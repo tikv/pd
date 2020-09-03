@@ -96,6 +96,7 @@ var (
 	ErrNewEtcdClient     = errors.Normalize("new etcd client failed", errors.RFCCodeText("PD:etcd:ErrNewEtcdClient"))
 	ErrStartEtcd         = errors.Normalize("start etcd failed", errors.RFCCodeText("PD:etcd:ErrStartEtcd"))
 	ErrEtcdURLMap        = errors.Normalize("etcd url map error", errors.RFCCodeText("PD:etcd:ErrEtcdURLMap"))
+	ErrEtcdLease         = errors.Normalize("etcd lease failed", errors.RFCCodeText("PD:etcd:ErrEtcdLease"))
 	ErrEtcdTxn           = errors.Normalize("etcd Txn failed", errors.RFCCodeText("PD:etcd:ErrEtcdTxn"))
 	ErrEtcdKVPut         = errors.Normalize("etcd KV put failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVPut"))
 	ErrEtcdKVDelete      = errors.Normalize("etcd KV delete failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVDelete"))
@@ -136,13 +137,13 @@ var (
 
 // server errors
 var (
-	ErrDecodeSchedulerConfig   = errors.Normalize("decode scheduler config failed", errors.RFCCodeText("PD:server:ErrDecodeSchedulerConfig"))
-	ErrServiceRegistered       = errors.Normalize("service with path [%s] already registered", errors.RFCCodeText("PD:server:ErrServiceRegistered"))
-	ErrAPIInformationInvalid   = errors.Normalize("invalid api information, group %s version %s", errors.RFCCodeText("PD:server:ErrAPIInformationInvalid"))
-	ErrClientURLEmpty          = errors.Normalize("client url empty", errors.RFCCodeText("PD:server:ErrClientEmpty"))
-	ErrStoreNotFound           = errors.Normalize("store %d not found", errors.RFCCodeText("PD:server:ErrStoreNotFound"))
-	ErrLeaderNil               = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
-	ErrCancelStartEtcd         = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
+	ErrDecodeSchedulerConfig = errors.Normalize("decode scheduler config failed", errors.RFCCodeText("PD:server:ErrDecodeSchedulerConfig"))
+	ErrServiceRegistered     = errors.Normalize("service with path [%s] already registered", errors.RFCCodeText("PD:server:ErrServiceRegistered"))
+	ErrAPIInformationInvalid = errors.Normalize("invalid api information, group %s version %s", errors.RFCCodeText("PD:server:ErrAPIInformationInvalid"))
+	ErrClientURLEmpty        = errors.Normalize("client url empty", errors.RFCCodeText("PD:server:ErrClientEmpty"))
+	ErrStoreNotFound         = errors.Normalize("store %d not found", errors.RFCCodeText("PD:server:ErrStoreNotFound"))
+	ErrLeaderNil             = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
+	ErrCancelStartEtcd       = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
 )
 
 // ioutil error

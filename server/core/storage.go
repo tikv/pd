@@ -218,7 +218,7 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 	}
 	err = json.Unmarshal([]byte(value), cfg)
 	if err != nil {
-		return false, errors.WithStack(err)
+		return false, errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
 	return true, nil
 }

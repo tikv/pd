@@ -94,7 +94,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 		lease:   clientv3.NewLease(ls.client),
 	})
 	if err := ls.getLease().Grant(leaseTimeout); err != nil {
-		return err
+		return errs.ErrEtcdLease.Wrap(err).GenWithStackByCause()
 	}
 	// The leader key must not exist, so the CreateRevision is 0.
 	resp, err := kv.NewSlowLogTxn(ls.client).
@@ -103,10 +103,10 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errors.New("failed to campaign leader, other server may campaign ok")
+		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	log.Info("write leaderDate to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil

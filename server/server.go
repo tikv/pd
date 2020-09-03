@@ -728,7 +728,7 @@ func (s *Server) GetConfig() *config.Config {
 			log.Error("failed to decode scheduler config",
 				zap.String("config", configs[i]),
 				zap.String("scheduler", sche),
-				errs.ZapError(errs.ErrDecodeSchedulerConfig, err))
+				errs.ZapError(err))
 			continue
 		}
 		payload[sche] = config
