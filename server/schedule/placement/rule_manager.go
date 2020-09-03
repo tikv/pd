@@ -92,22 +92,22 @@ func (m *RuleManager) loadRules() error {
 	err := m.store.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
-			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
+			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if err := m.adjustRule(&r); err != nil {
-			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if _, ok := m.ruleConfig.rules[r.Key()]; ok {
-			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
+			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if k != r.StoreKey() {
-			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
+			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			toSave = append(toSave, &r)
 		}
@@ -133,7 +133,7 @@ func (m *RuleManager) loadGroups() error {
 	return m.store.LoadRuleGroups(func(k, v string) {
 		var g RuleGroup
 		if err := json.Unmarshal([]byte(v), &g); err != nil {
-			log.Error("failed to unmarshal rule group", zap.String("group-id", k), zap.Error(errs.ErrLoadRuleGroup.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Error("failed to unmarshal rule group", zap.String("group-id", k), errs.ZapError(errs.ErrLoadRuleGroup, err))
 			return
 		}
 		m.ruleConfig.groups[g.ID] = &g
@@ -145,11 +145,11 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 	var err error
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
-		return errs.ErrRuleContent.FastGenByArgs("start key is not hex format")
+		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
 	}
 	r.EndKey, err = hex.DecodeString(r.EndKeyHex)
 	if err != nil {
-		return errs.ErrRuleContent.FastGenByArgs("end key is not hex format")
+		return errs.ErrHexDecodingString.FastGenByArgs(r.EndKeyHex)
 	}
 	if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
 		return errs.ErrRuleContent.FastGenByArgs("endKey should be greater than startKey")
@@ -191,7 +191,7 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 	}
 	m.Lock()
 	defer m.Unlock()
-	p := m.ruleConfig.beginPatch()
+	p := m.beginPatch()
 	p.setRule(rule)
 	if err := m.tryCommitPatch(p); err != nil {
 		return err
@@ -204,7 +204,7 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 func (m *RuleManager) DeleteRule(group, id string) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.ruleConfig.beginPatch()
+	p := m.beginPatch()
 	p.deleteRule(group, id)
 	if err := m.tryCommitPatch(p); err != nil {
 		return err
@@ -266,6 +266,10 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 	return FitRegion(stores, region, rules)
 }
 
+func (m *RuleManager) beginPatch() *ruleConfigPatch {
+	return m.ruleConfig.beginPatch()
+}
+
 func (m *RuleManager) tryCommitPatch(patch *ruleConfigPatch) error {
 	patch.adjust()
 
@@ -273,6 +277,8 @@ func (m *RuleManager) tryCommitPatch(patch *ruleConfigPatch) error {
 	if err != nil {
 		return err
 	}
+
+	patch.trim()
 
 	// save updates
 	err = m.savePatch(patch.mut)
@@ -322,7 +328,7 @@ func (m *RuleManager) savePatch(p *ruleConfig) error {
 func (m *RuleManager) SetRules(rules []*Rule) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.ruleConfig.beginPatch()
+	p := m.beginPatch()
 	for _, r := range rules {
 		if err := m.adjustRule(r); err != nil {
 			return err
@@ -375,7 +381,7 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 	m.Lock()
 	defer m.Unlock()
 
-	patch := m.ruleConfig.beginPatch()
+	patch := m.beginPatch()
 	for _, t := range todo {
 		switch t.Action {
 		case RuleOpAdd:
@@ -427,7 +433,7 @@ func (m *RuleManager) GetRuleGroups() []*RuleGroup {
 func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.ruleConfig.beginPatch()
+	p := m.beginPatch()
 	p.setGroup(group)
 	if err := m.tryCommitPatch(p); err != nil {
 		return err
@@ -440,7 +446,7 @@ func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
 func (m *RuleManager) DeleteRuleGroup(id string) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.ruleConfig.beginPatch()
+	p := m.beginPatch()
 	p.deleteGroup(id)
 	if err := m.tryCommitPatch(p); err != nil {
 		return err
@@ -500,7 +506,7 @@ func (m *RuleManager) GetGroupBundle(id string) (b GroupBundle) {
 func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.ruleConfig.beginPatch()
+	p := m.beginPatch()
 	for k := range m.ruleConfig.rules {
 		p.deleteRule(k[0], k[1])
 	}
@@ -532,7 +538,7 @@ func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle) error {
 func (m *RuleManager) SetGroupBundle(group GroupBundle) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.ruleConfig.beginPatch()
+	p := m.beginPatch()
 	if _, ok := m.ruleConfig.groups[group.ID]; ok {
 		for k := range m.ruleConfig.rules {
 			if k[0] == group.ID {
@@ -572,7 +578,7 @@ func (m *RuleManager) DeleteGroupBundle(id string, regex bool) error {
 		matchID = func(a string) bool { return r.MatchString(a) }
 	}
 
-	p := m.ruleConfig.beginPatch()
+	p := m.beginPatch()
 	for k := range m.ruleConfig.rules {
 		if matchID(k[0]) {
 			p.deleteRule(k[0], k[1])

@@ -21,9 +21,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
@@ -113,7 +113,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	for i := 0; i < int(splitCount); i++ {
 		newRegionID, err := c.id.Alloc()
 		if err != nil {
-			return nil, schedulers.ErrSchedulerNotFound
+			return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
@@ -192,7 +192,7 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 		log.Warn("report split region is invalid",
 			zap.Stringer("left-region", core.RegionToHexMeta(left)),
 			zap.Stringer("right-region", core.RegionToHexMeta(right)),
-			zap.Error(err))
+			errs.ZapError(err))
 		return nil, err
 	}
 
@@ -215,7 +215,7 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 	if err != nil {
 		log.Warn("report batch split region is invalid",
 			zap.Stringer("region-meta", hrm),
-			zap.Error(err))
+			errs.ZapError(err))
 		return nil, err
 	}
 	last := len(regions) - 1

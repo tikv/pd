@@ -119,7 +119,7 @@ type Server struct {
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
-	tsoAllocator tso.Allocator
+	tsoAllocatorManager *tso.AllocatorManager
 	// for raft cluster
 	cluster *cluster.RaftCluster
 	// For async region heartbeat.
@@ -348,10 +348,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
-	s.tsoAllocator = tso.NewGlobalTSOAllocator(
-		s.member.GetLeadership(),
-		s.rootPath,
-		s.cfg.TsoSaveInterval.Duration,
+	s.tsoAllocatorManager = tso.NewAllocatorManager(
+		s.member.Etcd(), s.client, s.rootPath, s.cfg.TsoSaveInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
@@ -472,10 +470,11 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(3)
+	s.serverLoopWg.Add(4)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
+	go s.tsoAllocatorLoop()
 }
 
 func (s *Server) stopServerLoop() {
@@ -498,6 +497,17 @@ func (s *Server) serverMetricsLoop() {
 			return
 		}
 	}
+}
+
+// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
+func (s *Server) tsoAllocatorLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	s.tsoAllocatorManager.AllocatorDaemon(ctx)
+	log.Info("server is closed, exit allocator loop")
 }
 
 func (s *Server) collectEtcdStateMetrics() {
@@ -571,11 +581,11 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
 	err = s.storage.SaveRegion(req.GetRegion())
 	if err != nil {
-		log.Warn("save the bootstrap region failed", zap.Error(err))
+		log.Warn("save the bootstrap region failed", errs.ZapError(err))
 	}
 	err = s.storage.Flush()
 	if err != nil {
-		log.Warn("flush the bootstrap region failed", zap.Error(err))
+		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
 	}
 
 	if err := s.cluster.Start(s); err != nil {
@@ -773,7 +783,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
-			return errors.WithStack(cluster.ErrNotBootstrapped)
+			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.
@@ -1030,7 +1040,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	if cluster != nil {
 		err := cluster.GetReplicationMode().UpdateConfig(cfg)
 		if err != nil {
-			log.Warn("failed to update replication mode", zap.Error(err))
+			log.Warn("failed to update replication mode", errs.ZapError(err))
 			// revert to old config
 			// NOTE: since we can't put the 2 storage mutations in a batch, it
 			// is possible that memory and persistent data become different
@@ -1058,7 +1068,7 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
-		leader, rev, checkAgain := s.member.CheckLeader(s.Name())
+		leader, rev, checkAgain := s.member.CheckLeader()
 		if checkAgain {
 			continue
 		}
@@ -1112,12 +1122,11 @@ func (s *Server) campaignLeader() {
 	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
-	log.Info("initialize the global TSO allocator")
-	if err := s.tsoAllocator.Initialize(); err != nil {
-		log.Error("failed to initialize the global TSO allocator", zap.Error(err))
+	log.Info("setting up the global TSO allocator")
+	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, cancel, tso.GlobalDCLocation, s.member.GetLeadership()); err != nil {
+		log.Error("failed to set up the global TSO allocator", zap.Error(err))
 		return
 	}
-	defer s.tsoAllocator.Reset()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", zap.Error(err))
@@ -1135,8 +1144,6 @@ func (s *Server) campaignLeader() {
 	CheckPDVersion(s.persistOptions)
 	log.Info("PD cluster leader is ready to serve", zap.String("pd-leader-name", s.Name()))
 
-	tsTicker := time.NewTicker(tso.UpdateTimestampStep)
-	defer tsTicker.Stop()
 	leaderTicker := time.NewTicker(leaderTickInterval)
 	defer leaderTicker.Stop()
 
@@ -1150,11 +1157,6 @@ func (s *Server) campaignLeader() {
 			etcdLeader := s.member.GetEtcdLeader()
 			if etcdLeader != s.member.ID() {
 				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
-				return
-			}
-		case <-tsTicker.C:
-			if err := s.tsoAllocator.UpdateTSO(); err != nil {
-				log.Error("failed to update timestamp", zap.Error(err))
 				return
 			}
 		case <-ctx.Done():

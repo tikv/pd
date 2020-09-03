@@ -146,14 +146,14 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error("request failed", errs.ZapError(errs.ErrRequestHTTP, err))
+			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
 			continue
 		}
 
 		b, err := ioutil.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			log.Error("read failed", errs.ZapError(errs.ErrReadHTTPBody, err))
+			log.Error("read failed", errs.ZapError(errs.ErrIORead, err))
 			continue
 		}
 

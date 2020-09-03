@@ -121,7 +121,7 @@ func (s *heartbeatStreams) run() {
 				if err := stream.Send(keepAlive); err != nil {
 					log.Warn("send keepalive message fail, store maybe disconnected",
 						zap.Uint64("target-store-id", storeID),
-						zap.Error(err))
+						errs.ZapError(err))
 					delete(s.streams, storeID)
 					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "keepalive", "err").Inc()
 				} else {

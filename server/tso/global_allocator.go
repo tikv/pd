@@ -17,7 +17,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -87,7 +86,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	var resp pdpb.Timestamp
 
 	if count == 0 {
-		return resp, errors.New("tso count should be positive")
+		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 	}
 
 	maxRetryCount := 10
@@ -104,8 +103,8 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
-			log.Error("invalid timestamp", zap.Any("timestamp", current), zap.Error(errs.ErrInvalidTimestamp.FastGenByArgs()))
-			return pdpb.Timestamp{}, errors.New("can not get timestamp, may be not leader")
+			log.Error("invalid timestamp", zap.Any("timestamp", current), errs.ZapError(errs.ErrInvalidTimestamp))
+			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 
 		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
@@ -113,18 +112,18 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		if resp.Logical >= maxLogical {
 			log.Error("logical part outside of max logical interval, please check ntp time",
 				zap.Reflect("response", resp),
-				zap.Int("retry-count", i), zap.Error(errs.ErrLogicOverflow.FastGenByArgs()))
+				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			tsoCounter.WithLabelValues("logical_overflow").Inc()
 			time.Sleep(UpdateTimestampStep)
 			continue
 		}
 		// In case lease expired after the first check.
 		if !gta.leadership.Check() {
-			return pdpb.Timestamp{}, errors.New("alloc timestamp failed, lease expired")
+			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd leader")
 		}
 		return resp, nil
 	}
-	return resp, errors.New("can not get timestamp")
+	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
 }
 
 // Reset is used to reset the TSO allocator.
