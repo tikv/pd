@@ -27,6 +27,8 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -567,7 +569,7 @@ func (c *coordinator) removeScheduler(name string) error {
 
 	var err error
 	opt := c.cluster.opt
-	if err = opt.RemoveSchedulerCfg(s.Ctx(), name); err != nil {
+	if err = c.removeOptScheduler(opt, name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
 	} else if err = opt.Persist(c.cluster.storage); err != nil {
 		log.Error("the option can not persist scheduler config", zap.Error(err))
@@ -578,6 +580,29 @@ func (c *coordinator) removeScheduler(name string) error {
 		}
 	}
 	return err
+}
+
+func (c *coordinator) removeOptScheduler(o *config.PersistOptions, name string) error {
+	v := o.GetScheduleConfig().Clone()
+	for i, schedulerCfg := range v.Schedulers {
+		// To create a temporary scheduler is just used to get scheduler's name
+		decoder := schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
+		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(c.ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), decoder)
+		if err != nil {
+			return err
+		}
+		if tmp.GetName() == name {
+			if config.IsDefaultScheduler(tmp.GetType()) {
+				schedulerCfg.Disable = true
+				v.Schedulers[i] = schedulerCfg
+			} else {
+				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
+			}
+			o.SetScheduleConfig(v)
+			return nil
+		}
+	}
+	return nil
 }
 
 func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {

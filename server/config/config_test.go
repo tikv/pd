@@ -26,9 +26,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
-
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
 )
 
 func Test(t *testing.T) {
@@ -38,6 +35,14 @@ func Test(t *testing.T) {
 var _ = Suite(&testConfigSuite{})
 
 type testConfigSuite struct{}
+
+func (s *testConfigSuite) SetUpSuite(c *C) {
+	for _, d := range DefaultSchedulers {
+		RegisterScheduler(d.Type)
+	}
+	RegisterScheduler("random-merge")
+	RegisterScheduler("adjacent-region")
+}
 
 func (s *testConfigSuite) TestTLS(c *C) {
 	cfg := NewConfig()
