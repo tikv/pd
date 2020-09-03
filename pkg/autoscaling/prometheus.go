@@ -105,7 +105,7 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 
 func extractInstancesFromResponse(resp promModel.Value, addresses []string) (QueryResult, error) {
 	if resp == nil {
-		return nil, errs.ErrEmptyResponse.FastGenByArgs()
+		return nil, errs.ErrEmptyMetricsResponse.FastGenByArgs()
 	}
 
 	if resp.Type() != promModel.ValVector {
@@ -119,7 +119,7 @@ func extractInstancesFromResponse(resp promModel.Value, addresses []string) (Que
 	}
 
 	if len(vector) == 0 {
-		return nil, errs.ErrEmptyResult.FastGenByArgs("query metrics duration must be at least twice the Prometheus scrape interval")
+		return nil, errs.ErrEmptyMetricsResult.FastGenByArgs("query metrics duration must be at least twice the Prometheus scrape interval")
 	}
 
 	instancesSet := map[string]string{}
