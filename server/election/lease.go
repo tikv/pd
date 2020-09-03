@@ -18,7 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -53,7 +52,7 @@ func (l *lease) Grant(leaseTimeout int64) error {
 	leaseResp, err := l.lease.Grant(ctx, leaseTimeout)
 	cancel()
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdLease.Wrap(err).GenWithStackByCause()
 	}
 	if cost := time.Since(start); cost > slowRequestTime {
 		log.Warn("lease grants too slow", zap.Duration("cost", cost), zap.String("purpose", l.Purpose))

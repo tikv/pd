@@ -17,7 +17,6 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -94,7 +93,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 		lease:   clientv3.NewLease(ls.client),
 	})
 	if err := ls.getLease().Grant(leaseTimeout); err != nil {
-		return errs.ErrEtcdLease.Wrap(err).GenWithStackByCause()
+		return err
 	}
 	// The leader key must not exist, so the CreateRevision is 0.
 	resp, err := kv.NewSlowLogTxn(ls.client).
