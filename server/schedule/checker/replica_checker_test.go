@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 const (
@@ -42,6 +43,7 @@ type testReplicaCheckerSuite struct {
 func (s *testReplicaCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
 	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.rc = NewReplicaChecker(s.cluster)
 	stats := &pdpb.StoreStats{
 		Capacity:  100,
@@ -148,7 +150,7 @@ func (s *testReplicaCheckerSuite) TestOfflineWithOneReplica(c *C) {
 func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-
+	tc.DisableFeature(versioninfo.JointConsensus)
 	rc := NewReplicaChecker(tc)
 
 	opt.GetScheduleConfig().MaxSnapshotCount = 2
@@ -223,6 +225,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 
+	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 
@@ -245,6 +248,7 @@ func newTestReplication(mso *config.PersistOptions, maxReplicas int, locationLab
 func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
@@ -296,6 +300,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
@@ -374,6 +379,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 
 	newTestReplication(opt, 5, "zone", "host")
 
@@ -404,6 +410,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 	opt := config.NewTestOptions()
 	opt.GetReplicationConfig().LocationLabels = []string{"zone"}
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	rc := NewReplicaChecker(tc)
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
@@ -438,6 +445,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	rc := NewReplicaChecker(tc)
 
 	tc.AddRegionStore(1, 100)

@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 var _ = Suite(&testRuleCheckerSuite{})
@@ -38,6 +39,7 @@ func (s *testRuleCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
 	cfg.GetReplicationConfig().EnablePlacementRules = true
 	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.ruleManager = s.cluster.RuleManager
 	s.rc = NewRuleChecker(s.cluster, s.ruleManager)
 }
