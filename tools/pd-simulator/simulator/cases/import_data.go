@@ -16,19 +16,15 @@ package cases
 import (
 	"bytes"
 	"fmt"
-	"gonum.org/v1/plot/plotter"
-	"gonum.org/v1/plot/vg"
+	"github.com/go-echarts/go-echarts/charts"
 	"math/rand"
 
-	"go.uber.org/zap"
-	"gonum.org/v1/plot"
-
-	"github.com/go-echarts/go-echarts/charts"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 func newImportData() *Case {
@@ -79,6 +75,7 @@ func newImportData() *Case {
 
 	// Checker description
 	checkCount := uint64(0)
+	var data [][3]int
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		leaderDist := make(map[uint64]int)
 		peerDist := make(map[uint64]int)
@@ -113,6 +110,7 @@ func newImportData() *Case {
 		}
 		for storeID := 1; storeID <= 10; storeID++ {
 			if peerCount, ok := peerDist[uint64(storeID)]; ok {
+				data = append(data, [3]int{storeID, int(checkCount), peerCount})
 				tablePeerLog = fmt.Sprintf("%s [store %d]:%.2f%%", tablePeerLog, storeID, float64(peerCount)/float64(peerTotal)*100)
 			}
 		}
@@ -145,7 +143,18 @@ func newImportData() *Case {
 			isEnd = dev < 0.002
 		}
 		if isEnd {
-
+			bar3d := charts.NewBar3D()
+			bar3d.SetGlobalOptions(
+				charts.TitleOpts{Title: "Bar3D-示例图"},
+				charts.VisualMapOpts{
+					Range:      []float32{0, 30},
+					Calculable: true,
+					InRange:    charts.VMInRange{Color: rangeColor},
+					Max:        30,
+				},
+				charts.Grid3DOpts{BoxDepth: 80, BoxWidth: 200},
+			)
+			bar3d.AddXYAxis(hours, days).AddZAxis("bar3d", genBar3dData())
 		}
 		return isEnd
 	}
