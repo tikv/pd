@@ -218,7 +218,7 @@ func isDataExist(d string) bool {
 
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
-		log.Error("failed to list directory", errs.ZapError(errs.ErrDirReadName, err))
+		log.Error("failed to list directory", errs.ZapError(errs.ErrReadDirName, err))
 		return false
 	}
 	return len(names) != 0

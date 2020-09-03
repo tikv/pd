@@ -178,7 +178,7 @@ var (
 
 // dir error
 var (
-	ErrDirReadName = errors.Normalize("read dir name error", errors.RFCCodeText("PD:dir:ErrDirReadName"))
+	ErrReadDirName = errors.Normalize("read dir name error", errors.RFCCodeText("PD:dir:ErrReadDirName"))
 )
 
 // netstat error
