@@ -55,7 +55,7 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 	if n := len(resp.Kvs); n == 0 {
 		return "", nil
 	} else if n > 1 {
-		return "", errors.Errorf("load more than one kvs: key %v kvs %v", key, n)
+		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
 	}
 	return string(resp.Kvs[0].Value), nil
 }

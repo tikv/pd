@@ -52,7 +52,7 @@ func (l *lease) Grant(leaseTimeout int64) error {
 	leaseResp, err := l.lease.Grant(ctx, leaseTimeout)
 	cancel()
 	if err != nil {
-		return errs.ErrEtcdLease.Wrap(err).GenWithStackByCause()
+		return errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
 	}
 	if cost := time.Since(start); cost > slowRequestTime {
 		log.Warn("lease grants too slow", zap.Duration("cost", cost), zap.String("purpose", l.Purpose))
