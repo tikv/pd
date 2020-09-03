@@ -269,7 +269,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
-		return errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
+		return err
 	}
 
 	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlMap, tlsConfig); err != nil {
@@ -560,11 +560,11 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
 	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
-		return nil, errs.ErrBootstrapResponse.Wrap(err).GenWithStackByCause()
+		return nil, errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
 		log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
-		return nil, errs.ErrBootstrapClusterExist.FastGenByArgs(clusterID)
+		return nil, errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
@@ -1215,11 +1215,11 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		res, err := s.httpClient.Do(req)
 		if err != nil {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
-			return errs.ErrReplicateFile.Wrap(err).GenWithStackByCause(member.GetName())
+			return errs.ErrHTTPPostFile.Wrap(err).GenWithStackByCause()
 		}
 		if res.StatusCode != http.StatusOK {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
-			return errs.ErrReplicateFile.FastGenByArgs(member.GetName())
+			return errs.ErrHTTPPostFile.FastGenByArgs()
 		}
 	}
 	return nil

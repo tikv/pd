@@ -96,11 +96,16 @@ var (
 
 // etcd errors
 var (
-	ErrNewEtcdClient     = errors.Normalize("new etcd client failed", errors.RFCCodeText("PD:etcd:ErrNewEtcdClient"))
-	ErrCloseEtcdClient   = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:etcd:ErrCloseEtcdClient"))
-	ErrBootstrapResponse = errors.Normalize("bootstrap response failed", errors.RFCCodeText("PD:server:ErrBootstrapReponse"))
-	ErrStartEtcd         = errors.Normalize("start etcd failed", errors.RFCCodeText("PD:etcd:ErrStartEtcd"))
-	ErrEtcdURLMap        = errors.Normalize("etcd url map error", errors.RFCCodeText("PD:etcd:ErrEtcdURLMap"))
+	ErrNewEtcdClient   = errors.Normalize("new etcd client failed", errors.RFCCodeText("PD:etcd:ErrNewEtcdClient"))
+	ErrCloseEtcdClient = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:etcd:ErrCloseEtcdClient"))
+	ErrEtcdTxn         = errors.Normalize("etcd txn failed", errors.RFCCodeText("PD:server:ErrEtcdTxn"))
+	ErrStartEtcd       = errors.Normalize("start etcd failed", errors.RFCCodeText("PD:etcd:ErrStartEtcd"))
+	ErrEtcdURLMap      = errors.Normalize("etcd url map error", errors.RFCCodeText("PD:etcd:ErrEtcdURLMap"))
+)
+
+// http errors
+var (
+	ErrHTTPPostFile = errors.Normalize("http post file request failed", errors.RFCCodeText("PD:http:ErrHTTPPostFile"))
 )
 
 // server errors
@@ -109,16 +114,13 @@ var (
 	ErrServiceRegistered       = errors.Normalize("service with path [%s] already registered", errors.RFCCodeText("PD:server:ErrServiceRegistered"))
 	ErrAPIInformationInvalid   = errors.Normalize("invalid api information, group %s version %s", errors.RFCCodeText("PD:server:ErrAPIInformationInvalid"))
 	ErrBootstrapClusterMarshal = errors.Normalize("bootstrap cluster marshal failed", errors.RFCCodeText("PD:server:ErrBootstrapClusterMarshal"))
-	ErrBootstrapClusterExist   = errors.Normalize("bootstrap cluster %d exist", errors.RFCCodeText("PD:server:ErrBootstrapClusterExist"))
 	ErrClusterNotExist         = errors.Normalize("cluster not exist", errors.RFCCodeText("PD:server:ErrClusterNotExist"))
 	ErrDisablePlacementRules   = errors.Normalize("cannot disable placement rules with TiFlash nodes", errors.RFCCodeText("PD:server:ErrDisablePlacementRules"))
 	ErrClientURL               = errors.Normalize("%s is not the client url of any member", errors.RFCCodeText("PD:server:ErrClientURL"))
 	ErrLogLevelIllegal         = errors.Normalize("illegal log level %s", errors.RFCCodeText("PD:server:ErrLogLevelIllegal"))
 	ErrReplicationModeInvalid  = errors.Normalize("invalid replication mode: %v", errors.RFCCodeText("PD:server:ErrReplicationModeInvalid"))
 	ErrClientURLEmpty          = errors.Normalize("client url empty", errors.RFCCodeText("PD:server:ErrClientEmpty"))
-	ErrReplicateFile           = errors.Normalize("replicate to member %s failed", errors.RFCCodeText("PD:server:ErrReplicateFile"))
 	ErrStoreNotFound           = errors.Normalize("store %d not found", errors.RFCCodeText("PD:server:ErrStoreNotFound"))
 	ErrLeaderNil               = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
-	ErrTLSConfig               = errors.Normalize("TLS config error", errors.RFCCodeText("PD:server:ErrTLSConfig"))
 	ErrCancelStartEtcd         = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
 )
