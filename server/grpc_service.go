@@ -295,10 +295,22 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		}, nil
 	}
 
+	storeID := request.Stats.GetStoreId()
+	store := rc.GetStore(storeID)
+	if store == nil {
+		return nil, core.NewStoreNotFoundErr(storeID)
+	}
+
+	storeAddress := store.GetAddress()
+	storeLabel := strconv.FormatUint(storeID, 10)
+	start := time.Now()
+
 	err := rc.HandleStoreHeartbeat(request.Stats)
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
+
+	storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 
 	return &pdpb.StoreHeartbeatResponse{
 		Header:            s.header(),
@@ -401,12 +413,16 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			continue
 		}
 
+		start := time.Now()
+
 		err = rc.HandleRegionHeartbeat(region)
 		if err != nil {
 			msg := err.Error()
 			s.hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
+			continue
 		}
 
+		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 	}
 }

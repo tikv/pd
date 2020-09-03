@@ -65,6 +65,24 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
+
+	regionHeartbeatHandleDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "handle_region_heartbeat_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled region heartbeat requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+		}, []string{"address", "store"})
+
+	storeHeartbeatHandleDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "handle_store_heartbeat_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled store heartbeat requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+		}, []string{"address", "store"})
 )
 
 func init() {
@@ -74,4 +92,6 @@ func init() {
 	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(tsoHandleDuration)
+	prometheus.MustRegister(regionHeartbeatHandleDuration)
+	prometheus.MustRegister(storeHeartbeatHandleDuration)
 }
