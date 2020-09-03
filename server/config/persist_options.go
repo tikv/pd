@@ -476,8 +476,7 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 		LabelProperty:   o.GetLabelPropertyConfig(),
 		ClusterVersion:  *o.GetClusterVersion(),
 	}
-	err := storage.SaveConfig(cfg)
-	return err
+	return storage.SaveConfig(cfg)
 }
 
 // Reload reloads the configuration from the storage.

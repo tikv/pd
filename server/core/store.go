@@ -14,13 +14,11 @@
 package core
 
 import (
-	"fmt"
 	"math"
 	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -514,19 +512,6 @@ L:
 	return res
 }
 
-type storeNotFoundErr struct {
-	storeID uint64
-}
-
-func (e storeNotFoundErr) Error() string {
-	return fmt.Sprintf("store %v not found", e.storeID)
-}
-
-// NewStoreNotFoundErr is for log of store not found
-func NewStoreNotFoundErr(storeID uint64) errcode.ErrorCode {
-	return errcode.NewNotFoundErr(storeNotFoundErr{storeID})
-}
-
 // StoresInfo contains information about all stores.
 type StoresInfo struct {
 	stores map[uint64]*StoreInfo
@@ -563,14 +548,13 @@ func (s *StoresInfo) SetStore(store *StoreInfo) {
 }
 
 // BlockStore blocks a StoreInfo with storeID.
-func (s *StoresInfo) BlockStore(storeID uint64) errcode.ErrorCode {
-	op := errcode.Op("store.block")
+func (s *StoresInfo) BlockStore(storeID uint64) error {
 	store, ok := s.stores[storeID]
 	if !ok {
-		return op.AddTo(NewStoreNotFoundErr(storeID))
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 	if store.IsBlocked() {
-		return op.AddTo(StoreBlockedErr{StoreID: storeID})
+		return errs.ErrStoreBlocked.FastGenByArgs(storeID)
 	}
 	s.stores[storeID] = store.Clone(SetStoreBlock())
 	return nil

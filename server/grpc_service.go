@@ -298,7 +298,7 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	storeID := request.Stats.GetStoreId()
 	store := rc.GetStore(storeID)
 	if store == nil {
-		return nil, core.NewStoreNotFoundErr(storeID)
+		return nil, errors.Errorf("store %v not found", storeID)
 	}
 
 	storeAddress := store.GetAddress()

@@ -230,7 +230,8 @@ func (r *RegionScatterer) selectPeerToReplace(group string, stores map[uint64]*c
 	storeID := oldPeer.GetStoreId()
 	sourceStore := r.cluster.GetStore(storeID)
 	if sourceStore == nil {
-		log.Error("failed to get the store", zap.Uint64("store-id", storeID))
+		log.Error("failed to get the store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
+		return nil
 	}
 	var scoreGuard filter.Filter
 	if r.cluster.IsPlacementRulesEnabled() {
