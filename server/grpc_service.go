@@ -299,7 +299,7 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	}
 
 	storeID := request.Stats.GetStoreId()
-	storeLabel := strconv.FormatUint(request.Stats.GetStoreId(), 10)
+	storeLabel := strconv.FormatUint(storeID, 10)
 	store := rc.GetStore(storeID)
 	if store == nil {
 		return nil, core.NewStoreNotFoundErr(storeID)
