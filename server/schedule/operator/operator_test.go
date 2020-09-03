@@ -22,7 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/storelimit"
@@ -39,12 +39,12 @@ type testOperatorSuite struct {
 }
 
 func (s *testOperatorSuite) SetUpTest(c *C) {
-	cfg := mockoption.NewScheduleOptions()
-	cfg.MaxMergeRegionSize = 2
-	cfg.MaxMergeRegionKeys = 2
-	cfg.LabelProperties = map[string][]*metapb.StoreLabel{
+	cfg := config.NewTestOptions()
+	cfg.GetScheduleConfig().MaxMergeRegionSize = 2
+	cfg.GetScheduleConfig().MaxMergeRegionKeys = 2
+	cfg.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		opt.RejectLeader: {{Key: "reject", Value: "leader"}},
-	}
+	})
 	s.cluster = mockcluster.NewCluster(cfg)
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},

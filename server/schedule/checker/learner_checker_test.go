@@ -17,7 +17,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 )
@@ -27,7 +27,7 @@ type testLearnerCheckerSuite struct{}
 var _ = Suite(&testLearnerCheckerSuite{})
 
 func (s *testLearnerCheckerSuite) TestPromoteLearner(c *C) {
-	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	cluster := mockcluster.NewCluster(config.NewTestOptions())
 	lc := NewLearnerChecker(cluster)
 	region := core.NewRegionInfo(
 		&metapb.Region{

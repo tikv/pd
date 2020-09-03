@@ -17,7 +17,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
 )
@@ -29,9 +29,11 @@ type testBuilderSuite struct {
 }
 
 func (s *testBuilderSuite) SetUpTest(c *C) {
-	opts := mockoption.NewScheduleOptions()
-	opts.LocationLabels = []string{"zone", "host"}
-	opts.LabelProperties = map[string][]*metapb.StoreLabel{opt.RejectLeader: {{Key: "noleader", Value: "true"}}}
+	opts := config.NewTestOptions()
+	opts.GetReplicationConfig().LocationLabels = []string{"zone", "host"}
+	opts.SetLabelPropertyConfig(config.LabelPropertyConfig{
+		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
+	})
 	s.cluster = mockcluster.NewCluster(opts)
 	s.cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
 	s.cluster.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h1"})

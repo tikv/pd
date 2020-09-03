@@ -22,8 +22,9 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -50,12 +51,12 @@ type testMergeCheckerSuite struct {
 }
 
 func (s *testMergeCheckerSuite) SetUpTest(c *C) {
-	cfg := mockoption.NewScheduleOptions()
-	cfg.MaxMergeRegionSize = 2
-	cfg.MaxMergeRegionKeys = 2
-	cfg.LabelProperties = map[string][]*metapb.StoreLabel{
+	cfg := config.NewTestOptions()
+	cfg.GetScheduleConfig().MaxMergeRegionSize = 2
+	cfg.GetScheduleConfig().MaxMergeRegionKeys = 2
+	cfg.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		opt.RejectLeader: {{Key: "reject", Value: "leader"}},
-	}
+	})
 	s.cluster = mockcluster.NewCluster(cfg)
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
@@ -137,7 +138,7 @@ func (s *testMergeCheckerSuite) TearDownTest(c *C) {
 }
 
 func (s *testMergeCheckerSuite) TestBasic(c *C) {
-	s.cluster.ScheduleOptions.SplitMergeInterval = 0
+	s.cluster.GetScheduleConfig().SplitMergeInterval = typeutil.Duration{}
 
 	// should with same peer count
 	ops := s.mc.Check(s.regions[0])
@@ -152,10 +153,10 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
 
 	// Enable one way merge
-	s.cluster.ScheduleOptions.EnableOneWayMerge = true
+	s.cluster.GetScheduleConfig().EnableOneWayMerge = true
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
-	s.cluster.ScheduleOptions.EnableOneWayMerge = false
+	s.cluster.GetScheduleConfig().EnableOneWayMerge = false
 
 	// Make up peers for next region.
 	s.regions[3] = s.regions[3].Clone(core.WithAddPeer(&metapb.Peer{Id: 110, StoreId: 1}), core.WithAddPeer(&metapb.Peer{Id: 111, StoreId: 2}))
@@ -167,7 +168,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
 
 	// merge cannot across rule key.
-	s.cluster.EnablePlacementRules = true
+	s.cluster.GetReplicationConfig().EnablePlacementRules = true
 	s.cluster.RuleManager.SetRule(&placement.Rule{
 		GroupID:     "pd",
 		ID:          "test",
@@ -186,7 +187,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	s.cluster.RuleManager.DeleteRule("test", "test")
 
 	// Skip recently split regions.
-	s.cluster.ScheduleOptions.SplitMergeInterval = time.Hour
+	s.cluster.GetScheduleConfig().SplitMergeInterval = typeutil.NewDuration(time.Hour)
 	s.mc.RecordRegionSplit([]uint64{s.regions[2].GetID()})
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
@@ -415,10 +416,10 @@ var _ = Suite(&testSplitMergeSuite{})
 type testSplitMergeSuite struct{}
 
 func (s *testMergeCheckerSuite) TestCache(c *C) {
-	cfg := mockoption.NewScheduleOptions()
-	cfg.MaxMergeRegionSize = 2
-	cfg.MaxMergeRegionKeys = 2
-	cfg.SplitMergeInterval = time.Hour
+	cfg := config.NewTestOptions()
+	cfg.GetScheduleConfig().MaxMergeRegionSize = 2
+	cfg.GetScheduleConfig().MaxMergeRegionKeys = 2
+	cfg.GetScheduleConfig().SplitMergeInterval = typeutil.NewDuration(time.Hour)
 	s.cluster = mockcluster.NewCluster(cfg)
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
@@ -467,7 +468,7 @@ func (s *testMergeCheckerSuite) TestCache(c *C) {
 
 	ops := s.mc.Check(s.regions[1])
 	c.Assert(ops, IsNil)
-	s.cluster.SplitMergeInterval = 0
+	s.cluster.GetScheduleConfig().SplitMergeInterval = typeutil.NewDuration(0)
 	time.Sleep(time.Second)
 	ops = s.mc.Check(s.regions[1])
 	c.Assert(ops, NotNil)

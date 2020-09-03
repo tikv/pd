@@ -8,7 +8,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -76,14 +76,14 @@ func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
 }
 
 func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 
 	// Add ordinary stores.
 	for i := uint64(1); i <= numStores; i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	tc.EnablePlacementRules = useRules
+	tc.GetReplicationConfig().EnablePlacementRules = useRules
 
 	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
 	tc.AddLeaderRegion(1, 1, 2, 3)
@@ -130,7 +130,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 }
 
 func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpecialStores, numRegions uint64) {
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 
 	// Add ordinary stores.
@@ -141,7 +141,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 	for i := uint64(1); i <= numSpecialStores; i++ {
 		tc.AddLabelsStore(numOrdinaryStores+i, 0, map[string]string{"engine": "tiflash"})
 	}
-	tc.EnablePlacementRules = true
+	tc.GetReplicationConfig().EnablePlacementRules = true
 	c.Assert(tc.RuleManager.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "learner", Role: placement.Learner, Count: 3,
 		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}), IsNil)
@@ -204,7 +204,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	oc := NewOperatorController(ctx, tc, mockhbstream.NewHeartbeatStream())
 
@@ -232,7 +232,7 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 }
 
 func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -275,7 +275,7 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 }
 
 func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
