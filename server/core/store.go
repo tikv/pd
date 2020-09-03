@@ -14,16 +14,15 @@
 package core
 
 import (
-	"fmt"
 	"math"
 	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
@@ -513,19 +512,6 @@ L:
 	return res
 }
 
-type storeNotFoundErr struct {
-	storeID uint64
-}
-
-func (e storeNotFoundErr) Error() string {
-	return fmt.Sprintf("store %v not found", e.storeID)
-}
-
-// NewStoreNotFoundErr is for log of store not found
-func NewStoreNotFoundErr(storeID uint64) errcode.ErrorCode {
-	return errcode.NewNotFoundErr(storeNotFoundErr{storeID})
-}
-
 // StoresInfo contains information about all stores.
 type StoresInfo struct {
 	stores map[uint64]*StoreInfo
@@ -562,14 +548,13 @@ func (s *StoresInfo) SetStore(store *StoreInfo) {
 }
 
 // PauseLeaderTransfer pauses a StoreInfo with storeID.
-func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) errcode.ErrorCode {
-	op := errcode.Op("store.pause_leader_transfer")
+func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
 	store, ok := s.stores[storeID]
 	if !ok {
-		return op.AddTo(NewStoreNotFoundErr(storeID))
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 	if !store.AllowLeaderTransfer() {
-		return op.AddTo(StorePauseLeaderTransferErr{StoreID: storeID})
+		return errs.ErrPauseLeaderTransfer.FastGenByArgs(storeID)
 	}
 	s.stores[storeID] = store.Clone(PauseLeaderTransfer())
 	return nil
