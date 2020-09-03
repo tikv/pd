@@ -128,7 +128,10 @@ var (
 
 // http errors
 var (
-	ErrHTTPPostFile = errors.Normalize("http post file request failed", errors.RFCCodeText("PD:http:ErrHTTPPostFile"))
+	ErrSendRequest    = errors.Normalize("send HTTP request failed", errors.RFCCodeText("PD:http:ErrSendRequest"))
+	ErrWriteHTTPBody  = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:http:ErrWriteHTTPBody"))
+	ErrNewHTTPRequest = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:http:ErrNewHTTPRequest"))
+	ErrHTTPPostFile   = errors.Normalize("http post file request failed", errors.RFCCodeText("PD:http:ErrHTTPPostFile"))
 )
 
 // server errors
@@ -141,9 +144,6 @@ var (
 	ErrStoreNotFound           = errors.Normalize("store %d not found", errors.RFCCodeText("PD:server:ErrStoreNotFound"))
 	ErrLeaderNil               = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
 	ErrCancelStartEtcd         = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
-	ErrSendRequest             = errors.Normalize("send HTTP request failed", errors.RFCCodeText("PD:http:ErrSendRequest"))
-	ErrWriteHTTPBody           = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:http:ErrWriteHTTPBody"))
-	ErrNewHTTPRequest          = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:http:ErrNewHTTPRequest"))
 )
 
 // ioutil error

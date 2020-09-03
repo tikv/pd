@@ -535,7 +535,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	// Set cluster meta
 	clusterValue, err := clusterMeta.Marshal()
 	if err != nil {
-		return nil, errs.ErrBootstrapClusterMarshal.Wrap(err).GenWithStackByCause()
+		return nil, errors.WithStack(err)
 	}
 	clusterRootPath := s.GetClusterRootPath()
 
@@ -554,13 +554,13 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	storePath := makeStoreKey(clusterRootPath, storeMeta.GetId())
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
-		return nil, errs.ErrBootstrapClusterMarshal.Wrap(err).GenWithStackByCause()
+		return nil, errors.WithStack(err)
 	}
 	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
 
 	regionValue, err := req.GetRegion().Marshal()
 	if err != nil {
-		return nil, errs.ErrBootstrapClusterMarshal.Wrap(err).GenWithStackByCause()
+		return nil, errors.WithStack(err)
 	}
 
 	// Set region meta with region id.
