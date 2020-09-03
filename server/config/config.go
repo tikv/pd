@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/tikv/pd/server/versioninfo"
 
@@ -875,7 +874,7 @@ func (c *ScheduleConfig) Validate() error {
 		return errors.New("low-space-ratio should be larger than high-space-ratio")
 	}
 	for _, scheduleConfig := range c.Schedulers {
-		if !schedule.IsSchedulerRegistered(scheduleConfig.Type) {
+		if !IsSchedulerRegistered(scheduleConfig.Type) {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
 		}
 	}
