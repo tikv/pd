@@ -347,7 +347,7 @@ func (m *Member) GetMemberDeployPath(id uint64) (string, error) {
 		return "", err
 	}
 	if len(res.Kvs) == 0 {
-		return "", errors.New("no value")
+		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
 	}
 	return string(res.Kvs[0].Value), nil
 }
@@ -387,7 +387,7 @@ func (m *Member) GetMemberBinaryVersion(id uint64) (string, error) {
 		return "", err
 	}
 	if len(res.Kvs) == 0 {
-		return "", errors.New("no value")
+		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
 	}
 	return string(res.Kvs[0].Value), nil
 }
@@ -400,7 +400,7 @@ func (m *Member) GetMemberGitHash(id uint64) (string, error) {
 		return "", err
 	}
 	if len(res.Kvs) == 0 {
-		return "", errors.New("no value")
+		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
 	}
 	return string(res.Kvs[0].Value), nil
 }
