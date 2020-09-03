@@ -139,7 +139,6 @@ var (
 	ErrDecodeSchedulerConfig   = errors.Normalize("decode scheduler config failed", errors.RFCCodeText("PD:server:ErrDecodeSchedulerConfig"))
 	ErrServiceRegistered       = errors.Normalize("service with path [%s] already registered", errors.RFCCodeText("PD:server:ErrServiceRegistered"))
 	ErrAPIInformationInvalid   = errors.Normalize("invalid api information, group %s version %s", errors.RFCCodeText("PD:server:ErrAPIInformationInvalid"))
-	ErrBootstrapClusterMarshal = errors.Normalize("bootstrap cluster marshal failed", errors.RFCCodeText("PD:server:ErrBootstrapClusterMarshal"))
 	ErrClientURLEmpty          = errors.Normalize("client url empty", errors.RFCCodeText("PD:server:ErrClientEmpty"))
 	ErrStoreNotFound           = errors.Normalize("store %d not found", errors.RFCCodeText("PD:server:ErrStoreNotFound"))
 	ErrLeaderNil               = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
