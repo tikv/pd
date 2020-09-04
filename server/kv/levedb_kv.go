@@ -31,7 +31,7 @@ type LeveldbKV struct {
 func NewLeveldbKV(path string) (*LeveldbKV, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errs.ErrLevelDBOpen.Wrap(err).GenWithStackByCause()
 	}
 	return &LeveldbKV{db}, nil
 }

@@ -16,13 +16,13 @@ package typeutil
 import (
 	"encoding/binary"
 
-	"github.com/pingcap/errors"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // BytesToUint64 converts a byte slice to uint64.
 func BytesToUint64(b []byte) (uint64, error) {
 	if len(b) != 8 {
-		return 0, errors.Errorf("invalid data, must 8 bytes, but %d", len(b))
+		return 0, errs.ErrBytesToUint64.FastGenByArgs(len(b))
 	}
 
 	return binary.BigEndian.Uint64(b), nil
