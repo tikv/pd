@@ -56,7 +56,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
-	// Two dc-locations will make two Local TSO Allocator leaders been elected
+	// There will be the number of dc-locations Local TSO Allocator leaders elected
 	testDCLocations := []string{"dc-1", "dc-2", "dc-3"}
 	dcLocationNum := len(testDCLocations)
 	for _, dcLocation := range testDCLocations {
