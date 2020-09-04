@@ -148,14 +148,14 @@ var (
 
 // pb errors
 var (
-	ErrPbStreamSend   = errors.Normalize("failed to send stream", errors.RFCCodeText("PD:pb:ErrPbStreamSend"))
-	ErrPbUnmarshal = errors.Normalize("failed to unmarshal metapb", errors.RFCCodeText("PD:pb:ErrPbUnmarshal"))
+	ErrPbStreamSend = errors.Normalize("failed to send stream", errors.RFCCodeText("PD:pb:ErrPbStreamSend"))
+	ErrPbUnmarshal  = errors.Normalize("failed to unmarshal metapb", errors.RFCCodeText("PD:pb:ErrPbUnmarshal"))
 )
 
 // leveldb errors
 var (
-	ErrLeveldbClose   = errors.Normalize("failed to close leveldb", errors.RFCCodeText("PD:leveldb:ErrLeveldbClose"))
-	ErrLeveldbWrite   = errors.Normalize("failed to write leveldb", errors.RFCCodeText("PD:leveldb:ErrLeveldbWrite"))
+	ErrLeveldbClose = errors.Normalize("failed to close leveldb", errors.RFCCodeText("PD:leveldb:ErrLeveldbClose"))
+	ErrLeveldbWrite = errors.Normalize("failed to write leveldb", errors.RFCCodeText("PD:leveldb:ErrLeveldbWrite"))
 )
 
 // ioutil error
