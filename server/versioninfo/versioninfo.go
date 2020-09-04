@@ -15,9 +15,8 @@ package versioninfo
 
 import (
 	"github.com/coreos/go-semver/semver"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"go.uber.org/zap"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 const (
@@ -44,14 +43,17 @@ func ParseVersion(v string) (*semver.Version, error) {
 		v = v[1:]
 	}
 	ver, err := semver.NewVersion(v)
-	return ver, errors.WithStack(err)
+	if err != nil {
+		return nil, errs.ErrSemverNewVersion.Wrap(err).GenWithStackByCause()
+	}
+	return ver, nil
 }
 
 // MustParseVersion wraps ParseVersion and will panic if error is not nil.
 func MustParseVersion(v string) *semver.Version {
 	ver, err := ParseVersion(v)
 	if err != nil {
-		log.Fatal("version string is illegal", zap.Error(err))
+		log.Fatal("version string is illegal", errs.ZapError(err))
 	}
 	return ver
 }

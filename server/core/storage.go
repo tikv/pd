@@ -218,7 +218,7 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 	}
 	err = json.Unmarshal([]byte(value), cfg)
 	if err != nil {
-		return false, errors.WithStack(err)
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	return true, nil
 }
@@ -257,7 +257,7 @@ func (s *Storage) LoadRuleGroups(f func(k, v string)) error {
 func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
 	value, err := json.Marshal(data)
 	if err != nil {
-		return err
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
 	}
 	return s.Save(path.Join(prefix, key), string(value))
 }
@@ -285,7 +285,7 @@ func (s *Storage) LoadRangeByPrefix(prefix string, f func(k, v string)) error {
 func (s *Storage) SaveReplicationStatus(mode string, status interface{}) error {
 	value, err := json.Marshal(status)
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
 	}
 	return s.Save(path.Join(replicationPath, mode), string(value))
 }
@@ -301,7 +301,7 @@ func (s *Storage) LoadReplicationStatus(mode string, status interface{}) (bool, 
 	}
 	err = json.Unmarshal([]byte(v), status)
 	if err != nil {
-		return false, errors.WithStack(err)
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
 	}
 	return true, nil
 }
@@ -326,7 +326,7 @@ func (s *Storage) LoadComponent(component interface{}) (bool, error) {
 	}
 	err = json.Unmarshal([]byte(v), component)
 	if err != nil {
-		return false, errors.WithStack(err)
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
 	}
 	return true, nil
 }
@@ -344,7 +344,7 @@ func (s *Storage) LoadStores(f func(store *StoreInfo)) error {
 		for _, str := range res {
 			store := &metapb.Store{}
 			if err := store.Unmarshal([]byte(str)); err != nil {
-				return errors.WithStack(err)
+				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
 			}
 			leaderWeight, err := s.loadFloatWithDefaultValue(s.storeLeaderWeightPath(store.GetId()), 1.0)
 			if err != nil {
@@ -385,7 +385,7 @@ func (s *Storage) loadFloatWithDefaultValue(path string, def float64) (float64, 
 	}
 	val, err := strconv.ParseFloat(res, 64)
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, errs.ErrStrconvParseFloat.Wrap(err).GenWithStackByArgs()
 	}
 	return val, nil
 }
