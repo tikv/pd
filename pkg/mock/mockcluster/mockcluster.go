@@ -61,11 +61,6 @@ func NewCluster(opts *config.PersistOptions) *Cluster {
 	}
 }
 
-// GetOpts returns the cluster configuration.
-func (mc *Cluster) GetOpts() *config.PersistOptions {
-	return mc.PersistOptions
-}
-
 // AllocID allocs a new unique ID.
 func (mc *Cluster) AllocID() (uint64, error) {
 	return mc.Alloc()
