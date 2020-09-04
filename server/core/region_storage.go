@@ -15,6 +15,7 @@ package core
 
 import (
 	"context"
+	"github.com/tikv/pd/pkg/errs"
 	"math"
 	"sync"
 	"time"
@@ -140,7 +141,7 @@ func loadRegions(kv kv.Base, f func(region *RegionInfo) []*RegionInfo) error {
 		for _, s := range res {
 			region := &metapb.Region{}
 			if err := region.Unmarshal([]byte(s)); err != nil {
-				return err
+				return errs.ErrPbUnmarshal.Wrap(err).GenWithStackByArgs()
 			}
 
 			nextID = region.GetId() + 1
@@ -181,5 +182,9 @@ func (s *RegionStorage) Close() error {
 		log.Error("meet error before close the region storage", zap.Error(err))
 	}
 	s.regionStorageCancel()
-	return errors.WithStack(s.LeveldbKV.Close())
+	err = s.LeveldbKV.Close()
+	if err != nil {
+		return errs.ErrLeveldbClose.Wrap(err).GenWithStackByArgs()
+	}
+	return nil
 }

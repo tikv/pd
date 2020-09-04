@@ -72,6 +72,16 @@ var (
 	ErrSecurityConfig = errors.Normalize("security config error: %s", errors.RFCCodeText("PD:grpcutil:ErrSecurityConfig"))
 )
 
+// server errors
+var (
+	ErrServiceRegistered     = errors.Normalize("service with path [%s] already registered", errors.RFCCodeText("PD:server:ErrServiceRegistered"))
+	ErrAPIInformationInvalid = errors.Normalize("invalid api information, group %s version %s", errors.RFCCodeText("PD:server:ErrAPIInformationInvalid"))
+	ErrClientURLEmpty        = errors.Normalize("client url empty", errors.RFCCodeText("PD:server:ErrClientEmpty"))
+	ErrStoreNotFound         = errors.Normalize("store %d not found", errors.RFCCodeText("PD:server:ErrStoreNotFound"))
+	ErrLeaderNil             = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
+	ErrCancelStartEtcd       = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
+)
+
 // The third-party project error.
 // url errors
 var (
@@ -136,15 +146,16 @@ var (
 	ErrHTTPPostFile   = errors.Normalize("http post file request failed", errors.RFCCodeText("PD:http:ErrHTTPPostFile"))
 )
 
-// server errors
+// pb errors
 var (
-	ErrDecodeSchedulerConfig = errors.Normalize("decode scheduler config failed", errors.RFCCodeText("PD:server:ErrDecodeSchedulerConfig"))
-	ErrServiceRegistered     = errors.Normalize("service with path [%s] already registered", errors.RFCCodeText("PD:server:ErrServiceRegistered"))
-	ErrAPIInformationInvalid = errors.Normalize("invalid api information, group %s version %s", errors.RFCCodeText("PD:server:ErrAPIInformationInvalid"))
-	ErrClientURLEmpty        = errors.Normalize("client url empty", errors.RFCCodeText("PD:server:ErrClientEmpty"))
-	ErrStoreNotFound         = errors.Normalize("store %d not found", errors.RFCCodeText("PD:server:ErrStoreNotFound"))
-	ErrLeaderNil             = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
-	ErrCancelStartEtcd       = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
+	ErrPbStreamSend   = errors.Normalize("failed to send stream", errors.RFCCodeText("PD:pb:ErrPbStreamSend"))
+	ErrPbUnmarshal = errors.Normalize("failed to unmarshal metapb", errors.RFCCodeText("PD:pb:ErrPbUnmarshal"))
+)
+
+// leveldb errors
+var (
+	ErrLeveldbClose   = errors.Normalize("failed to close leveldb", errors.RFCCodeText("PD:leveldb:ErrLeveldbClose"))
+	ErrLeveldbWrite   = errors.Normalize("failed to write leveldb", errors.RFCCodeText("PD:leveldb:ErrLeveldbWrite"))
 )
 
 // ioutil error
