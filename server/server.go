@@ -360,7 +360,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRaftPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
 	// Run callbacks
@@ -537,7 +537,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	clusterRootPath := s.GetClusterRaftPath()
+	clusterRootPath := s.GetClusterRootPath()
 
 	var ops []clientv3.Op
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
@@ -946,13 +946,13 @@ func (s *Server) GetSecurityConfig() *grpcutil.SecurityConfig {
 	return &s.cfg.Security
 }
 
-// GetClusterRootPath returns the cluster root path.
-func (s *Server) GetClusterRootPath() string {
+// GetServerRootPath returns the server root path.
+func (s *Server) GetServerRootPath() string {
 	return s.rootPath
 }
 
-// GetClusterRaftPath returns the cluster raft path.
-func (s *Server) GetClusterRaftPath() string {
+// GetClusterRootPath returns the cluster root path.
+func (s *Server) GetClusterRootPath() string {
 	return path.Join(s.rootPath, "raft")
 }
 

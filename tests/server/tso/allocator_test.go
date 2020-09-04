@@ -60,7 +60,7 @@ func (s *testAllocatorSuite) TestLocalAllocatorLeader(c *C) {
 		tsoAllocatorManager := server.GetTSOAllocatorManager()
 		leadership := election.NewLeadership(
 			server.GetEtcdClient(),
-			path.Join(server.GetServer().GetClusterRootPath(), testDCLocation),
+			path.Join(server.GetServer().GetServerRootPath(), testDCLocation),
 			"campaign-local-allocator-test")
 		tsoAllocatorManager.SetUpAllocator(ctx, cancel, testDCLocation, leadership)
 	}
@@ -83,12 +83,13 @@ func (s *testAllocatorSuite) TestLocalAllocatorLeader(c *C) {
 	// At the end, we should only have one initialized Local TSO Allocator,
 	// i.e., the Local TSO Allocator leader for dc-1
 	c.Assert(len(allAllocators), Equals, 1)
+	allocatorLeader, _ := allAllocators[0].(*tso.LocalTSOAllocator)
 	for _, server := range cluster.GetServers() {
 		// Filter out Global TSO Allocator
 		allocators := server.GetTSOAllocatorManager().GetAllocators(false, true, false)
 		c.Assert(len(allocators), Equals, 1)
 		allocatorFollower, _ := allocators[0].(*tso.LocalTSOAllocator)
-		allocatorLeader, _ := allAllocators[0].(*tso.LocalTSOAllocator)
+		// All followers sould have the same allocator leader
 		c.Assert(allocatorFollower.GetAllocatorLeader().MemberId, Equals, allocatorLeader.GetMember().MemberId)
 	}
 }

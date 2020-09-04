@@ -154,6 +154,11 @@ func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool)
 		if lta.isSameAllocatorLeader(allocatorLeader) {
 			// oh, we are already a Local TSO Allocator leader, which indicates we may meet something wrong
 			// in previous CampaignAllocatorLeader. We should delete the leadership and campaign again.
+			// In normal case, if a Local TSO Allocator become an allocator leader, it will keep looping
+			// in the campaignAllocatorLeader to maintain its leadership. However, the potential failure
+			// may occur after an allocator get the leadership and it will return from the campaignAllocatorLeader,
+			// which means the election and initialization are not completed fully. By this mean, we should
+			// re-campaign by deleting the current allocator leader.
 			log.Warn("the local tso allocator leader has not changed, delete and campaign again",
 				zap.String("dc-location", lta.dcLocation), zap.Stringer("old-pd-leader", allocatorLeader))
 			if err = lta.leadership.DeleteLeader(); err != nil {
