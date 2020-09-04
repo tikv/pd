@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	promClient "github.com/prometheus/client_golang/api"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -56,7 +57,7 @@ func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *St
 		Address: cfg.MetricStorage,
 	})
 	if err != nil {
-		log.Error("error initializing Prometheus client", zap.String("metric-storage", cfg.MetricStorage), zap.Error(err))
+		log.Error("error initializing Prometheus client", zap.String("metric-storage", cfg.MetricStorage), errs.ZapError(errs.ErrPrometheusCreateClient, err))
 		return nil
 	}
 	querier := NewPrometheusQuerier(client)
@@ -85,13 +86,13 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	now := time.Now()
 	totalCPUUseTime, err := getTotalCPUUseTime(querier, component, instances, now, MetricsTimeDuration)
 	if err != nil {
-		log.Error("cannot get total CPU used time", zap.Error(err))
+		log.Error("cannot get total CPU used time", errs.ZapError(err))
 		return nil
 	}
 
 	currentQuota, err := getTotalCPUQuota(querier, component, instances, now)
 	if err != nil {
-		log.Error("cannot get total CPU quota", zap.Error(err))
+		log.Error("cannot get total CPU quota", errs.ZapError(err))
 		return nil
 	}
 
