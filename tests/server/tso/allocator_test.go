@@ -89,7 +89,7 @@ func (s *testAllocatorSuite) TestLocalAllocatorLeader(c *C) {
 		allocators := server.GetTSOAllocatorManager().GetAllocators(false, true, false)
 		c.Assert(len(allocators), Equals, 1)
 		allocatorFollower, _ := allocators[0].(*tso.LocalTSOAllocator)
-		// All followers sould have the same allocator leader
+		// All followers should have the same allocator leader
 		c.Assert(allocatorFollower.GetAllocatorLeader().MemberId, Equals, allocatorLeader.GetMember().MemberId)
 	}
 }
