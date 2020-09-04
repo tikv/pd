@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -66,12 +67,12 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 	for _, m := range members.GetMembers() {
 		binaryVersion, e := h.svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
 		m.BinaryVersion = binaryVersion
 		deployPath, e := h.svr.GetMember().GetMemberDeployPath(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
 		m.DeployPath = deployPath
 		if h.svr.GetMember().GetEtcdLeader() == 0 {
@@ -80,13 +81,13 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 		}
 		leaderPriority, e := h.svr.GetMember().GetMemberLeaderPriority(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+			log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 			continue
 		}
 		m.LeaderPriority = int32(leaderPriority)
 		gitHash, e := h.svr.GetMember().GetMemberGitHash(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 			continue
 		}
 		m.GitHash = gitHash

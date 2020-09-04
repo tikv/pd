@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -107,12 +108,7 @@ func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) 
 		log.Fatal("duplicated scheduler", zap.String("type", typ))
 	}
 	schedulerArgsToDecoder[typ] = builder
-}
-
-// IsSchedulerRegistered check where the named scheduler type is registered.
-func IsSchedulerRegistered(name string) bool {
-	_, ok := schedulerMap[name]
-	return ok
+	config.RegisterScheduler(typ)
 }
 
 // CreateScheduler creates a scheduler with registered creator func.

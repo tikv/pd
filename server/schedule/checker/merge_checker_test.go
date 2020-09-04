@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/goleak"
 )
 
@@ -57,6 +58,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 		opt.RejectLeader: {{Key: "reject", Value: "leader"}},
 	}
 	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
 		7: {"reject", "leader"},
@@ -420,6 +422,7 @@ func (s *testMergeCheckerSuite) TestCache(c *C) {
 	cfg.MaxMergeRegionKeys = 2
 	cfg.SplitMergeInterval = time.Hour
 	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
 	}

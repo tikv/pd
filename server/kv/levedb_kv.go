@@ -83,13 +83,13 @@ func (kv *LeveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
 	for key, r := range regions {
 		value, err := proto.Marshal(r)
 		if err != nil {
-			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByArgs()
+			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
 		}
 		batch.Put([]byte(key), value)
 	}
-	err := kv.Write(batch, nil)
-	if err != nil {
-		return errs.ErrLeveldbWrite.Wrap(err).GenWithStackByArgs()
+
+	if err := kv.Write(batch, nil); err != nil {
+		return errs.ErrLeveldbWrite.Wrap(err).GenWithStackByCause()
 	}
 	return nil
 }
