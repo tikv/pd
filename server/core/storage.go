@@ -344,7 +344,7 @@ func (s *Storage) LoadStores(f func(store *StoreInfo)) error {
 		for _, str := range res {
 			store := &metapb.Store{}
 			if err := store.Unmarshal([]byte(str)); err != nil {
-				return errs.ErrPbUnmarshal.Wrap(err).GenWithStackByArgs()
+				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
 			}
 			leaderWeight, err := s.loadFloatWithDefaultValue(s.storeLeaderWeightPath(store.GetId()), 1.0)
 			if err != nil {

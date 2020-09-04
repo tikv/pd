@@ -1218,11 +1218,11 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		res, err := s.httpClient.Do(req)
 		if err != nil {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
-			return errs.ErrHTTPPostFile.Wrap(err).GenWithStackByCause()
+			return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
 		}
 		if res.StatusCode != http.StatusOK {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
-			return errs.ErrHTTPPostFile.FastGenByArgs()
+			return errs.ErrSendRequest.FastGenByArgs()
 		}
 	}
 	return nil
