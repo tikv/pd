@@ -89,7 +89,7 @@ func (kv *LeveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
 	}
 
 	if err := kv.Write(batch, nil); err != nil {
-		return errs.ErrLeveldbWrite.Wrap(err).GenWithStackByCause()
+		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
 	}
 	return nil
 }

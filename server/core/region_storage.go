@@ -182,7 +182,7 @@ func (s *RegionStorage) Close() error {
 	s.regionStorageCancel()
 	err = s.LeveldbKV.Close()
 	if err != nil {
-		return errs.ErrLeveldbClose.Wrap(err).GenWithStackByArgs()
+		return errs.ErrLevelDBClose.Wrap(err).GenWithStackByArgs()
 	}
 	return nil
 }
