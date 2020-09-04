@@ -15,8 +15,8 @@ package cluster
 
 import (
 	"github.com/coreos/go-semver/semver"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 )
 
@@ -50,7 +50,7 @@ var featuresDict = map[Feature]string{
 func MinSupportedVersion(v Feature) *semver.Version {
 	target, ok := featuresDict[v]
 	if !ok {
-		log.Fatal("the corresponding version of the feature doesn't exist", zap.Int("feature-number", int(v)))
+		log.Fatal("the corresponding version of the feature doesn't exist", zap.Int("feature-number", int(v)), errs.ZapError(errs.ErrFeatureNotExisted))
 	}
 	version := MustParseVersion(target)
 	return version
@@ -66,14 +66,17 @@ func ParseVersion(v string) (*semver.Version, error) {
 		v = v[1:]
 	}
 	ver, err := semver.NewVersion(v)
-	return ver, errors.WithStack(err)
+	if err != nil {
+		return nil, errs.ErrSemverNewVersion.Wrap(err).GenWithStackByCause()
+	}
+	return ver, nil
 }
 
 // MustParseVersion wraps ParseVersion and will panic if error is not nil.
 func MustParseVersion(v string) *semver.Version {
 	ver, err := ParseVersion(v)
 	if err != nil {
-		log.Fatal("version string is illegal", zap.Error(err))
+		log.Fatal("version string is illegal", errs.ZapError(err))
 	}
 	return ver
 }

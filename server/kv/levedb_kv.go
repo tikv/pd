@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // LeveldbKV is a kv store using leveldb.
@@ -30,7 +31,7 @@ type LeveldbKV struct {
 func NewLeveldbKV(path string) (*LeveldbKV, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errs.ErrLevelDBOpen.Wrap(err).GenWithStackByCause()
 	}
 	return &LeveldbKV{db}, nil
 }
