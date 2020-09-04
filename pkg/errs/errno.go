@@ -112,6 +112,7 @@ var (
 	ErrCancelStartEtcd       = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
 )
 
+<<<<<<< HEAD
 // logutil errors
 var (
 	ErrInitFileLog = errors.Normalize("init file log error, %s", errors.RFCCodeText("PD:logutil:ErrInitFileLog"))
@@ -122,6 +123,8 @@ var (
 	ErrBytesToUint64 = errors.Normalize("invalid data, must 8 bytes, but %d", errors.RFCCodeText("PD:typeutil:ErrBytesToUint64"))
 )
 
+=======
+>>>>>>> 12a08b1... server: Refine log error format (#2873)
 // The third-party project error.
 // url errors
 var (
@@ -235,6 +238,7 @@ var (
 
 // leveldb errors
 var (
+<<<<<<< HEAD
 	ErrLevelDBClose = errors.Normalize("close leveldb error", errors.RFCCodeText("PD:leveldb:ErrLevelDBClose"))
 	ErrLevelDBWrite = errors.Normalize("leveldb write error", errors.RFCCodeText("PD:leveldb:ErrLevelDBWrite"))
 	ErrLevelDBOpen  = errors.Normalize("leveldb open file error", errors.RFCCodeText("PD:leveldb:ErrLevelDBOpen"))
@@ -248,4 +252,8 @@ var (
 // log
 var (
 	ErrInitLogger = errors.Normalize("init logger error", errors.RFCCodeText("PD:log:ErrInitLogger"))
+=======
+	ErrLevelDBClose = errors.Normalize("failed to close leveldb", errors.RFCCodeText("PD:leveldb:ErrLevelDBClose"))
+	ErrLevelDBWrite = errors.Normalize("failed to write leveldb", errors.RFCCodeText("PD:leveldb:ErrLevelDBWrite"))
+>>>>>>> 12a08b1... server: Refine log error format (#2873)
 )

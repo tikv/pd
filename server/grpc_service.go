@@ -26,6 +26,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+<<<<<<< HEAD
+=======
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/tsoutil"
+>>>>>>> 12a08b1... server: Refine log error format (#2873)
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
@@ -404,7 +409,11 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		region := core.RegionFromHeartbeat(request)
 		if region.GetLeader() == nil {
+<<<<<<< HEAD
 			log.Error("invalid request, the leader is nil", zap.Reflect("reqeust", request))
+=======
+			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
+>>>>>>> 12a08b1... server: Refine log error format (#2873)
 			continue
 		}
 		if region.GetID() == 0 {

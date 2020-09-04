@@ -172,7 +172,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			return nil, err
 		}
 		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
-			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
+			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs(info.Name, info.Version)
 		}
 		var pathPrefix string
 		if len(info.PathPrefix) != 0 {
@@ -183,7 +183,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
 		}
 		if _, ok := registerMap[pathPrefix]; ok {
-			return nil, errors.Errorf("service with path [%s] already registered", pathPrefix)
+			return nil, errs.ErrServiceRegistered.FastGenByArgs(pathPrefix)
 		}
 
 		log.Info("register REST path", zap.String("path", pathPrefix))
@@ -263,13 +263,13 @@ func (s *Server) startEtcd(ctx context.Context) error {
 
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
 
 	// Check cluster ID
 	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdURLMap.Wrap(err).GenWithStackByCause()
 	}
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
@@ -284,7 +284,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	// Wait etcd until it is ready to use
 	case <-etcd.Server.ReadyNotify():
 	case <-newCtx.Done():
-		return errors.Errorf("canceled when waiting embed etcd to be ready")
+		return errs.ErrCancelStartEtcd.FastGenByArgs()
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
@@ -296,7 +296,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		TLS:         tlsConfig,
 	})
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 
 	etcdServerID := uint64(etcd.Server.ID())
@@ -429,7 +429,7 @@ func (s *Server) Close() {
 		s.hbStreams.Close()
 	}
 	if err := s.storage.Close(); err != nil {
-		log.Error("close storage meet error", zap.Error(err))
+		log.Error("close storage meet error", errs.ZapError(err))
 	}
 
 	// Run callbacks
@@ -448,7 +448,7 @@ func (s *Server) IsClosed() bool {
 // Run runs the pd server.
 func (s *Server) Run() error {
 	go StartMonitor(s.ctx, time.Now, func() {
-		log.Error("system time jumps backward")
+		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
 	})
 	if err := s.startEtcd(s.ctx); err != nil {
@@ -565,11 +565,11 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
 	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
 		log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
-		return nil, errors.Errorf("cluster %d already bootstrapped", clusterID)
+		return nil, errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
@@ -736,7 +736,7 @@ func (s *Server) GetConfig() *config.Config {
 			log.Error("failed to decode scheduler config",
 				zap.String("config", configs[i]),
 				zap.String("scheduler", sche),
-				zap.Error(err))
+				errs.ZapError(err))
 			continue
 		}
 		payload[sche] = config
@@ -768,7 +768,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 		log.Error("failed to update schedule config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -814,7 +814,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -852,7 +852,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 		log.Error("failed to update PDServer config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("PD server config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -868,7 +868,7 @@ func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 		log.Error("failed to update label property config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", &old),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("label property config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -886,7 +886,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 
@@ -905,7 +905,7 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 
@@ -932,7 +932,7 @@ func (s *Server) SetClusterVersion(v string) error {
 		log.Error("failed to update cluster version",
 			zap.String("old-version", old.String()),
 			zap.String("new-version", v),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("cluster version is updated", zap.String("new-version", v))
@@ -1039,7 +1039,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 		log.Error("failed to update replication mode config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", &old),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("replication mode config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -1057,7 +1057,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 			s.persistOptions.SetReplicationModeConfig(old)
 			revertErr := s.persistOptions.Persist(s.storage)
 			if revertErr != nil {
-				log.Error("failed to revert replication mode persistent config", zap.Error(err))
+				log.Error("failed to revert replication mode persistent config", errs.ZapError(revertErr))
 			}
 		}
 		return err
@@ -1083,7 +1083,7 @@ func (s *Server) leaderLoop() {
 		if leader != nil {
 			err := s.reloadConfigFromKV()
 			if err != nil {
-				log.Error("reload config failed", zap.Error(err))
+				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
 			syncer := s.cluster.GetRegionSyncer()
@@ -1109,12 +1109,18 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
+<<<<<<< HEAD
 	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
 
 	lease := member.NewLeaderLease(s.client)
 	defer lease.Close()
 	if err := s.member.CampaignLeader(lease, s.cfg.LeaderLease); err != nil {
 		log.Error("campaign leader meet error", zap.Error(err))
+=======
+	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
+	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
+		log.Error("campaign pd leader meet error", errs.ZapError(err))
+>>>>>>> 12a08b1... server: Refine log error format (#2873)
 		return
 	}
 
@@ -1125,6 +1131,7 @@ func (s *Server) campaignLeader() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
+<<<<<<< HEAD
 	go lease.KeepAlive(ctx)
 	s.SetLease(lease)
 	defer s.SetLease(nil)
@@ -1133,10 +1140,21 @@ func (s *Server) campaignLeader() {
 	log.Debug("sync timestamp for tso")
 	if err := s.tso.SyncTimestamp(lease); err != nil {
 		log.Error("failed to sync timestamp", zap.Error(err))
+=======
+	defer s.member.ResetLeader()
+	// maintain the PD leader
+	go s.member.KeepLeader(ctx)
+	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
+
+	log.Info("setting up the global TSO allocator")
+	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, cancel, tso.GlobalDCLocation, s.member.GetLeadership()); err != nil {
+		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
+>>>>>>> 12a08b1... server: Refine log error format (#2873)
 		return
 	}
 	defer s.tso.ResetTimestamp()
 
+<<<<<<< HEAD
 	err := s.reloadConfigFromKV()
 	if err != nil {
 		log.Error("failed to reload configuration", zap.Error(err))
@@ -1146,6 +1164,15 @@ func (s *Server) campaignLeader() {
 	err = s.createRaftCluster()
 	if err != nil {
 		log.Error("failed to create raft cluster", zap.Error(err))
+=======
+	if err := s.reloadConfigFromKV(); err != nil {
+		log.Error("failed to reload configuration", errs.ZapError(err))
+		return
+	}
+	// Try to create raft cluster.
+	if err := s.createRaftCluster(); err != nil {
+		log.Error("failed to create raft cluster", errs.ZapError(err))
+>>>>>>> 12a08b1... server: Refine log error format (#2873)
 		return
 	}
 	defer s.stopRaftCluster()
@@ -1229,7 +1256,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		clientUrls := member.GetClientUrls()
 		if len(clientUrls) == 0 {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
-			return errors.Errorf("failed to replicate to member %s: clientUrls is empty", member.GetName())
+			return errs.ErrClientURLEmpty.FastGenByArgs()
 		}
 		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
 		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
@@ -1237,11 +1264,11 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		res, err := s.httpClient.Do(req)
 		if err != nil {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
-			return errors.Errorf("failed to replicate to member %s", member.GetName())
+			return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
 		}
 		if res.StatusCode != http.StatusOK {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
-			return errors.Errorf("failed to replicate to member %s", member.GetName())
+			return errs.ErrSendRequest.FastGenByArgs()
 		}
 	}
 	return nil
