@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 func newTestReplication(mso *mockoption.ScheduleOptions, maxReplicas int, locationLabels ...string) {
@@ -577,6 +578,7 @@ func (s *testBalanceRegionSchedulerSuite) TearDownSuite(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -612,6 +614,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -673,6 +676,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	newTestReplication(opt, 5, "zone", "rack", "host")
 
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -732,6 +736,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica5(c *C, tc *mockcluster.Cl
 func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	opt.TolerantSizeRatio = 1
@@ -806,6 +811,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -831,6 +837,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
@@ -846,6 +853,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, tc, mockhbstream.NewHeartbeatStream())
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
@@ -944,6 +952,7 @@ func (s *testScatterRangeLeaderSuite) TearDownSuite(c *C) {
 func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	// Add stores 1,2,3,4,5.
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 0)

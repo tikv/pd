@@ -20,15 +20,28 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockoption"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/versioninfo"
 )
-
-type testLearnerCheckerSuite struct{}
 
 var _ = Suite(&testLearnerCheckerSuite{})
 
+type testLearnerCheckerSuite struct {
+	cluster *mockcluster.Cluster
+	lc      *LearnerChecker
+}
+
+func (s *testLearnerCheckerSuite) SetUpTest(c *C) {
+	s.cluster = mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	s.lc = NewLearnerChecker(s.cluster)
+	for id := uint64(1); id <= 10; id++ {
+		s.cluster.PutStoreWithLabels(id)
+	}
+}
+
 func (s *testLearnerCheckerSuite) TestPromoteLearner(c *C) {
-	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
-	lc := NewLearnerChecker(cluster)
+	lc := s.lc
+
 	region := core.NewRegionInfo(
 		&metapb.Region{
 			Id: 1,

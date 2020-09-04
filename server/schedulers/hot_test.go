@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 func init() {
@@ -46,6 +47,10 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
+	for id := uint64(1); id <= 10; id++ {
+		tc.PutStoreWithLabels(id)
+	}
+
 	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
@@ -127,6 +132,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	opt.HotRegionCacheHitsThreshold = 0
@@ -309,6 +315,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	opt.HotRegionCacheHitsThreshold = 0
 
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -404,6 +411,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 		// 0: byte rate
 		// 1: key rate
 		tc := mockcluster.NewCluster(opt)
+		tc.DisableFeature(versioninfo.JointConsensus)
 		tc.AddRegionStore(1, 20)
 		tc.AddRegionStore(2, 20)
 		tc.AddRegionStore(3, 20)
@@ -556,6 +564,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	defer cancel()
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	opt.HotRegionCacheHitsThreshold = 0
@@ -723,6 +732,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 		// 0: byte rate
 		// 1: key rate
 		tc := mockcluster.NewCluster(opt)
+		tc.DisableFeature(versioninfo.JointConsensus)
 		tc.AddRegionStore(1, 20)
 		tc.AddRegionStore(2, 20)
 		tc.AddRegionStore(3, 20)
