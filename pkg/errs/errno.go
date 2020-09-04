@@ -228,6 +228,6 @@ var (
 
 // leveldb errors
 var (
-	ErrLeveldbClose = errors.Normalize("failed to close leveldb", errors.RFCCodeText("PD:leveldb:ErrLeveldbClose"))
-	ErrLeveldbWrite = errors.Normalize("failed to write leveldb", errors.RFCCodeText("PD:leveldb:ErrLeveldbWrite"))
+	ErrLevelDBClose = errors.Normalize("failed to close leveldb", errors.RFCCodeText("PD:leveldb:ErrLevelDBClose"))
+	ErrLevelDBWrite = errors.Normalize("failed to write leveldb", errors.RFCCodeText("PD:leveldb:ErrLevelDBWrite"))
 )
