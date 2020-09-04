@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
-	"go.uber.org/zap"
 )
 
 const (
@@ -94,7 +93,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		s, err := ioutil.ReadFile(filePath)
 		if err != nil {
-			log.Fatal("read the join config meet error", zap.Error(err))
+			log.Fatal("read the join config meet error", errs.ZapError(errs.ErrIORead, err))
 		}
 		cfg.InitialCluster = strings.TrimSpace(string(s))
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
