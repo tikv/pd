@@ -240,6 +240,45 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	assertStateIDUpdate()
 }
 
+func (s *testReplicationMode) TestAsynctimeout(c *C) {
+	store := core.NewStorage(kv.NewMemoryKV())
+	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
+		LabelKey:         "zone",
+		Primary:          "zone1",
+		DR:               "zone2",
+		PrimaryReplicas:  2,
+		DRReplicas:       1,
+		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+		WaitAsyncTimeout: typeutil.Duration{Duration: 2 * time.Minute},
+	}}
+	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	var replicator mockFileReplicator
+	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
+	c.Assert(err, IsNil)
+
+	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"zone": "zone2"})
+
+	s.setStoreState(cluster, 3, "down")
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateSync) // cannot switch state due to recently start
+
+	rep.initTime = time.Now().Add(-3 * time.Minute)
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateAsync)
+
+	rep.drSwitchToSync()
+	rep.UpdateMemberWaitAsyncTime(42)
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateSync) // cannot switch state due to member not timeout
+
+	rep.drMemberWaitAsyncTime[42] = time.Now().Add(-3 * time.Minute)
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateAsync)
+}
+
 func (s *testReplicationMode) setStoreState(cluster *mockcluster.Cluster, id uint64, state string) {
 	store := cluster.GetStore(id)
 	if state == "down" {

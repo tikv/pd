@@ -216,6 +216,7 @@ const (
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
+	defaultDRWaitAsyncTimeout = 2 * time.Minute
 )
 
 var (
@@ -1307,13 +1308,17 @@ type DRAutoSyncReplicationConfig struct {
 	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
 	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
 	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
+	WaitAsyncTimeout typeutil.Duration `toml:"wait-async-timeout" json:"wait-async-timeout"`
 }
 
 func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
-		c.WaitStoreTimeout = typeutil.Duration{Duration: defaultDRWaitStoreTimeout}
+		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
 	}
 	if !meta.IsDefined("wait-sync-timeout") {
-		c.WaitSyncTimeout = typeutil.Duration{Duration: defaultDRWaitSyncTimeout}
+		c.WaitSyncTimeout = typeutil.NewDuration(defaultDRWaitSyncTimeout)
+	}
+	if !meta.IsDefined("wait-async-timeout") {
+		c.WaitAsyncTimeout = typeutil.NewDuration(defaultDRWaitAsyncTimeout)
 	}
 }
