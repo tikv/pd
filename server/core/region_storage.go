@@ -15,13 +15,13 @@ package core
 
 import (
 	"context"
-	"github.com/tikv/pd/pkg/errs"
 	"math"
 	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/kv"
 	"go.uber.org/zap"
 )

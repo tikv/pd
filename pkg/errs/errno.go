@@ -92,6 +92,7 @@ var (
 // grpc errors
 var (
 	ErrGRPCDial      = errors.Normalize("dial error", errors.RFCCodeText("PD:grpc:ErrGRPCDial"))
+	ErrGRPCSend      = errors.Normalize("dial error", errors.RFCCodeText("PD:grpc:ErrGRPCSend"))
 	ErrCloseGRPCConn = errors.Normalize("close gRPC connection failed", errors.RFCCodeText("PD:grpc:ErrCloseGRPCConn"))
 )
 
@@ -148,7 +149,6 @@ var (
 
 // pb errors
 var (
-	ErrPbStreamSend = errors.Normalize("failed to send stream", errors.RFCCodeText("PD:pb:ErrPbStreamSend"))
 	ErrPbUnmarshal  = errors.Normalize("failed to unmarshal metapb", errors.RFCCodeText("PD:pb:ErrPbUnmarshal"))
 )
 
