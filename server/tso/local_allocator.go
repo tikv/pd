@@ -33,8 +33,12 @@ type LocalTSOAllocator struct {
 	// leadership is used to campaign the corresponding DC's Local TSO Allocator.
 	leadership      *election.Leadership
 	timestampOracle *timestampOracle
+	// for election use, notice that the leadership that member holds is
+	// the leadership for PD leader. Local TSO Allocator's leadership is for the
+	// election of Local TSO Allocator leader among several PD servers and
+	// Local TSO Allocator only use member's some etcd and pbpd.Member info.
+	// So it's not conflicted.
 	member          *member.Member
-	// for election use
 	rootPath        string
 	dcLocation      string
 	allocatorLeader atomic.Value // stored as *pdpb.Member

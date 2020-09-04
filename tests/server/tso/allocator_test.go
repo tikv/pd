@@ -44,7 +44,8 @@ func (s *testAllocatorSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
 
-func (s *testAllocatorSuite) TestLocalAllocatorLeader(c *C) {
+// Make sure we have the correct number of allocator leaders.
+func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	var err error
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
@@ -55,41 +56,64 @@ func (s *testAllocatorSuite) TestLocalAllocatorLeader(c *C) {
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
-	testDCLocation := "dc-1"
-	for _, server := range cluster.GetServers() {
-		tsoAllocatorManager := server.GetTSOAllocatorManager()
-		leadership := election.NewLeadership(
-			server.GetEtcdClient(),
-			path.Join(server.GetServer().GetServerRootPath(), testDCLocation),
-			"campaign-local-allocator-test")
-		tsoAllocatorManager.SetUpAllocator(ctx, cancel, testDCLocation, leadership)
+	// Two dc-locations will make two Local TSO Allocator leaders been elected
+	testDCLocations := []string{"dc-1", "dc-2", "dc-3"}
+	dcLocationNum := len(testDCLocations)
+	for _, dcLocation := range testDCLocations {
+		for _, server := range cluster.GetServers() {
+			tsoAllocatorManager := server.GetTSOAllocatorManager()
+			leadership := election.NewLeadership(
+				server.GetEtcdClient(),
+				path.Join(server.GetServer().GetServerRootPath(), dcLocation),
+				"campaign-local-allocator-test")
+			tsoAllocatorManager.SetUpAllocator(ctx, cancel, dcLocation, leadership)
+
+		}
 	}
-	// To check whether we have only one Local TSO Allocator leader for dc-1
-	allAllocators := make([]tso.Allocator, 0)
+	// To check whether we have enough Local TSO Allocator leaders
+	allAllocatorLeaders := make([]tso.Allocator, 0, dcLocationNum)
 	for i := 0; i < 20; i++ {
 		for _, server := range cluster.GetServers() {
 			// Filter out Global TSO Allocator and uninitialized Local TSO Allocator
 			allocators := server.GetTSOAllocatorManager().GetAllocators(false, true, true)
-			c.Assert(len(allocators), LessEqual, 1)
+			// One PD server will have at most two initialized Local TSO Allocators,
+			// which also means two allocator leaders
+			c.Assert(len(allocators), LessEqual, dcLocationNum)
 			if len(allocators) == 0 {
 				continue
 			}
-			if len(allAllocators) == 0 || slice.NoneOf(allAllocators, func(i int) bool { return allAllocators[i] == allocators[0] }) {
-				allAllocators = append(allAllocators, allocators...)
+			if len(allAllocatorLeaders) == 0 {
+				allAllocatorLeaders = append(allAllocatorLeaders, allocators...)
+				continue
+			}
+			for _, allocator := range allocators {
+				if slice.NoneOf(allAllocatorLeaders, func(i int) bool { return allAllocatorLeaders[i] == allocator }) {
+					allAllocatorLeaders = append(allAllocatorLeaders, allocator)
+				}
 			}
 		}
 		time.Sleep(waitAllocatorCheckInterval)
 	}
-	// At the end, we should only have one initialized Local TSO Allocator,
-	// i.e., the Local TSO Allocator leader for dc-1
-	c.Assert(len(allAllocators), Equals, 1)
-	allocatorLeader, _ := allAllocators[0].(*tso.LocalTSOAllocator)
+	// At the end, we should have two initialized Local TSO Allocator,
+	// i.e., the Local TSO Allocator leaders for all dc-locations in testDCLocations
+	c.Assert(len(allAllocatorLeaders), Equals, dcLocationNum)
+	allocatorLeaderMemberIDs := make([]uint64, 0, dcLocationNum)
+	for _, allocator := range allAllocatorLeaders {
+		allocatorLeader, _ := allocator.(*tso.LocalTSOAllocator)
+		allocatorLeaderMemberIDs = append(allocatorLeaderMemberIDs, allocatorLeader.GetMember().MemberId)
+	}
 	for _, server := range cluster.GetServers() {
 		// Filter out Global TSO Allocator
 		allocators := server.GetTSOAllocatorManager().GetAllocators(false, true, false)
-		c.Assert(len(allocators), Equals, 1)
-		allocatorFollower, _ := allocators[0].(*tso.LocalTSOAllocator)
-		// All followers should have the same allocator leader
-		c.Assert(allocatorFollower.GetAllocatorLeader().MemberId, Equals, allocatorLeader.GetMember().MemberId)
+		c.Assert(len(allocators), Equals, dcLocationNum)
+		for _, allocator := range allocators {
+			allocatorFollower, _ := allocator.(*tso.LocalTSOAllocator)
+			allocatorFollowerMemberID := allocatorFollower.GetAllocatorLeader().MemberId
+			c.Assert(
+				slice.AnyOf(
+					allocatorLeaderMemberIDs,
+					func(i int) bool { return allocatorLeaderMemberIDs[i] == allocatorFollowerMemberID }),
+				IsTrue)
+		}
 	}
 }
