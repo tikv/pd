@@ -20,11 +20,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-<<<<<<< HEAD
-	"github.com/pkg/errors"
-=======
 	"github.com/tikv/pd/pkg/errs"
->>>>>>> 33cbf3e... Refine the log errs in scheduler (#2705)
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"

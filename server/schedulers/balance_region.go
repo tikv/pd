@@ -19,7 +19,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"

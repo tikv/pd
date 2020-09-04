@@ -22,13 +22,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-<<<<<<< HEAD
-	"github.com/pkg/errors"
-	"github.com/tikv/pd/pkg/keyutil"
-=======
 	"github.com/tikv/pd/pkg/errs"
->>>>>>> 33cbf3e... Refine the log errs in scheduler (#2705)
+	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"

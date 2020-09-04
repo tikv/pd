@@ -19,8 +19,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
@@ -345,13 +345,8 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		}
 		if last {
 			if err := handler.config.cluster.RemoveScheduler(EvictLeaderName); err != nil {
-<<<<<<< HEAD
-				if err == ErrSchedulerNotFound {
-					handler.rd.JSON(w, http.StatusNotFound, err.Error())
-=======
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err)
->>>>>>> 33cbf3e... Refine the log errs in scheduler (#2705)
 				} else {
 					handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				}
@@ -363,11 +358,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-<<<<<<< HEAD
-	handler.rd.JSON(w, http.StatusNotFound, ErrScheduleConfigNotExist.Error())
-=======
 	handler.rd.JSON(w, http.StatusNotFound, errs.ErrScheduleConfigNotExist.FastGenByArgs())
->>>>>>> 33cbf3e... Refine the log errs in scheduler (#2705)
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {

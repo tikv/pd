@@ -21,12 +21,7 @@ import (
 
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/log"
-<<<<<<< HEAD
-	"github.com/pkg/errors"
-=======
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/typeutil"
->>>>>>> 33cbf3e... Refine the log errs in scheduler (#2705)
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -39,16 +34,6 @@ const (
 	adjustRatio             float64 = 0.005
 	leaderTolerantSizeRatio float64 = 5.0
 	minTolerantSizeRatio    float64 = 1.0
-)
-
-<<<<<<< HEAD
-var (
-	// ErrSchedulerExisted is error info for scheduler has already existed.
-	ErrSchedulerExisted = errors.New("scheduler existed")
-	// ErrSchedulerNotFound is error info for scheduler is not found.
-	ErrSchedulerNotFound = errors.New("scheduler not found")
-	// ErrScheduleConfigNotExist the config is not correct.
-	ErrScheduleConfigNotExist = errors.New("the config does not exist")
 )
 
 func minUint64(a, b uint64) uint64 {
@@ -72,8 +57,6 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-=======
->>>>>>> 33cbf3e... Refine the log errs in scheduler (#2705)
 func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
