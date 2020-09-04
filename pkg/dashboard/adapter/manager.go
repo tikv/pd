@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -195,11 +196,7 @@ func (m *Manager) startService() {
 		return
 	}
 	if err := m.service.Start(m.ctx); err != nil {
-<<<<<<< HEAD
-		log.Error("Can not start dashboard server", zap.Error(err))
-=======
 		log.Error("Can not start dashboard server", errs.ZapError(errs.ErrStartDashboard, err))
->>>>>>> 5a8ed09... *: update the error dependency and do the corresponding changes (#2760)
 	} else {
 		log.Info("Dashboard server is started")
 	}
@@ -210,11 +207,7 @@ func (m *Manager) stopService() {
 		return
 	}
 	if err := m.service.Stop(context.Background()); err != nil {
-<<<<<<< HEAD
-		log.Error("Stop dashboard server error", zap.Error(err))
-=======
 		log.Error("Stop dashboard server error", errs.ZapError(errs.ErrStopDashboard, err))
->>>>>>> 5a8ed09... *: update the error dependency and do the corresponding changes (#2760)
 	} else {
 		log.Info("Dashboard server is stopped")
 	}

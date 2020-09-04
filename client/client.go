@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 )
 
@@ -232,11 +233,7 @@ func (c *client) tsLoop() {
 					return
 				default:
 				}
-<<<<<<< HEAD
-				log.Error("[pd] create tso stream error", zap.Error(err))
-=======
 				log.Error("[pd] create tso stream error", errs.ZapError(errs.ErrCreateTSOStream, err))
->>>>>>> 5a8ed09... *: update the error dependency and do the corresponding changes (#2760)
 				c.ScheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(errors.WithStack(err))
@@ -284,11 +281,7 @@ func (c *client) tsLoop() {
 				return
 			default:
 			}
-<<<<<<< HEAD
-			log.Error("[pd] getTS error", zap.Error(err))
-=======
 			log.Error("[pd] getTS error", errs.ZapError(errs.ErrGetTSO, err))
->>>>>>> 5a8ed09... *: update the error dependency and do the corresponding changes (#2760)
 			c.ScheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil
@@ -385,11 +378,7 @@ func (c *client) Close() {
 	defer c.connMu.Unlock()
 	for _, cc := range c.connMu.clientConns {
 		if err := cc.Close(); err != nil {
-<<<<<<< HEAD
-			log.Error("[pd] failed close grpc clientConn", zap.Error(err))
-=======
 			log.Error("[pd] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
->>>>>>> 5a8ed09... *: update the error dependency and do the corresponding changes (#2760)
 		}
 	}
 }

@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -88,11 +89,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
-<<<<<<< HEAD
-		log.Error("save to etcd meet error", zap.Error(err))
-=======
 		log.Error("save to etcd meet error", zap.String("key", key), zap.String("value", value), errs.ZapError(errs.ErrEtcdKVSave, err))
->>>>>>> 5a8ed09... *: update the error dependency and do the corresponding changes (#2760)
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
@@ -107,11 +104,7 @@ func (kv *etcdKVBase) Remove(key string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
-<<<<<<< HEAD
-		log.Error("remove from etcd meet error", zap.Error(err))
-=======
 		log.Error("remove from etcd meet error", zap.String("key", key), errs.ZapError(errs.ErrEtcdKVRemove, err))
->>>>>>> 5a8ed09... *: update the error dependency and do the corresponding changes (#2760)
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
