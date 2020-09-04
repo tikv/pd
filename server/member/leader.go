@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/kv"
@@ -138,7 +139,7 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 
 	leader, rev, err := getLeader(m.client, m.GetLeaderPath())
 	if err != nil {
-		log.Error("get leader meet error", zap.Error(err))
+		log.Error("getting pd leader meets error", errs.ZapError(errs.ErrGetLeader, err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}
@@ -148,7 +149,7 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 			// in previous CampaignLeader. we can delete and campaign again.
 			log.Warn("the leader has not changed, delete and campaign again", zap.Stringer("old-leader", leader))
 			if err = m.deleteLeaderKey(); err != nil {
-				log.Error("delete leader key meet error", zap.Error(err))
+				log.Error("deleting pd leader key meets error", errs.ZapError(errs.ErrDeleteLeaderKey, err))
 				time.Sleep(200 * time.Millisecond)
 				return nil, 0, true
 			}
@@ -165,18 +166,18 @@ func (m *Member) CheckPriority(ctx context.Context) {
 	}
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
-		log.Error("failed to load leader priority", zap.Error(err))
+		log.Error("failed to load leader priority", errs.ZapError(errs.ErrLoadLeaderPriority, err))
 		return
 	}
 	leaderPriority, err := m.GetMemberLeaderPriority(etcdLeader)
 	if err != nil {
-		log.Error("failed to load etcd leader priority", zap.Error(err))
+		log.Error("failed to load etcd leader priority", errs.ZapError(errs.ErrLoadetcdLeaderPriority, err))
 		return
 	}
 	if myPriority > leaderPriority {
 		err := m.MoveEtcdLeader(ctx, etcdLeader, m.ID())
 		if err != nil {
-			log.Error("failed to transfer etcd leader", zap.Error(err))
+			log.Error("failed to transfer etcd leader", errs.ZapError(errs.ErrTransferetcdLeader, err))
 		} else {
 			log.Info("transfer etcd leader",
 				zap.Uint64("from", etcdLeader),
@@ -227,7 +228,7 @@ func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
 	data, err := leader.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatal("marshal leader meet error", zap.Stringer("leader", leader), zap.Error(err))
+		log.Fatal("marshal pd leader meet error", zap.Stringer("pd-leader", leader), errs.ZapError(errs.ErrMarshalLeader, err))
 	}
 	m.member = leader
 	m.memberValue = string(data)
@@ -475,7 +476,7 @@ func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, rev
 				break
 			}
 			if wresp.Canceled {
-				log.Error("leader watcher is canceled with", zap.Int64("revision", revision), zap.Error(wresp.Err()))
+				log.Error("pd leader watcher is canceled with", zap.Int64("revision", revision), errs.ZapError(errs.ErrWatcherCancel, wresp.Err()))
 				return
 			}
 
