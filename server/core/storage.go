@@ -257,7 +257,7 @@ func (s *Storage) LoadRuleGroups(f func(k, v string)) error {
 func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
 	value, err := json.Marshal(data)
 	if err != nil {
-		return err
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
 	}
 	return s.Save(path.Join(prefix, key), string(value))
 }
