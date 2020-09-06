@@ -20,7 +20,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -47,16 +47,16 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*balanceAdjacentRegionConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
 			if len(args) == 2 {
 				leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
 				if err != nil {
-					return errors.WithStack(err)
+					return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
 				}
 				peerLimit, err := strconv.ParseUint(args[1], 10, 64)
 				if err != nil {
-					return errors.WithStack(err)
+					return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
 				}
 				conf.LeaderLimit = leaderLimit
 				conf.PeerLimit = peerLimit
@@ -233,7 +233,7 @@ func (l *balanceAdjacentRegionScheduler) process(cluster opt.Cluster) []*operato
 
 	defer func() {
 		if l.cacheRegions.len() < 0 {
-			log.Fatal("cache overflow", zap.String("scheduler", l.GetName()))
+			log.Fatal("cache overflow", zap.String("scheduler", l.GetName()), errs.ZapError(errs.ErrCacheOverflow))
 		}
 		l.cacheRegions.head = head + 1
 		l.lastKey = r2.GetStartKey()
@@ -262,10 +262,10 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster opt.Cluster, re
 	if !opt.IsRegionReplicated(cluster, region) {
 		return true
 	}
-	storeID := region.GetLeader().GetStoreId()
-	store := cluster.GetStore(storeID)
+	leaderStoreID := region.GetLeader().GetStoreId()
+	store := cluster.GetStore(leaderStoreID)
 	if store == nil {
-		log.Error("failed to get the store", zap.Uint64("store-id", storeID))
+		log.Error("failed to get the store", zap.Uint64("store-id", leaderStoreID), errs.ZapError(errs.ErrGetSourceStore))
 		return true
 	}
 	s := l.selector.SelectSource(cluster, []*core.StoreInfo{store})
@@ -300,7 +300,7 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster opt.Cluster, bef
 	}
 	op, err := operator.CreateTransferLeaderOperator("balance-adjacent-leader", cluster, before, before.GetLeader().GetStoreId(), target.GetID(), operator.OpAdjacent)
 	if err != nil {
-		log.Debug("fail to create transfer leader operator", zap.Error(err))
+		log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 		return nil
 	}
 	op.SetPriorityLevel(core.LowPriority)
@@ -317,7 +317,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(leaderStoreID)
 	if source == nil {
-		log.Error("failed to get the source store", zap.Uint64("store-id", leaderStoreID))
+		log.Error("failed to get the source store", zap.Uint64("store-id", leaderStoreID), errs.ZapError(errs.ErrGetSourceStore))
 		return nil
 	}
 	var scoreGuard filter.Filter

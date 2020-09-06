@@ -18,8 +18,8 @@ import (
 	"strconv"
 
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -42,11 +42,11 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*balanceLeaderSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errors.WithStack(err)
+				return err
 			}
 			conf.Ranges = ranges
 			conf.Name = BalanceLeaderName
@@ -78,7 +78,7 @@ type balanceLeaderScheduler struct {
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *balanceLeaderSchedulerConfig, opts ...BalanceLeaderCreateOption) schedule.Scheduler {
+func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
 
 	s := &balanceLeaderScheduler{
@@ -87,8 +87,8 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 		opController:  opController,
 		counter:       balanceLeaderCounter,
 	}
-	for _, opt := range opts {
-		opt(s)
+	for _, option := range options {
+		option(s)
 	}
 	s.filters = []filter.Filter{
 		filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true},
@@ -280,7 +280,7 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 
 	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, cluster, region, region.GetLeader().GetStoreId(), targetID, operator.OpBalance)
 	if err != nil {
-		log.Debug("fail to create balance leader operator", zap.Error(err))
+		log.Debug("fail to create balance leader operator", errs.ZapError(err))
 		return nil
 	}
 	sourceLabel := strconv.FormatUint(sourceID, 10)
