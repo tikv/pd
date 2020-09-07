@@ -234,6 +234,12 @@ func (c *coordinator) run() {
 	)
 	for i := 0; i < maxLoadConfigRetries; i++ {
 		scheduleNames, configs, err = c.cluster.storage.LoadAllScheduleConfig()
+		select {
+		case <-c.ctx.Done():
+			log.Info("coordinator stops running")
+			return
+		default:
+		}
 		if err == nil {
 			break
 		}
