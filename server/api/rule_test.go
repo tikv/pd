@@ -128,7 +128,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 			name:    "Set Rule Failed",
 			rawData: setErrData,
 			success: false,
-			response: `"invalid count -1"
+			response: `"[PD:placement:ErrRuleContent]invalid rule content, invalid count -1"
 `,
 		},
 	}
