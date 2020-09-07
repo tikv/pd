@@ -565,9 +565,9 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 
 func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 	cfg := config.NewTestOptions()
-	cfg.GetScheduleConfig().MaxMergeRegionSize = 2
-	cfg.GetScheduleConfig().MaxMergeRegionKeys = 2
 	tc := mockcluster.NewCluster(cfg)
+	tc.SetMaxMergeRegionSize(2)
+	tc.SetMaxMergeRegionKeys(2)
 	regions := []*core.RegionInfo{
 		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
 		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),

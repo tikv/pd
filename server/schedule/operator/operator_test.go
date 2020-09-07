@@ -40,12 +40,12 @@ type testOperatorSuite struct {
 
 func (s *testOperatorSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
-	cfg.GetScheduleConfig().MaxMergeRegionSize = 2
-	cfg.GetScheduleConfig().MaxMergeRegionKeys = 2
-	cfg.SetLabelPropertyConfig(config.LabelPropertyConfig{
+	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster.SetMaxMergeRegionSize(2)
+	s.cluster.SetMaxMergeRegionKeys(2)
+	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		opt.RejectLeader: {{Key: "reject", Value: "leader"}},
 	})
-	s.cluster = mockcluster.NewCluster(cfg)
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
 		7: {"reject", "leader"},

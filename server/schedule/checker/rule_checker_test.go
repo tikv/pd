@@ -37,9 +37,9 @@ type testRuleCheckerSuite struct {
 
 func (s *testRuleCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
-	cfg.GetReplicationConfig().EnablePlacementRules = true
 	s.cluster = mockcluster.NewCluster(cfg)
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	s.cluster.SetEnablePlacementRules(true)
 	s.ruleManager = s.cluster.RuleManager
 	s.rc = NewRuleChecker(s.cluster, s.ruleManager)
 }

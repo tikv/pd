@@ -30,11 +30,11 @@ type testBuilderSuite struct {
 
 func (s *testBuilderSuite) SetUpTest(c *C) {
 	opts := config.NewTestOptions()
-	opts.GetReplicationConfig().LocationLabels = []string{"zone", "host"}
-	opts.SetLabelPropertyConfig(config.LabelPropertyConfig{
+	s.cluster = mockcluster.NewCluster(opts)
+	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
-	s.cluster = mockcluster.NewCluster(opts)
+	s.cluster.SetLocationLabels([]string{"zone", "host"})
 	s.cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
 	s.cluster.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h1"})
 	s.cluster.AddLabelsStore(3, 0, map[string]string{"zone": "z1", "host": "h1"})

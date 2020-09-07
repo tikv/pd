@@ -244,14 +244,15 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
+	tc.SetMaxReplicas(3)
+	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
 	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	s.checkBalance(c, tc, opt, hb)
-	opt.GetReplicationConfig().EnablePlacementRules = true
+	tc.SetEnablePlacementRules(true)
 	s.checkBalance(c, tc, opt, hb)
 }
 
@@ -281,7 +282,7 @@ func (s *testShuffleHotRegionSchedulerSuite) checkBalance(c *C, tc *mockcluster.
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
 	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{3, 4})
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 4})
-	opt.GetScheduleConfig().HotRegionCacheHitsThreshold = 0
+	tc.SetHotRegionCacheHitsThreshold(0)
 
 	// try to get an operator
 	var op []*operator.Operator
@@ -304,8 +305,8 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	opt.GetScheduleConfig().LeaderScheduleLimit = 0
 	tc := mockcluster.NewCluster(opt)
+	tc.SetLeaderScheduleLimit(0)
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
@@ -321,7 +322,7 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	tc.AddLeaderRegionWithReadInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2})
 	tc.AddLeaderRegionWithReadInfo(2, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3})
 	tc.AddLeaderRegionWithReadInfo(3, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
-	opt.GetScheduleConfig().HotRegionCacheHitsThreshold = 0
+	tc.SetHotRegionCacheHitsThreshold(0)
 	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
 	c.Assert(hb.Schedule(tc), IsNil)
 }
@@ -393,7 +394,7 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 	tc.DisableFeature(versioninfo.JointConsensus)
 
 	// update rule to 1leader+1follower+1learner
-	opt.GetReplicationConfig().EnablePlacementRules = true
+	tc.SetEnablePlacementRules(true)
 	tc.RuleManager.SetRule(&placement.Rule{
 		GroupID: "pd",
 		ID:      "default",
@@ -456,8 +457,8 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	c.Assert(err, IsNil)
 
 	opt := config.NewTestOptions()
-	opt.GetScheduleConfig().HotRegionCacheHitsThreshold = 0
 	tc := mockcluster.NewCluster(opt)
+	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 4)
@@ -507,8 +508,8 @@ func (s *testSpecialUseSuite) TestSpecialUseReserved(c *C) {
 	c.Assert(err, IsNil)
 
 	opt := config.NewTestOptions()
-	opt.GetScheduleConfig().HotRegionCacheHitsThreshold = 0
 	tc := mockcluster.NewCluster(opt)
+	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 4)
@@ -545,8 +546,8 @@ type testBalanceLeaderSchedulerWithRuleEnabledSuite struct {
 func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) SetUpTest(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.opt = config.NewTestOptions()
-	s.opt.GetReplicationConfig().EnablePlacementRules = true
 	s.tc = mockcluster.NewCluster(s.opt)
+	s.tc.SetEnablePlacementRules(true)
 	s.oc = schedule.NewOperatorController(s.ctx, nil, nil)
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)

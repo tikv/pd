@@ -28,7 +28,9 @@ type testStoreStatisticsSuite struct{}
 
 func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 	opt := config.NewTestOptions()
-	opt.GetReplicationConfig().LocationLabels = []string{"zone", "host"}
+	rep := opt.GetReplicationConfig().Clone()
+	rep.LocationLabels = []string{"zone", "host"}
+	opt.SetReplicationConfig(rep)
 
 	metaStores := []*metapb.Store{
 		{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}},

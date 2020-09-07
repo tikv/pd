@@ -972,7 +972,8 @@ type ReplicationConfig struct {
 	IsolationLevel string `toml:"isolation-level" json:"isolation-level"`
 }
 
-func (c *ReplicationConfig) clone() *ReplicationConfig {
+// Clone makes a deep copy of the config.
+func (c *ReplicationConfig) Clone() *ReplicationConfig {
 	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{

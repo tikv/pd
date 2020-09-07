@@ -96,9 +96,9 @@ func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
 
 func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 	opt := config.NewTestOptions()
-	opt.GetReplicationConfig().EnablePlacementRules = true
-	opt.GetReplicationConfig().LocationLabels = []string{"zone"}
 	testCluster := mockcluster.NewCluster(opt)
+	testCluster.SetLocationLabels([]string{"zone"})
+	testCluster.SetEnablePlacementRules(true)
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 3, Id: 3},
@@ -183,8 +183,8 @@ func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
 
 func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 	opt := config.NewTestOptions()
-	opt.GetReplicationConfig().LocationLabels = []string{"zone", "rack", "host"}
 	testCluster := mockcluster.NewCluster(opt)
+	testCluster.SetLocationLabels([]string{"zone", "rack", "host"})
 	allStores := []struct {
 		storeID     uint64
 		regionCount int
@@ -250,8 +250,8 @@ func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 
 func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 	opt := config.NewTestOptions()
-	opt.GetReplicationConfig().LocationLabels = []string{"zone"}
 	testCluster := mockcluster.NewCluster(opt)
+	testCluster.SetLocationLabels([]string{"zone"})
 	testCluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	testCluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
 	testCluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
@@ -267,7 +267,7 @@ func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 	c.Assert(NewPlacementSafeguard("", testCluster, region, store),
 		FitsTypeOf,
 		NewLocationSafeguard("", []string{"zone"}, testCluster.GetRegionStores(region), store))
-	opt.GetReplicationConfig().EnablePlacementRules = true
+	testCluster.SetEnablePlacementRules(true)
 	c.Assert(NewPlacementSafeguard("", testCluster, region, store),
 		FitsTypeOf,
 		newRuleFitFilter("", testCluster, region, 1))

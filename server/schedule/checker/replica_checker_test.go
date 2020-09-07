@@ -133,7 +133,7 @@ func (s *testReplicaCheckerSuite) TestReplaceOfflinePeer(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestOfflineWithOneReplica(c *C) {
-	s.cluster.GetReplicationConfig().MaxReplicas = 1
+	s.cluster.SetMaxReplicas(1)
 	peers := []*metapb.Peer{
 		{
 			Id:      4,
@@ -150,10 +150,9 @@ func (s *testReplicaCheckerSuite) TestOfflineWithOneReplica(c *C) {
 func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.SetMaxSnapshotCount(2)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	rc := NewReplicaChecker(tc)
-
-	opt.GetScheduleConfig().MaxSnapshotCount = 2
 
 	// Add stores 1,2,3,4.
 	tc.AddRegionStore(1, 4)
@@ -168,9 +167,9 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 4)
 
 	// Disable make up replica feature.
-	opt.GetScheduleConfig().EnableMakeUpReplica = false
+	tc.SetEnableMakeUpReplica(false)
 	c.Assert(rc.Check(region), IsNil)
-	opt.GetScheduleConfig().EnableMakeUpReplica = true
+	tc.SetEnableMakeUpReplica(true)
 
 	// Test healthFilter.
 	// If store 4 is down, we add to store 3.
@@ -198,9 +197,9 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
 
 	// Disable remove extra replica feature.
-	opt.GetScheduleConfig().EnableRemoveExtraReplica = false
+	tc.SetEnableRemoveExtraReplica(false)
 	c.Assert(rc.Check(region), IsNil)
-	opt.GetScheduleConfig().EnableRemoveExtraReplica = true
+	tc.SetEnableRemoveExtraReplica(true)
 
 	region = region.Clone(core.WithRemoveStorePeer(1), core.WithLeader(region.GetStorePeer(3)))
 
@@ -240,17 +239,12 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	c.Assert(op, IsNil)
 }
 
-func newTestReplication(mso *config.PersistOptions, maxReplicas int, locationLabels ...string) {
-	mso.GetReplicationConfig().MaxReplicas = uint64(maxReplicas)
-	mso.GetReplicationConfig().LocationLabels = locationLabels
-}
-
 func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
-
-	newTestReplication(opt, 3, "zone", "rack", "host")
+	tc.SetMaxReplicas(3)
+	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 
 	rc := NewReplicaChecker(tc)
 
@@ -301,8 +295,8 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
-
-	newTestReplication(opt, 3, "zone", "rack", "host")
+	tc.SetMaxReplicas(3)
+	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 
 	rc := NewReplicaChecker(tc)
 
@@ -349,9 +343,9 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	// Replace peer in store 1 with store 6 because it has a different rack.
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 1, 6)
 	// Disable locationReplacement feature.
-	opt.GetScheduleConfig().EnableLocationReplacement = false
+	tc.SetEnableLocationReplacement(false)
 	c.Assert(rc.Check(region), IsNil)
-	opt.GetScheduleConfig().EnableLocationReplacement = true
+	tc.SetEnableLocationReplacement(true)
 	peer6, _ := tc.AllocPeer(6)
 	region = region.Clone(core.WithAddPeer(peer6))
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
@@ -380,8 +374,8 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
-
-	newTestReplication(opt, 5, "zone", "host")
+	tc.SetMaxReplicas(5)
+	tc.SetLocationLabels([]string{"zone", "host"})
 
 	rc := NewReplicaChecker(tc)
 
@@ -408,8 +402,8 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 
 func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 	opt := config.NewTestOptions()
-	opt.GetReplicationConfig().LocationLabels = []string{"zone"}
 	tc := mockcluster.NewCluster(opt)
+	tc.SetLocationLabels([]string{"zone"})
 	tc.DisableFeature(versioninfo.JointConsensus)
 	rc := NewReplicaChecker(tc)
 
@@ -466,8 +460,8 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	tc.SetStoreOffline(2)
 	// RemoveDownReplica has higher priority than replaceOfflineReplica.
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 1, 4)
-	opt.GetScheduleConfig().EnableRemoveDownReplica = false
+	tc.SetEnableRemoveDownReplica(false)
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 2, 4)
-	opt.GetScheduleConfig().EnableReplaceOfflineReplica = false
+	tc.SetEnableReplaceOfflineReplica(false)
 	c.Assert(rc.Check(region), IsNil)
 }

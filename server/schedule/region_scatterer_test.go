@@ -85,7 +85,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 	for i := uint64(1); i <= numStores; i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	tc.GetReplicationConfig().EnablePlacementRules = useRules
+	tc.SetEnablePlacementRules(useRules)
 
 	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
 	tc.AddLeaderRegion(1, 1, 2, 3)
@@ -144,7 +144,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 	for i := uint64(1); i <= numSpecialStores; i++ {
 		tc.AddLabelsStore(numOrdinaryStores+i, 0, map[string]string{"engine": "tiflash"})
 	}
-	tc.GetReplicationConfig().EnablePlacementRules = true
+	tc.SetEnablePlacementRules(true)
 	c.Assert(tc.RuleManager.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "learner", Role: placement.Learner, Count: 3,
 		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}), IsNil)

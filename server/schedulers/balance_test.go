@@ -32,11 +32,6 @@ import (
 	"github.com/tikv/pd/server/versioninfo"
 )
 
-func newTestReplication(mso *config.PersistOptions, maxReplicas int, locationLabels ...string) {
-	mso.GetReplicationConfig().MaxReplicas = uint64(maxReplicas)
-	mso.GetReplicationConfig().LocationLabels = locationLabels
-}
-
 var _ = Suite(&testBalanceSuite{})
 
 type testBalanceSuite struct{}
@@ -118,7 +113,7 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 		target := tc.GetStore(2)
 		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 		tc.PutRegion(region)
-		tc.GetScheduleConfig().LeaderSchedulePolicy = t.kind.String()
+		tc.SetLeaderSchedulePolicy(t.kind.String())
 		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
 		c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
 	}
@@ -160,13 +155,13 @@ func (s *testBalanceSuite) TestTolerantRatio(c *C) {
 	regionSize := int64(96 * KB)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
 
-	tc.GetScheduleConfig().TolerantSizeRatio = 0
+	tc.SetTolerantSizeRatio(0)
 	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.ByCount}), Equals, int64(leaderTolerantSizeRatio))
 	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
 	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.ByCount}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
 	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
 
-	tc.GetScheduleConfig().TolerantSizeRatio = 10
+	tc.SetTolerantSizeRatio(10)
 	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.ByCount}), Equals, int64(tc.GetScheduleConfig().TolerantSizeRatio))
 	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
 	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.ByCount}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
@@ -248,7 +243,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderSchedulePolicy(c *C) 
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
 	c.Assert(s.tc.GetScheduleConfig().LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), IsNil)
-	s.tc.GetScheduleConfig().LeaderSchedulePolicy = core.BySize.String()
+	s.tc.SetLeaderSchedulePolicy(core.BySize.String())
 	c.Check(s.schedule(), NotNil)
 }
 
@@ -269,7 +264,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
 	s.tc.AddLeaderStore(1, 15, 100)
 	c.Assert(s.tc.GetStore(1).GetLeaderCount(), Equals, 15)
 	c.Check(s.schedule(), NotNil)
-	s.tc.GetScheduleConfig().TolerantSizeRatio = 6 // (15-10)<6
+	s.tc.SetTolerantSizeRatio(6) // (15-10)<6
 	c.Check(s.schedule(), IsNil)
 }
 
@@ -290,7 +285,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	// returns false when leader difference is not greater than 5.
 	c.Assert(s.tc.GetScheduleConfig().LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), NotNil)
-	s.tc.GetScheduleConfig().LeaderSchedulePolicy = core.BySize.String()
+	s.tc.SetLeaderSchedulePolicy(core.BySize.String())
 	c.Check(s.schedule(), IsNil)
 
 	// Stores:     1    2    3    4
@@ -311,7 +306,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestTransferLeaderOut(c *C) {
 	s.tc.AddLeaderStore(2, 8)
 	s.tc.AddLeaderStore(3, 9)
 	s.tc.AddLeaderStore(4, 12)
-	s.opt.GetScheduleConfig().TolerantSizeRatio = 0.1
+	s.tc.SetTolerantSizeRatio(0.1)
 	for i := uint64(1); i <= 7; i++ {
 		s.tc.AddLeaderRegion(i, 4, 1, 2, 3)
 	}
@@ -404,9 +399,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalancePolicy(c *C) {
 	s.tc.AddLeaderStore(4, 20, 1)
 	s.tc.AddLeaderRegion(1, 2, 1, 3, 4)
 	s.tc.AddLeaderRegion(2, 1, 2, 3, 4)
-	s.tc.GetScheduleConfig().LeaderSchedulePolicy = "count"
+	s.tc.SetLeaderSchedulePolicy("count")
 	testutil.CheckTransferLeader(c, s.schedule()[0], operator.OpKind(0), 2, 3)
-	s.tc.GetScheduleConfig().LeaderSchedulePolicy = "size"
+	s.tc.SetLeaderSchedulePolicy("size")
 	testutil.CheckTransferLeader(c, s.schedule()[0], operator.OpKind(0), 1, 4)
 }
 
@@ -611,9 +606,9 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	opt := config.NewTestOptions()
-	newTestReplication(opt, 3, "zone", "rack", "host")
-
 	tc := mockcluster.NewCluster(opt)
+	tc.SetMaxReplicas(3)
+	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
@@ -621,7 +616,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	c.Assert(err, IsNil)
 
 	s.checkReplica3(c, tc, opt, sb)
-	opt.GetReplicationConfig().EnablePlacementRules = true
+	tc.SetEnablePlacementRules(true)
 	s.checkReplica3(c, tc, opt, sb)
 }
 
@@ -673,9 +668,10 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cl
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	opt := config.NewTestOptions()
-	newTestReplication(opt, 5, "zone", "rack", "host")
-
 	tc := mockcluster.NewCluster(opt)
+	tc.SetMaxReplicas(5)
+	tc.SetLocationLabels([]string{"zone", "rack", "host"})
+
 	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
@@ -683,7 +679,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	c.Assert(err, IsNil)
 
 	s.checkReplica5(c, tc, opt, sb)
-	opt.GetReplicationConfig().EnablePlacementRules = true
+	tc.SetEnablePlacementRules(true)
 	s.checkReplica5(c, tc, opt, sb)
 }
 
@@ -737,10 +733,10 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetTolerantSizeRatio(1)
+	tc.SetRegionScheduleLimit(1)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
-	opt.GetScheduleConfig().TolerantSizeRatio = 1
-	opt.GetScheduleConfig().RegionScheduleLimit = 1
 	source := core.NewRegionInfo(
 		&metapb.Region{
 			Id:       1,
@@ -837,16 +833,16 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.SetMaxReplicas(3)
+	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
-
-	newTestReplication(opt, 3, "zone", "rack", "host")
 
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	s.checkReplacePendingRegion(c, tc, opt, sb)
-	opt.GetReplicationConfig().EnablePlacementRules = true
+	tc.SetEnablePlacementRules(true)
 	s.checkReplacePendingRegion(c, tc, opt, sb)
 }
 
@@ -906,8 +902,8 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	opt.GetScheduleConfig().MergeScheduleLimit = 1
 	tc := mockcluster.NewCluster(opt)
+	tc.SetMergeScheduleLimit(1)
 	hb := mockhbstream.NewHeartbeatStreams(tc.ID, false /* need to run */)
 	oc := schedule.NewOperatorController(ctx, tc, hb)
 
@@ -924,7 +920,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	ops := mb.Schedule(tc)
 	c.Assert(ops, HasLen, 0) // regions are not fully replicated
 
-	opt.GetReplicationConfig().MaxReplicas = 1
+	tc.SetMaxReplicas(1)
 	ops = mb.Schedule(tc)
 	c.Assert(ops, HasLen, 2)
 	c.Assert(ops[0].Kind()&operator.OpMerge, Not(Equals), 0)
