@@ -22,7 +22,6 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -484,7 +483,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	storeID := stats.GetStoreId()
 	store := c.GetStore(storeID)
 	if store == nil {
-		return core.NewStoreNotFoundErr(storeID)
+		return errors.Errorf("store %v not found", storeID)
 	}
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
 	if newStore.IsLowSpace(c.GetLowSpaceRatio()) {
@@ -978,13 +977,12 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 // RemoveStore marks a store as offline in cluster.
 // State transition: Up -> Offline.
 func (c *RaftCluster) RemoveStore(storeID uint64) error {
-	op := errcode.Op("store.remove")
 	c.Lock()
 	defer c.Unlock()
 
 	store := c.GetStore(storeID)
 	if store == nil {
-		return op.AddTo(core.NewStoreNotFoundErr(storeID))
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
 	// Remove an offline store should be OK, nothing to do.
@@ -993,7 +991,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	if store.IsTombstone() {
-		return op.AddTo(core.StoreTombstonedErr{StoreID: storeID})
+		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
 	}
 
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
@@ -1017,7 +1015,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 
 	store := c.GetStore(storeID)
 	if store == nil {
-		return core.NewStoreNotFoundErr(storeID)
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
 	// Bury a tombstone store should be OK, nothing to do.
@@ -1065,7 +1063,7 @@ func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) err
 
 	store := c.GetStore(storeID)
 	if store == nil {
-		return core.NewStoreNotFoundErr(storeID)
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
 	newStore := store.Clone(core.SetStoreState(state))
@@ -1082,7 +1080,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 
 	store := c.GetStore(storeID)
 	if store == nil {
-		return core.NewStoreNotFoundErr(storeID)
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
 	if err := c.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {

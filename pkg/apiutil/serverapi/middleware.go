@@ -100,7 +100,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 
 	// Prevent more than one redirection.
 	if name := r.Header.Get(RedirectorHeader); len(name) != 0 {
-		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()))
+		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
 		http.Error(w, errRedirectToNotLeader, http.StatusInternalServerError)
 		return
 	}

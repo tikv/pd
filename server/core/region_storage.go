@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/kv"
-	"go.uber.org/zap"
 )
 
 var dirtyFlushTick = time.Second
@@ -86,7 +85,7 @@ func (s *RegionStorage) backgroundFlush() {
 					continue
 				}
 				if err = s.FlushRegion(); err != nil {
-					log.Error("flush regions meet error", zap.Error(err))
+					log.Error("flush regions meet error", errs.ZapError(err))
 				}
 			case <-s.regionStorageCtx.Done():
 				return
@@ -178,7 +177,7 @@ func (s *RegionStorage) flush() error {
 func (s *RegionStorage) Close() error {
 	err := s.FlushRegion()
 	if err != nil {
-		log.Error("meet error before close the region storage", zap.Error(err))
+		log.Error("meet error before close the region storage", errs.ZapError(err))
 	}
 	s.regionStorageCancel()
 	err = s.LeveldbKV.Close()
