@@ -717,3 +717,34 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	})
 	c.Succeed()
 }
+
+func (s *testClientSuite) TestScatterRegionWithOption(c *C) {
+	regionID := regionIDAllocator.alloc()
+	region := &metapb.Region{
+		Id: regionID,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: peers,
+	}
+	req := &pdpb.RegionHeartbeatRequest{
+		Header: newHeader(s.srv),
+		Region: region,
+		Leader: peers[0],
+	}
+	err := s.regionHeartbeat.Send(req)
+	c.Assert(err, IsNil)
+	testutil.WaitUntil(c, func(c *C) bool {
+		err := s.client.ScatterRegionWithOption(context.Background(), regionID, pd.WithGroup("test-group"))
+		if c.Check(err, NotNil) {
+			return false
+		}
+		resp, err := s.client.GetOperator(context.Background(), regionID)
+		if c.Check(err, NotNil) {
+			return false
+		}
+		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
+	})
+	c.Succeed()
+}
