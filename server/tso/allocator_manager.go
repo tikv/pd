@@ -134,15 +134,19 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, parentCanc
 func (am *AllocatorManager) setIsInitialized(dcLocation string, isInitialized bool) {
 	am.Lock()
 	defer am.Unlock()
-	am.allocatorGroups[dcLocation].isInitialized = isInitialized
+	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
+		allocatorGroup.isInitialized = isInitialized
+	}
 }
 
 func (am *AllocatorManager) resetAllocatorGroup(dcLocation string) {
 	am.Lock()
 	defer am.Unlock()
-	am.allocatorGroups[dcLocation].allocator.Reset()
-	am.allocatorGroups[dcLocation].leadership.Reset()
-	am.allocatorGroups[dcLocation].isInitialized = false
+	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
+		allocatorGroup.allocator.Reset()
+		allocatorGroup.leadership.Reset()
+		allocatorGroup.isInitialized = false
+	}
 }
 
 // similar logic with leaderLoop in server/server.go
