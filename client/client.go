@@ -86,10 +86,9 @@ type Client interface {
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	ScatterRegion(ctx context.Context, regionID uint64) error
-	// ScatterRegionWithGroup scatters the specified region. Should use it for a batch of regions , and the distribution
-	// of these regions will be dispersed If they have the same group.
-	// If the group is not defined, it will work as ScatterRegion.
-	ScatterRegionWithGroup(ctx context.Context, regionID uint64, group string) error
+	// ScatterRegionWithOption scatters the specified region with the given options, should use it
+	// for a batch of regions.
+	ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...ScatterRegionOption) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 	// Close closes the client.
@@ -107,6 +106,16 @@ type GetStoreOption func(*GetStoreOp)
 // WithExcludeTombstone excludes tombstone stores from the result.
 func WithExcludeTombstone() GetStoreOption {
 	return func(op *GetStoreOp) { op.excludeTombstone = true }
+}
+
+type ScatterRegionOp struct {
+	group string
+}
+
+type ScatterRegionOption func(op *ScatterRegionOp)
+
+func WithGroup(group string) ScatterRegionOption {
+	return func(op *ScatterRegionOp) { op.group = group }
 }
 
 type tsoRequest struct {
@@ -733,12 +742,16 @@ func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
 	return c.scatterRegionsWithGroup(ctx, regionID, "")
 }
 
-func (c *client) ScatterRegionWithGroup(ctx context.Context, regionID uint64, group string) error {
+func (c *client) ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...ScatterRegionOption) error {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ScatterRegionWithGroup", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("pdclient.ScatterRegionWithOption", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
-	return c.scatterRegionsWithGroup(ctx, regionID, group)
+	options := &ScatterRegionOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	return c.scatterRegionsWithGroup(ctx, regionID, options.group)
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {

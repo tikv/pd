@@ -741,7 +741,7 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	c.Succeed()
 }
 
-func (s *testClientSuite) TestScatterRegionGroup(c *C) {
+func (s *testClientSuite) TestScatterRegionWithOption(c *C) {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
@@ -759,7 +759,7 @@ func (s *testClientSuite) TestScatterRegionGroup(c *C) {
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
 	testutil.WaitUntil(c, func(c *C) bool {
-		err := s.client.ScatterRegionWithGroup(context.Background(), regionID, "test-group")
+		err := s.client.ScatterRegionWithOption(context.Background(), regionID, pd.WithGroup("test-group"))
 		if c.Check(err, NotNil) {
 			return false
 		}
