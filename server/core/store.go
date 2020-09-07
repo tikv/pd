@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
@@ -579,8 +580,8 @@ func (s *StoresInfo) BlockStore(storeID uint64) errcode.ErrorCode {
 func (s *StoresInfo) UnblockStore(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
-		log.Fatal("store is unblocked, but it is not found",
-			zap.Uint64("store-id", storeID))
+		log.Fatal("try to clean a store's pause state, but it is not found",
+			zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrStoreNotFound.FastGenByArgs(storeID)))
 	}
 	s.stores[storeID] = store.Clone(SetStoreUnBlock())
 }
