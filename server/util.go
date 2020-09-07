@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -100,7 +101,7 @@ func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 		Else(clientv3.OpGet(key)).
 		Commit()
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 
 	// Txn commits ok, return the generated cluster ID.
@@ -110,12 +111,12 @@ func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 
 	// Otherwise, parse the committed cluster ID.
 	if len(resp.Responses) == 0 {
-		return 0, errors.Errorf("txn returns empty response: %v", resp)
+		return 0, errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	response := resp.Responses[0].GetResponseRange()
 	if response == nil || len(response.Kvs) != 1 {
-		return 0, errors.Errorf("txn returns invalid range response: %v", resp)
+		return 0, errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	return typeutil.BytesToUint64(response.Kvs[0].Value)

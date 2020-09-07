@@ -14,10 +14,10 @@
 package id
 
 import (
+	"github.com/tikv/pd/pkg/errs"
 	"path"
 	"sync"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -101,10 +101,10 @@ func (alloc *AllocatorImpl) generate() (uint64, error) {
 	t := txn.If(append([]clientv3.Cmp{cmp}, clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member))...)
 	resp, err := t.Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
-		return 0, err
+		return 0, errs.ErrEtcdTxn.Wrap(err).GenWithStackByArgs()
 	}
 	if !resp.Succeeded {
-		return 0, errors.New("generate id failed, we may not leader")
+		return 0, errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))

@@ -17,7 +17,6 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -103,10 +102,10 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errors.New("failed to campaign leader, other server may campaign ok")
+		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	log.Info("write leaderDate to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
