@@ -45,9 +45,10 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	tolerantResource := getTolerantResource(cluster, region, kind)
 	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceProperty(kind)
 	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
-	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
-	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource)
-	if cluster.IsDebugMetricsEnabled() {
+	opt := cluster.GetOpts()
+	sourceScore := source.ResourceScore(kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
+	targetScore := target.ResourceScore(kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), targetInfluence+tolerantResource)
+	if opt.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(targetInfluence))
 		tolerantResourceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), strconv.FormatUint(targetID, 10)).Set(float64(tolerantResource))
@@ -70,7 +71,7 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 
 func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
 	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
-		tolerantSizeRatio := cluster.GetTolerantSizeRatio()
+		tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
 			tolerantSizeRatio = leaderTolerantSizeRatio
 		}
@@ -87,7 +88,7 @@ func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core
 }
 
 func adjustTolerantRatio(cluster opt.Cluster) float64 {
-	tolerantSizeRatio := cluster.GetTolerantSizeRatio()
+	tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
 	if tolerantSizeRatio == 0 {
 		var maxRegionCount float64
 		stores := cluster.GetStores()

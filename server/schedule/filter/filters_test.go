@@ -90,7 +90,7 @@ func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
 	}
 	for _, tc := range testCases {
 		filter := NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: tc.key, Op: placement.LabelConstraintOp(tc.op), Values: tc.values}})
-		c.Assert(filter.Source(testCluster, store), Equals, tc.res)
+		c.Assert(filter.Source(testCluster.GetOpts(), store), Equals, tc.res)
 	}
 }
 
@@ -125,8 +125,8 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 	}
 	for _, tc := range testCases {
 		filter := newRuleFitFilter("", testCluster, region, 1)
-		c.Assert(filter.Source(testCluster, testCluster.GetStore(tc.storeID)), Equals, tc.sourceRes)
-		c.Assert(filter.Target(testCluster, testCluster.GetStore(tc.storeID)), Equals, tc.targetRes)
+		c.Assert(filter.Source(testCluster.GetOpts(), testCluster.GetStore(tc.storeID)), Equals, tc.sourceRes)
+		c.Assert(filter.Target(testCluster.GetOpts(), testCluster.GetStore(tc.storeID)), Equals, tc.targetRes)
 	}
 }
 
@@ -242,8 +242,8 @@ func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 	for _, tc := range testCases {
 		filter := NewIsolationFilter("", tc.isolationLevel, testCluster.GetLocationLabels(), testCluster.GetRegionStores(tc.region))
 		for idx, store := range allStores {
-			c.Assert(filter.Source(testCluster, testCluster.GetStore(store.storeID)), Equals, tc.sourceRes[idx])
-			c.Assert(filter.Target(testCluster, testCluster.GetStore(store.storeID)), Equals, tc.targetRes[idx])
+			c.Assert(filter.Source(testCluster.GetOpts(), testCluster.GetStore(store.storeID)), Equals, tc.sourceRes[idx])
+			c.Assert(filter.Target(testCluster.GetOpts(), testCluster.GetStore(store.storeID)), Equals, tc.targetRes[idx])
 		}
 	}
 }

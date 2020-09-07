@@ -25,7 +25,7 @@ func IsRegionHealthy(cluster Cluster, region *core.RegionInfo) bool {
 // IsHealthyAllowPending checks if a region is healthy for scheduling.
 // Differs from IsRegionHealthy, it allows the region to have pending peers.
 func IsHealthyAllowPending(cluster Cluster, region *core.RegionInfo) bool {
-	if !cluster.IsPlacementRulesEnabled() && len(region.GetLearners()) > 0 {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() && len(region.GetLearners()) > 0 {
 		return false
 	}
 	return len(region.GetDownPeers()) == 0
@@ -49,10 +49,10 @@ func HealthAllowPending(cluster Cluster) func(*core.RegionInfo) bool {
 // rules is enabled, its peers should fit corresponding rules. When placement
 // rules is disabled, it should have enough replicas and no any learner peer.
 func IsRegionReplicated(cluster Cluster, region *core.RegionInfo) bool {
-	if cluster.IsPlacementRulesEnabled() {
+	if cluster.GetOpts().IsPlacementRulesEnabled() {
 		return cluster.FitRegion(region).IsSatisfied()
 	}
-	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetMaxReplicas()
+	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetOpts().GetMaxReplicas()
 }
 
 // ReplicatedRegion returns a function that checks if a region is fully replicated.

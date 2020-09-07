@@ -230,7 +230,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.ruleManager = placement.NewRuleManager(c.storage)
-	if c.IsPlacementRulesEnabled() {
+	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
 		if err != nil {
 			return err
@@ -427,6 +427,11 @@ func (c *RaftCluster) SetStorage(s *core.Storage) {
 	c.storage = s
 }
 
+// GetOpts returns cluster's configuration.
+func (c *RaftCluster) GetOpts() *config.PersistOptions {
+	return c.opt
+}
+
 // AddSuspectRegions adds regions to suspect list.
 func (c *RaftCluster) AddSuspectRegions(regionIDs ...uint64) {
 	c.Lock()
@@ -494,7 +499,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		return errors.Errorf("store %v not found", storeID)
 	}
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
-	if newStore.IsLowSpace(c.GetLowSpaceRatio()) {
+	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
 			zap.Uint64("store-id", newStore.GetID()),
 			zap.Uint64("capacity", newStore.GetCapacity()),
@@ -638,7 +643,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			if c.regionStats != nil {
 				c.regionStats.ClearDefunctRegion(item.GetID())
 			}
-			c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.GetLocationLabels())
+			c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.opt.GetLocationLabels())
 		}
 
 		// Update related stores.
@@ -787,7 +792,7 @@ func (c *RaftCluster) RandLearnerRegion(storeID uint64, ranges []core.KeyRange, 
 func (c *RaftCluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	r := c.hotSpotCache.RandHotRegionFromStore(store, kind, c.GetHotRegionCacheHitsThreshold())
+	r := c.hotSpotCache.RandHotRegionFromStore(store, kind, c.opt.GetHotRegionCacheHitsThreshold())
 	if r == nil {
 		return nil
 	}
@@ -874,7 +879,7 @@ func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
 func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.hotSpotCache.IsRegionHot(region, c.GetHotRegionCacheHitsThreshold())
+	return c.hotSpotCache.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
 }
 
 // GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
@@ -957,13 +962,13 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 		return nil
 	}
 	keysSet := make(map[string]struct{})
-	for _, k := range c.GetLocationLabels() {
+	for _, k := range c.opt.GetLocationLabels() {
 		keysSet[k] = struct{}{}
 		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warn("label configuration is incorrect",
 				zap.Stringer("store", s.GetMeta()),
 				zap.String("label-key", k))
-			if c.GetStrictlyMatchLabel() {
+			if c.opt.GetStrictlyMatchLabel() {
 				return errors.Errorf("label configuration is incorrect, need to specify the key: %s ", k)
 			}
 		}
@@ -974,7 +979,7 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 			log.Warn("not found the key match with the store label",
 				zap.Stringer("store", s.GetMeta()),
 				zap.String("label-key", key))
-			if c.GetStrictlyMatchLabel() {
+			if c.opt.GetStrictlyMatchLabel() {
 				return errors.Errorf("key matching the label was not found in the PD, store label key: %s ", key)
 			}
 		}
@@ -1127,7 +1132,7 @@ func (c *RaftCluster) checkStores() {
 		}
 
 		if store.IsUp() {
-			if !store.IsLowSpace(c.GetLowSpaceRatio()) {
+			if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 				upStoreCount++
 			}
 			continue
@@ -1152,7 +1157,7 @@ func (c *RaftCluster) checkStores() {
 	}
 
 	// When placement rules feature is enabled. It is hard to determine required replica count precisely.
-	if !c.IsPlacementRulesEnabled() && upStoreCount < c.GetMaxReplicas() {
+	if !c.opt.IsPlacementRulesEnabled() && upStoreCount < c.opt.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
 			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
@@ -1270,7 +1275,7 @@ func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	c.Lock()
 	defer c.Unlock()
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.takeRegionStoresLocked(region), c.GetLocationLabels())
+		c.labelLevelStats.Observe(region, c.takeRegionStoresLocked(region), c.opt.GetLocationLabels())
 	}
 }
 
@@ -1372,176 +1377,6 @@ func (c *RaftCluster) GetComponentManager() *component.Manager {
 	c.RLock()
 	defer c.RUnlock()
 	return c.componentManager
-}
-
-// GetOpt returns the scheduling options.
-func (c *RaftCluster) GetOpt() *config.PersistOptions {
-	return c.opt
-}
-
-// GetLeaderScheduleLimit returns the limit for leader schedule.
-func (c *RaftCluster) GetLeaderScheduleLimit() uint64 {
-	return c.opt.GetLeaderScheduleLimit()
-}
-
-// GetRegionScheduleLimit returns the limit for region schedule.
-func (c *RaftCluster) GetRegionScheduleLimit() uint64 {
-	return c.opt.GetRegionScheduleLimit()
-}
-
-// GetReplicaScheduleLimit returns the limit for replica schedule.
-func (c *RaftCluster) GetReplicaScheduleLimit() uint64 {
-	return c.opt.GetReplicaScheduleLimit()
-}
-
-// GetMergeScheduleLimit returns the limit for merge schedule.
-func (c *RaftCluster) GetMergeScheduleLimit() uint64 {
-	return c.opt.GetMergeScheduleLimit()
-}
-
-// GetHotRegionScheduleLimit returns the limit for hot region schedule.
-func (c *RaftCluster) GetHotRegionScheduleLimit() uint64 {
-	return c.opt.GetHotRegionScheduleLimit()
-}
-
-// GetTolerantSizeRatio gets the tolerant size ratio.
-func (c *RaftCluster) GetTolerantSizeRatio() float64 {
-	return c.opt.GetTolerantSizeRatio()
-}
-
-// GetLowSpaceRatio returns the low space ratio.
-func (c *RaftCluster) GetLowSpaceRatio() float64 {
-	return c.opt.GetLowSpaceRatio()
-}
-
-// GetHighSpaceRatio returns the high space ratio.
-func (c *RaftCluster) GetHighSpaceRatio() float64 {
-	return c.opt.GetHighSpaceRatio()
-}
-
-// GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
-func (c *RaftCluster) GetSchedulerMaxWaitingOperator() uint64 {
-	return c.opt.GetSchedulerMaxWaitingOperator()
-}
-
-// GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
-func (c *RaftCluster) GetMaxSnapshotCount() uint64 {
-	return c.opt.GetMaxSnapshotCount()
-}
-
-// GetMaxPendingPeerCount returns the number of the max pending peers.
-func (c *RaftCluster) GetMaxPendingPeerCount() uint64 {
-	return c.opt.GetMaxPendingPeerCount()
-}
-
-// GetMaxMergeRegionSize returns the max region size.
-func (c *RaftCluster) GetMaxMergeRegionSize() uint64 {
-	return c.opt.GetMaxMergeRegionSize()
-}
-
-// GetMaxMergeRegionKeys returns the max number of keys.
-func (c *RaftCluster) GetMaxMergeRegionKeys() uint64 {
-	return c.opt.GetMaxMergeRegionKeys()
-}
-
-// GetSplitMergeInterval returns the interval between finishing split and starting to merge.
-func (c *RaftCluster) GetSplitMergeInterval() time.Duration {
-	return c.opt.GetSplitMergeInterval()
-}
-
-// IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
-func (c *RaftCluster) IsOneWayMergeEnabled() bool {
-	return c.opt.IsOneWayMergeEnabled()
-}
-
-// IsCrossTableMergeEnabled returns if across table merge is enabled.
-func (c *RaftCluster) IsCrossTableMergeEnabled() bool {
-	return c.opt.IsCrossTableMergeEnabled()
-}
-
-// GetPatrolRegionInterval returns the interval of patrolling region.
-func (c *RaftCluster) GetPatrolRegionInterval() time.Duration {
-	return c.opt.GetPatrolRegionInterval()
-}
-
-// GetMaxStoreDownTime returns the max down time of a store.
-func (c *RaftCluster) GetMaxStoreDownTime() time.Duration {
-	return c.opt.GetMaxStoreDownTime()
-}
-
-// GetMaxReplicas returns the number of replicas.
-func (c *RaftCluster) GetMaxReplicas() int {
-	return c.opt.GetMaxReplicas()
-}
-
-// GetLocationLabels returns the location labels for each region
-func (c *RaftCluster) GetLocationLabels() []string {
-	return c.opt.GetLocationLabels()
-}
-
-// GetIsolationLevel returns the isolation label for each region.
-func (c *RaftCluster) GetIsolationLevel() string {
-	return c.opt.GetIsolationLevel()
-}
-
-// GetStrictlyMatchLabel returns if the strictly label check is enabled.
-func (c *RaftCluster) GetStrictlyMatchLabel() bool {
-	return c.opt.GetStrictlyMatchLabel()
-}
-
-// IsPlacementRulesEnabled returns if the placement rules feature is enabled.
-func (c *RaftCluster) IsPlacementRulesEnabled() bool {
-	return c.opt.IsPlacementRulesEnabled()
-}
-
-// GetHotRegionCacheHitsThreshold gets the threshold of hitting hot region cache.
-func (c *RaftCluster) GetHotRegionCacheHitsThreshold() int {
-	return c.opt.GetHotRegionCacheHitsThreshold()
-}
-
-// IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
-func (c *RaftCluster) IsRemoveDownReplicaEnabled() bool {
-	return c.opt.IsRemoveDownReplicaEnabled()
-}
-
-// GetLeaderSchedulePolicy is to get leader schedule policy.
-func (c *RaftCluster) GetLeaderSchedulePolicy() core.SchedulePolicy {
-	return c.opt.GetLeaderSchedulePolicy()
-}
-
-// GetKeyType is to get key type.
-func (c *RaftCluster) GetKeyType() core.KeyType {
-	return c.opt.GetKeyType()
-}
-
-// IsReplaceOfflineReplicaEnabled returns if replace offline replica is enabled.
-func (c *RaftCluster) IsReplaceOfflineReplicaEnabled() bool {
-	return c.opt.IsReplaceOfflineReplicaEnabled()
-}
-
-// IsMakeUpReplicaEnabled returns if make up replica is enabled.
-func (c *RaftCluster) IsMakeUpReplicaEnabled() bool {
-	return c.opt.IsMakeUpReplicaEnabled()
-}
-
-// IsRemoveExtraReplicaEnabled returns if remove extra replica is enabled.
-func (c *RaftCluster) IsRemoveExtraReplicaEnabled() bool {
-	return c.opt.IsRemoveExtraReplicaEnabled()
-}
-
-// IsLocationReplacementEnabled returns if location replace is enabled.
-func (c *RaftCluster) IsLocationReplacementEnabled() bool {
-	return c.opt.IsLocationReplacementEnabled()
-}
-
-// IsDebugMetricsEnabled mocks method
-func (c *RaftCluster) IsDebugMetricsEnabled() bool {
-	return c.opt.IsDebugMetricsEnabled()
-}
-
-// CheckLabelProperty is used to check label property.
-func (c *RaftCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
-	return c.opt.CheckLabelProperty(typ, labels)
 }
 
 // isPrepared if the cluster information is collected
