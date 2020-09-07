@@ -95,7 +95,7 @@ var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
 // func of a package.
 func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[typ]; ok {
-		log.Fatal("duplicated scheduler", zap.String("type", typ))
+		log.Fatal("duplicated scheduler", zap.String("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
 	schedulerMap[typ] = createFn
 }
@@ -104,7 +104,7 @@ func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 // func of package.
 func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) {
 	if _, ok := schedulerArgsToDecoder[typ]; ok {
-		log.Fatal("duplicated scheduler", zap.String("type", typ))
+		log.Fatal("duplicated scheduler", zap.String("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
 	schedulerArgsToDecoder[typ] = builder
 }

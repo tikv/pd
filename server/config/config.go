@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -1088,7 +1089,7 @@ func ParseUrls(s string) ([]url.URL, error) {
 	for _, item := range items {
 		u, err := url.Parse(item)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
 		}
 
 		urls = append(urls, *u)
@@ -1101,7 +1102,7 @@ func ParseUrls(s string) ([]url.URL, error) {
 func (c *Config) SetupLogger() error {
 	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
 	if err != nil {
-		return err
+		return errs.ErrInitLogger.Wrap(err).FastGenWithCause()
 	}
 	c.logger = lg
 	c.logProps = p

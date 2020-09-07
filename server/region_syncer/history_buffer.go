@@ -141,7 +141,7 @@ func (h *historyBuffer) reload() {
 	if v != "" {
 		h.index, err = strconv.ParseUint(v, 10, 64)
 		if err != nil {
-			log.Fatal("load history index failed", zap.Error(err))
+			log.Fatal("load history index failed", errs.ZapError(errs.ErrStrconvParseUint, err))
 		}
 	}
 	log.Info("start from history index", zap.Uint64("start-index", h.firstIndex()))

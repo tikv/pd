@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/swaggerserver"
@@ -53,7 +54,7 @@ func main() {
 	case flag.ErrHelp:
 		exit(0)
 	default:
-		log.Fatal("parse cmd flags error", zap.Error(err))
+		log.Fatal("parse cmd flags error", errs.ZapError(errs.ErrParseFlags))
 	}
 
 	if cfg.ConfigCheck {
@@ -66,7 +67,7 @@ func main() {
 	if err == nil {
 		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
 	} else {
-		log.Fatal("initialize logger error", zap.Error(err))
+		log.Fatal("initialize logger error", errs.ZapError(err))
 	}
 	// Flushing any buffered log entries
 	defer log.Sync()
@@ -74,7 +75,7 @@ func main() {
 	// The old logger
 	err = logutil.InitLogger(&cfg.Log)
 	if err != nil {
-		log.Fatal("initialize logger error", zap.Error(err))
+		log.Fatal("initialize logger error", errs.ZapError(err))
 	}
 
 	server.LogPDInfo()
@@ -99,7 +100,7 @@ func main() {
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
-		log.Fatal("create server failed", zap.Error(err))
+		log.Fatal("create server failed", errs.ZapError(err))
 	}
 
 	sc := make(chan os.Signal, 1)
