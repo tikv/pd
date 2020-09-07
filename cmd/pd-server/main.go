@@ -91,7 +91,7 @@ func main() {
 
 	err = join.PrepareJoinCluster(cfg)
 	if err != nil {
-		log.Fatal("join meet error", zap.Error(err))
+		log.Fatal("join meet error", errs.ZapError(err))
 	}
 
 	// Creates server.
@@ -117,7 +117,7 @@ func main() {
 	}()
 
 	if err := svr.Run(); err != nil {
-		log.Fatal("run server failed", zap.Error(err))
+		log.Fatal("run server failed", errs.ZapError(err))
 	}
 
 	<-ctx.Done()

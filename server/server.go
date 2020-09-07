@@ -1145,7 +1145,7 @@ func (s *Server) campaignLeader() {
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
-		log.Error("failed to create raft cluster", zap.Error(err))
+		log.Error("failed to create raft cluster", errs.ZapError(err))
 		return
 	}
 	defer s.stopRaftCluster()
@@ -1175,7 +1175,7 @@ func (s *Server) campaignLeader() {
 			}
 		case <-tsTicker.C:
 			if err = s.tso.UpdateTimestamp(); err != nil {
-				log.Error("failed to update timestamp", zap.Error(err))
+				log.Error("failed to update timestamp", errs.ZapError(err))
 				return
 			}
 		case <-ctx.Done():
