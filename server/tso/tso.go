@@ -308,7 +308,7 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 		if resp.Logical >= maxLogical {
 			log.Error("logical part outside of max logical interval, please check ntp time",
 				zap.Reflect("response", resp),
-				zap.Int("retry-count", i))
+				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			tsoCounter.WithLabelValues("logical_overflow").Inc()
 			time.Sleep(UpdateTimestampStep)
 			continue

@@ -1777,7 +1777,7 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
 			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s", cURL, healthURL), nil)
 			if err != nil {
-				log.Error("failed to new request", zap.Error(err))
+				log.Error("failed to new request", errs.ZapError(errs.ErrNewHTTPRequest, err))
 				cancel()
 				continue
 			}
