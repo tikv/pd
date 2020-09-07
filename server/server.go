@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -441,7 +442,7 @@ func (s *Server) IsClosed() bool {
 
 // Run runs the pd server.
 func (s *Server) Run() error {
-	go StartMonitor(s.ctx, time.Now, func() {
+	go systimemon.StartMonitor(s.ctx, time.Now, func() {
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
 	})
