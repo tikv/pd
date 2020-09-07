@@ -131,6 +131,20 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, parentCanc
 	return nil
 }
 
+func (am *AllocatorManager) setIsInitialized(dcLocation string, isInitialized bool) {
+	am.Lock()
+	defer am.Unlock()
+	am.allocatorGroups[dcLocation].isInitialized = isInitialized
+}
+
+func (am *AllocatorManager) resetAllocatorGroup(dcLocation string) {
+	am.Lock()
+	defer am.Unlock()
+	am.allocatorGroups[dcLocation].allocator.Reset()
+	am.allocatorGroups[dcLocation].leadership.Reset()
+	am.allocatorGroups[dcLocation].isInitialized = false
+}
+
 // similar logic with leaderLoop in server/server.go
 func (am *AllocatorManager) allocatorLeaderLoop(parentCtx context.Context, allocator *LocalTSOAllocator) {
 	for {
@@ -183,9 +197,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(parentCtx context.Context, a
 		log.Error("failed to initialize the local TSO allocator", errs.ZapError(err))
 		return
 	}
-	am.Lock()
-	am.allocatorGroups[allocator.dcLocation].isInitialized = true
-	am.Unlock()
+	am.setIsInitialized(allocator.dcLocation, true)
 	allocator.EnableAllocatorLeader()
 	log.Info("local tso allocator leader is ready to serve",
 		zap.String("dc-location", allocator.dcLocation),
@@ -205,11 +217,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(parentCtx context.Context, a
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("server is closed, reset the local tso allocator", zap.String("dc-location", allocator.dcLocation))
-			am.Lock()
-			allocator.Reset()
-			am.allocatorGroups[allocator.dcLocation].leadership.Reset()
-			am.allocatorGroups[allocator.dcLocation].isInitialized = false
-			am.Unlock()
+			am.resetAllocatorGroup(allocator.dcLocation)
 			return
 		}
 	}
