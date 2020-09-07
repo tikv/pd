@@ -108,12 +108,15 @@ func WithExcludeTombstone() GetStoreOption {
 	return func(op *GetStoreOp) { op.excludeTombstone = true }
 }
 
+// ScatterRegionOp represents available options when scatter regions
 type ScatterRegionOp struct {
 	group string
 }
 
+// ScatterRegionOption configures ScatterRegionOp
 type ScatterRegionOption func(op *ScatterRegionOp)
 
+// WithGroup specify the group during ScatterRegion
 func WithGroup(group string) ScatterRegionOption {
 	return func(op *ScatterRegionOp) { op.group = group }
 }
