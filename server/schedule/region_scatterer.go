@@ -263,19 +263,14 @@ func (r *RegionScatterer) selectPeerToReplace(group string, stores map[uint64]*c
 	if selectedCandidateID < 1 {
 		target := candidates[rand.Intn(len(candidates))]
 		return &metapb.Peer{
-			StoreId: target.GetID(),
-			Role:    oldPeer.GetRole(),
+			StoreId:   target.GetID(),
+			IsLearner: oldPeer.GetIsLearner(),
 		}
 	}
 
 	return &metapb.Peer{
-<<<<<<< HEAD
-		StoreId:   target.GetID(),
+		StoreId:   selectedCandidateID,
 		IsLearner: oldPeer.GetIsLearner(),
-=======
-		StoreId: selectedCandidateID,
-		Role:    oldPeer.GetRole(),
->>>>>>> ba4499d... scatter: support group level scattering for regions (#2849)
 	}
 }
 

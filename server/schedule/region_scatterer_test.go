@@ -229,51 +229,6 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 		}
 	}
 }
-<<<<<<< HEAD
-=======
-
-func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
-	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
-	// Add 5 stores.
-	for i := uint64(1); i <= 5; i++ {
-		tc.AddRegionStore(i, 0)
-	}
-	testcases := []struct {
-		name        string
-		checkRegion *core.RegionInfo
-		needFix     bool
-	}{
-		{
-			name:        "region with 4 replicas",
-			checkRegion: tc.AddLeaderRegion(1, 1, 2, 3, 4),
-			needFix:     true,
-		},
-		{
-			name:        "region with 3 replicas",
-			checkRegion: tc.AddLeaderRegion(1, 1, 2, 3),
-			needFix:     false,
-		},
-		{
-			name:        "region with 2 replicas",
-			checkRegion: tc.AddLeaderRegion(1, 1, 2),
-			needFix:     true,
-		},
-	}
-	for _, testcase := range testcases {
-		c.Logf(testcase.name)
-		scatterer := NewRegionScatterer(tc)
-		_, err := scatterer.Scatter(testcase.checkRegion, "")
-		if testcase.needFix {
-			c.Assert(err, NotNil)
-			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, true)
-		} else {
-			c.Assert(err, IsNil)
-			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, false)
-		}
-		tc.ResetSuspectRegions()
-	}
-}
 
 func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 	opt := mockoption.NewScheduleOptions()
@@ -338,4 +293,3 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 		}
 	}
 }
->>>>>>> ba4499d... scatter: support group level scattering for regions (#2849)
