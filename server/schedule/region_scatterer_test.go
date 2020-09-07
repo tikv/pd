@@ -2,6 +2,8 @@ package schedule
 
 import (
 	"context"
+	"fmt"
+	"math"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -93,7 +95,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region); op != nil {
+		if op, _ := scatterer.Scatter(region, ""); op != nil {
 			s.checkOperator(op, c)
 			ApplyOperator(tc, op)
 		}
@@ -158,7 +160,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region); op != nil {
+		if op, _ := scatterer.Scatter(region, ""); op != nil {
 			s.checkOperator(op, c)
 			ApplyOperator(tc, op)
 		}
@@ -222,8 +224,72 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 
 	for i := uint64(1); i <= 5; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region); op != nil {
+		if op, _ := scatterer.Scatter(region, ""); op != nil {
 			c.Assert(oc.AddWaitingOperator(op), Equals, 1)
+		}
+	}
+}
+
+func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	// Add 5 stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+
+	testcases := []struct {
+		name       string
+		groupCount int
+	}{
+		{
+			name:       "1 group",
+			groupCount: 1,
+		},
+		{
+			name:       "2 group",
+			groupCount: 2,
+		},
+		{
+			name:       "3 group",
+			groupCount: 3,
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Logf(testcase.name)
+		scatterer := NewRegionScatterer(tc)
+		regionID := 1
+		for i := 0; i < 100; i++ {
+			for j := 0; j < testcase.groupCount; j++ {
+				_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
+					fmt.Sprintf("group-%v", j))
+				c.Assert(err, IsNil)
+				regionID++
+			}
+			// insert region with no group
+			_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3), "")
+			c.Assert(err, IsNil)
+			regionID++
+		}
+
+		for i := 0; i < testcase.groupCount; i++ {
+			// comparing the leader distribution
+			group := fmt.Sprintf("group-%v", i)
+			max := uint64(0)
+			min := uint64(math.MaxUint64)
+			for _, count := range scatterer.ordinaryEngine.selectedLeader.groupDistribution[group] {
+				if count > max {
+					max = count
+				}
+				if count < min {
+					min = count
+				}
+			}
+			// 100 regions divided 5 stores, each store expected to have about 20 regions.
+			c.Assert(min, LessEqual, uint64(20))
+			c.Assert(max, GreaterEqual, uint64(20))
+			c.Assert(max-min, LessEqual, uint64(3))
 		}
 	}
 }

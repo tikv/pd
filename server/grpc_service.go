@@ -682,7 +682,7 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
 
-	op, err := rc.GetRegionScatter().Scatter(region)
+	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())
 	if err != nil {
 		return nil, err
 	}
