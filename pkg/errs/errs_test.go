@@ -90,7 +90,6 @@ func (s *testErrorSuite) TestError(c *C) {
 	err := errors.New("test error")
 	log.Error("test", ZapError(ErrInvalidTimestamp, err))
 	rfc = `[error="[PD:tso:ErrInvalidTimestamp]test error"]`
-	fmt.Println(lg.Message())
 	c.Assert(strings.Contains(lg.Message(), rfc), IsTrue)
 }
 

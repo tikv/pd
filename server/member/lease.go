@@ -18,7 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/clientv3"
@@ -50,7 +49,7 @@ func (l *LeaderLease) Grant(leaseTimeout int64) error {
 	leaseResp, err := l.lease.Grant(ctx, leaseTimeout)
 	cancel()
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
 	}
 	if cost := time.Since(start); cost > slowRequestTime {
 		log.Warn("lease grants too slow", zap.Duration("cost", cost))

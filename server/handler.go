@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -210,9 +209,9 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 	if err = c.AddScheduler(s, args...); err != nil {
-		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
 	} else if err = h.opt.Persist(c.GetStorage()); err != nil {
-		log.Error("can not persist scheduler config", zap.Error(err))
+		log.Error("can not persist scheduler config", errs.ZapError(err))
 	}
 	return err
 }
@@ -224,7 +223,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 		return err
 	}
 	if err = c.RemoveScheduler(name); err != nil {
-		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
+		log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 	}
 	return err
 }
@@ -239,9 +238,9 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 	}
 	if err = c.PauseOrResumeScheduler(name, t); err != nil {
 		if t == 0 {
-			log.Error("can not resume scheduler", zap.String("scheduler-name", name), zap.Error(err))
+			log.Error("can not resume scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {
-			log.Error("can not pause scheduler", zap.String("scheduler-name", name), zap.Error(err))
+			log.Error("can not pause scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		}
 	}
 	return err
@@ -492,10 +491,10 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 	for id := range storeIDs {
 		store = c.GetStore(id)
 		if store == nil {
-			return core.NewStoreNotFoundErr(id)
+			return errs.ErrStoreNotFound.FastGenByArgs(id)
 		}
 		if store.IsTombstone() {
-			return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: id})
+			return errs.ErrStoreTombstone.FastGenByArgs(id)
 		}
 	}
 
@@ -534,10 +533,10 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 
 	toStore := c.GetStore(toStoreID)
 	if toStore == nil {
-		return core.NewStoreNotFoundErr(toStoreID)
+		return errs.ErrStoreNotFound.FastGenByArgs(toStoreID)
 	}
 	if toStore.IsTombstone() {
-		return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
+		return errs.ErrStoreTombstone.FastGenByArgs(toStoreID)
 	}
 
 	newPeer := &metapb.Peer{StoreId: toStoreID, IsLearner: oldPeer.GetIsLearner()}
@@ -570,10 +569,10 @@ func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (
 
 	toStore := c.GetStore(toStoreID)
 	if toStore == nil {
-		return nil, nil, core.NewStoreNotFoundErr(toStoreID)
+		return nil, nil, errs.ErrStoreNotFound.FastGenByArgs(toStoreID)
 	}
 	if toStore.IsTombstone() {
-		return nil, nil, errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
+		return nil, nil, errs.ErrStoreTombstone.FastGenByArgs(toStoreID)
 	}
 
 	return c, region, nil

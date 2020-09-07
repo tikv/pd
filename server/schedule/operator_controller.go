@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -134,7 +135,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 				log.Error("dispatching operator with unexpected status",
 					zap.Uint64("region-id", op.RegionID()),
 					zap.String("status", operator.OpStatusToString(op.Status())),
-					zap.Reflect("operator", op))
+					zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
 				operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 				failpoint.Inject("unexpectedOperator", func() {
 					panic(op)
@@ -258,13 +259,13 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 		if op.Kind()&operator.OpMerge != 0 {
 			if i+1 >= len(ops) {
 				// should not be here forever
-				log.Error("orphan merge operators found", zap.String("desc", desc))
+				log.Error("orphan merge operators found", zap.String("desc", desc), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("orphan operator found")))
 				oc.Unlock()
 				return added
 			}
 			if ops[i+1].Kind()&operator.OpMerge == 0 {
 				log.Error("merge operator should be paired", zap.String("desc",
-					ops[i+1].Desc()))
+					ops[i+1].Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
 				oc.Unlock()
 				return added
 			}
@@ -390,7 +391,7 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			log.Error("trying to add operator with unexpected status",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.String("status", operator.OpStatusToString(op.Status())),
-				zap.Reflect("operator", op))
+				zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
 			failpoint.Inject("unexpectedOperator", func() {
 				panic(op)
 			})
@@ -436,7 +437,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 		log.Error("adding operator with unexpected status",
 			zap.Uint64("region-id", regionID),
 			zap.String("status", operator.OpStatusToString(op.Status())),
-			zap.Reflect("operator", op))
+			zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
 		failpoint.Inject("unexpectedOperator", func() {
 			panic(op)
 		})
@@ -522,7 +523,7 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ..
 		log.Error("burying operator with non-end status",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.String("status", operator.OpStatusToString(op.Status())),
-			zap.Reflect("operator", op))
+			zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
 		failpoint.Inject("unexpectedOperator", func() {
 			panic(op)
 		})
@@ -724,7 +725,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		}
 		oc.hbStreams.SendMsg(region, cmd)
 	default:
-		log.Error("unknown operator step", zap.Reflect("step", step))
+		log.Error("unknown operator step", zap.Reflect("step", step), errs.ZapError(errs.ErrUnknownOperatorStep))
 	}
 }
 

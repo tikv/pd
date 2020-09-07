@@ -17,9 +17,9 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sync"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
@@ -134,23 +134,23 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 		return errs.ErrHexDecodingString.FastGenByArgs(r.EndKeyHex)
 	}
 	if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
-		return errors.New("endKey should be greater than startKey")
+		return errs.ErrRuleContent.FastGenByArgs("endKey should be greater than startKey")
 	}
 	if r.GroupID == "" {
-		return errors.New("group ID should not be empty")
+		return errs.ErrRuleContent.FastGenByArgs("group ID should not be empty")
 	}
 	if r.ID == "" {
-		return errors.New("ID should not be empty")
+		return errs.ErrRuleContent.FastGenByArgs("ID should not be empty")
 	}
 	if !validateRole(r.Role) {
-		return errors.Errorf("invalid role %s", r.Role)
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid role %s", r.Role))
 	}
 	if r.Count <= 0 {
-		return errors.Errorf("invalid count %v", r.Count)
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid count %d", r.Count))
 	}
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
-			return errors.Errorf("invalid op %s", c.Op)
+			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
 		}
 	}
 	return nil
