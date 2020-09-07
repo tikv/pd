@@ -16,10 +16,11 @@ package placement
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/pingcap/errors"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 type splitPointType int
@@ -74,7 +75,7 @@ type ruleList struct {
 
 func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 	if len(rules) == 0 {
-		return ruleList{}, errors.New("no rule left")
+		return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs("no rule left")
 	}
 	// collect and sort split points.
 	var points []splitPoint
@@ -114,9 +115,9 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 				if i != len(points)-1 {
 					endKey = points[i+1].key
 				}
-				return ruleList{}, errors.Errorf("no rule for range {%s, %s}",
+				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("no rule for range {%s, %s}",
 					strings.ToUpper(hex.EncodeToString(p.key)),
-					strings.ToUpper(hex.EncodeToString(endKey)))
+					strings.ToUpper(hex.EncodeToString(endKey))))
 			}
 			if i != len(points)-1 {
 				rr = append(rr[:0:0], rr...) // clone
