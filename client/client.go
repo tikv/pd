@@ -85,7 +85,7 @@ type Client interface {
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
-	ScatterRegion(ctx context.Context, regionID uint64) error
+	ScatterRegion(ctx context.Context, regionID uint64, group string) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 	// Close closes the client.
@@ -721,7 +721,7 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	return resp.GetMinSafePoint(), nil
 }
 
-func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
+func (c *client) ScatterRegion(ctx context.Context, regionID uint64, group string) error {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -733,6 +733,7 @@ func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
 	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
 		Header:   c.requestHeader(),
 		RegionId: regionID,
+		Group:    group,
 	})
 	cancel()
 	if err != nil {

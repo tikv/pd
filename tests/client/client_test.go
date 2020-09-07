@@ -728,7 +728,7 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
 	testutil.WaitUntil(c, func(c *C) bool {
-		err := s.client.ScatterRegion(context.Background(), regionID)
+		err := s.client.ScatterRegion(context.Background(), regionID, "")
 		if c.Check(err, NotNil) {
 			return false
 		}
