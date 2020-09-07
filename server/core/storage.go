@@ -237,46 +237,11 @@ func (s *Storage) DeleteRule(ruleKey string) error {
 }
 
 // LoadRules loads placement rules from storage.
-<<<<<<< HEAD
 func (s *Storage) LoadRules(f func(k, v string)) (bool, error) {
 	// Range is ['rule/\x00', 'rule0'). 'rule0' is the upper bound of all rules because '0' is next char of '/' in
 	// ascii order.
 	nextKey := path.Join(rulesPath, "\x00")
 	endKey := rulesPath + "0"
-=======
-func (s *Storage) LoadRules(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(rulesPath+"/", f)
-}
-
-// SaveRuleGroup stores a rule group config to storage.
-func (s *Storage) SaveRuleGroup(groupID string, group interface{}) error {
-	return s.SaveJSON(ruleGroupPath, groupID, group)
-}
-
-// DeleteRuleGroup removes a rule group from storage.
-func (s *Storage) DeleteRuleGroup(groupID string) error {
-	return s.Remove(path.Join(ruleGroupPath, groupID))
-}
-
-// LoadRuleGroups loads all rule groups from storage.
-func (s *Storage) LoadRuleGroups(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(ruleGroupPath+"/", f)
-}
-
-// SaveJSON saves json format data to storage.
-func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
-	value, err := json.Marshal(data)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
-	}
-	return s.Save(path.Join(prefix, key), string(value))
-}
-
-// LoadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
-func (s *Storage) LoadRangeByPrefix(prefix string, f func(k, v string)) error {
-	nextKey := prefix
-	endKey := clientv3.GetPrefixRangeEnd(prefix)
->>>>>>> 12a08b1... server: Refine log error format (#2873)
 	for {
 		keys, values, err := s.LoadRange(nextKey, endKey, minKVRangeLimit)
 		if err != nil {

@@ -1109,18 +1109,12 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-<<<<<<< HEAD
 	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
 
 	lease := member.NewLeaderLease(s.client)
 	defer lease.Close()
 	if err := s.member.CampaignLeader(lease, s.cfg.LeaderLease); err != nil {
-		log.Error("campaign leader meet error", zap.Error(err))
-=======
-	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
-	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
-		log.Error("campaign pd leader meet error", errs.ZapError(err))
->>>>>>> 12a08b1... server: Refine log error format (#2873)
+		log.Error("campaign leader meet error", errs.ZapError(err))
 		return
 	}
 
@@ -1131,7 +1125,6 @@ func (s *Server) campaignLeader() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-<<<<<<< HEAD
 	go lease.KeepAlive(ctx)
 	s.SetLease(lease)
 	defer s.SetLease(nil)
@@ -1139,40 +1132,20 @@ func (s *Server) campaignLeader() {
 
 	log.Debug("sync timestamp for tso")
 	if err := s.tso.SyncTimestamp(lease); err != nil {
-		log.Error("failed to sync timestamp", zap.Error(err))
-=======
-	defer s.member.ResetLeader()
-	// maintain the PD leader
-	go s.member.KeepLeader(ctx)
-	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
-
-	log.Info("setting up the global TSO allocator")
-	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, cancel, tso.GlobalDCLocation, s.member.GetLeadership()); err != nil {
-		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
->>>>>>> 12a08b1... server: Refine log error format (#2873)
+		log.Error("failed to sync timestamp", errs.ZapError(err))
 		return
 	}
 	defer s.tso.ResetTimestamp()
 
-<<<<<<< HEAD
 	err := s.reloadConfigFromKV()
 	if err != nil {
-		log.Error("failed to reload configuration", zap.Error(err))
+		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
 	}
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
 		log.Error("failed to create raft cluster", zap.Error(err))
-=======
-	if err := s.reloadConfigFromKV(); err != nil {
-		log.Error("failed to reload configuration", errs.ZapError(err))
-		return
-	}
-	// Try to create raft cluster.
-	if err := s.createRaftCluster(); err != nil {
-		log.Error("failed to create raft cluster", errs.ZapError(err))
->>>>>>> 12a08b1... server: Refine log error format (#2873)
 		return
 	}
 	defer s.stopRaftCluster()
