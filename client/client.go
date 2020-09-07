@@ -84,7 +84,8 @@ type Client interface {
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
-	// and the distribution of these regions will be dispersed.
+	// and the distribution of these regions will be dispersed. If the group is defined, the regions would be scattered
+	// by the group If they have the same group.
 	ScatterRegion(ctx context.Context, regionID uint64, group string) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
