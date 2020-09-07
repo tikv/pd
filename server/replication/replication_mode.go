@@ -23,6 +23,7 @@ import (
 
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -217,7 +218,7 @@ func (m *ModeManager) drSwitchToAsync() error {
 func (m *ModeManager) drSwitchToAsyncWithLock() error {
 	id, err := m.cluster.AllocID()
 	if err != nil {
-		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
+		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateAsync, StateID: id}
@@ -225,7 +226,7 @@ func (m *ModeManager) drSwitchToAsyncWithLock() error {
 		return err
 	}
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
-		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
+		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
 	}
 	m.drAutoSync = dr
@@ -242,7 +243,7 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 	id, err := m.cluster.AllocID()
 	if err != nil {
-		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
+		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: time.Now()}
@@ -250,7 +251,7 @@ func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 		return err
 	}
 	if err = m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
-		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
+		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
 	}
 	m.drAutoSync = dr
@@ -264,7 +265,7 @@ func (m *ModeManager) drSwitchToSync() error {
 	defer m.Unlock()
 	id, err := m.cluster.AllocID()
 	if err != nil {
-		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
+		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateSync, StateID: id}
@@ -272,7 +273,7 @@ func (m *ModeManager) drSwitchToSync() error {
 		return err
 	}
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
-		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
+		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
 	}
 	m.drAutoSync = dr
@@ -286,8 +287,14 @@ func (m *ModeManager) drPersistStatus(status drAutoSyncStatus) error {
 		defer cancel()
 		data, _ := json.Marshal(status)
 		if err := m.fileReplicater.ReplicateFileToAllMembers(ctx, drStatusFile, data); err != nil {
-			log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", status.State), zap.Error(err))
-			return err
+			log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", status.State), errs.ZapError(err))
+			// Throw away the error to make it possible to switch to async when
+			// primary and dr DC are disconnected. This will result in the
+			// inability to accurately determine whether data is fully
+			// synchronized when using dr DC to disaster recovery.
+			// TODO: introduce PD's leader-follower connection timeout to solve
+			// this issue. More details: https://github.com/tikv/pd/issues/2490
+			return nil
 		}
 	}
 	return nil

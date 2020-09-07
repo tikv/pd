@@ -15,13 +15,14 @@ package analysis
 
 import (
 	"bufio"
-	"errors"
 	"io"
 	"log"
 	"os"
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/pingcap/errors"
 )
 
 var supportOperators = []string{"balance-region", "balance-leader", "transfer-hot-read-leader", "move-hot-read-region", "transfer-hot-write-leader", "move-hot-write-region"}

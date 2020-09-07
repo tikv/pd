@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -121,7 +122,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	log.Debug("try to merge region", zap.Stringer("from", core.RegionToHexMeta(region.GetMeta())), zap.Stringer("to", core.RegionToHexMeta(target.GetMeta())))
 	ops, err := operator.CreateMergeRegionOperator("merge-region", m.cluster, region, target, operator.OpMerge)
 	if err != nil {
-		log.Warn("create merge region operator failed", zap.Error(err))
+		log.Warn("create merge region operator failed", errs.ZapError(err))
 		return nil
 	}
 	checkerCounter.WithLabelValues("merge_checker", "new-operator").Inc()

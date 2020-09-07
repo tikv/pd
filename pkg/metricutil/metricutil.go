@@ -21,8 +21,8 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
-	"go.uber.org/zap"
 )
 
 const zeroDuration = time.Duration(0)
@@ -68,7 +68,7 @@ func prometheusPushClient(job, addr string, interval time.Duration) {
 	for {
 		err := pusher.Push()
 		if err != nil {
-			log.Error("could not push metrics to Prometheus Pushgateway", zap.Error(err))
+			log.Error("could not push metrics to Prometheus Pushgateway", errs.ZapError(errs.ErrPrometheusPushMetrics, err))
 		}
 
 		time.Sleep(interval)

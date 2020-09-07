@@ -138,7 +138,7 @@ func (c *baseClient) leaderLoop() {
 		}
 
 		if err := c.updateLeader(); err != nil {
-			log.Error("[pd] failed updateLeader", errs.ZapError(errs.ErrUpdateLeader, err))
+			log.Error("[pd] failed updateLeader", errs.ZapError(err))
 		}
 	}
 }
@@ -178,7 +178,7 @@ func (c *baseClient) initClusterID() error {
 		members, err := c.getMembers(timeoutCtx, u)
 		timeoutCancel()
 		if err != nil || members.GetHeader() == nil {
-			log.Warn("[pd] failed to get cluster id", zap.String("url", u), errs.ZapError(errs.ErrGetClusterID, err))
+			log.Warn("[pd] failed to get cluster id", zap.String("url", u), errs.ZapError(err))
 			continue
 		}
 		c.clusterID = members.GetHeader().GetClusterId()
@@ -192,7 +192,7 @@ func (c *baseClient) updateLeader() error {
 		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
 		members, err := c.getMembers(ctx, u)
 		if err != nil {
-			log.Warn("[pd] cannot update leader", zap.String("address", u), errs.ZapError(errs.ErrUpdateLeader, err))
+			log.Warn("[pd] cannot update leader", zap.String("address", u), errs.ZapError(err))
 		}
 		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
@@ -206,7 +206,7 @@ func (c *baseClient) updateLeader() error {
 		c.updateURLs(members.GetMembers())
 		return c.switchLeader(members.GetLeader().GetClientUrls())
 	}
-	return errors.Errorf("failed to get leader from %v", c.urls)
+	return errs.ErrClientGetLeader.FastGenByArgs(c.urls)
 }
 
 func (c *baseClient) getMembers(ctx context.Context, url string) (*pdpb.GetMembersResponse, error) {
@@ -217,7 +217,7 @@ func (c *baseClient) getMembers(ctx context.Context, url string) (*pdpb.GetMembe
 	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
-		return nil, errors.WithStack(attachErr)
+		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
 	return members, nil
 }
@@ -274,13 +274,13 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 		KeyPath:  c.security.KeyPath,
 	}.ToTLSConfig()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	dctx, cancel := context.WithTimeout(c.ctx, dialTimeout)
 	defer cancel()
 	cc, err := grpcutil.GetClientConn(dctx, addr, tlsCfg, c.gRPCDialOptions...)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	c.connMu.Lock()
 	defer c.connMu.Unlock()

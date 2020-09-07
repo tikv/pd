@@ -23,8 +23,8 @@ import (
 	"sync"
 
 	"github.com/coreos/pkg/capnslog"
+	"github.com/pingcap/errors"
 	zaplog "github.com/pingcap/log"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"go.etcd.io/etcd/raft"
 	"go.uber.org/zap"
