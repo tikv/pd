@@ -256,17 +256,14 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 }
 
 // ConfVerChanged returns the number of confver has consumed by steps
-func (o *Operator) ConfVerChanged(region *core.RegionInfo) int {
-	total := 0
+func (o *Operator) ConfVerChanged(region *core.RegionInfo) (total uint64) {
 	current := atomic.LoadInt32(&o.currentStep)
 	if current == int32(len(o.steps)) {
 		current--
 	}
 	// including current step, it may has taken effects in this heartbeat
 	for _, step := range o.steps[0 : current+1] {
-		if step.ConfVerChanged(region) {
-			total++
-		}
+		total += step.ConfVerChanged(region)
 	}
 	return total
 }

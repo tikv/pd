@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
@@ -29,20 +30,35 @@ import (
 // OpStep describes the basic scheduling steps that can not be subdivided.
 type OpStep interface {
 	fmt.Stringer
-	ConfVerChanged(region *core.RegionInfo) bool
+	ConfVerChanged(region *core.RegionInfo) uint64
 	IsFinish(region *core.RegionInfo) bool
 	CheckSafety(region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
+
+var (
+	_ OpStep = (*TransferLeader)(nil)
+
+	_ OpStep = (*AddPeer)(nil)
+	_ OpStep = (*AddLightPeer)(nil)
+	_ OpStep = (*RemovePeer)(nil)
+	_ OpStep = (*AddLearner)(nil)
+	_ OpStep = (*AddLightLearner)(nil)
+
+	_ OpStep = (*PromoteLearner)(nil)
+
+	_ OpStep = (*MergeRegion)(nil)
+	_ OpStep = (*SplitRegion)(nil)
+)
 
 // TransferLeader is an OpStep that transfers a region's leader.
 type TransferLeader struct {
 	FromStore, ToStore uint64
 }
 
-// ConfVerChanged returns true if the conf version has been changed by this step
-func (tl TransferLeader) ConfVerChanged(region *core.RegionInfo) bool {
-	return false // transfer leader never change the conf version
+// ConfVerChanged returns the delta value for version increased by this step.
+func (tl TransferLeader) ConfVerChanged(region *core.RegionInfo) uint64 {
+	return 0 // transfer leader never change the conf version
 }
 
 func (tl TransferLeader) String() string {
@@ -82,25 +98,24 @@ type AddPeer struct {
 	ToStore, PeerID uint64
 }
 
-// ConfVerChanged returns true if the conf version has been changed by this step
-func (ap AddPeer) ConfVerChanged(region *core.RegionInfo) bool {
-	if p := region.GetStoreVoter(ap.ToStore); p != nil {
-		return p.GetId() == ap.PeerID
-	}
-	return false
+// ConfVerChanged returns the delta value for version increased by this step.
+func (ap AddPeer) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStoreVoter(ap.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == ap.PeerID)
 }
+
 func (ap AddPeer) String() string {
 	return fmt.Sprintf("add peer %v on store %v", ap.PeerID, ap.ToStore)
 }
 
 // IsFinish checks if current step is finished.
 func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreVoter(ap.ToStore); p != nil {
-		if p.GetId() != ap.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", p.GetId()))
+	if peer := region.GetStoreVoter(ap.ToStore); peer != nil {
+		if peer.GetId() != ap.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", peer.GetId()))
 			return false
 		}
-		return region.GetPendingVoter(p.GetId()) == nil
+		return region.GetPendingVoter(peer.GetId()) == nil
 	}
 	return false
 }
@@ -129,12 +144,10 @@ type AddLearner struct {
 	ToStore, PeerID uint64
 }
 
-// ConfVerChanged returns true if the conf version has been changed by this step
-func (al AddLearner) ConfVerChanged(region *core.RegionInfo) bool {
-	if p := region.GetStorePeer(al.ToStore); p != nil {
-		return p.GetId() == al.PeerID
-	}
-	return false
+// ConfVerChanged returns the delta value for version increased by this step.
+func (al AddLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStorePeer(al.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == al.PeerID)
 }
 
 func (al AddLearner) String() string {
@@ -143,12 +156,12 @@ func (al AddLearner) String() string {
 
 // IsFinish checks if current step is finished.
 func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreLearner(al.ToStore); p != nil {
-		if p.GetId() != al.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", p.GetId()))
+	if peer := region.GetStoreLearner(al.ToStore); peer != nil {
+		if peer.GetId() != al.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", peer.GetId()))
 			return false
 		}
-		return region.GetPendingLearner(p.GetId()) == nil
+		return region.GetPendingLearner(peer.GetId()) == nil
 	}
 	return false
 }
@@ -183,12 +196,10 @@ type PromoteLearner struct {
 	ToStore, PeerID uint64
 }
 
-// ConfVerChanged returns true if the conf version has been changed by this step
-func (pl PromoteLearner) ConfVerChanged(region *core.RegionInfo) bool {
-	if p := region.GetStoreVoter(pl.ToStore); p != nil {
-		return p.GetId() == pl.PeerID
-	}
-	return false
+// ConfVerChanged returns the delta value for version increased by this step.
+func (pl PromoteLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStoreVoter(pl.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == pl.PeerID)
 }
 
 func (pl PromoteLearner) String() string {
@@ -197,11 +208,11 @@ func (pl PromoteLearner) String() string {
 
 // IsFinish checks if current step is finished.
 func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreVoter(pl.ToStore); p != nil {
-		if p.GetId() != pl.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", p.GetId()))
+	if peer := region.GetStoreVoter(pl.ToStore); peer != nil {
+		if peer.GetId() != pl.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.GetId()))
 		}
-		return p.GetId() == pl.PeerID
+		return peer.GetId() == pl.PeerID
 	}
 	return false
 }
@@ -209,7 +220,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 // CheckSafety checks if the step meets the safety properties.
 func (pl PromoteLearner) CheckSafety(region *core.RegionInfo) error {
 	peer := region.GetStorePeer(pl.ToStore)
-	if peer == nil {
+	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
 	}
 	return nil
@@ -220,12 +231,13 @@ func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionI
 
 // RemovePeer is an OpStep that removes a region peer.
 type RemovePeer struct {
-	FromStore uint64
+	FromStore, PeerID uint64
 }
 
-// ConfVerChanged returns true if the conf version has been changed by this step
-func (rp RemovePeer) ConfVerChanged(region *core.RegionInfo) bool {
-	return region.GetStorePeer(rp.FromStore) == nil
+// ConfVerChanged returns the delta value for version increased by this step.
+func (rp RemovePeer) ConfVerChanged(region *core.RegionInfo) uint64 {
+	id := region.GetStorePeer(rp.FromStore).GetId()
+	return typeutil.BoolToUint64(id == 0 || (rp.PeerID != 0 && id != rp.PeerID))
 }
 
 func (rp RemovePeer) String() string {
@@ -268,9 +280,9 @@ type MergeRegion struct {
 	IsPassive bool
 }
 
-// ConfVerChanged returns true if the conf version has been changed by this step
-func (mr MergeRegion) ConfVerChanged(region *core.RegionInfo) bool {
-	return false
+// ConfVerChanged returns the delta value for version increased by this step.
+func (mr MergeRegion) ConfVerChanged(region *core.RegionInfo) uint64 {
+	return 0
 }
 
 func (mr MergeRegion) String() string {
@@ -293,10 +305,10 @@ func (mr MergeRegion) CheckSafety(region *core.RegionInfo) error {
 // Influence calculates the store difference that current step makes.
 func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	if mr.IsPassive {
-		for _, p := range region.GetPeers() {
-			o := opInfluence.GetStoreInfluence(p.GetStoreId())
+		for _, peer := range region.GetPeers() {
+			o := opInfluence.GetStoreInfluence(peer.GetStoreId())
 			o.RegionCount--
-			if region.GetLeader().GetId() == p.GetId() {
+			if region.GetLeader().GetId() == peer.GetId() {
 				o.LeaderCount--
 			}
 		}
@@ -310,9 +322,9 @@ type SplitRegion struct {
 	SplitKeys        [][]byte
 }
 
-// ConfVerChanged returns true if the conf version has been changed by this step
-func (sr SplitRegion) ConfVerChanged(region *core.RegionInfo) bool {
-	return false
+// ConfVerChanged returns the delta value for version increased by this step.
+func (sr SplitRegion) ConfVerChanged(region *core.RegionInfo) uint64 {
+	return 0
 }
 
 func (sr SplitRegion) String() string {
@@ -326,10 +338,10 @@ func (sr SplitRegion) IsFinish(region *core.RegionInfo) bool {
 
 // Influence calculates the store difference that current step makes.
 func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
-	for _, p := range region.GetPeers() {
-		inf := opInfluence.GetStoreInfluence(p.GetStoreId())
+	for _, peer := range region.GetPeers() {
+		inf := opInfluence.GetStoreInfluence(peer.GetStoreId())
 		inf.RegionCount++
-		if region.GetLeader().GetId() == p.GetId() {
+		if region.GetLeader().GetId() == peer.GetId() {
 			inf.LeaderCount++
 		}
 	}
@@ -345,12 +357,10 @@ type AddLightPeer struct {
 	ToStore, PeerID uint64
 }
 
-// ConfVerChanged returns true if the conf version has been changed by this step
-func (ap AddLightPeer) ConfVerChanged(region *core.RegionInfo) bool {
-	if p := region.GetStoreVoter(ap.ToStore); p != nil {
-		return p.GetId() == ap.PeerID
-	}
-	return false
+// ConfVerChanged returns the delta value for version increased by this step.
+func (ap AddLightPeer) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStoreVoter(ap.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == ap.PeerID)
 }
 
 func (ap AddLightPeer) String() string {
@@ -359,12 +369,12 @@ func (ap AddLightPeer) String() string {
 
 // IsFinish checks if current step is finished.
 func (ap AddLightPeer) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreVoter(ap.ToStore); p != nil {
-		if p.GetId() != ap.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", p.GetId()))
+	if peer := region.GetStoreVoter(ap.ToStore); peer != nil {
+		if peer.GetId() != ap.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", peer.GetId()))
 			return false
 		}
-		return region.GetPendingVoter(p.GetId()) == nil
+		return region.GetPendingVoter(peer.GetId()) == nil
 	}
 	return false
 }
@@ -391,12 +401,10 @@ type AddLightLearner struct {
 	ToStore, PeerID uint64
 }
 
-// ConfVerChanged returns true if the conf version has been changed by this step
-func (al AddLightLearner) ConfVerChanged(region *core.RegionInfo) bool {
-	if p := region.GetStorePeer(al.ToStore); p != nil {
-		return p.GetId() == al.PeerID
-	}
-	return false
+// ConfVerChanged returns the delta value for version increased by this step.
+func (al AddLightLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStorePeer(al.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == al.PeerID)
 }
 
 func (al AddLightLearner) String() string {
@@ -405,12 +413,12 @@ func (al AddLightLearner) String() string {
 
 // IsFinish checks if current step is finished.
 func (al AddLightLearner) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreLearner(al.ToStore); p != nil {
-		if p.GetId() != al.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", p.GetId()))
+	if peer := region.GetStoreLearner(al.ToStore); peer != nil {
+		if peer.GetId() != al.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", peer.GetId()))
 			return false
 		}
-		return region.GetPendingLearner(p.GetId()) == nil
+		return region.GetPendingLearner(peer.GetId()) == nil
 	}
 	return false
 }
