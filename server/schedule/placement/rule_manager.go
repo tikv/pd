@@ -30,7 +30,7 @@ import (
 )
 
 // RuleManager is responsible for the lifecycle of all placement Rules.
-// It is threadsafe.
+// It is thread safe.
 type RuleManager struct {
 	store *core.Storage
 	sync.RWMutex

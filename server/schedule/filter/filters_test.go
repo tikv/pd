@@ -48,7 +48,7 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		stores       []uint64
 		source       uint64
 		target       uint64
-		safeGuradRes bool
+		safeGuardRes bool
 		improverRes  bool
 	}{
 		{[]uint64{1, 2, 3}, 1, 4, true, true},
@@ -62,7 +62,7 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		}
 		ls := NewLocationSafeguard("", labels, stores, allStores[tc.source-1])
 		li := NewLocationImprover("", labels, stores, allStores[tc.source-1])
-		c.Assert(ls.Target(config.NewTestOptions(), allStores[tc.target-1]), Equals, tc.safeGuradRes)
+		c.Assert(ls.Target(config.NewTestOptions(), allStores[tc.target-1]), Equals, tc.safeGuardRes)
 		c.Assert(li.Target(config.NewTestOptions(), allStores[tc.target-1]), Equals, tc.improverRes)
 	}
 }

@@ -301,7 +301,7 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
 	}
-	// fisrt poll got nil
+	// first poll got nil
 	r, next := oc.pollNeedDispatchRegion()
 	c.Assert(r, IsNil)
 	c.Assert(next, IsFalse)
@@ -326,7 +326,7 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	c.Assert(next, IsTrue)
 	c.Assert(r.GetID(), Equals, region4.GetID())
 
-	// after waiting 500 millseconds, the region2 need to dispatch
+	// after waiting 500 milliseconds, the region2 need to dispatch
 	time.Sleep(400 * time.Millisecond)
 	r, next = oc.pollNeedDispatchRegion()
 	c.Assert(r, NotNil)
@@ -437,7 +437,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	c.Assert(op.ConfVerChanged(region), Equals, uint64(1))
 	c.Assert(len(stream.MsgCh()), Equals, 2)
 
-	// add and disaptch op again, the op should be stale
+	// add and dispatch op again, the op should be stale
 	op = operator.NewOperator("test", "test", 1,
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
 		operator.OpRegion, steps...)
@@ -668,7 +668,7 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 		return op
 	}
 
-	// a batch of operators should be added atomiclly
+	// a batch of operators should be added atomically
 	var batch []*operator.Operator
 	for i := uint64(0); i < cluster.GetSchedulerMaxWaitingOperator()-1; i++ {
 		batch = append(batch, addPeerOp(i))

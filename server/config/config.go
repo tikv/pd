@@ -83,8 +83,11 @@ type Config struct {
 	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
 	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
 
-	// Tso service related configuration.
-	Tso TsoConfig `toml:"tso" json:"tso"`
+	// TSOSaveInterval is the interval to save timestamp.
+	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+
+	// Local TSO service related configuration.
+	LocalTSO LocalTSOConfig `toml:"local-tso" json:"local-tso"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -493,7 +496,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
-	if err := c.Tso.adjust(); err != nil {
+	adjustDuration(&c.TSOSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
+
+	if err := c.LocalTSO.Validate(); err != nil {
 		return err
 	}
 
@@ -1022,7 +1027,7 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
-	// MaxResetTSGap is the max gap to reset the tso.
+	// MaxResetTSGap is the max gap to reset the TSO.
 	MaxResetTSGap typeutil.Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
@@ -1240,12 +1245,13 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath       string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
-	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb-cert-path"`
-	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb-key-path"`
-	PublicPathPrefix string `toml:"public-path-prefix" json:"public-path-prefix"`
-	InternalProxy    bool   `toml:"internal-proxy" json:"internal-proxy"`
-	EnableTelemetry  bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	TiDBCAPath         string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
+	TiDBCertPath       string `toml:"tidb-cert-path" json:"tidb-cert-path"`
+	TiDBKeyPath        string `toml:"tidb-key-path" json:"tidb-key-path"`
+	PublicPathPrefix   string `toml:"public-path-prefix" json:"public-path-prefix"`
+	InternalProxy      bool   `toml:"internal-proxy" json:"internal-proxy"`
+	EnableTelemetry    bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	EnableExperimental bool   `toml:"enable-experimental" json:"enable-experimental"`
 	// WARN: DisableTelemetry is deprecated.
 	DisableTelemetry bool `toml:"disable-telemetry" json:"disable-telemetry,omitempty"`
 }
@@ -1323,31 +1329,24 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	}
 }
 
-// TsoConfig is the configuration for Tso service.
-type TsoConfig struct {
-	// TsoSaveInterval is the interval to save timestamp.
-	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
-	// EnableLocalTso is used to enable the Local TSO Allocator feature,
-	// which allows the PD server to generate local Tso for certain DC-level transactions.
+// LocalTSOConfig is the configuration for Local TSO service.
+type LocalTSOConfig struct {
+	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
+	// which allows the PD server to generate local TSO for certain DC-level transactions.
 	// To make this feature meaningful, user has to set the dc-location configuration for
 	// each PD server.
-	EnableLocalTso bool `toml:"enable-local-tso" json:"enable-local-tso"`
+	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
 	// DCLocation indicates that which data center a PD server is in. According to it,
-	// the PD cluster can elect a TSO allocator to generate local Tso for
+	// the PD cluster can elect a TSO allocator to generate local TSO for
 	// DC-level transactions.
 	DCLocation string `toml:"dc-location" json:"dc-location"`
 }
 
-// Validate is used to validate if some Tso configurations are right.
-func (c *TsoConfig) Validate() error {
+// Validate is used to validate if some TSO configurations are right.
+func (c *LocalTSOConfig) Validate() error {
 	if c.DCLocation == tso.GlobalDCLocation {
 		errMsg := fmt.Sprintf("dc-location %s is the PD reserved label to represent the PD leader, please try another one.", tso.GlobalDCLocation)
 		return errors.New(errMsg)
 	}
 	return nil
-}
-
-func (c *TsoConfig) adjust() error {
-	adjustDuration(&c.TsoSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
-	return c.Validate()
 }

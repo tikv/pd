@@ -70,10 +70,8 @@ func NewTestSingleConfig(c *check.C) *config.Config {
 
 		InitialClusterState: embed.ClusterStateFlagNew,
 
-		LeaderLease: 1,
-		Tso: config.TsoConfig{
-			TsoSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
-		},
+		LeaderLease:     1,
+		TSOSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
 	}
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls

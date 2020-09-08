@@ -152,7 +152,7 @@ func transferPDLeaderCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := leaderMemberPrefix + "/transfer/" + args[0]
 	_, err := doRequest(cmd, prefix, http.MethodPost)
 	if err != nil {
-		cmd.Printf("Failed to trasfer leadership: %s\n", err)
+		cmd.Printf("Failed to transfer leadership: %s\n", err)
 		return
 	}
 	cmd.Println("Success!")

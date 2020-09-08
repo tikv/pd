@@ -47,12 +47,12 @@ func (s *testDistinctScoreSuite) TestDistinctScore(c *C) {
 				stores = append(stores, store)
 
 				// Number of stores in different zones.
-				nzones := i * len(racks) * len(hosts)
+				numZones := i * len(racks) * len(hosts)
 				// Number of stores in the same zone but in different racks.
-				nracks := j * len(hosts)
+				numRacks := j * len(hosts)
 				// Number of stores in the same rack but in different hosts.
-				nhosts := k
-				score := (nzones*replicaBaseScore+nracks)*replicaBaseScore + nhosts
+				numHosts := k
+				score := (numZones*replicaBaseScore+numRacks)*replicaBaseScore + numHosts
 				c.Assert(DistinctScore(labels, stores, store), Equals, float64(score))
 			}
 		}

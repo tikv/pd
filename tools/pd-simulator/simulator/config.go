@@ -20,7 +20,7 @@ const (
 	defaultStoreVersion       = "2.1.0"
 	// server
 	defaultLeaderLease                 = 1
-	defaultTsoSaveInterval             = 200 * time.Millisecond
+	defaultTSOSaveInterval             = 200 * time.Millisecond
 	defaultTickInterval                = 100 * time.Millisecond
 	defaultElectionInterval            = 3 * time.Second
 	defaultLeaderPriorityCheckInterval = 100 * time.Millisecond
@@ -88,7 +88,7 @@ func (sc *SimConfig) Adjust() error {
 	adjustInt64(&sc.StoreIOMBPerSecond, defaultStoreIOMBPerSecond)
 	adjustString(&sc.StoreVersion, defaultStoreVersion)
 	adjustInt64(&sc.ServerConfig.LeaderLease, defaultLeaderLease)
-	adjustDuration(&sc.ServerConfig.Tso.TsoSaveInterval, defaultTsoSaveInterval)
+	adjustDuration(&sc.ServerConfig.TSOSaveInterval, defaultTSOSaveInterval)
 	adjustDuration(&sc.ServerConfig.TickInterval, defaultTickInterval)
 	adjustDuration(&sc.ServerConfig.ElectionInterval, defaultElectionInterval)
 	adjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
