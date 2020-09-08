@@ -474,7 +474,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return err
 	}
 
-	if c.IsPlacementRulesEnabled() {
+	if c.GetOpts().IsPlacementRulesEnabled() {
 		// Cannot determine role when placement rules enabled. Not supported now.
 		return errors.New("transfer region is not supported when placement rules enabled")
 	}
@@ -484,7 +484,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return ErrRegionNotFound(regionID)
 	}
 
-	if len(storeIDs) > c.GetMaxReplicas() {
+	if len(storeIDs) > c.GetOpts().GetMaxReplicas() {
 		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDs))
 	}
 

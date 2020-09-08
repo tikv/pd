@@ -17,8 +17,8 @@ import (
 	"math/rand"
 	"sort"
 
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/opt"
 )
 
 // StoreCandidates wraps store list and proivde utilities to select source or
@@ -33,13 +33,13 @@ func NewCandidates(stores []*core.StoreInfo) *StoreCandidates {
 }
 
 // FilterSource keeps stores that can pass all source filters.
-func (c *StoreCandidates) FilterSource(opt opt.Options, filters ...Filter) *StoreCandidates {
+func (c *StoreCandidates) FilterSource(opt *config.PersistOptions, filters ...Filter) *StoreCandidates {
 	c.Stores = SelectSourceStores(c.Stores, filters, opt)
 	return c
 }
 
 // FilterTarget keeps stores that can pass all target filters.
-func (c *StoreCandidates) FilterTarget(opt opt.Options, filters ...Filter) *StoreCandidates {
+func (c *StoreCandidates) FilterTarget(opt *config.PersistOptions, filters ...Filter) *StoreCandidates {
 	c.Stores = SelectTargetStores(c.Stores, filters, opt)
 	return c
 }

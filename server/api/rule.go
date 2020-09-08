@@ -52,7 +52,7 @@ func newRulesHandler(svr *server.Server, rd *render.Render) *ruleHandler {
 // @Router /config/rules [get]
 func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -71,7 +71,7 @@ func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 // @Router /config/rules [get]
 func (h *ruleHandler) SetAll(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -101,7 +101,7 @@ func (h *ruleHandler) SetAll(w http.ResponseWriter, r *http.Request) {
 // @Router /config/rules/group/{group} [get]
 func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -121,7 +121,7 @@ func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
 // @Router /config/rules/region/{region} [get]
 func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -150,7 +150,7 @@ func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
 // @Router /config/rules/key/{key} [get]
 func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -175,7 +175,7 @@ func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 // @Router /config/rule/{group}/{id} [get]
 func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -200,7 +200,7 @@ func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Router /config/rule [post]
 func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -265,7 +265,7 @@ func (h *ruleHandler) checkRule(r *placement.Rule) error {
 // @Router /config/rule/{group}/{id} [delete]
 func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -293,7 +293,7 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Router /config/rules/batch [post]
 func (h *ruleHandler) Batch(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -327,7 +327,7 @@ func (h *ruleHandler) Batch(w http.ResponseWriter, r *http.Request) {
 // @Router /config/rule_group/{id} [get]
 func (h *ruleHandler) GetGroupConfig(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -352,7 +352,7 @@ func (h *ruleHandler) GetGroupConfig(w http.ResponseWriter, r *http.Request) {
 // @Router /config/rule_group [post]
 func (h *ruleHandler) SetGroupConfig(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -380,7 +380,7 @@ func (h *ruleHandler) SetGroupConfig(w http.ResponseWriter, r *http.Request) {
 // @Router /config/rule_group/{id} [delete]
 func (h *ruleHandler) DeleteGroupConfig(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -404,7 +404,7 @@ func (h *ruleHandler) DeleteGroupConfig(w http.ResponseWriter, r *http.Request) 
 // @Router /config/rule_groups [get]
 func (h *ruleHandler) GetAllGroupConfigs(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -420,7 +420,7 @@ func (h *ruleHandler) GetAllGroupConfigs(w http.ResponseWriter, r *http.Request)
 // @Router /config/placement-rule [get]
 func (h *ruleHandler) GetAllGroupBundles(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -438,7 +438,7 @@ func (h *ruleHandler) GetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 // @Router /config/placement-rule [post]
 func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -470,7 +470,7 @@ func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 // @Router /config/placement-rule/{group} [get]
 func (h *ruleHandler) GetGroupBundle(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -489,7 +489,7 @@ func (h *ruleHandler) GetGroupBundle(w http.ResponseWriter, r *http.Request) {
 // @Router /config/placement-rule [delete]
 func (h *ruleHandler) DeleteGroupBundle(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
@@ -517,7 +517,7 @@ func (h *ruleHandler) DeleteGroupBundle(w http.ResponseWriter, r *http.Request) 
 // @Router /config/placement-rule/{group} [post]
 func (h *ruleHandler) SetGroupBundle(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
-	if !cluster.IsPlacementRulesEnabled() {
+	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}

@@ -22,8 +22,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -41,7 +41,7 @@ const (
 
 // Cluster provides an overview of a cluster's regions distribution.
 type Cluster interface {
-	opt.Options
+	GetOpts() *config.PersistOptions
 	GetStore(id uint64) *core.StoreInfo
 	AllocID() (uint64, error)
 	FitRegion(region *core.RegionInfo) *placement.RegionFit

@@ -126,20 +126,21 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpRegion)-s.opController.OperatorCount(operator.OpMerge) < cluster.GetRegionScheduleLimit()
+	return s.opController.OperatorCount(operator.OpRegion)-s.opController.OperatorCount(operator.OpMerge) < cluster.GetOpts().GetRegionScheduleLimit()
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
-	stores = filter.SelectSourceStores(stores, s.filters, cluster)
+	opts := cluster.GetOpts()
+	stores = filter.SelectSourceStores(stores, s.filters, opts)
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
 	sort.Slice(stores, func(i, j int) bool {
 		iOp := opInfluence.GetStoreInfluence(stores[i].GetID()).ResourceProperty(kind)
 		jOp := opInfluence.GetStoreInfluence(stores[j].GetID()).ResourceProperty(kind)
-		return stores[i].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), iOp) >
-			stores[j].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), jOp)
+		return stores[i].RegionScore(opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp) >
+			stores[j].RegionScore(opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
 	})
 	for _, source := range stores {
 		sourceID := source.GetID()
@@ -201,8 +202,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 	}
 
 	candidates := filter.NewCandidates(cluster.GetStores()).
-		FilterTarget(cluster, filters...).
-		Sort(filter.RegionScoreComparer(cluster))
+		FilterTarget(cluster.GetOpts(), filters...).
+		Sort(filter.RegionScoreComparer(cluster.GetOpts()))
 
 	for _, target := range candidates.Stores {
 		regionID := region.GetID()
