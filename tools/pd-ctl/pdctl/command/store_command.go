@@ -396,7 +396,6 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 	} else {
 		if args[0] != "all" {
 			cmd.Println("Labels are an option of set all stores limit.")
-			return
 		} else {
 			postInput := map[string]interface{}{}
 			prefix := path.Join(storesPrefix, "limit")
