@@ -205,7 +205,7 @@ func (m *Member) CheckPriority(ctx context.Context) {
 	}
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
-		log.Error("failed to load etcd leader priority", errs.ZapError(err))
+		log.Error("failed to load leader priority", errs.ZapError(err))
 		return
 	}
 	leaderPriority, err := m.GetMemberLeaderPriority(etcdLeader)
