@@ -66,7 +66,7 @@ func (c *ttlCache) putWithTTL(key interface{}, value interface{}, ttl time.Durat
 	}
 }
 
-// Get retrives an item from cache.
+// Get retrieves an item from cache.
 func (c *ttlCache) get(key interface{}) (interface{}, bool) {
 	c.RLock()
 	defer c.RUnlock()

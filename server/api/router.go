@@ -191,7 +191,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	clusterRouter.HandleFunc("/admin/reset-ts", adminHandler.ResetTS).Methods("POST")
 	apiRouter.HandleFunc("/admin/persist-file/{file_name}", adminHandler.persistFile).Methods("POST")
 
-	logHandler := newlogHandler(svr, rd)
+	logHandler := newLogHandler(svr, rd)
 	apiRouter.HandleFunc("/admin/log", logHandler.Handle).Methods("POST")
 
 	replicationModeHandler := newReplicationModeHandler(svr, rd)

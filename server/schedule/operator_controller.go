@@ -92,7 +92,7 @@ func (oc *OperatorController) Ctx() context.Context {
 	return oc.ctx
 }
 
-// GetCluster exports cluster to evict-scheduler for check sctore status.
+// GetCluster exports cluster to evict-scheduler for check store status.
 func (oc *OperatorController) GetCluster() opt.Cluster {
 	oc.RLock()
 	defer oc.RUnlock()
@@ -483,7 +483,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 }
 
 // RemoveOperator removes a operator from the running operators.
-func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFileds ...zap.Field) bool {
+func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFields ...zap.Field) bool {
 	oc.Lock()
 	removed := oc.removeOperatorLocked(op)
 	oc.Unlock()
@@ -494,7 +494,7 @@ func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFileds 
 				zap.Duration("takes", op.RunningTime()),
 				zap.Reflect("operator", op))
 		}
-		oc.buryOperator(op, extraFileds...)
+		oc.buryOperator(op, extraFields...)
 	}
 	return removed
 }
@@ -516,7 +516,7 @@ func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 	return false
 }
 
-func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ...zap.Field) {
+func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ...zap.Field) {
 	st := op.Status()
 
 	if !operator.IsEndStatus(st) {
@@ -558,14 +558,14 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ..
 			zap.Reflect("operator", op))
 		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 	case operator.CANCELED:
-		fileds := []zap.Field{
+		fields := []zap.Field{
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
 		}
-		fileds = append(fileds, extraFileds...)
+		fields = append(fields, extraFields...)
 		log.Info("operator canceled",
-			fileds...,
+			fields...,
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}

@@ -28,7 +28,7 @@ func (b ByteSize) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + units.BytesSize(float64(b)) + `"`), nil
 }
 
-// UnmarshalJSON parses a JSON string into the bytesize.
+// UnmarshalJSON parses a JSON string into the byte size.
 func (b *ByteSize) UnmarshalJSON(text []byte) error {
 	s, err := strconv.Unquote(string(text))
 	if err != nil {
@@ -42,7 +42,7 @@ func (b *ByteSize) UnmarshalJSON(text []byte) error {
 	return nil
 }
 
-// UnmarshalText parses a Toml string into the bytesize.
+// UnmarshalText parses a Toml string into the byte size.
 func (b *ByteSize) UnmarshalText(text []byte) error {
 	v, err := units.RAMInBytes(string(text))
 	if err != nil {

@@ -511,7 +511,7 @@ func (b *Builder) comparePlan(best, next stepPlan) stepPlan {
 		// operator with less leader transfer steps.
 		b.preferAddOrPromoteTargetLeader, // 4. it is precondition of 5 so goes first.
 		b.preferTargetLeader,             // 5. it may help 6 in later steps.
-		b.preferLessLeaderTransfer,       // 6. trival optimization to make the operator more tidy.
+		b.preferLessLeaderTransfer,       // 6. trivial optimization to make the operator more tidy.
 	}
 	for _, t := range fs {
 		if tb, tc := t(best), t(next); tb > tc {

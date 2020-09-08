@@ -265,6 +265,6 @@ func (s *calculationTestSuite) TestGetTotalCPUQuota(c *C) {
 		},
 	}
 	totalCPUQuota, _ := getTotalCPUQuota(querier, TiDB, instances, time.Now())
-	expected := uint64(mockResultValue * float64(len(instances)*millicores))
+	expected := uint64(mockResultValue * float64(len(instances)*milliCores))
 	c.Assert(totalCPUQuota, Equals, expected)
 }
