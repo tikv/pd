@@ -34,3 +34,11 @@ func Uint64ToBytes(v uint64) []byte {
 	binary.BigEndian.PutUint64(b, v)
 	return b
 }
+
+// BoolToUint64 converts bool to uint64.
+func BoolToUint64(b bool) uint64 {
+	if b {
+		return 1
+	}
+	return 0
+}
