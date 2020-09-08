@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 
 	"github.com/BurntSushi/toml"
@@ -82,8 +83,8 @@ type Config struct {
 	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
 	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
 
-	// TsoSaveInterval is the interval to save timestamp.
-	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+	// Tso service related configuration.
+	Tso TsoConfig `toml:"tso" json:"tso"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -492,7 +493,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
-	adjustDuration(&c.TsoSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
+	if err := c.Tso.adjust(); err != nil {
+		return err
+	}
 
 	if c.nextRetryDelay == 0 {
 		c.nextRetryDelay = defaultNextRetryDelay
@@ -1318,4 +1321,33 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-sync-timeout") {
 		c.WaitSyncTimeout = typeutil.Duration{Duration: defaultDRWaitSyncTimeout}
 	}
+}
+
+// TsoConfig is the configuration for Tso service.
+type TsoConfig struct {
+	// TsoSaveInterval is the interval to save timestamp.
+	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+	// EnableLocalTso is used to enable the Local TSO Allocator feature,
+	// which allows the PD server to generate local Tso for certain DC-level transactions.
+	// To make this feature meaningful, user has to set the dc-location configuration for
+	// each PD server.
+	EnableLocalTso bool `toml:"enable-local-tso" json:"enable-local-tso"`
+	// DCLocation indicates that which data center a PD server is in. According to it,
+	// the PD cluster can elect a TSO allocator to generate local Tso for
+	// DC-level transactions.
+	DCLocation string `toml:"dc-location" json:"dc-location"`
+}
+
+// Validate is used to validate if some Tso configurations are right.
+func (c *TsoConfig) Validate() error {
+	if c.DCLocation == tso.GlobalDCLocation {
+		errMsg := fmt.Sprintf("dc-location %s is the PD reserved label to represent the PD leader, please try another one.", tso.GlobalDCLocation)
+		return errors.New(errMsg)
+	}
+	return nil
+}
+
+func (c *TsoConfig) adjust() error {
+	adjustDuration(&c.TsoSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
+	return c.Validate()
 }

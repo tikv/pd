@@ -88,7 +88,7 @@ func (sc *SimConfig) Adjust() error {
 	adjustInt64(&sc.StoreIOMBPerSecond, defaultStoreIOMBPerSecond)
 	adjustString(&sc.StoreVersion, defaultStoreVersion)
 	adjustInt64(&sc.ServerConfig.LeaderLease, defaultLeaderLease)
-	adjustDuration(&sc.ServerConfig.TsoSaveInterval, defaultTsoSaveInterval)
+	adjustDuration(&sc.ServerConfig.Tso.TsoSaveInterval, defaultTsoSaveInterval)
 	adjustDuration(&sc.ServerConfig.TickInterval, defaultTickInterval)
 	adjustDuration(&sc.ServerConfig.ElectionInterval, defaultElectionInterval)
 	adjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
