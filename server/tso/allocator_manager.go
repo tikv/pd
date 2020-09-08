@@ -176,6 +176,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(parentCtx context.Context, a
 	// Start keepalive the Local TSO Allocator leadership and enable Local TSO service.
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
+	defer am.resetAllocatorGroup(allocator.dcLocation)
 	// maintain the Local TSO Allocator leader
 	go allocator.KeepAllocatorLeader(ctx)
 	log.Info("campaign local tso allocator leader ok",
@@ -212,7 +213,6 @@ func (am *AllocatorManager) campaignAllocatorLeader(parentCtx context.Context, a
 			log.Info("server is closed, reset the local tso allocator",
 				zap.String("dc-location", allocator.dcLocation),
 				zap.String("name", am.member.Member().Name))
-			am.resetAllocatorGroup(allocator.dcLocation)
 			return
 		}
 	}

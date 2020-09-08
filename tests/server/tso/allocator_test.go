@@ -56,7 +56,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
-	// There will be the number of dc-locations Local TSO Allocator leaders elected
+	// There will be three Local TSO Allocator leaders elected
 	testDCLocations := []string{"dc-1", "dc-2", "dc-3"}
 	dcLocationNum := len(testDCLocations)
 	for _, dcLocation := range testDCLocations {
@@ -77,8 +77,8 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	for _, server := range cluster.GetServers() {
 		// Filter out Global TSO Allocator and uninitialized Local TSO Allocator
 		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(tso.GlobalDCLocation), tso.FilterUninitialized())
-		// One PD server will have at most two initialized Local TSO Allocators,
-		// which also means two allocator leaders
+		// One PD server will have at most three initialized Local TSO Allocators,
+		// which also means three allocator leaders
 		c.Assert(len(allocators), LessEqual, dcLocationNum)
 		if len(allocators) == 0 {
 			continue
@@ -93,7 +93,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 			}
 		}
 	}
-	// At the end, we should have two initialized Local TSO Allocator,
+	// At the end, we should have three initialized Local TSO Allocator,
 	// i.e., the Local TSO Allocator leaders for all dc-locations in testDCLocations
 	c.Assert(len(allAllocatorLeaders), Equals, dcLocationNum)
 	allocatorLeaderMemberIDs := make([]uint64, 0, dcLocationNum)
