@@ -1779,24 +1779,8 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 }
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
-func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64, labels... config.StoreLabel) {
-	if len(labels) == 0 {
-		c.opt.SetAllStoresLimit(typ, ratePerMin)
-	} else {
-		c.setLabelStoresLimit(typ, ratePerMin, labels...)
-	}
-}
-
-func (c *RaftCluster) setLabelStoresLimit(typ storelimit.Type, ratePerMin float64, labels... config.StoreLabel) {
-	for _, store := range c.GetStores() {
-		for _, sl := range store.GetLabels() {
-			for _, l := range labels {
-				if sl.Key == l.Key && sl.Value == l.Value {
-					c.SetStoreLimit(store.GetID(), typ, ratePerMin)
-				}
-			}
-		}
-	}
+func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
+	c.opt.SetAllStoresLimit(typ, ratePerMin)
 }
 
 // GetClusterVersion returns the current cluster version.

@@ -457,10 +457,23 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, typ := range typeValues {
-		if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
+	if labels, ok := input["labels"]; !ok {
+		for _, typ := range typeValues {
+			if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	} else {
+		labelValues, ok := labels.([]config.StoreLabel)
+		if !ok || labelValues == nil {
+			h.rd.JSON(w, http.StatusBadRequest, "invalid store labels")
+		}
+		for _, typ := range typeValues {
+			if err := h.SetLabelStoresLimit(ratePerMin, typ, labelValues); err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 	}
 
