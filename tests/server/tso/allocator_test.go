@@ -75,7 +75,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	for i := 0; i < 20; i++ {
 		for _, server := range cluster.GetServers() {
 			// Filter out Global TSO Allocator and uninitialized Local TSO Allocator
-			allocators := server.GetTSOAllocatorManager().GetAllocators(false, true, true)
+			allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(tso.GlobalDCLocation), tso.FilterInitialized(false))
 			// One PD server will have at most two initialized Local TSO Allocators,
 			// which also means two allocator leaders
 			c.Assert(len(allocators), LessEqual, dcLocationNum)
@@ -104,7 +104,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	}
 	for _, server := range cluster.GetServers() {
 		// Filter out Global TSO Allocator
-		allocators := server.GetTSOAllocatorManager().GetAllocators(false, true, false)
+		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(tso.GlobalDCLocation))
 		c.Assert(len(allocators), Equals, dcLocationNum)
 		for _, allocator := range allocators {
 			allocatorFollower, _ := allocator.(*tso.LocalTSOAllocator)
