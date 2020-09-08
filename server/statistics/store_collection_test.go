@@ -18,7 +18,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -27,8 +27,10 @@ var _ = Suite(&testStoreStatisticsSuite{})
 type testStoreStatisticsSuite struct{}
 
 func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
-	opt := mockoption.NewScheduleOptions()
-	opt.LocationLabels = []string{"zone", "host"}
+	opt := config.NewTestOptions()
+	rep := opt.GetReplicationConfig().Clone()
+	rep.LocationLabels = []string{"zone", "host"}
+	opt.SetReplicationConfig(rep)
 
 	metaStores := []*metapb.Store{
 		{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}},

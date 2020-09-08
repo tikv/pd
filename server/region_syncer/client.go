@@ -128,7 +128,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		// used to load region from kv storage to cache storage.
 		err := s.server.GetStorage().LoadRegionsOnce(s.server.GetBasicCluster().CheckAndPutRegion)
 		if err != nil {
-			log.Warn("failed to load regions.", zap.Error(err))
+			log.Warn("failed to load regions.", errs.ZapError(err))
 		}
 		// establish client.
 		var conn *grpc.ClientConn

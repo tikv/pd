@@ -17,7 +17,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/versioninfo"
@@ -31,7 +31,7 @@ type testLearnerCheckerSuite struct {
 }
 
 func (s *testLearnerCheckerSuite) SetUpTest(c *C) {
-	s.cluster = mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	s.cluster = mockcluster.NewCluster(config.NewTestOptions())
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.lc = NewLearnerChecker(s.cluster)
 	for id := uint64(1); id <= 10; id++ {

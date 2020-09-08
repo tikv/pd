@@ -111,8 +111,8 @@ func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit &&
-		s.OpController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit() &&
-		s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+		s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit() &&
+		s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 }
 
 func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
@@ -123,7 +123,7 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 
 func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
 	storesStats := cluster.GetStoresStats()
-	minHotDegree := cluster.GetHotRegionCacheHitsThreshold()
+	minHotDegree := cluster.GetOpts().GetHotRegionCacheHitsThreshold()
 	switch typ {
 	case read:
 		hotRegionThreshold := getHotRegionThreshold(storesStats, read)
@@ -177,7 +177,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 		stores := cluster.GetStores()
 		destStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
-			if !filter.Target(cluster, store, filters) {
+			if !filter.Target(cluster.GetOpts(), store, filters) {
 				continue
 			}
 			destStoreIDs = append(destStoreIDs, store.GetID())

@@ -180,7 +180,7 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 		return
 	}
 	if err := ag.allocator.UpdateTSO(); err != nil {
-		log.Warn("failed to update allocator's timestamp", zap.String("dc-location", ag.dcLocation), zap.Error(err))
+		log.Warn("failed to update allocator's timestamp", zap.String("dc-location", ag.dcLocation), errs.ZapError(err))
 		ag.parentCancel()
 		return
 	}

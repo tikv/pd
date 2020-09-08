@@ -160,7 +160,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 		return false
 	}
 	stateFilter := filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
-	if !stateFilter.Target(c.cluster, s) {
+	if !stateFilter.Target(c.cluster.GetOpts(), s) {
 		return false
 	}
 	for _, rf := range fit.RuleFits {
@@ -220,10 +220,10 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return false
 		}
-		if store.DownTime() < c.cluster.GetMaxStoreDownTime() {
+		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
 			continue
 		}
-		if stats.GetDownSeconds() < uint64(c.cluster.GetMaxStoreDownTime().Seconds()) {
+		if stats.GetDownSeconds() < uint64(c.cluster.GetOpts().GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
 		return true
