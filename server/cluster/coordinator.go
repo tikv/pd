@@ -90,7 +90,7 @@ func (c *coordinator) patrolRegions() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	timer := time.NewTimer(c.cluster.GetPatrolRegionInterval())
+	timer := time.NewTimer(c.cluster.GetOpts().GetPatrolRegionInterval())
 	defer timer.Stop()
 
 	log.Info("coordinator starts patrol regions")
@@ -99,7 +99,7 @@ func (c *coordinator) patrolRegions() {
 	for {
 		select {
 		case <-timer.C:
-			timer.Reset(c.cluster.GetPatrolRegionInterval())
+			timer.Reset(c.cluster.GetOpts().GetPatrolRegionInterval())
 		case <-c.ctx.Done():
 			log.Info("patrol regions has been stopped")
 			return

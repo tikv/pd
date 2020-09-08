@@ -70,7 +70,7 @@ func NewBuilder(desc string, cluster Cluster, region *core.RegionInfo) *Builder 
 	}
 
 	var rules []*placement.Rule
-	if cluster.IsPlacementRulesEnabled() {
+	if cluster.GetOpts().IsPlacementRulesEnabled() {
 		fit := cluster.FitRegion(region)
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
@@ -352,7 +352,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 		return false
 	}
 	stateFilter := filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
-	if !stateFilter.Target(b.cluster, store) {
+	if !stateFilter.Target(b.cluster.GetOpts(), store) {
 		return false
 	}
 	if len(b.rules) == 0 {
@@ -528,7 +528,7 @@ func (b *Builder) labelMatch(x, y uint64) int {
 	if sx == nil || sy == nil {
 		return 0
 	}
-	labels := b.cluster.GetLocationLabels()
+	labels := b.cluster.GetOpts().GetLocationLabels()
 	for i, l := range labels {
 		if sx.GetLabelValue(l) != sy.GetLabelValue(l) {
 			return i

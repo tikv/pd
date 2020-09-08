@@ -96,7 +96,7 @@ func (r *RangeCluster) GetTolerantSizeRatio() float64 {
 	if r.tolerantSizeRatio != 0 {
 		return r.tolerantSizeRatio
 	}
-	return r.Cluster.GetTolerantSizeRatio()
+	return r.Cluster.GetOpts().GetTolerantSizeRatio()
 }
 
 // RandFollowerRegion returns a random region that has a follower on the store.
