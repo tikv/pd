@@ -1218,12 +1218,13 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath       string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
-	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb-cert-path"`
-	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb-key-path"`
-	PublicPathPrefix string `toml:"public-path-prefix" json:"public-path-prefix"`
-	InternalProxy    bool   `toml:"internal-proxy" json:"internal-proxy"`
-	EnableTelemetry  bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	TiDBCAPath         string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
+	TiDBCertPath       string `toml:"tidb-cert-path" json:"tidb-cert-path"`
+	TiDBKeyPath        string `toml:"tidb-key-path" json:"tidb-key-path"`
+	PublicPathPrefix   string `toml:"public-path-prefix" json:"public-path-prefix"`
+	InternalProxy      bool   `toml:"internal-proxy" json:"internal-proxy"`
+	EnableTelemetry    bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	EnableExperimental bool   `toml:"enable-experimental" json:"enable-experimental"`
 	// WARN: DisableTelemetry is deprecated.
 	DisableTelemetry bool `toml:"disable-telemetry" json:"disable-telemetry,omitempty"`
 }
