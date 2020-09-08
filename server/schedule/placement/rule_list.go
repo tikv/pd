@@ -8,7 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// See the License for the specific language governing perlissions and
+// See the License for the specific language governing permissions and
 // limitations under the License.
 
 package placement
@@ -43,7 +43,7 @@ type sortedRules struct {
 	rules []*Rule
 }
 
-// insertRule inserts a rule into soretedRules while keeping the order unchanged
+// insertRule inserts a rule into sortedRules while keeping the order unchanged
 func (sr *sortedRules) insertRule(rule *Rule) {
 	i := sort.Search(len(sr.rules), func(i int) bool {
 		return compareRule(sr.rules[i], rule) > 0

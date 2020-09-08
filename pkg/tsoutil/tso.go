@@ -32,7 +32,7 @@ func ParseTS(ts uint64) (time.Time, uint64) {
 	return physicalTime, logical
 }
 
-// ParseTimestamp parses pdpb.Timestamp to time.Time
+// ParseTimestamp parses `pdpb.Timestamp` to `time.Time`
 func ParseTimestamp(ts pdpb.Timestamp) (time.Time, uint64) {
 	logical := uint64(ts.Logical)
 	physical := ts.Physical

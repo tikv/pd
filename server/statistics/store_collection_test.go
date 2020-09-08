@@ -65,7 +65,7 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 	c.Assert(stats.Down, Equals, 1)
 	c.Assert(stats.Offline, Equals, 1)
 	c.Assert(stats.RegionCount, Equals, 0)
-	c.Assert(stats.Unhealth, Equals, 0)
+	c.Assert(stats.Unhealthy, Equals, 0)
 	c.Assert(stats.Disconnect, Equals, 0)
 	c.Assert(stats.Tombstone, Equals, 1)
 	c.Assert(stats.LowSpace, Equals, 8)

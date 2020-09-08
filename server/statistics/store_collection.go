@@ -30,7 +30,7 @@ type storeStatistics struct {
 	opt             ScheduleOptions
 	Up              int
 	Disconnect      int
-	Unhealth        int
+	Unhealthy       int
 	Down            int
 	Offline         int
 	Tombstone       int
@@ -68,8 +68,8 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	case metapb.StoreState_Up:
 		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
 			s.Down++
-		} else if store.IsUnhealth() {
-			s.Unhealth++
+		} else if store.IsUnhealthy() {
+			s.Unhealthy++
 		} else if store.IsDisconnected() {
 			s.Disconnect++
 		} else {
@@ -129,7 +129,7 @@ func (s *storeStatistics) Collect() {
 	metrics["store_up_count"] = float64(s.Up)
 	metrics["store_disconnected_count"] = float64(s.Disconnect)
 	metrics["store_down_count"] = float64(s.Down)
-	metrics["store_unhealth_count"] = float64(s.Unhealth)
+	metrics["store_unhealth_count"] = float64(s.Unhealthy)
 	metrics["store_offline_count"] = float64(s.Offline)
 	metrics["store_tombstone_count"] = float64(s.Tombstone)
 	metrics["store_low_space_count"] = float64(s.LowSpace)

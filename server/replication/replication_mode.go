@@ -448,8 +448,8 @@ func (m *ModeManager) estimateProgress() float32 {
 		totalUnchecked = m.drSampleTotalRegion
 	}
 	total := m.drRecoverCount + totalUnchecked
-	uncheckRecoverd := float32(totalUnchecked) * float32(m.drSampleRecoverCount) / float32(m.drSampleTotalRegion)
-	return (float32(m.drRecoverCount) + uncheckRecoverd) / float32(total)
+	uncheckRecovered := float32(totalUnchecked) * float32(m.drSampleRecoverCount) / float32(m.drSampleTotalRegion)
+	return (float32(m.drRecoverCount) + uncheckRecovered) / float32(total)
 }
 
 func (m *ModeManager) checkRegionRecover(region *core.RegionInfo, startKey []byte) bool {

@@ -216,7 +216,7 @@ func (r *RaftEngine) updateRegionReadBytes(readBytes map[uint64]int64) {
 
 func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 	var (
-		unhealth         int
+		unhealthy        int
 		newLeaderStoreID uint64
 	)
 	ids := region.GetStoreIds()
@@ -224,10 +224,10 @@ func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 		if r.conn.nodeHealth(id) {
 			newLeaderStoreID = id
 		} else {
-			unhealth++
+			unhealthy++
 		}
 	}
-	if unhealth > len(ids)/2 {
+	if unhealthy > len(ids)/2 {
 		return nil
 	}
 	for _, peer := range region.GetPeers() {

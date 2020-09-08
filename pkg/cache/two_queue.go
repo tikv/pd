@@ -109,7 +109,7 @@ func (c *TwoQueue) ensureSpace(ghost bool) {
 	c.frequent.removeOldest()
 }
 
-// Get retrives an item from cache.
+// Get retrieves an item from cache.
 func (c *TwoQueue) Get(key uint64) (interface{}, bool) {
 	// Check in frequent list
 	if val, ok := c.frequent.Get(key); ok {

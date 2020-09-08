@@ -43,7 +43,7 @@ func (t *taskStatistics) getStatistics() map[string]int {
 	t.RLock()
 	defer t.RUnlock()
 	stats := make(map[string]int)
-	addpeer := getSum(t.addPeer)
+	addPeer := getSum(t.addPeer)
 	removePeer := getSum(t.removePeer)
 	addLearner := getSum(t.addLearner)
 	promoteLeaner := getSum(t.promoteLeaner)
@@ -55,7 +55,7 @@ func (t *taskStatistics) getStatistics() map[string]int {
 		}
 	}
 
-	stats["Add Peer (task)"] = addpeer
+	stats["Add Peer (task)"] = addPeer
 	stats["Remove Peer (task)"] = removePeer
 	stats["Add Learner (task)"] = addLearner
 	stats["Promote Learner (task)"] = promoteLeaner
