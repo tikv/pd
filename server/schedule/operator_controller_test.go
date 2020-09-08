@@ -426,7 +426,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerChanged(region), Equals, 0)
+	c.Assert(op.ConfVerChanged(region), Equals, uint64(0))
 	c.Assert(len(stream.MsgCh()), Equals, 2)
 
 	// report the result of removing peer
@@ -434,7 +434,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerChanged(region), Equals, 1)
+	c.Assert(op.ConfVerChanged(region), Equals, uint64(1))
 	c.Assert(len(stream.MsgCh()), Equals, 2)
 
 	// add and dispatch op again, the op should be stale
@@ -442,14 +442,14 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
 		operator.OpRegion, steps...)
 	c.Assert(controller.AddOperator(op), Equals, true)
-	c.Assert(op.ConfVerChanged(region), Equals, 0)
+	c.Assert(op.ConfVerChanged(region), Equals, uint64(0))
 	c.Assert(len(stream.MsgCh()), Equals, 3)
 
 	// report region with an abnormal confver
 	region = cluster.MockRegionInfo(1, 1, []uint64{1, 2}, []uint64{},
 		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
 	controller.Dispatch(region, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerChanged(region), Equals, 0)
+	c.Assert(op.ConfVerChanged(region), Equals, uint64(0))
 	// no new step
 	c.Assert(len(stream.MsgCh()), Equals, 3)
 }
@@ -510,7 +510,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		// In this case, the conf version has been changed, but the
 		// peer added is in pending state, the operator should not be
 		// removed by the stale checker
-		c.Assert(op.ConfVerChanged(region2), Equals, 1)
+		c.Assert(op.ConfVerChanged(region2), Equals, uint64(1))
 		c.Assert(controller.GetOperator(1), NotNil)
 		// The operator is valid yet, but the step should not be sent
 		// again, because it is in pending state, so the message channel
@@ -524,7 +524,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		)
 		c.Assert(steps[0].IsFinish(region3), Equals, true)
 		controller.Dispatch(region3, DispatchFromHeartBeat)
-		c.Assert(op.ConfVerChanged(region3), Equals, 1)
+		c.Assert(op.ConfVerChanged(region3), Equals, uint64(1))
 		c.Assert(len(stream.MsgCh()), Equals, 2)
 
 		region4 := region3.Clone(
@@ -533,7 +533,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		)
 		c.Assert(steps[1].IsFinish(region4), Equals, true)
 		controller.Dispatch(region4, DispatchFromHeartBeat)
-		c.Assert(op.ConfVerChanged(region4), Equals, 2)
+		c.Assert(op.ConfVerChanged(region4), Equals, uint64(2))
 		c.Assert(len(stream.MsgCh()), Equals, 3)
 
 		// Transfer leader
@@ -542,7 +542,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		)
 		c.Assert(steps[2].IsFinish(region5), Equals, true)
 		controller.Dispatch(region5, DispatchFromHeartBeat)
-		c.Assert(op.ConfVerChanged(region5), Equals, 2)
+		c.Assert(op.ConfVerChanged(region5), Equals, uint64(2))
 		c.Assert(len(stream.MsgCh()), Equals, 4)
 
 		// Remove peer
@@ -552,7 +552,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		)
 		c.Assert(steps[3].IsFinish(region6), Equals, true)
 		controller.Dispatch(region6, DispatchFromHeartBeat)
-		c.Assert(op.ConfVerChanged(region6), Equals, 3)
+		c.Assert(op.ConfVerChanged(region6), Equals, uint64(3))
 
 		// The Operator has finished, so no message should be sent
 		c.Assert(len(stream.MsgCh()), Equals, 4)
