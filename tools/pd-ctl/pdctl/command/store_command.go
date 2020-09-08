@@ -401,8 +401,8 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			postInput := map[string]interface{}{}
 			prefix := path.Join(storesPrefix, "limit")
 			ratePos := argsCount - 1
-			if argsCount % 2 == 1 {
-				postInput["type"] = args[argsCount - 1]
+			if argsCount%2 == 1 {
+				postInput["type"] = args[argsCount-1]
 				ratePos = argsCount - 2
 			}
 			rate, err := strconv.ParseFloat(args[ratePos], 64)
