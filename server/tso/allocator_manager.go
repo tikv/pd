@@ -297,10 +297,10 @@ func (am *AllocatorManager) resetAllocatorGroup(dcLocation string) {
 func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) []*allocatorGroup {
 	am.RLock()
 	defer am.RUnlock()
-	allocatorGroups := make([]*allocatorGroup, 0, len(am.allocatorGroups))
+	allocatorGroups := make([]*allocatorGroup, 0)
 	for _, ag := range am.allocatorGroups {
-		if ag != nil {
-			break
+		if ag == nil {
+			continue
 		}
 		if slice.NoneOf(filters, func(i int) bool { return filters[i](ag) }) {
 			allocatorGroups = append(allocatorGroups, ag)
