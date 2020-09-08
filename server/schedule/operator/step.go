@@ -237,6 +237,14 @@ type RemovePeer struct {
 // ConfVerChanged returns the delta value for version increased by this step.
 func (rp RemovePeer) ConfVerChanged(region *core.RegionInfo) uint64 {
 	id := region.GetStorePeer(rp.FromStore).GetId()
+	// 1. id == 0 -> The peer does not exist, it needs to return 1.
+	// 2. id != 0 && rp.PeerId == 0 -> No rp.PeerID is specified, and there is a Peer on the Store, it needs to return 0.
+	// 3. id != 0 && rp.PeerID != 0 && id == rp.PeerID -> The peer still exists, it needs to return 0.
+	// 4. id != 0 && rp.PeerID != 0 && id != rp.PeerID -> The rp.PeerID is specified,
+	//     and although there is a Peer on the Store, but the Id has changed, it should return 1.
+	//     This is for the following case:
+	//     If DemoteFollower step is not allowed, it will be split into RemovePeer and AddLearner.
+	//     After the AddLearner step, ConfVerChanged of RemovePeer should still return 1.
 	return typeutil.BoolToUint64(id == 0 || (rp.PeerID != 0 && id != rp.PeerID))
 }
 
