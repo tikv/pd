@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-const waitAllocatorCheckInterval = 500 * time.Millisecond
+const waitAllocatorCheckInterval = 1 * time.Second
 
 var _ = Suite(&testAllocatorSuite{})
 
@@ -47,7 +47,7 @@ func (s *testAllocatorSuite) TearDownSuite(c *C) {
 // Make sure we have the correct number of allocator leaders.
 func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	var err error
-	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	cluster, err := tests.NewTestCluster(s.ctx, 6)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
@@ -70,29 +70,28 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 
 		}
 	}
+	// Wait for a while to check
+	time.Sleep(waitAllocatorCheckInterval)
 	// To check whether we have enough Local TSO Allocator leaders
 	allAllocatorLeaders := make([]tso.Allocator, 0, dcLocationNum)
-	for i := 0; i < 20; i++ {
-		for _, server := range cluster.GetServers() {
-			// Filter out Global TSO Allocator and uninitialized Local TSO Allocator
-			allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(tso.GlobalDCLocation), tso.FilterUninitialized())
-			// One PD server will have at most two initialized Local TSO Allocators,
-			// which also means two allocator leaders
-			c.Assert(len(allocators), LessEqual, dcLocationNum)
-			if len(allocators) == 0 {
-				continue
-			}
-			if len(allAllocatorLeaders) == 0 {
-				allAllocatorLeaders = append(allAllocatorLeaders, allocators...)
-				continue
-			}
-			for _, allocator := range allocators {
-				if slice.NoneOf(allAllocatorLeaders, func(i int) bool { return allAllocatorLeaders[i] == allocator }) {
-					allAllocatorLeaders = append(allAllocatorLeaders, allocator)
-				}
+	for _, server := range cluster.GetServers() {
+		// Filter out Global TSO Allocator and uninitialized Local TSO Allocator
+		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(tso.GlobalDCLocation), tso.FilterUninitialized())
+		// One PD server will have at most two initialized Local TSO Allocators,
+		// which also means two allocator leaders
+		c.Assert(len(allocators), LessEqual, dcLocationNum)
+		if len(allocators) == 0 {
+			continue
+		}
+		if len(allAllocatorLeaders) == 0 {
+			allAllocatorLeaders = append(allAllocatorLeaders, allocators...)
+			continue
+		}
+		for _, allocator := range allocators {
+			if slice.NoneOf(allAllocatorLeaders, func(i int) bool { return allAllocatorLeaders[i] == allocator }) {
+				allAllocatorLeaders = append(allAllocatorLeaders, allocator)
 			}
 		}
-		time.Sleep(waitAllocatorCheckInterval)
 	}
 	// At the end, we should have two initialized Local TSO Allocator,
 	// i.e., the Local TSO Allocator leaders for all dc-locations in testDCLocations
@@ -100,7 +99,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	allocatorLeaderMemberIDs := make([]uint64, 0, dcLocationNum)
 	for _, allocator := range allAllocatorLeaders {
 		allocatorLeader, _ := allocator.(*tso.LocalTSOAllocator)
-		allocatorLeaderMemberIDs = append(allocatorLeaderMemberIDs, allocatorLeader.GetMember().MemberId)
+		allocatorLeaderMemberIDs = append(allocatorLeaderMemberIDs, allocatorLeader.GetMember().GetMemberId())
 	}
 	for _, server := range cluster.GetServers() {
 		// Filter out Global TSO Allocator
@@ -108,7 +107,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 		c.Assert(len(allocators), Equals, dcLocationNum)
 		for _, allocator := range allocators {
 			allocatorFollower, _ := allocator.(*tso.LocalTSOAllocator)
-			allocatorFollowerMemberID := allocatorFollower.GetAllocatorLeader().MemberId
+			allocatorFollowerMemberID := allocatorFollower.GetAllocatorLeader().GetMemberId()
 			c.Assert(
 				slice.AnyOf(
 					allocatorLeaderMemberIDs,
