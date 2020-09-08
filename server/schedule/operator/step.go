@@ -474,7 +474,7 @@ func (df DemoteFollower) CheckSafety(region *core.RegionInfo) error {
 		return errors.New("peer does not exist")
 	}
 	if peer.GetId() == region.GetLeader().GetId() {
-		return errors.New("peer is a leader, can not demote")
+		return errors.New("cannot demote leader peer")
 	}
 	return nil
 }
@@ -580,6 +580,10 @@ func (cpe ChangePeerV2Enter) CheckSafety(region *core.RegionInfo) error {
 			notInJointState = true
 		case metapb.PeerRole_IncomingVoter:
 			inJointState = true
+		case metapb.PeerRole_Voter:
+			return errors.New("peer already is a voter")
+		case metapb.PeerRole_DemotingVoter:
+			return errors.New("cannot promote a demoting voter")
 		default:
 			return errors.New("unexpected peer role")
 		}
@@ -594,17 +598,22 @@ func (cpe ChangePeerV2Enter) CheckSafety(region *core.RegionInfo) error {
 			notInJointState = true
 		case metapb.PeerRole_DemotingVoter:
 			inJointState = true
+		case metapb.PeerRole_Learner:
+			return errors.New("peer already is a learner")
+		case metapb.PeerRole_IncomingVoter:
+			return errors.New("cannot demote a incoming voter")
 		default:
 			return errors.New("unexpected peer role")
 		}
 	}
 
-	count := core.CountInJointState(region.GetPeers()...)
-	if (notInJointState && inJointState) ||
-		(notInJointState && count != 0) ||
-		(inJointState && count != len(cpe.PromoteLearners)+len(cpe.DemoteVoters)) {
-		// change is not atomic, or there are other peers in the joint state
-		return errors.New("unexpected peer role")
+	switch count := core.CountInJointState(region.GetPeers()...); {
+	case notInJointState && inJointState:
+		return errors.New("non-atomic joint consensus")
+	case notInJointState && count != 0:
+		return errors.New("some other peers are in joint state, when the region is in joint state")
+	case inJointState && count != len(cpe.PromoteLearners)+len(cpe.DemoteVoters):
+		return errors.New("some other peers are in joint state, when the region is not in joint state")
 	}
 
 	return nil
@@ -713,6 +722,10 @@ func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
 			notInJointState = true
 		case metapb.PeerRole_IncomingVoter:
 			inJointState = true
+		case metapb.PeerRole_Learner:
+			return errors.New("peer is still a learner")
+		case metapb.PeerRole_DemotingVoter:
+			return errors.New("cannot promote a demoting voter")
 		default:
 			return errors.New("unexpected peer role")
 		}
@@ -730,21 +743,24 @@ func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
 			if peer.GetStoreId() == leaderStoreID {
 				demoteLeader = true
 			}
+		case metapb.PeerRole_Voter:
+			return errors.New("peer is still a voter")
+		case metapb.PeerRole_IncomingVoter:
+			return errors.New("cannot demote a incoming voter")
 		default:
 			return errors.New("unexpected peer role")
 		}
 	}
 
-	count := core.CountInJointState(region.GetPeers()...)
-	if (notInJointState && inJointState) ||
-		(notInJointState && count != 0) ||
-		(inJointState && count != len(cpl.PromoteLearners)+len(cpl.DemoteVoters)) {
-		// change is not atomic, or there are other peers in the joint state
-		return errors.New("unexpected peer role")
-	}
-
-	if demoteLeader {
-		return errors.New("try to demote leader when leaving joint state")
+	switch count := core.CountInJointState(region.GetPeers()...); {
+	case notInJointState && inJointState:
+		return errors.New("non-atomic joint consensus")
+	case notInJointState && count != 0:
+		return errors.New("some other peers are in joint state, when the region is in joint state")
+	case inJointState && count != len(cpl.PromoteLearners)+len(cpl.DemoteVoters):
+		return errors.New("some other peers are in joint state, when the region is not in joint state")
+	case demoteLeader:
+		return errors.New("cannot demote leader peer")
 	}
 
 	return nil
