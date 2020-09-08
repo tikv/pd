@@ -14,11 +14,11 @@
 package id
 
 import (
-	"github.com/tikv/pd/pkg/errs"
 	"path"
 	"sync"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/kv"

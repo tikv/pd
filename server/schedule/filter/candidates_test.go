@@ -17,8 +17,8 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/opt"
 )
 
 // A dummy comparer for testing.
@@ -45,10 +45,14 @@ func idComparer2(a, b *core.StoreInfo) int {
 
 type idFilter func(uint64) bool
 
-func (f idFilter) Scope() string                                      { return "idFilter" }
-func (f idFilter) Type() string                                       { return "idFilter" }
-func (f idFilter) Source(opt opt.Options, store *core.StoreInfo) bool { return f(store.GetID()) }
-func (f idFilter) Target(opt opt.Options, store *core.StoreInfo) bool { return f(store.GetID()) }
+func (f idFilter) Scope() string { return "idFilter" }
+func (f idFilter) Type() string  { return "idFilter" }
+func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	return f(store.GetID())
+}
+func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	return f(store.GetID())
+}
 
 type testCandidatesSuite struct{}
 
