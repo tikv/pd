@@ -142,7 +142,7 @@ func (o *PersistOptions) GetMaxReplicas() int {
 
 // SetMaxReplicas sets the number of replicas for each region.
 func (o *PersistOptions) SetMaxReplicas(replicas int) {
-	v := o.GetReplicationConfig().clone()
+	v := o.GetReplicationConfig().Clone()
 	v.MaxReplicas = uint64(replicas)
 	o.SetReplicationConfig(v)
 }

@@ -20,7 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 )
@@ -62,13 +62,13 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		}
 		ls := NewLocationSafeguard("", labels, stores, allStores[tc.source-1])
 		li := NewLocationImprover("", labels, stores, allStores[tc.source-1])
-		c.Assert(ls.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.safeGuradRes)
-		c.Assert(li.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.improverRes)
+		c.Assert(ls.Target(config.NewTestOptions(), allStores[tc.target-1]), Equals, tc.safeGuradRes)
+		c.Assert(li.Target(config.NewTestOptions(), allStores[tc.target-1]), Equals, tc.improverRes)
 	}
 }
 
 func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	testCluster := mockcluster.NewCluster(opt)
 	store := core.NewStoreInfoWithLabel(1, 1, map[string]string{"id": "1"})
 
@@ -95,10 +95,10 @@ func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
 }
 
 func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
-	opt := mockoption.NewScheduleOptions()
-	opt.EnablePlacementRules = true
-	opt.LocationLabels = []string{"zone"}
+	opt := config.NewTestOptions()
 	testCluster := mockcluster.NewCluster(opt)
+	testCluster.SetLocationLabels([]string{"zone"})
+	testCluster.SetEnablePlacementRules(true)
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 3, Id: 3},
@@ -137,7 +137,7 @@ func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
 		StoreStateFilter{TransferLeader: true, MoveRegion: true},
 		StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
 	}
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
 
 	type testCase struct {
@@ -182,9 +182,9 @@ func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
 }
 
 func (s *testFiltersSuite) TestIsolationFilter(c *C) {
-	opt := mockoption.NewScheduleOptions()
-	opt.LocationLabels = []string{"zone", "rack", "host"}
+	opt := config.NewTestOptions()
 	testCluster := mockcluster.NewCluster(opt)
+	testCluster.SetLocationLabels([]string{"zone", "rack", "host"})
 	allStores := []struct {
 		storeID     uint64
 		regionCount int
@@ -249,9 +249,9 @@ func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 }
 
 func (s *testFiltersSuite) TestPlacementGuard(c *C) {
-	opt := mockoption.NewScheduleOptions()
-	opt.LocationLabels = []string{"zone"}
+	opt := config.NewTestOptions()
 	testCluster := mockcluster.NewCluster(opt)
+	testCluster.SetLocationLabels([]string{"zone"})
 	testCluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	testCluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
 	testCluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
@@ -267,7 +267,7 @@ func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 	c.Assert(NewPlacementSafeguard("", testCluster, region, store),
 		FitsTypeOf,
 		NewLocationSafeguard("", []string{"zone"}, testCluster.GetRegionStores(region), store))
-	opt.EnablePlacementRules = true
+	testCluster.SetEnablePlacementRules(true)
 	c.Assert(NewPlacementSafeguard("", testCluster, region, store),
 		FitsTypeOf,
 		newRuleFitFilter("", testCluster, region, 1))
