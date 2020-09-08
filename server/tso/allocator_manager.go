@@ -36,6 +36,9 @@ const (
 	defaultAllocatorLeaderLease = 3
 )
 
+// AllocatorGroupFilter is used to select AllocatorGroup.
+type AllocatorGroupFilter func(ag *allocatorGroup) bool
+
 type allocatorGroup struct {
 	dcLocation string
 	// allocator's parent ctx and cancel function, which is to
@@ -223,18 +226,12 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	for {
 		select {
 		case <-tsTicker.C:
-			// Collect all dc-locations first
-			allocatorGroups := am.getAllocatorGroups()
+			// Filter out allocators without leadership and uninitialized
+			allocatorGroups := am.getAllocatorGroups(FilterUninitialized(), FilterUnavailableLeadership())
 			// Update each allocator concurrently
 			for _, ag := range allocatorGroups {
-				am.RLock()
-				// Filter allocators without leadership and uninitialized
-				notFilterd := ag.isInitialized && ag.leadership.Check()
-				am.RUnlock()
-				if notFilterd {
-					am.wg.Add(1)
-					go am.updateAllocator(ag)
-				}
+				am.wg.Add(1)
+				go am.updateAllocator(ag)
 			}
 			am.wg.Wait()
 		case <-serverCtx.Done():
@@ -297,12 +294,17 @@ func (am *AllocatorManager) resetAllocatorGroup(dcLocation string) {
 	}
 }
 
-func (am *AllocatorManager) getAllocatorGroups() []*allocatorGroup {
+func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) []*allocatorGroup {
 	am.RLock()
 	defer am.RUnlock()
 	allocatorGroups := make([]*allocatorGroup, 0, len(am.allocatorGroups))
 	for _, ag := range am.allocatorGroups {
-		allocatorGroups = append(allocatorGroups, ag)
+		if ag != nil {
+			break
+		}
+		if slice.NoneOf(filters, func(i int) bool { return filters[i](ag) }) {
+			allocatorGroups = append(allocatorGroups, ag)
+		}
 	}
 	return allocatorGroups
 }
@@ -318,21 +320,11 @@ func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
 	return allocatorGroup.allocator, nil
 }
 
-// AllocatorGroupFilter is used to select AllocatorGroup.
-type AllocatorGroupFilter func(ag *allocatorGroup) bool
-
 // GetAllocators get all allocators with some filters.
 func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []Allocator {
-	am.RLock()
-	defer am.RUnlock()
 	var allocators []Allocator
-	for _, allocatorGroup := range am.allocatorGroups {
-		if allocatorGroup == nil {
-			break
-		}
-		if slice.AllOf(filters, func(i int) bool { return filters[i](allocatorGroup) }) {
-			allocators = append(allocators, allocatorGroup.allocator)
-		}
+	for _, ag := range am.getAllocatorGroups(filters...) {
+		allocators = append(allocators, ag.allocator)
 	}
 	return allocators
 }
