@@ -40,6 +40,7 @@ var (
 	ruleGroupPrefix       = "pd/api/v1/config/rule_group"
 	ruleGroupsPrefix      = "pd/api/v1/config/rule_groups"
 	replicationModePrefix = "pd/api/v1/config/replication-mode"
+	ruleBundlePrefix      = "pd/api/v1/config/placement-rule"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -450,7 +451,41 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   deleteRuleGroupFunc,
 	}
 	ruleGroup.AddCommand(ruleGroupShow, ruleGroupSet, ruleGroupDelete)
-	c.AddCommand(enable, disable, show, load, save, ruleGroup)
+	ruleBundle := &cobra.Command{
+		Use:   "rule-bundle",
+		Short: "process rules in group(s), set/save perform in a replace fashion",
+	}
+	ruleBundleGet := &cobra.Command{
+		Use:   "get <id>",
+		Short: "get rule group config and its rules by group id",
+		Run:   getRuleBundle,
+	}
+	ruleBundleGet.Flags().String("out", "", "the output file")
+	ruleBundleSet := &cobra.Command{
+		Use:   "set",
+		Short: "set rule group config and its rules from file",
+		Run:   setRuleBundle,
+	}
+	ruleBundleSet.Flags().String("in", "bundle.json", "the file contains one group config and its rules")
+	ruleBundleDelete := &cobra.Command{
+		Use:   "delete <id?regexp>",
+		Short: "delete rule group config and its rules by group id",
+		Run:   delRuleBundle,
+	}
+	ruleBundleLoad := &cobra.Command{
+		Use:   "load",
+		Short: "load all group configs and rules to file",
+		Run:   loadRuleBundle,
+	}
+	ruleBundleLoad.Flags().String("out", "rules.json", "the output file")
+	ruleBundleSave := &cobra.Command{
+		Use:   "save",
+		Short: "save all group configs and rules from file",
+		Run:   saveRuleBundle,
+	}
+	ruleBundleSave.Flags().String("in", "rules.json", "the file contains all group configs and all rules")
+	ruleBundle.AddCommand(ruleBundleGet, ruleBundleSet, ruleBundleDelete, ruleBundleLoad, ruleBundleSave)
+	c.AddCommand(enable, disable, show, load, save, ruleGroup, ruleBundle)
 	return c
 }
 
@@ -613,4 +648,126 @@ func deleteRuleGroupFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println("Success!")
+}
+
+func getRuleBundle(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+
+	reqPath := path.Join(ruleBundlePrefix, args[0])
+
+	res, err := doRequest(cmd, reqPath, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	file := ""
+	if f := cmd.Flag("out"); f != nil {
+		file = f.Value.String()
+	}
+	if file == "" {
+		cmd.Println(res)
+		return
+	}
+
+	err = ioutil.WriteFile(file, []byte(res), 0644)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Printf("rule group saved to file %s\n", file)
+}
+
+func setRuleBundle(cmd *cobra.Command, args []string) {
+	var file string
+	if f := cmd.Flag("in"); f != nil {
+		file = f.Value.String()
+	}
+	content, err := ioutil.ReadFile(file)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	id := struct {
+		GroupId string `json:"group_id"`
+	}{}
+	if err = json.Unmarshal(content, &id); err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	reqPath := path.Join(ruleBundlePrefix, id.GroupId)
+
+	res, err := doRequest(cmd, reqPath, http.MethodPost, WithBody("application/json", bytes.NewReader(content)))
+	if err != nil {
+		cmd.Printf("failed to save rule bundle %s: %s\n", content, err)
+		return
+	}
+
+	cmd.Println(res)
+}
+
+func delRuleBundle(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+
+	reqPath := path.Join(ruleBundlePrefix, args[0])
+
+	res, err := doRequest(cmd, reqPath, http.MethodDelete)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	cmd.Println(res)
+}
+
+func loadRuleBundle(cmd *cobra.Command, args []string) {
+	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	file := ""
+	if f := cmd.Flag("out"); f != nil {
+		file = f.Value.String()
+	}
+	if file == "" {
+		cmd.Println(res)
+		return
+	}
+
+	err = ioutil.WriteFile(file, []byte(res), 0644)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Printf("rule group saved to file %s\n", file)
+}
+
+func saveRuleBundle(cmd *cobra.Command, args []string) {
+	var file string
+	if f := cmd.Flag("in"); f != nil {
+		file = f.Value.String()
+	}
+	content, err := ioutil.ReadFile(file)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodPost, WithBody("application/json", bytes.NewReader(content)))
+	if err != nil {
+		cmd.Printf("failed to save rule bundles %s: %s\n", content, err)
+		return
+	}
+
+	cmd.Println(res)
 }
