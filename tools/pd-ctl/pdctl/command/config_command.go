@@ -466,7 +466,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Short: "set rule group config and its rules from file",
 		Run:   setRuleBundle,
 	}
-	ruleBundleSet.Flags().String("in", "bundle.json", "the file contains one group config and its rules")
+	ruleBundleSet.Flags().String("in", "group.json", "the file contains one group config and its rules")
 	ruleBundleDelete := &cobra.Command{
 		Use:   "delete <id?regexp>",
 		Short: "delete rule group config and its rules by group id",
@@ -693,14 +693,14 @@ func setRuleBundle(cmd *cobra.Command, args []string) {
 	}
 
 	id := struct {
-		GroupId string `json:"group_id"`
+		GroupID string `json:"group_id"`
 	}{}
 	if err = json.Unmarshal(content, &id); err != nil {
 		cmd.Println(err)
 		return
 	}
 
-	reqPath := path.Join(ruleBundlePrefix, id.GroupId)
+	reqPath := path.Join(ruleBundlePrefix, id.GroupID)
 
 	res, err := doRequest(cmd, reqPath, http.MethodPost, WithBody("application/json", bytes.NewReader(content)))
 	if err != nil {
