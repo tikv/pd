@@ -196,6 +196,14 @@ func (s *storeTestSuite) TestStore(c *C) {
 	limit2 = leaderServer.GetRaftCluster().GetStoreLimitByType(2, storelimit.RemovePeer)
 	c.Assert(limit2, Equals, float64(25))
 
+	// store limit all <key> <value> <rate> <type>
+	args = []string{"-u", pdAddr, "store", "limit", "all", "zone", "uk", "20", "remove-peer"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Log(string(output))
+	c.Assert(err, IsNil)
+	limit1 = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
+	c.Assert(limit1, Equals, float64(20))
+
 	// store limit all 0 is invalid
 	args = []string{"-u", pdAddr, "store", "limit", "all", "0"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
@@ -214,7 +222,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	echo = pdctl.GetEcho([]string{"-u", pdAddr, "store", "limit", "remove-peer"})
 	allRemovePeerLimit := make(map[string]map[string]interface{})
 	json.Unmarshal([]byte(echo), &allRemovePeerLimit)
-	c.Assert(allRemovePeerLimit["1"]["remove-peer"].(float64), Equals, float64(25))
+	c.Assert(allRemovePeerLimit["1"]["remove-peer"].(float64), Equals, float64(20))
 	c.Assert(allRemovePeerLimit["3"]["remove-peer"].(float64), Equals, float64(25))
 	_, ok = allRemovePeerLimit["2"]["add-peer"]
 	c.Assert(ok, Equals, false)

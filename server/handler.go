@@ -421,7 +421,7 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 }
 
 // SetLabelStoresLimit is used to set limit of label stores.
-func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.Type, labels []config.StoreLabel) error {
+func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.Type, labels []*metapb.StoreLabel) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
