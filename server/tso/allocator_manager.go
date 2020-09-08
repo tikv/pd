@@ -54,8 +54,6 @@ type allocatorGroup struct {
 	// TSO for local transactions in its DC.
 	leadership *election.Leadership
 	allocator  Allocator
-	// the flag indicates whether this allocator is initialized
-	isInitialized bool
 }
 
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
@@ -117,7 +115,6 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, parentCanc
 		if err := am.allocatorGroups[dcLocation].allocator.Initialize(); err != nil {
 			return err
 		}
-		am.allocatorGroups[dcLocation].isInitialized = true
 	// For Local TSO Allocator
 	default:
 		// Join in a Local TSO Allocator election
@@ -190,7 +187,6 @@ func (am *AllocatorManager) campaignAllocatorLeader(parentCtx context.Context, a
 		log.Error("failed to initialize the local TSO allocator", errs.ZapError(err))
 		return
 	}
-	am.setIsInitialized(allocator.dcLocation, true)
 	allocator.EnableAllocatorLeader()
 	log.Info("local tso allocator leader is ready to serve",
 		zap.String("dc-location", allocator.dcLocation),
@@ -245,8 +241,6 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 	defer am.wg.Done()
 	select {
 	case <-ag.parentCtx.Done():
-		// Need to initialize first before next use
-		ag.isInitialized = false
 		// Resetting the allocator will clear TSO in memory
 		ag.allocator.Reset()
 		return
@@ -276,21 +270,12 @@ func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (p
 	return allocatorGroup.allocator.GenerateTSO(count)
 }
 
-func (am *AllocatorManager) setIsInitialized(dcLocation string, isInitialized bool) {
-	am.Lock()
-	defer am.Unlock()
-	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
-		allocatorGroup.isInitialized = isInitialized
-	}
-}
-
 func (am *AllocatorManager) resetAllocatorGroup(dcLocation string) {
 	am.Lock()
 	defer am.Unlock()
 	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
 		allocatorGroup.leadership.Reset()
-		allocatorGroup.isInitialized = false
 	}
 }
 

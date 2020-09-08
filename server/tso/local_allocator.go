@@ -65,13 +65,18 @@ func (lta *LocalTSOAllocator) Initialize() error {
 	return lta.timestampOracle.SyncTimestamp(lta.leadership)
 }
 
+// IsInitialize is used to indicates whether this allocator is initialized.
+func (lta *LocalTSOAllocator) IsInitialize() bool {
+	return lta.timestampOracle.isInitialized()
+}
+
 // UpdateTSO is used to update the TSO in memory and the time window in etcd
 // for all local TSO allocators this PD server hold.
 func (lta *LocalTSOAllocator) UpdateTSO() error {
 	return lta.timestampOracle.UpdateTimestamp(lta.leadership)
 }
 
-// SetTSO sets the physical part with given tso.
+// SetTSO sets the physical part with given TSO.
 func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 	return lta.timestampOracle.ResetUserTimestamp(lta.leadership, tso)
 }

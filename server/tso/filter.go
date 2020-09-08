@@ -20,7 +20,7 @@ func FilterDCLocation(dcLocation string) func(ag *allocatorGroup) bool {
 
 // FilterUninitialized will filter out the allocatorGroup uninitialized.
 func FilterUninitialized() func(ag *allocatorGroup) bool {
-	return func(ag *allocatorGroup) bool { return !ag.isInitialized }
+	return func(ag *allocatorGroup) bool { return !ag.allocator.IsInitialize() }
 }
 
 // FilterUnavailableLeadership will filter out the allocatorGroup whose leadership is unavailable.
