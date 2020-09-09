@@ -94,7 +94,7 @@ func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth i
 // Flush only for implementing Formatter.
 func (rf *redirectFormatter) Flush() {}
 
-// isSKippedPackageName tests wether path name is on log library calling stack.
+// isSKippedPackageName tests whether path name is on log library calling stack.
 func isSkippedPackageName(name string) bool {
 	return strings.Contains(name, "github.com/sirupsen/logrus") ||
 		strings.Contains(name, "github.com/coreos/pkg/capnslog")
@@ -245,7 +245,7 @@ type wrapLogrus struct {
 // least l - this is needed to meet the LoggerV2 interface.  GRPC's logging levels
 // are: https://github.com/grpc/grpc-go/blob/master/grpclog/loggerv2.go#L71
 // 0=info, 1=warning, 2=error, 3=fatal
-// logrus's are: https://github.com/sirupsen/logrus/blob/master/logrus.go
+// logrus' are: https://github.com/sirupsen/logrus/blob/master/logrus.go
 // 0=panic, 1=fatal, 2=error, 3=warn, 4=info, 5=debug
 func (lg *wrapLogrus) V(l int) bool {
 	// translate to logrus level

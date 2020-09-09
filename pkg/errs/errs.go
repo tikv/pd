@@ -19,7 +19,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// ZapError is used to make the log output eaiser.
+// ZapError is used to make the log output easier.
 func ZapError(err error, causeError ...error) zap.Field {
 	if err == nil {
 		return zap.Skip()

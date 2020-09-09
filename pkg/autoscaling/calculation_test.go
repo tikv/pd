@@ -22,7 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -36,7 +36,7 @@ type calculationTestSuite struct{}
 
 func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	// case1 indicates the tikv cluster with not any group existed
-	case1 := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	case1 := mockcluster.NewCluster(config.NewTestOptions())
 	case1.AddLabelsStore(1, 1, map[string]string{})
 	case1.AddLabelsStore(2, 1, map[string]string{
 		"foo": "bar",
@@ -46,7 +46,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	})
 
 	// case2 indicates the tikv cluster with 1 auto-scaling group existed
-	case2 := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	case2 := mockcluster.NewCluster(config.NewTestOptions())
 	case2.AddLabelsStore(1, 1, map[string]string{})
 	case2.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
@@ -58,7 +58,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	})
 
 	// case3 indicates the tikv cluster with other group existed
-	case3 := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	case3 := mockcluster.NewCluster(config.NewTestOptions())
 	case3.AddLabelsStore(1, 1, map[string]string{})
 	case3.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey: "foo",
@@ -265,6 +265,6 @@ func (s *calculationTestSuite) TestGetTotalCPUQuota(c *C) {
 		},
 	}
 	totalCPUQuota, _ := getTotalCPUQuota(querier, TiDB, instances, time.Now())
-	expected := uint64(mockResultValue * float64(len(instances)*millicores))
+	expected := uint64(mockResultValue * float64(len(instances)*milliCores))
 	c.Assert(totalCPUQuota, Equals, expected)
 }

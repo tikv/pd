@@ -145,7 +145,7 @@ func newEngineContext(filters ...filter.Filter) engineContext {
 	}
 }
 
-// Scatter relocates the region. If the group is defined, the regions's leader with the same group would be scattered
+// Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
 // in a group level instead of cluster level.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*operator.Operator, error) {
 	if !opt.IsRegionReplicated(r.cluster, region) {
@@ -167,7 +167,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
-		if ordinaryFilter.Target(r.cluster, store) {
+		if ordinaryFilter.Target(r.cluster.GetOpts(), store) {
 			ordinaryPeers = append(ordinaryPeers, peer)
 		} else {
 			engine := store.GetLabelValue(filter.EngineKey)
@@ -237,7 +237,7 @@ func (r *RegionScatterer) selectPeerToReplace(group string, stores map[uint64]*c
 
 	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {
-		if !scoreGuard.Target(r.cluster, store) {
+		if !scoreGuard.Target(r.cluster.GetOpts(), store) {
 			continue
 		}
 		candidates = append(candidates, store)
@@ -281,7 +281,7 @@ func (r *RegionScatterer) collectAvailableStores(group string, region *core.Regi
 	stores := r.cluster.GetStores()
 	targets := make(map[uint64]*core.StoreInfo, len(stores))
 	for _, store := range stores {
-		if filter.Target(r.cluster, store, filters) && !store.IsBusy() {
+		if filter.Target(r.cluster.GetOpts(), store, filters) && !store.IsBusy() {
 			targets[store.GetID()] = store
 		}
 	}

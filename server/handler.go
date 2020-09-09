@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/tso"
 	"go.uber.org/zap"
 )
 
@@ -474,7 +473,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return err
 	}
 
-	if c.IsPlacementRulesEnabled() {
+	if c.GetOpts().IsPlacementRulesEnabled() {
 		// Cannot determine role when placement rules enabled. Not supported now.
 		return errors.New("transfer region is not supported when placement rules enabled")
 	}
@@ -484,7 +483,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return ErrRegionNotFound(regionID)
 	}
 
-	if len(storeIDs) > c.GetMaxReplicas() {
+	if len(storeIDs) > c.GetOpts().GetMaxReplicas() {
 		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDs))
 	}
 
@@ -826,7 +825,7 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 
 // ResetTS resets the ts with specified tso.
 func (h *Handler) ResetTS(ts uint64) error {
-	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(config.GlobalDCLocation)
 	if err != nil {
 		return err
 	}

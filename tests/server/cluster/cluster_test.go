@@ -655,7 +655,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 
 	storage := rc.GetStorage()
 	basicCluster := rc.GetCacheCluster()
-	opt := rc.GetOpt()
+	opt := rc.GetOpts()
 	// Save meta, stores and regions.
 	n := 10
 	meta := &metapb.Cluster{Id: 123}
@@ -921,7 +921,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	}
 
 	oc := rc.GetOperatorController()
-	opt := rc.GetOpt()
+	opt := rc.GetOpts()
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 1)
 	// only can add 5 remove peer operators on store 1
 	for i := uint64(1); i <= 5; i++ {
@@ -1002,7 +1002,7 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 
 	// restart PD
 	// Here we use an empty storelimit to simulate the upgrade progress.
-	opt := rc.GetOpt()
+	opt := rc.GetOpts()
 	scheduleCfg := opt.GetScheduleConfig()
 	scheduleCfg.StoreLimit = map[uint64]config.StoreLimitConfig{}
 	c.Assert(leaderServer.GetServer().SetScheduleConfig(*scheduleCfg), IsNil)

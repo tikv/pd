@@ -17,7 +17,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -26,7 +26,7 @@ var _ = Suite(&testRegionStatisticsSuite{})
 type testRegionStatisticsSuite struct{}
 
 func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	peers := []*metapb.Peer{
 		{Id: 5, StoreId: 1},
 		{Id: 6, StoreId: 2},
