@@ -14,8 +14,8 @@
 package schedulers
 
 import (
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -36,11 +36,11 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*labelSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errors.WithStack(err)
+				return err
 			}
 			conf.Ranges = ranges
 			conf.Name = LabelName
@@ -90,7 +90,7 @@ func (s *labelScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *labelScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 }
 
 func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
@@ -98,7 +98,7 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
 	for _, s := range stores {
-		if cluster.CheckLabelProperty(opt.RejectLeader, s.GetLabels()) {
+		if cluster.GetOpts().CheckLabelProperty(opt.RejectLeader, s.GetLabels()) {
 			rejectLeaderStores[s.GetID()] = struct{}{}
 		}
 	}
@@ -120,7 +120,7 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 
 			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-				FilterTarget(cluster, filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true}, f).
+				FilterTarget(cluster.GetOpts(), filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true}, f).
 				RandomPick()
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))
@@ -130,7 +130,7 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 
 			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, id, target.GetID(), operator.OpLeader)
 			if err != nil {
-				log.Debug("fail to create transfer label reject leader operator", zap.Error(err))
+				log.Debug("fail to create transfer label reject leader operator", errs.ZapError(err))
 				return nil
 			}
 			op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))

@@ -26,10 +26,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/tikv/pd/server/versioninfo"
 
@@ -82,8 +82,11 @@ type Config struct {
 	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
 	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
 
-	// TsoSaveInterval is the interval to save timestamp.
-	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+	// TSOSaveInterval is the interval to save timestamp.
+	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+
+	// Local TSO service related configuration.
+	LocalTSO LocalTSOConfig `toml:"local-tso" json:"local-tso"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -205,6 +208,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage = true
+	defaultTraceRegionFlow  = true
 	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultKeyType          = "table"
 
@@ -491,7 +495,11 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
-	adjustDuration(&c.TsoSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
+	adjustDuration(&c.TSOSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
+
+	if err := c.LocalTSO.Validate(); err != nil {
+		return err
+	}
 
 	if c.nextRetryDelay == 0 {
 		c.nextRetryDelay = defaultNextRetryDelay
@@ -874,7 +882,7 @@ func (c *ScheduleConfig) Validate() error {
 		return errors.New("low-space-ratio should be larger than high-space-ratio")
 	}
 	for _, scheduleConfig := range c.Schedulers {
-		if !schedule.IsSchedulerRegistered(scheduleConfig.Type) {
+		if !IsSchedulerRegistered(scheduleConfig.Type) {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
 		}
 	}
@@ -971,7 +979,8 @@ type ReplicationConfig struct {
 	IsolationLevel string `toml:"isolation-level" json:"isolation-level"`
 }
 
-func (c *ReplicationConfig) clone() *ReplicationConfig {
+// Clone makes a deep copy of the config.
+func (c *ReplicationConfig) Clone() *ReplicationConfig {
 	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{
@@ -1017,7 +1026,7 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
-	// MaxResetTSGap is the max gap to reset the tso.
+	// MaxResetTSGap is the max gap to reset the TSO.
 	MaxResetTSGap typeutil.Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
@@ -1029,6 +1038,8 @@ type PDServerConfig struct {
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
+	// TraceRegionFlow the option to update flow information of regions
+	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1044,6 +1055,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
+	}
+	if !meta.IsDefined("trace-region-flow") {
+		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
 	return c.Validate()
 }
@@ -1104,7 +1118,7 @@ func ParseUrls(s string) ([]url.URL, error) {
 	for _, item := range items {
 		u, err := url.Parse(item)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
 		}
 
 		urls = append(urls, *u)
@@ -1117,7 +1131,7 @@ func ParseUrls(s string) ([]url.URL, error) {
 func (c *Config) SetupLogger() error {
 	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
 	if err != nil {
-		return err
+		return errs.ErrInitLogger.Wrap(err).FastGenWithCause()
 	}
 	c.logger = lg
 	c.logProps = p
@@ -1230,12 +1244,13 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath       string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
-	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb-cert-path"`
-	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb-key-path"`
-	PublicPathPrefix string `toml:"public-path-prefix" json:"public-path-prefix"`
-	InternalProxy    bool   `toml:"internal-proxy" json:"internal-proxy"`
-	EnableTelemetry  bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	TiDBCAPath         string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
+	TiDBCertPath       string `toml:"tidb-cert-path" json:"tidb-cert-path"`
+	TiDBKeyPath        string `toml:"tidb-key-path" json:"tidb-key-path"`
+	PublicPathPrefix   string `toml:"public-path-prefix" json:"public-path-prefix"`
+	InternalProxy      bool   `toml:"internal-proxy" json:"internal-proxy"`
+	EnableTelemetry    bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	EnableExperimental bool   `toml:"enable-experimental" json:"enable-experimental"`
 	// WARN: DisableTelemetry is deprecated.
 	DisableTelemetry bool `toml:"disable-telemetry" json:"disable-telemetry,omitempty"`
 }
@@ -1311,4 +1326,29 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-sync-timeout") {
 		c.WaitSyncTimeout = typeutil.Duration{Duration: defaultDRWaitSyncTimeout}
 	}
+}
+
+// GlobalDCLocation is the Global TSO Allocator's dc-location label.
+const GlobalDCLocation = "global"
+
+// LocalTSOConfig is the configuration for Local TSO service.
+type LocalTSOConfig struct {
+	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
+	// which allows the PD server to generate local TSO for certain DC-level transactions.
+	// To make this feature meaningful, user has to set the dc-location configuration for
+	// each PD server.
+	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
+	// DCLocation indicates that which data center a PD server is in. According to it,
+	// the PD cluster can elect a TSO allocator to generate local TSO for
+	// DC-level transactions. It shouldn't be the same with GlobalDCLocation.
+	DCLocation string `toml:"dc-location" json:"dc-location"`
+}
+
+// Validate is used to validate if some TSO configurations are right.
+func (c *LocalTSOConfig) Validate() error {
+	if c.DCLocation == GlobalDCLocation {
+		errMsg := fmt.Sprintf("dc-location %s is the PD reserved label to represent the PD leader, please try another one.", GlobalDCLocation)
+		return errors.New(errMsg)
+	}
+	return nil
 }

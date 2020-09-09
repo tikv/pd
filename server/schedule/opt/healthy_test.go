@@ -20,7 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -70,18 +70,18 @@ func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
 		{region(peers(1, 2, 3, 4), core.WithLearners(peers(1))), false, false, false, true, true, false},
 	}
 
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 	tc.AddRegionStore(3, 1)
 	tc.AddRegionStore(4, 1)
 	for _, t := range cases {
-		opt.EnablePlacementRules = false
+		tc.SetEnablePlacementRules(false)
 		c.Assert(IsRegionHealthy(tc, t.region), Equals, t.healthy1)
 		c.Assert(IsHealthyAllowPending(tc, t.region), Equals, t.healthyAllowPending1)
 		c.Assert(IsRegionReplicated(tc, t.region), Equals, t.replicated1)
-		opt.EnablePlacementRules = true
+		tc.SetEnablePlacementRules(true)
 		c.Assert(IsRegionHealthy(tc, t.region), Equals, t.healthy2)
 		c.Assert(IsHealthyAllowPending(tc, t.region), Equals, t.healthyAllowPending2)
 		c.Assert(IsRegionReplicated(tc, t.region), Equals, t.replicated2)

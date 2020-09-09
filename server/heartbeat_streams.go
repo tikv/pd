@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
@@ -87,7 +88,7 @@ func (s *heartbeatStreams) run() {
 			if store == nil {
 				log.Error("failed to get store",
 					zap.Uint64("region-id", msg.RegionId),
-					zap.Uint64("store-id", storeID))
+					zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
 				delete(s.streams, storeID)
 				continue
 			}
@@ -95,7 +96,7 @@ func (s *heartbeatStreams) run() {
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
 					log.Error("send heartbeat message fail",
-						zap.Uint64("region-id", msg.RegionId), zap.Error(err))
+						zap.Uint64("region-id", msg.RegionId), errs.ZapError(errs.ErrGRPCSend.Wrap(err).GenWithStackByArgs()))
 					delete(s.streams, storeID)
 					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
 				} else {
@@ -111,7 +112,7 @@ func (s *heartbeatStreams) run() {
 			for storeID, stream := range s.streams {
 				store := s.cluster.GetStore(storeID)
 				if store == nil {
-					log.Error("failed to get store", zap.Uint64("store-id", storeID))
+					log.Error("failed to get store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
 					delete(s.streams, storeID)
 					continue
 				}
@@ -120,7 +121,7 @@ func (s *heartbeatStreams) run() {
 				if err := stream.Send(keepAlive); err != nil {
 					log.Warn("send keepalive message fail, store maybe disconnected",
 						zap.Uint64("target-store-id", storeID),
-						zap.Error(err))
+						errs.ZapError(err))
 					delete(s.streams, storeID)
 					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "keepalive", "err").Inc()
 				} else {

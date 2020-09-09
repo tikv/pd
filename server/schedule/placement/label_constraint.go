@@ -69,7 +69,7 @@ func (c *LabelConstraint) MatchStore(store *core.StoreInfo) bool {
 var legacyExclusiveLabels = []string{"engine", "exclusive"}
 
 // If a store has exclusiveLabels, it can only be selected when the label is
-// exciplitly specified in constraints.
+// explicitly specified in constraints.
 func isExclusiveLabel(key string) bool {
 	return strings.HasPrefix(key, "$") || slice.AnyOf(legacyExclusiveLabels, func(i int) bool {
 		return key == legacyExclusiveLabels[i]

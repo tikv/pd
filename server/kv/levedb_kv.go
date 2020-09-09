@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // LeveldbKV is a kv store using leveldb.
@@ -30,7 +31,7 @@ type LeveldbKV struct {
 func NewLeveldbKV(path string) (*LeveldbKV, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errs.ErrLevelDBOpen.Wrap(err).GenWithStackByCause()
 	}
 	return &LeveldbKV{db}, nil
 }
@@ -82,9 +83,13 @@ func (kv *LeveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
 	for key, r := range regions {
 		value, err := proto.Marshal(r)
 		if err != nil {
-			return errors.WithStack(err)
+			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
 		}
 		batch.Put([]byte(key), value)
 	}
-	return errors.WithStack(kv.Write(batch, nil))
+
+	if err := kv.Write(batch, nil); err != nil {
+		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
+	}
+	return nil
 }

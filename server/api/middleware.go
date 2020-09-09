@@ -16,8 +16,8 @@ package api
 import (
 	"net/http"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 
@@ -37,7 +37,7 @@ func (m clusterMiddleware) Middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rc := m.s.GetRaftCluster()
 		if rc == nil {
-			m.rd.JSON(w, http.StatusInternalServerError, cluster.ErrNotBootstrapped.Error())
+			m.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 			return
 		}
 		ctx := withClusterCtx(r.Context(), rc)

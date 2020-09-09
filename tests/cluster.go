@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/join"
+	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -329,17 +330,22 @@ func (s *TestServer) BootstrapCluster() error {
 	return nil
 }
 
-// WaitLeadership is used to get instant leadership in order to
+// WaitLeader is used to get instant leader info in order to
 // make a test know the PD leader has been elected as soon as possible.
 // If it exceeds the maximum number of loops, it will return nil.
-func (s *TestServer) WaitLeadership() bool {
+func (s *TestServer) WaitLeader() bool {
 	for i := 0; i < 100; i++ {
-		if s.server.GetLeadership().Check() {
+		if s.server.GetMember().IsStillLeader() {
 			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)
 	}
 	return false
+}
+
+// GetTSOAllocatorManager returns the server's TSO Allocator Manager.
+func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
+	return s.server.GetTSOAllocatorManager()
 }
 
 // TestCluster is only for test.

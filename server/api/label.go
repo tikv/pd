@@ -86,7 +86,7 @@ func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
 		if store == nil {
-			h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
+			h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID).Error())
 			return
 		}
 

@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -91,7 +92,7 @@ func (oc *OperatorController) Ctx() context.Context {
 	return oc.ctx
 }
 
-// GetCluster exports cluster to evict-scheduler for check sctore status.
+// GetCluster exports cluster to evict-scheduler for check store status.
 func (oc *OperatorController) GetCluster() opt.Cluster {
 	oc.RLock()
 	defer oc.RUnlock()
@@ -134,7 +135,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 				log.Error("dispatching operator with unexpected status",
 					zap.Uint64("region-id", op.RegionID()),
 					zap.String("status", operator.OpStatusToString(op.Status())),
-					zap.Reflect("operator", op))
+					zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
 				operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 				failpoint.Inject("unexpectedOperator", func() {
 					panic(op)
@@ -163,7 +164,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 	origin := op.RegionEpoch()
 	latest := region.GetRegionEpoch()
 	changes := latest.GetConfVer() - origin.GetConfVer()
-	if changes > uint64(op.ConfVerChanged(region)) {
+	if changes > op.ConfVerChanged(region) {
 		if oc.RemoveOperator(
 			op,
 			zap.String("reason", "stale operator, confver does not meet expectations"),
@@ -258,13 +259,13 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 		if op.Kind()&operator.OpMerge != 0 {
 			if i+1 >= len(ops) {
 				// should not be here forever
-				log.Error("orphan merge operators found", zap.String("desc", desc))
+				log.Error("orphan merge operators found", zap.String("desc", desc), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("orphan operator found")))
 				oc.Unlock()
 				return added
 			}
 			if ops[i+1].Kind()&operator.OpMerge == 0 {
 				log.Error("merge operator should be paired", zap.String("desc",
-					ops[i+1].Desc()))
+					ops[i+1].Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
 				oc.Unlock()
 				return added
 			}
@@ -390,15 +391,15 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			log.Error("trying to add operator with unexpected status",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.String("status", operator.OpStatusToString(op.Status())),
-				zap.Reflect("operator", op))
+				zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
 			failpoint.Inject("unexpectedOperator", func() {
 				panic(op)
 			})
 			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
 			return false
 		}
-		if oc.wopStatus.ops[op.Desc()] >= oc.cluster.GetSchedulerMaxWaitingOperator() {
-			log.Debug("exceed_max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetSchedulerMaxWaitingOperator()))
+		if oc.wopStatus.ops[op.Desc()] >= oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator() {
+			log.Debug("exceed_max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed_max").Inc()
 			return false
 		}
@@ -436,7 +437,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 		log.Error("adding operator with unexpected status",
 			zap.Uint64("region-id", regionID),
 			zap.String("status", operator.OpStatusToString(op.Status())),
-			zap.Reflect("operator", op))
+			zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
 		failpoint.Inject("unexpectedOperator", func() {
 			panic(op)
 		})
@@ -482,7 +483,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 }
 
 // RemoveOperator removes a operator from the running operators.
-func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFileds ...zap.Field) bool {
+func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFields ...zap.Field) bool {
 	oc.Lock()
 	removed := oc.removeOperatorLocked(op)
 	oc.Unlock()
@@ -493,7 +494,7 @@ func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFileds 
 				zap.Duration("takes", op.RunningTime()),
 				zap.Reflect("operator", op))
 		}
-		oc.buryOperator(op, extraFileds...)
+		oc.buryOperator(op, extraFields...)
 	}
 	return removed
 }
@@ -515,14 +516,14 @@ func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 	return false
 }
 
-func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ...zap.Field) {
+func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ...zap.Field) {
 	st := op.Status()
 
 	if !operator.IsEndStatus(st) {
 		log.Error("burying operator with non-end status",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.String("status", operator.OpStatusToString(op.Status())),
-			zap.Reflect("operator", op))
+			zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
 		failpoint.Inject("unexpectedOperator", func() {
 			panic(op)
 		})
@@ -557,14 +558,14 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ..
 			zap.Reflect("operator", op))
 		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 	case operator.CANCELED:
-		fileds := []zap.Field{
+		fields := []zap.Field{
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
 		}
-		fileds = append(fileds, extraFileds...)
+		fields = append(fields, extraFields...)
 		log.Info("operator canceled",
-			fileds...,
+			fields...,
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}
@@ -634,6 +635,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				Peer: &metapb.Peer{
 					Id:      st.PeerID,
 					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Voter,
 				},
 			},
 		}
@@ -649,6 +651,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				Peer: &metapb.Peer{
 					Id:      st.PeerID,
 					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Voter,
 				},
 			},
 		}
@@ -724,7 +727,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		}
 		oc.hbStreams.SendMsg(region, cmd)
 	default:
-		log.Error("unknown operator step", zap.Reflect("step", step))
+		log.Error("unknown operator step", zap.Reflect("step", step), errs.ZapError(errs.ErrUnknownOperatorStep))
 	}
 }
 
@@ -906,7 +909,7 @@ func (oc *OperatorController) newStoreLimit(storeID uint64, ratePerSec float64, 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
 	if oc.storesLimit[storeID][limitType] == nil {
-		ratePerSec := oc.cluster.GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
+		ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 		oc.newStoreLimit(storeID, ratePerSec, limitType)
 		oc.cluster.AttachAvailableFunc(storeID, limitType, func() bool {
 			oc.RLock()
@@ -917,7 +920,7 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 			return oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
 		})
 	}
-	ratePerSec := oc.cluster.GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
+	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	if ratePerSec != oc.storesLimit[storeID][limitType].Rate() {
 		oc.newStoreLimit(storeID, ratePerSec, limitType)
 	}
@@ -929,7 +932,7 @@ func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	if oc.cluster == nil {
 		return core.ByCount
 	}
-	return oc.cluster.GetLeaderSchedulePolicy()
+	return oc.cluster.GetOpts().GetLeaderSchedulePolicy()
 }
 
 // CollectStoreLimitMetrics collects the metrics about store limit

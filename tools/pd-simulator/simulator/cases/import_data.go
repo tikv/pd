@@ -16,9 +16,9 @@ package cases
 import (
 	"bytes"
 	"fmt"
-	"github.com/go-echarts/go-echarts/charts"
 	"math/rand"
 
+	"github.com/go-echarts/go-echarts/charts"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
@@ -61,14 +61,14 @@ func newImportData() *Case {
 	simCase.TableNumber = 10
 	// Events description
 	e := &WriteFlowOnSpotDescriptor{}
-	table2 := string(codec.EncodeBytes(codec.GenerateTableKey(2)))
-	table3 := string(codec.EncodeBytes(codec.GenerateTableKey(3)))
+	table12 := string(codec.EncodeBytes(codec.GenerateTableKey(12)))
+	table13 := string(codec.EncodeBytes(codec.GenerateTableKey(13)))
 	e.Step = func(tick int64) map[string]int64 {
 		if tick > int64(getRegionNum())/10 {
 			return nil
 		}
 		return map[string]int64{
-			table2: 32 * MB,
+			table12: 32 * MB,
 		}
 	}
 	simCase.Events = []EventDescriptor{e}
@@ -82,8 +82,8 @@ func newImportData() *Case {
 		leaderTotal := 0
 		peerTotal := 0
 		res := make([]*core.RegionInfo, 0, 100)
-		regions.ScanRangeWithIterator([]byte(table2), func(region *core.RegionInfo) bool {
-			if bytes.Compare(region.GetEndKey(), []byte(table3)) < 0 {
+		regions.ScanRangeWithIterator([]byte(table12), func(region *core.RegionInfo) bool {
+			if bytes.Compare(region.GetEndKey(), []byte(table13)) < 0 {
 				res = append(res, regions.GetRegion(region.GetID()))
 				return true
 			}
