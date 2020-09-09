@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"path"
 	"reflect"
 	"strconv"
@@ -468,10 +469,11 @@ func NewPlacementRulesCommand() *cobra.Command {
 	}
 	ruleBundleSet.Flags().String("in", "group.json", "the file contains one group config and its rules")
 	ruleBundleDelete := &cobra.Command{
-		Use:   "delete <id?regexp>",
+		Use:   "delete <id>",
 		Short: "delete rule group config and its rules by group id",
 		Run:   delRuleBundle,
 	}
+	ruleBundleDelete.Flags().Bool("regexp", false, "match group id by regular expression")
 	ruleBundleLoad := &cobra.Command{
 		Use:   "load",
 		Short: "load all group configs and rules to file",
@@ -717,7 +719,11 @@ func delRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	reqPath := path.Join(ruleBundlePrefix, args[0])
+	reqPath := path.Join(ruleBundlePrefix, url.PathEscape(args[0]))
+
+	if f := cmd.Flag("regexp"); f != nil {
+		reqPath += "?regexp"
+	}
 
 	res, err := doRequest(cmd, reqPath, http.MethodDelete)
 	if err != nil {
