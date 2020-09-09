@@ -48,7 +48,7 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		stores       []uint64
 		source       uint64
 		target       uint64
-		safeGuradRes bool
+		safeGuardRes bool
 		improverRes  bool
 	}{
 		{[]uint64{1, 2, 3}, 1, 4, true, true},
@@ -62,7 +62,7 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		}
 		ls := NewLocationSafeguard("", labels, stores, allStores[tc.source-1])
 		li := NewLocationImprover("", labels, stores, allStores[tc.source-1])
-		c.Assert(ls.Target(config.NewTestOptions(), allStores[tc.target-1]), Equals, tc.safeGuradRes)
+		c.Assert(ls.Target(config.NewTestOptions(), allStores[tc.target-1]), Equals, tc.safeGuardRes)
 		c.Assert(li.Target(config.NewTestOptions(), allStores[tc.target-1]), Equals, tc.improverRes)
 	}
 }
@@ -90,7 +90,7 @@ func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
 	}
 	for _, tc := range testCases {
 		filter := NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: tc.key, Op: placement.LabelConstraintOp(tc.op), Values: tc.values}})
-		c.Assert(filter.Source(testCluster, store), Equals, tc.res)
+		c.Assert(filter.Source(testCluster.GetOpts(), store), Equals, tc.res)
 	}
 }
 
@@ -125,8 +125,8 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 	}
 	for _, tc := range testCases {
 		filter := newRuleFitFilter("", testCluster, region, 1)
-		c.Assert(filter.Source(testCluster, testCluster.GetStore(tc.storeID)), Equals, tc.sourceRes)
-		c.Assert(filter.Target(testCluster, testCluster.GetStore(tc.storeID)), Equals, tc.targetRes)
+		c.Assert(filter.Source(testCluster.GetOpts(), testCluster.GetStore(tc.storeID)), Equals, tc.sourceRes)
+		c.Assert(filter.Target(testCluster.GetOpts(), testCluster.GetStore(tc.storeID)), Equals, tc.targetRes)
 	}
 }
 
@@ -242,8 +242,8 @@ func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 	for _, tc := range testCases {
 		filter := NewIsolationFilter("", tc.isolationLevel, testCluster.GetLocationLabels(), testCluster.GetRegionStores(tc.region))
 		for idx, store := range allStores {
-			c.Assert(filter.Source(testCluster, testCluster.GetStore(store.storeID)), Equals, tc.sourceRes[idx])
-			c.Assert(filter.Target(testCluster, testCluster.GetStore(store.storeID)), Equals, tc.targetRes[idx])
+			c.Assert(filter.Source(testCluster.GetOpts(), testCluster.GetStore(store.storeID)), Equals, tc.sourceRes[idx])
+			c.Assert(filter.Target(testCluster.GetOpts(), testCluster.GetStore(store.storeID)), Equals, tc.targetRes[idx])
 		}
 	}
 }

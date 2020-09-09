@@ -22,8 +22,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -41,7 +41,7 @@ const (
 
 // Cluster provides an overview of a cluster's regions distribution.
 type Cluster interface {
-	opt.Options
+	GetOpts() *config.PersistOptions
 	GetStore(id uint64) *core.StoreInfo
 	AllocID() (uint64, error)
 	FitRegion(region *core.RegionInfo) *placement.RegionFit
@@ -256,17 +256,14 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 }
 
 // ConfVerChanged returns the number of confver has consumed by steps
-func (o *Operator) ConfVerChanged(region *core.RegionInfo) int {
-	total := 0
+func (o *Operator) ConfVerChanged(region *core.RegionInfo) (total uint64) {
 	current := atomic.LoadInt32(&o.currentStep)
 	if current == int32(len(o.steps)) {
 		current--
 	}
 	// including current step, it may has taken effects in this heartbeat
 	for _, step := range o.steps[0 : current+1] {
-		if step.ConfVerChanged(region) {
-			total++
-		}
+		total += step.ConfVerChanged(region)
 	}
 	return total
 }

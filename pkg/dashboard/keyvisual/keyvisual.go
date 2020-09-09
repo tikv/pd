@@ -20,7 +20,7 @@ import (
 	"github.com/tikv/pd/server"
 )
 
-// GenCustomDataProvider generates a custom DataProvider for the dashboard keyvisual package.
+// GenCustomDataProvider generates a custom DataProvider for the dashboard `keyvisual` package.
 func GenCustomDataProvider(srv *server.Server) *region.DataProvider {
 	return &region.DataProvider{
 		PeriodicGetter: input.NewCorePeriodicGetter(srv),

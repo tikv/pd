@@ -27,7 +27,7 @@ var _ = Suite(&testHealthAPISuite{})
 
 type testHealthAPISuite struct{}
 
-func checkSliceResponse(c *C, body []byte, cfgs []*config.Config, unhealth string) {
+func checkSliceResponse(c *C, body []byte, cfgs []*config.Config, unhealthy string) {
 	got := []Health{}
 	c.Assert(json.Unmarshal(body, &got), IsNil)
 	c.Assert(len(got), Equals, len(cfgs))
@@ -39,7 +39,7 @@ func checkSliceResponse(c *C, body []byte, cfgs []*config.Config, unhealth strin
 			}
 			relaxEqualStings(c, h.ClientUrls, strings.Split(cfg.ClientUrls, ","))
 		}
-		if h.Name == unhealth {
+		if h.Name == unhealthy {
 			c.Assert(h.Health, IsFalse)
 			continue
 		}

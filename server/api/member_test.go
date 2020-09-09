@@ -58,14 +58,14 @@ func checkListResponse(c *C, body []byte, cfgs []*config.Config) {
 
 	c.Assert(len(got["members"]), Equals, len(cfgs))
 
-	for _, memb := range got["members"] {
+	for _, member := range got["members"] {
 		for _, cfg := range cfgs {
-			if memb.GetName() != cfg.Name {
+			if member.GetName() != cfg.Name {
 				continue
 			}
 
-			relaxEqualStings(c, memb.ClientUrls, strings.Split(cfg.ClientUrls, ","))
-			relaxEqualStings(c, memb.PeerUrls, strings.Split(cfg.PeerUrls, ","))
+			relaxEqualStings(c, member.ClientUrls, strings.Split(cfg.ClientUrls, ","))
+			relaxEqualStings(c, member.PeerUrls, strings.Split(cfg.PeerUrls, ","))
 		}
 	}
 }

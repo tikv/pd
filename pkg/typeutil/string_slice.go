@@ -28,7 +28,7 @@ func (s StringSlice) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.Quote(strings.Join(s, ","))), nil
 }
 
-// UnmarshalJSON parses a JSON string into the bytesize.
+// UnmarshalJSON parses a JSON string into the byte size.
 func (s *StringSlice) UnmarshalJSON(text []byte) error {
 	data, err := strconv.Unquote(string(text))
 	if err != nil {
