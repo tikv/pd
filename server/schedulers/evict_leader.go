@@ -209,7 +209,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 }
 
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 }
 
 func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Operator {
@@ -222,7 +222,7 @@ func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Ope
 		}
 
 		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster, filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
+			FilterTarget(cluster.GetOpts(), filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
 			RandomPick()
 		if target == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()

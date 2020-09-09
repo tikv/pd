@@ -96,7 +96,7 @@ var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
 // func of a package.
 func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[typ]; ok {
-		log.Fatal("duplicated scheduler", zap.String("type", typ))
+		log.Fatal("duplicated scheduler", zap.String("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
 	schedulerMap[typ] = createFn
 }
@@ -105,7 +105,7 @@ func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 // func of package.
 func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) {
 	if _, ok := schedulerArgsToDecoder[typ]; ok {
-		log.Fatal("duplicated scheduler", zap.String("type", typ))
+		log.Fatal("duplicated scheduler", zap.String("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
 	schedulerArgsToDecoder[typ] = builder
 	config.RegisterScheduler(typ)
@@ -133,10 +133,10 @@ func CreateScheduler(typ string, opController *OperatorController, storage *core
 // FindSchedulerTypeByName finds the type of the specified name.
 func FindSchedulerTypeByName(name string) string {
 	var typ string
-	for registerdType := range schedulerMap {
-		if strings.Contains(name, registerdType) {
-			if len(registerdType) > len(typ) {
-				typ = registerdType
+	for registeredType := range schedulerMap {
+		if strings.Contains(name, registeredType) {
+			if len(registeredType) > len(typ) {
+				typ = registeredType
 			}
 		}
 	}

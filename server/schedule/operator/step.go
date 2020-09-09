@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
@@ -37,30 +38,12 @@ type OpStep interface {
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
-var (
-	_ OpStep = (*TransferLeader)(nil)
-
-	_ OpStep = (*AddPeer)(nil)
-	_ OpStep = (*AddLightPeer)(nil)
-	_ OpStep = (*RemovePeer)(nil)
-	_ OpStep = (*AddLearner)(nil)
-	_ OpStep = (*AddLightLearner)(nil)
-
-	_ OpStep = (*PromoteLearner)(nil)
-	_ OpStep = (*DemoteFollower)(nil)
-	_ OpStep = (*ChangePeerV2Enter)(nil)
-	_ OpStep = (*ChangePeerV2Leave)(nil)
-
-	_ OpStep = (*MergeRegion)(nil)
-	_ OpStep = (*SplitRegion)(nil)
-)
-
 // TransferLeader is an OpStep that transfers a region's leader.
 type TransferLeader struct {
 	FromStore, ToStore uint64
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (tl TransferLeader) ConfVerChanged(region *core.RegionInfo) uint64 {
 	return 0 // transfer leader never change the conf version
 }
@@ -102,10 +85,10 @@ type AddPeer struct {
 	ToStore, PeerID uint64
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (ap AddPeer) ConfVerChanged(region *core.RegionInfo) uint64 {
-	p := region.GetStoreVoter(ap.ToStore)
-	return b2u64(p.GetId() == ap.PeerID)
+	peer := region.GetStoreVoter(ap.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == ap.PeerID)
 }
 
 func (ap AddPeer) String() string {
@@ -114,12 +97,12 @@ func (ap AddPeer) String() string {
 
 // IsFinish checks if current step is finished.
 func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreVoter(ap.ToStore); p != nil {
-		if p.GetId() != ap.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", p.GetId()))
+	if peer := region.GetStoreVoter(ap.ToStore); peer != nil {
+		if peer.GetId() != ap.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", peer.GetId()))
 			return false
 		}
-		return region.GetPendingVoter(p.GetId()) == nil
+		return region.GetPendingVoter(peer.GetId()) == nil
 	}
 	return false
 }
@@ -148,10 +131,10 @@ type AddLearner struct {
 	ToStore, PeerID uint64
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (al AddLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
-	p := region.GetStorePeer(al.ToStore)
-	return b2u64(p.GetId() == al.PeerID)
+	peer := region.GetStorePeer(al.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == al.PeerID)
 }
 
 func (al AddLearner) String() string {
@@ -160,12 +143,12 @@ func (al AddLearner) String() string {
 
 // IsFinish checks if current step is finished.
 func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreLearner(al.ToStore); p != nil {
-		if p.GetId() != al.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", p.GetId()))
+	if peer := region.GetStoreLearner(al.ToStore); peer != nil {
+		if peer.GetId() != al.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", peer.GetId()))
 			return false
 		}
-		return region.GetPendingLearner(p.GetId()) == nil
+		return region.GetPendingLearner(peer.GetId()) == nil
 	}
 	return false
 }
@@ -200,29 +183,31 @@ type PromoteLearner struct {
 	ToStore, PeerID uint64
 }
 
-func (pl PromoteLearner) String() string {
-	return fmt.Sprintf("promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
+// ConfVerChanged returns the delta value for version increased by this step.
+func (pl PromoteLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStoreVoter(pl.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == pl.PeerID)
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
-func (pl PromoteLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
-	return b2u64(region.GetStoreVoter(pl.ToStore).GetId() == pl.PeerID)
+func (pl PromoteLearner) String() string {
+	return fmt.Sprintf("promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
 }
 
 // IsFinish checks if current step is finished.
 func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 	if peer := region.GetStoreVoter(pl.ToStore); peer != nil {
-		if peer.Id != pl.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.Id))
+		if peer.GetId() != pl.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.GetId()))
 		}
-		return peer.Id == pl.PeerID
+		return peer.GetId() == pl.PeerID
 	}
 	return false
 }
 
 // CheckSafety checks if the step meets the safety properties.
 func (pl PromoteLearner) CheckSafety(region *core.RegionInfo) error {
-	if region.GetStorePeer(pl.ToStore).GetId() != pl.PeerID {
+	peer := region.GetStorePeer(pl.ToStore)
+	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
 	}
 	return nil
@@ -236,10 +221,18 @@ type RemovePeer struct {
 	FromStore, PeerID uint64
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (rp RemovePeer) ConfVerChanged(region *core.RegionInfo) uint64 {
 	id := region.GetStorePeer(rp.FromStore).GetId()
-	return b2u64(id == 0 || (rp.PeerID != 0 && id != rp.PeerID))
+	// 1. id == 0 -> The peer does not exist, it needs to return 1.
+	// 2. id != 0 && rp.PeerId == 0 -> No rp.PeerID is specified, and there is a Peer on the Store, it needs to return 0.
+	// 3. id != 0 && rp.PeerID != 0 && id == rp.PeerID -> The peer still exists, it needs to return 0.
+	// 4. id != 0 && rp.PeerID != 0 && id != rp.PeerID -> The rp.PeerID is specified,
+	//     and although there is a Peer on the Store, but the Id has changed, it should return 1.
+	//     This is for the following case:
+	//     If DemoteFollower step is not allowed, it will be split into RemovePeer and AddLearner.
+	//     After the AddLearner step, ConfVerChanged of RemovePeer should still return 1.
+	return typeutil.BoolToUint64(id == 0 || (rp.PeerID != 0 && id != rp.PeerID))
 }
 
 func (rp RemovePeer) String() string {
@@ -282,7 +275,7 @@ type MergeRegion struct {
 	IsPassive bool
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (mr MergeRegion) ConfVerChanged(region *core.RegionInfo) uint64 {
 	return 0
 }
@@ -307,10 +300,10 @@ func (mr MergeRegion) CheckSafety(region *core.RegionInfo) error {
 // Influence calculates the store difference that current step makes.
 func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	if mr.IsPassive {
-		for _, p := range region.GetPeers() {
-			o := opInfluence.GetStoreInfluence(p.GetStoreId())
+		for _, peer := range region.GetPeers() {
+			o := opInfluence.GetStoreInfluence(peer.GetStoreId())
 			o.RegionCount--
-			if region.GetLeader().GetId() == p.GetId() {
+			if region.GetLeader().GetId() == peer.GetId() {
 				o.LeaderCount--
 			}
 		}
@@ -324,7 +317,7 @@ type SplitRegion struct {
 	SplitKeys        [][]byte
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (sr SplitRegion) ConfVerChanged(region *core.RegionInfo) uint64 {
 	return 0
 }
@@ -340,10 +333,10 @@ func (sr SplitRegion) IsFinish(region *core.RegionInfo) bool {
 
 // Influence calculates the store difference that current step makes.
 func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
-	for _, p := range region.GetPeers() {
-		inf := opInfluence.GetStoreInfluence(p.GetStoreId())
+	for _, peer := range region.GetPeers() {
+		inf := opInfluence.GetStoreInfluence(peer.GetStoreId())
 		inf.RegionCount++
-		if region.GetLeader().GetId() == p.GetId() {
+		if region.GetLeader().GetId() == peer.GetId() {
 			inf.LeaderCount++
 		}
 	}
@@ -359,10 +352,10 @@ type AddLightPeer struct {
 	ToStore, PeerID uint64
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (ap AddLightPeer) ConfVerChanged(region *core.RegionInfo) uint64 {
-	p := region.GetStoreVoter(ap.ToStore)
-	return b2u64(p.GetId() == ap.PeerID)
+	peer := region.GetStoreVoter(ap.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == ap.PeerID)
 }
 
 func (ap AddLightPeer) String() string {
@@ -371,12 +364,12 @@ func (ap AddLightPeer) String() string {
 
 // IsFinish checks if current step is finished.
 func (ap AddLightPeer) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreVoter(ap.ToStore); p != nil {
-		if p.GetId() != ap.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", p.GetId()))
+	if peer := region.GetStoreVoter(ap.ToStore); peer != nil {
+		if peer.GetId() != ap.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", peer.GetId()))
 			return false
 		}
-		return region.GetPendingVoter(p.GetId()) == nil
+		return region.GetPendingVoter(peer.GetId()) == nil
 	}
 	return false
 }
@@ -403,10 +396,10 @@ type AddLightLearner struct {
 	ToStore, PeerID uint64
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (al AddLightLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
-	p := region.GetStorePeer(al.ToStore)
-	return b2u64(p.GetId() == al.PeerID)
+	peer := region.GetStorePeer(al.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == al.PeerID)
 }
 
 func (al AddLightLearner) String() string {
@@ -415,12 +408,12 @@ func (al AddLightLearner) String() string {
 
 // IsFinish checks if current step is finished.
 func (al AddLightLearner) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreLearner(al.ToStore); p != nil {
-		if p.GetId() != al.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", p.GetId()))
+	if peer := region.GetStoreLearner(al.ToStore); peer != nil {
+		if peer.GetId() != al.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", peer.GetId()))
 			return false
 		}
-		return region.GetPendingLearner(p.GetId()) == nil
+		return region.GetPendingLearner(peer.GetId()) == nil
 	}
 	return false
 }
@@ -448,7 +441,7 @@ func (al AddLightLearner) Influence(opInfluence OpInfluence, region *core.Region
 	to.RegionCount++
 }
 
-// DemoteFollower is an OpStep that demotes a region voter peer (not a leader) to learner.
+// DemoteFollower is an OpStep that demotes a region follower peer to learner.
 type DemoteFollower struct {
 	ToStore, PeerID uint64
 }
@@ -457,18 +450,19 @@ func (df DemoteFollower) String() string {
 	return fmt.Sprintf("demote follower peer %v on store %v to learner", df.PeerID, df.ToStore)
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (df DemoteFollower) ConfVerChanged(region *core.RegionInfo) uint64 {
-	return b2u64(region.GetStoreLearner(df.ToStore).GetId() == df.PeerID)
+	peer := region.GetStoreLearner(df.ToStore)
+	return typeutil.BoolToUint64(peer.GetId() == df.PeerID)
 }
 
 // IsFinish checks if current step is finished.
 func (df DemoteFollower) IsFinish(region *core.RegionInfo) bool {
 	if peer := region.GetStoreLearner(df.ToStore); peer != nil {
-		if peer.Id != df.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", df.String()), zap.Uint64("obtain-learner", peer.Id))
+		if peer.GetId() != df.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", df.String()), zap.Uint64("obtain-learner", peer.GetId()))
 		}
-		return peer.Id == df.PeerID
+		return peer.GetId() == df.PeerID
 	}
 	return false
 }
@@ -479,8 +473,8 @@ func (df DemoteFollower) CheckSafety(region *core.RegionInfo) error {
 	if peer.GetId() != df.PeerID {
 		return errors.New("peer does not exist")
 	}
-	if peer != nil && peer.Id == region.GetLeader().GetId() {
-		return errors.New("peer is a leader, can not demote")
+	if peer.GetId() == region.GetLeader().GetId() {
+		return errors.New("cannot demote leader peer")
 	}
 	return nil
 }
@@ -489,7 +483,7 @@ func (df DemoteFollower) CheckSafety(region *core.RegionInfo) error {
 func (df DemoteFollower) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
 // DemoteVoter is very similar to DemoteFollower. But it allows Demote Leader.
-// Note: It is not an OpStep, only a sub step in ChangePeerV2Enter.
+// Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
 type DemoteVoter struct {
 	ToStore, PeerID uint64
 }
@@ -498,18 +492,19 @@ func (dv DemoteVoter) String() string {
 	return fmt.Sprintf("demote voter peer %v on store %v to learner", dv.PeerID, dv.ToStore)
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (dv DemoteVoter) ConfVerChanged(region *core.RegionInfo) bool {
-	return region.GetStoreLearner(dv.ToStore).GetId() == dv.PeerID
+	peer := region.GetStoreLearner(dv.ToStore)
+	return peer.GetId() == dv.PeerID
 }
 
 // IsFinish checks if current step is finished.
 func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 	if peer := region.GetStoreLearner(dv.ToStore); peer != nil {
-		if peer.Id != dv.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", dv.String()), zap.Uint64("obtain-learner", peer.Id))
+		if peer.GetId() != dv.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", dv.String()), zap.Uint64("obtain-learner", peer.GetId()))
 		}
-		return peer.Id == dv.PeerID
+		return peer.GetId() == dv.PeerID
 	}
 	return false
 }
@@ -532,18 +527,17 @@ func (cpe ChangePeerV2Enter) String() string {
 	return b.String()
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (cpe ChangePeerV2Enter) ConfVerChanged(region *core.RegionInfo) uint64 {
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStoreVoter(pl.ToStore)
-		if peer == nil || peer.Id != pl.PeerID ||
-			(peer.Role != metapb.PeerRole_IncomingVoter && peer.Role != metapb.PeerRole_Voter) {
+		if peer.GetId() != pl.PeerID || !core.IsVoterOrIncomingVoter(peer) {
 			return 0
 		}
 	}
 	for _, dv := range cpe.DemoteVoters {
 		peer := region.GetStoreVoter(dv.ToStore)
-		if peer != nil && (peer.Id != dv.PeerID || (peer.Role != metapb.PeerRole_DemotingVoter && peer.Role != metapb.PeerRole_Learner)) {
+		if peer != nil && (peer.GetId() != dv.PeerID || !core.IsLearnerOrDemotingVoter(peer)) {
 			return 0
 		}
 	}
@@ -554,19 +548,19 @@ func (cpe ChangePeerV2Enter) ConfVerChanged(region *core.RegionInfo) uint64 {
 func (cpe ChangePeerV2Enter) IsFinish(region *core.RegionInfo) bool {
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStoreVoter(pl.ToStore)
-		if peer != nil && peer.Id != pl.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.Id))
+		if peer != nil && peer.GetId() != pl.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.GetId()))
 		}
-		if peer == nil || peer.Id != pl.PeerID || peer.Role != metapb.PeerRole_IncomingVoter {
+		if peer.GetId() != pl.PeerID || peer.GetRole() != metapb.PeerRole_IncomingVoter {
 			return false
 		}
 	}
 	for _, dv := range cpe.DemoteVoters {
 		peer := region.GetStoreVoter(dv.ToStore)
-		if peer != nil && peer.Id != dv.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", dv.String()), zap.Uint64("obtain-learner", peer.Id))
+		if peer != nil && peer.GetId() != dv.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", dv.String()), zap.Uint64("obtain-learner", peer.GetId()))
 		}
-		if peer == nil || peer.Id != dv.PeerID || peer.Role != metapb.PeerRole_DemotingVoter {
+		if peer.GetId() != dv.PeerID || peer.GetRole() != metapb.PeerRole_DemotingVoter {
 			return false
 		}
 	}
@@ -581,11 +575,15 @@ func (cpe ChangePeerV2Enter) CheckSafety(region *core.RegionInfo) error {
 		if peer.GetId() != pl.PeerID {
 			return errors.New("peer does not exist")
 		}
-		switch peer.Role {
+		switch peer.GetRole() {
 		case metapb.PeerRole_Learner:
 			notInJointState = true
 		case metapb.PeerRole_IncomingVoter:
 			inJointState = true
+		case metapb.PeerRole_Voter:
+			return errors.New("peer already is a voter")
+		case metapb.PeerRole_DemotingVoter:
+			return errors.New("cannot promote a demoting voter")
 		default:
 			return errors.New("unexpected peer role")
 		}
@@ -595,22 +593,27 @@ func (cpe ChangePeerV2Enter) CheckSafety(region *core.RegionInfo) error {
 		if peer.GetId() != dv.PeerID {
 			return errors.New("peer does not exist")
 		}
-		switch peer.Role {
+		switch peer.GetRole() {
 		case metapb.PeerRole_Voter:
 			notInJointState = true
 		case metapb.PeerRole_DemotingVoter:
 			inJointState = true
+		case metapb.PeerRole_Learner:
+			return errors.New("peer already is a learner")
+		case metapb.PeerRole_IncomingVoter:
+			return errors.New("cannot demote a incoming voter")
 		default:
 			return errors.New("unexpected peer role")
 		}
 	}
 
-	count := core.CountInJointState(region.GetPeers()...)
-	if (notInJointState && inJointState) ||
-		(notInJointState && count != 0) ||
-		(inJointState && count != len(cpe.PromoteLearners)+len(cpe.DemoteVoters)) {
-		// change is not atomic, or there are other peers in the joint state
-		return errors.New("unexpected peer role")
+	switch count := core.CountInJointState(region.GetPeers()...); {
+	case notInJointState && inJointState:
+		return errors.New("non-atomic joint consensus")
+	case notInJointState && count != 0:
+		return errors.New("some other peers are in joint state, when the region is in joint state")
+	case inJointState && count != len(cpe.PromoteLearners)+len(cpe.DemoteVoters):
+		return errors.New("some other peers are in joint state, when the region is not in joint state")
 	}
 
 	return nil
@@ -665,11 +668,11 @@ func (cpl ChangePeerV2Leave) String() string {
 	return b.String()
 }
 
-// ConfVerChanged returns how much the conf version will increase due to this step.
+// ConfVerChanged returns the delta value for version increased by this step.
 func (cpl ChangePeerV2Leave) ConfVerChanged(region *core.RegionInfo) uint64 {
 	for _, pl := range cpl.PromoteLearners {
 		peer := region.GetStoreVoter(pl.ToStore)
-		if peer == nil || peer.Id != pl.PeerID || peer.Role != metapb.PeerRole_Voter {
+		if peer.GetId() != pl.PeerID || peer.GetRole() != metapb.PeerRole_Voter {
 			return 0
 		}
 	}
@@ -685,10 +688,10 @@ func (cpl ChangePeerV2Leave) ConfVerChanged(region *core.RegionInfo) uint64 {
 func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 	for _, pl := range cpl.PromoteLearners {
 		peer := region.GetStoreVoter(pl.ToStore)
-		if peer != nil && peer.Id != pl.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.Id))
+		if peer != nil && peer.GetId() != pl.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.GetId()))
 		}
-		if peer == nil || peer.Id != pl.PeerID || peer.Role != metapb.PeerRole_Voter {
+		if peer.GetId() != pl.PeerID || peer.GetRole() != metapb.PeerRole_Voter {
 			return false
 		}
 	}
@@ -707,18 +710,22 @@ func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 // CheckSafety checks if the step meets the safety properties.
 func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
 	inJointState, notInJointState, demoteLeader := false, false, false
-	leaderStoreID := region.GetLeader().StoreId
+	leaderStoreID := region.GetLeader().GetStoreId()
 
 	for _, pl := range cpl.PromoteLearners {
 		peer := region.GetStorePeer(pl.ToStore)
 		if peer.GetId() != pl.PeerID {
 			return errors.New("peer does not exist")
 		}
-		switch peer.Role {
+		switch peer.GetRole() {
 		case metapb.PeerRole_Voter:
 			notInJointState = true
 		case metapb.PeerRole_IncomingVoter:
 			inJointState = true
+		case metapb.PeerRole_Learner:
+			return errors.New("peer is still a learner")
+		case metapb.PeerRole_DemotingVoter:
+			return errors.New("cannot promote a demoting voter")
 		default:
 			return errors.New("unexpected peer role")
 		}
@@ -728,29 +735,32 @@ func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
 		if peer.GetId() != dv.PeerID {
 			return errors.New("peer does not exist")
 		}
-		switch peer.Role {
+		switch peer.GetRole() {
 		case metapb.PeerRole_Learner:
 			notInJointState = true
 		case metapb.PeerRole_DemotingVoter:
 			inJointState = true
-			if peer.StoreId == leaderStoreID {
+			if peer.GetStoreId() == leaderStoreID {
 				demoteLeader = true
 			}
+		case metapb.PeerRole_Voter:
+			return errors.New("peer is still a voter")
+		case metapb.PeerRole_IncomingVoter:
+			return errors.New("cannot demote a incoming voter")
 		default:
 			return errors.New("unexpected peer role")
 		}
 	}
 
-	count := core.CountInJointState(region.GetPeers()...)
-	if (notInJointState && inJointState) ||
-		(notInJointState && count != 0) ||
-		(inJointState && count != len(cpl.PromoteLearners)+len(cpl.DemoteVoters)) {
-		// change is not atomic, or there are other peers in the joint state
-		return errors.New("unexpected peer role")
-	}
-
-	if demoteLeader {
-		return errors.New("try to demote leader when leaving joint state")
+	switch count := core.CountInJointState(region.GetPeers()...); {
+	case notInJointState && inJointState:
+		return errors.New("non-atomic joint consensus")
+	case notInJointState && count != 0:
+		return errors.New("some other peers are in joint state, when the region is in joint state")
+	case inJointState && count != len(cpl.PromoteLearners)+len(cpl.DemoteVoters):
+		return errors.New("some other peers are in joint state, when the region is not in joint state")
+	case demoteLeader:
+		return errors.New("cannot demote leader peer")
 	}
 
 	return nil
@@ -758,10 +768,3 @@ func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
 
 // Influence calculates the store difference that current step makes.
 func (cpl ChangePeerV2Leave) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
-
-func b2u64(b bool) uint64 {
-	if b {
-		return 1
-	}
-	return 0
-}

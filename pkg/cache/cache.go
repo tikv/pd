@@ -19,7 +19,7 @@ import "sync"
 type Cache interface {
 	// Put puts an item into cache.
 	Put(key uint64, value interface{})
-	// Get retrives an item from cache.
+	// Get retrieves an item from cache.
 	Get(key uint64) (interface{}, bool)
 	// Peek reads an item from cache. The action is no considered 'Use'.
 	Peek(key uint64) (interface{}, bool)
@@ -64,7 +64,7 @@ func (c *threadSafeCache) Put(key uint64, value interface{}) {
 	c.cache.Put(key, value)
 }
 
-// Get retrives an item from cache.
+// Get retrieves an item from cache.
 // When Get method called, LRU and TwoQueue cache will rearrange entries
 // so we must use write lock.
 func (c *threadSafeCache) Get(key uint64) (interface{}, bool) {

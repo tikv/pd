@@ -22,7 +22,6 @@ import (
 	. "github.com/pingcap/check"
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -40,7 +39,7 @@ type testReplicationMode struct{}
 func (s *testReplicationMode) TestInitial(c *C) {
 	store := core.NewStorage(kv.NewMemoryKV())
 	conf := config.ReplicationModeConfig{ReplicationMode: modeMajority}
-	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	cluster := mockcluster.NewCluster(config.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{Mode: pb.ReplicationMode_MAJORITY})
@@ -73,7 +72,7 @@ func (s *testReplicationMode) TestStatus(c *C) {
 		LabelKey:        "dr-label",
 		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	cluster := mockcluster.NewCluster(config.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{
@@ -148,7 +147,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	cluster := mockcluster.NewCluster(config.NewTestOptions())
 	var replicator mockFileReplicator
 	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
 	c.Assert(err, IsNil)
@@ -264,7 +263,7 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	cluster := mockcluster.NewCluster(config.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
 	c.Assert(err, IsNil)

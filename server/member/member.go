@@ -190,7 +190,7 @@ func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, rev
 	m.unsetLeader()
 }
 
-// ResetLeader is used to reset the PD member's cuurent leadership.
+// ResetLeader is used to reset the PD member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
 func (m *Member) ResetLeader() {
 	m.leadership.Reset()
@@ -205,7 +205,7 @@ func (m *Member) CheckPriority(ctx context.Context) {
 	}
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
-		log.Error("failed to load etcd leader priority", errs.ZapError(err))
+		log.Error("failed to load leader priority", errs.ZapError(err))
 		return
 	}
 	leaderPriority, err := m.GetMemberLeaderPriority(etcdLeader)
@@ -305,7 +305,7 @@ func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 	return nil
 }
 
-// DeleteMemberLeaderPriority removes a member's ectd leader priority config.
+// DeleteMemberLeaderPriority removes a member's etcd leader priority config.
 func (m *Member) DeleteMemberLeaderPriority(id uint64) error {
 	key := m.getMemberLeaderPriorityPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()

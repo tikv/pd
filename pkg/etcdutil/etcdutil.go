@@ -42,7 +42,7 @@ const (
 	DefaultSlowRequestTime = 1 * time.Second
 )
 
-// CheckClusterID checks Etcd's cluster ID, returns an error if mismatch.
+// CheckClusterID checks etcd cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.
 func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Config) error {
 	if len(um) == 0 {
