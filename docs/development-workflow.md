@@ -48,7 +48,7 @@ After your code changes, make sure that you have:
 After verification, commit your changes. 
 
 ```
-$ git commit -am 'information about your feature'
+$ git commit -s -am 'information about your feature'
 ```
 
 ## Push to the branch
