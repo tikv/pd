@@ -21,7 +21,7 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-// StoreCandidates wraps store list and proivde utilities to select source or
+// StoreCandidates wraps store list and provide utilities to select source or
 // target store to schedule.
 type StoreCandidates struct {
 	Stores []*core.StoreInfo

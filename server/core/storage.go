@@ -113,7 +113,7 @@ func (s *Storage) SaveScheduleConfig(scheduleName string, data []byte) error {
 	return s.Save(configPath, string(data))
 }
 
-// RemoveScheduleConfig remvoes the config of scheduler.
+// RemoveScheduleConfig removes the config of scheduler.
 func (s *Storage) RemoveScheduleConfig(scheduleName string) error {
 	configPath := path.Join(customScheduleConfigPath, scheduleName)
 	return s.Remove(configPath)
@@ -150,7 +150,7 @@ func (s *Storage) DeleteStore(store *metapb.Store) error {
 	return s.Remove(s.storePath(store.GetId()))
 }
 
-// LoadRegion loads one regoin from storage.
+// LoadRegion loads one region from storage.
 func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
 	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
 		return loadProto(s.regionStorage, regionPath(regionID), region)
@@ -198,7 +198,7 @@ func (s *Storage) DeleteRegion(region *metapb.Region) error {
 	return deleteRegion(s.Base, region)
 }
 
-// SaveConfig stores marshalable cfg to the configPath.
+// SaveConfig stores marshallable cfg to the configPath.
 func (s *Storage) SaveConfig(cfg interface{}) error {
 	value, err := json.Marshal(cfg)
 	if err != nil {
@@ -306,7 +306,7 @@ func (s *Storage) LoadReplicationStatus(mode string, status interface{}) (bool, 
 	return true, nil
 }
 
-// SaveComponent stores marshalable components to the componentPath.
+// SaveComponent stores marshallable components to the componentPath.
 func (s *Storage) SaveComponent(component interface{}) error {
 	value, err := json.Marshal(component)
 	if err != nil {

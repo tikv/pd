@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/join"
+	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -340,6 +341,11 @@ func (s *TestServer) WaitLeader() bool {
 		time.Sleep(WaitLeaderCheckInterval)
 	}
 	return false
+}
+
+// GetTSOAllocatorManager returns the server's TSO Allocator Manager.
+func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
+	return s.server.GetTSOAllocatorManager()
 }
 
 // TestCluster is only for test.

@@ -133,10 +133,10 @@ func CreateScheduler(typ string, opController *OperatorController, storage *core
 // FindSchedulerTypeByName finds the type of the specified name.
 func FindSchedulerTypeByName(name string) string {
 	var typ string
-	for registerdType := range schedulerMap {
-		if strings.Contains(name, registerdType) {
-			if len(registerdType) > len(typ) {
-				typ = registerdType
+	for registeredType := range schedulerMap {
+		if strings.Contains(name, registeredType) {
+			if len(registeredType) > len(typ) {
+				typ = registeredType
 			}
 		}
 	}
