@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
+	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -35,7 +36,7 @@ import (
 type Builder struct {
 	// basic info
 	desc        string
-	cluster     Cluster
+	cluster     opt.Cluster
 	regionID    uint64
 	regionEpoch *metapb.RegionEpoch
 	rules       []*placement.Rule
@@ -59,7 +60,7 @@ type Builder struct {
 }
 
 // NewBuilder creates a Builder.
-func NewBuilder(desc string, cluster Cluster, region *core.RegionInfo) *Builder {
+func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Builder {
 	var originPeers peersMap
 	for _, p := range region.GetPeers() {
 		originPeers.Set(p)
