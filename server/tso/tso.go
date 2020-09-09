@@ -47,14 +47,14 @@ type atomicObject struct {
 	logical  int64
 }
 
-// timestampOracle is used to maintain the logic of tso.
+// timestampOracle is used to maintain the logic of TSO.
 type timestampOracle struct {
 	client   *clientv3.Client
 	rootPath string
 	// TODO: remove saveInterval
 	saveInterval  time.Duration
 	maxResetTSGap func() time.Duration
-	// For tso, set after the PD becomes a leader.
+	// For TSO, set after the PD becomes a leader.
 	TSO           unsafe.Pointer
 	lastSavedTime atomic.Value
 }
@@ -136,7 +136,19 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	return nil
 }
 
-// ResetUserTimestamp update the physical part with specified tso.
+// isInitialized is used to check whether the timestampOracle is initialized.
+// There are two situations we have an uninitialized timestampOracle:
+// 1. When the SyncTimestamp has not been called yet.
+// 2. When the ResetUserTimestamp has been called already.
+func (t *timestampOracle) isInitialized() bool {
+	tsoNow := (*atomicObject)(atomic.LoadPointer(&t.TSO))
+	if tsoNow == nil || tsoNow.physical == typeutil.ZeroTime {
+		return false
+	}
+	return true
+}
+
+// ResetUserTimestamp update the physical part with specified TSO.
 func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, tso uint64) error {
 	if !leadership.Check() {
 		tsoCounter.WithLabelValues("err_lease_reset_ts").Inc()
