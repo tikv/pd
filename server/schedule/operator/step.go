@@ -441,7 +441,7 @@ func (al AddLightLearner) Influence(opInfluence OpInfluence, region *core.Region
 	to.RegionCount++
 }
 
-// DemoteFollower is an OpStep that demotes a region voter peer (not a leader) to learner.
+// DemoteFollower is an OpStep that demotes a region follower peer to learner.
 type DemoteFollower struct {
 	ToStore, PeerID uint64
 }
