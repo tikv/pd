@@ -767,7 +767,7 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 }
 
 func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {
-	tc, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) {
 		conf.ReplicationMode.ReplicationMode = "dr-auto-sync"
 	})
 

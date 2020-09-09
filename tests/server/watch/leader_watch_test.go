@@ -52,7 +52,7 @@ func (s *serverTestSuite) TearDownSuite(c *C) {
 }
 
 func (s *serverTestSuite) TestWatcher(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, _ string) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
@@ -88,7 +88,7 @@ func (s *serverTestSuite) TestWatcher(c *C) {
 }
 
 func (s *serverTestSuite) TestWatcherCompacted(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, _ string) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 

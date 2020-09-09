@@ -127,7 +127,7 @@ func (s *serverTestSuite) checkServiceIsStopped(c *C, servers map[string]*tests.
 }
 
 func (s *serverTestSuite) testDashboard(c *C, internalProxy bool) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, _ string) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, serverName string) {
 		conf.Dashboard.InternalProxy = internalProxy
 	})
 	c.Assert(err, IsNil)
