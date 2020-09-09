@@ -43,13 +43,13 @@ func newTestKeyManager() *testKeyManager {
 		Keys: &encryptionpb.KeyDictionary{
 			CurrentKeyId: 2,
 			Keys: map[uint64]*encryptionpb.DataKey{
-				1: &encryptionpb.DataKey{
+				1: {
 					Key:          []byte("\x05\x4f\xc7\x9b\xa3\xa4\xc8\x99\x37\x44\x55\x21\x6e\xd4\x8d\x5d"),
 					Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 					CreationTime: 1599608041,
 					WasExposed:   false,
 				},
-				2: &encryptionpb.DataKey{
+				2: {
 					Key:          []byte("\x6c\xe0\xc1\xfc\xb2\x0d\x38\x18\x50\xcb\xe4\x21\x33\xda\x0d\xb0"),
 					Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 					CreationTime: 1599608042,
