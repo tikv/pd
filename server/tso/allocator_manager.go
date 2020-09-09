@@ -24,14 +24,13 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/member"
 	"go.uber.org/zap"
 )
 
 const (
-	// GlobalDCLocation is the Global TSO Allocator's dc-location label.
-	GlobalDCLocation            = "global"
 	leaderTickInterval          = 50 * time.Millisecond
 	defaultAllocatorLeaderLease = 3
 )
@@ -91,7 +90,7 @@ func NewAllocatorManager(m *member.Member, rootPath string, saveInterval time.Du
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, parentCancel context.CancelFunc, dcLocation string, leadership *election.Leadership) error {
 	var allocator Allocator
-	if dcLocation == GlobalDCLocation {
+	if dcLocation == config.GlobalDCLocation {
 		allocator = NewGlobalTSOAllocator(leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.maxResetTSGap)
 	} else {
 		allocator = NewLocalTSOAllocator(am.member, leadership, am.getAllocatorPath(dcLocation), dcLocation, am.saveInterval, am.maxResetTSGap)
@@ -109,7 +108,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, parentCanc
 	// Different kinds of allocators have different setup works to do
 	switch dcLocation {
 	// For Global TSO Allocator
-	case GlobalDCLocation:
+	case config.GlobalDCLocation:
 		// Because Global TSO Allocator only depends on PD leader's leadership,
 		// so we can directly initialize it here.
 		if err := am.allocatorGroups[dcLocation].allocator.Initialize(); err != nil {
@@ -126,7 +125,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, parentCanc
 
 func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
 	// For backward compatibility, the global timestamp's store path will still use the old one
-	if dcLocation == GlobalDCLocation {
+	if dcLocation == config.GlobalDCLocation {
 		return am.rootPath
 	}
 	return path.Join(am.rootPath, dcLocation)

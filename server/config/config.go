@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/schedule/storelimit"
-	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 
 	"github.com/BurntSushi/toml"
@@ -1329,6 +1328,9 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	}
 }
 
+// GlobalDCLocation is the Global TSO Allocator's dc-location label.
+const GlobalDCLocation = "global"
+
 // LocalTSOConfig is the configuration for Local TSO service.
 type LocalTSOConfig struct {
 	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
@@ -1338,14 +1340,14 @@ type LocalTSOConfig struct {
 	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
 	// DCLocation indicates that which data center a PD server is in. According to it,
 	// the PD cluster can elect a TSO allocator to generate local TSO for
-	// DC-level transactions.
+	// DC-level transactions. It shouldn't be the same with GlobalDCLocation.
 	DCLocation string `toml:"dc-location" json:"dc-location"`
 }
 
 // Validate is used to validate if some TSO configurations are right.
 func (c *LocalTSOConfig) Validate() error {
-	if c.DCLocation == tso.GlobalDCLocation {
-		errMsg := fmt.Sprintf("dc-location %s is the PD reserved label to represent the PD leader, please try another one.", tso.GlobalDCLocation)
+	if c.DCLocation == GlobalDCLocation {
+		errMsg := fmt.Sprintf("dc-location %s is the PD reserved label to represent the PD leader, please try another one.", GlobalDCLocation)
 		return errors.New(errMsg)
 	}
 	return nil
