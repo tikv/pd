@@ -63,7 +63,7 @@ func (i *idAllocator) alloc() uint64 {
 }
 
 func (s *serverTestSuite) TestRegionSyncer(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
@@ -171,7 +171,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 }
 
 func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
