@@ -17,7 +17,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -29,7 +29,7 @@ type testJointStateCheckerSuite struct {
 }
 
 func (s *testJointStateCheckerSuite) SetUpTest(c *C) {
-	s.cluster = mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	s.cluster = mockcluster.NewCluster(config.NewTestOptions())
 	s.jsc = NewJointStateChecker(s.cluster)
 	for id := uint64(1); id <= 10; id++ {
 		s.cluster.PutStoreWithLabels(id)
