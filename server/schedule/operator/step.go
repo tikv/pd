@@ -531,13 +531,13 @@ func (cpe ChangePeerV2Enter) String() string {
 func (cpe ChangePeerV2Enter) ConfVerChanged(region *core.RegionInfo) uint64 {
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStoreVoter(pl.ToStore)
-		if peer.GetId() != pl.PeerID || !core.ReadyToBecomeVoter(peer) {
+		if peer.GetId() != pl.PeerID || !core.IsVoterOrIncomingVoter(peer) {
 			return 0
 		}
 	}
 	for _, dv := range cpe.DemoteVoters {
 		peer := region.GetStoreVoter(dv.ToStore)
-		if peer != nil && (peer.GetId() != dv.PeerID || !core.ReadyToBecomeLearner(peer)) {
+		if peer != nil && (peer.GetId() != dv.PeerID || !core.IsLearnerOrDemotingVoter(peer)) {
 			return 0
 		}
 	}
