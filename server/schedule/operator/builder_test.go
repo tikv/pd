@@ -52,13 +52,14 @@ func (s *testBuilderSuite) TestNewBuilder(c *C) {
 	region := core.NewRegionInfo(&metapb.Region{Id: 42, Peers: peers}, peers[0])
 	builder := NewBuilder("test", s.cluster, region)
 	c.Assert(builder.err, IsNil)
-	c.Assert(builder.originPeers.Len(), Equals, 2)
-	c.Assert(builder.originPeers.Get(1), DeepEquals, peers[0])
-	c.Assert(builder.originPeers.Get(2), DeepEquals, peers[1])
-	c.Assert(builder.originLeader, Equals, uint64(1))
-	c.Assert(builder.targetPeers.Len(), Equals, 2)
-	c.Assert(builder.targetPeers.Get(1), DeepEquals, peers[0])
-	c.Assert(builder.targetPeers.Get(2), DeepEquals, peers[1])
+	c.Assert(len(builder.originPeers), Equals, 2)
+	c.Assert(builder.originPeers[1], DeepEquals, peers[0])
+	c.Assert(builder.originPeers[2], DeepEquals, peers[1])
+	c.Assert(builder.originLeaderStoreID, Equals, uint64(1))
+	c.Assert(len(builder.targetPeers), Equals, 2)
+	c.Assert(builder.targetPeers[1], DeepEquals, peers[0])
+	c.Assert(builder.targetPeers[2], DeepEquals, peers[1])
+
 	region = region.Clone(core.WithLeader(nil))
 	builder = NewBuilder("test", s.cluster, region)
 	c.Assert(builder.err, NotNil)
@@ -94,11 +95,11 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 		4: {StoreId: 4},
 	}
 	builder := s.newBuilder().SetPeers(m).SetLightWeight()
-	c.Assert(builder.targetPeers.Len(), Equals, 3)
-	c.Assert(builder.targetPeers.Get(2), DeepEquals, m[2])
-	c.Assert(builder.targetPeers.Get(3), DeepEquals, m[3])
-	c.Assert(builder.targetPeers.Get(4), DeepEquals, m[4])
-	c.Assert(builder.targetLeader, Equals, uint64(0))
+	c.Assert(len(builder.targetPeers), Equals, 3)
+	c.Assert(builder.targetPeers[2], DeepEquals, m[2])
+	c.Assert(builder.targetPeers[3], DeepEquals, m[3])
+	c.Assert(builder.targetPeers[4], DeepEquals, m[4])
+	c.Assert(builder.targetLeaderStoreID, Equals, uint64(0))
 	c.Assert(builder.isLightWeight, IsTrue)
 }
 
@@ -107,7 +108,8 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	_, err := s.newBuilder().SetPeers(map[uint64]*metapb.Peer{4: {StoreId: 4, Role: metapb.PeerRole_Learner}}).prepareBuild()
 	c.Assert(err, NotNil)
 
-	builder := s.newBuilder().SetPeers(map[uint64]*metapb.Peer{
+	// do not use joint consensus
+	builder := s.newBuilder().setUseJointConsensus(false).SetPeers(map[uint64]*metapb.Peer{
 		1: {StoreId: 1, Role: metapb.PeerRole_Learner},
 		2: {StoreId: 2},
 		3: {StoreId: 3},
@@ -116,28 +118,72 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	})
 	_, err = builder.prepareBuild()
 	c.Assert(err, IsNil)
-	c.Assert(builder.toAdd.Len(), Equals, 3)
-	c.Assert(builder.toAdd.Get(1).Role, Equals, metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd.Get(1).Id, Not(Equals), uint64(0))
-	c.Assert(builder.toAdd.Get(4).Role, Not(Equals), metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd.Get(4).Id, Equals, uint64(14))
-	c.Assert(builder.toAdd.Get(5).Role, Equals, metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd.Get(5).Id, Not(Equals), uint64(0))
-	c.Assert(builder.toRemove.Len(), Equals, 1)
-	c.Assert(builder.toRemove.Get(1), NotNil)
-	c.Assert(builder.toPromote.Len(), Equals, 1)
-	c.Assert(builder.toPromote.Get(3), NotNil)
-	c.Assert(builder.currentLeader, Equals, uint64(1))
+	c.Assert(len(builder.toAdd), Equals, 3)
+	c.Assert(builder.toAdd[1].GetRole(), Equals, metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[1].GetId(), Not(Equals), uint64(0))
+	c.Assert(builder.toAdd[4].GetRole(), Not(Equals), metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[4].GetId(), Equals, uint64(14))
+	c.Assert(builder.toAdd[5].GetRole(), Equals, metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[5].GetId(), Not(Equals), uint64(0))
+	c.Assert(len(builder.toRemove), Equals, 1)
+	c.Assert(builder.toRemove[1], NotNil)
+	c.Assert(len(builder.toPromote), Equals, 1)
+	c.Assert(builder.toPromote[3], NotNil)
+	c.Assert(builder.currentLeaderStoreID, Equals, uint64(1))
 }
 
 func (s *testBuilderSuite) TestBuild(c *C) {
 	type testCase struct {
-		originPeers []*metapb.Peer // first is leader
-		targetPeers []*metapb.Peer // first is leader
-		steps       []OpStep
+		useJointConsensus bool
+		originPeers       []*metapb.Peer // first is leader
+		targetPeers       []*metapb.Peer // first is leader
+		steps             []OpStep
 	}
 	cases := []testCase{
-		{ // prefer replace
+		{ // empty step
+			false,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]OpStep{},
+		},
+		{ // empty step
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]OpStep{},
+		},
+		{ // no valid leader
+			false,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}},
+			[]*metapb.Peer{{Id: 10, StoreId: 10}},
+			[]OpStep{},
+		},
+		{ // no valid leader
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}},
+			[]*metapb.Peer{{Id: 10, StoreId: 10}},
+			[]OpStep{},
+		},
+		{ // promote learner
+			false,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
+			[]OpStep{
+				PromoteLearner{ToStore: 2},
+				TransferLeader{FromStore: 1, ToStore: 2},
+			},
+		},
+		{ // promote learner
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
+			[]OpStep{
+				PromoteLearner{ToStore: 2},
+				TransferLeader{FromStore: 1, ToStore: 2},
+			},
+		},
+		{ // not use joint consensus: prefer replace
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
@@ -150,7 +196,8 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 1},
 			},
 		},
-		{ // transfer leader before remove leader
+		{ // not use joint consensus: transfer leader before remove leader
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{StoreId: 2}},
 			[]OpStep{
@@ -160,15 +207,18 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 1},
 			},
 		},
-		{ // replace voter with learner
+		{ // not use joint consensus: replace voter with learner
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
 				RemovePeer{FromStore: 2},
 				AddLearner{ToStore: 2},
 			},
 		},
-		{ // prefer replace with neareast peer
+		// not use joint consensus
+		{ // prefer replace with nearest peer
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 6, StoreId: 6}, {Id: 8, StoreId: 8}},
 			//             z1,h1                z1,h2                 z2,h1
 			[]*metapb.Peer{{StoreId: 9}, {StoreId: 7}, {StoreId: 10}},
@@ -191,25 +241,8 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				TransferLeader{FromStore: 7, ToStore: 9},
 			},
 		},
-		{ // promote learner
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
-			[]OpStep{
-				PromoteLearner{ToStore: 2},
-				TransferLeader{FromStore: 1, ToStore: 2},
-			},
-		},
-		{ // empty step
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]OpStep{},
-		},
-		{ // no valid leader
-			[]*metapb.Peer{{Id: 1, StoreId: 1}},
-			[]*metapb.Peer{{Id: 10, StoreId: 10}},
-			[]OpStep{},
-		},
 		{ // add learner + promote learner + remove voter
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
@@ -223,7 +256,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 
 	for _, tc := range cases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.originPeers}, tc.originPeers[0])
-		builder := NewBuilder("test", s.cluster, region)
+		builder := NewBuilder("test", s.cluster, region).setUseJointConsensus(tc.useJointConsensus)
 		m := make(map[uint64]*metapb.Peer)
 		for _, p := range tc.targetPeers {
 			m[p.GetStoreId()] = p
@@ -234,25 +267,45 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			c.Assert(err, NotNil)
 			continue
 		}
+		c.Assert(err, IsNil)
 		c.Assert(op.Len(), Equals, len(tc.steps))
 		for i := 0; i < op.Len(); i++ {
-			step := op.Step(i)
-			switch step.(type) {
+			switch step := op.Step(i).(type) {
 			case TransferLeader:
-				c.Assert(step.(TransferLeader).FromStore, Equals, tc.steps[i].(TransferLeader).FromStore)
-				c.Assert(step.(TransferLeader).ToStore, Equals, tc.steps[i].(TransferLeader).ToStore)
+				c.Assert(step.FromStore, Equals, tc.steps[i].(TransferLeader).FromStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(TransferLeader).ToStore)
 			case AddPeer:
-				c.Assert(step.(AddPeer).ToStore, Equals, tc.steps[i].(AddPeer).ToStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(AddPeer).ToStore)
 			case AddLightPeer:
-				c.Assert(step.(AddLightPeer).ToStore, Equals, tc.steps[i].(AddLightPeer).ToStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLightPeer).ToStore)
 			case RemovePeer:
-				c.Assert(step.(RemovePeer).FromStore, Equals, tc.steps[i].(RemovePeer).FromStore)
+				c.Assert(step.FromStore, Equals, tc.steps[i].(RemovePeer).FromStore)
 			case AddLearner:
-				c.Assert(step.(AddLearner).ToStore, Equals, tc.steps[i].(AddLearner).ToStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLearner).ToStore)
 			case AddLightLearner:
-				c.Assert(step.(AddLightLearner).ToStore, Equals, tc.steps[i].(AddLightLearner).ToStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLightLearner).ToStore)
 			case PromoteLearner:
-				c.Assert(step.(PromoteLearner).ToStore, Equals, tc.steps[i].(PromoteLearner).ToStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(PromoteLearner).ToStore)
+			case DemoteFollower:
+				c.Assert(step.ToStore, Equals, tc.steps[i].(DemoteFollower).ToStore)
+			case ChangePeerV2Enter:
+				c.Assert(len(step.PromoteLearners), Equals, len(tc.steps[i].(ChangePeerV2Enter).PromoteLearners))
+				c.Assert(len(step.DemoteVoters), Equals, len(tc.steps[i].(ChangePeerV2Enter).DemoteVoters))
+				for j, p := range tc.steps[i].(ChangePeerV2Enter).PromoteLearners {
+					c.Assert(step.PromoteLearners[j].ToStore, Equals, p.ToStore)
+				}
+				for j, d := range tc.steps[i].(ChangePeerV2Enter).DemoteVoters {
+					c.Assert(step.DemoteVoters[j].ToStore, Equals, d.ToStore)
+				}
+			case ChangePeerV2Leave:
+				c.Assert(len(step.PromoteLearners), Equals, len(tc.steps[i].(ChangePeerV2Leave).PromoteLearners))
+				c.Assert(len(step.DemoteVoters), Equals, len(tc.steps[i].(ChangePeerV2Leave).DemoteVoters))
+				for j, p := range tc.steps[i].(ChangePeerV2Leave).PromoteLearners {
+					c.Assert(step.PromoteLearners[j].ToStore, Equals, p.ToStore)
+				}
+				for j, d := range tc.steps[i].(ChangePeerV2Leave).DemoteVoters {
+					c.Assert(step.DemoteVoters[j].ToStore, Equals, d.ToStore)
+				}
 			}
 		}
 	}

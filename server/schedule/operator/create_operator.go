@@ -52,6 +52,14 @@ func CreateTransferLeaderOperator(desc string, cluster opt.Cluster, region *core
 		Build(kind)
 }
 
+// CreateForceTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store forcible.
+func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
+	return NewBuilder(desc, cluster, region).
+		SetLeader(targetStoreID).
+		SetForceTargetLeader().
+		Build(kind)
+}
+
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
 func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, peers map[uint64]*metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
