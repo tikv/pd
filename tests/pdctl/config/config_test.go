@@ -411,7 +411,7 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 
 	// test load
 	var bundles []placement.GroupBundle
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
 	b, _ := ioutil.ReadFile(fname)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
@@ -424,7 +424,7 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	b, err = json.Marshal(bundle)
 	c.Assert(err, IsNil)
 	c.Assert(ioutil.WriteFile(fname, b, 0644), IsNil)
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	c.Assert(err, IsNil)
 
 	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pe")
@@ -434,7 +434,7 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(bundle, DeepEquals, placement.GroupBundle{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}})
 
 	// test delete
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "pd")
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "pd")
 	c.Assert(err, IsNil)
 
 	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pd")
@@ -449,10 +449,10 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	b, err = json.Marshal(bundle)
 	c.Assert(err, IsNil)
 	c.Assert(ioutil.WriteFile(fname, b, 0644), IsNil)
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	c.Assert(err, IsNil)
 
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "--regexp", ".*f")
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "--regexp", ".*f")
 	c.Assert(err, IsNil)
 
 	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pf")
@@ -467,9 +467,10 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	b, err = json.Marshal(bundles)
 	c.Assert(err, IsNil)
 	c.Assert(ioutil.WriteFile(fname, b, 0644), IsNil)
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname)
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname)
+	c.Assert(err, IsNil)
 
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
 	b, err = ioutil.ReadFile(fname)
 	c.Assert(err, IsNil)
