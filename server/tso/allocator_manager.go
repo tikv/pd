@@ -17,20 +17,25 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/election"
+	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
 const (
+	dcLocationConfigEtcdPrefix  = "dc-location"
 	leaderTickInterval          = 50 * time.Millisecond
 	defaultAllocatorLeaderLease = 3
 )
@@ -69,7 +74,7 @@ type AllocatorManager struct {
 	allocatorGroups map[string]*allocatorGroup
 	// for election use
 	member *member.Member
-	// tso config
+	// TSO config
 	rootPath      string
 	saveInterval  time.Duration
 	maxResetTSGap func() time.Duration
@@ -85,6 +90,70 @@ func NewAllocatorManager(m *member.Member, rootPath string, saveInterval time.Du
 		maxResetTSGap:   maxResetTSGap,
 	}
 	return allocatorManager
+}
+
+// SetLocalTSOConfig receives a `LocalTSOConfig` and write it into etcd to make the whole
+// cluster know the DC-level topology for later Local TSO Allocator campaign.
+func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConfig) error {
+	memberName := am.member.Member().Name
+	memberID := fmt.Sprint(am.member.ID())
+	log.Info("write dc-location into etcd",
+		zap.String("dc-location", localTSOConfig.DCLocation),
+		zap.String("name", memberName),
+		zap.String("member-id", memberID))
+	if !localTSOConfig.EnableLocalTSO {
+		log.Info("pd server doesn't enable local tso, skip writing dc-location into etcd",
+			zap.String("name", memberName),
+			zap.String("member-id", memberID))
+		return nil
+	}
+	// The key-value pair in etcd will be like: memberName -> dcLocation
+	dcLocationKey := path.Join(am.getLocalTSOConfigPath(), memberName)
+	resp, err := kv.
+		NewSlowLogTxn(am.member.Client()).
+		Then(clientv3.OpPut(dcLocationKey, localTSOConfig.DCLocation)).
+		Commit()
+	if err != nil {
+		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+	}
+	if !resp.Succeeded {
+		log.Warn("write dc-location into etcd failed",
+			zap.String("dc-location", localTSOConfig.DCLocation),
+			zap.String("server-name", memberName),
+			zap.String("member-id", memberID))
+		return errs.ErrEtcdTxn.FastGenByArgs()
+	}
+	return nil
+}
+
+// GetClusterDCLocations returns all dc-locations of a cluster and transform it into a map
+// which satisfies dcLocation -> []memberName.
+func (am *AllocatorManager) GetClusterDCLocations() (map[string][]string, error) {
+	resp, err := etcdutil.EtcdKVGet(
+		am.member.Client(),
+		am.getLocalTSOConfigPath(),
+		clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	if err != nil {
+		log.Error("get cluster dc-locations failed", errs.ZapError(err))
+		return nil, err
+	}
+	dcLocationMap := make(map[string][]string)
+	for _, kv := range resp.Kvs {
+		// The key will contain the member name and the value is its dcLocation
+		memberPath := strings.Split(string(kv.Key), "/")
+		memberName := memberPath[len(memberPath)-1]
+		dcLocation := string(kv.Value)
+		if len(dcLocationMap[dcLocation]) == 0 {
+			dcLocationMap[dcLocation] = make([]string, 0)
+		}
+		dcLocationMap[dcLocation] = append(dcLocationMap[dcLocation], memberName)
+	}
+	return dcLocationMap, nil
+}
+
+func (am *AllocatorManager) getLocalTSOConfigPath() string {
+	return path.Join(am.rootPath, dcLocationConfigEtcdPrefix)
 }
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
