@@ -17,9 +17,11 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
+	"os"
 
 	"github.com/go-echarts/go-echarts/charts"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
@@ -110,14 +112,13 @@ func newImportData() *Case {
 		}
 		for storeID := 1; storeID <= 10; storeID++ {
 			if peerCount, ok := peerDist[uint64(storeID)]; ok {
-				data = append(data, [3]int{storeID, int(checkCount), peerCount})
 				tablePeerLog = fmt.Sprintf("%s [store %d]:%.2f%%", tablePeerLog, storeID, float64(peerCount)/float64(peerTotal)*100)
 			}
 		}
 		regionTotal := regions.GetRegionCount()
 		totalLeaderLog := fmt.Sprintf("%d leader:", regionTotal)
 		totalPeerLog := fmt.Sprintf("%d peer:", regionTotal*3)
-		isEnd := true
+		isEnd := checkCount > 1000
 		var regionProps []float64
 		for storeID := uint64(1); storeID <= 10; storeID++ {
 			regions.GetStoreRegionCount(storeID)
@@ -143,18 +144,37 @@ func newImportData() *Case {
 			isEnd = dev < 0.002
 		}
 		if isEnd {
+			var rangeColor = []string{
+				"#313695", "#4575b4", "#74add1", "#abd9e9", "#e0f3f8",
+				"#fee090", "#fdae61", "#f46d43", "#d73027", "#a50026",
+			}
 			bar3d := charts.NewBar3D()
 			bar3d.SetGlobalOptions(
-				charts.TitleOpts{Title: "Bar3D-示例图"},
+				charts.TitleOpts{Title: "New region count"},
 				charts.VisualMapOpts{
-					Range:      []float32{0, 30},
+					Range:      []float32{0, 12},
 					Calculable: true,
 					InRange:    charts.VMInRange{Color: rangeColor},
-					Max:        30,
+					Max:        12,
 				},
 				charts.Grid3DOpts{BoxDepth: 80, BoxWidth: 200},
 			)
-			bar3d.AddXYAxis(hours, days).AddZAxis("bar3d", genBar3dData())
+			xAxis := make([]int, 10, 10)
+			for i := 1; i <= 10; i++ {
+				xAxis[i - 1] = i
+			}
+			yAxis := make([]int, checkCount, checkCount)
+			for i := 1; i <= int(checkCount); i++ {
+				yAxis[i - 1] = i
+			}
+			bar3d.AddXYAxis(xAxis, yAxis).AddZAxis("bar3d", data)
+			f, _ := os.Create("3d.html")
+			err := bar3d.Render(f)
+			err = bar3d.Render(f)
+			f.Close()
+			if err != nil {
+				log.Error("", zap.Error(err))
+			}
 		}
 		return isEnd
 	}

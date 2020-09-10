@@ -11,7 +11,7 @@ require (
 	github.com/coreos/pkg v0.0.0-20160727233714-3ac0863d7acf
 	github.com/docker/go-units v0.4.0
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
-	github.com/go-echarts/go-echarts v1.0.0 // indirect
+	github.com/go-echarts/go-echarts v1.0.0
 	github.com/go-playground/overalls v0.0.0-20180201144345-22ec1a223b7c
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/protobuf v1.3.4
@@ -50,8 +50,6 @@ require (
 	go.uber.org/goleak v0.10.0
 	go.uber.org/zap v1.15.0
 	golang.org/x/tools v0.0.0-20200527183253-8e7acdbce89d
-	gonum.org/v1/netlib v0.0.0-20200824093956-f0ca4b3a5ef5 // indirect
-	gonum.org/v1/plot v0.7.0
 	google.golang.org/grpc v1.25.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
