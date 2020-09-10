@@ -1,1 +1,0 @@
-./bin/pd-simulator --regionNum 10000 --case import-data
