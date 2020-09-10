@@ -210,7 +210,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 		{ // not use joint consensus: replace voter with learner
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
 				RemovePeer{FromStore: 2},
 				AddLearner{ToStore: 2},
