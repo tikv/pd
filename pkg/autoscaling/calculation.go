@@ -62,7 +62,7 @@ func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *St
 	}
 	querier := NewPrometheusQuerier(client)
 
-	var components map[ComponentType]struct{}
+	components := map[ComponentType]struct{}{}
 	for _, rule := range strategy.Rules {
 		switch rule.Component {
 		case "tidb":
@@ -227,6 +227,10 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 	group := findBestGroupToScaleOut(rc, strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
+	if math.Abs(resCPU) <= 1e-6 {
+		log.Error("resource CPU is zero, exiting calculation")
+		return nil
+	}
 	resCount := getCountByResourceType(strategy, group.ResourceType)
 	scaleOutCount := typeutil.MinUint64(uint64(math.Ceil(scaleOutQuota/resCPU)), MaxScaleOutStep)
 
