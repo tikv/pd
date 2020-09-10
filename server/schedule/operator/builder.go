@@ -271,6 +271,7 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 }
 
 // Initialize intermediate states.
+// TODO: simply the code
 func (b *Builder) prepareBuild() (string, error) {
 	b.toAdd = newPeersMap()
 	b.toRemove = newPeersMap()
