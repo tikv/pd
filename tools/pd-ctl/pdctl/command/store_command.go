@@ -25,6 +25,7 @@ import (
 
 var (
 	storesPrefix = "pd/api/v1/stores"
+	storesLimitPrefix = "pd/api/v1/stores/limit"
 	storePrefix  = "pd/api/v1/store/%v"
 )
 
@@ -363,7 +364,7 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 	argsCount := len(args)
 	if argsCount <= 1 {
-		prefix := path.Join(storesPrefix, "limit")
+		prefix := storesLimitPrefix
 		if argsCount == 1 {
 			prefix += fmt.Sprintf("?type=%s", args[0])
 		}
@@ -382,7 +383,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		// if the storeid is "all", set limits for all stores
 		var prefix string
 		if args[0] == "all" {
-			prefix = path.Join(storesPrefix, "limit")
+			prefix = storesLimitPrefix
 		} else {
 			prefix = fmt.Sprintf(path.Join(storePrefix, "limit"), args[0])
 		}
@@ -398,7 +399,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			cmd.Println("Labels are an option of set all stores limit.")
 		} else {
 			postInput := map[string]interface{}{}
-			prefix := path.Join(storesPrefix, "limit")
+			prefix := storesLimitPrefix
 			ratePos := argsCount - 1
 			if argsCount%2 == 1 {
 				postInput["type"] = args[argsCount-1]
@@ -439,7 +440,7 @@ func showAllStoresLimitCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
-	prefix := path.Join(storesPrefix, "limit")
+	prefix := storesLimitPrefix
 	if len(args) == 1 {
 		prefix += fmt.Sprintf("?type=%s", args[0])
 	}
@@ -472,7 +473,7 @@ func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println("rate should be a number that > 0.")
 		return
 	}
-	prefix := path.Join(storesPrefix, "limit")
+	prefix := storesLimitPrefix
 	input := map[string]interface{}{
 		"rate": rate,
 	}

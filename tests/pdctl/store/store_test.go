@@ -199,7 +199,6 @@ func (s *storeTestSuite) TestStore(c *C) {
 	// store limit all <key> <value> <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "zone", "uk", "20", "remove-peer"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Log(string(output))
 	c.Assert(err, IsNil)
 	limit1 = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
 	c.Assert(limit1, Equals, float64(20))
