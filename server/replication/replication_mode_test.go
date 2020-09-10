@@ -251,7 +251,7 @@ func (s *testReplicationMode) TestAsynctimeout(c *C) {
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 		WaitAsyncTimeout: typeutil.Duration{Duration: 2 * time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	cluster := mockcluster.NewCluster(config.NewTestOptions())
 	var replicator mockFileReplicator
 	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
 	c.Assert(err, IsNil)
