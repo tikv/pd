@@ -56,7 +56,7 @@ func CreateTransferLeaderOperator(desc string, cluster opt.Cluster, region *core
 func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
 		SetLeader(targetStoreID).
-		SetForceTargetLeader().
+		EnableForceTargetLeader().
 		Build(kind)
 }
 
@@ -174,6 +174,6 @@ func CreateScatterRegionOperator(desc string, cluster opt.Cluster, origin *core.
 	return NewBuilder(desc, cluster, origin).
 		SetPeers(targetPeers).
 		SetLeader(leader).
-		SetLightWeight().
+		EnableLightWeight().
 		Build(0)
 }

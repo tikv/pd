@@ -229,14 +229,14 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 	return b
 }
 
-// SetLightWeight marks the region as light weight. It is used for scatter regions.
-func (b *Builder) SetLightWeight() *Builder {
+// EnableLightWeight marks the region as light weight. It is used for scatter regions.
+func (b *Builder) EnableLightWeight() *Builder {
 	b.isLightWeight = true
 	return b
 }
 
-// SetForceTargetLeader marks the step of transferring leader to target is forcible. It is used for grant leader.
-func (b *Builder) SetForceTargetLeader() *Builder {
+// EnableForceTargetLeader marks the step of transferring leader to target is forcible. It is used for grant leader.
+func (b *Builder) EnableForceTargetLeader() *Builder {
 	b.forceTargetLeader = true
 	return b
 }

@@ -94,7 +94,7 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 		3: {StoreId: 3, Role: metapb.PeerRole_Learner},
 		4: {StoreId: 4},
 	}
-	builder := s.newBuilder().SetPeers(m).SetLightWeight()
+	builder := s.newBuilder().SetPeers(m).EnableLightWeight()
 	c.Assert(len(builder.targetPeers), Equals, 3)
 	c.Assert(builder.targetPeers[2], DeepEquals, m[2])
 	c.Assert(builder.targetPeers[3], DeepEquals, m[3])
