@@ -88,6 +88,11 @@ func (m *Member) Etcd() *embed.Etcd {
 	return m.etcd
 }
 
+// Client returns the etcd client.
+func (m *Member) Client() *clientv3.Client {
+	return m.client
+}
+
 // IsLeader returns whether the server is PD leader or not.
 func (m *Member) IsLeader() bool {
 	// If server is not started. Both leaderID and ID could be 0.
