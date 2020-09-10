@@ -568,6 +568,7 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 	tc := mockcluster.NewCluster(cfg)
 	tc.SetMaxMergeRegionSize(2)
 	tc.SetMaxMergeRegionKeys(2)
+	tc.SetSplitMergeInterval(0)
 	regions := []*core.RegionInfo{
 		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
 		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),

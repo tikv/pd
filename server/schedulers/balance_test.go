@@ -100,6 +100,7 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.SetTolerantSizeRatio(2.5)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	oc := schedule.NewOperatorController(ctx, nil, nil)
@@ -183,7 +184,7 @@ func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.opt = config.NewTestOptions()
 	s.tc = mockcluster.NewCluster(s.opt)
-	s.oc = schedule.NewOperatorController(s.ctx, nil, nil)
+	s.oc = schedule.NewOperatorController(s.ctx, s.tc, nil)
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	s.lb = lb
@@ -198,6 +199,7 @@ func (s *testBalanceLeaderSchedulerSuite) schedule() []*operator.Operator {
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
+	s.tc.SetTolerantSizeRatio(2.5)
 	// Stores:     1    2    3    4
 	// Leaders:    1    0    0    0
 	// Region1:    L    F    F    F
@@ -248,7 +250,8 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderSchedulePolicy(c *C) 
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
-	// default leader tolerant ratio is 5, when schedule by count
+	s.tc.SetTolerantSizeRatio(2.5)
+	// test schedule leader by count, with tolerantSizeRatio=2.5
 	// Stores:          1       2       3       4
 	// Leader Count:    14->15  10      10      10
 	// Leader Size :    100     100     100     100
@@ -269,6 +272,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
+	s.tc.SetTolerantSizeRatio(2.5)
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   14
 	// Region1:    F    F    F    L
@@ -375,7 +379,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
 	// Leaders:    10      10      10      10
 	// Weight:     0.5     0.9     1       2
 	// Region1:    L       F       F       F
-
+	s.tc.SetTolerantSizeRatio(2.5)
 	for i := uint64(1); i <= 4; i++ {
 		s.tc.AddLeaderStore(i, 10)
 	}
@@ -949,6 +953,7 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetTolerantSizeRatio(2.5)
 	// Add stores 1,2,3,4,5.
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 0)
