@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -95,20 +96,20 @@ func NewAllocatorManager(m *member.Member, rootPath string, saveInterval time.Du
 // SetLocalTSOConfig receives a `LocalTSOConfig` and write it into etcd to make the whole
 // cluster know the DC-level topology for later Local TSO Allocator campaign.
 func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConfig) error {
-	memberName := am.member.Member().Name
-	memberID := fmt.Sprint(am.member.ID())
+	serverName := am.member.Member().Name
+	serverID := fmt.Sprint(am.member.ID())
 	log.Info("write dc-location into etcd",
 		zap.String("dc-location", localTSOConfig.DCLocation),
-		zap.String("name", memberName),
-		zap.String("member-id", memberID))
+		zap.String("server-name", serverName),
+		zap.String("server-id", serverID))
 	if !localTSOConfig.EnableLocalTSO {
 		log.Info("pd server doesn't enable local tso, skip writing dc-location into etcd",
-			zap.String("name", memberName),
-			zap.String("member-id", memberID))
+			zap.String("server-name", serverName),
+			zap.String("server-id", serverID))
 		return nil
 	}
-	// The key-value pair in etcd will be like: memberName -> dcLocation
-	dcLocationKey := path.Join(am.getLocalTSOConfigPath(), memberName)
+	// The key-value pair in etcd will be like: serverID -> dcLocation
+	dcLocationKey := path.Join(am.getLocalTSOConfigPath(), serverID)
 	resp, err := kv.
 		NewSlowLogTxn(am.member.Client()).
 		Then(clientv3.OpPut(dcLocationKey, localTSOConfig.DCLocation)).
@@ -119,16 +120,16 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 	if !resp.Succeeded {
 		log.Warn("write dc-location into etcd failed",
 			zap.String("dc-location", localTSOConfig.DCLocation),
-			zap.String("server-name", memberName),
-			zap.String("member-id", memberID))
+			zap.String("server-name", serverName),
+			zap.String("server-id", serverID))
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 	return nil
 }
 
 // GetClusterDCLocations returns all dc-locations of a cluster and transform it into a map
-// which satisfies dcLocation -> []memberName.
-func (am *AllocatorManager) GetClusterDCLocations() (map[string][]string, error) {
+// which satisfies dcLocation -> []serverID.
+func (am *AllocatorManager) GetClusterDCLocations() (map[string][]uint64, error) {
 	resp, err := etcdutil.EtcdKVGet(
 		am.member.Client(),
 		am.getLocalTSOConfigPath(),
@@ -138,16 +139,21 @@ func (am *AllocatorManager) GetClusterDCLocations() (map[string][]string, error)
 		log.Error("get cluster dc-locations failed", errs.ZapError(err))
 		return nil, err
 	}
-	dcLocationMap := make(map[string][]string)
+	dcLocationMap := make(map[string][]uint64)
 	for _, kv := range resp.Kvs {
-		// The key will contain the member name and the value is its dcLocation
-		memberPath := strings.Split(string(kv.Key), "/")
-		memberName := memberPath[len(memberPath)-1]
+		// The key will contain the member ID and the value is its dcLocation
+		serverPath := strings.Split(string(kv.Key), "/")
 		dcLocation := string(kv.Value)
-		if len(dcLocationMap[dcLocation]) == 0 {
-			dcLocationMap[dcLocation] = make([]string, 0)
+		// Get serverID from serverPath, e.g, /pd/dc-location/1232143243253 -> 1232143243253
+		serverID, err := strconv.ParseUint(serverPath[len(serverPath)-1], 10, 64)
+		if err != nil {
+			log.Warn("get server id and dcLocation from etcd failed, invalid server id",
+				zap.Any("splitted-serverPath", serverPath),
+				zap.String("dc-location", dcLocation),
+				errs.ZapError(err))
+			continue
 		}
-		dcLocationMap[dcLocation] = append(dcLocationMap[dcLocation], memberName)
+		dcLocationMap[dcLocation] = append(dcLocationMap[dcLocation], serverID)
 	}
 	return dcLocationMap, nil
 }

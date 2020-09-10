@@ -67,15 +67,20 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
+	serverNameMap := make(map[uint64]string)
+	for _, server := range cluster.GetServers() {
+		serverNameMap[server.GetServerID()] = server.GetServer().Name()
+	}
+	// Start to check every server's GetClusterDCLocations() result
 	for _, server := range cluster.GetServers() {
 		obtainedServerNumber := 0
 		dcLocationMap, err := server.GetTSOAllocatorManager().GetClusterDCLocations()
 		c.Assert(err, IsNil)
 		c.Assert(len(dcLocationMap), Equals, testCase.dcLocationNumber)
-		for obtainedDCLocation, serverNames := range dcLocationMap {
-			obtainedServerNumber += len(serverNames)
-			for _, serverName := range serverNames {
-				expectedDCLocation, exist := testCase.dcLocationConfig[serverName]
+		for obtainedDCLocation, serverIDs := range dcLocationMap {
+			obtainedServerNumber += len(serverIDs)
+			for _, serverID := range serverIDs {
+				expectedDCLocation, exist := testCase.dcLocationConfig[serverNameMap[serverID]]
 				c.Assert(exist, IsTrue)
 				c.Assert(obtainedDCLocation, Equals, expectedDCLocation)
 			}
