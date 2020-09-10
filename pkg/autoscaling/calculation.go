@@ -255,6 +255,10 @@ func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component
 	}
 	group := findBestGroupToScaleIn(rc, strategy, scaleInQuota, groups)
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
+	if math.Abs(resCPU) <= 1e-6 {
+		log.Error("resource CPU is zero, exiting calculation")
+		return nil
+	}
 	scaleInCount := typeutil.MinUint64(uint64(math.Ceil(scaleInQuota/resCPU)), MaxScaleInStep)
 	for i, g := range groups {
 		if g.ResourceType == group.ResourceType {
