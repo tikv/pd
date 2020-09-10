@@ -363,11 +363,27 @@ func newRegionInfo(id uint64, srcStoreID uint64, load1 float64, load2 float64) *
 	}
 }
 
+func (r *regionInfo) NeedSplit() bool {
+	return r.splitRatio != 0
+}
+
 type regionInfoByDiff []*regionInfo
 
 func (s regionInfoByDiff) Len() int           { return len(s) }
 func (s regionInfoByDiff) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 func (s regionInfoByDiff) Less(i, j int) bool { return s[i].diffLoad < s[j].diffLoad }
+
+type regionInfoByLoad0 []*regionInfo
+
+func (s regionInfoByLoad0) Len() int           { return len(s) }
+func (s regionInfoByLoad0) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s regionInfoByLoad0) Less(i, j int) bool { return s[i].loads[0] < s[j].loads[0] }
+
+type regionInfoByLoad1 []*regionInfo
+
+func (s regionInfoByLoad1) Len() int           { return len(s) }
+func (s regionInfoByLoad1) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s regionInfoByLoad1) Less(i, j int) bool { return s[i].loads[1] < s[j].loads[1] }
 
 type regionContainer struct {
 	emphRegions     [DimensionCount]map[uint64][]*regionInfo
@@ -435,10 +451,11 @@ func (rc *regionContainer) empty(dimID uint64) bool {
 }
 
 type storeInfo struct {
-	id          uint64
-	loads       []float64
-	regions     map[uint64]*regionInfo
-	emphRegions [][]*regionInfo
+	id             uint64
+	loads          []float64
+	regions        map[uint64]*regionInfo
+	emphRegions    [][]*regionInfo
+	sorted_regions []*regionInfo
 }
 
 type storeInfoByLoad0 []*storeInfo
@@ -492,6 +509,17 @@ func (si *storeInfo) classifyRegion() {
 	sort.Sort(regionInfoByDiff(si.emphRegions[1]))
 }
 
+func (si *storeInfo) sortBy(dimID uint64) {
+	for _, region := range si.regions {
+		si.sorted_regions = append(si.sorted_regions, region)
+	}
+	if dimID == 0 {
+		sort.Sort(regionInfoByLoad0(si.sorted_regions))
+	} else {
+		sort.Sort(regionInfoByLoad1(si.sorted_regions))
+	}
+}
+
 func calcMaxMeanRatio(storeInfos []*storeInfo) float64 {
 	var ratios []float64
 	for dimID := uint64(0); dimID < DimensionCount; dimID++ {
@@ -504,6 +532,53 @@ func calcMaxMeanRatio(storeInfos []*storeInfo) float64 {
 		ratios = append(ratios, maxLoad/avgLoad)
 	}
 	return math.Max(ratios[0], ratios[1])
+}
+
+func greedySingle(storeInfos []*storeInfo, ratio float64, dimID uint64) (ret []*regionInfo, needSplit bool) {
+	if dimID == 0 {
+		sort.Sort(storeInfoByLoad0(storeInfos))
+	} else {
+		sort.Sort(storeInfoByLoad1(storeInfos))
+	}
+
+	for _, store := range storeInfos {
+		log.Info("store load", zap.Float64("load", store.loads[dimID]))
+		store.sortBy(dimID)
+	}
+
+	low := 0
+	high := len(storeInfos) - 1
+	for low < high {
+		hStore := storeInfos[high]
+		if hStore.loads[dimID] <= 1+ratio {
+			break
+		}
+
+		for i := len(hStore.sorted_regions) - 1; i >= 0 && hStore.loads[dimID] > 1+ratio; i-- {
+			curRegion := hStore.sorted_regions[i]
+			if hStore.loads[dimID]-curRegion.loads[dimID] < 1-ratio {
+				continue
+			}
+
+			for j := low; j < high; j++ {
+				lStore := storeInfos[j]
+				if lStore.loads[dimID]+curRegion.loads[dimID] <= 1+ratio {
+					hStore.remove(curRegion)
+					lStore.add(curRegion)
+					curRegion.dstStoreID = lStore.id
+					ret = append(ret, curRegion)
+					break
+				}
+			}
+		}
+
+		high--
+	}
+	log.Info("greedyBalance: summary",
+		zap.Int("migrationCost", len(ret)),
+		zap.Float64("balanceRatio", calcMaxMeanRatio(storeInfos)),
+	)
+	return
 }
 
 func greedyBalance(storeInfos []*storeInfo, ratio float64) (ret []*regionInfo, needSplit bool) {

@@ -69,7 +69,16 @@ const (
 	hotReadRegionMinFlowRateHR  = 128 * 1024
 	hotWriteRegionMinKeyRateHR  = 256
 	hotReadRegionMinKeyRateHR   = 512
+	batchOperationLimit         = 10
+	operationRetryLimit         = 10
 )
+
+type opRecord struct {
+	pendingOp *operator.Operator
+	region    *regionInfo
+	retry     uint64
+	isFinish  bool
+}
 
 // schedulePeerPrHR the probability of schedule the hot peer.
 var schedulePeerPrHR = 0.66
@@ -93,7 +102,8 @@ type multiDimensionScheduler struct {
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
 
-	isScheduled bool
+	isScheduled    bool
+	regionOpRecord map[uint64]*opRecord
 }
 
 func newMultiDimensionScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *multiDimensionScheduler {
@@ -107,6 +117,7 @@ func newMultiDimensionScheduler(opController *schedule.OperatorController, conf 
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 		regionPendings: make(map[uint64][2]*operator.Operator),
 		conf:           conf,
+		regionOpRecord: make(map[uint64]*opRecord),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.pendings[ty] = map[*pendingInfluence]struct{}{}
@@ -135,7 +146,7 @@ func (h *multiDimensionScheduler) GetNextInterval(interval time.Duration) time.D
 }
 
 func (h *multiDimensionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return !h.isScheduled
+	return h.allowBalanceLeader(cluster) || h.allowBalanceRegion(cluster)
 }
 
 func (h *multiDimensionScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
@@ -149,35 +160,75 @@ func (h *multiDimensionScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
 
 func (h *multiDimensionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
-	if !h.isScheduled {
-		return h.dispatch(h.types[1], cluster)
-	} else {
-		return nil
-	}
+	return h.dispatch(h.types[1], cluster)
 }
 
 func (h *multiDimensionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 
-	log.Info("execute multiDimensionScheduler")
-	h.isScheduled = true
-
+	// log.Info("execute multiDimensionScheduler")
 	h.prepareForBalance(cluster)
-
 	bs := newBalanceSolverHR(h, cluster, read, transferLeader)
-	ops := bs.greedyTwoDimension()
+
+	pendingOps := h.processPendingOps(bs)
+	if len(pendingOps) > 0 || h.isScheduled {
+		return pendingOps
+	}
+
+	bs.greedyTwoDimension()
+	h.isScheduled = true
 	// ops := bs.genScheduleRequestFromFile()
 
-	return ops
+	return h.processPendingOps(bs)
+}
 
-	// switch typ {
-	// case read:
-	// 	return h.balanceHotReadRegions(cluster)
-	// case write:
-	// 	return h.balanceHotWriteRegions(cluster)
-	// }
-	// return nil
+func (h *multiDimensionScheduler) processPendingOps(bs *balanceSolverHR) []*operator.Operator {
+	var pendingOps []*operator.Operator
+
+	for regionID, record := range h.regionOpRecord {
+		if record.isFinish {
+		} else if record.pendingOp == nil {
+			if len(pendingOps) < batchOperationLimit {
+				op := bs.generateOperator(record.region)
+				if op != nil {
+					record.pendingOp = op
+					pendingOps = append(pendingOps, record.pendingOp)
+				} else {
+					record.isFinish = true
+				}
+			}
+		} else if record.pendingOp.CheckSuccess() {
+			record.isFinish = true
+		} else if record.pendingOp.Status() > operator.SUCCESS {
+			if record.retry >= operationRetryLimit {
+				log.Info("cancel failed operation",
+					zap.Uint64("regionID", regionID),
+					zap.String("desc", record.pendingOp.Desc()))
+				record.isFinish = true
+			} else {
+				log.Info("retry to process failed operation",
+					zap.Uint64("regionID", regionID),
+					zap.String("status", operator.OpStatusToString(record.pendingOp.Status())),
+					zap.String("opType", record.pendingOp.Kind().String()))
+				record.retry++
+				op := bs.generateOperator(record.region)
+				if op != nil {
+					record.pendingOp = op
+					pendingOps = append(pendingOps, record.pendingOp)
+					if len(pendingOps) == batchOperationLimit {
+						break
+					}
+				} else {
+					record.isFinish = true
+				}
+			}
+		}
+	}
+	if len(pendingOps) > 0 {
+		log.Info("process pending operations", zap.Int("count", len(pendingOps)))
+	}
+	return pendingOps
 }
 
 func (h *multiDimensionScheduler) prepareForBalance(cluster opt.Cluster) {
@@ -573,7 +624,12 @@ func (bs *balanceSolverHR) genScheduleRequestFromFile() []*operator.Operator {
 	schCmds := loadScheduleRequest()
 	for _, cmd := range schCmds {
 		log.Info(fmt.Sprintf("parse schedule cmd: %v", cmd))
-		op := bs.generateOperator(cmd.regionID, cmd.srcStoreID, cmd.dstStoreID)
+		ri := &regionInfo{
+			id:         cmd.regionID,
+			srcStoreID: cmd.srcStoreID,
+			dstStoreID: cmd.dstStoreID,
+		}
+		op := bs.generateOperator(ri)
 		if op != nil {
 			ret = append(ret, op)
 		}
@@ -582,7 +638,7 @@ func (bs *balanceSolverHR) genScheduleRequestFromFile() []*operator.Operator {
 	return ret
 }
 
-func (bs *balanceSolverHR) generateOperator(regionID uint64, srcStoreID uint64, dstStoreID uint64) *operator.Operator {
+func (bs *balanceSolverHR) generateOperator(ri *regionInfo) *operator.Operator {
 	var (
 		op       *operator.Operator
 		counters []prometheus.Counter
@@ -591,10 +647,20 @@ func (bs *balanceSolverHR) generateOperator(regionID uint64, srcStoreID uint64, 
 		rwTy     rwType = bs.rwTy
 	)
 
+	regionID := ri.id
+	srcStoreID := ri.srcStoreID
+	dstStoreID := ri.dstStoreID
+
 	region := bs.cluster.GetRegion(regionID)
 	if !bs.isRegionAvailable(region) {
 		log.Error("region is not avaiable", zap.Uint64("regionID", regionID))
 		return nil
+	}
+
+	if ri.NeedSplit() {
+		opts := []float64{float64(ri.splitDimID), ri.splitRatio}
+		op := operator.CreateSplitRegionOperator("hotspot-split-region", bs.cluster.GetRegion(ri.id), operator.OpAdmin, pdpb.CheckPolicy_RATIO, nil, opts)
+		return op
 	}
 
 	if region.GetStoreVoter(dstStoreID) == nil { // move peer
@@ -649,7 +715,7 @@ func (bs *balanceSolverHR) generateOperator(regionID uint64, srcStoreID uint64, 
 	return op
 }
 
-func (bs *balanceSolverHR) greedyTwoDimension() []*operator.Operator {
+func (bs *balanceSolverHR) greedyTwoDimension() {
 	storeInfos := make([]*storeInfo, 0)
 	// create RegionInfo and StoreInfo to normalize flow data
 	for id, loadDetail := range bs.stLoadDetail {
@@ -666,26 +732,22 @@ func (bs *balanceSolverHR) greedyTwoDimension() []*operator.Operator {
 		storeInfos = append(storeInfos, si)
 	}
 
-	ret := make([]*operator.Operator, 0)
-
 	pendingRegions, needSplit := greedyBalance(storeInfos, 0.07)
-	if needSplit {
-		for _, ri := range pendingRegions {
-			opts := []float64{float64(ri.splitDimID), ri.splitRatio}
-			op := operator.CreateSplitRegionOperator("hotspot-split-region", bs.cluster.GetRegion(ri.id), operator.OpAdmin, pdpb.CheckPolicy_RATIO, nil, opts)
-			ret = append(ret, op)
-		}
-	} else {
-		for _, ri := range pendingRegions {
+
+	// pendingRegions, needSplit := greedySingle(storeInfos, 0.07, 0)
+	// pendingRegions1, needSplit := greedySingle(storeInfos, 0.07, 1)
+	// pendingRegions = append(pendingRegions, pendingRegions1...)
+
+	for _, ri := range pendingRegions {
+		if needSplit {
+			log.Info("split", zap.String("regionInfo", fmt.Sprintf("%+v", ri)))
+		} else {
 			log.Info("migrate", zap.String("regionInfo", fmt.Sprintf("%+v", ri)))
-			op := bs.generateOperator(ri.id, ri.srcStoreID, ri.dstStoreID)
-			if op != nil {
-				ret = append(ret, op)
-			}
+		}
+		bs.sche.regionOpRecord[ri.id] = &opRecord{
+			region: ri,
 		}
 	}
-
-	return ret
 }
 
 func getUnhealthyStoresHR(cluster opt.Cluster) []uint64 {
@@ -867,15 +929,15 @@ func (bs *balanceSolverHR) isRegionAvailable(region *core.RegionInfo) bool {
 		return false
 	}
 
-	if pendings, ok := bs.sche.regionPendings[region.GetID()]; ok {
-		if bs.opTy == transferLeader {
-			return false
-		}
-		if pendings[movePeer] != nil ||
-			(pendings[transferLeader] != nil && !pendings[transferLeader].IsEnd()) {
-			return false
-		}
-	}
+	// if pendings, ok := bs.sche.regionPendings[region.GetID()]; ok {
+	// 	if bs.opTy == transferLeader {
+	// 		return false
+	// 	}
+	// 	if pendings[movePeer] != nil ||
+	// 		(pendings[transferLeader] != nil && !pendings[transferLeader].IsEnd()) {
+	// 		return false
+	// 	}
+	// }
 
 	if !opt.IsHealthyAllowPending(bs.cluster, region) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "unhealthy-replica").Inc()
