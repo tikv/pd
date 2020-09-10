@@ -101,7 +101,7 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	}
 
 	currentQuota, err := getTotalCPUQuota(querier, component, instances, now)
-	if err != nil {
+	if err != nil || currentQuota == 0 {
 		log.Error("cannot get total CPU quota", errs.ZapError(err))
 		return nil
 	}
