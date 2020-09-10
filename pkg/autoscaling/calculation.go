@@ -62,12 +62,22 @@ func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *St
 	}
 	querier := NewPrometheusQuerier(client)
 
-	if tikvPlans := getPlans(rc, querier, strategy, TiKV); tikvPlans != nil {
-		plans = append(plans, tikvPlans...)
+	var components map[ComponentType]struct{}
+	for _, rule := range strategy.Rules {
+		switch rule.Component {
+		case "tidb":
+			components[TiDB] = struct{}{}
+		case "tikv":
+			components[TiKV] = struct{}{}
+		}
 	}
-	if tidbPlans := getPlans(rc, querier, strategy, TiDB); tidbPlans != nil {
-		plans = append(plans, tidbPlans...)
+
+	for comp := range components {
+		if compPlans := getPlans(rc, querier, strategy, comp); compPlans != nil {
+			plans = append(plans, compPlans...)
+		}
 	}
+
 	return plans
 }
 
