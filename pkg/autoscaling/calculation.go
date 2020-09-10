@@ -373,15 +373,9 @@ func buildPlans(planMap map[string]map[string]struct{}, resourceTypeMap map[stri
 			Component:    componentType.String(),
 			Count:        uint64(len(groupInstances)),
 			ResourceType: resourceType,
-			Labels: []*metapb.StoreLabel{
-				{
-					Key:   groupLabelKey,
-					Value: groupName,
-				},
-				{
-					Key:   resourceTypeLabelKey,
-					Value: resourceType,
-				},
+			Labels: map[string]string{
+				groupLabelKey:        groupName,
+				resourceTypeLabelKey: resourceType,
 			},
 		})
 	}
@@ -404,17 +398,12 @@ func findBestGroupToScaleOut(rc *cluster.RaftCluster, strategy *Strategy, scaleO
 		Component:    component.String(),
 		Count:        0,
 		ResourceType: resources[0].ResourceType,
-		Labels: []*metapb.StoreLabel{
-			{
-				Key: groupLabelKey,
-				// TODO: we need to make this label not duplicated when we implement the heterogeneous logic.
-				Value: autoScalingGroupLabelKeyPrefix + component.String(),
-			},
-			{
-				Key:   resourceTypeLabelKey,
-				Value: resources[0].ResourceType,
-			},
+		Labels: map[string]string{
+			// TODO: we need to make this label not duplicated when we implement the heterogeneous logic.
+			groupLabelKey:        autoScalingGroupLabelKeyPrefix + component.String(),
+			resourceTypeLabelKey: resources[0].ResourceType,
 		},
 	}
+
 	return group
 }
