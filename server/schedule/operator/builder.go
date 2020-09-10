@@ -113,7 +113,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Buil
 	b := newBuilderWithBasicCheck(desc, cluster, region)
 
 	if b.err == nil && core.IsInJointState(region.GetPeers()...) {
-		b.err = errors.Errorf("cannot build operator for region is in joint state")
+		b.err = errors.Errorf("cannot build operator for region which is in joint state")
 	}
 
 	return b
