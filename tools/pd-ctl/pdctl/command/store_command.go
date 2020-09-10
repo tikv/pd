@@ -24,9 +24,9 @@ import (
 )
 
 var (
-	storesPrefix = "pd/api/v1/stores"
+	storesPrefix      = "pd/api/v1/stores"
 	storesLimitPrefix = "pd/api/v1/stores/limit"
-	storePrefix  = "pd/api/v1/store/%v"
+	storePrefix       = "pd/api/v1/store/%v"
 )
 
 // NewStoreCommand return a stores subcommand of rootCmd
