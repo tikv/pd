@@ -33,9 +33,9 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 }
 
 // WithPendingPeers sets the pending peers for the region.
-func WithPendingPeers(pengdingPeers []*metapb.Peer) RegionCreateOption {
+func WithPendingPeers(pendingPeers []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.pendingPeers = pengdingPeers
+		region.pendingPeers = pendingPeers
 	}
 }
 
@@ -196,7 +196,7 @@ func SetReportInterval(v uint64) RegionCreateOption {
 	}
 }
 
-// SetRegionConfVer sets the config version for the reigon.
+// SetRegionConfVer sets the config version for the region.
 func SetRegionConfVer(confVer uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		if region.meta.RegionEpoch == nil {
@@ -207,7 +207,7 @@ func SetRegionConfVer(confVer uint64) RegionCreateOption {
 	}
 }
 
-// SetRegionVersion sets the version for the reigon.
+// SetRegionVersion sets the version for the region.
 func SetRegionVersion(version uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		if region.meta.RegionEpoch == nil {

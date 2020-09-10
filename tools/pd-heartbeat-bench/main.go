@@ -34,7 +34,7 @@ var (
 	replica           = flag.Int("replica", 3, "replica count")
 	regionUpdateRatio = flag.Float64("region-update-ratio", 0.05, "ratio of the region need to update")
 	sample            = flag.Bool("sample", false, "sample per second")
-	heartbeatRounds   = flag.Int("heartbeat-rounds", 5, "total rounds of hearbeat")
+	heartbeatRounds   = flag.Int("heartbeat-rounds", 5, "total rounds of heartbeat")
 )
 
 var clusterID uint64
@@ -211,7 +211,7 @@ func main() {
 			startNotifier := groupStartNotify[storeID]
 			startNotifier <- report
 		}
-		// All stores finished hearbeat once.
+		// All stores finished heartbeat once.
 		for storeID := 1; storeID <= *storeCount; storeID++ {
 			<-groupEndNotify[storeID]
 		}

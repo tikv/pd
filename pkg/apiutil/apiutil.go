@@ -77,7 +77,7 @@ type FieldError struct {
 }
 
 // ParseUint64VarsField connects strconv.ParseUint with request variables
-// It hardcodes the base to 10 and bitsize to 64
+// It hardcodes the base to 10 and bit size to 64
 // Any error returned will connect the requested field to the error via FieldError
 func ParseUint64VarsField(vars map[string]string, varName string) (uint64, *FieldError) {
 	str, ok := vars[varName]

@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -27,10 +28,10 @@ const (
 )
 
 type storeStatistics struct {
-	opt             ScheduleOptions
+	opt             *config.PersistOptions
 	Up              int
 	Disconnect      int
-	Unhealth        int
+	Unhealthy       int
 	Down            int
 	Offline         int
 	Tombstone       int
@@ -42,7 +43,7 @@ type storeStatistics struct {
 	LabelCounter    map[string]int
 }
 
-func newStoreStatistics(opt ScheduleOptions) *storeStatistics {
+func newStoreStatistics(opt *config.PersistOptions) *storeStatistics {
 	return &storeStatistics{
 		opt:          opt,
 		LabelCounter: make(map[string]int),
@@ -68,8 +69,8 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	case metapb.StoreState_Up:
 		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
 			s.Down++
-		} else if store.IsUnhealth() {
-			s.Unhealth++
+		} else if store.IsUnhealthy() {
+			s.Unhealthy++
 		} else if store.IsDisconnected() {
 			s.Disconnect++
 		} else {
@@ -129,7 +130,7 @@ func (s *storeStatistics) Collect() {
 	metrics["store_up_count"] = float64(s.Up)
 	metrics["store_disconnected_count"] = float64(s.Disconnect)
 	metrics["store_down_count"] = float64(s.Down)
-	metrics["store_unhealth_count"] = float64(s.Unhealth)
+	metrics["store_unhealth_count"] = float64(s.Unhealthy)
 	metrics["store_offline_count"] = float64(s.Offline)
 	metrics["store_tombstone_count"] = float64(s.Tombstone)
 	metrics["store_low_space_count"] = float64(s.LowSpace)
@@ -209,12 +210,12 @@ func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
 }
 
 type storeStatisticsMap struct {
-	opt   ScheduleOptions
+	opt   *config.PersistOptions
 	stats *storeStatistics
 }
 
 // NewStoreStatisticsMap creates a new storeStatisticsMap.
-func NewStoreStatisticsMap(opt ScheduleOptions) *storeStatisticsMap {
+func NewStoreStatisticsMap(opt *config.PersistOptions) *storeStatisticsMap {
 	return &storeStatisticsMap{
 		opt:   opt,
 		stats: newStoreStatistics(opt),

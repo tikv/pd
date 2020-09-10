@@ -145,7 +145,7 @@ func newEngineContext(filters ...filter.Filter) engineContext {
 	}
 }
 
-// Scatter relocates the region. If the group is defined, the regions's leader with the same group would be scattered
+// Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
 // in a group level instead of cluster level.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*operator.Operator, error) {
 	if !opt.IsRegionReplicated(r.cluster, region) {

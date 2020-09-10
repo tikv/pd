@@ -35,7 +35,7 @@ const (
 	groupLabelKey                  = "group"
 	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling-"
 	resourceTypeLabelKey           = "resource-type"
-	millicores                     = 1000
+	milliCores                     = 1000
 )
 
 // TODO: adjust the value or make it configurable.
@@ -44,9 +44,9 @@ var (
 	// This must be long enough to cover at least 2 scrape intervals
 	// Or you will get nothing when querying CPU usage
 	MetricsTimeDuration = 60 * time.Second
-	// MaxScaleOutStep is used to indicate the maxium number of instance for scaling out operations at once.
+	// MaxScaleOutStep is used to indicate the maximum number of instance for scaling out operations at once.
 	MaxScaleOutStep uint64 = 1
-	// MaxScaleInStep is used to indicate the maxium number of instance for scaling in operations at once.
+	// MaxScaleInStep is used to indicate the maximum number of instance for scaling in operations at once.
 	MaxScaleInStep uint64 = 1
 )
 
@@ -96,7 +96,7 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 		return nil
 	}
 
-	totalCPUTime := float64(currentQuota) / millicores * MetricsTimeDuration.Seconds()
+	totalCPUTime := float64(currentQuota) / milliCores * MetricsTimeDuration.Seconds()
 	usage := totalCPUUseTime / totalCPUTime
 	maxThreshold, minThreshold := getCPUThresholdByComponent(strategy, component)
 
@@ -152,7 +152,7 @@ func getAddresses(instances []instance) []string {
 	return names
 }
 
-// TODO: suppport other metrics storage
+// TODO: support other metrics storage
 // get total CPU use time (in seconds) through Prometheus.
 func getTotalCPUUseTime(querier Querier, component ComponentType, instances []instance, timestamp time.Time, duration time.Duration) (float64, error) {
 	result, err := querier.Query(NewQueryOptions(component, CPUUsage, getAddresses(instances), timestamp, duration))
@@ -168,8 +168,8 @@ func getTotalCPUUseTime(querier Querier, component ComponentType, instances []in
 	return sum, nil
 }
 
-// TODO: suppport other metrics storage
-// get total CPU quota (in millicores) through Prometheus.
+// TODO: support other metrics storage
+// get total CPU quota (in milliCores) through Prometheus.
 func getTotalCPUQuota(querier Querier, component ComponentType, instances []instance, timestamp time.Time) (uint64, error) {
 	result, err := querier.Query(NewQueryOptions(component, CPUQuota, getAddresses(instances), timestamp, 0))
 	if err != nil {
@@ -181,7 +181,7 @@ func getTotalCPUQuota(querier Querier, component ComponentType, instances []inst
 		sum += value
 	}
 
-	quota := uint64(math.Floor(sum * float64(millicores)))
+	quota := uint64(math.Floor(sum * float64(milliCores)))
 
 	return quota, nil
 }

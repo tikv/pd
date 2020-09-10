@@ -67,7 +67,7 @@ func (s *testKVSuite) TestLevelDB(c *C) {
 	s.testRange(c, kv)
 }
 
-func (s *testKVSuite) TestMemkv(c *C) {
+func (s *testKVSuite) TestMemKV(c *C) {
 	kv := NewMemoryKV()
 	s.testReadWrite(c, kv)
 	s.testRange(c, kv)

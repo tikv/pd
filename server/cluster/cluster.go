@@ -1251,9 +1251,9 @@ func (c *RaftCluster) collectHealthStatus() {
 	if err != nil {
 		log.Error("get members error", errs.ZapError(err))
 	}
-	unhealth := CheckHealth(c.httpClient, members)
+	unhealthy := CheckHealth(c.httpClient, members)
 	for _, member := range members {
-		if _, ok := unhealth[member.GetMemberId()]; ok {
+		if _, ok := unhealthy[member.GetMemberId()]; ok {
 			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
 			continue
 		}

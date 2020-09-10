@@ -18,7 +18,7 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 )
 
-// Connection records the informations of connection among nodes.
+// Connection records the information of connection among nodes.
 type Connection struct {
 	pdAddr string
 	Nodes  map[uint64]*Node

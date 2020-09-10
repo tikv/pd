@@ -175,11 +175,11 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 
 	etcd, err := embed.StartEtcd(svr.etcdCfg)
 	c.Assert(err, IsNil)
-	urlmap, err := types.NewURLsMap(svr.cfg.InitialCluster)
+	urlsMap, err := types.NewURLsMap(svr.cfg.InitialCluster)
 	c.Assert(err, IsNil)
 	tlsConfig, err := svr.cfg.Security.ToTLSConfig()
 	c.Assert(err, IsNil)
-	err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap, tlsConfig)
+	err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlsMap, tlsConfig)
 	c.Assert(err, NotNil)
 	etcd.Close()
 	testutil.CleanServer(cfgA.DataDir)

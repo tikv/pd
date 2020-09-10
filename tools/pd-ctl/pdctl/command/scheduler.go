@@ -66,12 +66,12 @@ func pauseOrResumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	input := make(map[string]interface{})
 	input["delay"] = 0
 	if len(args) == 2 {
-		dealy, err := strconv.Atoi(args[1])
+		delay, err := strconv.Atoi(args[1])
 		if err != nil {
 			cmd.Usage()
 			return
 		}
-		input["delay"] = dealy
+		input["delay"] = delay
 	}
 	postJSON(cmd, path, input)
 }
@@ -157,10 +157,10 @@ func checkSchedulerExist(cmd *cobra.Command, schedulerName string) (bool, error)
 		cmd.Println(err)
 		return false, err
 	}
-	var scheudlerList []string
-	json.Unmarshal([]byte(r), &scheudlerList)
-	for idx := range scheudlerList {
-		if strings.Contains(scheudlerList[idx], schedulerName) {
+	var schedulerList []string
+	json.Unmarshal([]byte(r), &schedulerList)
+	for idx := range schedulerList {
+		if strings.Contains(schedulerList[idx], schedulerName) {
 			return true, nil
 		}
 	}
@@ -383,7 +383,7 @@ func NewRemoveSchedulerCommand() *cobra.Command {
 	return c
 }
 
-func redirectReomveSchedulerToDeleteConfig(cmd *cobra.Command, schedulerName string, args []string) {
+func redirectRemoveSchedulerToDeleteConfig(cmd *cobra.Command, schedulerName string, args []string) {
 	args = strings.Split(args[0], "-")
 	args = args[len(args)-1:]
 	deleteStoreFromSchedulerConfig(cmd, schedulerName, args)
@@ -397,9 +397,9 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	// FIXME: maybe there is a more graceful method to handler it
 	switch {
 	case strings.HasPrefix(args[0], evictLeaderSchedulerName) && args[0] != evictLeaderSchedulerName:
-		redirectReomveSchedulerToDeleteConfig(cmd, evictLeaderSchedulerName, args)
+		redirectRemoveSchedulerToDeleteConfig(cmd, evictLeaderSchedulerName, args)
 	case strings.HasPrefix(args[0], grantLeaderSchedulerName) && args[0] != grantLeaderSchedulerName:
-		redirectReomveSchedulerToDeleteConfig(cmd, grantLeaderSchedulerName, args)
+		redirectRemoveSchedulerToDeleteConfig(cmd, grantLeaderSchedulerName, args)
 	default:
 		path := schedulersPrefix + "/" + args[0]
 		_, err := doRequest(cmd, path, http.MethodDelete)
@@ -493,7 +493,7 @@ func newConfigShuffleRegionCommand() *cobra.Command {
 	}, &cobra.Command{
 		Use:   "set-roles [leader,][follower,][learner]",
 		Short: "set affected roles",
-		Run:   setSuffleRegionSchedulerRolesCommandFunc,
+		Run:   setShuffleRegionSchedulerRolesCommandFunc,
 	})
 	return c
 }
@@ -581,7 +581,7 @@ func showShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []strin
 	cmd.Println(r)
 }
 
-func setSuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string) {
+func setShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
 		return
