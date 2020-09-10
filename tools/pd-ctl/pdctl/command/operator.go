@@ -265,7 +265,7 @@ func addLearnerCommandFunc(cmd *cobra.Command, args []string) {
 func NewMergeRegionCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "merge-region <source_region_id> <target_region_id>",
-		Short: "merge source region into target reigon",
+		Short: "merge source region into target region",
 		Run:   mergeRegionCommandFunc,
 	}
 	return c

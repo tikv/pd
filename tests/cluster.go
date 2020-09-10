@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/join"
+	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -342,6 +343,11 @@ func (s *TestServer) WaitLeader() bool {
 	return false
 }
 
+// GetTSOAllocatorManager returns the server's TSO Allocator Manager.
+func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
+	return s.server.GetTSOAllocatorManager()
+}
+
 // TestCluster is only for test.
 type TestCluster struct {
 	config  *clusterConfig
@@ -349,7 +355,10 @@ type TestCluster struct {
 }
 
 // ConfigOption is used to define customize settings in test.
-type ConfigOption func(conf *config.Config)
+// You can use serverName to customize a config for a certain
+// server. Usually, the server name will be like `pd1`, `pd2`
+// and so on, which determined by the number of servers you set.
+type ConfigOption func(conf *config.Config, serverName string)
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {

@@ -67,7 +67,7 @@ type streamUpdate struct {
 	stream  opt.HeartbeatStream
 }
 
-// HeartbeatStreams is used to mock heartbeatstreams for test use.
+// HeartbeatStreams is used to mock heartbeat streams for test use.
 type HeartbeatStreams struct {
 	wg        sync.WaitGroup
 	ctx       context.Context

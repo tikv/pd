@@ -21,3 +21,54 @@ import (
 func IsLearner(peer *metapb.Peer) bool {
 	return peer.GetRole() == metapb.PeerRole_Learner
 }
+
+// IsVoterOrIncomingVoter judges whether peer role will become Voter.
+// The peer is not nil and the role is equal to IncomingVoter or Voter.
+func IsVoterOrIncomingVoter(peer *metapb.Peer) bool {
+	if peer == nil {
+		return false
+	}
+	switch peer.GetRole() {
+	case metapb.PeerRole_IncomingVoter, metapb.PeerRole_Voter:
+		return true
+	}
+	return false
+}
+
+// IsLearnerOrDemotingVoter judges whether peer role will become Learner.
+// The peer is not nil and the role is equal to DemotingVoter or Learner.
+func IsLearnerOrDemotingVoter(peer *metapb.Peer) bool {
+	if peer == nil {
+		return false
+	}
+	switch peer.GetRole() {
+	case metapb.PeerRole_DemotingVoter, metapb.PeerRole_Learner:
+		return true
+	}
+	return false
+}
+
+// IsInJointState judges whether the Peer is in joint state.
+func IsInJointState(peers ...*metapb.Peer) bool {
+	for _, peer := range peers {
+		switch peer.GetRole() {
+		case metapb.PeerRole_IncomingVoter, metapb.PeerRole_DemotingVoter:
+			return true
+		default:
+		}
+	}
+	return false
+}
+
+// CountInJointState count the peers are in joint state.
+func CountInJointState(peers ...*metapb.Peer) int {
+	count := 0
+	for _, peer := range peers {
+		switch peer.GetRole() {
+		case metapb.PeerRole_IncomingVoter, metapb.PeerRole_DemotingVoter:
+			count++
+		default:
+		}
+	}
+	return count
+}

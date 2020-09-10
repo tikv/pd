@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -349,7 +350,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.member.Etcd(), s.client, s.rootPath, s.cfg.TsoSaveInterval.Duration,
+		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
@@ -441,7 +442,7 @@ func (s *Server) IsClosed() bool {
 
 // Run runs the pd server.
 func (s *Server) Run() error {
-	go StartMonitor(s.ctx, time.Now, func() {
+	go systimemon.StartMonitor(s.ctx, time.Now, func() {
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
 	})
@@ -686,6 +687,11 @@ func (s *Server) GetHBStreams() opt.HeartbeatStreams {
 // GetAllocator returns the ID allocator of server.
 func (s *Server) GetAllocator() *id.AllocatorImpl {
 	return s.idAllocator
+}
+
+// GetTSOAllocatorManager returns the manager of TSO Allocator.
+func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
+	return s.tsoAllocatorManager
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.
@@ -941,6 +947,11 @@ func (s *Server) GetSecurityConfig() *grpcutil.SecurityConfig {
 	return &s.cfg.Security
 }
 
+// GetServerRootPath returns the server root path.
+func (s *Server) GetServerRootPath() string {
+	return s.rootPath
+}
+
 // GetClusterRootPath returns the cluster root path.
 func (s *Server) GetClusterRootPath() string {
 	return path.Join(s.rootPath, "raft")
@@ -1123,7 +1134,7 @@ func (s *Server) campaignLeader() {
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
 	log.Info("setting up the global TSO allocator")
-	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, cancel, tso.GlobalDCLocation, s.member.GetLeadership()); err != nil {
+	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, cancel, config.GlobalDCLocation, s.member.GetLeadership()); err != nil {
 		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
 		return
 	}

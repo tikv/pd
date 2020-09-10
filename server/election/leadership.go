@@ -147,7 +147,7 @@ func (ls *Leadership) DeleteLeader() error {
 }
 
 // Watch is used to watch the changes of the leadership, usually is used to
-// detect the leadership steping down and restart an election as soon as possible.
+// detect the leadership stepping down and restart an election as soon as possible.
 func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 	watcher := clientv3.NewWatcher(ls.client)
 	defer watcher.Close()

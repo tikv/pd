@@ -321,12 +321,12 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	}
 	leader, ok := leaderVal.(float64)
 	if !ok || leader < 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "badformat leader weight")
+		h.rd.JSON(w, http.StatusBadRequest, "bad format leader weight")
 		return
 	}
 	region, ok := regionVal.(float64)
 	if !ok || region < 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "badformat region weight")
+		h.rd.JSON(w, http.StatusBadRequest, "bad format region weight")
 		return
 	}
 
@@ -410,7 +410,7 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 // @Tags store
 // @Summary Remove tombstone records in the cluster.
 // @Produce json
-// @Success 200 {string} string "Remove tomestone successfully."
+// @Success 200 {string} string "Remove tombstone successfully."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/remove-tombstone [delete]
 func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
@@ -421,7 +421,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, "Remove tomestone successfully.")
+	h.rd.JSON(w, http.StatusOK, "Remove tombstone successfully.")
 }
 
 // FIXME: details of input json body params

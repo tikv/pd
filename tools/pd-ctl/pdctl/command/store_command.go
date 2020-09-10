@@ -380,7 +380,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			cmd.Println("rate should be a number that > 0.")
 			return
 		}
-		// if the storeid is "all", set limits for all stores
+		// if the store id is "all", set limits for all stores
 		var prefix string
 		if args[0] == "all" {
 			prefix = storesLimitPrefix

@@ -92,7 +92,7 @@ func (oc *OperatorController) Ctx() context.Context {
 	return oc.ctx
 }
 
-// GetCluster exports cluster to evict-scheduler for check sctore status.
+// GetCluster exports cluster to evict-scheduler for check store status.
 func (oc *OperatorController) GetCluster() opt.Cluster {
 	oc.RLock()
 	defer oc.RUnlock()
@@ -164,7 +164,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 	origin := op.RegionEpoch()
 	latest := region.GetRegionEpoch()
 	changes := latest.GetConfVer() - origin.GetConfVer()
-	if changes > uint64(op.ConfVerChanged(region)) {
+	if changes > op.ConfVerChanged(region) {
 		if oc.RemoveOperator(
 			op,
 			zap.String("reason", "stale operator, confver does not meet expectations"),
@@ -183,7 +183,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 func (oc *OperatorController) getNextPushOperatorTime(step operator.OpStep, now time.Time) time.Time {
 	nextTime := slowNotifyInterval
 	switch step.(type) {
-	case operator.TransferLeader, operator.PromoteLearner:
+	case operator.TransferLeader, operator.PromoteLearner, operator.DemoteFollower, operator.ChangePeerV2Enter, operator.ChangePeerV2Leave:
 		nextTime = fastNotifyInterval
 	}
 	return now.Add(nextTime)
@@ -483,7 +483,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 }
 
 // RemoveOperator removes a operator from the running operators.
-func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFileds ...zap.Field) bool {
+func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFields ...zap.Field) bool {
 	oc.Lock()
 	removed := oc.removeOperatorLocked(op)
 	oc.Unlock()
@@ -494,7 +494,7 @@ func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFileds 
 				zap.Duration("takes", op.RunningTime()),
 				zap.Reflect("operator", op))
 		}
-		oc.buryOperator(op, extraFileds...)
+		oc.buryOperator(op, extraFields...)
 	}
 	return removed
 }
@@ -516,7 +516,7 @@ func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 	return false
 }
 
-func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ...zap.Field) {
+func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ...zap.Field) {
 	st := op.Status()
 
 	if !operator.IsEndStatus(st) {
@@ -558,14 +558,14 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ..
 			zap.Reflect("operator", op))
 		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 	case operator.CANCELED:
-		fileds := []zap.Field{
+		fields := []zap.Field{
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
 		}
-		fileds = append(fileds, extraFileds...)
+		fields = append(fields, extraFields...)
 		log.Info("operator canceled",
-			fileds...,
+			fields...,
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}
@@ -616,50 +616,51 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		zap.Uint64("region-id", region.GetID()),
 		zap.Stringer("step", step),
 		zap.String("source", source))
+
+	var cmd *pdpb.RegionHeartbeatResponse
 	switch st := step.(type) {
 	case operator.TransferLeader:
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			TransferLeader: &pdpb.TransferLeader{
 				Peer: region.GetStorePeer(st.ToStore),
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.AddPeer:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
 					Id:      st.PeerID,
 					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Voter,
 				},
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.AddLightPeer:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
 					Id:      st.PeerID,
 					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Voter,
 				},
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.AddLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 				Peer: &metapb.Peer{
@@ -669,13 +670,12 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				},
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 				Peer: &metapb.Peer{
@@ -685,48 +685,66 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				},
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.PromoteLearner:
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				// reuse AddNode type
 				ChangeType: eraftpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
 					Id:      st.PeerID,
 					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Voter,
 				},
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
+	case operator.DemoteFollower:
+		cmd = &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				// reuse AddLearnerNode type
+				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+				Peer: &metapb.Peer{
+					Id:      st.PeerID,
+					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Learner,
+				},
+			},
+		}
 	case operator.RemovePeer:
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_RemoveNode,
 				Peer:       region.GetStorePeer(st.FromStore),
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.MergeRegion:
 		if st.IsPassive {
 			return
 		}
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			Merge: &pdpb.Merge{
 				Target: st.ToRegion,
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.SplitRegion:
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			SplitRegion: &pdpb.SplitRegion{
 				Policy: st.Policy,
 				Keys:   st.SplitKeys,
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
+	case operator.ChangePeerV2Enter:
+		cmd = &pdpb.RegionHeartbeatResponse{
+			ChangePeerV2: st.GetRequest(),
+		}
+	case operator.ChangePeerV2Leave:
+		cmd = &pdpb.RegionHeartbeatResponse{
+			ChangePeerV2: &pdpb.ChangePeerV2{},
+		}
 	default:
 		log.Error("unknown operator step", zap.Reflect("step", step), errs.ZapError(errs.ErrUnknownOperatorStep))
+		return
 	}
+	oc.hbStreams.SendMsg(region, cmd)
 }
 
 func (oc *OperatorController) pushHistory(op *operator.Operator) {

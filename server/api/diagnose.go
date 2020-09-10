@@ -147,7 +147,7 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 		*rdd = append(*rdd, diagnosePD(memberLostPeers, stringID, ""))
 	}
 	if len(runningMemberIDs)%2 == 0 {
-		// alived pd's numbers is even
+		// alive pd's numbers is even
 		*rdd = append(*rdd, diagnosePD(memberEvenInstance, "", ""))
 	}
 	if float64(lenMembers)/2 < float64(lenLostMembers) {

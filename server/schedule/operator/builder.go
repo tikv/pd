@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
+	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -35,7 +36,7 @@ import (
 type Builder struct {
 	// basic info
 	desc        string
-	cluster     Cluster
+	cluster     opt.Cluster
 	regionID    uint64
 	regionEpoch *metapb.RegionEpoch
 	rules       []*placement.Rule
@@ -59,7 +60,7 @@ type Builder struct {
 }
 
 // NewBuilder creates a Builder.
-func NewBuilder(desc string, cluster Cluster, region *core.RegionInfo) *Builder {
+func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Builder {
 	var originPeers peersMap
 	for _, p := range region.GetPeers() {
 		originPeers.Set(p)
@@ -511,7 +512,7 @@ func (b *Builder) comparePlan(best, next stepPlan) stepPlan {
 		// operator with less leader transfer steps.
 		b.preferAddOrPromoteTargetLeader, // 4. it is precondition of 5 so goes first.
 		b.preferTargetLeader,             // 5. it may help 6 in later steps.
-		b.preferLessLeaderTransfer,       // 6. trival optimization to make the operator more tidy.
+		b.preferLessLeaderTransfer,       // 6. trivial optimization to make the operator more tidy.
 	}
 	for _, t := range fs {
 		if tb, tc := t(best), t(next); tb > tc {
