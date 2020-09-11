@@ -184,7 +184,7 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 	b := newBuilderWithBasicCheck(desc, cluster, origin)
 
 	if b.err == nil && !core.IsInJointState(origin.GetPeers()...) {
-		b.err = errors.Errorf("cannot build leave joint state operator for region is not in joint state")
+		b.err = errors.Errorf("cannot build leave joint state operator for region which is not in joint state")
 	}
 
 	if b.err != nil {
