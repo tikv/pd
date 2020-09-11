@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -57,7 +58,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	for _, rf := range fit.RuleFits {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
-			log.Debug("fail to fix rule peer", zap.Error(err), zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID))
+			log.Debug("fail to fix rule peer", zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID), errs.ZapError(err))
 			break
 		}
 		if op != nil {
@@ -66,7 +67,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 	op, err := c.fixOrphanPeers(region, fit)
 	if err != nil {
-		log.Debug("fail to fix orphan peer", zap.Error(err))
+		log.Debug("fail to fix orphan peer", errs.ZapError(err))
 		return nil
 	}
 	return op
@@ -159,7 +160,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 		return false
 	}
 	stateFilter := filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
-	if !stateFilter.Target(c.cluster, s) {
+	if !stateFilter.Target(c.cluster.GetOpts(), s) {
 		return false
 	}
 	for _, rf := range fit.RuleFits {
@@ -219,10 +220,10 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return false
 		}
-		if store.DownTime() < c.cluster.GetMaxStoreDownTime() {
+		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
 			continue
 		}
-		if stats.GetDownSeconds() < uint64(c.cluster.GetMaxStoreDownTime().Seconds()) {
+		if stats.GetDownSeconds() < uint64(c.cluster.GetOpts().GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
 		return true

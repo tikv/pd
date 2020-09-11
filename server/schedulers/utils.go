@@ -19,8 +19,8 @@ import (
 	"strconv"
 
 	"github.com/montanaflynn/stats"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -36,15 +36,6 @@ const (
 	minTolerantSizeRatio    float64 = 1.0
 )
 
-var (
-	// ErrSchedulerExisted is error info for scheduler has already existed.
-	ErrSchedulerExisted = errors.New("scheduler existed")
-	// ErrSchedulerNotFound is error info for scheduler is not found.
-	ErrSchedulerNotFound = errors.New("scheduler not found")
-	// ErrScheduleConfigNotExist the config is not correct.
-	ErrScheduleConfigNotExist = errors.New("the config does not exist")
-)
-
 func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
@@ -54,9 +45,10 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	tolerantResource := getTolerantResource(cluster, region, kind)
 	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceProperty(kind)
 	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
-	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
-	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource)
-	if cluster.IsDebugMetricsEnabled() {
+	opts := cluster.GetOpts()
+	sourceScore := source.ResourceScore(kind, opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
+	targetScore := target.ResourceScore(kind, opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetInfluence+tolerantResource)
+	if opts.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(targetInfluence))
 		tolerantResourceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), strconv.FormatUint(targetID, 10)).Set(float64(tolerantResource))
@@ -79,7 +71,7 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 
 func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
 	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
-		tolerantSizeRatio := cluster.GetTolerantSizeRatio()
+		tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
 			tolerantSizeRatio = leaderTolerantSizeRatio
 		}
@@ -96,7 +88,7 @@ func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core
 }
 
 func adjustTolerantRatio(cluster opt.Cluster) float64 {
-	tolerantSizeRatio := cluster.GetTolerantSizeRatio()
+	tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
 	if tolerantSizeRatio == 0 {
 		var maxRegionCount float64
 		stores := cluster.GetStores()
@@ -131,11 +123,11 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 	for len(args) > 1 {
 		startKey, err := url.QueryUnescape(args[0])
 		if err != nil {
-			return nil, err
+			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
 		}
 		endKey, err := url.QueryUnescape(args[1])
 		if err != nil {
-			return nil, err
+			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
 		}
 		args = args[2:]
 		ranges = append(ranges, core.NewKeyRange(startKey, endKey))

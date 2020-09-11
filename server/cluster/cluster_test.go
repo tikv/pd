@@ -22,6 +22,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -346,6 +347,34 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(region, DeepEquals, overlapRegion.GetMeta())
 	}
+}
+
+func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	processRegions := func(regions []*core.RegionInfo) {
+		for _, r := range regions {
+			cluster.processRegionHeartbeat(r)
+		}
+	}
+	regions = core.SplitRegions(regions)
+	processRegions(regions)
+	// update region
+	region := regions[0]
+	regions[0] = region.Clone(core.SetReadBytes(1000))
+	processRegions(regions)
+	newRegion := cluster.GetRegion(region.GetID())
+	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
+
+	// do not trace the flow changes
+	cluster.traceRegionFlow = false
+	processRegions([]*core.RegionInfo{region})
+	newRegion = cluster.GetRegion(region.GetID())
+	c.Assert(region.GetBytesRead(), Equals, uint64(0))
+	c.Assert(newRegion.GetBytesRead(), Not(Equals), uint64(0))
+
 }
 
 func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
@@ -830,7 +859,7 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 	e := region.GetRegionEpoch()
 
 	if e.GetVersion() < o.GetVersion() || e.GetConfVer() < o.GetConfVer() {
-		return core.ErrRegionIsStale(region, origin)
+		return errors.Errorf("region is stale: region %v origin %v", region, origin)
 	}
 
 	return nil

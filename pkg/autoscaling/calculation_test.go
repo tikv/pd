@@ -20,9 +20,8 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -36,7 +35,7 @@ type calculationTestSuite struct{}
 
 func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	// case1 indicates the tikv cluster with not any group existed
-	case1 := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	case1 := mockcluster.NewCluster(config.NewTestOptions())
 	case1.AddLabelsStore(1, 1, map[string]string{})
 	case1.AddLabelsStore(2, 1, map[string]string{
 		"foo": "bar",
@@ -46,17 +45,19 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	})
 
 	// case2 indicates the tikv cluster with 1 auto-scaling group existed
-	case2 := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	case2 := mockcluster.NewCluster(config.NewTestOptions())
 	case2.AddLabelsStore(1, 1, map[string]string{})
 	case2.AddLabelsStore(2, 1, map[string]string{
-		groupLabelKey: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+		groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+		resourceTypeLabelKey: "a",
 	})
 	case2.AddLabelsStore(3, 1, map[string]string{
-		groupLabelKey: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+		groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+		resourceTypeLabelKey: "a",
 	})
 
 	// case3 indicates the tikv cluster with other group existed
-	case3 := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	case3 := mockcluster.NewCluster(config.NewTestOptions())
 	case3.AddLabelsStore(1, 1, map[string]string{})
 	case3.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey: "foo",
@@ -70,6 +71,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 		informer         core.StoreSetInformer
 		healthyInstances []instance
 		expectedPlan     []*Plan
+		errChecker       Checker
 	}{
 		{
 			name:     "no scaled tikv group",
@@ -89,6 +91,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 				},
 			},
 			expectedPlan: nil,
+			errChecker:   IsNil,
 		},
 		{
 			name:     "exist 1 scaled tikv group",
@@ -109,16 +112,16 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 			},
 			expectedPlan: []*Plan{
 				{
-					Component: TiKV.String(),
-					Count:     2,
-					Labels: []*metapb.StoreLabel{
-						{
-							Key:   groupLabelKey,
-							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
-						},
+					Component:    TiKV.String(),
+					Count:        2,
+					ResourceType: "a",
+					Labels: map[string]string{
+						groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						resourceTypeLabelKey: "a",
 					},
 				},
 			},
+			errChecker: IsNil,
 		},
 		{
 			name:     "exist 1 tikv scaled group with inconsistency healthy instances",
@@ -138,6 +141,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 				},
 			},
 			expectedPlan: nil,
+			errChecker:   NotNil,
 		},
 		{
 			name:     "exist 1 tikv scaled group with less healthy instances",
@@ -154,16 +158,16 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 			},
 			expectedPlan: []*Plan{
 				{
-					Component: TiKV.String(),
-					Count:     1,
-					Labels: []*metapb.StoreLabel{
-						{
-							Key:   groupLabelKey,
-							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
-						},
+					Component:    TiKV.String(),
+					Count:        1,
+					ResourceType: "a",
+					Labels: map[string]string{
+						groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						resourceTypeLabelKey: "a",
 					},
 				},
 			},
+			errChecker: IsNil,
 		},
 		{
 			name:     "existed other tikv group",
@@ -183,14 +187,16 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 				},
 			},
 			expectedPlan: nil,
+			errChecker:   IsNil,
 		},
 	}
 
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
-		plans := getScaledTiKVGroups(testcase.informer, testcase.healthyInstances)
+		plans, err := getScaledTiKVGroups(testcase.informer, testcase.healthyInstances)
 		if testcase.expectedPlan == nil {
 			c.Assert(plans, IsNil)
+			c.Assert(err, testcase.errChecker)
 		} else {
 			c.Assert(plans, DeepEquals, testcase.expectedPlan)
 		}
@@ -246,122 +252,6 @@ func (s *calculationTestSuite) TestGetTotalCPUQuota(c *C) {
 		},
 	}
 	totalCPUQuota, _ := getTotalCPUQuota(querier, TiDB, instances, time.Now())
-	expected := uint64(mockResultValue * float64(len(instances)*millicores))
+	expected := uint64(mockResultValue * float64(len(instances)*milliCores))
 	c.Assert(totalCPUQuota, Equals, expected)
-}
-
-func (s *calculationTestSuite) TestGetScaledTiDBGroups(c *C) {
-	case1 := newMockTiDBInformer()
-	case1.SetTiDBs([]*TiDBInfo{
-		{
-			Address: "tidb-0",
-			Labels: map[string]string{
-				groupLabelKey: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
-			},
-		},
-		{
-			Address: "tidb-1",
-			Labels: map[string]string{
-				groupLabelKey: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
-			},
-		},
-		{
-			Address: "tidb-2",
-			Labels:  map[string]string{},
-		},
-	})
-	testcases := []struct {
-		name             string
-		informer         tidbInformer
-		healthyInstances []instance
-		expectedPlan     []*Plan
-	}{
-		{
-			name:     "exist 1 scaled tidb group",
-			informer: case1,
-			healthyInstances: []instance{
-				{
-					id:      0,
-					address: "tidb-0",
-				},
-				{
-					id:      1,
-					address: "tidb-1",
-				},
-				{
-					id:      2,
-					address: "tidb-2",
-				},
-			},
-			expectedPlan: []*Plan{
-				{
-					Component: TiDB.String(),
-					Count:     2,
-					Labels: []*metapb.StoreLabel{
-						{
-							Key:   groupLabelKey,
-							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
-						},
-					},
-				},
-			},
-		},
-		{
-			name:     "exist 1 tidb scaled group with less healthy instances",
-			informer: case1,
-			healthyInstances: []instance{
-				{
-					id:      1,
-					address: "tidb-1",
-				},
-				{
-					id:      2,
-					address: "tidb-2",
-				},
-			},
-			expectedPlan: []*Plan{
-				{
-					Component: TiDB.String(),
-					Count:     1,
-					Labels: []*metapb.StoreLabel{
-						{
-							Key:   groupLabelKey,
-							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
-						},
-					},
-				},
-			},
-		},
-	}
-	for _, testcase := range testcases {
-		c.Log(testcase.name)
-		plans := getScaledTiDBGroups(testcase.informer, testcase.healthyInstances)
-		if testcase.expectedPlan == nil {
-			c.Assert(plans, IsNil)
-		} else {
-			c.Assert(plans, DeepEquals, testcase.expectedPlan)
-		}
-	}
-}
-
-type mockTidbInformer struct {
-	tidbs map[string]*TiDBInfo
-}
-
-func newMockTiDBInformer() *mockTidbInformer {
-	return &mockTidbInformer{
-		tidbs: map[string]*TiDBInfo{},
-	}
-}
-
-// GetTiDB implements TiDBInformer.GetTiDB
-func (mc *mockTidbInformer) GetTiDB(address string) *TiDBInfo {
-	return mc.tidbs[address]
-}
-
-// SetTiDBs set multiple TiDB
-func (mc *mockTidbInformer) SetTiDBs(tidbs []*TiDBInfo) {
-	for _, tidb := range tidbs {
-		mc.tidbs[tidb.Address] = tidb
-	}
 }

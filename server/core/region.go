@@ -23,10 +23,16 @@ import (
 	"unsafe"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 )
+
+// errRegionIsStale is error info for region is stale.
+var errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
+	return errors.Errorf("region is stale: region %v origin %v", region, origin)
+}
 
 // RegionInfo records detail region info.
 // Read-Only once created.

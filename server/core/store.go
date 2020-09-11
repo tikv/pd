@@ -14,16 +14,15 @@
 package core
 
 import (
-	"fmt"
 	"math"
 	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
@@ -31,9 +30,7 @@ import (
 const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
 	storePersistInterval = 5 * time.Minute
-	lowSpaceThreshold    = 100 * (1 << 10) // 100 GB
-	highSpaceThreshold   = 300 * (1 << 10) // 300 GB
-	mb                   = 1 << 20         // megabyte
+	mb                   = 1 << 20 // megabyte
 )
 
 // StoreInfo contains information about a store.
@@ -303,6 +300,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	var amplification float64
 	available := float64(s.GetAvailable()) / mb
 	used := float64(s.GetUsedSize()) / mb
+	capacity := float64(s.GetCapacity()) / mb
 
 	if s.GetRegionSize() == 0 || used == 0 {
 		amplification = 1
@@ -312,9 +310,9 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	}
 
 	// highSpaceBound is the lower bound of the high space stage.
-	highSpaceBound := s.GetSpaceThreshold(highSpaceRatio, highSpaceThreshold)
+	highSpaceBound := (1 - highSpaceRatio) * capacity
 	// lowSpaceBound is the upper bound of the low space stage.
-	lowSpaceBound := s.GetSpaceThreshold(lowSpaceRatio, lowSpaceThreshold)
+	lowSpaceBound := (1 - lowSpaceRatio) * capacity
 	if available-float64(delta)/amplification >= highSpaceBound {
 		score = float64(s.GetRegionSize() + delta)
 	} else if available-float64(delta)/amplification <= lowSpaceBound {
@@ -347,21 +345,17 @@ func (s *StoreInfo) StorageSize() uint64 {
 	return s.GetUsedSize()
 }
 
-// GetSpaceThreshold returns the threshold of low/high space in MB.
-func (s *StoreInfo) GetSpaceThreshold(spaceRatio, spaceThreshold float64) float64 {
-	var min float64 = spaceThreshold
-	capacity := float64(s.GetCapacity()) / mb
-	space := capacity * (1.0 - spaceRatio)
-	if min > space {
-		min = space
+// AvailableRatio is store's freeSpace/capacity.
+func (s *StoreInfo) AvailableRatio() float64 {
+	if s.GetCapacity() == 0 {
+		return 0
 	}
-	return min
+	return float64(s.GetAvailable()) / float64(s.GetCapacity())
 }
 
 // IsLowSpace checks if the store is lack of space.
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
-	available := float64(s.GetAvailable()) / mb
-	return s.GetStoreStats() != nil && available <= s.GetSpaceThreshold(lowSpaceRatio, lowSpaceThreshold)
+	return s.GetStoreStats() != nil && s.AvailableRatio() < 1-lowSpaceRatio
 }
 
 // ResourceCount returns count of leader/region in the store.
@@ -439,7 +433,7 @@ var (
 	// be marked as disconnected state. The value should be greater than tikv's
 	// store heartbeat interval (default 10s).
 	storeDisconnectDuration = 20 * time.Second
-	storeUnhealthDuration   = 10 * time.Minute
+	storeUnhealthyDuration  = 10 * time.Minute
 )
 
 // IsDisconnected checks if a store is disconnected, which means PD misses
@@ -449,9 +443,9 @@ func (s *StoreInfo) IsDisconnected() bool {
 	return s.DownTime() > storeDisconnectDuration
 }
 
-// IsUnhealth checks if a store is unhealth.
-func (s *StoreInfo) IsUnhealth() bool {
-	return s.DownTime() > storeUnhealthDuration
+// IsUnhealthy checks if a store is unhealthy.
+func (s *StoreInfo) IsUnhealthy() bool {
+	return s.DownTime() > storeUnhealthyDuration
 }
 
 // GetLabelValue returns a label's value (if exists).
@@ -518,19 +512,6 @@ L:
 	return res
 }
 
-type storeNotFoundErr struct {
-	storeID uint64
-}
-
-func (e storeNotFoundErr) Error() string {
-	return fmt.Sprintf("store %v not found", e.storeID)
-}
-
-// NewStoreNotFoundErr is for log of store not found
-func NewStoreNotFoundErr(storeID uint64) errcode.ErrorCode {
-	return errcode.NewNotFoundErr(storeNotFoundErr{storeID})
-}
-
 // StoresInfo contains information about all stores.
 type StoresInfo struct {
 	stores map[uint64]*StoreInfo
@@ -567,14 +548,13 @@ func (s *StoresInfo) SetStore(store *StoreInfo) {
 }
 
 // PauseLeaderTransfer pauses a StoreInfo with storeID.
-func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) errcode.ErrorCode {
-	op := errcode.Op("store.pause_leader_transfer")
+func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
 	store, ok := s.stores[storeID]
 	if !ok {
-		return op.AddTo(NewStoreNotFoundErr(storeID))
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 	if !store.AllowLeaderTransfer() {
-		return op.AddTo(StorePauseLeaderTransferErr{StoreID: storeID})
+		return errs.ErrPauseLeaderTransfer.FastGenByArgs(storeID)
 	}
 	s.stores[storeID] = store.Clone(PauseLeaderTransfer())
 	return nil
@@ -586,7 +566,7 @@ func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
 		log.Fatal("try to clean a store's pause state, but it is not found",
-			zap.Uint64("store-id", storeID))
+			zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrStoreNotFound.FastGenByArgs(storeID)))
 	}
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
 }

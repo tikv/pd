@@ -133,3 +133,8 @@ location-labels = []
 
 ## When enabled, usage data will be sent to PingCAP for improving user experience.
 # enable-telemetry = true
+
+## When enabled, experimental TiDB Dashboard features will be available.
+## These features are incomplete or not well tested. Suggest not to enable in
+## production.
+# enable-experimental = false

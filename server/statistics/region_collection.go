@@ -14,6 +14,7 @@
 package statistics
 
 import (
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -35,13 +36,13 @@ const nonIsolation = "none"
 
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
-	opt   ScheduleOptions
+	opt   *config.PersistOptions
 	stats map[RegionStatisticType]map[uint64]*core.RegionInfo
 	index map[uint64]RegionStatisticType
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
-func NewRegionStatistics(opt ScheduleOptions) *RegionStatistics {
+func NewRegionStatistics(opt *config.PersistOptions) *RegionStatistics {
 	r := &RegionStatistics{
 		opt:   opt,
 		stats: make(map[RegionStatisticType]map[uint64]*core.RegionInfo),

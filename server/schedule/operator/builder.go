@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
+	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -35,7 +36,7 @@ import (
 type Builder struct {
 	// basic info
 	desc        string
-	cluster     Cluster
+	cluster     opt.Cluster
 	regionID    uint64
 	regionEpoch *metapb.RegionEpoch
 	rules       []*placement.Rule
@@ -48,7 +49,7 @@ type Builder struct {
 	err          error
 
 	// flags
-	isLigthWeight bool
+	isLightWeight bool
 
 	// intermediate states
 	currentPeers               peersMap
@@ -59,7 +60,7 @@ type Builder struct {
 }
 
 // NewBuilder creates a Builder.
-func NewBuilder(desc string, cluster Cluster, region *core.RegionInfo) *Builder {
+func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Builder {
 	var originPeers peersMap
 	for _, p := range region.GetPeers() {
 		originPeers.Set(p)
@@ -70,7 +71,7 @@ func NewBuilder(desc string, cluster Cluster, region *core.RegionInfo) *Builder 
 	}
 
 	var rules []*placement.Rule
-	if cluster.IsPlacementRulesEnabled() {
+	if cluster.GetOpts().IsPlacementRulesEnabled() {
 		fit := cluster.FitRegion(region)
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
@@ -178,7 +179,7 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 
 // SetLightWeight marks the region as light weight. It is used for scatter regions.
 func (b *Builder) SetLightWeight() *Builder {
-	b.isLigthWeight = true
+	b.isLightWeight = true
 	return b
 }
 
@@ -251,7 +252,7 @@ func (b *Builder) brief() string {
 	switch {
 	case b.toAdd.Len() > 0 && b.toRemove.Len() > 0:
 		op := "mv peer"
-		if b.isLigthWeight {
+		if b.isLightWeight {
 			op = "mv light peer"
 		}
 		return fmt.Sprintf("%s: store %s to %s", op, b.toRemove, b.toAdd)
@@ -317,7 +318,7 @@ func (b *Builder) execPromoteLearner(p *metapb.Peer) {
 }
 
 func (b *Builder) execAddPeer(p *metapb.Peer) {
-	if b.isLigthWeight {
+	if b.isLightWeight {
 		b.steps = append(b.steps, AddLightLearner{ToStore: p.GetStoreId(), PeerID: p.GetId()})
 	} else {
 		b.steps = append(b.steps, AddLearner{ToStore: p.GetStoreId(), PeerID: p.GetId()})
@@ -352,7 +353,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 		return false
 	}
 	stateFilter := filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
-	if !stateFilter.Target(b.cluster, store) {
+	if !stateFilter.Target(b.cluster.GetOpts(), store) {
 		return false
 	}
 	if len(b.rules) == 0 {
@@ -511,7 +512,7 @@ func (b *Builder) comparePlan(best, next stepPlan) stepPlan {
 		// operator with less leader transfer steps.
 		b.preferAddOrPromoteTargetLeader, // 4. it is precondition of 5 so goes first.
 		b.preferTargetLeader,             // 5. it may help 6 in later steps.
-		b.preferLessLeaderTransfer,       // 6. trival optimization to make the operator more tidy.
+		b.preferLessLeaderTransfer,       // 6. trivial optimization to make the operator more tidy.
 	}
 	for _, t := range fs {
 		if tb, tc := t(best), t(next); tb > tc {
@@ -528,7 +529,7 @@ func (b *Builder) labelMatch(x, y uint64) int {
 	if sx == nil || sy == nil {
 		return 0
 	}
-	labels := b.cluster.GetLocationLabels()
+	labels := b.cluster.GetOpts().GetLocationLabels()
 	for i, l := range labels {
 		if sx.GetLabelValue(l) != sy.GetLabelValue(l) {
 			return i

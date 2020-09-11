@@ -14,62 +14,13 @@
 package opt
 
 import (
-	"time"
-
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
 )
-
-// Options for schedulers.
-type Options interface {
-	GetLeaderScheduleLimit() uint64
-	GetRegionScheduleLimit() uint64
-	GetReplicaScheduleLimit() uint64
-	GetMergeScheduleLimit() uint64
-	GetHotRegionScheduleLimit() uint64
-
-	// store limit
-	GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64
-	SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
-
-	GetMaxSnapshotCount() uint64
-	GetMaxPendingPeerCount() uint64
-	GetMaxStoreDownTime() time.Duration
-	GetMaxMergeRegionSize() uint64
-	GetMaxMergeRegionKeys() uint64
-	GetSplitQPSThreshold() uint64
-	GetSplitMergeInterval() time.Duration
-	IsOneWayMergeEnabled() bool
-	IsCrossTableMergeEnabled() bool
-
-	GetMaxReplicas() int
-	GetLocationLabels() []string
-	GetStrictlyMatchLabel() bool
-	IsPlacementRulesEnabled() bool
-	GetIsolationLevel() string
-
-	GetHotRegionCacheHitsThreshold() int
-	GetTolerantSizeRatio() float64
-	GetLowSpaceRatio() float64
-	GetHighSpaceRatio() float64
-	GetSchedulerMaxWaitingOperator() uint64
-
-	IsRemoveDownReplicaEnabled() bool
-	IsReplaceOfflineReplicaEnabled() bool
-	IsMakeUpReplicaEnabled() bool
-	IsRemoveExtraReplicaEnabled() bool
-	IsLocationReplacementEnabled() bool
-	IsDebugMetricsEnabled() bool
-	GetLeaderSchedulePolicy() core.SchedulePolicy
-	GetKeyType() core.KeyType
-
-	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
-}
 
 const (
 	// RejectLeader is the label property type that suggests a store should not
@@ -86,8 +37,8 @@ type Cluster interface {
 
 	statistics.RegionStatInformer
 	statistics.StoreStatInformer
-	Options
 
+	GetOpts() *config.PersistOptions
 	AllocID() (uint64, error)
 	FitRegion(*core.RegionInfo) *placement.RegionFit
 	RemoveScheduler(name string) error

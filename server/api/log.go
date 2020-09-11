@@ -29,7 +29,7 @@ type logHandler struct {
 	rd  *render.Render
 }
 
-func newlogHandler(svr *server.Server, rd *render.Render) *logHandler {
+func newLogHandler(svr *server.Server, rd *render.Render) *logHandler {
 	return &logHandler{
 		svr: svr,
 		rd:  rd,

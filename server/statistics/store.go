@@ -337,7 +337,7 @@ func newRollingStats() *rollingStats {
 
 func (s *StoresStats) storeIsUnhealthy(cluster core.StoreSetInformer, storeID uint64) bool {
 	store := cluster.GetStore(storeID)
-	return store.IsTombstone() || store.IsUnhealth()
+	return store.IsTombstone() || store.IsUnhealthy()
 }
 
 // FilterUnhealthyStore filter unhealthy store

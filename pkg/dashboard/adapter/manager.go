@@ -21,7 +21,6 @@ import (
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -106,7 +105,7 @@ func (m *Manager) updateInfo() {
 
 	var err error
 	if m.members, err = cluster.GetMembers(m.srv.GetClient()); err != nil {
-		log.Warn("failed to get members", zap.Error(err))
+		log.Warn("failed to get members", errs.ZapError(err))
 		m.members = nil
 		return
 	}
@@ -196,7 +195,7 @@ func (m *Manager) startService() {
 		return
 	}
 	if err := m.service.Start(m.ctx); err != nil {
-		log.Error("Can not start dashboard server", errs.ZapError(errs.ErrStartDashboard, err))
+		log.Error("Can not start dashboard server", errs.ZapError(errs.ErrDashboardStart, err))
 	} else {
 		log.Info("Dashboard server is started")
 	}
@@ -207,7 +206,7 @@ func (m *Manager) stopService() {
 		return
 	}
 	if err := m.service.Stop(context.Background()); err != nil {
-		log.Error("Stop dashboard server error", errs.ZapError(errs.ErrStopDashboard, err))
+		log.Error("Stop dashboard server error", errs.ZapError(errs.ErrDashboardStop, err))
 	} else {
 		log.Info("Dashboard server is stopped")
 	}

@@ -52,13 +52,37 @@ func ValidateLabels(labels []*metapb.StoreLabel) error {
 }
 
 // ValidateURLWithScheme checks the format of the URL.
-func ValidateURLWithScheme(rawurl string) error {
-	u, err := url.ParseRequestURI(rawurl)
+func ValidateURLWithScheme(rawURL string) error {
+	u, err := url.ParseRequestURI(rawURL)
 	if err != nil {
 		return err
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return errors.Errorf("%s has no scheme", rawurl)
+		return errors.Errorf("%s has no scheme", rawURL)
 	}
 	return nil
+}
+
+var schedulerMap = make(map[string]struct{})
+
+// RegisterScheduler registers the scheduler type.
+func RegisterScheduler(typ string) {
+	schedulerMap[typ] = struct{}{}
+}
+
+// IsSchedulerRegistered checks if the named scheduler type is registered.
+func IsSchedulerRegistered(name string) bool {
+	_, ok := schedulerMap[name]
+	return ok
+}
+
+// NewTestOptions creates default options for testing.
+func NewTestOptions() *PersistOptions {
+	// register default schedulers in case config check fail.
+	for _, d := range DefaultSchedulers {
+		RegisterScheduler(d.Type)
+	}
+	c := NewConfig()
+	c.Adjust(nil)
+	return NewPersistOptions(c)
 }

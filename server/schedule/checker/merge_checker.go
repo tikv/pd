@@ -21,6 +21,8 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -31,15 +33,18 @@ import (
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	cluster    opt.Cluster
+	opts       *config.PersistOptions
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
 func NewMergeChecker(ctx context.Context, cluster opt.Cluster) *MergeChecker {
-	splitCache := cache.NewIDTTL(ctx, time.Minute, cluster.GetSplitMergeInterval())
+	opts := cluster.GetOpts()
+	splitCache := cache.NewIDTTL(ctx, time.Minute, opts.GetSplitMergeInterval())
 	return &MergeChecker{
 		cluster:    cluster,
+		opts:       opts,
 		splitCache: splitCache,
 		startTime:  time.Now(),
 	}
@@ -49,13 +54,13 @@ func NewMergeChecker(ctx context.Context, cluster opt.Cluster) *MergeChecker {
 // will skip check it for a while.
 func (m *MergeChecker) RecordRegionSplit(regionIDs []uint64) {
 	for _, regionID := range regionIDs {
-		m.splitCache.PutWithTTL(regionID, nil, m.cluster.GetSplitMergeInterval())
+		m.splitCache.PutWithTTL(regionID, nil, m.opts.GetSplitMergeInterval())
 	}
 }
 
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
-	expireTime := m.startTime.Add(m.cluster.GetSplitMergeInterval())
+	expireTime := m.startTime.Add(m.opts.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
 		checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
 		return nil
@@ -78,8 +83,8 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// region is not small enough
-	if region.GetApproximateSize() > int64(m.cluster.GetMaxMergeRegionSize()) ||
-		region.GetApproximateKeys() > int64(m.cluster.GetMaxMergeRegionKeys()) {
+	if region.GetApproximateSize() > int64(m.opts.GetMaxMergeRegionSize()) ||
+		region.GetApproximateKeys() > int64(m.opts.GetMaxMergeRegionKeys()) {
 		checkerCounter.WithLabelValues("merge_checker", "no-need").Inc()
 		return nil
 	}
@@ -107,7 +112,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	if m.checkTarget(region, next) {
 		target = next
 	}
-	if !m.cluster.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow a region can be merged by two ways.
+	if !m.opts.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow a region can be merged by two ways.
 		if target == nil || prev.GetApproximateSize() < next.GetApproximateSize() { // pick smaller
 			target = prev
 		}
@@ -126,7 +131,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	log.Debug("try to merge region", zap.Stringer("from", core.RegionToHexMeta(region.GetMeta())), zap.Stringer("to", core.RegionToHexMeta(target.GetMeta())))
 	ops, err := operator.CreateMergeRegionOperator("merge-region", m.cluster, region, target, operator.OpMerge)
 	if err != nil {
-		log.Warn("create merge region operator failed", zap.Error(err))
+		log.Warn("create merge region operator failed", errs.ZapError(err))
 		return nil
 	}
 	checkerCounter.WithLabelValues("merge_checker", "new-operator").Inc()
@@ -152,7 +157,7 @@ func AllowMerge(cluster opt.Cluster, region *core.RegionInfo, adjacent *core.Reg
 	} else {
 		return false
 	}
-	if cluster.IsPlacementRulesEnabled() {
+	if cluster.GetOpts().IsPlacementRulesEnabled() {
 		type withRuleManager interface {
 			GetRuleManager() *placement.RuleManager
 		}
@@ -161,10 +166,10 @@ func AllowMerge(cluster opt.Cluster, region *core.RegionInfo, adjacent *core.Reg
 			return false
 		}
 	}
-	policy := cluster.GetKeyType()
+	policy := cluster.GetOpts().GetKeyType()
 	switch policy {
 	case core.Table:
-		if cluster.IsCrossTableMergeEnabled() {
+		if cluster.GetOpts().IsCrossTableMergeEnabled() {
 			return true
 		}
 		return isTableIDSame(region, adjacent)
