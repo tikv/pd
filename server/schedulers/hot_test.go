@@ -48,7 +48,6 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
-	tc.DisableFeature(versioninfo.JointConsensus) // TODO: Delete after perfecting JointConsensus
 	for id := uint64(1); id <= 10; id++ {
 		tc.PutStoreWithLabels(id)
 	}

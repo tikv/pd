@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/storelimit"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 func Test(t *testing.T) {
@@ -570,7 +569,6 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 	tc.SetMaxMergeRegionSize(2)
 	tc.SetMaxMergeRegionKeys(2)
 	tc.SetSplitMergeInterval(0)
-	tc.DisableFeature(versioninfo.JointConsensus) // TODO: Delete after perfecting JointConsensus
 	regions := []*core.RegionInfo{
 		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
 		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
