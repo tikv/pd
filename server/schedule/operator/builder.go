@@ -432,7 +432,11 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	for _, remove := range b.toRemove.IDs() {
 		peer := b.toRemove[remove]
 		if !core.IsLearner(peer) {
-			b.toDemote.Set(peer)
+			b.toDemote.Set(&metapb.Peer{
+				Id:      peer.GetId(),
+				StoreId: peer.GetStoreId(),
+				Role:    metapb.PeerRole_Learner,
+			})
 		}
 	}
 
