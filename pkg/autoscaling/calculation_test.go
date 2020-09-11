@@ -20,7 +20,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -116,15 +115,9 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 					Component:    TiKV.String(),
 					Count:        2,
 					ResourceType: "a",
-					Labels: []*metapb.StoreLabel{
-						{
-							Key:   groupLabelKey,
-							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
-						},
-						{
-							Key:   resourceTypeLabelKey,
-							Value: "a",
-						},
+					Labels: map[string]string{
+						groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						resourceTypeLabelKey: "a",
 					},
 				},
 			},
@@ -168,15 +161,9 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 					Component:    TiKV.String(),
 					Count:        1,
 					ResourceType: "a",
-					Labels: []*metapb.StoreLabel{
-						{
-							Key:   groupLabelKey,
-							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
-						},
-						{
-							Key:   resourceTypeLabelKey,
-							Value: "a",
-						},
+					Labels: map[string]string{
+						groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						resourceTypeLabelKey: "a",
 					},
 				},
 			},
