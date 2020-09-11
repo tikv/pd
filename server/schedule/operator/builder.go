@@ -62,8 +62,8 @@ type Builder struct {
 	peerAddStep                          map[uint64]int // record at which step a peer is created.
 
 	// comparison function
-	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithJointConsensus
-	leaderPreferFuncs   []func(uint64) int   // for buildStepsWithoutJointConsensus
+	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus
+	leaderPreferFuncs   []func(uint64) int   // for buildStepsWithJointConsensus
 }
 
 // newBuilderWithBasicCheck creates a Builder with some basic checks.
