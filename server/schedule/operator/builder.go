@@ -62,7 +62,8 @@ type Builder struct {
 	peerAddStep                          map[uint64]int // record at which step a peer is created.
 
 	// comparison function
-	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus
+	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithJointConsensus
+	leaderPreferFuncs   []func(uint64) int   // for buildStepsWithoutJointConsensus
 }
 
 // newBuilderWithBasicCheck creates a Builder with some basic checks.
@@ -406,7 +407,111 @@ func (b *Builder) brief() string {
 
 // Using Joint Consensus can ensure the replica safety and reduce the number of steps.
 func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
-	return kind, errors.New("not implemented")
+	b.initLeaderPreferFuncs()
+	kind |= OpRegion
+
+	// Add all the peers as Learner first. Split `Add Voter` to `Add Learner + Promote`
+	for _, add := range b.toAdd.IDs() {
+		peer := b.toAdd[add]
+		if !core.IsLearner(peer) {
+			b.execAddPeer(&metapb.Peer{
+				Id:      peer.GetId(),
+				StoreId: peer.GetStoreId(),
+				Role:    metapb.PeerRole_Learner,
+			})
+			b.toPromote.Set(peer)
+		} else {
+			b.execAddPeer(peer)
+		}
+	}
+
+	b.setTargetLeaderIfNotExist()
+	if b.targetLeaderStoreID == 0 {
+		return kind, errors.New("no valid leader")
+	}
+
+	// Split `Remove Voter` to `Demote + Remove Learner`
+	for _, remove := range b.toRemove.IDs() {
+		peer := b.toRemove[remove]
+		if !core.IsLearner(peer) {
+			b.toDemote.Set(peer)
+		}
+	}
+
+	if targetLeaderBefore, ok := b.originPeers[b.targetLeaderStoreID]; ok && !core.IsLearner(targetLeaderBefore) {
+		// target leader is a voter in `originPeers`, transfer leader first.
+		if b.originLeaderStoreID != b.targetLeaderStoreID {
+			b.execTransferLeader(b.targetLeaderStoreID)
+			kind |= OpLeader
+		}
+		b.execChangePeerV2(true, false)
+	} else if originLeaderAfter, ok := b.targetPeers[b.originLeaderStoreID]; b.originLeaderStoreID == 0 ||
+		(ok && !core.IsLearner(originLeaderAfter)) {
+		// origin leader is none or a voter in `targetPeers`, change peers first.
+		b.execChangePeerV2(true, false)
+		if b.originLeaderStoreID != b.targetLeaderStoreID {
+			b.execTransferLeader(b.targetLeaderStoreID)
+			kind |= OpLeader
+		}
+	} else {
+		// both demote origin leader and promote target leader, transfer leader in joint state.
+		b.execChangePeerV2(true, true)
+		kind |= OpLeader
+	}
+
+	// Finally, remove all the peers as Learner
+	for _, remove := range b.toRemove.IDs() {
+		b.execRemovePeer(b.toRemove[remove])
+	}
+
+	return kind, nil
+}
+
+func (b *Builder) initLeaderPreferFuncs() {
+	b.leaderPreferFuncs = []func(uint64) int{
+		b.preferUpStoreAsLeader,
+		b.preferKeepVoterAsLeader,
+		b.preferOldPeerAsLeader,
+	}
+}
+
+func (b *Builder) setTargetLeaderIfNotExist() {
+	if b.targetLeaderStoreID != 0 {
+		return
+	}
+
+	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
+		peer := b.targetPeers[targetLeaderStoreID]
+		if !b.allowLeader(peer) {
+			continue
+		}
+		if b.targetLeaderStoreID == 0 {
+			b.targetLeaderStoreID = targetLeaderStoreID
+			continue
+		}
+		for _, f := range b.leaderPreferFuncs {
+			if best, next := f(b.targetLeaderStoreID), f(targetLeaderStoreID); best < next {
+				b.targetLeaderStoreID = targetLeaderStoreID
+				break
+			} else if best > next {
+				break
+			}
+		}
+	}
+}
+
+func (b *Builder) preferUpStoreAsLeader(targetLeaderStoreID uint64) int {
+	store := b.cluster.GetStore(targetLeaderStoreID)
+	return b2i(store != nil && store.IsUp())
+}
+
+func (b *Builder) preferKeepVoterAsLeader(targetLeaderStoreID uint64) int {
+	_, ok := b.toPromote[targetLeaderStoreID]
+	return b2i(!ok)
+}
+
+func (b *Builder) preferOldPeerAsLeader(targetLeaderStoreID uint64) int {
+	return -b.peerAddStep[targetLeaderStoreID]
 }
 
 // Some special cases, and stores that do not support using joint consensus.
@@ -491,6 +596,38 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 	b.steps = append(b.steps, RemovePeer{FromStore: peer.GetStoreId(), PeerID: peer.GetId()})
 	delete(b.currentPeers, peer.GetStoreId())
 	delete(b.toRemove, peer.GetStoreId())
+}
+
+func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
+	// Enter
+	step := ChangePeerV2Enter{
+		PromoteLearners: make([]PromoteLearner, 0, len(b.toPromote)),
+		DemoteVoters:    make([]DemoteVoter, 0, len(b.toDemote)),
+	}
+
+	for _, p := range b.toPromote.IDs() {
+		peer := b.toPromote[p]
+		step.PromoteLearners = append(step.PromoteLearners, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
+		b.currentPeers.Set(peer)
+	}
+	b.toPromote = newPeersMap()
+
+	for _, d := range b.toDemote.IDs() {
+		peer := b.toDemote[d]
+		step.DemoteVoters = append(step.DemoteVoters, DemoteVoter{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
+		b.currentPeers.Set(peer)
+	}
+	b.toDemote = newPeersMap()
+
+	if needEnter {
+		b.steps = append(b.steps, step)
+	}
+	// Transfer Leader
+	if needTransferLeader && b.originLeaderStoreID != b.targetLeaderStoreID {
+		b.execTransferLeader(b.targetLeaderStoreID)
+	}
+	// Leave
+	b.steps = append(b.steps, ChangePeerV2Leave(step))
 }
 
 var stateFilter = filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
