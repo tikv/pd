@@ -63,7 +63,6 @@ type Builder struct {
 
 	// comparison function
 	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus
-	leaderPreferFuncs   []func(uint64) int   // for buildStepsWithJointConsensus
 }
 
 // newBuilderWithBasicCheck creates a Builder with some basic checks.
@@ -407,7 +406,6 @@ func (b *Builder) brief() string {
 
 // Using Joint Consensus can ensure the replica safety and reduce the number of steps.
 func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
-	b.initLeaderPreferFuncs()
 	kind |= OpRegion
 
 	// Add all the peers as Learner first. Split `Add Voter` to `Add Learner + Promote`
@@ -467,17 +465,15 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	return kind, nil
 }
 
-func (b *Builder) initLeaderPreferFuncs() {
-	b.leaderPreferFuncs = []func(uint64) int{
-		b.preferUpStoreAsLeader,
-		b.preferKeepVoterAsLeader,
-		b.preferOldPeerAsLeader,
-	}
-}
-
 func (b *Builder) setTargetLeaderIfNotExist() {
 	if b.targetLeaderStoreID != 0 {
 		return
+	}
+
+	leaderPreferFuncs := []func(uint64) int{
+		b.preferUpStoreAsLeader,
+		b.preferKeepVoterAsLeader,
+		b.preferOldPeerAsLeader,
 	}
 
 	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
@@ -489,7 +485,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 			b.targetLeaderStoreID = targetLeaderStoreID
 			continue
 		}
-		for _, f := range b.leaderPreferFuncs {
+		for _, f := range leaderPreferFuncs {
 			if best, next := f(b.targetLeaderStoreID), f(targetLeaderStoreID); best < next {
 				b.targetLeaderStoreID = targetLeaderStoreID
 				break
