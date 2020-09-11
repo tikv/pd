@@ -35,6 +35,11 @@ func (mc *Cluster) SetSplitMergeInterval(v time.Duration) {
 	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.SplitMergeInterval = typeutil.NewDuration(v) })
 }
 
+// SetSplitQPSThreshold updates the SetSplitQPSThreshold configuration.
+func (mc *Cluster) SetSplitQPSThreshold(v uint64) {
+	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.SplitQPSThreshold = v })
+}
+
 // SetEnableOneWayMerge updates the EnableOneWayMerge configuration.
 func (mc *Cluster) SetEnableOneWayMerge(v bool) {
 	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.EnableOneWayMerge = v })

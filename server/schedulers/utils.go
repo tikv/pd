@@ -212,9 +212,9 @@ func stLdKeyRate(ld *storeLoad) float64 {
 	return ld.KeyRate
 }
 
-func stLdCount(ld *storeLoad) float64 {
-	return ld.Count
-}
+//func stLdCount(ld *storeLoad) float64 {
+//	return ld.Count
+//}
 
 func stLdQPS(ld *storeLoad) float64 {
 	return ld.QPS

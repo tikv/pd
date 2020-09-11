@@ -21,7 +21,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-  "github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
@@ -198,11 +198,11 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 }
 
 func (s *testMergeCheckerSuite) TestSplitQPSThreshold(c *C) {
-	s.cluster.ScheduleOptions.SplitMergeInterval = 0
+	s.cluster.SetSplitMergeInterval(0)
 	ops := s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	region := s.regions[2]
-	queryStats := &pdpb.QueryStats{Get: s.cluster.ScheduleOptions.SplitQPSThreshold * 2}
+	queryStats := &pdpb.QueryStats{Get: s.cluster.GetOpts().GetSplitQPSThreshold() * 2}
 	s.regions[2] = core.NewRegionInfo(
 		region.GetMeta(),
 		region.GetLeader(),

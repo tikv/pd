@@ -123,7 +123,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	if region.GetQPSRead()+target.GetQPSRead() > m.cluster.GetSplitQPSThreshold()*3/2 {
+	if region.GetQPSRead()+target.GetQPSRead() > m.cluster.GetOpts().GetSplitQPSThreshold()*3/2 {
 		checkerCounter.WithLabelValues("merge_checker", "read-load-high").Inc()
 		return nil
 	}

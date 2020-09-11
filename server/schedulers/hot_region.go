@@ -1146,9 +1146,7 @@ func (bs *balanceSolver) getCmps(isSrc bool) []storeLoadCmp {
 func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare source store
-		var lpCmp storeLPCmp
-
-		lpCmp = sliceLPCmp(
+		lpCmp := sliceLPCmp(
 			minLPCmp(negLoadCmp(sliceLoadCmp(
 				bs.getCmps(true)...,
 			))),
@@ -1168,8 +1166,7 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare destination store
-		var lpCmp storeLPCmp
-		lpCmp = sliceLPCmp(
+		lpCmp := sliceLPCmp(
 			maxLPCmp(sliceLoadCmp(
 				bs.getCmps(false)...,
 			)),

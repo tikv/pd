@@ -79,14 +79,6 @@ var hotSchedulerResultCounter = prometheus.NewCounterVec(
 		Help:      "Counter of hot region scheduler.",
 	}, []string{"type", "store"})
 
-var hotDirectionCounter = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Namespace: "pd",
-		Subsystem: "scheduler",
-		Name:      "hot_region_direction",
-		Help:      "Counter of hot region scheduler.",
-	}, []string{"type", "rw", "store", "direction"})
-
 var balanceDirectionCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",

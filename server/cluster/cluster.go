@@ -601,7 +601,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
 			region.GetKeysRead() != origin.GetKeysRead() ||
 			region.GetQPSRead() != origin.GetQPSRead() ||
-			region.GetQPSWrite() != origin.GetQPSWrite() ){
+			region.GetQPSWrite() != origin.GetQPSWrite()) {
 			saveCache, needSync = true, true
 		}
 
