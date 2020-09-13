@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package hbstream
 
 import (
 	"context"
@@ -19,12 +19,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
@@ -40,7 +40,7 @@ type streamUpdate struct {
 	stream  opt.HeartbeatStream
 }
 
-type heartbeatStreams struct {
+type HeartbeatStreams struct {
 	wg             sync.WaitGroup
 	hbStreamCtx    context.Context
 	hbStreamCancel context.CancelFunc
@@ -48,26 +48,38 @@ type heartbeatStreams struct {
 	streams        map[uint64]opt.HeartbeatStream
 	msgCh          chan *pdpb.RegionHeartbeatResponse
 	streamCh       chan streamUpdate
-	cluster        *cluster.RaftCluster
+	storeInformer  core.StoreSetInformer
+	noNeedRun      bool // For test only.
 }
 
-func newHeartbeatStreams(ctx context.Context, clusterID uint64, cluster *cluster.RaftCluster) *heartbeatStreams {
+func NewHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer) *HeartbeatStreams {
+	return newHeartbeatStreams(ctx, clusterID, storeInformer, false)
+}
+
+func NewTestHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, noNeedRun bool) *HeartbeatStreams {
+	return newHeartbeatStreams(ctx, clusterID, storeInformer, noNeedRun)
+}
+
+func newHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, noNeedRun bool) *HeartbeatStreams {
 	hbStreamCtx, hbStreamCancel := context.WithCancel(ctx)
-	hs := &heartbeatStreams{
+	hs := &HeartbeatStreams{
 		hbStreamCtx:    hbStreamCtx,
 		hbStreamCancel: hbStreamCancel,
 		clusterID:      clusterID,
 		streams:        make(map[uint64]opt.HeartbeatStream),
 		msgCh:          make(chan *pdpb.RegionHeartbeatResponse, heartbeatChanCapacity),
 		streamCh:       make(chan streamUpdate, 1),
-		cluster:        cluster,
+		storeInformer:  storeInformer,
+		noNeedRun:      noNeedRun,
 	}
-	hs.wg.Add(1)
-	go hs.run()
+	if !noNeedRun {
+		hs.wg.Add(1)
+		go hs.run()
+	}
 	return hs
 }
 
-func (s *heartbeatStreams) run() {
+func (s *HeartbeatStreams) run() {
 	defer logutil.LogPanic()
 
 	defer s.wg.Done()
@@ -84,7 +96,7 @@ func (s *heartbeatStreams) run() {
 		case msg := <-s.msgCh:
 			storeID := msg.GetTargetPeer().GetStoreId()
 			storeLabel := strconv.FormatUint(storeID, 10)
-			store := s.cluster.GetStore(storeID)
+			store := s.storeInformer.GetStore(storeID)
 			if store == nil {
 				log.Error("failed to get store",
 					zap.Uint64("region-id", msg.RegionId),
@@ -98,19 +110,19 @@ func (s *heartbeatStreams) run() {
 					log.Error("send heartbeat message fail",
 						zap.Uint64("region-id", msg.RegionId), errs.ZapError(errs.ErrGRPCSend.Wrap(err).GenWithStackByArgs()))
 					delete(s.streams, storeID)
-					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
+					heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
 				} else {
-					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "push", "ok").Inc()
+					heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "push", "ok").Inc()
 				}
 			} else {
 				log.Debug("heartbeat stream not found, skip send message",
 					zap.Uint64("region-id", msg.RegionId),
 					zap.Uint64("store-id", storeID))
-				regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "push", "skip").Inc()
+				heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "push", "skip").Inc()
 			}
 		case <-keepAliveTicker.C:
 			for storeID, stream := range s.streams {
-				store := s.cluster.GetStore(storeID)
+				store := s.storeInformer.GetStore(storeID)
 				if store == nil {
 					log.Error("failed to get store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
 					delete(s.streams, storeID)
@@ -123,9 +135,9 @@ func (s *heartbeatStreams) run() {
 						zap.Uint64("target-store-id", storeID),
 						errs.ZapError(err))
 					delete(s.streams, storeID)
-					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "keepalive", "err").Inc()
+					heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "keepalive", "err").Inc()
 				} else {
-					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "keepalive", "ok").Inc()
+					heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "keepalive", "ok").Inc()
 				}
 			}
 		case <-s.hbStreamCtx.Done():
@@ -134,12 +146,12 @@ func (s *heartbeatStreams) run() {
 	}
 }
 
-func (s *heartbeatStreams) Close() {
+func (s *HeartbeatStreams) Close() {
 	s.hbStreamCancel()
 	s.wg.Wait()
 }
 
-func (s *heartbeatStreams) BindStream(storeID uint64, stream opt.HeartbeatStream) {
+func (s *HeartbeatStreams) BindStream(storeID uint64, stream opt.HeartbeatStream) {
 	update := streamUpdate{
 		storeID: storeID,
 		stream:  stream,
@@ -150,7 +162,7 @@ func (s *heartbeatStreams) BindStream(storeID uint64, stream opt.HeartbeatStream
 	}
 }
 
-func (s *heartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
+func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
 	if region.GetLeader() == nil {
 		return
 	}
@@ -166,9 +178,7 @@ func (s *heartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHear
 	}
 }
 
-func (s *heartbeatStreams) sendErr(errType pdpb.ErrorType, errMsg string, targetPeer *metapb.Peer, storeAddress, storeLabel string) {
-	regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
-
+func (s *HeartbeatStreams) SendErr(errType pdpb.ErrorType, errMsg string, targetPeer *metapb.Peer) {
 	msg := &pdpb.RegionHeartbeatResponse{
 		Header: &pdpb.ResponseHeader{
 			ClusterId: s.clusterID,
@@ -184,4 +194,22 @@ func (s *heartbeatStreams) sendErr(errType pdpb.ErrorType, errMsg string, target
 	case s.msgCh <- msg:
 	case <-s.hbStreamCtx.Done():
 	}
+}
+
+// MsgLength gets the length of msgCh.
+// For test only.
+func (s *HeartbeatStreams) MsgLength() int {
+	return len(s.msgCh)
+}
+
+// Drain consumes message from msgCh when disable background running.
+// For test only.
+func (s *HeartbeatStreams) Drain(count int) error {
+	if !s.noNeedRun {
+		return errors.Normalize("hbstream running enabled")
+	}
+	for i := 0; i < count; i++ {
+		<-s.msgCh
+	}
+	return nil
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/storelimit"
@@ -59,7 +60,7 @@ type OperatorController struct {
 	ctx             context.Context
 	cluster         opt.Cluster
 	operators       map[uint64]*operator.Operator
-	hbStreams       opt.HeartbeatStreams
+	hbStreams       *hbstream.HeartbeatStreams
 	histories       *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
@@ -70,7 +71,7 @@ type OperatorController struct {
 }
 
 // NewOperatorController creates a OperatorController.
-func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams opt.HeartbeatStreams) *OperatorController {
+func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams *hbstream.HeartbeatStreams) *OperatorController {
 	return &OperatorController{
 		ctx:             ctx,
 		cluster:         cluster,
