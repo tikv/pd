@@ -362,10 +362,10 @@ func (b *Builder) prepareBuild() (string, error) {
 	if b.targetLeaderStoreID != 0 {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
 		if b.forceTargetLeader {
-			if !b.hasAbilityLeader(targetLeader) {
+			if !b.allowLeader(targetLeader, true) {
 				return "", errors.New("cannot create operator: target leader is impossible")
 			}
-		} else if !b.allowLeader(targetLeader) {
+		} else if !b.allowLeader(targetLeader, false) {
 			return "", errors.New("cannot create operator: target leader is not allowed")
 		}
 	}
@@ -482,7 +482,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 
 	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[targetLeaderStoreID]
-		if !b.allowLeader(peer) {
+		if !b.allowLeader(peer, false) {
 			continue
 		}
 		if b.targetLeaderStoreID == 0 {
@@ -632,25 +632,9 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 
 var stateFilter = filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 
-// check if the peer has the ability to become a leader.
-func (b *Builder) hasAbilityLeader(peer *metapb.Peer) bool {
-	// these roles are not allowed to become leaders.
-	switch peer.GetRole() {
-	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
-		return false
-	}
-
-	// store does not exist
-	if peer.GetStoreId() == b.currentLeaderStoreID {
-		return true
-	}
-	store := b.cluster.GetStore(peer.GetStoreId())
-	return store != nil
-}
-
 // check if the peer is allowed to become the leader.
-func (b *Builder) allowLeader(peer *metapb.Peer) bool {
-	// these roles are not allowed to become leaders.
+func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
+	// these peer roles are not allowed to become leader.
 	switch peer.GetRole() {
 	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
 		return false
@@ -665,10 +649,16 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 		return false
 	}
 
-	// filter and rules
+	if ignoreClusterLimit {
+		return true
+	}
+
+	// store state filter
 	if !stateFilter.Target(b.cluster.GetOpts(), store) {
 		return false
 	}
+
+	// placement rules
 	if len(b.rules) == 0 {
 		return true
 	}
@@ -774,14 +764,14 @@ func (b *Builder) planReplace() stepPlan {
 func (b *Builder) planReplaceLeaders(best, next stepPlan) stepPlan {
 	// Brute force all possible leader combinations to find the best plan.
 	for _, leaderBeforeAdd := range b.currentPeers.IDs() {
-		if !b.allowLeader(b.currentPeers[leaderBeforeAdd]) {
+		if !b.allowLeader(b.currentPeers[leaderBeforeAdd], false) {
 			continue
 		}
 		next.leaderBeforeAdd = leaderBeforeAdd
 		for _, leaderBeforeRemove := range b.currentPeers.IDs() {
 			if leaderBeforeRemove != next.demote.GetStoreId() &&
 				leaderBeforeRemove != next.remove.GetStoreId() &&
-				b.allowLeader(b.currentPeers[leaderBeforeRemove]) {
+				b.allowLeader(b.currentPeers[leaderBeforeRemove], false) {
 				// leaderBeforeRemove does not select nodes to be demote or removed.
 				next.leaderBeforeRemove = leaderBeforeRemove
 				best = b.comparePlan(best, next)
@@ -790,7 +780,7 @@ func (b *Builder) planReplaceLeaders(best, next stepPlan) stepPlan {
 		if next.promote != nil &&
 			next.promote.GetStoreId() != next.demote.GetStoreId() &&
 			next.promote.GetStoreId() != next.remove.GetStoreId() &&
-			b.allowLeader(next.promote) {
+			b.allowLeader(next.promote, false) {
 			// leaderBeforeRemove does not select nodes to be demote or removed.
 			next.leaderBeforeRemove = next.promote.GetStoreId()
 			best = b.comparePlan(best, next)
@@ -798,7 +788,7 @@ func (b *Builder) planReplaceLeaders(best, next stepPlan) stepPlan {
 		if next.add != nil &&
 			next.add.GetStoreId() != next.demote.GetStoreId() &&
 			next.add.GetStoreId() != next.remove.GetStoreId() &&
-			b.allowLeader(next.add) {
+			b.allowLeader(next.add, false) {
 			// leaderBeforeRemove does not select nodes to be demote or removed.
 			next.leaderBeforeRemove = next.add.GetStoreId()
 			best = b.comparePlan(best, next)
@@ -820,7 +810,7 @@ func (b *Builder) planDemotePeer() stepPlan {
 	for _, i := range b.toDemote.IDs() {
 		d := b.toDemote[i]
 		for _, leader := range b.currentPeers.IDs() {
-			if b.allowLeader(b.currentPeers[leader]) && leader != d.GetStoreId() {
+			if b.allowLeader(b.currentPeers[leader], false) && leader != d.GetStoreId() {
 				best = b.comparePlan(best, stepPlan{demote: d, leaderBeforeRemove: leader})
 			}
 		}
@@ -833,7 +823,7 @@ func (b *Builder) planRemovePeer() stepPlan {
 	for _, i := range b.toRemove.IDs() {
 		r := b.toRemove[i]
 		for _, leader := range b.currentPeers.IDs() {
-			if b.allowLeader(b.currentPeers[leader]) && leader != r.GetStoreId() {
+			if b.allowLeader(b.currentPeers[leader], false) && leader != r.GetStoreId() {
 				best = b.comparePlan(best, stepPlan{remove: r, leaderBeforeRemove: leader})
 			}
 		}
@@ -846,7 +836,7 @@ func (b *Builder) planAddPeer() stepPlan {
 	for _, i := range b.toAdd.IDs() {
 		a := b.toAdd[i]
 		for _, leader := range b.currentPeers.IDs() {
-			if b.allowLeader(b.currentPeers[leader]) {
+			if b.allowLeader(b.currentPeers[leader], false) {
 				best = b.comparePlan(best, stepPlan{add: a, leaderBeforeAdd: leader})
 			}
 		}
