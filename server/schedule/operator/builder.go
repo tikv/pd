@@ -525,7 +525,7 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 
 	for len(b.toAdd) > 0 || len(b.toRemove) > 0 || len(b.toPromote) > 0 || len(b.toDemote) > 0 {
 		plan := b.peerPlan()
-		if plan.Empty() {
+		if plan.IsEmpty() {
 			return kind, errors.New("fail to build operator: plan is empty, maybe no valid leader")
 		}
 		if plan.leaderBeforeAdd != 0 && plan.leaderBeforeAdd != b.currentLeaderStoreID {
@@ -702,26 +702,26 @@ func (p stepPlan) String() string {
 		p.leaderBeforeAdd, p.add, p.promote, p.leaderBeforeRemove, p.demote, p.remove)
 }
 
-func (p stepPlan) Empty() bool {
+func (p stepPlan) IsEmpty() bool {
 	return p.promote == nil && p.demote == nil && p.add == nil && p.remove == nil
 }
 
 func (b *Builder) peerPlan() stepPlan {
 	// Replace has the highest priority because it does not change region's
 	// voter/learner count.
-	if p := b.planReplace(); !p.Empty() {
+	if p := b.planReplace(); !p.IsEmpty() {
 		return p
 	}
-	if p := b.planPromotePeer(); !p.Empty() {
+	if p := b.planPromotePeer(); !p.IsEmpty() {
 		return p
 	}
-	if p := b.planDemotePeer(); !p.Empty() {
+	if p := b.planDemotePeer(); !p.IsEmpty() {
 		return p
 	}
-	if p := b.planRemovePeer(); !p.Empty() {
+	if p := b.planRemovePeer(); !p.IsEmpty() {
 		return p
 	}
-	if p := b.planAddPeer(); !p.Empty() {
+	if p := b.planAddPeer(); !p.IsEmpty() {
 		return p
 	}
 	return stepPlan{}
@@ -875,7 +875,7 @@ func (b *Builder) initStepPlanPreferFuncs() {
 
 // Pick the better plan from 2 candidates.
 func (b *Builder) comparePlan(best, next stepPlan) stepPlan {
-	if best.Empty() {
+	if best.IsEmpty() {
 		return next
 	}
 	for _, f := range b.stepPlanPreferFuncs {
