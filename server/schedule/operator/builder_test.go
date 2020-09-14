@@ -156,10 +156,10 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 
 func (s *testBuilderSuite) TestBuild(c *C) {
 	type testCase struct {
-		useJointConsensus bool
-		originPeers       []*metapb.Peer // first is leader
-		targetPeers       []*metapb.Peer // first is leader
-		steps             []OpStep
+		supportJointConsensus bool
+		originPeers           []*metapb.Peer // first is leader
+		targetPeers           []*metapb.Peer // first is leader
+		steps                 []OpStep
 	}
 	cases := []testCase{
 		{ // empty step
@@ -360,7 +360,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 
 	for _, tc := range cases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.originPeers}, tc.originPeers[0])
-		builder := NewBuilder("test", s.cluster, region).setSupportJointConsensus(tc.useJointConsensus)
+		builder := NewBuilder("test", s.cluster, region).setSupportJointConsensus(tc.supportJointConsensus)
 		m := make(map[uint64]*metapb.Peer)
 		for _, p := range tc.targetPeers {
 			m[p.GetStoreId()] = p
