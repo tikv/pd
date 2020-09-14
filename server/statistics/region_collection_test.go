@@ -116,39 +116,6 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 }
 
 func (t *testRegionStatisticsSuite) TestRegionStatisticsWithPlacementRule(c *C) {
-	err := t.manager.SetRule(&placement.Rule{
-		GroupID:  "fake1",
-		ID:       "fake1",
-		Index:    0,
-		Override: false,
-		StartKey: []byte("ee"),
-		EndKey:   []byte("ff"),
-		Role:     "voter",
-		Count:    99,
-	})
-	c.Assert(err, IsNil)
-	err = t.manager.SetRule(&placement.Rule{
-		GroupID:  "fake2",
-		ID:       "fake2",
-		Index:    0,
-		Override: false,
-		StartKey: []byte("gg"),
-		EndKey:   []byte("hh"),
-		Role:     "voter",
-		Count:    3,
-	})
-	c.Assert(err, IsNil)
-	err = t.manager.SetRule(&placement.Rule{
-		GroupID:  "fake3",
-		ID:       "fake3",
-		Index:    0,
-		Override: false,
-		StartKey: []byte("gg"),
-		EndKey:   []byte("hh"),
-		Role:     "learner",
-		Count:    1,
-	})
-	c.Assert(err, IsNil)
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(true)
 	peers := []*metapb.Peer{
@@ -169,17 +136,23 @@ func (t *testRegionStatisticsSuite) TestRegionStatisticsWithPlacementRule(c *C) 
 		s := core.NewStoreInfo(m)
 		stores = append(stores, s)
 	}
+	r2 := &metapb.Region{Id: 0, Peers: peers[0:1], StartKey: []byte("aa"), EndKey: []byte("bb")}
 	r3 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("ee"), EndKey: []byte("ff")}
-	r4 := &metapb.Region{Id: 2, Peers: peers, StartKey: []byte("gg"), EndKey: []byte("hh")}
+	r4 := &metapb.Region{Id: 2, Peers: peers[0:3], StartKey: []byte("gg"), EndKey: []byte("hh")}
+	region2 := core.NewRegionInfo(r2, peers[0])
 	region3 := core.NewRegionInfo(r3, peers[0])
 	region4 := core.NewRegionInfo(r4, peers[0])
 	regionStats := NewRegionStatistics(opt, t.manager)
+	// r2 didn't match the rules
+	regionStats.Observe(region2, stores)
+	c.Assert(len(regionStats.stats[MissPeer]), Equals, 1)
 	regionStats.Observe(region3, stores)
 	// r3 didn't match the rules
-	c.Assert(len(regionStats.stats[MissPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
 	regionStats.Observe(region4, stores)
 	// r4 match the rules
 	c.Assert(len(regionStats.stats[MissPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
 }
 
 func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
