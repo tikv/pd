@@ -50,7 +50,10 @@ type Builder struct {
 	targetLeaderStoreID uint64
 	err                 error
 
-	// flags
+	// skip origin check flags
+	skipOriginJointStateCheck bool
+
+	// build flags
 	allowDemote       bool
 	useJointConsensus bool
 	isLightWeight     bool
@@ -67,9 +70,28 @@ type Builder struct {
 	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus
 }
 
-// newBuilderWithBasicCheck creates a Builder with some basic checks.
-func newBuilderWithBasicCheck(desc string, cluster opt.Cluster, region *core.RegionInfo) *Builder {
-	var err error
+type BuilderOption func(*Builder)
+
+func SkipOriginJointStateCheck(b *Builder) {
+	b.skipOriginJointStateCheck = true
+}
+
+// NewBuilder creates a Builder.
+func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
+	b := &Builder{
+		desc:        desc,
+		cluster:     cluster,
+		regionID:    region.GetID(),
+		regionEpoch: region.GetRegionEpoch(),
+	}
+
+	// options
+	for _, option := range opts {
+		option(b)
+	}
+
+	// origin peers
+	err := b.err
 	originPeers := newPeersMap()
 
 	for _, p := range region.GetPeers() {
@@ -80,11 +102,13 @@ func newBuilderWithBasicCheck(desc string, cluster opt.Cluster, region *core.Reg
 		originPeers.Set(p)
 	}
 
+	// origin leader
 	originLeaderStoreID := region.GetLeader().GetStoreId()
 	if _, ok := originPeers[originLeaderStoreID]; err == nil && !ok {
 		err = errors.Errorf("cannot build operator for region with no leader")
 	}
 
+	// placement rules
 	var rules []*placement.Rule
 	if err == nil && cluster.GetOpts().IsPlacementRulesEnabled() {
 		fit := cluster.FitRegion(region)
@@ -96,31 +120,21 @@ func newBuilderWithBasicCheck(desc string, cluster opt.Cluster, region *core.Reg
 		}
 	}
 
+	// joint state check
+	if err == nil && !b.skipOriginJointStateCheck && core.IsInJointState(region.GetPeers()...) {
+		err = errors.Errorf("cannot build operator for region which is in joint state")
+	}
+
+	// build flags
 	supportJointConsensus := cluster.IsFeatureSupported(versioninfo.JointConsensus)
 
-	return &Builder{
-		desc:                desc,
-		cluster:             cluster,
-		regionID:            region.GetID(),
-		regionEpoch:         region.GetRegionEpoch(),
-		rules:               rules,
-		originPeers:         originPeers,
-		originLeaderStoreID: originLeaderStoreID,
-		targetPeers:         originPeers.Copy(),
-		allowDemote:         supportJointConsensus,
-		useJointConsensus:   supportJointConsensus,
-		err:                 err,
-	}
-}
-
-// NewBuilder creates a Builder.
-func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Builder {
-	b := newBuilderWithBasicCheck(desc, cluster, region)
-
-	if b.err == nil && core.IsInJointState(region.GetPeers()...) {
-		b.err = errors.Errorf("cannot build operator for region which is in joint state")
-	}
-
+	b.rules = rules
+	b.originPeers = originPeers
+	b.originLeaderStoreID = originLeaderStoreID
+	b.targetPeers = originPeers.Copy()
+	b.allowDemote = supportJointConsensus
+	b.useJointConsensus = supportJointConsensus
+	b.err = err
 	return b
 }
 
