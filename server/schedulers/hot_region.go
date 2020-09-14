@@ -187,6 +187,8 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 
 	h.prepareForBalance(cluster)
 
+	// Turn off the default hot scheduler policy to avoid interference
+
 	// switch typ {
 	// case read:
 	// 	return h.balanceHotReadRegions(cluster)

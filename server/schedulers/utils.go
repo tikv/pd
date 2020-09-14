@@ -369,21 +369,21 @@ func (r *regionInfo) NeedSplit() bool {
 
 type regionInfoByDiff []*regionInfo
 
-func (s regionInfoByDiff) Len() int           { return len(s) }
-func (s regionInfoByDiff) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-func (s regionInfoByDiff) Less(i, j int) bool { return s[i].diffLoad < s[j].diffLoad }
+func (r regionInfoByDiff) Len() int           { return len(r) }
+func (r regionInfoByDiff) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r regionInfoByDiff) Less(i, j int) bool { return r[i].diffLoad < r[j].diffLoad }
 
 type regionInfoByLoad0 []*regionInfo
 
-func (s regionInfoByLoad0) Len() int           { return len(s) }
-func (s regionInfoByLoad0) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-func (s regionInfoByLoad0) Less(i, j int) bool { return s[i].loads[0] < s[j].loads[0] }
+func (r regionInfoByLoad0) Len() int           { return len(r) }
+func (r regionInfoByLoad0) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r regionInfoByLoad0) Less(i, j int) bool { return r[i].loads[0] < r[j].loads[0] }
 
 type regionInfoByLoad1 []*regionInfo
 
-func (s regionInfoByLoad1) Len() int           { return len(s) }
-func (s regionInfoByLoad1) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-func (s regionInfoByLoad1) Less(i, j int) bool { return s[i].loads[1] < s[j].loads[1] }
+func (r regionInfoByLoad1) Len() int           { return len(r) }
+func (r regionInfoByLoad1) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r regionInfoByLoad1) Less(i, j int) bool { return r[i].loads[1] < r[j].loads[1] }
 
 type regionContainer struct {
 	emphRegions     [DimensionCount]map[uint64][]*regionInfo
@@ -451,11 +451,11 @@ func (rc *regionContainer) empty(dimID uint64) bool {
 }
 
 type storeInfo struct {
-	id             uint64
-	loads          []float64
-	regions        map[uint64]*regionInfo
-	emphRegions    [][]*regionInfo
-	sorted_regions []*regionInfo
+	id            uint64
+	loads         []float64
+	regions       map[uint64]*regionInfo
+	emphRegions   [][]*regionInfo
+	sortedRegions []*regionInfo
 }
 
 type storeInfoByLoad0 []*storeInfo
@@ -511,12 +511,12 @@ func (si *storeInfo) classifyRegion() {
 
 func (si *storeInfo) sortBy(dimID uint64) {
 	for _, region := range si.regions {
-		si.sorted_regions = append(si.sorted_regions, region)
+		si.sortedRegions = append(si.sortedRegions, region)
 	}
 	if dimID == 0 {
-		sort.Sort(regionInfoByLoad0(si.sorted_regions))
+		sort.Sort(regionInfoByLoad0(si.sortedRegions))
 	} else {
-		sort.Sort(regionInfoByLoad1(si.sorted_regions))
+		sort.Sort(regionInfoByLoad1(si.sortedRegions))
 	}
 }
 
@@ -554,8 +554,8 @@ func greedySingle(storeInfos []*storeInfo, ratio float64, dimID uint64) (ret []*
 			break
 		}
 
-		for i := len(hStore.sorted_regions) - 1; i >= 0 && hStore.loads[dimID] > 1+ratio; i-- {
-			curRegion := hStore.sorted_regions[i]
+		for i := len(hStore.sortedRegions) - 1; i >= 0 && hStore.loads[dimID] > 1+ratio; i-- {
+			curRegion := hStore.sortedRegions[i]
 			if hStore.loads[dimID]-curRegion.loads[dimID] < 1-ratio {
 				continue
 			}
@@ -582,15 +582,15 @@ func greedySingle(storeInfos []*storeInfo, ratio float64, dimID uint64) (ret []*
 }
 
 func greedyBalance(storeInfos []*storeInfo, ratio float64) (ret []*regionInfo, needSplit bool) {
-	type balanceType int
+	type storeLoadStat int
 
 	const (
-		above balanceType = iota
+		above storeLoadStat = iota
 		cross
 		under
 	)
 
-	storeBalanceType := func(store *storeInfo) balanceType {
+	getStoreLoadStat := func(store *storeInfo) storeLoadStat {
 		if store.loads[0] > 1.0 && store.loads[1] > 1.0 {
 			return above
 		} else if (store.loads[0]-1.0)*(store.loads[1]-1.0) < 0 {
@@ -600,14 +600,15 @@ func greedyBalance(storeInfos []*storeInfo, ratio float64) (ret []*regionInfo, n
 		}
 	}
 
-	pickHigher := func(store *storeInfo) (dimID uint64, region *regionInfo) {
+	// pick region according to dimension with higher load
+	pickRegion := func(store *storeInfo) (dimID uint64, region *regionInfo) {
 		if store.loads[0] < store.loads[1] {
 			dimID = 1
 		}
 		{
 			length := len(store.emphRegions[dimID])
 			if length == 0 {
-				log.Warn("can not choose region from pickHigher",
+				log.Warn("can not choose region from pickRegion",
 					zap.Uint64("storeID", store.id),
 					zap.Int("emphRegionLen0", len(store.emphRegions[0])),
 					zap.Int("emphRegionLen1", len(store.emphRegions[1])),
@@ -663,9 +664,9 @@ func greedyBalance(storeInfos []*storeInfo, ratio float64) (ret []*regionInfo, n
 	for _, store := range storeInfos {
 		store.classifyRegion()
 		pickCount := 0
-		for math.Abs(store.loads[0]-store.loads[1]) > ratio || storeBalanceType(store) == above {
+		for math.Abs(store.loads[0]-store.loads[1]) > ratio || getStoreLoadStat(store) == above {
 			preHigher, _ := checkOrder(store)
-			dimID, region := pickHigher(store)
+			dimID, region := pickRegion(store)
 			if region == nil { // statistics error or no hotspots were recognized
 				// return nil, false
 				break
@@ -681,7 +682,7 @@ func greedyBalance(storeInfos []*storeInfo, ratio float64) (ret []*regionInfo, n
 			container.push(dimID, region)
 			pickCount++
 
-			if storeBalanceType(store) != under {
+			if getStoreLoadStat(store) != under {
 				continue
 			} else if math.Abs(store.loads[0]-store.loads[1]) <= ratio ||
 				preHigher != curHigher {
@@ -705,7 +706,7 @@ func greedyBalance(storeInfos []*storeInfo, ratio float64) (ret []*regionInfo, n
 	// step 2: carefully fill regions into stores, make sure each store will not overflow too much
 	sort.Sort(storeInfoByLoad0(storeInfos))
 	for _, store := range storeInfos {
-		for storeBalanceType(store) != above {
+		for getStoreLoadStat(store) != above {
 			var dimID uint64
 			if store.loads[0] > store.loads[1] {
 				dimID = 1

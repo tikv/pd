@@ -112,19 +112,6 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		// Check will call CheckSuccess and CheckTimeout.
 		step := op.Check(region)
 
-		var hotRegionOpIds []uint64
-		waitOps := oc.wop.ListOperator()
-		for _, wop := range waitOps {
-			if wop.Kind()&operator.OpHotRegion == operator.OpHotRegion {
-				hotRegionOpIds = append(hotRegionOpIds, wop.RegionID())
-			}
-		}
-		if op.Kind()&operator.OpHotRegion == operator.OpHotRegion {
-			log.Debug("dispatch hot region op", zap.Reflect("waitHotRegionIDs", hotRegionOpIds), zap.Reflect("op", op))
-		} else {
-			log.Debug("dispatch normal op", zap.Reflect("waitHotRegionIDs", hotRegionOpIds), zap.Reflect("op", op))
-		}
-
 		switch op.Status() {
 		case operator.STARTED:
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
@@ -582,11 +569,6 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 			fields...,
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
-
-		if op.Kind()&operator.OpHotRegion == operator.OpHotRegion {
-			log.Info("cancel hot region op",
-				zap.Reflect("op", op))
-		}
 	}
 
 	oc.opRecords.Put(op)
