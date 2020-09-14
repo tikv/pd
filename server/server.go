@@ -353,6 +353,9 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 	)
+	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
+		return err
+	}
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
 	regionStorage, err := core.NewRegionStorage(ctx, path)

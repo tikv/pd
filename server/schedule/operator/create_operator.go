@@ -57,7 +57,7 @@ func CreateTransferLeaderOperator(desc string, cluster opt.Cluster, region *core
 func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
 		SetLeader(targetStoreID).
-		SetForceTargetLeader().
+		EnableForceTargetLeader().
 		Build(kind)
 }
 
@@ -175,7 +175,7 @@ func CreateScatterRegionOperator(desc string, cluster opt.Cluster, origin *core.
 	return NewBuilder(desc, cluster, origin).
 		SetPeers(targetPeers).
 		SetLeader(leader).
-		SetLightWeight().
+		EnableLightWeight().
 		Build(0)
 }
 
@@ -184,7 +184,7 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 	b := newBuilderWithBasicCheck(desc, cluster, origin)
 
 	if b.err == nil && !core.IsInJointState(origin.GetPeers()...) {
-		b.err = errors.Errorf("cannot build leave joint state operator for region is not in joint state")
+		b.err = errors.Errorf("cannot build leave joint state operator for region which is not in joint state")
 	}
 
 	if b.err != nil {
@@ -195,7 +195,7 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 	b.toDemote = newPeersMap()
 	b.toPromote = newPeersMap()
 	for _, o := range b.originPeers {
-		switch o.Role {
+		switch o.GetRole() {
 		case metapb.PeerRole_IncomingVoter:
 			b.toPromote.Set(o)
 		case metapb.PeerRole_DemotingVoter:
@@ -204,7 +204,7 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 	}
 
 	leader := b.originPeers[b.originLeaderStoreID]
-	if leader == nil || (leader.Role == metapb.PeerRole_DemotingVoter || core.IsLearner(leader)) {
+	if leader == nil || (leader.GetRole() == metapb.PeerRole_DemotingVoter || core.IsLearner(leader)) {
 		b.targetLeaderStoreID = 0
 	} else {
 		b.targetLeaderStoreID = b.originLeaderStoreID

@@ -66,7 +66,7 @@ func (c *serverConfig) Generate(opts ...ConfigOption) (*config.Config, error) {
 		return nil, err
 	}
 	for _, opt := range opts {
-		opt(cfg)
+		opt(cfg, c.Name)
 	}
 	return cfg, nil
 }

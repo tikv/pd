@@ -94,7 +94,7 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 		3: {StoreId: 3, Role: metapb.PeerRole_Learner},
 		4: {StoreId: 4},
 	}
-	builder := s.newBuilder().SetPeers(m).SetLightWeight()
+	builder := s.newBuilder().SetPeers(m).EnableLightWeight()
 	c.Assert(len(builder.targetPeers), Equals, 3)
 	c.Assert(builder.targetPeers[2], DeepEquals, m[2])
 	c.Assert(builder.targetPeers[3], DeepEquals, m[3])
@@ -118,10 +118,10 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	_, err = builder.prepareBuild()
 	c.Assert(err, IsNil)
 	c.Assert(len(builder.toAdd), Equals, 2)
-	c.Assert(builder.toAdd[4].Role, Not(Equals), metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd[4].Id, Equals, uint64(14))
-	c.Assert(builder.toAdd[5].Role, Equals, metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd[5].Id, Not(Equals), uint64(0))
+	c.Assert(builder.toAdd[4].GetRole(), Not(Equals), metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[4].GetId(), Equals, uint64(14))
+	c.Assert(builder.toAdd[5].GetRole(), Equals, metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[5].GetId(), Not(Equals), uint64(0))
 	c.Assert(len(builder.toRemove), Equals, 1)
 	c.Assert(builder.toRemove[2], NotNil)
 	c.Assert(len(builder.toPromote), Equals, 1)
@@ -141,12 +141,12 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	_, err = builder.prepareBuild()
 	c.Assert(err, IsNil)
 	c.Assert(len(builder.toAdd), Equals, 3)
-	c.Assert(builder.toAdd[1].Role, Equals, metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd[1].Id, Not(Equals), uint64(0))
-	c.Assert(builder.toAdd[4].Role, Not(Equals), metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd[4].Id, Equals, uint64(14))
-	c.Assert(builder.toAdd[5].Role, Equals, metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd[5].Id, Not(Equals), uint64(0))
+	c.Assert(builder.toAdd[1].GetRole(), Equals, metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[1].GetId(), Not(Equals), uint64(0))
+	c.Assert(builder.toAdd[4].GetRole(), Not(Equals), metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[4].GetId(), Equals, uint64(14))
+	c.Assert(builder.toAdd[5].GetRole(), Equals, metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[5].GetId(), Not(Equals), uint64(0))
 	c.Assert(len(builder.toRemove), Equals, 1)
 	c.Assert(builder.toRemove[1], NotNil)
 	c.Assert(len(builder.toPromote), Equals, 1)
@@ -271,7 +271,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 		{ // not use joint consensus: replace voter with learner
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
 				RemovePeer{FromStore: 2},
 				AddLearner{ToStore: 2},
