@@ -77,7 +77,7 @@ func newImportData() *Case {
 
 	// Checker description
 	checkCount := uint64(0)
-	var data [][3]int
+	var newRegionCount [][3]int
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		leaderDist := make(map[uint64]int)
 		peerDist := make(map[uint64]int)
@@ -112,6 +112,7 @@ func newImportData() *Case {
 		}
 		for storeID := 1; storeID <= 10; storeID++ {
 			if peerCount, ok := peerDist[uint64(storeID)]; ok {
+				newRegionCount = append(newRegionCount, [3]int{storeID, int(checkCount), peerCount})
 				tablePeerLog = fmt.Sprintf("%s [store %d]:%.2f%%", tablePeerLog, storeID, float64(peerCount)/float64(peerTotal)*100)
 			}
 		}
@@ -121,7 +122,6 @@ func newImportData() *Case {
 		isEnd := false
 		var regionProps []float64
 		for storeID := uint64(1); storeID <= 10; storeID++ {
-			regions.GetStoreRegionCount(storeID)
 			totalLeaderLog = fmt.Sprintf("%s [store %d]:%.2f%%", totalLeaderLog, storeID, float64(regions.GetStoreLeaderCount(storeID))/float64(regionTotal)*100)
 			regionProp := float64(regions.GetStoreRegionCount(storeID)) / float64(regionTotal*3) * 100
 			regionProps = append(regionProps, regionProp)
@@ -167,7 +167,7 @@ func newImportData() *Case {
 			for i := 1; i <= int(checkCount); i++ {
 				yAxis[i - 1] = i
 			}
-			bar3d.AddXYAxis(xAxis, yAxis).AddZAxis("bar3d", data)
+			bar3d.AddXYAxis(xAxis, yAxis).AddZAxis("bar3d", newRegionCount)
 			f, _ := os.Create("region_3d.html")
 			err := bar3d.Render(f)
 			if err != nil {
