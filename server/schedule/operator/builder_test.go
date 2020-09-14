@@ -131,7 +131,7 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	c.Assert(builder.currentLeaderStoreID, Equals, uint64(1))
 
 	// do not use joint consensus
-	builder = s.newBuilder().setUseJointConsensus(false).SetPeers(map[uint64]*metapb.Peer{
+	builder = s.newBuilder().setSupportJointConsensus(false).SetPeers(map[uint64]*metapb.Peer{
 		1: {StoreId: 1, Role: metapb.PeerRole_Learner},
 		2: {StoreId: 2},
 		3: {StoreId: 3},
@@ -360,7 +360,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 
 	for _, tc := range cases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.originPeers}, tc.originPeers[0])
-		builder := NewBuilder("test", s.cluster, region).setUseJointConsensus(tc.useJointConsensus)
+		builder := NewBuilder("test", s.cluster, region).setSupportJointConsensus(tc.useJointConsensus)
 		m := make(map[uint64]*metapb.Peer)
 		for _, p := range tc.targetPeers {
 			m[p.GetStoreId()] = p

@@ -50,6 +50,7 @@ type Builder struct {
 	err                 error
 
 	// flags
+	allowDemote       bool
 	useJointConsensus bool
 	isLightWeight     bool
 	forceTargetLeader bool
@@ -94,6 +95,8 @@ func newBuilderWithBasicCheck(desc string, cluster opt.Cluster, region *core.Reg
 		}
 	}
 
+	supportJointConsensus := cluster.IsFeatureSupported(versioninfo.JointConsensus)
+
 	return &Builder{
 		desc:                desc,
 		cluster:             cluster,
@@ -103,7 +106,8 @@ func newBuilderWithBasicCheck(desc string, cluster opt.Cluster, region *core.Reg
 		originPeers:         originPeers,
 		originLeaderStoreID: originLeaderStoreID,
 		targetPeers:         originPeers.Copy(),
-		useJointConsensus:   cluster.IsFeatureSupported(versioninfo.JointConsensus),
+		allowDemote:         supportJointConsensus,
+		useJointConsensus:   supportJointConsensus,
 		err:                 err,
 	}
 }
@@ -241,8 +245,9 @@ func (b *Builder) EnableForceTargetLeader() *Builder {
 	return b
 }
 
-func (b *Builder) setUseJointConsensus(useJointConsensus bool) *Builder {
-	b.useJointConsensus = useJointConsensus
+func (b *Builder) setSupportJointConsensus(supportJointConsensus bool) *Builder {
+	b.allowDemote = supportJointConsensus
+	b.useJointConsensus = supportJointConsensus
 	return b
 }
 
@@ -289,7 +294,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	}
 
 	// Diff `originPeers` and `targetPeers` to initialize `toAdd`, `toRemove`, `toPromote`, `toDemote`.
-	// Note: Use `toDemote` only when `useJointConsensus` is true. Otherwise use `toAdd`, `toRemove` instead.
+	// Note: Use `toDemote` only when `allowDemote` is true. Otherwise use `toAdd`, `toRemove` instead.
 	for _, o := range b.originPeers {
 		n := b.targetPeers[o.GetStoreId()]
 		if n == nil {
@@ -315,7 +320,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		} else {
 			if core.IsLearner(n) {
 				// voter -> learner
-				if b.useJointConsensus {
+				if b.allowDemote {
 					b.toDemote.Set(n)
 				} else {
 					b.toRemove.Set(o)
@@ -327,7 +332,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	for _, n := range b.targetPeers {
 		// old peer not exists, or target is learner while old one is voter.
 		o := b.originPeers[n.GetStoreId()]
-		if o == nil || (!b.useJointConsensus && !core.IsLearner(o) && core.IsLearner(n)) {
+		if o == nil || (!b.allowDemote && !core.IsLearner(o) && core.IsLearner(n)) {
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
 				id, err := b.cluster.AllocID()
