@@ -133,10 +133,10 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 
 func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
 	filters := []Filter{
-		StoreStateFilter{TransferLeader: true},
-		StoreStateFilter{MoveRegion: true},
-		StoreStateFilter{TransferLeader: true, MoveRegion: true},
-		StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+		&StoreStateFilter{TransferLeader: true},
+		&StoreStateFilter{MoveRegion: true},
+		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
+		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
 	}
 	opt := config.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
