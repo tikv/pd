@@ -15,10 +15,13 @@ package tso_test
 
 import (
 	"context"
+	"path"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/tests"
 )
 
@@ -42,11 +45,9 @@ func (s *testManagerSuite) TearDownSuite(c *C) {
 // and test whether we can get the whole dc-location config from each server.
 func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	testCase := struct {
-		serverNumber     int
 		dcLocationNumber int
 		dcLocationConfig map[string]string
 	}{
-		serverNumber:     6,
 		dcLocationNumber: 3,
 		dcLocationConfig: map[string]string{
 			"pd1": "dc-1",
@@ -57,7 +58,8 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 			"pd6": "dc-3",
 		},
 	}
-	cluster, err := tests.NewTestCluster(s.ctx, testCase.serverNumber, func(conf *config.Config, serverName string) {
+	serverNumber := len(testCase.dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
 		conf.LocalTSO.EnableLocalTSO = true
 		conf.LocalTSO.DCLocation = testCase.dcLocationConfig[serverName]
 	})
@@ -85,6 +87,51 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 				c.Assert(obtainedDCLocation, Equals, expectedDCLocation)
 			}
 		}
-		c.Assert(obtainedServerNumber, Equals, testCase.serverNumber)
+		c.Assert(obtainedServerNumber, Equals, serverNumber)
+	}
+}
+
+func (s *testManagerSuite) TestAllocatorPriority(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	serverNumber := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
+	for _, server := range cluster.GetServers() {
+		for _, dcLocation := range dcLocationConfig {
+			tsoAllocatorManager := server.GetTSOAllocatorManager()
+			leadership := election.NewLeadership(
+				server.GetEtcdClient(),
+				path.Join(server.GetServer().GetServerRootPath(), dcLocation),
+				"campaign-local-allocator-priority-test")
+			tsoAllocatorManager.SetUpAllocator(ctx, cancel, dcLocation, leadership)
+		}
+	}
+	// Before the priority is checked, we will have allocators typology like this:
+	// pd1: dc-1, dc-2 and dc-3 allocator leader
+	// pd2: None
+	// pd3: None
+	// After the priority is checked, we should have allocators typology like this:
+	// pd1: dc-1 allocator leader
+	// pd2: dc-2 allocator leader
+	// pd3: dc-3 allocator leader
+	// Priority check could be slow. So we sleep longer here.
+	time.Sleep(waitAllocatorCheckInterval * 10)
+	for serverName, dcLocation := range dcLocationConfig {
+		currentLeaderName := cluster.WaitAllocatorLeader(dcLocation)
+		c.Assert(currentLeaderName, Equals, serverName)
 	}
 }
