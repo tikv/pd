@@ -357,7 +357,7 @@ const (
 // distinguished by the field `Action`.
 type RuleOp struct {
 	*Rule                       // information of the placement rule to add/delete
-	Action           RuleOpType `json:"action"`              // the operation type
+	Action           RuleOpType `json:"action"` // the operation type
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
@@ -594,4 +594,10 @@ func (m *RuleManager) DeleteGroupBundle(id string, regex bool) error {
 	}
 	log.Info("groups are removed", zap.String("id", id), zap.Bool("regexp", regex))
 	return nil
+}
+
+func (m *RuleManager) IsInitialized() bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.initialized
 }
