@@ -159,11 +159,11 @@ func newImportData() *Case {
 				},
 				charts.Grid3DOpts{BoxDepth: 80, BoxWidth: 200},
 			)
-			xAxis := make([]int, 10, 10)
+			xAxis := make([]int, 10)
 			for i := 1; i <= 10; i++ {
 				xAxis[i-1] = i
 			}
-			yAxis := make([]int, checkCount, checkCount)
+			yAxis := make([]int, checkCount)
 			for i := 1; i <= int(checkCount); i++ {
 				yAxis[i-1] = i
 			}
