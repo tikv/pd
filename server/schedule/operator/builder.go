@@ -70,8 +70,10 @@ type Builder struct {
 	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus
 }
 
+// BuilderOption is used to create operator builder.
 type BuilderOption func(*Builder)
 
+// SkipOriginJointStateCheck lets the builder skip the joint state check for origin peers.
 func SkipOriginJointStateCheck(b *Builder) {
 	b.skipOriginJointStateCheck = true
 }
