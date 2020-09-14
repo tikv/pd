@@ -678,14 +678,16 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 }
 
 // stepPlan is exec step. It can be:
-// 1. add voter + remove voter.
-// 2. add learner + remove learner.
-// 3. add learner + promote learner + remove voter.
-// 4. promote learner.
-// 5. demote voter.
-// 6. remove voter/learner.
-// 7. add voter/learner.
-// Plan 1-3 (replace plans) do not change voter/learner count, so they have higher priority.
+// 1. promote learner + demote voter.
+// 2. add voter + remove voter.
+// 3. add learner + remove learner.
+// 4. add learner + promote learner + remove voter.
+// 5. add voter + demote voter + remove learner.
+// 6. promote learner.
+// 7. demote voter.
+// 8. remove voter/learner.
+// 9. add voter/learner.
+// Plan 1-5 (replace plans) do not change voter/learner count, so they have higher priority.
 type stepPlan struct {
 	leaderBeforeAdd    uint64 // leader before adding peer.
 	leaderBeforeRemove uint64 // leader before removing peer.
@@ -727,6 +729,14 @@ func (b *Builder) peerPlan() stepPlan {
 
 func (b *Builder) planReplace() stepPlan {
 	var best stepPlan
+	// promote learner + demote voter
+	for _, i := range b.toDemote.IDs() {
+		demote := b.toDemote[i]
+		for _, j := range b.toPromote.IDs() {
+			promote := b.toPromote[j]
+			best = b.planReplaceLeaders(best, stepPlan{promote: promote, demote: demote})
+		}
+	}
 	// add voter + remove voter OR add learner + remove learner.
 	for _, i := range b.toAdd.IDs() {
 		add := b.toAdd[i]
@@ -750,7 +760,7 @@ func (b *Builder) planReplace() stepPlan {
 			}
 		}
 	}
-	// demote voter + remove learner + add voter
+	// add voter + demote voter + remove learner
 	for _, i := range b.toDemote.IDs() {
 		demote := b.toDemote[i]
 		for _, j := range b.toRemove.IDs() {
