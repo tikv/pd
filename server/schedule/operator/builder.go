@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -507,12 +508,12 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 
 func (b *Builder) preferUpStoreAsLeader(targetLeaderStoreID uint64) int {
 	store := b.cluster.GetStore(targetLeaderStoreID)
-	return b2i(store != nil && store.IsUp())
+	return typeutil.BoolToInt(store != nil && store.IsUp())
 }
 
 func (b *Builder) preferKeepVoterAsLeader(targetLeaderStoreID uint64) int {
 	_, ok := b.toPromote[targetLeaderStoreID]
-	return b2i(!ok)
+	return typeutil.BoolToInt(!ok)
 }
 
 func (b *Builder) preferOldPeerAsLeader(targetLeaderStoreID uint64) int {
@@ -902,13 +903,6 @@ func (b *Builder) labelMatch(x, y uint64) int {
 	return len(labels)
 }
 
-func b2i(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
 // return matched label count.
 func (b *Builder) planPreferReplaceByNearest(p stepPlan) int {
 	m := 0
@@ -933,7 +927,7 @@ func (b *Builder) planPreferReplaceByNearest(p stepPlan) int {
 func (b *Builder) planPreferUpStoreAsLeader(p stepPlan) int {
 	if p.add != nil {
 		store := b.cluster.GetStore(p.leaderBeforeAdd)
-		return b2i(store != nil && store.IsUp())
+		return typeutil.BoolToInt(store != nil && store.IsUp())
 	}
 	return 1
 }
@@ -954,16 +948,16 @@ func (b *Builder) planPreferLessLeaderTransfer(p stepPlan) int {
 	if p.leaderBeforeAdd == 0 || p.leaderBeforeAdd == b.currentLeaderStoreID {
 		// 3: current == leaderBeforeAdd == leaderBeforeRemove
 		// 2: current == leaderBeforeAdd != leaderBeforeRemove
-		return 2 + b2i(p.leaderBeforeRemove == 0 || p.leaderBeforeRemove == b.currentLeaderStoreID)
+		return 2 + typeutil.BoolToInt(p.leaderBeforeRemove == 0 || p.leaderBeforeRemove == b.currentLeaderStoreID)
 	}
 	// 1: current != leaderBeforeAdd == leaderBeforeRemove
 	// 0: current != leaderBeforeAdd != leaderBeforeRemove
-	return b2i(p.leaderBeforeRemove == 0 || p.leaderBeforeRemove == p.leaderBeforeAdd)
+	return typeutil.BoolToInt(p.leaderBeforeRemove == 0 || p.leaderBeforeRemove == p.leaderBeforeAdd)
 }
 
 // It is better to transfer leader to the target leader.
 func (b *Builder) planPreferTargetLeader(p stepPlan) int {
-	return b2i(b.targetLeaderStoreID == 0 ||
+	return typeutil.BoolToInt(b.targetLeaderStoreID == 0 ||
 		(p.leaderBeforeRemove != 0 && p.leaderBeforeRemove == b.targetLeaderStoreID) ||
 		(p.leaderBeforeRemove == 0 && p.leaderBeforeAdd == b.targetLeaderStoreID))
 }
@@ -975,7 +969,7 @@ func (b *Builder) planPreferAddOrPromoteTargetLeader(p stepPlan) int {
 	}
 	addTarget := p.add != nil && !core.IsLearner(p.add) && p.add.GetStoreId() == b.targetLeaderStoreID
 	promoteTarget := p.promote != nil && p.promote.GetStoreId() == b.targetLeaderStoreID
-	return b2i(addTarget || promoteTarget)
+	return typeutil.BoolToInt(addTarget || promoteTarget)
 }
 
 // Peers indexed by storeID.
