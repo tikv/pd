@@ -161,11 +161,11 @@ func newImportData() *Case {
 			)
 			xAxis := make([]int, 10, 10)
 			for i := 1; i <= 10; i++ {
-				xAxis[i - 1] = i
+				xAxis[i-1] = i
 			}
 			yAxis := make([]int, checkCount, checkCount)
 			for i := 1; i <= int(checkCount); i++ {
-				yAxis[i - 1] = i
+				yAxis[i-1] = i
 			}
 			bar3d.AddXYAxis(xAxis, yAxis).AddZAxis("bar3d", newRegionCount)
 			f, _ := os.Create("region_3d.html")
