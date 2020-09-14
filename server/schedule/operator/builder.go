@@ -383,11 +383,7 @@ func (b *Builder) prepareBuild() (string, error) {
 
 	if b.targetLeaderStoreID != 0 {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
-		if b.forceTargetLeader {
-			if !b.allowLeader(targetLeader, true) {
-				return "", errors.New("cannot create operator: target leader is impossible")
-			}
-		} else if !b.allowLeader(targetLeader, false) {
+		if !b.allowLeader(targetLeader, b.forceTargetLeader) {
 			return "", errors.New("cannot create operator: target leader is not allowed")
 		}
 	}
