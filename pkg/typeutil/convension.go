@@ -42,3 +42,11 @@ func BoolToUint64(b bool) uint64 {
 	}
 	return 0
 }
+
+// BoolToInt converts bool to int.
+func BoolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
