@@ -118,7 +118,7 @@ func newImportData() *Case {
 		regionTotal := regions.GetRegionCount()
 		totalLeaderLog := fmt.Sprintf("%d leader:", regionTotal)
 		totalPeerLog := fmt.Sprintf("%d peer:", regionTotal*3)
-		isEnd := checkCount > 1000
+		isEnd := false
 		var regionProps []float64
 		for storeID := uint64(1); storeID <= 10; storeID++ {
 			regions.GetStoreRegionCount(storeID)
@@ -152,10 +152,10 @@ func newImportData() *Case {
 			bar3d.SetGlobalOptions(
 				charts.TitleOpts{Title: "New region count"},
 				charts.VisualMapOpts{
-					Range:      []float32{0, 12},
+					Range:      []float32{0, float32(getRegionNum()) / 10},
 					Calculable: true,
 					InRange:    charts.VMInRange{Color: rangeColor},
-					Max:        12,
+					Max:        float32(getRegionNum()) / 10,
 				},
 				charts.Grid3DOpts{BoxDepth: 80, BoxWidth: 200},
 			)
@@ -168,10 +168,8 @@ func newImportData() *Case {
 				yAxis[i - 1] = i
 			}
 			bar3d.AddXYAxis(xAxis, yAxis).AddZAxis("bar3d", data)
-			f, _ := os.Create("3d.html")
+			f, _ := os.Create("region_3d.html")
 			err := bar3d.Render(f)
-			err = bar3d.Render(f)
-			f.Close()
 			if err != nil {
 				log.Error("", zap.Error(err))
 			}
