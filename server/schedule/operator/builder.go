@@ -262,12 +262,6 @@ func (b *Builder) EnableForceTargetLeader() *Builder {
 	return b
 }
 
-func (b *Builder) setSupportJointConsensus(supportJointConsensus bool) *Builder {
-	b.allowDemote = supportJointConsensus
-	b.useJointConsensus = supportJointConsensus
-	return b
-}
-
 // Build creates the Operator.
 func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	var brief string
