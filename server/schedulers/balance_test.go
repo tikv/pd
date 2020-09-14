@@ -854,7 +854,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
-	stream := hbstream.NewTestHeartbeatStreams(s.ctx, tc.ID, tc, true /* no need to run*/)
+	stream := hbstream.NewTestHeartbeatStreams(s.ctx, tc.ID, tc, false /* no need to run */)
 	oc := schedule.NewOperatorController(s.ctx, tc, stream)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
@@ -909,7 +909,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMergeScheduleLimit(1)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false /* need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, true /* need to run */)
 	oc := schedule.NewOperatorController(ctx, tc, stream)
 
 	mb, err := schedule.CreateScheduler(RandomMergeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(RandomMergeType, []string{"", ""}))

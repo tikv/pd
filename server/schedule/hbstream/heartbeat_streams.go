@@ -40,6 +40,7 @@ type streamUpdate struct {
 	stream  opt.HeartbeatStream
 }
 
+// HeartbeatStreams is the bridge of communication with TIKV instance.
 type HeartbeatStreams struct {
 	wg             sync.WaitGroup
 	hbStreamCtx    context.Context
@@ -49,18 +50,21 @@ type HeartbeatStreams struct {
 	msgCh          chan *pdpb.RegionHeartbeatResponse
 	streamCh       chan streamUpdate
 	storeInformer  core.StoreSetInformer
-	noNeedRun      bool // For test only.
+	needRun        bool // For test only.
 }
 
+// NewHeartbeatStreams creates a new HeartbeatStreams which enable background running by default.
 func NewHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer) *HeartbeatStreams {
-	return newHeartbeatStreams(ctx, clusterID, storeInformer, false)
+	return newHeartbeatStreams(ctx, clusterID, storeInformer, true)
 }
 
-func NewTestHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, noNeedRun bool) *HeartbeatStreams {
-	return newHeartbeatStreams(ctx, clusterID, storeInformer, noNeedRun)
+// NewTestHeartbeatStreams creates a new HeartbeatStreams for test purpose only.
+// Please use NewHeartbeatStreams for other usage.
+func NewTestHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
+	return newHeartbeatStreams(ctx, clusterID, storeInformer, needRun)
 }
 
-func newHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, noNeedRun bool) *HeartbeatStreams {
+func newHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
 	hbStreamCtx, hbStreamCancel := context.WithCancel(ctx)
 	hs := &HeartbeatStreams{
 		hbStreamCtx:    hbStreamCtx,
@@ -70,9 +74,9 @@ func newHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer co
 		msgCh:          make(chan *pdpb.RegionHeartbeatResponse, heartbeatChanCapacity),
 		streamCh:       make(chan streamUpdate, 1),
 		storeInformer:  storeInformer,
-		noNeedRun:      noNeedRun,
+		needRun:        needRun,
 	}
-	if !noNeedRun {
+	if needRun {
 		hs.wg.Add(1)
 		go hs.run()
 	}
@@ -205,7 +209,7 @@ func (s *HeartbeatStreams) MsgLength() int {
 // Drain consumes message from msgCh when disable background running.
 // For test only.
 func (s *HeartbeatStreams) Drain(count int) error {
-	if !s.noNeedRun {
+	if s.needRun {
 		return errors.Normalize("hbstream running enabled")
 	}
 	for i := 0; i < count; i++ {

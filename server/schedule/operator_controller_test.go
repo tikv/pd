@@ -100,7 +100,7 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, true /* no need to run*/)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
@@ -135,7 +135,7 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 func (t *testOperatorControllerSuite) TestFastFailOperator(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, true /* no need to run*/)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
@@ -169,7 +169,7 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/unexpectedOperator"), IsNil)
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, true /* no need to run*/)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
@@ -233,7 +233,7 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, true /* no need to run*/)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
@@ -274,7 +274,7 @@ func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, true /* no need to run*/)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 1)
@@ -346,7 +346,7 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, true /* no need to run*/)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 0)
 	tc.UpdateLeaderCount(1, 1000)
@@ -411,7 +411,7 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 // #1652
 func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	cluster := mockcluster.NewCluster(config.NewTestOptions())
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, true /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 
 	cluster.AddLeaderStore(1, 2)
@@ -463,7 +463,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 
 func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	cluster := mockcluster.NewCluster(config.NewTestOptions())
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, true /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 
 	// Create a new region with epoch(0, 0)
@@ -594,7 +594,7 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 	}
 
 	mc := checker.NewMergeChecker(t.ctx, tc)
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, true /* no need to run*/)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(t.ctx, tc, stream)
 
 	regions[2] = regions[2].Clone(
@@ -662,7 +662,7 @@ func checkRemoveOperatorSuccess(c *C, oc *OperatorController, op *operator.Opera
 
 func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	cluster := mockcluster.NewCluster(config.NewTestOptions())
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, true /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 
 	addPeerOp := func(i uint64) *operator.Operator {
