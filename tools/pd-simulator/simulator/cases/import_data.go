@@ -147,7 +147,7 @@ func newImportData() *Case {
 		}
 		if isEnd {
 			renderPlot("new_region.html", newRegionCount, int(checkCount), 0, getRegionNum()/10)
-			renderPlot("all_region.html", allRegionCount, int(checkCount), getRegionNum()/4, getRegionNum()/3)
+			renderPlot("all_region.html", allRegionCount, int(checkCount), 28*getRegionNum()/100, getRegionNum()/3)
 		}
 		return isEnd
 	}
