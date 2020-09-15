@@ -78,6 +78,7 @@ func newImportData() *Case {
 	// Checker description
 	checkCount := uint64(0)
 	var newRegionCount [][3]int
+	var allRegionCount [][3]int
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		leaderDist := make(map[uint64]int)
 		peerDist := make(map[uint64]int)
@@ -126,6 +127,7 @@ func newImportData() *Case {
 			regionProp := float64(regions.GetStoreRegionCount(storeID)) / float64(regionTotal*3) * 100
 			regionProps = append(regionProps, regionProp)
 			totalPeerLog = fmt.Sprintf("%s [store %d]:%.2f%%", totalPeerLog, storeID, regionProp)
+			allRegionCount = append(allRegionCount, [3]int{int(storeID), int(checkCount), regions.GetStoreRegionCount(storeID)})
 		}
 		simutil.Logger.Info("import data information",
 			zap.String("table-leader", tableLeaderLog),
@@ -144,37 +146,43 @@ func newImportData() *Case {
 			isEnd = dev < 0.002
 		}
 		if isEnd {
-			var rangeColor = []string{
-				"#313695", "#4575b4", "#74add1", "#abd9e9", "#e0f3f8",
-				"#fee090", "#fdae61", "#f46d43", "#d73027", "#a50026",
-			}
-			bar3d := charts.NewBar3D()
-			bar3d.SetGlobalOptions(
-				charts.TitleOpts{Title: "New region count"},
-				charts.VisualMapOpts{
-					Range:      []float32{0, float32(getRegionNum()) / 10},
-					Calculable: true,
-					InRange:    charts.VMInRange{Color: rangeColor},
-					Max:        float32(getRegionNum()) / 10,
-				},
-				charts.Grid3DOpts{BoxDepth: 80, BoxWidth: 200},
-			)
-			xAxis := make([]int, 10)
-			for i := 1; i <= 10; i++ {
-				xAxis[i-1] = i
-			}
-			yAxis := make([]int, checkCount)
-			for i := 1; i <= int(checkCount); i++ {
-				yAxis[i-1] = i
-			}
-			bar3d.AddXYAxis(xAxis, yAxis).AddZAxis("bar3d", newRegionCount)
-			f, _ := os.Create("region_3d.html")
-			err := bar3d.Render(f)
-			if err != nil {
-				log.Error("", zap.Error(err))
-			}
+			renderPlot("new_region.html", newRegionCount, int(checkCount), 0, getRegionNum()/10)
+			renderPlot("all_region.html", allRegionCount, int(checkCount), getRegionNum()/4, getRegionNum()/3)
 		}
 		return isEnd
 	}
 	return &simCase
+}
+
+func renderPlot(name string, data [][3]int, len, minCount, maxCount int) {
+	var rangeColor = []string{
+		"#313695", "#4575b4", "#74add1", "#abd9e9", "#e0f3f8",
+		"#fee090", "#fdae61", "#f46d43", "#d73027", "#a50026",
+	}
+	bar3d := charts.NewBar3D()
+	bar3d.SetGlobalOptions(
+		charts.TitleOpts{Title: "Region count"},
+		charts.VisualMapOpts{
+			Range:      []float32{float32(minCount), float32(maxCount)},
+			Calculable: true,
+			InRange:    charts.VMInRange{Color: rangeColor},
+			Min:        float32(minCount),
+			Max:        float32(maxCount),
+		},
+		charts.Grid3DOpts{BoxDepth: 100, BoxWidth: 300},
+	)
+	xAxis := make([]int, 10)
+	for i := 1; i <= 10; i++ {
+		xAxis[i-1] = i
+	}
+	yAxis := make([]int, len)
+	for i := 1; i <= len; i++ {
+		yAxis[i-1] = i
+	}
+	bar3d.AddXYAxis(xAxis, yAxis).AddZAxis("bar3d", data)
+	f, _ := os.Create(name)
+	err := bar3d.Render(f)
+	if err != nil {
+		log.Error("Render error", zap.Error(err))
+	}
 }
