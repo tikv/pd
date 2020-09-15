@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math/rand"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
@@ -176,4 +177,53 @@ func CreateScatterRegionOperator(desc string, cluster opt.Cluster, origin *core.
 		SetLeader(leader).
 		EnableLightWeight().
 		Build(0)
+}
+
+// CreateLeaveJointStateOperator creates an operator that let region leave joint state.
+func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *core.RegionInfo) (*Operator, error) {
+	b := NewBuilder(desc, cluster, origin, SkipOriginJointStateCheck)
+
+	if b.err == nil && !core.IsInJointState(origin.GetPeers()...) {
+		b.err = errors.Errorf("cannot build leave joint state operator for region which is not in joint state")
+	}
+
+	if b.err != nil {
+		return nil, b.err
+	}
+
+	// prepareBuild
+	b.toDemote = newPeersMap()
+	b.toPromote = newPeersMap()
+	for _, o := range b.originPeers {
+		switch o.GetRole() {
+		case metapb.PeerRole_IncomingVoter:
+			b.toPromote.Set(o)
+		case metapb.PeerRole_DemotingVoter:
+			b.toDemote.Set(o)
+		}
+	}
+
+	leader := b.originPeers[b.originLeaderStoreID]
+	if leader == nil || (leader.GetRole() == metapb.PeerRole_DemotingVoter || core.IsLearner(leader)) {
+		b.targetLeaderStoreID = 0
+	} else {
+		b.targetLeaderStoreID = b.originLeaderStoreID
+	}
+
+	b.currentPeers, b.currentLeaderStoreID = b.originPeers.Copy(), b.originLeaderStoreID
+	b.peerAddStep = make(map[uint64]int)
+	brief := b.brief()
+
+	// buildStepsWithJointConsensus
+	kind := OpRegion
+
+	b.setTargetLeaderIfNotExist()
+	if b.targetLeaderStoreID == 0 {
+		b.originLeaderStoreID = 0
+	} else if b.originLeaderStoreID != b.targetLeaderStoreID {
+		kind |= OpLeader
+	}
+
+	b.execChangePeerV2(false, true)
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.steps...), nil
 }
