@@ -21,8 +21,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 const (
@@ -43,9 +43,9 @@ func CheckEncryptionMethodSupported(method encryptionpb.EncryptionMethod) error 
 	default:
 		name, ok := encryptionpb.EncryptionMethod_name[int32(method)]
 		if ok {
-			return errors.Errorf("invalid encryption method %s", name)
+			return errs.ErrEncryptionInvalidMethod.GenWithStackByArgs(name)
 		}
-		return errors.Errorf("invalid encryption method %d", int32(method))
+		return errs.ErrEncryptionInvalidMethod.GenWithStackByArgs(int32(method))
 	}
 }
 
@@ -61,9 +61,9 @@ func KeyLength(method encryptionpb.EncryptionMethod) (int, error) {
 	default:
 		name, ok := encryptionpb.EncryptionMethod_name[int32(method)]
 		if ok {
-			return 0, errors.Errorf("invalid encryption method %s", name)
+			return 0, errs.ErrEncryptionInvalidMethod.GenWithStackByArgs(name)
 		}
-		return 0, errors.Errorf("invalid encryption method %d", int32(method))
+		return 0, errs.ErrEncryptionInvalidMethod.GenWithStackByArgs(int32(method))
 	}
 }
 
@@ -77,10 +77,11 @@ func newIV(ivLength int) ([]byte, error) {
 	iv := make([]byte, ivLength)
 	n, err := io.ReadFull(rand.Reader, iv)
 	if err != nil {
-		return nil, errors.Wrap(err, "fail to generate iv")
+		return nil, errs.ErrEncryptionGenerateIV.Wrap(err).GenWithStackByArgs()
 	}
 	if n != ivLength {
-		return nil, errors.New("no enough random bytes to generate iv")
+		return nil, errs.ErrEncryptionGenerateIV.GenWithStack(
+			"iv length exepcted %d vs actual %d", ivLength, n)
 	}
 	return iv, nil
 }
@@ -106,11 +107,13 @@ func NewDataKey(
 	keyIDBuf := make([]byte, 8)
 	n, err := io.ReadFull(rand.Reader, keyIDBuf)
 	if err != nil {
-		err = errors.Wrap(err, "fail to generate data key id")
+		err = errs.ErrEncryptionNewDataKey.Wrap(err).GenWithStack(
+			"fail to generate data key id")
 		return
 	}
 	if n != 8 {
-		err = errors.New("no enough random bytes to generate data key id")
+		err = errs.ErrEncryptionNewDataKey.GenWithStack(
+			"no enough random bytes to generate data key id, bytes %d", n)
 		return
 	}
 	keyID = binary.BigEndian.Uint64(keyIDBuf)
@@ -121,11 +124,13 @@ func NewDataKey(
 	keyBuf := make([]byte, keyLength)
 	n, err = io.ReadFull(rand.Reader, keyBuf)
 	if err != nil {
-		err = errors.Wrap(err, "fail to generate data key")
+		err = errs.ErrEncryptionNewDataKey.Wrap(err).GenWithStack(
+			"fail to generate data key")
 		return
 	}
 	if n != keyLength {
-		err = errors.New("no enough random bytes to generate data key")
+		err = errs.ErrEncryptionNewDataKey.GenWithStack(
+			"no enough random bytes to generate data key, bytes %d", n)
 		return
 	}
 	key = &encryptionpb.DataKey{
@@ -144,12 +149,12 @@ func aesGcmEncryptImpl(
 ) (ciphertext []byte, err error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		err = errors.Wrap(err, "fail to create aes cipher")
+		err = errs.ErrEncryptionGCMEncrypt.Wrap(err).GenWithStack("fail to create aes cipher")
 		return
 	}
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		err = errors.Wrap(err, "fail to create aes-gcm cipher")
+		err = errs.ErrEncryptionGCMEncrypt.Wrap(err).GenWithStack("fail to create aes-gcm cipher")
 		return
 	}
 	ciphertext = aesgcm.Seal(nil, iv, plaintext, nil)
@@ -178,22 +183,22 @@ func AesGcmDecrypt(
 	iv IvGcm,
 ) (plaintext []byte, err error) {
 	if len(iv) != ivLengthGCM {
-		err = errors.Errorf("unexpected gcm iv length %d", len(iv))
+		err = errs.ErrEncryptionGCMDecrypt.GenWithStack("unexpected gcm iv length %d", len(iv))
 		return
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		err = errors.Wrap(err, "fail to create aes cipher")
+		err = errs.ErrEncryptionGCMDecrypt.Wrap(err).GenWithStack("fail to create aes cipher")
 		return
 	}
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		err = errors.Wrap(err, "fail to create aes-gcm cipher")
+		err = errs.ErrEncryptionGCMDecrypt.Wrap(err).GenWithStack("fail to create aes-gcm cipher")
 		return
 	}
 	plaintext, err = aesgcm.Open(nil, iv, ciphertext, nil)
 	if err != nil {
-		err = errors.Wrap(err, "authentication fail")
+		err = errs.ErrEncryptionGCMDecrypt.Wrap(err).GenWithStack("authentication fail")
 		return
 	}
 	return

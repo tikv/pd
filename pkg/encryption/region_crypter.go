@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // processRegionKeys encrypt or decrypt the start key and end key of the region in-place,
@@ -39,10 +40,11 @@ func processRegionKeys(region *metapb.Region, key *encryptionpb.DataKey, iv []by
 // Note: Call may need to make deep copy of the object if changing the object is undesired.
 func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	if region == nil {
-		return errors.New("trying to encrypt nil region")
+		return errs.ErrEncryptionEncryptRegion.GenWithStack("trying to encrypt nil region")
 	}
 	if region.EncryptionMeta != nil {
-		return errors.Errorf("region already encrypted, region id = %d", region.Id)
+		return errs.ErrEncryptionEncryptRegion.GenWithStack(
+			"region already encrypted, region id = %d", region.Id)
 	}
 	if keyManager == nil {
 		// encryption is not enabled.
@@ -80,13 +82,14 @@ func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
 // Note: Call may need to make deep copy of the object if changing the object is undesired.
 func DecryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	if region == nil {
-		return errors.New("trying to decrypt nil region")
+		return errs.ErrEncryptionDecryptRegion.GenWithStack("trying to decrypt nil region")
 	}
 	if region.EncryptionMeta == nil {
 		return nil
 	}
 	if keyManager == nil {
-		return errors.New("unable to decrypt region without encryption keys")
+		return errs.ErrEncryptionDecryptRegion.GenWithStack(
+			"unable to decrypt region without encryption keys")
 	}
 	key, err := keyManager.GetKey(region.EncryptionMeta.KeyId)
 	if err != nil {

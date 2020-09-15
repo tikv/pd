@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 const (
@@ -40,7 +41,7 @@ type MasterKey struct {
 // The config may be altered to fill in metadata generated when initializing the master key.
 func NewMasterKey(config *encryptionpb.MasterKey) (*MasterKey, error) {
 	if config == nil {
-		return nil, errors.New("master key config is empty")
+		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack("master key config is empty")
 	}
 	if plaintext := config.GetPlaintext(); plaintext != nil {
 		return &MasterKey{
@@ -92,22 +93,25 @@ func (k *MasterKey) IsPlaintext() bool {
 // tailing spaces.
 func newMasterKeyFromFile(config *encryptionpb.MasterKeyFile) ([]byte, error) {
 	if config == nil {
-		return nil, errors.New("missing master key file config")
+		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack("missing master key file config")
 	}
 	path := config.Path
 	if path == "" {
-		return nil, errors.New("missing master key file path")
+		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack("missing master key file path")
 	}
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, errors.Wrapf(err, "fail to get encryption key from file %s", path)
+		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack(
+			"fail to get encryption key from file %s", path)
 	}
 	key, err := hex.DecodeString(strings.TrimSpace(string(data)))
 	if err != nil {
-		return nil, errors.New("failed to decode encryption key from file, the key must be in hex form")
+		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack(
+			"failed to decode encryption key from file, the key must be in hex form")
 	}
 	if len(key) != masterKeyLength {
-		return nil, errors.Errorf("unexpected key length from master key file, expected %d vs actual %d",
+		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack(
+			"unexpected key length from master key file, expected %d vs actual %d",
 			masterKeyLength, len(key))
 	}
 	return key, nil
