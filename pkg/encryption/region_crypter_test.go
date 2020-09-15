@@ -65,7 +65,7 @@ func (m *testKeyManager) GetCurrentKey() (uint64, *encryptionpb.DataKey, error) 
 		return 0, nil, nil
 	}
 	currentKeyID := m.Keys.CurrentKeyId
-	return currentKeyId, m.Keys.Keys[currentKeyID], nil
+	return currentKeyID, m.Keys.Keys[currentKeyID], nil
 }
 
 func (m *testKeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
@@ -84,29 +84,25 @@ func (s *testRegionCrypterSuite) TestNilRegion(c *C) {
 
 func (s *testRegionCrypterSuite) TestEncryptRegionWithoutKeyManager(c *C) {
 	region := &metapb.Region{
-		Id:       10,
-		StartKey: []byte("abc"),
-		EndKey:   []byte("xyz"),
-		EncryptionMeta: &encryptionpb.EncryptionMeta{
-			IsEncrypted: false,
-		},
+		Id:             10,
+		StartKey:       []byte("abc"),
+		EndKey:         []byte("xyz"),
+		EncryptionMeta: nil,
 	}
 	err := EncryptRegion(region, nil)
 	c.Assert(err, IsNil)
 	// check the region isn't changed
 	c.Assert(string(region.StartKey), Equals, "abc")
 	c.Assert(string(region.EndKey), Equals, "xyz")
-	c.Assert(region.EncryptionMeta.IsEncrypted, IsFalse)
+	c.Assert(region.EncryptionMeta, IsNil)
 }
 
 func (s *testRegionCrypterSuite) TestEncryptRegionWhileEncryptionDisabled(c *C) {
 	region := &metapb.Region{
-		Id:       10,
-		StartKey: []byte("abc"),
-		EndKey:   []byte("xyz"),
-		EncryptionMeta: &encryptionpb.EncryptionMeta{
-			IsEncrypted: false,
-		},
+		Id:             10,
+		StartKey:       []byte("abc"),
+		EndKey:         []byte("xyz"),
+		EncryptionMeta: nil,
 	}
 	m := newTestKeyManager()
 	m.EncryptionEnabled = false
@@ -115,19 +111,17 @@ func (s *testRegionCrypterSuite) TestEncryptRegionWhileEncryptionDisabled(c *C) 
 	// check the region isn't changed
 	c.Assert(string(region.StartKey), Equals, "abc")
 	c.Assert(string(region.EndKey), Equals, "xyz")
-	c.Assert(region.EncryptionMeta.IsEncrypted, IsFalse)
+	c.Assert(region.EncryptionMeta, IsNil)
 }
 
 func (s *testRegionCrypterSuite) TestEncryptRegion(c *C) {
 	startKey := []byte("abc")
 	endKey := []byte("xyz")
 	region := &metapb.Region{
-		Id:       10,
-		StartKey: make([]byte, len(startKey)),
-		EndKey:   make([]byte, len(endKey)),
-		EncryptionMeta: &encryptionpb.EncryptionMeta{
-			IsEncrypted: false,
-		},
+		Id:             10,
+		StartKey:       make([]byte, len(startKey)),
+		EndKey:         make([]byte, len(endKey)),
+		EncryptionMeta: nil,
 	}
 	copy(region.StartKey, startKey)
 	copy(region.EndKey, endKey)
@@ -135,7 +129,7 @@ func (s *testRegionCrypterSuite) TestEncryptRegion(c *C) {
 	err := EncryptRegion(region, m)
 	c.Assert(err, IsNil)
 	// check region is encrypted
-	c.Assert(region.EncryptionMeta.IsEncrypted, IsTrue)
+	c.Assert(region.EncryptionMeta, Not(IsNil))
 	c.Assert(region.EncryptionMeta.KeyId, Equals, uint64(2))
 	c.Assert(len(region.EncryptionMeta.Iv), Equals, ivLengthCTR)
 	// Check encrypted content
@@ -154,12 +148,10 @@ func (s *testRegionCrypterSuite) TestEncryptRegion(c *C) {
 
 func (s *testRegionCrypterSuite) TestDecryptRegionNotEncrypted(c *C) {
 	region := &metapb.Region{
-		Id:       10,
-		StartKey: []byte("abc"),
-		EndKey:   []byte("xyz"),
-		EncryptionMeta: &encryptionpb.EncryptionMeta{
-			IsEncrypted: false,
-		},
+		Id:             10,
+		StartKey:       []byte("abc"),
+		EndKey:         []byte("xyz"),
+		EncryptionMeta: nil,
 	}
 	m := newTestKeyManager()
 	err := DecryptRegion(region, m)
@@ -167,7 +159,7 @@ func (s *testRegionCrypterSuite) TestDecryptRegionNotEncrypted(c *C) {
 	// check the region isn't changed
 	c.Assert(string(region.StartKey), Equals, "abc")
 	c.Assert(string(region.EndKey), Equals, "xyz")
-	c.Assert(region.EncryptionMeta.IsEncrypted, IsFalse)
+	c.Assert(region.EncryptionMeta, IsNil)
 }
 
 func (s *testRegionCrypterSuite) TestDecryptRegionWithoutKeyManager(c *C) {
@@ -176,9 +168,8 @@ func (s *testRegionCrypterSuite) TestDecryptRegionWithoutKeyManager(c *C) {
 		StartKey: []byte("abc"),
 		EndKey:   []byte("xyz"),
 		EncryptionMeta: &encryptionpb.EncryptionMeta{
-			IsEncrypted: true,
-			KeyId:       2,
-			Iv:          []byte("\x03\xcc\x30\xee\xef\x9a\x19\x79\x71\x38\xbb\x6a\xe5\xee\x31\x86"),
+			KeyId: 2,
+			Iv:    []byte("\x03\xcc\x30\xee\xef\x9a\x19\x79\x71\x38\xbb\x6a\xe5\xee\x31\x86"),
 		},
 	}
 	err := DecryptRegion(region, nil)
@@ -196,9 +187,8 @@ func (s *testRegionCrypterSuite) TestDecryptRegionWhileKeyMissing(c *C) {
 		StartKey: []byte("abc"),
 		EndKey:   []byte("xyz"),
 		EncryptionMeta: &encryptionpb.EncryptionMeta{
-			IsEncrypted: true,
-			KeyId:       keyID,
-			Iv:          []byte("\x03\xcc\x30\xee\xef\x9a\x19\x79\x71\x38\xbb\x6a\xe5\xee\x31\x86"),
+			KeyId: keyID,
+			Iv:    []byte("\x03\xcc\x30\xee\xef\x9a\x19\x79\x71\x38\xbb\x6a\xe5\xee\x31\x86"),
 		},
 	}
 	err = DecryptRegion(region, m)
@@ -215,9 +205,8 @@ func (s *testRegionCrypterSuite) TestDecryptRegion(c *C) {
 		StartKey: make([]byte, len(startKey)),
 		EndKey:   make([]byte, len(endKey)),
 		EncryptionMeta: &encryptionpb.EncryptionMeta{
-			IsEncrypted: true,
-			KeyId:       keyID,
-			Iv:          make([]byte, len(iv)),
+			KeyId: keyID,
+			Iv:    make([]byte, len(iv)),
 		},
 	}
 	copy(region.StartKey, startKey)
@@ -227,9 +216,7 @@ func (s *testRegionCrypterSuite) TestDecryptRegion(c *C) {
 	err := DecryptRegion(region, m)
 	c.Assert(err, IsNil)
 	// check region is encrypted
-	c.Assert(region.EncryptionMeta.IsEncrypted, IsFalse)
-	c.Assert(region.EncryptionMeta.KeyId, Equals, uint64(0))
-	c.Assert(len(region.EncryptionMeta.Iv), Equals, 0)
+	c.Assert(region.EncryptionMeta, IsNil)
 	// Check encrypted content
 	key, err := m.GetKey(keyID)
 	c.Assert(err, IsNil)

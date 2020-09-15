@@ -41,7 +41,7 @@ func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	if region == nil {
 		return nil
 	}
-	if region.EncryptionMeta != nil && region.EncryptionMeta.IsEncrypted {
+	if region.EncryptionMeta != nil {
 		return errors.Errorf("region already encrypted, region id = %d", region.Id)
 	}
 	if keyManager == nil {
@@ -69,9 +69,8 @@ func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
 		return err
 	}
 	region.EncryptionMeta = &encryptionpb.EncryptionMeta{
-		IsEncrypted: true,
-		KeyId:       keyID,
-		Iv:          iv,
+		KeyId: keyID,
+		Iv:    iv,
 	}
 	return nil
 }
@@ -83,7 +82,7 @@ func DecryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	if region == nil {
 		return nil
 	}
-	if region.EncryptionMeta == nil || !region.EncryptionMeta.IsEncrypted {
+	if region.EncryptionMeta == nil {
 		return nil
 	}
 	if keyManager == nil {
@@ -101,10 +100,6 @@ func DecryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	if err != nil {
 		return err
 	}
-	region.EncryptionMeta = &encryptionpb.EncryptionMeta{
-		IsEncrypted: false,
-		KeyId:       0,
-		Iv:          []byte{},
-	}
+	region.EncryptionMeta = nil
 	return nil
 }
