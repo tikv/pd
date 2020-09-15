@@ -29,9 +29,9 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/storelimit"
 )
 
 func Test(t *testing.T) {
