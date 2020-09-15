@@ -39,11 +39,11 @@ func (s *testCrypterSuite) TestEncryptionMethodSupported(c *C) {
 }
 
 func (s *testCrypterSuite) TestKeyLength(c *C) {
-	length, err := KeyLength(encryptionpb.EncryptionMethod_PLAINTEXT)
+	_, err := KeyLength(encryptionpb.EncryptionMethod_PLAINTEXT)
 	c.Assert(err, Not(IsNil))
-	length, err = KeyLength(encryptionpb.EncryptionMethod_UNKNOWN)
+	_, err = KeyLength(encryptionpb.EncryptionMethod_UNKNOWN)
 	c.Assert(err, Not(IsNil))
-	length, err = KeyLength(encryptionpb.EncryptionMethod_AES128_CTR)
+	length, err := KeyLength(encryptionpb.EncryptionMethod_AES128_CTR)
 	c.Assert(err, IsNil)
 	c.Assert(length, Equals, 16)
 	length, err = KeyLength(encryptionpb.EncryptionMethod_AES192_CTR)
