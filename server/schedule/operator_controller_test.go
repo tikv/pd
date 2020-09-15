@@ -564,10 +564,8 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		// The Operator has finished, so no message should be sent
 		c.Assert(stream.MsgLength(), Equals, 4)
 		c.Assert(controller.GetOperator(1), IsNil)
-		for i := 0; i < 4; i++ {
-			e := stream.Drain(4)
-			c.Assert(e, IsNil)
-		}
+		e := stream.Drain(4)
+		c.Assert(e, IsNil)
 	}
 }
 

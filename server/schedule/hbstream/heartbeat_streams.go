@@ -155,6 +155,7 @@ func (s *HeartbeatStreams) Close() {
 	s.wg.Wait()
 }
 
+// BindStream binds a stream with a specified store.
 func (s *HeartbeatStreams) BindStream(storeID uint64, stream opt.HeartbeatStream) {
 	update := streamUpdate{
 		storeID: storeID,
@@ -166,6 +167,7 @@ func (s *HeartbeatStreams) BindStream(storeID uint64, stream opt.HeartbeatStream
 	}
 }
 
+// SendMsg sends a message to related store.
 func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
 	if region.GetLeader() == nil {
 		return
@@ -182,6 +184,7 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHear
 	}
 }
 
+// SendErr sends a error message to related store.
 func (s *HeartbeatStreams) SendErr(errType pdpb.ErrorType, errMsg string, targetPeer *metapb.Peer) {
 	msg := &pdpb.RegionHeartbeatResponse{
 		Header: &pdpb.ResponseHeader{
