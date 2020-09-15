@@ -7,9 +7,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
@@ -209,7 +209,8 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(ctx, tc, mockhbstream.NewHeartbeatStream())
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
 
 	// Add stores 1~6.
 	for i := uint64(1); i <= 5; i++ {
