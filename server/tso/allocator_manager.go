@@ -79,6 +79,8 @@ type AllocatorManager struct {
 	rootPath      string
 	saveInterval  time.Duration
 	maxResetTSGap func() time.Duration
+	// lease that used to write the local TSO config into etcd
+	lease *election.Lease
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
@@ -95,7 +97,7 @@ func NewAllocatorManager(m *member.Member, rootPath string, saveInterval time.Du
 
 // SetLocalTSOConfig receives a `LocalTSOConfig` and write it into etcd to make the whole
 // cluster know the DC-level topology for later Local TSO Allocator campaign.
-func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConfig) error {
+func (am *AllocatorManager) SetLocalTSOConfig(ctx context.Context, localTSOConfig config.LocalTSOConfig) error {
 	serverName := am.member.Member().Name
 	serverID := fmt.Sprint(am.member.ID())
 	log.Info("write dc-location into etcd",
@@ -108,11 +110,16 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 			zap.String("server-id", serverID))
 		return nil
 	}
+	am.lease = election.NewLease("write-dc-location-config", am.member.Client())
+	if err := am.lease.Grant(defaultAllocatorLeaderLease); err != nil {
+		return err
+	}
+	go am.lease.KeepAlive(ctx)
 	// The key-value pair in etcd will be like: serverID -> dcLocation
 	dcLocationKey := path.Join(am.getLocalTSOConfigPath(), serverID)
 	resp, err := kv.
 		NewSlowLogTxn(am.member.Client()).
-		Then(clientv3.OpPut(dcLocationKey, localTSOConfig.DCLocation)).
+		Then(clientv3.OpPut(dcLocationKey, localTSOConfig.DCLocation, clientv3.WithLease(am.lease.ID))).
 		Commit()
 	if err != nil {
 		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
@@ -144,6 +151,13 @@ func (am *AllocatorManager) GetClusterDCLocations() (map[string][]uint64, error)
 		// The key will contain the member ID and the value is its dcLocation
 		serverPath := strings.Split(string(kv.Key), "/")
 		dcLocation := string(kv.Value)
+		// Maybe all members of this dc-location are done, just skip
+		if len(dcLocation) == 0 {
+			log.Warn("maybe all servers with this dc-location are done",
+				zap.Any("splitted-serverPath", serverPath),
+				zap.String("dc-location", dcLocation))
+			continue
+		}
 		// Get serverID from serverPath, e.g, /pd/dc-location/1232143243253 -> 1232143243253
 		serverID, err := strconv.ParseUint(serverPath[len(serverPath)-1], 10, 64)
 		if err != nil {

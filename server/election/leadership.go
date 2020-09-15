@@ -47,7 +47,7 @@ type Leadership struct {
 	// purpose is used to show what this election for
 	purpose string
 	// The lease which is used to get this leadership
-	lease  atomic.Value // stored as *lease
+	lease  atomic.Value // stored as *Lease
 	client *clientv3.Client
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
@@ -66,15 +66,15 @@ func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadersh
 
 // getLease gets the lease of leadership, only if leadership is valid,
 // i.e the owner is a true leader, the lease is not nil.
-func (ls *Leadership) getLease() *lease {
+func (ls *Leadership) getLease() *Lease {
 	l := ls.lease.Load()
 	if l == nil {
 		return nil
 	}
-	return l.(*lease)
+	return l.(*Lease)
 }
 
-func (ls *Leadership) setLease(lease *lease) {
+func (ls *Leadership) setLease(lease *Lease) {
 	ls.lease.Store(lease)
 }
 
@@ -87,11 +87,7 @@ func (ls *Leadership) GetClient() *clientv3.Client {
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
-	ls.setLease(&lease{
-		Purpose: ls.purpose,
-		client:  ls.client,
-		lease:   clientv3.NewLease(ls.client),
-	})
+	ls.setLease(NewLease(ls.purpose, ls.client))
 	if err := ls.getLease().Grant(leaseTimeout); err != nil {
 		return err
 	}
