@@ -35,12 +35,13 @@ type testHeartbeatStreamSuite struct {
 	region       *metapb.Region
 }
 
+// TODO: refactor and move to server/schedule/hbstream
 func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	var err error
 	var cleanup func()
 	s.svr, cleanup, err = NewTestServer(c)
-	defer cleanup()
 	c.Assert(err, IsNil)
+	defer cleanup()
 	s.svr.cfg.HeartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())

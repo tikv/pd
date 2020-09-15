@@ -15,8 +15,9 @@ package swaggerserver
 
 import (
 	"context"
-	"github.com/tikv/pd/server"
 	"net/http"
+
+	"github.com/tikv/pd/server"
 )
 
 const swaggerPrefix = "/swagger/"

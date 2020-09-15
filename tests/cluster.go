@@ -355,7 +355,10 @@ type TestCluster struct {
 }
 
 // ConfigOption is used to define customize settings in test.
-type ConfigOption func(conf *config.Config)
+// You can use serverName to customize a config for a certain
+// server. Usually, the server name will be like `pd1`, `pd2`
+// and so on, which determined by the number of servers you set.
+type ConfigOption func(conf *config.Config, serverName string)
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {

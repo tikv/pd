@@ -21,7 +21,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
 

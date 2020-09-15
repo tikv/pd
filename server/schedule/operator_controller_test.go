@@ -26,12 +26,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/checker"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/storelimit"
 )
 
 func Test(t *testing.T) {
@@ -99,7 +99,8 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)
@@ -133,7 +134,8 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 func (t *testOperatorControllerSuite) TestFastFailOperator(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
@@ -166,7 +168,8 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/unexpectedOperator"), IsNil)
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 2, 1)
@@ -229,7 +232,8 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 2, 1)
@@ -269,7 +273,8 @@ func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
@@ -340,7 +345,8 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(t.ctx, tc, stream)
 	tc.AddLeaderStore(1, 0)
 	tc.UpdateLeaderCount(1, 1000)
 	tc.AddLeaderStore(2, 0)
@@ -404,7 +410,7 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 // #1652
 func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	cluster := mockcluster.NewCluster(config.NewTestOptions())
-	stream := mockhbstream.NewHeartbeatStreams(cluster.ID, true /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 
 	cluster.AddLeaderStore(1, 2)
@@ -419,7 +425,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
 		operator.OpRegion, steps...)
 	c.Assert(controller.AddOperator(op), Equals, true)
-	c.Assert(len(stream.MsgCh()), Equals, 1)
+	c.Assert(stream.MsgLength(), Equals, 1)
 
 	// report the result of transferring leader
 	region := cluster.MockRegionInfo(1, 2, []uint64{1, 2}, []uint64{},
@@ -427,7 +433,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
 	c.Assert(op.ConfVerChanged(region), Equals, uint64(0))
-	c.Assert(len(stream.MsgCh()), Equals, 2)
+	c.Assert(stream.MsgLength(), Equals, 2)
 
 	// report the result of removing peer
 	region = cluster.MockRegionInfo(1, 2, []uint64{2}, []uint64{},
@@ -435,7 +441,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
 	c.Assert(op.ConfVerChanged(region), Equals, uint64(1))
-	c.Assert(len(stream.MsgCh()), Equals, 2)
+	c.Assert(stream.MsgLength(), Equals, 2)
 
 	// add and dispatch op again, the op should be stale
 	op = operator.NewOperator("test", "test", 1,
@@ -443,7 +449,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		operator.OpRegion, steps...)
 	c.Assert(controller.AddOperator(op), Equals, true)
 	c.Assert(op.ConfVerChanged(region), Equals, uint64(0))
-	c.Assert(len(stream.MsgCh()), Equals, 3)
+	c.Assert(stream.MsgLength(), Equals, 3)
 
 	// report region with an abnormal confver
 	region = cluster.MockRegionInfo(1, 1, []uint64{1, 2}, []uint64{},
@@ -451,12 +457,12 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	controller.Dispatch(region, DispatchFromHeartBeat)
 	c.Assert(op.ConfVerChanged(region), Equals, uint64(0))
 	// no new step
-	c.Assert(len(stream.MsgCh()), Equals, 3)
+	c.Assert(stream.MsgLength(), Equals, 3)
 }
 
 func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	cluster := mockcluster.NewCluster(config.NewTestOptions())
-	stream := mockhbstream.NewHeartbeatStreams(cluster.ID, true /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 
 	// Create a new region with epoch(0, 0)
@@ -491,7 +497,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		op := operator.NewOperator("test", "test", 1, epoch,
 			operator.OpRegion, steps...)
 		c.Assert(controller.AddOperator(op), Equals, true)
-		c.Assert(len(stream.MsgCh()), Equals, 1)
+		c.Assert(stream.MsgLength(), Equals, 1)
 
 		// Create region2 which is cloned from the original region.
 		// region2 has peer 2 in pending state, so the AddPeer step
@@ -515,7 +521,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		// The operator is valid yet, but the step should not be sent
 		// again, because it is in pending state, so the message channel
 		// should not be increased
-		c.Assert(len(stream.MsgCh()), Equals, 1)
+		c.Assert(stream.MsgLength(), Equals, 1)
 
 		// Finish the step by clearing the pending state
 		region3 := region.Clone(
@@ -525,7 +531,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		c.Assert(steps[0].IsFinish(region3), Equals, true)
 		controller.Dispatch(region3, DispatchFromHeartBeat)
 		c.Assert(op.ConfVerChanged(region3), Equals, uint64(1))
-		c.Assert(len(stream.MsgCh()), Equals, 2)
+		c.Assert(stream.MsgLength(), Equals, 2)
 
 		region4 := region3.Clone(
 			core.WithPromoteLearner(3),
@@ -534,7 +540,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		c.Assert(steps[1].IsFinish(region4), Equals, true)
 		controller.Dispatch(region4, DispatchFromHeartBeat)
 		c.Assert(op.ConfVerChanged(region4), Equals, uint64(2))
-		c.Assert(len(stream.MsgCh()), Equals, 3)
+		c.Assert(stream.MsgLength(), Equals, 3)
 
 		// Transfer leader
 		region5 := region4.Clone(
@@ -543,7 +549,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		c.Assert(steps[2].IsFinish(region5), Equals, true)
 		controller.Dispatch(region5, DispatchFromHeartBeat)
 		c.Assert(op.ConfVerChanged(region5), Equals, uint64(2))
-		c.Assert(len(stream.MsgCh()), Equals, 4)
+		c.Assert(stream.MsgLength(), Equals, 4)
 
 		// Remove peer
 		region6 := region5.Clone(
@@ -555,11 +561,10 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		c.Assert(op.ConfVerChanged(region6), Equals, uint64(3))
 
 		// The Operator has finished, so no message should be sent
-		c.Assert(len(stream.MsgCh()), Equals, 4)
+		c.Assert(stream.MsgLength(), Equals, 4)
 		c.Assert(controller.GetOperator(1), IsNil)
-		for i := 0; i < 4; i++ {
-			<-stream.MsgCh()
-		}
+		e := stream.Drain(4)
+		c.Assert(e, IsNil)
 	}
 }
 
@@ -568,6 +573,7 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 	tc := mockcluster.NewCluster(cfg)
 	tc.SetMaxMergeRegionSize(2)
 	tc.SetMaxMergeRegionKeys(2)
+	tc.SetSplitMergeInterval(0)
 	regions := []*core.RegionInfo{
 		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
 		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
@@ -584,7 +590,8 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 	}
 
 	mc := checker.NewMergeChecker(t.ctx, tc)
-	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(t.ctx, tc, stream)
 
 	regions[2] = regions[2].Clone(
 		core.SetPeers([]*metapb.Peer{
@@ -651,7 +658,7 @@ func checkRemoveOperatorSuccess(c *C, oc *OperatorController, op *operator.Opera
 
 func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	cluster := mockcluster.NewCluster(config.NewTestOptions())
-	stream := mockhbstream.NewHeartbeatStreams(cluster.ID, true /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 
 	addPeerOp := func(i uint64) *operator.Operator {

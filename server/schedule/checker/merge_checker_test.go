@@ -220,6 +220,7 @@ func (s *testMergeCheckerSuite) checkSteps(c *C, op *operator.Operator, steps []
 }
 
 func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
+	s.cluster.SetSplitMergeInterval(0)
 	// partial store overlap not including leader
 	ops := s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
