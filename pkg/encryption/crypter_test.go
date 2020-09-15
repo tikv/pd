@@ -91,10 +91,10 @@ func (s *testCrypterSuite) TestAesGcmCrypter(c *C) {
 	c.Assert(bytes.Equal(plaintext2, plaintext), IsTrue)
 	// Modify ciphertext to test authentication failure. We modify the beginning of the ciphertext,
 	// which is the real ciphertext part, not the tag.
-	fake_ciphertext := make([]byte, len(ciphertext))
-	copy(fake_ciphertext, ciphertext)
+	fakeCiphertext := make([]byte, len(ciphertext))
+	copy(fakeCiphertext, ciphertext)
 	// ignore overflow
-	fake_ciphertext[0] = ciphertext[0] + 1
-	_, err = AesGcmDecrypt(key, fake_ciphertext, iv)
+	fakeCiphertext[0] = ciphertext[0] + 1
+	_, err = AesGcmDecrypt(key, fakeCiphertext, iv)
 	c.Assert(err, Not(IsNil))
 }

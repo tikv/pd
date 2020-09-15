@@ -18,6 +18,6 @@ import (
 )
 
 type KeyManager interface {
-	GetCurrentKey() (keyId uint64, key *encryptionpb.DataKey, err error)
+	GetCurrentKey() (keyID uint64, key *encryptionpb.DataKey, err error)
 	GetKey(keyId uint64) (key *encryptionpb.DataKey, err error)
 }

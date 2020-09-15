@@ -48,7 +48,7 @@ func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
 		// encryption is not enabled.
 		return nil
 	}
-	keyId, key, err := keyManager.GetCurrentKey()
+	keyID, key, err := keyManager.GetCurrentKey()
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	}
 	region.EncryptionMeta = &encryptionpb.EncryptionMeta{
 		IsEncrypted: true,
-		KeyId:       keyId,
+		KeyId:       keyID,
 		Iv:          iv,
 	}
 	return nil

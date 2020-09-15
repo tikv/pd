@@ -64,12 +64,12 @@ func (m *testKeyManager) GetCurrentKey() (uint64, *encryptionpb.DataKey, error) 
 	if !m.EncryptionEnabled {
 		return 0, nil, nil
 	}
-	currentKeyId := m.Keys.CurrentKeyId
-	return currentKeyId, m.Keys.Keys[currentKeyId], nil
+	currentKeyID := m.Keys.CurrentKeyId
+	return currentKeyId, m.Keys.Keys[currentKeyID], nil
 }
 
-func (m *testKeyManager) GetKey(keyId uint64) (*encryptionpb.DataKey, error) {
-	key, ok := m.Keys.Keys[keyId]
+func (m *testKeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
+	key, ok := m.Keys.Keys[keyID]
 	if !ok {
 		return nil, errors.New("missing key")
 	}
@@ -186,7 +186,7 @@ func (s *testRegionCrypterSuite) TestDecryptRegionWithoutKeyManager(c *C) {
 }
 
 func (s *testRegionCrypterSuite) TestDecryptRegionWhileKeyMissing(c *C) {
-	keyId := uint64(3)
+	keyID := uint64(3)
 	m := newTestKeyManager()
 	_, err := m.GetKey(3)
 	c.Assert(err, Not(IsNil))
@@ -197,7 +197,7 @@ func (s *testRegionCrypterSuite) TestDecryptRegionWhileKeyMissing(c *C) {
 		EndKey:   []byte("xyz"),
 		EncryptionMeta: &encryptionpb.EncryptionMeta{
 			IsEncrypted: true,
-			KeyId:       keyId,
+			KeyId:       keyID,
 			Iv:          []byte("\x03\xcc\x30\xee\xef\x9a\x19\x79\x71\x38\xbb\x6a\xe5\xee\x31\x86"),
 		},
 	}
@@ -206,7 +206,7 @@ func (s *testRegionCrypterSuite) TestDecryptRegionWhileKeyMissing(c *C) {
 }
 
 func (s *testRegionCrypterSuite) TestDecryptRegion(c *C) {
-	keyId := uint64(1)
+	keyID := uint64(1)
 	startKey := []byte("abc")
 	endKey := []byte("xyz")
 	iv := []byte("\x03\xcc\x30\xee\xef\x9a\x19\x79\x71\x38\xbb\x6a\xe5\xee\x31\x86")
@@ -216,7 +216,7 @@ func (s *testRegionCrypterSuite) TestDecryptRegion(c *C) {
 		EndKey:   make([]byte, len(endKey)),
 		EncryptionMeta: &encryptionpb.EncryptionMeta{
 			IsEncrypted: true,
-			KeyId:       keyId,
+			KeyId:       keyID,
 			Iv:          make([]byte, len(iv)),
 		},
 	}
@@ -231,7 +231,7 @@ func (s *testRegionCrypterSuite) TestDecryptRegion(c *C) {
 	c.Assert(region.EncryptionMeta.KeyId, Equals, uint64(0))
 	c.Assert(len(region.EncryptionMeta.Iv), Equals, 0)
 	// Check encrypted content
-	key, err := m.GetKey(keyId)
+	key, err := m.GetKey(keyID)
 	c.Assert(err, IsNil)
 	block, err := aes.NewCipher(key.Key)
 	c.Assert(err, IsNil)

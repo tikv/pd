@@ -49,7 +49,7 @@ func CheckEncryptionMethodSupported(method encryptionpb.EncryptionMethod) error 
 	}
 }
 
-// KeyLength return the encryption key lenght for supported encryption methods.
+// KeyLength return the encryption key length for supported encryption methods.
 func KeyLength(method encryptionpb.EncryptionMethod) int {
 	switch method {
 	case encryptionpb.EncryptionMethod_AES128_CTR:
@@ -94,13 +94,13 @@ func NewIvGcm() (IvGcm, error) {
 // NewDataKey randomly generate a new data key.
 func NewDataKey(
 	method encryptionpb.EncryptionMethod,
-) (keyId uint64, key *encryptionpb.DataKey, err error) {
+) (keyID uint64, key *encryptionpb.DataKey, err error) {
 	err = CheckEncryptionMethodSupported(method)
 	if err != nil {
 		return
 	}
-	keyIdBuf := make([]byte, 8)
-	n, err := io.ReadFull(rand.Reader, keyIdBuf)
+	keyIDBuf := make([]byte, 8)
+	n, err := io.ReadFull(rand.Reader, keyIDBuf)
 	if err != nil {
 		err = errors.Wrap(err, "fail to generate data key id")
 		return
@@ -109,7 +109,7 @@ func NewDataKey(
 		err = errors.New("no enough random bytes to generate data key id")
 		return
 	}
-	keyId = binary.BigEndian.Uint64(keyIdBuf)
+	keyID = binary.BigEndian.Uint64(keyIDBuf)
 	keyLength := KeyLength(method)
 	keyBuf := make([]byte, keyLength)
 	n, err = io.ReadFull(rand.Reader, keyBuf)
