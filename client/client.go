@@ -80,12 +80,15 @@ type Client interface {
 
 	// UpdateServiceGCSafePoint updates the safepoint for specific service and
 	// returns the minimum safepoint across all services, this value is used to
-	// determine the safepoint for multiple services, it does not tigger a GC
+	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	ScatterRegion(ctx context.Context, regionID uint64) error
+	// ScatterRegionWithOption scatters the specified region with the given options, should use it
+	// for a batch of regions.
+	ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...ScatterRegionOption) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 	// Close closes the client.
@@ -103,6 +106,19 @@ type GetStoreOption func(*GetStoreOp)
 // WithExcludeTombstone excludes tombstone stores from the result.
 func WithExcludeTombstone() GetStoreOption {
 	return func(op *GetStoreOp) { op.excludeTombstone = true }
+}
+
+// ScatterRegionOp represents available options when scatter regions
+type ScatterRegionOp struct {
+	group string
+}
+
+// ScatterRegionOption configures ScatterRegionOp
+type ScatterRegionOption func(op *ScatterRegionOp)
+
+// WithGroup specify the group during ScatterRegion
+func WithGroup(group string) ScatterRegionOption {
+	return func(op *ScatterRegionOp) { op.group = group }
 }
 
 type tsoRequest struct {
@@ -693,7 +709,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 
 // UpdateServiceGCSafePoint updates the safepoint for specific service and
 // returns the minimum safepoint across all services, this value is used to
-// determine the safepoint for multiple services, it does not tigger a GC
+// determine the safepoint for multiple services, it does not trigger a GC
 // job. Use UpdateGCSafePoint to trigger the GC job if needed.
 func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
@@ -726,22 +742,19 @@ func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
 		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
-	start := time.Now()
-	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
+	return c.scatterRegionsWithGroup(ctx, regionID, "")
+}
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
-		Header:   c.requestHeader(),
-		RegionId: regionID,
-	})
-	cancel()
-	if err != nil {
-		return err
+func (c *client) ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...ScatterRegionOption) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.ScatterRegionWithOption", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
 	}
-	if resp.Header.GetError() != nil {
-		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	options := &ScatterRegionOp{}
+	for _, opt := range opts {
+		opt(options)
 	}
-	return nil
+	return c.scatterRegionsWithGroup(ctx, regionID, options.group)
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
@@ -764,6 +777,26 @@ func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
 		ClusterId: c.clusterID,
 	}
+}
+
+func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, group string) error {
+	start := time.Now()
+	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+		Group:    group,
+	})
+	cancel()
+	if err != nil {
+		return err
+	}
+	if resp.Header.GetError() != nil {
+		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	}
+	return nil
 }
 
 func addrsToUrls(addrs []string) []string {

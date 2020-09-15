@@ -22,7 +22,6 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -38,14 +37,14 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/id"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/replication"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
-	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
@@ -65,7 +64,7 @@ type Server interface {
 	GetConfig() *config.Config
 	GetPersistOptions() *config.PersistOptions
 	GetStorage() *core.Storage
-	GetHBStreams() opt.HeartbeatStreams
+	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
 	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
@@ -231,7 +230,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.ruleManager = placement.NewRuleManager(c.storage)
-	if c.IsPlacementRulesEnabled() {
+	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
 		if err != nil {
 			return err
@@ -387,7 +386,7 @@ func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
 }
 
 // GetHeartbeatStreams returns the heartbeat streams.
-func (c *RaftCluster) GetHeartbeatStreams() opt.HeartbeatStreams {
+func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.hbStreams
@@ -426,6 +425,11 @@ func (c *RaftCluster) SetStorage(s *core.Storage) {
 	c.Lock()
 	defer c.Unlock()
 	c.storage = s
+}
+
+// GetOpts returns cluster's configuration.
+func (c *RaftCluster) GetOpts() *config.PersistOptions {
+	return c.opt
 }
 
 // AddSuspectRegions adds regions to suspect list.
@@ -492,10 +496,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	storeID := stats.GetStoreId()
 	store := c.GetStore(storeID)
 	if store == nil {
-		return core.NewStoreNotFoundErr(storeID)
+		return errors.Errorf("store %v not found", storeID)
 	}
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
-	if newStore.IsLowSpace(c.GetLowSpaceRatio()) {
+	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
 			zap.Uint64("store-id", newStore.GetID()),
 			zap.Uint64("capacity", newStore.GetCapacity()),
@@ -503,7 +507,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	}
 	if newStore.NeedPersist() && c.storage != nil {
 		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
-			log.Error("failed to persist store", zap.Uint64("store-id", newStore.GetID()), errs.ZapError(errs.ErrPersistStore, err))
+			log.Error("failed to persist store", zap.Uint64("store-id", newStore.GetID()), errs.ZapError(err))
 		} else {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
 		}
@@ -631,7 +635,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 					log.Error("failed to delete region from storage",
 						zap.Uint64("region-id", item.GetID()),
 						zap.Stringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
-						errs.ZapError(errs.ErrDeleteRegion, err))
+						errs.ZapError(err))
 				}
 			}
 		}
@@ -639,7 +643,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			if c.regionStats != nil {
 				c.regionStats.ClearDefunctRegion(item.GetID())
 			}
-			c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.GetLocationLabels())
+			c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.opt.GetLocationLabels())
 		}
 
 		// Update related stores.
@@ -683,7 +687,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			log.Error("failed to save region to storage",
 				zap.Uint64("region-id", region.GetID()),
 				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
-				errs.ZapError(errs.ErrSaveRegion, err))
+				errs.ZapError(err))
 		}
 		regionEventCounter.WithLabelValues("update_kv").Inc()
 	}
@@ -788,7 +792,7 @@ func (c *RaftCluster) RandLearnerRegion(storeID uint64, ranges []core.KeyRange, 
 func (c *RaftCluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	r := c.hotSpotCache.RandHotRegionFromStore(store, kind, c.GetHotRegionCacheHitsThreshold())
+	r := c.hotSpotCache.RandHotRegionFromStore(store, kind, c.opt.GetHotRegionCacheHitsThreshold())
 	if r == nil {
 		return nil
 	}
@@ -875,7 +879,7 @@ func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
 func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.hotSpotCache.IsRegionHot(region, c.GetHotRegionCacheHitsThreshold())
+	return c.hotSpotCache.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
 }
 
 // GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
@@ -958,13 +962,13 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 		return nil
 	}
 	keysSet := make(map[string]struct{})
-	for _, k := range c.GetLocationLabels() {
+	for _, k := range c.opt.GetLocationLabels() {
 		keysSet[k] = struct{}{}
 		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warn("label configuration is incorrect",
 				zap.Stringer("store", s.GetMeta()),
 				zap.String("label-key", k))
-			if c.GetStrictlyMatchLabel() {
+			if c.opt.GetStrictlyMatchLabel() {
 				return errors.Errorf("label configuration is incorrect, need to specify the key: %s ", k)
 			}
 		}
@@ -975,7 +979,7 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 			log.Warn("not found the key match with the store label",
 				zap.Stringer("store", s.GetMeta()),
 				zap.String("label-key", key))
-			if c.GetStrictlyMatchLabel() {
+			if c.opt.GetStrictlyMatchLabel() {
 				return errors.Errorf("key matching the label was not found in the PD, store label key: %s ", key)
 			}
 		}
@@ -986,13 +990,12 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 // RemoveStore marks a store as offline in cluster.
 // State transition: Up -> Offline.
 func (c *RaftCluster) RemoveStore(storeID uint64) error {
-	op := errcode.Op("store.remove")
 	c.Lock()
 	defer c.Unlock()
 
 	store := c.GetStore(storeID)
 	if store == nil {
-		return op.AddTo(core.NewStoreNotFoundErr(storeID))
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
 	// Remove an offline store should be OK, nothing to do.
@@ -1001,7 +1004,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	if store.IsTombstone() {
-		return op.AddTo(core.StoreTombstonedErr{StoreID: storeID})
+		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
 	}
 
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
@@ -1025,7 +1028,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 
 	store := c.GetStore(storeID)
 	if store == nil {
-		return core.NewStoreNotFoundErr(storeID)
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
 	// Bury a tombstone store should be OK, nothing to do.
@@ -1035,7 +1038,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 
 	if store.IsUp() {
 		if !force {
-			return errors.New("store is still up, please remove store gracefully")
+			return errs.ErrStoreIsUp.FastGenByArgs()
 		}
 		log.Warn("force bury store", zap.Stringer("store", store.GetMeta()))
 	}
@@ -1075,7 +1078,7 @@ func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) err
 
 	store := c.GetStore(storeID)
 	if store == nil {
-		return core.NewStoreNotFoundErr(storeID)
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
 	newStore := store.Clone(core.SetStoreState(state))
@@ -1092,7 +1095,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 
 	store := c.GetStore(storeID)
 	if store == nil {
-		return core.NewStoreNotFoundErr(storeID)
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
 	if err := c.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
@@ -1129,7 +1132,7 @@ func (c *RaftCluster) checkStores() {
 		}
 
 		if store.IsUp() {
-			if !store.IsLowSpace(c.GetLowSpaceRatio()) {
+			if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 				upStoreCount++
 			}
 			continue
@@ -1142,7 +1145,7 @@ func (c *RaftCluster) checkStores() {
 			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
-					errs.ZapError(errs.ErrBuryStore, err))
+					errs.ZapError(err))
 			}
 		} else {
 			offlineStores = append(offlineStores, offlineStore)
@@ -1154,7 +1157,7 @@ func (c *RaftCluster) checkStores() {
 	}
 
 	// When placement rules feature is enabled. It is hard to determine required replica count precisely.
-	if !c.IsPlacementRulesEnabled() && upStoreCount < c.GetMaxReplicas() {
+	if !c.opt.IsPlacementRulesEnabled() && upStoreCount < c.opt.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
 			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
@@ -1173,7 +1176,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 			if err != nil {
 				log.Error("delete store failed",
 					zap.Stringer("store", store.GetMeta()),
-					errs.ZapError(errs.ErrDeleteStore, err))
+					errs.ZapError(err))
 				return err
 			}
 			c.RemoveStoreLimit(store.GetID())
@@ -1246,11 +1249,11 @@ func (c *RaftCluster) resetClusterMetrics() {
 func (c *RaftCluster) collectHealthStatus() {
 	members, err := GetMembers(c.etcdClient)
 	if err != nil {
-		log.Error("get members error", errs.ZapError(errs.ErrGetMembers, err))
+		log.Error("get members error", errs.ZapError(err))
 	}
-	unhealth := CheckHealth(c.httpClient, members)
+	unhealthy := CheckHealth(c.httpClient, members)
 	for _, member := range members {
-		if _, ok := unhealth[member.GetMemberId()]; ok {
+		if _, ok := unhealthy[member.GetMemberId()]; ok {
 			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
 			continue
 		}
@@ -1272,7 +1275,7 @@ func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	c.Lock()
 	defer c.Unlock()
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.takeRegionStoresLocked(region), c.GetLocationLabels())
+		c.labelLevelStats.Observe(region, c.takeRegionStoresLocked(region), c.opt.GetLocationLabels())
 	}
 }
 
@@ -1320,7 +1323,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 		}
 		err := c.opt.Persist(c.storage)
 		if err != nil {
-			log.Error("persist cluster version meet error", errs.ZapError(errs.ErrPersistClusterVersion, err))
+			log.Error("persist cluster version meet error", errs.ZapError(err))
 		}
 		log.Info("cluster version changed",
 			zap.Stringer("old-cluster-version", clusterVersion),
@@ -1334,8 +1337,6 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 
 // IsFeatureSupported checks if the feature is supported by current cluster.
 func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
-	c.RLock()
-	defer c.RUnlock()
 	clusterVersion := *c.opt.GetClusterVersion()
 	minSupportVersion := *versioninfo.MinSupportedVersion(f)
 	// For features before version 5.0 (such as BatchSplit), strict version checks are performed according to the
@@ -1376,176 +1377,6 @@ func (c *RaftCluster) GetComponentManager() *component.Manager {
 	c.RLock()
 	defer c.RUnlock()
 	return c.componentManager
-}
-
-// GetOpt returns the scheduling options.
-func (c *RaftCluster) GetOpt() *config.PersistOptions {
-	return c.opt
-}
-
-// GetLeaderScheduleLimit returns the limit for leader schedule.
-func (c *RaftCluster) GetLeaderScheduleLimit() uint64 {
-	return c.opt.GetLeaderScheduleLimit()
-}
-
-// GetRegionScheduleLimit returns the limit for region schedule.
-func (c *RaftCluster) GetRegionScheduleLimit() uint64 {
-	return c.opt.GetRegionScheduleLimit()
-}
-
-// GetReplicaScheduleLimit returns the limit for replica schedule.
-func (c *RaftCluster) GetReplicaScheduleLimit() uint64 {
-	return c.opt.GetReplicaScheduleLimit()
-}
-
-// GetMergeScheduleLimit returns the limit for merge schedule.
-func (c *RaftCluster) GetMergeScheduleLimit() uint64 {
-	return c.opt.GetMergeScheduleLimit()
-}
-
-// GetHotRegionScheduleLimit returns the limit for hot region schedule.
-func (c *RaftCluster) GetHotRegionScheduleLimit() uint64 {
-	return c.opt.GetHotRegionScheduleLimit()
-}
-
-// GetTolerantSizeRatio gets the tolerant size ratio.
-func (c *RaftCluster) GetTolerantSizeRatio() float64 {
-	return c.opt.GetTolerantSizeRatio()
-}
-
-// GetLowSpaceRatio returns the low space ratio.
-func (c *RaftCluster) GetLowSpaceRatio() float64 {
-	return c.opt.GetLowSpaceRatio()
-}
-
-// GetHighSpaceRatio returns the high space ratio.
-func (c *RaftCluster) GetHighSpaceRatio() float64 {
-	return c.opt.GetHighSpaceRatio()
-}
-
-// GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
-func (c *RaftCluster) GetSchedulerMaxWaitingOperator() uint64 {
-	return c.opt.GetSchedulerMaxWaitingOperator()
-}
-
-// GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
-func (c *RaftCluster) GetMaxSnapshotCount() uint64 {
-	return c.opt.GetMaxSnapshotCount()
-}
-
-// GetMaxPendingPeerCount returns the number of the max pending peers.
-func (c *RaftCluster) GetMaxPendingPeerCount() uint64 {
-	return c.opt.GetMaxPendingPeerCount()
-}
-
-// GetMaxMergeRegionSize returns the max region size.
-func (c *RaftCluster) GetMaxMergeRegionSize() uint64 {
-	return c.opt.GetMaxMergeRegionSize()
-}
-
-// GetMaxMergeRegionKeys returns the max number of keys.
-func (c *RaftCluster) GetMaxMergeRegionKeys() uint64 {
-	return c.opt.GetMaxMergeRegionKeys()
-}
-
-// GetSplitMergeInterval returns the interval between finishing split and starting to merge.
-func (c *RaftCluster) GetSplitMergeInterval() time.Duration {
-	return c.opt.GetSplitMergeInterval()
-}
-
-// IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
-func (c *RaftCluster) IsOneWayMergeEnabled() bool {
-	return c.opt.IsOneWayMergeEnabled()
-}
-
-// IsCrossTableMergeEnabled returns if across table merge is enabled.
-func (c *RaftCluster) IsCrossTableMergeEnabled() bool {
-	return c.opt.IsCrossTableMergeEnabled()
-}
-
-// GetPatrolRegionInterval returns the interval of patrolling region.
-func (c *RaftCluster) GetPatrolRegionInterval() time.Duration {
-	return c.opt.GetPatrolRegionInterval()
-}
-
-// GetMaxStoreDownTime returns the max down time of a store.
-func (c *RaftCluster) GetMaxStoreDownTime() time.Duration {
-	return c.opt.GetMaxStoreDownTime()
-}
-
-// GetMaxReplicas returns the number of replicas.
-func (c *RaftCluster) GetMaxReplicas() int {
-	return c.opt.GetMaxReplicas()
-}
-
-// GetLocationLabels returns the location labels for each region
-func (c *RaftCluster) GetLocationLabels() []string {
-	return c.opt.GetLocationLabels()
-}
-
-// GetIsolationLevel returns the isolation label for each region.
-func (c *RaftCluster) GetIsolationLevel() string {
-	return c.opt.GetIsolationLevel()
-}
-
-// GetStrictlyMatchLabel returns if the strictly label check is enabled.
-func (c *RaftCluster) GetStrictlyMatchLabel() bool {
-	return c.opt.GetStrictlyMatchLabel()
-}
-
-// IsPlacementRulesEnabled returns if the placement rules feature is enabled.
-func (c *RaftCluster) IsPlacementRulesEnabled() bool {
-	return c.opt.IsPlacementRulesEnabled()
-}
-
-// GetHotRegionCacheHitsThreshold gets the threshold of hitting hot region cache.
-func (c *RaftCluster) GetHotRegionCacheHitsThreshold() int {
-	return c.opt.GetHotRegionCacheHitsThreshold()
-}
-
-// IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
-func (c *RaftCluster) IsRemoveDownReplicaEnabled() bool {
-	return c.opt.IsRemoveDownReplicaEnabled()
-}
-
-// GetLeaderSchedulePolicy is to get leader schedule policy.
-func (c *RaftCluster) GetLeaderSchedulePolicy() core.SchedulePolicy {
-	return c.opt.GetLeaderSchedulePolicy()
-}
-
-// GetKeyType is to get key type.
-func (c *RaftCluster) GetKeyType() core.KeyType {
-	return c.opt.GetKeyType()
-}
-
-// IsReplaceOfflineReplicaEnabled returns if replace offline replica is enabled.
-func (c *RaftCluster) IsReplaceOfflineReplicaEnabled() bool {
-	return c.opt.IsReplaceOfflineReplicaEnabled()
-}
-
-// IsMakeUpReplicaEnabled returns if make up replica is enabled.
-func (c *RaftCluster) IsMakeUpReplicaEnabled() bool {
-	return c.opt.IsMakeUpReplicaEnabled()
-}
-
-// IsRemoveExtraReplicaEnabled returns if remove extra replica is enabled.
-func (c *RaftCluster) IsRemoveExtraReplicaEnabled() bool {
-	return c.opt.IsRemoveExtraReplicaEnabled()
-}
-
-// IsLocationReplacementEnabled returns if location replace is enabled.
-func (c *RaftCluster) IsLocationReplacementEnabled() bool {
-	return c.opt.IsLocationReplacementEnabled()
-}
-
-// IsDebugMetricsEnabled mocks method
-func (c *RaftCluster) IsDebugMetricsEnabled() bool {
-	return c.opt.IsDebugMetricsEnabled()
-}
-
-// CheckLabelProperty is used to check label property.
-func (c *RaftCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
-	return c.opt.CheckLabelProperty(typ, labels)
 }
 
 // isPrepared if the cluster information is collected

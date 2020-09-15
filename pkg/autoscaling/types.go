@@ -19,7 +19,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -64,10 +63,10 @@ type Resource struct {
 
 // Plan is the final result of auto scaling, which indicates how to scale in or scale out.
 type Plan struct {
-	Component    string               `json:"component"`
-	Count        uint64               `json:"count"`
-	ResourceType string               `json:"resource_type"`
-	Labels       []*metapb.StoreLabel `json:"labels"`
+	Component    string            `json:"component"`
+	Count        uint64            `json:"count"`
+	ResourceType string            `json:"resource_type"`
+	Labels       map[string]string `json:"labels"`
 }
 
 // ComponentType distinguishes different kinds of components.

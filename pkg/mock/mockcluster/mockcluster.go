@@ -22,11 +22,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
@@ -36,27 +36,31 @@ import (
 type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
-	*mockoption.ScheduleOptions
 	*placement.RuleManager
 	*statistics.HotCache
 	*statistics.StoresStats
-	ID             uint64
-	suspectRegions map[uint64]struct{}
+	*config.PersistOptions
+	ID               uint64
+	suspectRegions   map[uint64]struct{}
+	disabledFeatures map[versioninfo.Feature]struct{}
 }
 
 // NewCluster creates a new Cluster
-func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
-	ruleManager := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()))
-	ruleManager.Initialize(opt.MaxReplicas, opt.GetLocationLabels())
+func NewCluster(opts *config.PersistOptions) *Cluster {
 	return &Cluster{
-		BasicCluster:    core.NewBasicCluster(),
-		IDAllocator:     mockid.NewIDAllocator(),
-		ScheduleOptions: opt,
-		RuleManager:     ruleManager,
-		HotCache:        statistics.NewHotCache(),
-		StoresStats:     statistics.NewStoresStats(),
-		suspectRegions:  map[uint64]struct{}{},
+		BasicCluster:     core.NewBasicCluster(),
+		IDAllocator:      mockid.NewIDAllocator(),
+		HotCache:         statistics.NewHotCache(),
+		StoresStats:      statistics.NewStoresStats(),
+		PersistOptions:   opts,
+		suspectRegions:   map[uint64]struct{}{},
+		disabledFeatures: make(map[versioninfo.Feature]struct{}),
 	}
+}
+
+// GetOpts returns the cluster configuration.
+func (mc *Cluster) GetOpts() *config.PersistOptions {
+	return mc.PersistOptions
 }
 
 // AllocID allocs a new unique ID.
@@ -127,6 +131,13 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 		StoreId: storeID,
 	}
 	return peer, nil
+}
+
+func (mc *Cluster) initRuleManager() {
+	if mc.RuleManager == nil {
+		mc.RuleManager = placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()))
+		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels)
+	}
 }
 
 // FitRegion fits a region to the rules it matches.
@@ -527,49 +538,9 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, foll
 	return mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, []uint64{}, nil)
 }
 
-// GetOpt mocks method.
-func (mc *Cluster) GetOpt() *mockoption.ScheduleOptions {
-	return mc.ScheduleOptions
-}
-
-// GetLeaderScheduleLimit mocks method.
-func (mc *Cluster) GetLeaderScheduleLimit() uint64 {
-	return mc.ScheduleOptions.GetLeaderScheduleLimit()
-}
-
-// GetRegionScheduleLimit mocks method.
-func (mc *Cluster) GetRegionScheduleLimit() uint64 {
-	return mc.ScheduleOptions.GetRegionScheduleLimit()
-}
-
-// GetReplicaScheduleLimit mocks method.
-func (mc *Cluster) GetReplicaScheduleLimit() uint64 {
-	return mc.ScheduleOptions.GetReplicaScheduleLimit()
-}
-
-// GetMergeScheduleLimit mocks method.
-func (mc *Cluster) GetMergeScheduleLimit() uint64 {
-	return mc.ScheduleOptions.GetMergeScheduleLimit()
-}
-
-// GetHotRegionScheduleLimit mocks method.
-func (mc *Cluster) GetHotRegionScheduleLimit() uint64 {
-	return mc.ScheduleOptions.GetHotRegionScheduleLimit()
-}
-
-// GetMaxReplicas mocks method.
-func (mc *Cluster) GetMaxReplicas() int {
-	return mc.ScheduleOptions.GetMaxReplicas()
-}
-
-// GetStoreLimitByType mocks method.
-func (mc *Cluster) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
-	return mc.ScheduleOptions.GetStoreLimitByType(storeID, typ)
-}
-
 // CheckLabelProperty checks label property.
 func (mc *Cluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
-	for _, cfg := range mc.LabelProperties[typ] {
+	for _, cfg := range mc.GetLabelPropertyConfig()[typ] {
 		for _, l := range labels {
 			if l.Key == cfg.Key && l.Value == cfg.Value {
 				return true
@@ -637,9 +608,17 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	mc.PutStore(newStore)
 }
 
+// DisableFeature marks that these features are not supported in the cluster.
+func (mc *Cluster) DisableFeature(fs ...versioninfo.Feature) {
+	for _, f := range fs {
+		mc.disabledFeatures[f] = struct{}{}
+	}
+}
+
 // IsFeatureSupported checks if the feature is supported by current cluster.
-func (mc *Cluster) IsFeatureSupported(versioninfo.Feature) bool {
-	return true
+func (mc *Cluster) IsFeatureSupported(f versioninfo.Feature) bool {
+	_, ok := mc.disabledFeatures[f]
+	return !ok
 }
 
 // AddSuspectRegions mock method

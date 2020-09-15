@@ -35,12 +35,13 @@ type testHeartbeatStreamSuite struct {
 	region       *metapb.Region
 }
 
+// TODO: refactor and move to server/schedule/hbstream
 func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	var err error
 	var cleanup func()
 	s.svr, cleanup, err = NewTestServer(c)
-	defer cleanup()
 	c.Assert(err, IsNil)
+	defer cleanup()
 	s.svr.cfg.HeartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
@@ -66,7 +67,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	err = newHandler(s.svr).AddAddPeerOperator(s.region.GetId(), 2)
 	c.Assert(err, IsNil)
 
-	stream1, stream2 := newRegionheartbeatClient(c, s.grpcPDClient), newRegionheartbeatClient(c, s.grpcPDClient)
+	stream1, stream2 := newRegionHeartbeatClient(c, s.grpcPDClient), newRegionHeartbeatClient(c, s.grpcPDClient)
 	defer stream1.close()
 	defer stream2.close()
 	checkActiveStream := func() int {
@@ -120,7 +121,7 @@ type regionHeartbeatClient struct {
 	respCh chan *pdpb.RegionHeartbeatResponse
 }
 
-func newRegionheartbeatClient(c *C, grpcClient pdpb.PDClient) *regionHeartbeatClient {
+func newRegionHeartbeatClient(c *C, grpcClient pdpb.PDClient) *regionHeartbeatClient {
 	stream, err := grpcClient.RegionHeartbeat(context.Background())
 	c.Assert(err, IsNil)
 	ch := make(chan *pdpb.RegionHeartbeatResponse)

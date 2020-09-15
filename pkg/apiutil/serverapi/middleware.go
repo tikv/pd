@@ -31,7 +31,7 @@ import (
 const (
 	RedirectorHeader    = "PD-Redirector"
 	AllowFollowerHandle = "PD-Allow-follower-handle"
-	FollowerHandle      = "PD-Follwer-handle"
+	FollowerHandle      = "PD-Follower-handle"
 )
 
 const (
@@ -90,8 +90,9 @@ func NewRedirector(s *server.Server) negroni.Handler {
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	allowFollowerHandle := len(r.Header.Get(AllowFollowerHandle)) > 0
-	if !h.s.IsClosed() && (allowFollowerHandle || h.s.GetMember().IsLeader()) {
-		if allowFollowerHandle {
+	isLeader := h.s.GetMember().IsLeader()
+	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) {
+		if !isLeader {
 			w.Header().Add(FollowerHandle, "true")
 		}
 		next(w, r)
@@ -100,7 +101,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 
 	// Prevent more than one redirection.
 	if name := r.Header.Get(RedirectorHeader); len(name) != 0 {
-		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()))
+		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
 		http.Error(w, errRedirectToNotLeader, http.StatusInternalServerError)
 		return
 	}

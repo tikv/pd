@@ -127,7 +127,7 @@ func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return l.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return l.opController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
@@ -135,8 +135,8 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 
 	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
 	stores := cluster.GetStores()
-	sources := filter.SelectSourceStores(stores, l.filters, cluster)
-	targets := filter.SelectTargetStores(stores, l.filters, cluster)
+	sources := filter.SelectSourceStores(stores, l.filters, cluster.GetOpts())
+	targets := filter.SelectTargetStores(stores, l.filters, cluster.GetOpts())
 	opInfluence := l.opController.GetOpInfluence(cluster)
 	kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
 	sort.Slice(sources, func(i, j int) bool {
@@ -202,7 +202,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), cluster, region, source); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
-	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
+	targets = filter.SelectTargetStores(targets, finalFilters, cluster.GetOpts())
 	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
@@ -249,7 +249,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster opt.Cluster, target *c
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), cluster, region, source); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
-	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
+	targets = filter.SelectTargetStores(targets, finalFilters, cluster.GetOpts())
 	if len(targets) < 1 {
 		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
@@ -273,7 +273,7 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	targetID := target.GetID()
 
 	opInfluence := l.opController.GetOpInfluence(cluster)
-	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetLeaderSchedulePolicy())
+	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetOpts().GetLeaderSchedulePolicy())
 	if !shouldBalance(cluster, source, target, region, kind, opInfluence, l.GetName()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil

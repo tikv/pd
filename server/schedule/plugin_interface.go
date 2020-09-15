@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 )
 
@@ -44,20 +45,19 @@ func (p *PluginInterface) GetFunction(path string, funcName string) (plugin.Symb
 		//open plugin
 		filePath, err := filepath.Abs(path)
 		if err != nil {
-			return nil, err
+			return nil, errs.ErrFilePathAbs.Wrap(err).FastGenWithCause()
 		}
 		log.Info("open plugin file", zap.String("file-path", filePath))
 		plugin, err := plugin.Open(filePath)
 		if err != nil {
-			return nil, err
+			return nil, errs.ErrLoadPlugin.Wrap(err).FastGenWithCause()
 		}
 		p.pluginMap[path] = plugin
 	}
 	//get func from plugin
 	f, err := p.pluginMap[path].Lookup(funcName)
 	if err != nil {
-		log.Error("Lookup func error!")
-		return nil, err
+		return nil, errs.ErrLookupPluginFunc.Wrap(err).FastGenWithCause()
 	}
 	return f, nil
 }

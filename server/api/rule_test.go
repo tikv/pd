@@ -142,7 +142,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 			name:    "Set Rule Failed",
 			rawData: setErrData,
 			success: false,
-			response: `"[PD:placement:ErrRuleContent] invalid rule content, invalid count -1"
+			response: `"[PD:placement:ErrRuleContent]invalid rule content, invalid count -1"
 `,
 		},
 	}
@@ -280,7 +280,7 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 			name:    "Set Rule Failed",
 			rawData: setErrData,
 			success: false,
-			response: `"[PD:placement:ErrRuleContent] invalid rule content, invalid count -1"
+			response: `"[PD:placement:ErrRuleContent]invalid rule content, invalid count -1"
 `,
 		},
 	}
@@ -613,7 +613,7 @@ func (s *testRuleSuite) TestBatch(c *C) {
 			name:    "Set Rule Failed",
 			rawData: setErrData,
 			success: false,
-			response: `"[PD:placement:ErrRuleContent] invalid rule content, invalid count -1"
+			response: `"[PD:placement:ErrRuleContent]invalid rule content, invalid count -1"
 `,
 		},
 	}

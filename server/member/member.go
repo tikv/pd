@@ -88,6 +88,11 @@ func (m *Member) Etcd() *embed.Etcd {
 	return m.etcd
 }
 
+// Client returns the etcd client.
+func (m *Member) Client() *clientv3.Client {
+	return m.client
+}
+
 // IsLeader returns whether the server is PD leader or not.
 func (m *Member) IsLeader() bool {
 	// If server is not started. Both leaderID and ID could be 0.
@@ -155,7 +160,7 @@ func (m *Member) IsStillLeader() bool {
 }
 
 // CheckLeader checks returns true if it is needed to check later.
-func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
+func (m *Member) CheckLeader() (*pdpb.Member, int64, bool) {
 	if m.GetEtcdLeader() == 0 {
 		log.Error("no etcd leader, check pd leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
 		time.Sleep(200 * time.Millisecond)
@@ -190,7 +195,7 @@ func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, rev
 	m.unsetLeader()
 }
 
-// ResetLeader is used to reset the PD member's cuurent leadership.
+// ResetLeader is used to reset the PD member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
 func (m *Member) ResetLeader() {
 	m.leadership.Reset()
@@ -205,7 +210,7 @@ func (m *Member) CheckPriority(ctx context.Context) {
 	}
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
-		log.Error("failed to load etcd leader priority", errs.ZapError(err))
+		log.Error("failed to load leader priority", errs.ZapError(err))
 		return
 	}
 	leaderPriority, err := m.GetMemberLeaderPriority(etcdLeader)
@@ -305,7 +310,7 @@ func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 	return nil
 }
 
-// DeleteMemberLeaderPriority removes a member's ectd leader priority config.
+// DeleteMemberLeaderPriority removes a member's etcd leader priority config.
 func (m *Member) DeleteMemberLeaderPriority(id uint64) error {
 	key := m.getMemberLeaderPriorityPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
@@ -347,7 +352,7 @@ func (m *Member) GetMemberDeployPath(id uint64) (string, error) {
 		return "", err
 	}
 	if len(res.Kvs) == 0 {
-		return "", errors.New("no value")
+		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
 	}
 	return string(res.Kvs[0].Value), nil
 }
@@ -387,7 +392,7 @@ func (m *Member) GetMemberBinaryVersion(id uint64) (string, error) {
 		return "", err
 	}
 	if len(res.Kvs) == 0 {
-		return "", errors.New("no value")
+		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
 	}
 	return string(res.Kvs[0].Value), nil
 }
@@ -400,7 +405,7 @@ func (m *Member) GetMemberGitHash(id uint64) (string, error) {
 		return "", err
 	}
 	if len(res.Kvs) == 0 {
-		return "", errors.New("no value")
+		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
 	}
 	return string(res.Kvs[0].Value), nil
 }

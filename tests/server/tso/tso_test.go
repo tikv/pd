@@ -212,7 +212,7 @@ func (s *testTsoSuite) TestRequestFollower(c *C) {
 
 // In some cases, when a TSO request arrives, the SyncTimestamp may not finish yet.
 // This test is used to simulate this situation and verify that the retry mechanism.
-func (s *testTsoSuite) TestDeplaySyncTimestamp(c *C) {
+func (s *testTsoSuite) TestDelaySyncTimestamp(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 2)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -395,6 +395,6 @@ func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	c.Assert(err, IsNil)
 	_, err = tsoClient.Recv()
 	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "can not get timestamp"), IsTrue)
+	c.Assert(strings.Contains(err.Error(), "generate timestamp failed"), IsTrue)
 	failpoint.Disable("github.com/tikv/pd/server/tso/skipRetryGetTS")
 }

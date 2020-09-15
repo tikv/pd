@@ -2,14 +2,17 @@ package schedule
 
 import (
 	"context"
+	"fmt"
+	"math"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockhbstream"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 type sequencer struct {
@@ -74,14 +77,15 @@ func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
 }
 
 func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 
 	// Add ordinary stores.
 	for i := uint64(1); i <= numStores; i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	tc.EnablePlacementRules = useRules
+	tc.SetEnablePlacementRules(useRules)
 
 	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
 	tc.AddLeaderRegion(1, 1, 2, 3)
@@ -94,7 +98,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region); op != nil {
+		if op, _ := scatterer.Scatter(region, ""); op != nil {
 			s.checkOperator(op, c)
 			ApplyOperator(tc, op)
 		}
@@ -128,8 +132,9 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 }
 
 func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpecialStores, numRegions uint64) {
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 
 	// Add ordinary stores.
 	for i := uint64(1); i <= numOrdinaryStores; i++ {
@@ -139,7 +144,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 	for i := uint64(1); i <= numSpecialStores; i++ {
 		tc.AddLabelsStore(numOrdinaryStores+i, 0, map[string]string{"engine": "tiflash"})
 	}
-	tc.EnablePlacementRules = true
+	tc.SetEnablePlacementRules(true)
 	c.Assert(tc.RuleManager.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "learner", Role: placement.Learner, Count: 3,
 		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}), IsNil)
@@ -159,7 +164,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region); op != nil {
+		if op, _ := scatterer.Scatter(region, ""); op != nil {
 			s.checkOperator(op, c)
 			ApplyOperator(tc, op)
 		}
@@ -202,9 +207,10 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(ctx, tc, mockhbstream.NewHeartbeatStream())
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
 
 	// Add stores 1~6.
 	for i := uint64(1); i <= 5; i++ {
@@ -223,14 +229,14 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 
 	for i := uint64(1); i <= 5; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region); op != nil {
+		if op, _ := scatterer.Scatter(region, ""); op != nil {
 			c.Assert(oc.AddWaitingOperator(op), Equals, 1)
 		}
 	}
 }
 
 func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
-	opt := mockoption.NewScheduleOptions()
+	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -260,7 +266,7 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 	for _, testcase := range testcases {
 		c.Logf(testcase.name)
 		scatterer := NewRegionScatterer(tc)
-		_, err := scatterer.Scatter(testcase.checkRegion)
+		_, err := scatterer.Scatter(testcase.checkRegion, "")
 		if testcase.needFix {
 			c.Assert(err, NotNil)
 			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, true)
@@ -269,5 +275,69 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, false)
 		}
 		tc.ResetSuspectRegions()
+	}
+}
+
+func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	// Add 5 stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+
+	testcases := []struct {
+		name       string
+		groupCount int
+	}{
+		{
+			name:       "1 group",
+			groupCount: 1,
+		},
+		{
+			name:       "2 group",
+			groupCount: 2,
+		},
+		{
+			name:       "3 group",
+			groupCount: 3,
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Logf(testcase.name)
+		scatterer := NewRegionScatterer(tc)
+		regionID := 1
+		for i := 0; i < 100; i++ {
+			for j := 0; j < testcase.groupCount; j++ {
+				_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
+					fmt.Sprintf("group-%v", j))
+				c.Assert(err, IsNil)
+				regionID++
+			}
+			// insert region with no group
+			_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3), "")
+			c.Assert(err, IsNil)
+			regionID++
+		}
+
+		for i := 0; i < testcase.groupCount; i++ {
+			// comparing the leader distribution
+			group := fmt.Sprintf("group-%v", i)
+			max := uint64(0)
+			min := uint64(math.MaxUint64)
+			for _, count := range scatterer.ordinaryEngine.selectedLeader.groupDistribution[group] {
+				if count > max {
+					max = count
+				}
+				if count < min {
+					min = count
+				}
+			}
+			// 100 regions divided 5 stores, each store expected to have about 20 regions.
+			c.Assert(min, LessEqual, uint64(20))
+			c.Assert(max, GreaterEqual, uint64(20))
+			c.Assert(max-min, LessEqual, uint64(3))
+		}
 	}
 }

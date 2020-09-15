@@ -234,7 +234,6 @@ func (l *balanceAdjacentRegionScheduler) process(cluster opt.Cluster) []*operato
 	defer func() {
 		if l.cacheRegions.len() < 0 {
 			log.Fatal("cache overflow", zap.String("scheduler", l.GetName()), errs.ZapError(errs.ErrCacheOverflow))
-			log.Fatal("cache overflow", zap.String("scheduler", l.GetName()), errs.ZapError(errs.ErrCacheOverflow))
 		}
 		l.cacheRegions.head = head + 1
 		l.lastKey = r2.GetStartKey()
@@ -269,7 +268,7 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster opt.Cluster, re
 		log.Error("failed to get the store", zap.Uint64("store-id", leaderStoreID), errs.ZapError(errs.ErrGetSourceStore))
 		return true
 	}
-	if !filter.Source(cluster, store, l.filters) {
+	if !filter.Source(cluster.GetOpts(), store, l.filters) {
 		return true
 	}
 	// Skip hot regions.
@@ -295,7 +294,7 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster opt.Cluster, bef
 		}
 	}
 	target := filter.NewCandidates(storesInfo).
-		FilterTarget(cluster, l.filters...).
+		FilterTarget(cluster.GetOpts(), l.filters...).
 		RandomPick()
 	if target == nil {
 		return nil
@@ -334,8 +333,8 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 		scoreGuard,
 	}
 	target := filter.NewCandidates(cluster.GetStores()).
-		FilterTarget(cluster, filters...).
-		FilterTarget(cluster, l.filters...).
+		FilterTarget(cluster.GetOpts(), filters...).
+		FilterTarget(cluster.GetOpts(), l.filters...).
 		RandomPick()
 	if target == nil {
 		return nil

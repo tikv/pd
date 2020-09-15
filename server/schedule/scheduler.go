@@ -21,6 +21,8 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -44,12 +46,20 @@ type Scheduler interface {
 
 // EncodeConfig encode the custom config for each scheduler.
 func EncodeConfig(v interface{}) ([]byte, error) {
-	return json.Marshal(v)
+	marshaled, err := json.Marshal(v)
+	if err != nil {
+		return nil, errs.ErrJSONMarshal.Wrap(err).FastGenWithCause()
+	}
+	return marshaled, nil
 }
 
 // DecodeConfig decode the custom config for each scheduler.
 func DecodeConfig(data []byte, v interface{}) error {
-	return json.Unmarshal(data, v)
+	err := json.Unmarshal(data, v)
+	if err != nil {
+		return errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()
+	}
+	return nil
 }
 
 // ConfigDecoder used to decode the config.
@@ -86,7 +96,7 @@ var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
 // func of a package.
 func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[typ]; ok {
-		log.Fatal("duplicated scheduler", zap.String("type", typ))
+		log.Fatal("duplicated scheduler", zap.String("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
 	schedulerMap[typ] = createFn
 }
@@ -95,22 +105,17 @@ func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 // func of package.
 func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) {
 	if _, ok := schedulerArgsToDecoder[typ]; ok {
-		log.Fatal("duplicated scheduler", zap.String("type", typ))
+		log.Fatal("duplicated scheduler", zap.String("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
 	schedulerArgsToDecoder[typ] = builder
-}
-
-// IsSchedulerRegistered check where the named scheduler type is registered.
-func IsSchedulerRegistered(name string) bool {
-	_, ok := schedulerMap[name]
-	return ok
+	config.RegisterScheduler(typ)
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
 func CreateScheduler(typ string, opController *OperatorController, storage *core.Storage, dec ConfigDecoder) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
-		return nil, errors.Errorf("create func of %v is not registered", typ)
+		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
 	}
 
 	s, err := fn(opController, storage, dec)
@@ -128,10 +133,10 @@ func CreateScheduler(typ string, opController *OperatorController, storage *core
 // FindSchedulerTypeByName finds the type of the specified name.
 func FindSchedulerTypeByName(name string) string {
 	var typ string
-	for registerdType := range schedulerMap {
-		if strings.Contains(name, registerdType) {
-			if len(registerdType) > len(typ) {
-				typ = registerdType
+	for registeredType := range schedulerMap {
+		if strings.Contains(name, registeredType) {
+			if len(registeredType) > len(typ) {
+				typ = registeredType
 			}
 		}
 	}

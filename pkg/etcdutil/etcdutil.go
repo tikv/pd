@@ -42,7 +42,7 @@ const (
 	DefaultSlowRequestTime = 1 * time.Second
 )
 
-// CheckClusterID checks Etcd's cluster ID, returns an error if mismatch.
+// CheckClusterID checks etcd cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.
 func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Config) error {
 	if len(um) == 0 {
@@ -87,7 +87,10 @@ func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, err
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	listResp, err := client.MemberList(ctx)
 	cancel()
-	return listResp, errors.WithStack(err)
+	if err != nil {
+		return listResp, errs.ErrEtcdMemberList.Wrap(err).GenWithStackByCause()
+	}
+	return listResp, nil
 }
 
 // RemoveEtcdMember removes a member by the given id.

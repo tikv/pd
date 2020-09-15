@@ -62,3 +62,27 @@ func ValidateURLWithScheme(rawURL string) error {
 	}
 	return nil
 }
+
+var schedulerMap = make(map[string]struct{})
+
+// RegisterScheduler registers the scheduler type.
+func RegisterScheduler(typ string) {
+	schedulerMap[typ] = struct{}{}
+}
+
+// IsSchedulerRegistered checks if the named scheduler type is registered.
+func IsSchedulerRegistered(name string) bool {
+	_, ok := schedulerMap[name]
+	return ok
+}
+
+// NewTestOptions creates default options for testing.
+func NewTestOptions() *PersistOptions {
+	// register default schedulers in case config check fail.
+	for _, d := range DefaultSchedulers {
+		RegisterScheduler(d.Type)
+	}
+	c := NewConfig()
+	c.Adjust(nil)
+	return NewPersistOptions(c)
+}

@@ -14,17 +14,16 @@
 package core
 
 import (
-	"fmt"
 	"math"
 	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
 
@@ -434,7 +433,7 @@ var (
 	// be marked as disconnected state. The value should be greater than tikv's
 	// store heartbeat interval (default 10s).
 	storeDisconnectDuration = 20 * time.Second
-	storeUnhealthDuration   = 10 * time.Minute
+	storeUnhealthyDuration  = 10 * time.Minute
 )
 
 // IsDisconnected checks if a store is disconnected, which means PD misses
@@ -444,9 +443,9 @@ func (s *StoreInfo) IsDisconnected() bool {
 	return s.DownTime() > storeDisconnectDuration
 }
 
-// IsUnhealth checks if a store is unhealth.
-func (s *StoreInfo) IsUnhealth() bool {
-	return s.DownTime() > storeUnhealthDuration
+// IsUnhealthy checks if a store is unhealthy.
+func (s *StoreInfo) IsUnhealthy() bool {
+	return s.DownTime() > storeUnhealthyDuration
 }
 
 // GetLabelValue returns a label's value (if exists).
@@ -513,19 +512,6 @@ L:
 	return res
 }
 
-type storeNotFoundErr struct {
-	storeID uint64
-}
-
-func (e storeNotFoundErr) Error() string {
-	return fmt.Sprintf("store %v not found", e.storeID)
-}
-
-// NewStoreNotFoundErr is for log of store not found
-func NewStoreNotFoundErr(storeID uint64) errcode.ErrorCode {
-	return errcode.NewNotFoundErr(storeNotFoundErr{storeID})
-}
-
 // StoresInfo contains information about all stores.
 type StoresInfo struct {
 	stores map[uint64]*StoreInfo
@@ -562,14 +548,13 @@ func (s *StoresInfo) SetStore(store *StoreInfo) {
 }
 
 // PauseLeaderTransfer pauses a StoreInfo with storeID.
-func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) errcode.ErrorCode {
-	op := errcode.Op("store.pause_leader_transfer")
+func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
 	store, ok := s.stores[storeID]
 	if !ok {
-		return op.AddTo(NewStoreNotFoundErr(storeID))
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 	if !store.AllowLeaderTransfer() {
-		return op.AddTo(StorePauseLeaderTransferErr{StoreID: storeID})
+		return errs.ErrPauseLeaderTransfer.FastGenByArgs(storeID)
 	}
 	s.stores[storeID] = store.Clone(PauseLeaderTransfer())
 	return nil
@@ -581,7 +566,7 @@ func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
 		log.Fatal("try to clean a store's pause state, but it is not found",
-			zap.Uint64("store-id", storeID))
+			zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrStoreNotFound.FastGenByArgs(storeID)))
 	}
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
 }

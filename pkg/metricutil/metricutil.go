@@ -59,7 +59,7 @@ func camelCaseToSnakeCase(str string) string {
 	return string(ret)
 }
 
-// prometheusPushClient pushs metrics to Prometheus Pushgateway.
+// prometheusPushClient pushes metrics to Prometheus Pushgateway.
 func prometheusPushClient(job, addr string, interval time.Duration) {
 	pusher := push.New(addr, job).
 		Gatherer(prometheus.DefaultGatherer).
@@ -75,7 +75,7 @@ func prometheusPushClient(job, addr string, interval time.Duration) {
 	}
 }
 
-// Push metircs in background.
+// Push metrics in background.
 func Push(cfg *MetricConfig) {
 	if cfg.PushInterval.Duration == zeroDuration || len(cfg.PushAddress) == 0 {
 		log.Info("disable Prometheus push client")

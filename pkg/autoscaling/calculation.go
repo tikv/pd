@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	promClient "github.com/prometheus/client_golang/api"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -34,7 +35,7 @@ const (
 	groupLabelKey                  = "group"
 	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling-"
 	resourceTypeLabelKey           = "resource-type"
-	millicores                     = 1000
+	milliCores                     = 1000
 )
 
 // TODO: adjust the value or make it configurable.
@@ -43,9 +44,9 @@ var (
 	// This must be long enough to cover at least 2 scrape intervals
 	// Or you will get nothing when querying CPU usage
 	MetricsTimeDuration = 60 * time.Second
-	// MaxScaleOutStep is used to indicate the maxium number of instance for scaling out operations at once.
+	// MaxScaleOutStep is used to indicate the maximum number of instance for scaling out operations at once.
 	MaxScaleOutStep uint64 = 1
-	// MaxScaleInStep is used to indicate the maxium number of instance for scaling in operations at once.
+	// MaxScaleInStep is used to indicate the maximum number of instance for scaling in operations at once.
 	MaxScaleInStep uint64 = 1
 )
 
@@ -56,17 +57,27 @@ func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *St
 		Address: cfg.MetricStorage,
 	})
 	if err != nil {
-		log.Error("error initializing Prometheus client", zap.String("metric-storage", cfg.MetricStorage), zap.Error(err))
+		log.Error("error initializing Prometheus client", zap.String("metric-storage", cfg.MetricStorage), errs.ZapError(errs.ErrPrometheusCreateClient, err))
 		return nil
 	}
 	querier := NewPrometheusQuerier(client)
 
-	if tikvPlans := getPlans(rc, querier, strategy, TiKV); tikvPlans != nil {
-		plans = append(plans, tikvPlans...)
+	components := map[ComponentType]struct{}{}
+	for _, rule := range strategy.Rules {
+		switch rule.Component {
+		case "tidb":
+			components[TiDB] = struct{}{}
+		case "tikv":
+			components[TiKV] = struct{}{}
+		}
 	}
-	if tidbPlans := getPlans(rc, querier, strategy, TiDB); tidbPlans != nil {
-		plans = append(plans, tidbPlans...)
+
+	for comp := range components {
+		if compPlans := getPlans(rc, querier, strategy, comp); compPlans != nil {
+			plans = append(plans, compPlans...)
+		}
 	}
+
 	return plans
 }
 
@@ -85,17 +96,17 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	now := time.Now()
 	totalCPUUseTime, err := getTotalCPUUseTime(querier, component, instances, now, MetricsTimeDuration)
 	if err != nil {
-		log.Error("cannot get total CPU used time", zap.Error(err))
+		log.Error("cannot get total CPU used time", errs.ZapError(err))
 		return nil
 	}
 
 	currentQuota, err := getTotalCPUQuota(querier, component, instances, now)
-	if err != nil {
-		log.Error("cannot get total CPU quota", zap.Error(err))
+	if err != nil || currentQuota == 0 {
+		log.Error("cannot get total CPU quota", errs.ZapError(err))
 		return nil
 	}
 
-	totalCPUTime := float64(currentQuota) / millicores * MetricsTimeDuration.Seconds()
+	totalCPUTime := float64(currentQuota) / milliCores * MetricsTimeDuration.Seconds()
 	usage := totalCPUUseTime / totalCPUTime
 	maxThreshold, minThreshold := getCPUThresholdByComponent(strategy, component)
 
@@ -151,7 +162,7 @@ func getAddresses(instances []instance) []string {
 	return names
 }
 
-// TODO: suppport other metrics storage
+// TODO: support other metrics storage
 // get total CPU use time (in seconds) through Prometheus.
 func getTotalCPUUseTime(querier Querier, component ComponentType, instances []instance, timestamp time.Time, duration time.Duration) (float64, error) {
 	result, err := querier.Query(NewQueryOptions(component, CPUUsage, getAddresses(instances), timestamp, duration))
@@ -167,8 +178,8 @@ func getTotalCPUUseTime(querier Querier, component ComponentType, instances []in
 	return sum, nil
 }
 
-// TODO: suppport other metrics storage
-// get total CPU quota (in millicores) through Prometheus.
+// TODO: support other metrics storage
+// get total CPU quota (in milliCores) through Prometheus.
 func getTotalCPUQuota(querier Querier, component ComponentType, instances []instance, timestamp time.Time) (uint64, error) {
 	result, err := querier.Query(NewQueryOptions(component, CPUQuota, getAddresses(instances), timestamp, 0))
 	if err != nil {
@@ -180,7 +191,7 @@ func getTotalCPUQuota(querier Querier, component ComponentType, instances []inst
 		sum += value
 	}
 
-	quota := uint64(math.Floor(sum * float64(millicores)))
+	quota := uint64(math.Floor(sum * float64(milliCores)))
 
 	return quota, nil
 }
@@ -216,6 +227,10 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 	group := findBestGroupToScaleOut(rc, strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
+	if math.Abs(resCPU) <= 1e-6 {
+		log.Error("resource CPU is zero, exiting calculation")
+		return nil
+	}
 	resCount := getCountByResourceType(strategy, group.ResourceType)
 	scaleOutCount := typeutil.MinUint64(uint64(math.Ceil(scaleOutQuota/resCPU)), MaxScaleOutStep)
 
@@ -244,6 +259,10 @@ func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component
 	}
 	group := findBestGroupToScaleIn(rc, strategy, scaleInQuota, groups)
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
+	if math.Abs(resCPU) <= 1e-6 {
+		log.Error("resource CPU is zero, exiting calculation")
+		return nil
+	}
 	scaleInCount := typeutil.MinUint64(uint64(math.Ceil(scaleInQuota/resCPU)), MaxScaleInStep)
 	for i, g := range groups {
 		if g.ResourceType == group.ResourceType {
@@ -372,15 +391,9 @@ func buildPlans(planMap map[string]map[string]struct{}, resourceTypeMap map[stri
 			Component:    componentType.String(),
 			Count:        uint64(len(groupInstances)),
 			ResourceType: resourceType,
-			Labels: []*metapb.StoreLabel{
-				{
-					Key:   groupLabelKey,
-					Value: groupName,
-				},
-				{
-					Key:   resourceTypeLabelKey,
-					Value: resourceType,
-				},
+			Labels: map[string]string{
+				groupLabelKey:        groupName,
+				resourceTypeLabelKey: resourceType,
 			},
 		})
 	}
@@ -403,17 +416,12 @@ func findBestGroupToScaleOut(rc *cluster.RaftCluster, strategy *Strategy, scaleO
 		Component:    component.String(),
 		Count:        0,
 		ResourceType: resources[0].ResourceType,
-		Labels: []*metapb.StoreLabel{
-			{
-				Key: groupLabelKey,
-				// TODO: we need to make this label not duplicated when we implement the heterogeneous logic.
-				Value: autoScalingGroupLabelKeyPrefix + component.String(),
-			},
-			{
-				Key:   resourceTypeLabelKey,
-				Value: resources[0].ResourceType,
-			},
+		Labels: map[string]string{
+			// TODO: we need to make this label not duplicated when we implement the heterogeneous logic.
+			groupLabelKey:        autoScalingGroupLabelKeyPrefix + component.String(),
+			resourceTypeLabelKey: resources[0].ResourceType,
 		},
 	}
+
 	return group
 }
