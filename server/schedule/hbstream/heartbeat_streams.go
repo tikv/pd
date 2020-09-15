@@ -55,16 +55,16 @@ type HeartbeatStreams struct {
 
 // NewHeartbeatStreams creates a new HeartbeatStreams which enable background running by default.
 func NewHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer) *HeartbeatStreams {
-	return newHeartbeatStreams(ctx, clusterID, storeInformer, true)
+	return newHbStreams(ctx, clusterID, storeInformer, true)
 }
 
 // NewTestHeartbeatStreams creates a new HeartbeatStreams for test purpose only.
 // Please use NewHeartbeatStreams for other usage.
 func NewTestHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
-	return newHeartbeatStreams(ctx, clusterID, storeInformer, needRun)
+	return newHbStreams(ctx, clusterID, storeInformer, needRun)
 }
 
-func newHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
+func newHbStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
 	hbStreamCtx, hbStreamCancel := context.WithCancel(ctx)
 	hs := &HeartbeatStreams{
 		hbStreamCtx:    hbStreamCtx,
@@ -150,6 +150,7 @@ func (s *HeartbeatStreams) run() {
 	}
 }
 
+// Close closes background running.
 func (s *HeartbeatStreams) Close() {
 	s.hbStreamCancel()
 	s.wg.Wait()
