@@ -56,4 +56,4 @@ require (
 
 replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 
-replace github.com/pingcap/kvproto => github.com/yiwu-arbug/kvproto v0.0.0-20200909020201-e9b87ecd4a2d
+replace github.com/pingcap/kvproto => github.com/yiwu-arbug/kvproto v0.0.0-20200915034642-c7863a91fd2a
