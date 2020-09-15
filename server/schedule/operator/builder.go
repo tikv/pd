@@ -135,7 +135,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
 	b.allowDemote = supportJointConsensus
-	b.useJointConsensus = supportJointConsensus
+	b.useJointConsensus = supportJointConsensus && cluster.GetOpts().IsUseJointConsensus()
 	b.err = err
 	return b
 }
