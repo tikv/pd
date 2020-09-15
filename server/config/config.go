@@ -669,6 +669,8 @@ type ScheduleConfig struct {
 	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
 	// EnableDebugMetrics is the option to enable debug metrics.
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
+	// EnableJointConsensus is the option to enable using joint consensus as a operator step.
+	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
@@ -727,6 +729,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
 		EnableLocationReplacement:    c.EnableLocationReplacement,
 		EnableDebugMetrics:           c.EnableDebugMetrics,
+		EnableJointConsensus:         c.EnableJointConsensus,
 		StoreLimitMode:               c.StoreLimitMode,
 		Schedulers:                   schedulers,
 	}
@@ -755,6 +758,7 @@ const (
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
+	defaultEnableJointConsensus        = true
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -802,6 +806,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("store-limit-mode") {
 		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
+	}
+	if !meta.IsDefined("enable-joint-consensus") {
+		c.EnableJointConsensus = defaultEnableJointConsensus
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
