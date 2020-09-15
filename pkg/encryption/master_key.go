@@ -18,8 +18,8 @@ import (
 	"io/ioutil"
 	"strings"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
-	"github.com/pkg/errors"
 )
 
 const (

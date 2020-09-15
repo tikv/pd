@@ -19,9 +19,9 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pkg/errors"
 )
 
 func TestRegionCrypter(t *testing.T) {
@@ -78,8 +78,8 @@ func (m *testKeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
 
 func (s *testRegionCrypterSuite) TestNilRegion(c *C) {
 	m := newTestKeyManager()
-	c.Assert(EncryptRegion(nil, m), IsNil)
-	c.Assert(DecryptRegion(nil, m), IsNil)
+	c.Assert(EncryptRegion(nil, m), Not(IsNil))
+	c.Assert(DecryptRegion(nil, m), Not(IsNil))
 }
 
 func (s *testRegionCrypterSuite) TestEncryptRegionWithoutKeyManager(c *C) {
@@ -215,9 +215,9 @@ func (s *testRegionCrypterSuite) TestDecryptRegion(c *C) {
 	m := newTestKeyManager()
 	err := DecryptRegion(region, m)
 	c.Assert(err, IsNil)
-	// check region is encrypted
+	// check region is decrypted
 	c.Assert(region.EncryptionMeta, IsNil)
-	// Check encrypted content
+	// Check decrypted content
 	key, err := m.GetKey(keyID)
 	c.Assert(err, IsNil)
 	block, err := aes.NewCipher(key.Key)

@@ -16,9 +16,9 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pkg/errors"
 )
 
 // processRegionKeys encrypt or decrypt the start key and end key of the region in-place,
@@ -39,7 +39,7 @@ func processRegionKeys(region *metapb.Region, key *encryptionpb.DataKey, iv []by
 // Note: Call may need to make deep copy of the object if changing the object is undesired.
 func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	if region == nil {
-		return nil
+		return errors.New("trying to encrypt nil region")
 	}
 	if region.EncryptionMeta != nil {
 		return errors.Errorf("region already encrypted, region id = %d", region.Id)
@@ -80,7 +80,7 @@ func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
 // Note: Call may need to make deep copy of the object if changing the object is undesired.
 func DecryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	if region == nil {
-		return nil
+		return errors.New("trying to decrypt nil region")
 	}
 	if region.EncryptionMeta == nil {
 		return nil

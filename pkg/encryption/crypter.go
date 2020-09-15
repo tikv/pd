@@ -21,8 +21,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -50,16 +50,20 @@ func CheckEncryptionMethodSupported(method encryptionpb.EncryptionMethod) error 
 }
 
 // KeyLength return the encryption key length for supported encryption methods.
-func KeyLength(method encryptionpb.EncryptionMethod) int {
+func KeyLength(method encryptionpb.EncryptionMethod) (int, error) {
 	switch method {
 	case encryptionpb.EncryptionMethod_AES128_CTR:
-		return 16
+		return 16, nil
 	case encryptionpb.EncryptionMethod_AES192_CTR:
-		return 24
+		return 24, nil
 	case encryptionpb.EncryptionMethod_AES256_CTR:
-		return 32
+		return 32, nil
 	default:
-		panic("unsupported encryption method")
+		name, ok := encryptionpb.EncryptionMethod_name[int32(method)]
+		if ok {
+			return 0, errors.Errorf("invalid encryption method %s", name)
+		}
+		return 0, errors.Errorf("invalid encryption method %d", int32(method))
 	}
 }
 
@@ -110,7 +114,10 @@ func NewDataKey(
 		return
 	}
 	keyID = binary.BigEndian.Uint64(keyIDBuf)
-	keyLength := KeyLength(method)
+	keyLength, err := KeyLength(method)
+	if err != nil {
+		return
+	}
 	keyBuf := make([]byte, keyLength)
 	n, err = io.ReadFull(rand.Reader, keyBuf)
 	if err != nil {
