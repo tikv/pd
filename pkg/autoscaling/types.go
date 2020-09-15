@@ -179,8 +179,8 @@ func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
 	for _, resp := range resps.Kvs {
 		key := string(resp.Key)
 		if tidbTTLPattern.MatchString(key) {
-			address := key[len(tidbInfoPrefix) : len(key)-len("/info")]
-			// In order to avoid make "aaa/bbb" in "/topology/tidb/aaa/bbb/info" stored as tidb address
+			address := key[len(tidbInfoPrefix) : len(key)-len("/ttl")]
+			// In order to avoid make "aaa/bbb" in "/topology/tidb/aaa/bbb/ttl" stored as tidb address
 			if !strings.Contains(address, "/") {
 				tidbs = append(tidbs, &TiDBInfo{
 					Address: address,
