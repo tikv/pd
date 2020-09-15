@@ -19,5 +19,5 @@ import (
 
 type KeyManager interface {
 	GetCurrentKey() (keyID uint64, key *encryptionpb.DataKey, err error)
-	GetKey(keyId uint64) (key *encryptionpb.DataKey, err error)
+	GetKey(keyID uint64) (key *encryptionpb.DataKey, err error)
 }

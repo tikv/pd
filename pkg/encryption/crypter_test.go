@@ -39,19 +39,19 @@ func (s *testCrypterSuite) TestEncryptionMethodSupported(c *C) {
 }
 
 func (s *testCrypterSuite) TestKeyLength(c *C) {
-	len, err := KeyLength(encryptionpb.EncryptionMethod_PLAINTEXT)
+	length, err := KeyLength(encryptionpb.EncryptionMethod_PLAINTEXT)
 	c.Assert(err, Not(IsNil))
-	len, err = KeyLength(encryptionpb.EncryptionMethod_UNKNOWN)
+	length, err = KeyLength(encryptionpb.EncryptionMethod_UNKNOWN)
 	c.Assert(err, Not(IsNil))
-	len, err = KeyLength(encryptionpb.EncryptionMethod_AES128_CTR)
+	length, err = KeyLength(encryptionpb.EncryptionMethod_AES128_CTR)
 	c.Assert(err, IsNil)
-	c.Assert(len, Equals, 16)
-	len, err = KeyLength(encryptionpb.EncryptionMethod_AES192_CTR)
+	c.Assert(length, Equals, 16)
+	length, err = KeyLength(encryptionpb.EncryptionMethod_AES192_CTR)
 	c.Assert(err, IsNil)
-	c.Assert(len, Equals, 24)
-	len, err = KeyLength(encryptionpb.EncryptionMethod_AES256_CTR)
+	c.Assert(length, Equals, 24)
+	length, err = KeyLength(encryptionpb.EncryptionMethod_AES256_CTR)
 	c.Assert(err, IsNil)
-	c.Assert(len, Equals, 32)
+	c.Assert(length, Equals, 32)
 }
 
 func (s *testCrypterSuite) TestNewIv(c *C) {
