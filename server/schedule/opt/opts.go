@@ -50,9 +50,3 @@ type Cluster interface {
 type HeartbeatStream interface {
 	Send(*pdpb.RegionHeartbeatResponse) error
 }
-
-// HeartbeatStreams is an interface of async region heartbeat.
-type HeartbeatStreams interface {
-	SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse)
-	BindStream(storeID uint64, stream HeartbeatStream)
-}
