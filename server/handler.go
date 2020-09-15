@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/tso"
 	"go.uber.org/zap"
 )
 
@@ -417,6 +416,24 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 		return err
 	}
 	c.SetAllStoresLimit(limitType, ratePerMin)
+	return nil
+}
+
+// SetLabelStoresLimit is used to set limit of label stores.
+func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.Type, labels []*metapb.StoreLabel) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	for _, store := range c.GetStores() {
+		for _, label := range labels {
+			for _, sl := range store.GetLabels() {
+				if label.Key == sl.Key && label.Value == sl.Value {
+					c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -826,7 +843,7 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 
 // ResetTS resets the ts with specified tso.
 func (h *Handler) ResetTS(ts uint64) error {
-	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(config.GlobalDCLocation)
 	if err != nil {
 		return err
 	}

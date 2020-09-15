@@ -21,6 +21,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
@@ -76,7 +77,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	allAllocatorLeaders := make([]tso.Allocator, 0, dcLocationNum)
 	for _, server := range cluster.GetServers() {
 		// Filter out Global TSO Allocator and uninitialized Local TSO Allocator
-		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(tso.GlobalDCLocation), tso.FilterUninitialized())
+		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(config.GlobalDCLocation), tso.FilterUninitialized())
 		// One PD server will have at most three initialized Local TSO Allocators,
 		// which also means three allocator leaders
 		c.Assert(len(allocators), LessEqual, dcLocationNum)
@@ -103,7 +104,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	}
 	for _, server := range cluster.GetServers() {
 		// Filter out Global TSO Allocator
-		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(tso.GlobalDCLocation))
+		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(config.GlobalDCLocation))
 		c.Assert(len(allocators), Equals, dcLocationNum)
 		for _, allocator := range allocators {
 			allocatorFollower, _ := allocator.(*tso.LocalTSOAllocator)

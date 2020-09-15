@@ -457,10 +457,32 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, typ := range typeValues {
-		if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if _, ok := input["labels"]; !ok {
+		for _, typ := range typeValues {
+			if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	} else {
+		labelMap := input["labels"].(map[string]interface{})
+		labels := make([]*metapb.StoreLabel, 0, len(input))
+		for k, v := range labelMap {
+			labels = append(labels, &metapb.StoreLabel{
+				Key:   k,
+				Value: v.(string),
+			})
+		}
+
+		if err := config.ValidateLabels(labels); err != nil {
+			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 			return
+		}
+		for _, typ := range typeValues {
+			if err := h.SetLabelStoresLimit(ratePerMin, typ, labels); err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 	}
 
