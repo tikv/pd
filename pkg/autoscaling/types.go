@@ -161,13 +161,13 @@ func GetTiDB(etcdClient *clientv3.Client, address string) (*TiDBInfo, error) {
 }
 
 const (
-	tidbInfoPatternStr = "/topology/tidb/.+/info"
-	tidbInfoPrefix     = "/topology/tidb/"
+	tidbTTLPatternStr = "/topology/tidb/.+/ttl"
+	tidbInfoPrefix    = "/topology/tidb/"
 )
 
 // GetTiDBs list TiDB register in PD
 func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
-	tidbInfoPattern, err := regexp.Compile(tidbInfoPatternStr)
+	tidbTTLPattern, err := regexp.Compile(tidbTTLPatternStr)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
 	tidbs := make([]*TiDBInfo, 0, resps.Count)
 	for _, resp := range resps.Kvs {
 		key := string(resp.Key)
-		if tidbInfoPattern.MatchString(key) {
+		if tidbTTLPattern.MatchString(key) {
 			address := key[len(tidbInfoPrefix) : len(key)-len("/info")]
 			// In order to avoid make "aaa/bbb" in "/topology/tidb/aaa/bbb/info" stored as tidb address
 			if !strings.Contains(address, "/") {
