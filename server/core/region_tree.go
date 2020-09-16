@@ -150,9 +150,6 @@ func (t *regionTree) searchPrev(regionKey []byte) *RegionInfo {
 // find is a helper function to find an item that contains the regions start
 // key.
 func (t *regionTree) find(region *RegionInfo) *regionItem {
-	if t == nil {
-		return nil
-	}
 	item := &regionItem{region: region}
 
 	var result *regionItem
