@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/core/storelimit"
 )
 
 // PersistOptions wraps all configurations that need to persist to storage and
@@ -385,9 +385,14 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
 
-// IsDebugMetricsEnabled mocks method
+// IsDebugMetricsEnabled returns if debug metrics is enabled.
 func (o *PersistOptions) IsDebugMetricsEnabled() bool {
 	return o.GetScheduleConfig().EnableDebugMetrics
+}
+
+// IsUseJointConsensus returns if using joint consensus as a operator step is enabled.
+func (o *PersistOptions) IsUseJointConsensus() bool {
+	return o.GetScheduleConfig().EnableJointConsensus
 }
 
 // GetHotRegionCacheHitsThreshold is a threshold to decide if a region is hot.

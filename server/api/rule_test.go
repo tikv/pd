@@ -709,6 +709,25 @@ func (s *testRuleSuite) TestBundle(c *C) {
 	compareBundle(c, bundles[0], b1)
 }
 
+func (s *testRuleSuite) TestBundleBadRequest(c *C) {
+	testCases := []struct {
+		uri  string
+		data string
+		ok   bool
+	}{
+		{"/placement-rule/foo", `{"group_id":"foo"}`, true},
+		{"/placement-rule/foo", `{"group_id":"bar"}`, false},
+		{"/placement-rule/foo", `{"group_id":"foo", "rules": [{"group_id":"foo", "id":"baz", "role":"voter", "count":1}]}`, true},
+		{"/placement-rule/foo", `{"group_id":"foo", "rules": [{"group_id":"bar", "id":"baz", "role":"voter", "count":1}]}`, false},
+		{"/placement-rule", `[{"group_id":"foo", "rules": [{"group_id":"foo", "id":"baz", "role":"voter", "count":1}]}]`, true},
+		{"/placement-rule", `[{"group_id":"foo", "rules": [{"group_id":"bar", "id":"baz", "role":"voter", "count":1}]}]`, false},
+	}
+	for _, tc := range testCases {
+		err := postJSON(testDialClient, s.urlPrefix+tc.uri, []byte(tc.data))
+		c.Assert(err == nil, Equals, tc.ok)
+	}
+}
+
 func compareBundle(c *C, b1, b2 placement.GroupBundle) {
 	c.Assert(b1.ID, Equals, b2.ID)
 	c.Assert(b1.Index, Equals, b2.Index)

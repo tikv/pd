@@ -181,7 +181,7 @@ func CreateScatterRegionOperator(desc string, cluster opt.Cluster, origin *core.
 
 // CreateLeaveJointStateOperator creates an operator that let region leave joint state.
 func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *core.RegionInfo) (*Operator, error) {
-	b := newBuilderWithBasicCheck(desc, cluster, origin)
+	b := NewBuilder(desc, cluster, origin, SkipOriginJointStateCheck)
 
 	if b.err == nil && !core.IsInJointState(origin.GetPeers()...) {
 		b.err = errors.Errorf("cannot build leave joint state operator for region which is not in joint state")

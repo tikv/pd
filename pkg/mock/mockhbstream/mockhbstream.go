@@ -14,9 +14,7 @@
 package mockhbstream
 
 import (
-	"context"
 	"errors"
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -59,98 +57,5 @@ func (s HeartbeatStream) Recv() *pdpb.RegionHeartbeatResponse {
 		return nil
 	case res := <-s.ch:
 		return res
-	}
-}
-
-type streamUpdate struct {
-	storeID uint64
-	stream  opt.HeartbeatStream
-}
-
-// HeartbeatStreams is used to mock heartbeat streams for test use.
-type HeartbeatStreams struct {
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
-	clusterID uint64
-	streams   map[uint64]opt.HeartbeatStream
-	streamCh  chan streamUpdate
-	msgCh     chan *pdpb.RegionHeartbeatResponse
-}
-
-// NewHeartbeatStreams creates a new HeartbeatStreams.
-func NewHeartbeatStreams(clusterID uint64, noNeedRun bool) *HeartbeatStreams {
-	ctx, cancel := context.WithCancel(context.Background())
-	hs := &HeartbeatStreams{
-		ctx:       ctx,
-		cancel:    cancel,
-		clusterID: clusterID,
-		streams:   make(map[uint64]opt.HeartbeatStream),
-		streamCh:  make(chan streamUpdate, 1),
-		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, 1024),
-	}
-	if noNeedRun {
-		return hs
-	}
-	hs.wg.Add(1)
-	go hs.run()
-	return hs
-}
-
-func (mhs *HeartbeatStreams) run() {
-	defer mhs.wg.Done()
-	for {
-		select {
-		case update := <-mhs.streamCh:
-			mhs.streams[update.storeID] = update.stream
-		case msg := <-mhs.msgCh:
-			storeID := msg.GetTargetPeer().GetStoreId()
-			if stream, ok := mhs.streams[storeID]; ok {
-				stream.Send(msg)
-			}
-		case <-mhs.ctx.Done():
-			return
-		}
-	}
-}
-
-// Close mock method.
-func (mhs *HeartbeatStreams) Close() {
-	mhs.cancel()
-	mhs.wg.Wait()
-}
-
-// SendMsg is used to send the message.
-func (mhs *HeartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
-	if region.GetLeader() == nil {
-		return
-	}
-
-	msg.Header = &pdpb.ResponseHeader{ClusterId: mhs.clusterID}
-	msg.RegionId = region.GetID()
-	msg.RegionEpoch = region.GetRegionEpoch()
-	msg.TargetPeer = region.GetLeader()
-
-	select {
-	case mhs.msgCh <- msg:
-	case <-mhs.ctx.Done():
-	}
-}
-
-// MsgCh returns the internal channel which contains the heartbeat responses
-// from PD. It can be used to inspect the content of a PD response
-func (mhs *HeartbeatStreams) MsgCh() chan *pdpb.RegionHeartbeatResponse {
-	return mhs.msgCh
-}
-
-// BindStream mock method.
-func (mhs *HeartbeatStreams) BindStream(storeID uint64, stream opt.HeartbeatStream) {
-	update := streamUpdate{
-		storeID: storeID,
-		stream:  stream,
-	}
-	select {
-	case mhs.streamCh <- update:
-	case <-mhs.ctx.Done():
 	}
 }

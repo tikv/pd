@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
-	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 )
