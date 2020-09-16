@@ -35,6 +35,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20200916031750-f9473f2c5379
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
 	github.com/pingcap/sysutil v0.0.0-20200715082929-4c47bcac246a
+	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.0.0
 	github.com/prometheus/common v0.4.1
 	github.com/sasha-s/go-deadlock v0.2.0

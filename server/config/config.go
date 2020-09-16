@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/metricutil"
@@ -121,7 +122,7 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
-	Security grpcutil.SecurityConfig `toml:"security" json:"security"`
+	Security SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
@@ -542,6 +543,8 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	c.Dashboard.adjust(configMetaData.Child("dashboard"))
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
+
+	c.Security.Encryption.Adjust()
 
 	return nil
 }
@@ -1363,4 +1366,10 @@ func (c *LocalTSOConfig) Validate() error {
 		return errors.New(errMsg)
 	}
 	return nil
+}
+
+// SecurityConfig is the configuration for TLS and encryption.
+type SecurityConfig struct {
+	grpcutil.SecurityConfig
+	Encryption encryption.Config `toml:"encryption" json:"encryption"`
 }
