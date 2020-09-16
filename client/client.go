@@ -54,8 +54,8 @@ type Client interface {
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
 	GetRegion(ctx context.Context, key []byte) (*Region, error)
-	// GetRegionFromMember gets a region from the server which responds earliest
-	GetRegionFromMember(ctx context.Context, key []byte) (*Region, error)
+	// GetRegionFromMember gets a region from certain members
+	GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error)
 	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
 	GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
@@ -490,16 +490,14 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 	return c.parseRegionResponse(resp), nil
 }
 
-func (c *client) waitForRegion(ctx context.Context, key []byte) (*pdpb.GetRegionResponse, error) {
+func (c *client) waitForRegion(ctx context.Context, key []byte, memberURLs []string) (*pdpb.GetRegionResponse, error) {
 	childContext, cancel := context.WithCancel(ctx)
 
-	ch := make(chan *pdpb.GetRegionResponse, len(c.connMu.clientConns))
+	ch := make(chan *pdpb.GetRegionResponse, len(memberURLs))
 
-	c.connMu.RLock()
-	for _, conn := range c.connMu.clientConns {
-		go c.getRegionResponse(childContext, pdpb.NewPDClient(conn), key, ch)
+	for _, memberURL := range memberURLs {
+		go c.getRegionResponse(childContext, memberURL, key, ch)
 	}
-	c.connMu.RUnlock()
 
 	var resp *pdpb.GetRegionResponse
 
@@ -520,7 +518,9 @@ func (c *client) waitForRegion(ctx context.Context, key []byte) (*pdpb.GetRegion
 	return resp, nil
 }
 
-func (c *client) getRegionResponse(ctx context.Context, cc pdpb.PDClient, key []byte, ch chan<- *pdpb.GetRegionResponse) {
+func (c *client) getRegionResponse(ctx context.Context, url string, key []byte, ch chan<- *pdpb.GetRegionResponse) {
+	conn, _ := c.getOrCreateGRPCConn(url)
+	cc := pdpb.NewPDClient(conn)
 	resp, err := cc.GetRegion(ctx, &pdpb.GetRegionRequest{
 		Header:    c.requestHeader(),
 		RegionKey: key,
@@ -537,7 +537,7 @@ func (c *client) getRegionResponse(ctx context.Context, cc pdpb.PDClient, key []
 	}
 }
 
-func (c *client) GetRegionFromMember(ctx context.Context, key []byte) (*Region, error) {
+func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -546,7 +546,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte) (*Region, 
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
 	childContext, cancel := context.WithTimeout(ctx, c.timeout)
-	resp, err := c.waitForRegion(childContext, key)
+	resp, err := c.waitForRegion(childContext, key, memberURLs)
 	cancel()
 
 	if err != nil {
