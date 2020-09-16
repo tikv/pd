@@ -67,8 +67,9 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	apiRouter.HandleFunc("/schedulers", schedulerHandler.Post).Methods("POST")
 	apiRouter.HandleFunc("/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
 	apiRouter.HandleFunc("/schedulers/{name}", schedulerHandler.PauseOrResume).Methods("POST")
+
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	rootRouter.PathPrefix(server.SchedulerConfigHandlerPath).Handler(schedulerConfigHandler)
+	apiRouter.PathPrefix("/scheduler-config").Handler(schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
 	apiRouter.Handle("/cluster", clusterHandler).Methods("GET")
