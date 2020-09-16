@@ -52,7 +52,7 @@ import (
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/urfave/negroni"
@@ -124,7 +124,7 @@ type Server struct {
 	// for raft cluster
 	cluster *cluster.RaftCluster
 	// For async region heartbeat.
-	hbStreams *heartbeatStreams
+	hbStreams *hbstream.HeartbeatStreams
 	// Zap logger
 	lg       *zap.Logger
 	logProps *log.ZapProperties
@@ -365,7 +365,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
-	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
@@ -683,7 +683,7 @@ func (s *Server) GetPersistOptions() *config.PersistOptions {
 }
 
 // GetHBStreams returns the heartbeat streams.
-func (s *Server) GetHBStreams() opt.HeartbeatStreams {
+func (s *Server) GetHBStreams() *hbstream.HeartbeatStreams {
 	return s.hbStreams
 }
 

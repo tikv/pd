@@ -100,7 +100,7 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 	c.Assert(builder.targetPeers[3], DeepEquals, m[3])
 	c.Assert(builder.targetPeers[4], DeepEquals, m[4])
 	c.Assert(builder.targetLeaderStoreID, Equals, uint64(0))
-	c.Assert(builder.isLightWeight, IsTrue)
+	c.Assert(builder.lightWeight, IsTrue)
 }
 
 func (s *testBuilderSuite) TestPrepareBuild(c *C) {

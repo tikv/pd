@@ -19,6 +19,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
 )
 
 var _ = Suite(&testJointStateCheckerSuite{})
@@ -39,8 +40,8 @@ func (s *testJointStateCheckerSuite) SetUpTest(c *C) {
 func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 	jsc := s.jsc
 	type testCase struct {
-		Peers []*metapb.Peer // first is leader
-		OpLen int
+		Peers   []*metapb.Peer // first is leader
+		OpSteps []operator.OpStep
 	}
 	cases := []testCase{
 		{
@@ -49,7 +50,12 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
 			},
-			1,
+			[]operator.OpStep{
+				operator.ChangePeerV2Leave{
+					PromoteLearners: []operator.PromoteLearner{{ToStore: 3}},
+					DemoteVoters:    []operator.DemoteVoter{{ToStore: 2}},
+				},
+			},
 		},
 		{
 			[]*metapb.Peer{
@@ -57,7 +63,12 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
 			},
-			1,
+			[]operator.OpStep{
+				operator.ChangePeerV2Leave{
+					PromoteLearners: []operator.PromoteLearner{{ToStore: 3}},
+					DemoteVoters:    []operator.DemoteVoter{},
+				},
+			},
 		},
 		{
 			[]*metapb.Peer{
@@ -65,7 +76,12 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
 			},
-			1,
+			[]operator.OpStep{
+				operator.ChangePeerV2Leave{
+					PromoteLearners: []operator.PromoteLearner{},
+					DemoteVoters:    []operator.DemoteVoter{{ToStore: 2}},
+				},
+			},
 		},
 		{
 			[]*metapb.Peer{
@@ -73,7 +89,13 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
 			},
-			2,
+			[]operator.OpStep{
+				operator.TransferLeader{FromStore: 1, ToStore: 2},
+				operator.ChangePeerV2Leave{
+					PromoteLearners: []operator.PromoteLearner{},
+					DemoteVoters:    []operator.DemoteVoter{{ToStore: 1}},
+				},
+			},
 		},
 		{
 			[]*metapb.Peer{
@@ -81,7 +103,7 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
 			},
-			0,
+			nil,
 		},
 		{
 			[]*metapb.Peer{
@@ -89,18 +111,45 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_Learner},
 			},
-			0,
+			nil,
 		},
 	}
 
 	for _, tc := range cases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.Peers}, tc.Peers[0])
 		op := jsc.Check(region)
-		if tc.OpLen == 0 {
-			c.Assert(op, IsNil)
-		} else {
-			c.Assert(op.Desc(), Equals, "leave-joint-state")
-			c.Assert(op.Len(), Equals, tc.OpLen)
+		s.checkSteps(c, op, tc.OpSteps)
+	}
+}
+
+func (s *testJointStateCheckerSuite) checkSteps(c *C, op *operator.Operator, steps []operator.OpStep) {
+	if len(steps) == 0 {
+		c.Assert(op, IsNil)
+		return
+	}
+
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "leave-joint-state")
+
+	c.Assert(op.Len(), Equals, len(steps))
+	for i := range steps {
+		switch obtain := op.Step(i).(type) {
+		case operator.ChangePeerV2Leave:
+			expect := steps[i].(operator.ChangePeerV2Leave)
+			c.Assert(len(obtain.PromoteLearners), Equals, len(expect.PromoteLearners))
+			c.Assert(len(obtain.DemoteVoters), Equals, len(expect.DemoteVoters))
+			for j, p := range expect.PromoteLearners {
+				c.Assert(expect.PromoteLearners[j].ToStore, Equals, p.ToStore)
+			}
+			for j, d := range expect.DemoteVoters {
+				c.Assert(obtain.DemoteVoters[j].ToStore, Equals, d.ToStore)
+			}
+		case operator.TransferLeader:
+			expect := steps[i].(operator.TransferLeader)
+			c.Assert(obtain.FromStore, Equals, expect.FromStore)
+			c.Assert(obtain.ToStore, Equals, expect.ToStore)
+		default:
+			c.Fatal("unknown operator step type")
 		}
 	}
 }
