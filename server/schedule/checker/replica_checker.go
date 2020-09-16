@@ -68,6 +68,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 	if op := r.checkMakeUpReplica(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
+		op.SetPriorityLevel(core.HighPriority)
 		return op
 	}
 	if op := r.checkRemoveExtraReplica(region); op != nil {
