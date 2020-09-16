@@ -173,6 +173,11 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 				schedulerCounter.WithLabelValues(s.GetName(), "region-hot").Inc()
 				continue
 			}
+			// Check region whether have leader
+			if region.GetLeader() == nil {
+				log.Debug("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
+				continue
+			}
 
 			oldPeer := region.GetStorePeer(sourceID)
 			if op := s.transferPeer(cluster, region, oldPeer); op != nil {
