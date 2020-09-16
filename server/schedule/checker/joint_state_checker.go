@@ -43,5 +43,6 @@ func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
 		log.Debug("fail to create leave joint state operator", zap.Error(err))
 		return nil
 	}
+	op.SetPriorityLevel(core.HighPriority)
 	return op
 }
