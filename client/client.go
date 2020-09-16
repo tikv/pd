@@ -15,6 +15,7 @@ package pd
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -491,50 +492,30 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 }
 
 func (c *client) waitForRegion(ctx context.Context, key []byte, memberURLs []string) (*pdpb.GetRegionResponse, error) {
-	childContext, cancel := context.WithCancel(ctx)
-
-	ch := make(chan *pdpb.GetRegionResponse, len(memberURLs))
-
 	for _, memberURL := range memberURLs {
-		go c.getRegionResponse(childContext, memberURL, key, ch)
-	}
-
-	var resp *pdpb.GetRegionResponse
-
-	for resp = range ch {
-		if resp != nil {
-			cancel()
-			close(ch)
-			break
+		if resp, err := c.getRegionResponse(ctx, memberURL, key); err == nil && resp != nil {
+			return resp, nil
 		}
 	}
 
-	if resp == nil {
-		cancel()
-		return nil, errors.New("[pd] can't get region info from all servers")
-	}
-
-	cancel()
-	return resp, nil
+	errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %v", memberURLs)
+	return nil, errors.New(errorMsg)
 }
 
-func (c *client) getRegionResponse(ctx context.Context, url string, key []byte, ch chan<- *pdpb.GetRegionResponse) {
+func (c *client) getRegionResponse(ctx context.Context, url string, key []byte) (*pdpb.GetRegionResponse, error) {
 	conn, _ := c.getOrCreateGRPCConn(url)
 	cc := pdpb.NewPDClient(conn)
 	resp, err := cc.GetRegion(ctx, &pdpb.GetRegionRequest{
 		Header:    c.requestHeader(),
 		RegionKey: key,
 	})
+
 	if err != nil {
 		log.Error("[pd] get region error", errs.ZapError(errs.ErrGetRegion, err))
-		resp = nil
+		return resp, err
 	}
 
-	select {
-	case <-ctx.Done():
-	case ch <- resp:
-		return
-	}
+	return resp, nil
 }
 
 func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error) {
