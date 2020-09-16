@@ -245,6 +245,11 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	mc.PutStore(store)
 }
 
+// AddRegionInfo supports add regionInfo directly
+func (mc *Cluster) AddRegionInfo(regionInfo *core.RegionInfo) {
+	mc.PutRegion(regionInfo)
+}
+
 // AddRegionStoreWithLeader adds store with specified count of region and leader.
 func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, leaderCounts ...int) {
 	leaderCount := regionCount
@@ -292,7 +297,7 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, follow
 
 // AddRegionWithLearner adds region with specified leader, followers and learners.
 func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, followerStoreIDs, learnerStoreIDs []uint64) *core.RegionInfo {
-	origin := mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)
+	origin := mc.MockRegionInfo(regionID, &leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)
 	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
@@ -535,7 +540,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 }
 
 func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
-	return mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, []uint64{}, nil)
+	return mc.MockRegionInfo(regionID, &leaderStoreID, followerStoreIDs, []uint64{}, nil)
 }
 
 // CheckLabelProperty checks label property.
@@ -574,7 +579,8 @@ func (mc *Cluster) RemoveScheduler(name string) error {
 }
 
 // MockRegionInfo returns a mock region
-func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
+// If leaderStoreID is undefined, the regions would have no leader
+func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID *uint64,
 	followerStoreIDs, learnerStoreIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
 
 	region := &metapb.Region{
@@ -583,8 +589,12 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
 		RegionEpoch: epoch,
 	}
-	leader, _ := mc.AllocPeer(leaderStoreID)
-	region.Peers = []*metapb.Peer{leader}
+	region.Peers = []*metapb.Peer{}
+	var leader *metapb.Peer
+	if leaderStoreID != nil {
+		leader, _ = mc.AllocPeer(*leaderStoreID)
+		region.Peers = append(region.Peers, leader)
+	}
 	for _, storeID := range followerStoreIDs {
 		peer, _ := mc.AllocPeer(storeID)
 		region.Peers = append(region.Peers, peer)
