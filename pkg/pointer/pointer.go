@@ -13,6 +13,7 @@
 
 package pointer
 
+// UInt64Ptr return the pointer for the given value
 func UInt64Ptr(value uint64) *uint64 {
 	return &value
 }
