@@ -43,7 +43,7 @@ import (
 	"github.com/tikv/pd/server/replication"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
-	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
@@ -64,7 +64,7 @@ type Server interface {
 	GetConfig() *config.Config
 	GetPersistOptions() *config.PersistOptions
 	GetStorage() *core.Storage
-	GetHBStreams() opt.HeartbeatStreams
+	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
 	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
@@ -249,7 +249,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
-	c.regionStats = statistics.NewRegionStatistics(c.opt)
+	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.quit = make(chan struct{})
 
@@ -386,7 +386,7 @@ func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
 }
 
 // GetHeartbeatStreams returns the heartbeat streams.
-func (c *RaftCluster) GetHeartbeatStreams() opt.HeartbeatStreams {
+func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.hbStreams
