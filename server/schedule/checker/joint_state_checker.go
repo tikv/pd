@@ -35,14 +35,21 @@ func NewJointStateChecker(cluster opt.Cluster) *JointStateChecker {
 
 // Check verifies a region's role, creating an Operator if need.
 func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
+	checkerCounter.WithLabelValues("joint_state_checker", "check").Inc()
 	if !core.IsInJointState(region.GetPeers()...) {
 		return nil
 	}
 	op, err := operator.CreateLeaveJointStateOperator("leave-joint-state", c.cluster, region)
 	if err != nil {
+		checkerCounter.WithLabelValues("joint_state_checker", "create-operator-fail").Inc()
 		log.Debug("fail to create leave joint state operator", zap.Error(err))
 		return nil
+	} else if op != nil {
+		checkerCounter.WithLabelValues("joint_state_checker", "new-operator").Inc()
+		if op.Len() > 1 {
+			checkerCounter.WithLabelValues("joint_state_checker", "transfer-leader").Inc()
+		}
+		op.SetPriorityLevel(core.HighPriority)
 	}
-	op.SetPriorityLevel(core.HighPriority)
 	return op
 }
