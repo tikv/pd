@@ -32,7 +32,7 @@ require (
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/errors v0.11.5-0.20200902104258-eba4f1d8f6de
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
-	github.com/pingcap/kvproto v0.0.0-20200827082727-23dedec2339b
+	github.com/pingcap/kvproto v0.0.0-20200916031750-f9473f2c5379
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
 	github.com/pingcap/sysutil v0.0.0-20200715082929-4c47bcac246a
 	github.com/prometheus/client_golang v1.0.0
@@ -55,5 +55,3 @@ require (
 )
 
 replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
-
-replace github.com/pingcap/kvproto => github.com/yiwu-arbug/kvproto v0.0.0-20200915034642-c7863a91fd2a
