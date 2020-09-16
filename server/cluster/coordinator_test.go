@@ -246,7 +246,11 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream opt.Hear
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
+<<<<<<< HEAD
 		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpt())
+=======
+		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil)
+>>>>>>> cb96984... statistics: fix statistics.Observe result error when placementRule is enabled (#2948)
 	}, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
