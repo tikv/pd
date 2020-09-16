@@ -86,12 +86,12 @@ func newIV(ivLength int) ([]byte, error) {
 	return iv, nil
 }
 
-// NewIvCtr randomly generate an IV for CTR mode.
+// NewIvGcm randomly generate an IV for CTR mode.
 func NewIvCtr() (IvCtr, error) {
 	return newIV(ivLengthCTR)
 }
 
-// NewIvCtr randomly generate an IV for GCM mode.
+// NewIvGcm randomly generate an IV for GCM mode.
 func NewIvGcm() (IvGcm, error) {
 	return newIV(ivLengthGCM)
 }

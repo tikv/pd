@@ -17,6 +17,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 )
 
+// KeyManager maintains the list to encryption keys. It handles encryption key generation and
+// rotation, persisting and loading encryption keys.
 type KeyManager interface {
 	GetCurrentKey() (keyID uint64, key *encryptionpb.DataKey, err error)
 	GetKey(keyID uint64) (key *encryptionpb.DataKey, err error)
