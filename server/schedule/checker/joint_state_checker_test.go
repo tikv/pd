@@ -128,6 +128,7 @@ func (s *testJointStateCheckerSuite) checkSteps(c *C, op *operator.Operator, ste
 		return
 	}
 
+	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "leave-joint-state")
 
 	c.Assert(op.Len(), Equals, len(steps))
