@@ -86,7 +86,7 @@ func newIV(ivLength int) ([]byte, error) {
 	return iv, nil
 }
 
-// NewIvGcm randomly generate an IV for CTR mode.
+// NewIvCtr randomly generate an IV for CTR mode.
 func NewIvCtr() (IvCtr, error) {
 	return newIV(ivLengthCTR)
 }
@@ -175,7 +175,7 @@ func AesGcmEncrypt(
 	return
 }
 
-// AesGcmEncrypt encrypt given plaintext with given key using aes256-gcm.
+// AesGcmDecrypt decrypt given ciphertext with given key using aes256-gcm.
 // The method is used to decrypt data keys.
 func AesGcmDecrypt(
 	key []byte,
