@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package encryption
+package encryption_key_manager
 
 import (
 	"github.com/pingcap/kvproto/pkg/encryptionpb"

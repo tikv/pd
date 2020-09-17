@@ -47,7 +47,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/encryption"
+	ekm "github.com/tikv/pd/server/encryption_key_manager"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
@@ -117,7 +117,7 @@ type Server struct {
 	// a unique ID.
 	idAllocator *id.AllocatorImpl
 	// for encryption
-	encryptionKeyManager *encryption.KeyManager
+	encryptionKeyManager *ekm.KeyManager
 	// for storage operation.
 	storage *core.Storage
 	// for basicCluster operation.
@@ -360,7 +360,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
-	encryptionKeyManager, err := encryption.NewKeyManager(kvBase, &s.cfg.Security.Encryption)
+	encryptionKeyManager, err := ekm.NewKeyManager(kvBase, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}

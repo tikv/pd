@@ -22,9 +22,9 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	crypter "github.com/tikv/pd/pkg/encryption"
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/server/encryption"
+	ekm "github.com/tikv/pd/server/encryption_key_manager"
 	"github.com/tikv/pd/server/kv"
 )
 
@@ -33,7 +33,7 @@ var dirtyFlushTick = time.Second
 // RegionStorage is used to save regions.
 type RegionStorage struct {
 	*kv.LeveldbKV
-	encryptionKeyManager *encryption.KeyManager
+	encryptionKeyManager *ekm.KeyManager
 	mu                   sync.RWMutex
 	batchRegions         map[string]*metapb.Region
 	batchSize            int
@@ -55,7 +55,7 @@ const (
 func NewRegionStorage(
 	ctx context.Context,
 	path string,
-	encryptionKeyManager *encryption.KeyManager,
+	encryptionKeyManager *ekm.KeyManager,
 ) (*RegionStorage, error) {
 	levelDB, err := kv.NewLeveldbKV(path)
 	if err != nil {
@@ -105,7 +105,7 @@ func (s *RegionStorage) backgroundFlush() {
 
 // SaveRegion saves one region to storage.
 func (s *RegionStorage) SaveRegion(region *metapb.Region) error {
-	err := crypter.EncryptRegion(region, s.encryptionKeyManager)
+	err := encryption.EncryptRegion(region, s.encryptionKeyManager)
 	if err != nil {
 		return err
 	}
@@ -133,10 +133,10 @@ func deleteRegion(kv kv.Base, region *metapb.Region) error {
 
 func saveRegion(
 	kv kv.Base,
-	encryptionKeyManager *encryption.KeyManager,
+	encryptionKeyManager *ekm.KeyManager,
 	region *metapb.Region,
 ) error {
-	err := crypter.EncryptRegion(region, encryptionKeyManager)
+	err := encryption.EncryptRegion(region, encryptionKeyManager)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func saveRegion(
 
 func loadRegion(
 	kv kv.Base,
-	encryptionKeyManager *encryption.KeyManager,
+	encryptionKeyManager *ekm.KeyManager,
 	regionID uint64,
 	region *metapb.Region,
 ) (ok bool, err error) {
@@ -164,13 +164,13 @@ func loadRegion(
 	if err != nil {
 		return true, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
 	}
-	err = crypter.DecryptRegion(region, encryptionKeyManager)
+	err = encryption.DecryptRegion(region, encryptionKeyManager)
 	return true, err
 }
 
 func loadRegions(
 	kv kv.Base,
-	encryptionKeyManager *encryption.KeyManager,
+	encryptionKeyManager *ekm.KeyManager,
 	f func(region *RegionInfo) []*RegionInfo,
 ) error {
 	nextID := uint64(0)
@@ -195,7 +195,7 @@ func loadRegions(
 			if err := region.Unmarshal([]byte(s)); err != nil {
 				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
 			}
-			if err = crypter.DecryptRegion(region, encryptionKeyManager); err != nil {
+			if err = encryption.DecryptRegion(region, encryptionKeyManager); err != nil {
 				return err
 			}
 
