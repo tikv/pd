@@ -14,16 +14,21 @@
 package tso
 
 import (
-	"sync/atomic"
+	"context"
+	"fmt"
+	"sync"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 // Allocator is a Timestamp Oracle allocator.
@@ -52,10 +57,17 @@ type GlobalTSOAllocator struct {
 	// to determine whether a TSO request could be processed.
 	leadership      *election.Leadership
 	timestampOracle *timestampOracle
+	// for global TSO synchronization
+	allocatorManager *AllocatorManager
+	// for gRPC use
+	localAllocatorConn struct {
+		sync.RWMutex
+		clientConns map[string]*grpc.ClientConn
+	}
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
-func NewGlobalTSOAllocator(leadership *election.Leadership, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
+func NewGlobalTSOAllocator(am *AllocatorManager, leadership *election.Leadership, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
 	return &GlobalTSOAllocator{
 		leadership: leadership,
 		timestampOracle: &timestampOracle{
@@ -63,6 +75,13 @@ func NewGlobalTSOAllocator(leadership *election.Leadership, rootPath string, sav
 			rootPath:      rootPath,
 			saveInterval:  saveInterval,
 			maxResetTSGap: maxResetTSGap,
+		},
+		allocatorManager: am,
+		localAllocatorConn: struct {
+			sync.RWMutex
+			clientConns map[string]*grpc.ClientConn
+		}{
+			clientConns: make(map[string]*grpc.ClientConn),
 		},
 	}
 }
@@ -90,47 +109,145 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	var resp pdpb.Timestamp
-
-	if count == 0 {
-		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
+	// To check if we have any dc-location configured in the cluster
+	dcLocationMap, err := gta.allocatorManager.GetClusterDCLocations()
+	if err != nil {
+		log.Error("get cluster dc-locations info failed", errs.ZapError(err))
+		return pdpb.Timestamp{}, err
 	}
-
-	maxRetryCount := 10
-	failpoint.Inject("skipRetryGetTS", func() {
-		maxRetryCount = 1
-	})
-
-	for i := 0; i < maxRetryCount; i++ {
-		current := (*atomicObject)(atomic.LoadPointer(&gta.timestampOracle.TSO))
-		if current == nil || current.physical == typeutil.ZeroTime {
-			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			if gta.leadership.Check() {
-				log.Info("sync hasn't completed yet, wait for a while")
-				time.Sleep(200 * time.Millisecond)
-				continue
+	// No dc-locations configured in the cluster
+	if len(dcLocationMap) == 0 {
+		return gta.timestampOracle.getTS(gta.leadership, count)
+	}
+	// Colletc all allocator leaders' client URLs
+	allocatorLeaders, err := gta.allocatorManager.GetLocalAllocatorLeaders()
+	if err != nil {
+		return pdpb.Timestamp{}, err
+	}
+	leaderURLs := make([]string, 0, len(allocatorLeaders))
+	for _, allocator := range allocatorLeaders {
+		for _, leaderURL := range allocator.GetMember().GetClientUrls() {
+			if slice.NoneOf(leaderURLs, func(i int) bool { return leaderURLs[i] == leaderURL }) {
+				leaderURLs = append(leaderURLs, leaderURL)
 			}
-			log.Error("invalid timestamp", zap.Any("timestamp", current), errs.ZapError(errs.ErrInvalidTimestamp))
-			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
-
-		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
-		resp.Logical = atomic.AddInt64(&current.logical, int64(count))
-		if resp.Logical >= maxLogical {
-			log.Error("logical part outside of max logical interval, please check ntp time",
-				zap.Reflect("response", resp),
-				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
-			tsoCounter.WithLabelValues("logical_overflow").Inc()
-			time.Sleep(UpdateTimestampStep)
-			continue
-		}
-		// In case lease expired after the first check.
-		if !gta.leadership.Check() {
-			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd leader")
-		}
-		return resp, nil
 	}
-	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
+	// Send maxTS to all Local TSO Allocator leaders to prewrite
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var maxTS time.Time
+	// Collect the MaxTS with all Local TSO Allocator leaders first
+	if maxTS, err = gta.syncMaxTS(ctx, leaderURLs, dcLocationMap, maxTS); err != nil {
+		return pdpb.Timestamp{}, err
+	}
+	maxTS = maxTS.Add(updateTimestampGuard)
+	// Sync the MaxTS with all Local TSO Allocator leaders then
+	if _, err := gta.syncMaxTS(ctx, leaderURLs, dcLocationMap, maxTS); err != nil {
+		return pdpb.Timestamp{}, err
+	}
+	globalTSO := tsoutil.GenerateTimestamp(maxTS, 0)
+	// Update the global TSO in memory
+	if err := gta.SetTSO(tsoutil.GenerateTS(globalTSO)); err != nil {
+		return pdpb.Timestamp{}, err
+	}
+	return *globalTSO, nil
+}
+
+const (
+	dialTimeout = 3 * time.Second
+	rpcTimeout  = 3 * time.Second
+)
+
+func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, leaderURLs []string, dcLocationMap map[string][]uint64, maxTS time.Time) (time.Time, error) {
+	respCh := make(chan *pdpb.SyncMaxTSResponse, len(leaderURLs))
+	errCh := make(chan error, len(leaderURLs))
+	wg := sync.WaitGroup{}
+	for _, leaderURL := range leaderURLs {
+		leaderConn, err := gta.getOrCreateGRPCConn(ctx, leaderURL)
+		if err != nil {
+			return typeutil.ZeroTime, err
+		}
+		wg.Add(1)
+		go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *pdpb.SyncMaxTSResponse, errCh chan<- error) {
+			request := &pdpb.SyncMaxTSRequest{
+				Header: &pdpb.RequestHeader{
+					SenderId: gta.allocatorManager.member.ID(),
+				},
+			}
+			if maxTS != typeutil.ZeroTime {
+				request.MaxTs = tsoutil.GenerateTimestamp(maxTS, 0)
+			}
+			syncCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
+			resp, err := pdpb.NewPDClient(conn).SyncMaxTS(syncCtx, request)
+			cancel()
+			if err != nil {
+				errCh <- err
+			}
+			respCh <- resp
+			wg.Done()
+		}(ctx, leaderConn, respCh, errCh)
+	}
+	wg.Wait()
+	close(respCh)
+	close(errCh)
+	// If any error occurs, the synchronization process will fail
+	if err := <-errCh; err != nil {
+		return typeutil.ZeroTime, err
+	}
+	for resp := range respCh {
+		if resp == nil {
+			return typeutil.ZeroTime, errs.ErrSyncMaxTS.FastGenWithCause("got nil response")
+		}
+		if notSyncedDCs := gta.checkSyncedDCs(dcLocationMap, resp.GetDcs()); len(notSyncedDCs) > 0 {
+			return typeutil.ZeroTime, errs.ErrSyncMaxTS.FastGenWithCause(fmt.Sprintf("got unsynced dc-locations: %+v", notSyncedDCs))
+		}
+		// Compare and get the max one
+		if resp.GetMaxLocalTs() != nil && resp.GetMaxLocalTs().GetPhysical() != 0 {
+			localTS, _ := tsoutil.ParseTimestamp(*resp.GetMaxLocalTs())
+			if localTS.After(maxTS) {
+				maxTS = localTS
+			}
+		}
+	}
+	return maxTS, nil
+}
+
+func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string][]uint64, syncedDCs []string) []string {
+	unsyncedDCs := make([]string, 0)
+	for dcLocation := range dcLocationMap {
+		if slice.NoneOf(syncedDCs, func(i int) bool { return syncedDCs[i] == dcLocation }) {
+			unsyncedDCs = append(unsyncedDCs, dcLocation)
+		}
+	}
+	return unsyncedDCs
+}
+
+func (gta *GlobalTSOAllocator) getOrCreateGRPCConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
+	gta.localAllocatorConn.RLock()
+	conn, ok := gta.localAllocatorConn.clientConns[addr]
+	gta.localAllocatorConn.RUnlock()
+	if ok {
+		return conn, nil
+	}
+	tlsCfg, err := gta.allocatorManager.securityConfig.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
+	cc, err := grpcutil.GetClientConn(ctxWithTimeout, addr, tlsCfg)
+	if err != nil {
+		return nil, err
+	}
+	gta.localAllocatorConn.Lock()
+	defer gta.localAllocatorConn.Unlock()
+	if old, ok := gta.localAllocatorConn.clientConns[addr]; ok {
+		cc.Close()
+		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
+		return old, nil
+	}
+	gta.localAllocatorConn.clientConns[addr] = cc
+	return cc, nil
 }
 
 // Reset is used to reset the TSO allocator.

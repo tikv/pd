@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -352,7 +353,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
 		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
-	)
+		s.GetSecurityConfig())
 	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
 		return err
 	}
@@ -808,6 +809,15 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			}
 		}
 	}
+	if cfg.EnablePlacementRules {
+		// replication.MaxReplicas and replication.LocationLabels won't work when placement rule is enabled
+		if cfg.MaxReplicas != old.MaxReplicas {
+			return errors.New("cannot update MaxReplicas when placement rules feature is enabled, please update rule instead")
+		}
+		if !reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels) {
+			return errors.New("cannot update LocationLabels when placement rules feature is enabled, please update rule instead")
+		}
+	}
 
 	s.persistOptions.SetReplicationConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
@@ -1137,7 +1147,7 @@ func (s *Server) campaignLeader() {
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
 	log.Info("setting up the global TSO allocator")
-	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, cancel, config.GlobalDCLocation, s.member.GetLeadership()); err != nil {
+	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, config.GlobalDCLocation, s.member.GetLeadership()); err != nil {
 		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
 		return
 	}

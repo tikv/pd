@@ -116,7 +116,8 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 		tc.PutRegion(region)
 		tc.SetLeaderSchedulePolicy(t.kind.String())
 		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
-		c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
+		shouldBalance, _, _ := shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), "")
+		c.Assert(shouldBalance, Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -128,7 +129,8 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 			tc.PutRegion(region)
 			kind := core.NewScheduleKind(core.RegionKind, t.kind)
-			c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
+			shouldBalance, _, _ := shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), "")
+			c.Assert(shouldBalance, Equals, t.expectedResult)
 		}
 	}
 }
@@ -507,7 +509,8 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestSingleRangeBalance(c *C) {
 	ops := lb.Schedule(s.tc)
 	c.Assert(ops, NotNil)
 	c.Assert(ops, HasLen, 1)
-	c.Assert(ops[0].Counters, HasLen, 5)
+	c.Assert(ops[0].Counters, HasLen, 3)
+	c.Assert(ops[0].FinishedCounters, HasLen, 2)
 	lb, err = schedule.CreateScheduler(BalanceLeaderType, s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"h", "n"}))
 	c.Assert(err, IsNil)
 	c.Assert(lb.Schedule(s.tc), IsNil)
@@ -845,9 +848,9 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
-	s.checkReplacePendingRegion(c, tc, opt, sb)
+	s.checkReplacePendingRegion(c, tc, sb)
 	tc.SetEnablePlacementRules(true)
-	s.checkReplacePendingRegion(c, tc, opt, sb)
+	s.checkReplacePendingRegion(c, tc, sb)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
@@ -879,7 +882,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], operator.OpKind(0), 3, 1)
 }
 
-func (s *testBalanceRegionSchedulerSuite) checkReplacePendingRegion(c *C, tc *mockcluster.Cluster, opt *config.PersistOptions, sb schedule.Scheduler) {
+func (s *testBalanceRegionSchedulerSuite) checkReplacePendingRegion(c *C, tc *mockcluster.Cluster, sb schedule.Scheduler) {
 	// Store 1 has the largest region score, so the balance scheduler try to replace peer in store 1.
 	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 7, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -897,6 +900,23 @@ func (s *testBalanceRegionSchedulerSuite) checkReplacePendingRegion(c *C, tc *mo
 
 	c.Assert(sb.Schedule(tc)[0].RegionID(), Equals, uint64(3))
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], operator.OpKind(0), 1, 4)
+}
+
+func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
+	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	c.Assert(err, IsNil)
+	region := tc.MockRegionInfo(1, 0, []uint64{2, 3, 4}, nil, nil)
+	tc.PutRegion(region)
+	operators := sb.Schedule(tc)
+	if operators != nil {
+		c.Assert(len(operators), Equals, 0)
+	} else {
+		c.Assert(operators, IsNil)
+	}
 }
 
 var _ = Suite(&testRandomMergeSchedulerSuite{})

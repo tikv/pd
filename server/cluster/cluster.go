@@ -545,8 +545,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if origin == nil {
 		log.Debug("insert new region",
 			zap.Uint64("region-id", region.GetID()),
-			zap.Stringer("meta-region", core.RegionToHexMeta(region.GetMeta())),
-		)
+			logutil.ZapRedactStringer("meta-region", core.RegionToHexMeta(region.GetMeta())))
 		saveKV, saveCache, isNew = true, true, true
 	} else {
 		r := region.GetRegionEpoch()
@@ -554,7 +553,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if r.GetVersion() > o.GetVersion() {
 			log.Info("region Version changed",
 				zap.Uint64("region-id", region.GetID()),
-				zap.String("detail", core.DiffRegionKeyInfo(origin, region)),
+				logutil.ZapRedactString("detail", core.DiffRegionKeyInfo(origin, region)),
 				zap.Uint64("old-version", o.GetVersion()),
 				zap.Uint64("new-version", r.GetVersion()),
 			)
@@ -634,7 +633,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 				if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
 					log.Error("failed to delete region from storage",
 						zap.Uint64("region-id", item.GetID()),
-						zap.Stringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
+						logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
 						errs.ZapError(err))
 				}
 			}
@@ -686,7 +685,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			// after restart. Here we only log the error then go on updating cache.
 			log.Error("failed to save region to storage",
 				zap.Uint64("region-id", region.GetID()),
-				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
+				logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
 				errs.ZapError(err))
 		}
 		regionEventCounter.WithLabelValues("update_kv").Inc()
@@ -1220,6 +1219,7 @@ func (c *RaftCluster) resetMetrics() {
 	c.coordinator.resetSchedulerMetrics()
 	c.coordinator.resetHotSpotMetrics()
 	c.resetClusterMetrics()
+	c.resetHealthStatus()
 }
 
 func (c *RaftCluster) collectClusterMetrics() {
@@ -1251,14 +1251,18 @@ func (c *RaftCluster) collectHealthStatus() {
 	if err != nil {
 		log.Error("get members error", errs.ZapError(err))
 	}
-	unhealthy := CheckHealth(c.httpClient, members)
+	healthy := CheckHealth(c.httpClient, members)
 	for _, member := range members {
-		if _, ok := unhealthy[member.GetMemberId()]; ok {
-			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
-			continue
+		var v float64
+		if _, ok := healthy[member.GetMemberId()]; ok {
+			v = 1
 		}
-		healthStatusGauge.WithLabelValues(member.GetName()).Set(1)
+		healthStatusGauge.WithLabelValues(member.GetName()).Set(v)
 	}
+}
+
+func (c *RaftCluster) resetHealthStatus() {
+	healthStatusGauge.Reset()
 }
 
 // GetRegionStatsByType gets the status of the region by types.
