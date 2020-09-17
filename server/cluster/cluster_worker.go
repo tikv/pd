@@ -218,6 +218,7 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 			errs.ZapError(err))
 		return nil, err
 	}
+	c.collectSplitRegions(regions)
 	last := len(regions) - 1
 	originRegion := proto.Clone(regions[last]).(*metapb.Region)
 	hrm = core.RegionsToHexMeta(regions[:last])
@@ -226,4 +227,30 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 		zap.Stringer("origin", hrm),
 		zap.Int("total", last))
 	return &pdpb.ReportBatchSplitResponse{}, nil
+}
+
+func (c *RaftCluster) collectSplitRegions(regions []*metapb.Region) {
+	c.Lock()
+	defer c.Unlock()
+
+	regionInfos := make([]uint64, len(regions)-1)
+	for _, r := range regions[:len(regions)-1] {
+		regionInfos = append(regionInfos, r.GetId())
+	}
+	originRegionID := regions[len(regions)-1].GetId()
+	c.splitRegionInfos[originRegionID] = regionInfos
+}
+
+// GetSplitRegionInfos returns the split region infos
+func (c *RaftCluster) GetSplitRegionInfos() map[uint64][]uint64 {
+	c.Lock()
+	defer c.Unlock()
+
+	splitRegionInfos := make(map[uint64][]uint64, len(c.splitRegionInfos))
+	for id, regionInfos := range c.splitRegionInfos {
+		splitRegionInfos[id] = regionInfos
+	}
+	// clear old infos
+	c.splitRegionInfos = make(map[uint64][]uint64)
+	return splitRegionInfos
 }

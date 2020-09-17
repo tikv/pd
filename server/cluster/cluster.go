@@ -119,6 +119,8 @@ type RaftCluster struct {
 
 	// It's used to manage components.
 	componentManager *component.Manager
+
+	splitRegionInfos map[uint64][]uint64
 }
 
 // Status saves some state information.
