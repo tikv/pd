@@ -37,9 +37,9 @@ const nonIsolation = "none"
 
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
-	opt   ScheduleOptions
-	stats map[RegionStatisticType]map[uint64]*core.RegionInfo
-	index map[uint64]RegionStatisticType
+	opt         ScheduleOptions
+	stats       map[RegionStatisticType]map[uint64]*core.RegionInfo
+	index       map[uint64]RegionStatisticType
 	ruleManager *placement.RuleManager
 }
 
