@@ -36,8 +36,8 @@ cert-allowed-cn = ["example.com"]
 ## Encryption method to use for PD data. One of "plaintext", "aes128-ctr", "aes192-ctr" and "aes256-ctr".
 ## Defaults to "plaintext" if not set.
 # data-encryption-method = "plaintext"
-## Specifies how often PD rotates data encryption key.
-# data-key-rotation-period = "7d"
+## Specifies how often PD rotates data encryption key. Default is 7 days.
+# data-key-rotation-period = "168h"
 
 ## Specifies master key if encryption is enabled. There are three types of master key:
 ##

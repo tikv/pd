@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 )
 
@@ -55,7 +55,8 @@ func (c *Config) Adjust() error {
 	if c.DataKeyRotationPeriod.Duration == 0 {
 		duration, err := time.ParseDuration(defaultDataKeyRotationPeriod)
 		if err != nil {
-			return errors.Wrapf(err, "fail to parse default value of data-key-rotation-period %s",
+			return errs.ErrEncryptionInvalidConfig.Wrap(err).GenWithStack(
+				"fail to parse default value of data-key-rotation-period %s",
 				defaultDataKeyRotationPeriod)
 		}
 		c.DataKeyRotationPeriod.Duration = duration
@@ -82,7 +83,7 @@ func (c *Config) GetMethod() (encryptionpb.EncryptionMethod, error) {
 		return encryptionpb.EncryptionMethod_AES256_CTR, nil
 	default:
 		return encryptionpb.EncryptionMethod_UNKNOWN,
-			errors.Errorf("invalid encryption method %s", c.DataEncryptionMethod)
+			errs.ErrEncryptionInvalidMethod.GenWithStack("unknown method")
 	}
 }
 
@@ -114,7 +115,8 @@ func (c *Config) GetMasterKey() (*encryptionpb.MasterKey, error) {
 			},
 		}, nil
 	default:
-		return nil, errors.Errorf("unrecognized encryption master key type: %s", c.MasterKey.Type)
+		return nil, errs.ErrEncryptionInvalidConfig.GenWithStack(
+			"unrecognized encryption master key type: %s", c.MasterKey.Type)
 	}
 }
 
