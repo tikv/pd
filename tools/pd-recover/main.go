@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"path"
 	"strconv"
@@ -65,16 +68,39 @@ func main() {
 		fmt.Println("please specify safe cluster-id")
 		return
 	}
-	if allocID == 0 {
-		fmt.Println("please specify safe alloc-id")
-		return
-	}
 
 	rootPath := path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
 	clusterRootPath := path.Join(rootPath, "raft")
 	raftBootstrapTimeKey := path.Join(clusterRootPath, "status", "raft_bootstrap_time")
 
 	urls := strings.Split(endpoints, ",")
+
+	if allocID == 0 {
+		for _, url := range urls {
+			regionsURL := strings.TrimRight(url, "/") + "/pd/api/v1/regions"
+			getRegionsResponse, err := http.Get(regionsURL)
+			if err != nil {
+				_ = fmt.Errorf("failed to fetch regions from %s", url)
+				return
+			}
+			var regionJSON struct {
+				Regions []struct {
+					ID uint64 `json:"id"`
+				} `json:"regions"`
+			}
+			body, _ := ioutil.ReadAll(getRegionsResponse.Body)
+			err = json.Unmarshal(body, &regionJSON)
+			if err != nil {
+				_ = fmt.Errorf("failed to fetch regions from %s", url)
+				return
+			}
+			for _, region := range regionJSON.Regions {
+				if region.ID+1 > allocID {
+					allocID = region.ID + 1
+				}
+			}
+		}
+	}
 
 	tlsInfo := transport.TLSInfo{
 		CertFile:      certPath,
