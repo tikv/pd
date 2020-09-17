@@ -601,12 +601,12 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(tc.addLeaderRegion(3, 3, 1, 2), IsNil)
 
 	oc := co.opController
-	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
+	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV(), nil, nil), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	gls, err = schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls, err = schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV(), nil, nil), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), IsNil)
 
@@ -1014,7 +1014,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 2), IsNil)
-	scheduler, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	scheduler, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, core.NewStorage(kv.NewMemoryKV(), nil, nil), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
@@ -1098,7 +1098,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	_, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 
-	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, core.NewStorage(kv.NewMemoryKV(), nil, nil), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
 

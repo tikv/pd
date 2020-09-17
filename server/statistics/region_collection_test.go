@@ -31,7 +31,7 @@ type testRegionStatisticsSuite struct {
 }
 
 func (t *testRegionStatisticsSuite) SetUpTest(c *C) {
-	t.store = core.NewStorage(kv.NewMemoryKV())
+	t.store = core.NewStorage(kv.NewMemoryKV(), nil, nil)
 	var err error
 	t.manager = placement.NewRuleManager(t.store)
 	err = t.manager.Initialize(3, []string{"zone", "rack", "host"})
