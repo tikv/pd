@@ -157,7 +157,7 @@ func (s *Storage) DeleteStore(store *metapb.Store) error {
 	return s.Remove(s.storePath(store.GetId()))
 }
 
-// LoadRegion loads one regoin from storage.
+// LoadRegion loads one region from storage.
 func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
 	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
 		return loadRegion(s.regionStorage, s.encryptionKeyManager, region)
