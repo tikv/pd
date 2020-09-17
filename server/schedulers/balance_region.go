@@ -242,17 +242,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.Counters = append(op.Counters,
-<<<<<<< HEAD
-			s.counter.WithLabelValues("move-peer", source.GetAddress()+"-out", sourceLabel),
-			s.counter.WithLabelValues("move-peer", target.GetAddress()+"-in", targetLabel),
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
-=======
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
 		)
 		op.FinishedCounters = append(op.FinishedCounters,
-			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
-			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
->>>>>>> 14d559b... metrics: make counter inc when operator finished rather than operator add (#2962)
+			s.counter.WithLabelValues("move-peer", source.GetAddress()+"-out", sourceLabel),
+			s.counter.WithLabelValues("move-peer", target.GetAddress()+"-in", targetLabel),
 		)
 		return op
 	}

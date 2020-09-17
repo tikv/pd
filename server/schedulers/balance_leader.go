@@ -287,17 +287,11 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	targetLabel := strconv.FormatUint(targetID, 10)
 	op.Counters = append(op.Counters,
 		schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
-<<<<<<< HEAD
-		l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel),
-		l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel),
-		balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel),
-=======
 		balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel),
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
-		l.counter.WithLabelValues("move-leader", sourceLabel+"-out"),
-		l.counter.WithLabelValues("move-leader", targetLabel+"-in"),
->>>>>>> 14d559b... metrics: make counter inc when operator finished rather than operator add (#2962)
+		l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel),
+		l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel),
 	)
 	return []*operator.Operator{op}
 }
