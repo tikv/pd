@@ -893,12 +893,18 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 
 // GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
-	return r.leaders[storeID].find(region).region
+	if leaders, ok := r.leaders[storeID]; ok {
+		return leaders.find(region).region
+	}
+	return nil
 }
 
 // GetFollower return follower RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
-	return r.followers[storeID].find(region).region
+	if followers, ok := r.followers[storeID]; ok {
+		return followers.find(region).region
+	}
+	return nil
 }
 
 // ScanRange scans regions intersecting [start key, end key), returns at most
