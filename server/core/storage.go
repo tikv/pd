@@ -28,7 +28,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/errs"
-	ekm "github.com/tikv/pd/server/encryption_key_manager"
+	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -55,7 +55,7 @@ const (
 type Storage struct {
 	kv.Base
 	regionStorage        *RegionStorage
-	encryptionKeyManager *ekm.KeyManager
+	encryptionKeyManager *encryptionkm.KeyManager
 	useRegionStorage     int32
 	regionLoaded         int32
 	mu                   sync.Mutex
@@ -65,7 +65,7 @@ type Storage struct {
 func NewStorage(
 	base kv.Base,
 	regionStorage *RegionStorage,
-	encryptionKeyManager *ekm.KeyManager,
+	encryptionKeyManager *encryptionkm.KeyManager,
 ) *Storage {
 	return &Storage{
 		Base:                 base,

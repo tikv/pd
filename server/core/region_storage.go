@@ -24,7 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	ekm "github.com/tikv/pd/server/encryption_key_manager"
+	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
 )
 
@@ -33,7 +33,7 @@ var dirtyFlushTick = time.Second
 // RegionStorage is used to save regions.
 type RegionStorage struct {
 	*kv.LeveldbKV
-	encryptionKeyManager *ekm.KeyManager
+	encryptionKeyManager *encryptionkm.KeyManager
 	mu                   sync.RWMutex
 	batchRegions         map[string]*metapb.Region
 	batchSize            int
@@ -55,7 +55,7 @@ const (
 func NewRegionStorage(
 	ctx context.Context,
 	path string,
-	encryptionKeyManager *ekm.KeyManager,
+	encryptionKeyManager *encryptionkm.KeyManager,
 ) (*RegionStorage, error) {
 	levelDB, err := kv.NewLeveldbKV(path)
 	if err != nil {
@@ -133,7 +133,7 @@ func deleteRegion(kv kv.Base, region *metapb.Region) error {
 
 func saveRegion(
 	kv kv.Base,
-	encryptionKeyManager *ekm.KeyManager,
+	encryptionKeyManager *encryptionkm.KeyManager,
 	region *metapb.Region,
 ) error {
 	err := encryption.EncryptRegion(region, encryptionKeyManager)
@@ -149,7 +149,7 @@ func saveRegion(
 
 func loadRegion(
 	kv kv.Base,
-	encryptionKeyManager *ekm.KeyManager,
+	encryptionKeyManager *encryptionkm.KeyManager,
 	regionID uint64,
 	region *metapb.Region,
 ) (ok bool, err error) {
@@ -170,7 +170,7 @@ func loadRegion(
 
 func loadRegions(
 	kv kv.Base,
-	encryptionKeyManager *ekm.KeyManager,
+	encryptionKeyManager *encryptionkm.KeyManager,
 	f func(region *RegionInfo) []*RegionInfo,
 ) error {
 	nextID := uint64(0)
