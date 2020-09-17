@@ -46,7 +46,7 @@ type Config struct {
 
 func (c *Config) Adjust() error {
 	if len(c.DataEncryptionMethod) == 0 {
-		c.DataEncryptionMethod = methodPlaintext
+		c.DataEncryptionMethod = defaultDataEncryptionMethod
 	} else {
 		if _, err := c.GetMethod(); err != nil {
 			return err
@@ -100,7 +100,7 @@ func (c *Config) GetMasterKey() (*encryptionpb.MasterKey, error) {
 			Backend: &encryptionpb.MasterKey_Kms{
 				Kms: &encryptionpb.MasterKeyKms{
 					Vendor:   kmsVendorAWS,
-					KeyId:    c.MasterKey.KmsKeyId,
+					KeyId:    c.MasterKey.KmsKeyID,
 					Region:   c.MasterKey.KmsRegion,
 					Endpoint: c.MasterKey.KmsEndpoint,
 				},
@@ -130,7 +130,7 @@ type MasterKeyConfig struct {
 
 type MasterKeyKMSConfig struct {
 	// KMS CMK key id.
-	KmsKeyId string `toml:"key-id" json:"key-id"`
+	KmsKeyID string `toml:"key-id" json:"key-id"`
 	// KMS region of the CMK.
 	KmsRegion string `toml:"region" json:"region"`
 	// Custom endpoint to access KMS.
