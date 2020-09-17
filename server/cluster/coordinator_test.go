@@ -246,11 +246,7 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream opt.Hear
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-<<<<<<< HEAD
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpt())
-=======
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil)
->>>>>>> cb96984... statistics: fix statistics.Observe result error when placementRule is enabled (#2948)
+		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpt(), nil)
 	}, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
@@ -337,7 +333,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	s.checkRegion(c, tc, co, 1, false, 0)
 
 	r := tc.GetRegion(1)
-	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
+	p := &metapb.Peer{Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}
 	r = r.Clone(
 		core.WithAddPeer(p),
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),

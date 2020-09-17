@@ -130,7 +130,7 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 
 // SetPlacementRuleEnabled set PlacementRuleEnabled
 func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
-	v := o.GetReplicationConfig().Clone()
+	v := o.GetReplicationConfig().clone()
 	v.EnablePlacementRules = enabled
 	o.SetReplicationConfig(v)
 }

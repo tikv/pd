@@ -14,11 +14,7 @@
 package statistics
 
 import (
-<<<<<<< HEAD
-=======
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/server/config"
->>>>>>> cb96984... statistics: fix statistics.Observe result error when placementRule is enabled (#2948)
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 )
@@ -41,24 +37,14 @@ const nonIsolation = "none"
 
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
-<<<<<<< HEAD
 	opt   ScheduleOptions
 	stats map[RegionStatisticType]map[uint64]*core.RegionInfo
 	index map[uint64]RegionStatisticType
-}
-
-// NewRegionStatistics creates a new RegionStatistics.
-func NewRegionStatistics(opt ScheduleOptions) *RegionStatistics {
-=======
-	opt         *config.PersistOptions
-	stats       map[RegionStatisticType]map[uint64]*core.RegionInfo
-	index       map[uint64]RegionStatisticType
 	ruleManager *placement.RuleManager
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
-func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.RuleManager) *RegionStatistics {
->>>>>>> cb96984... statistics: fix statistics.Observe result error when placementRule is enabled (#2948)
+func NewRegionStatistics(opt ScheduleOptions, ruleManager *placement.RuleManager) *RegionStatistics {
 	r := &RegionStatistics{
 		opt:   opt,
 		stats: make(map[RegionStatisticType]map[uint64]*core.RegionInfo),

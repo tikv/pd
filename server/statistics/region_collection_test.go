@@ -39,12 +39,8 @@ func (t *testRegionStatisticsSuite) SetUpTest(c *C) {
 }
 
 func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
-<<<<<<< HEAD
 	opt := mockoption.NewScheduleOptions()
-=======
-	opt := config.NewTestOptions()
-	opt.SetPlacementRuleEnabled(false)
->>>>>>> cb96984... statistics: fix statistics.Observe result error when placementRule is enabled (#2948)
+	opt.EnablePlacementRules = false
 	peers := []*metapb.Peer{
 		{Id: 5, StoreId: 1},
 		{Id: 6, StoreId: 2},
@@ -120,13 +116,13 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 }
 
 func (t *testRegionStatisticsSuite) TestRegionStatisticsWithPlacementRule(c *C) {
-	opt := config.NewTestOptions()
-	opt.SetPlacementRuleEnabled(true)
+	opt := mockoption.NewScheduleOptions()
+	opt.EnablePlacementRules = true
 	peers := []*metapb.Peer{
 		{Id: 5, StoreId: 1},
 		{Id: 6, StoreId: 2},
 		{Id: 4, StoreId: 3},
-		{Id: 8, StoreId: 7, Role: metapb.PeerRole_Learner},
+		{Id: 8, StoreId: 7, IsLearner: true},
 	}
 	metaStores := []*metapb.Store{
 		{Id: 1, Address: "mock://tikv-1"},
