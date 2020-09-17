@@ -46,7 +46,8 @@ type testClusterInfoSuite struct{}
 func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(
+		mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
 
 	n, np := uint64(3), uint64(3)
 	stores := newTestStores(n)
@@ -95,7 +96,8 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(
+		mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
 
 	stores := newTestStores(3)
 	for _, store := range stores {
@@ -127,7 +129,8 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(
+		mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
 
 	n, np := uint64(3), uint64(3)
 
@@ -352,7 +355,8 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(
+		mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
 	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
 	processRegions := func(regions []*core.RegionInfo) {
 		for _, r := range regions {
@@ -380,7 +384,8 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(
+		mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
 
 	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
 	regions = core.SplitRegions(regions)
@@ -441,7 +446,8 @@ func heartbeatRegions(c *C, cluster *RaftCluster, regions []*core.RegionInfo) {
 func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(
+		mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
 
 	// 1: [nil, nil)
 	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
@@ -480,7 +486,8 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(
+		mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
 
 	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
 
@@ -587,7 +594,8 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	regions := newTestRegions(n, np)
 	_, opts, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestRaftCluster(mockid.NewIDAllocator(), opts, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	tc := newTestRaftCluster(
+		mockid.NewIDAllocator(), opts, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
 	cache := tc.core.Regions
 
 	for i := uint64(0); i < n; i++ {
@@ -697,7 +705,8 @@ type testGetStoresSuite struct {
 func (s *testGetStoresSuite) SetUpSuite(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(
+		mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
 	s.cluster = cluster
 
 	stores := newTestStores(200)
@@ -730,7 +739,8 @@ func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, er
 }
 
 func newTestCluster(opt *config.PersistOptions) *testCluster {
-	rc := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	rc := newTestRaftCluster(
+		mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
 	return &testCluster{RaftCluster: rc}
 }
 

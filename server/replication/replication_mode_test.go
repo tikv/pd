@@ -37,7 +37,7 @@ var _ = Suite(&testReplicationMode{})
 type testReplicationMode struct{}
 
 func (s *testReplicationMode) TestInitial(c *C) {
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewStorage(kv.NewMemoryKV(), nil, nil)
 	conf := config.ReplicationModeConfig{ReplicationMode: modeMajority}
 	cluster := mockcluster.NewCluster(config.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
@@ -67,7 +67,7 @@ func (s *testReplicationMode) TestInitial(c *C) {
 }
 
 func (s *testReplicationMode) TestStatus(c *C) {
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewStorage(kv.NewMemoryKV(), nil, nil)
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:        "dr-label",
 		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
@@ -137,7 +137,7 @@ func (rep *mockFileReplicator) ReplicateFileToAllMembers(context.Context, string
 }
 
 func (s *testReplicationMode) TestStateSwitch(c *C) {
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewStorage(kv.NewMemoryKV(), nil, nil)
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
@@ -240,7 +240,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 }
 
 func (s *testReplicationMode) TestAsynctimeout(c *C) {
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewStorage(kv.NewMemoryKV(), nil, nil)
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
@@ -292,7 +292,7 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 	regionScanBatchSize = 10
 	regionMinSampleSize = 5
 
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewStorage(kv.NewMemoryKV(), nil, nil)
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
