@@ -68,8 +68,8 @@ func (s *testKVSuite) TestBasic(c *C) {
 	c.Assert(storage.SaveRegion(region), IsNil)
 	newRegion := &metapb.Region{}
 	ok, err = storage.LoadRegion(123, newRegion)
-	c.Assert(ok, IsTrue)
 	c.Assert(err, IsNil)
+	c.Assert(ok, IsTrue)
 	c.Assert(newRegion, DeepEquals, region)
 	err = storage.DeleteRegion(region)
 	c.Assert(err, IsNil)

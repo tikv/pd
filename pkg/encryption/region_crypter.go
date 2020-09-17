@@ -63,7 +63,7 @@ func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	if err != nil {
 		return err
 	}
-	iv, err := NewIvCtr()
+	iv, err := NewIvCTR()
 	if err != nil {
 		return err
 	}
