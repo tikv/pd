@@ -574,7 +574,7 @@ func (mc *Cluster) RemoveScheduler(name string) error {
 }
 
 // MockRegionInfo returns a mock region
-// If leaderStoreID is undefined, the regions would have no leader
+// If leaderStoreID is zero, the regions would have no leader
 func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	followerStoreIDs, learnerStoreIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
 
