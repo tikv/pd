@@ -150,9 +150,10 @@ func saveRegion(
 func loadRegion(
 	kv kv.Base,
 	encryptionKeyManager *encryption.KeyManager,
+	regionID uint64,
 	region *metapb.Region,
 ) (ok bool, err error) {
-	value, err := kv.Load(regionPath(region.GetId()))
+	value, err := kv.Load(regionPath(regionID))
 	if err != nil {
 		return false, err
 	}
