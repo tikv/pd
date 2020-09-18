@@ -913,7 +913,7 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 // it compares the MaxTS received with each Local TSO Allocator leader's TSO
 // and prewrite it into memory to wait for the next phase of formal writing.
 func (s *Server) PrewriteMaxTS(ctx context.Context, request *pdpb.PrewriteMaxTSRequest) (*pdpb.PrewriteMaxTSResponse, error) {
-	if err := s.validateInternalRequest(); err != nil {
+	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
@@ -949,7 +949,7 @@ func (s *Server) PrewriteMaxTS(ctx context.Context, request *pdpb.PrewriteMaxTSR
 // prewritten TSO in memory and write it into memory to finish the global
 // TSO synchronization progress.
 func (s *Server) WriteMaxTS(ctx context.Context, request *pdpb.WriteMaxTSRequest) (*pdpb.WriteMaxTSResponse, error) {
-	if err := s.validateInternalRequest(); err != nil {
+	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
@@ -991,11 +991,15 @@ func (s *Server) WriteMaxTS(ctx context.Context, request *pdpb.WriteMaxTSRequest
 	}, nil
 }
 
-// validateInternalRequest checks if server is closed, which is used to valide
+// validateInternalRequest checks if server is closed, which is used to validate
 // the gRPC communication between PD servers internally.
-func (s *Server) validateInternalRequest() error {
+func (s *Server) validateInternalRequest(header *pdpb.RequestHeader) error {
 	if s.IsClosed() {
 		return errors.WithStack(ErrNotStarted)
+	}
+	leaderID := s.GetLeader().GetMemberId()
+	if leaderID != header.GetSenderId() {
+		return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
 	}
 	return nil
 }
