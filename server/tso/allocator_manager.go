@@ -36,6 +36,7 @@ import (
 )
 
 const (
+	checkPriorityStep           = 1 * time.Minute
 	dcLocationConfigEtcdPrefix  = "dc-location"
 	leaderTickInterval          = 50 * time.Millisecond
 	defaultAllocatorLeaderLease = 3
@@ -237,6 +238,8 @@ func (am *AllocatorManager) allocatorLeaderLoop(parentCtx context.Context, alloc
 			log.Error("get next leader from etcd failed",
 				zap.String("dc-location", allocator.dcLocation),
 				errs.ZapError(err))
+			time.Sleep(200 * time.Millisecond)
+			continue
 		}
 		if nextLeader != 0 && nextLeader != am.member.ID() {
 			log.Info("skip campaigning of the local tso allocator leader and check later",
@@ -309,6 +312,8 @@ func (am *AllocatorManager) campaignAllocatorLeader(parentCtx context.Context, a
 func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	tsTicker := time.NewTicker(UpdateTimestampStep)
 	defer tsTicker.Stop()
+	priorityTicker := time.NewTicker(checkPriorityStep)
+	defer priorityTicker.Stop()
 
 	for {
 		select {
@@ -321,8 +326,9 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 				go am.updateAllocator(ag)
 			}
 			am.wg.Wait()
-			// The Local TSO Allocator priority checker
-			am.checkPriority()
+		case <-priorityTicker.C:
+			// The Local TSO Allocator leader priority checker
+			am.PriorityChecker()
 		case <-serverCtx.Done():
 			return
 		}
@@ -351,70 +357,14 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 	}
 }
 
-// HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.
-func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
-	am.RLock()
-	defer am.RUnlock()
-	allocatorGroup, exist := am.allocatorGroups[dcLocation]
-	if !exist {
-		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
-		return pdpb.Timestamp{}, err
-	}
-	return allocatorGroup.allocator.GenerateTSO(count)
-}
-
-func (am *AllocatorManager) resetAllocatorGroup(dcLocation string) {
-	am.Lock()
-	defer am.Unlock()
-	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
-		allocatorGroup.allocator.Reset()
-		allocatorGroup.leadership.Reset()
-	}
-}
-
-func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) []*allocatorGroup {
-	am.RLock()
-	defer am.RUnlock()
-	allocatorGroups := make([]*allocatorGroup, 0)
-	for _, ag := range am.allocatorGroups {
-		if ag == nil {
-			continue
-		}
-		if slice.NoneOf(filters, func(i int) bool { return filters[i](ag) }) {
-			allocatorGroups = append(allocatorGroups, ag)
-		}
-	}
-	return allocatorGroups
-}
-
-// GetAllocator get the allocator by dc-location.
-func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
-	am.RLock()
-	defer am.RUnlock()
-	allocatorGroup, exist := am.allocatorGroups[dcLocation]
-	if !exist {
-		return nil, errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found", dcLocation))
-	}
-	return allocatorGroup.allocator, nil
-}
-
-// GetAllocators get all allocators with some filters.
-func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []Allocator {
-	var allocators []Allocator
-	for _, ag := range am.getAllocatorGroups(filters...) {
-		allocators = append(allocators, ag.allocator)
-	}
-	return allocators
-}
-
-// checkPriority is used to check the election priority of a Local TSO Allocator.
+// PriorityChecker is used to check the election priority of a Local TSO Allocator.
 // In the normal case, if we want to elect a Local TSO Allocator for a certain DC,
 // such as dc-1, we need to make sure the follow priority rules:
 // 1. The PD server with dc-location="dc-1" needs to be elected as the allocator
 // leader with the highest priority.
-// 2. If all PD servers with dc-location="dc-1" are done, then the other PD servers
+// 2. If all PD servers with dc-location="dc-1" are down, then the other PD servers
 // of DC could be elected.
-func (am *AllocatorManager) checkPriority() {
+func (am *AllocatorManager) PriorityChecker() {
 	serverID := am.member.ID()
 	myServerDCLocation, err := am.getServerDCLocation(serverID)
 	if err != nil {
@@ -518,4 +468,60 @@ func (am *AllocatorManager) deleteNextLeaderID(dcLocation string) error {
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 	return nil
+}
+
+// HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.
+func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
+	am.RLock()
+	defer am.RUnlock()
+	allocatorGroup, exist := am.allocatorGroups[dcLocation]
+	if !exist {
+		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
+		return pdpb.Timestamp{}, err
+	}
+	return allocatorGroup.allocator.GenerateTSO(count)
+}
+
+func (am *AllocatorManager) resetAllocatorGroup(dcLocation string) {
+	am.Lock()
+	defer am.Unlock()
+	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
+		allocatorGroup.allocator.Reset()
+		allocatorGroup.leadership.Reset()
+	}
+}
+
+func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) []*allocatorGroup {
+	am.RLock()
+	defer am.RUnlock()
+	allocatorGroups := make([]*allocatorGroup, 0)
+	for _, ag := range am.allocatorGroups {
+		if ag == nil {
+			continue
+		}
+		if slice.NoneOf(filters, func(i int) bool { return filters[i](ag) }) {
+			allocatorGroups = append(allocatorGroups, ag)
+		}
+	}
+	return allocatorGroups
+}
+
+// GetAllocator get the allocator by dc-location.
+func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
+	am.RLock()
+	defer am.RUnlock()
+	allocatorGroup, exist := am.allocatorGroups[dcLocation]
+	if !exist {
+		return nil, errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found", dcLocation))
+	}
+	return allocatorGroup.allocator, nil
+}
+
+// GetAllocators get all allocators with some filters.
+func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []Allocator {
+	var allocators []Allocator
+	for _, ag := range am.getAllocatorGroups(filters...) {
+		allocators = append(allocators, ag.allocator)
+	}
+	return allocators
 }

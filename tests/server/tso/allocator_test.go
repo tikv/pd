@@ -27,7 +27,7 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-const waitAllocatorCheckInterval = 1 * time.Second
+const waitAllocatorLeaderCheckInterval = 1 * time.Second
 
 var _ = Suite(&testAllocatorSuite{})
 
@@ -72,7 +72,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 		}
 	}
 	// Wait for a while to check
-	time.Sleep(waitAllocatorCheckInterval)
+	time.Sleep(waitAllocatorLeaderCheckInterval)
 	// To check whether we have enough Local TSO Allocator leaders
 	allAllocatorLeaders := make([]tso.Allocator, 0, dcLocationNum)
 	for _, server := range cluster.GetServers() {
