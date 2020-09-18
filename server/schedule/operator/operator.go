@@ -51,6 +51,7 @@ type Operator struct {
 	level            core.PriorityLevel
 	Counters         []prometheus.Counter
 	FinishedCounters []prometheus.Counter
+	AdditionalInfos  map[string]string
 }
 
 // NewOperator creates a new operator.

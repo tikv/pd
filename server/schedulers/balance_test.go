@@ -116,7 +116,8 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 		tc.PutRegion(region)
 		tc.SetLeaderSchedulePolicy(t.kind.String())
 		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
-		c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
+		shouldBalance, _, _ := shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), "")
+		c.Assert(shouldBalance, Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -128,7 +129,8 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 			tc.PutRegion(region)
 			kind := core.NewScheduleKind(core.RegionKind, t.kind)
-			c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
+			shouldBalance, _, _ := shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), "")
+			c.Assert(shouldBalance, Equals, t.expectedResult)
 		}
 	}
 }
