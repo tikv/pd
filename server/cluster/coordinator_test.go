@@ -30,11 +30,12 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
-	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 )
@@ -247,7 +248,7 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream opt.Hear
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts())
+		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil)
 	}, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
@@ -282,7 +283,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 		setCfg(cfg)
 	}
 	tc := newTestCluster(opt)
-	hbStreams := mockhbstream.NewHeartbeatStreams(tc.getClusterID(), false /* need to run */)
+	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.getClusterID(), tc, true /* need to run */)
 	if setTc != nil {
 		setTc(tc)
 	}

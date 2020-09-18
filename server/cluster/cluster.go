@@ -37,14 +37,14 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/id"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/replication"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
-	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
@@ -64,7 +64,7 @@ type Server interface {
 	GetConfig() *config.Config
 	GetPersistOptions() *config.PersistOptions
 	GetStorage() *core.Storage
-	GetHBStreams() opt.HeartbeatStreams
+	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
 	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
@@ -249,7 +249,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
-	c.regionStats = statistics.NewRegionStatistics(c.opt)
+	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.quit = make(chan struct{})
 
@@ -386,7 +386,7 @@ func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
 }
 
 // GetHeartbeatStreams returns the heartbeat streams.
-func (c *RaftCluster) GetHeartbeatStreams() opt.HeartbeatStreams {
+func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.hbStreams
@@ -1220,6 +1220,7 @@ func (c *RaftCluster) resetMetrics() {
 	c.coordinator.resetSchedulerMetrics()
 	c.coordinator.resetHotSpotMetrics()
 	c.resetClusterMetrics()
+	c.resetHealthStatus()
 }
 
 func (c *RaftCluster) collectClusterMetrics() {
@@ -1251,14 +1252,18 @@ func (c *RaftCluster) collectHealthStatus() {
 	if err != nil {
 		log.Error("get members error", errs.ZapError(err))
 	}
-	unhealthy := CheckHealth(c.httpClient, members)
+	healthy := CheckHealth(c.httpClient, members)
 	for _, member := range members {
-		if _, ok := unhealthy[member.GetMemberId()]; ok {
-			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
-			continue
+		var v float64
+		if _, ok := healthy[member.GetMemberId()]; ok {
+			v = 1
 		}
-		healthStatusGauge.WithLabelValues(member.GetName()).Set(1)
+		healthStatusGauge.WithLabelValues(member.GetName()).Set(v)
 	}
+}
+
+func (c *RaftCluster) resetHealthStatus() {
+	healthStatusGauge.Reset()
 }
 
 // GetRegionStatsByType gets the status of the region by types.

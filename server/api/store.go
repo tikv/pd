@@ -29,7 +29,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/unrolled/render"
 )
 

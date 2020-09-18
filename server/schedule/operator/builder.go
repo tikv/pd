@@ -56,7 +56,7 @@ type Builder struct {
 	// build flags
 	allowDemote       bool
 	useJointConsensus bool
-	isLightWeight     bool
+	lightWeight       bool
 	forceTargetLeader bool
 
 	// intermediate states
@@ -135,7 +135,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
 	b.allowDemote = supportJointConsensus
-	b.useJointConsensus = supportJointConsensus
+	b.useJointConsensus = supportJointConsensus && cluster.GetOpts().IsUseJointConsensus()
 	b.err = err
 	return b
 }
@@ -252,7 +252,7 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 
 // EnableLightWeight marks the region as light weight. It is used for scatter regions.
 func (b *Builder) EnableLightWeight() *Builder {
-	b.isLightWeight = true
+	b.lightWeight = true
 	return b
 }
 
@@ -397,7 +397,7 @@ func (b *Builder) brief() string {
 	switch {
 	case len(b.toAdd) > 0 && len(b.toRemove) > 0:
 		op := "mv peer"
-		if b.isLightWeight {
+		if b.lightWeight {
 			op = "mv light peer"
 		}
 		return fmt.Sprintf("%s: store %s to %s", op, b.toRemove, b.toAdd)
@@ -591,7 +591,7 @@ func (b *Builder) execDemoteFollower(peer *metapb.Peer) {
 }
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
-	if b.isLightWeight {
+	if b.lightWeight {
 		b.steps = append(b.steps, AddLightLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
 	} else {
 		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})

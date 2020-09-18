@@ -11,6 +11,7 @@ require (
 	github.com/coreos/pkg v0.0.0-20160727233714-3ac0863d7acf
 	github.com/docker/go-units v0.4.0
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
+	github.com/go-echarts/go-echarts v1.0.0
 	github.com/go-playground/overalls v0.0.0-20180201144345-22ec1a223b7c
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/protobuf v1.3.4
@@ -31,7 +32,7 @@ require (
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/errors v0.11.5-0.20200902104258-eba4f1d8f6de
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
-	github.com/pingcap/kvproto v0.0.0-20200827082727-23dedec2339b
+	github.com/pingcap/kvproto v0.0.0-20200916031750-f9473f2c5379
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
 	github.com/pingcap/sysutil v0.0.0-20200715082929-4c47bcac246a
 	github.com/prometheus/client_golang v1.0.0

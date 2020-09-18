@@ -288,9 +288,11 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	targetLabel := strconv.FormatUint(targetID, 10)
 	op.Counters = append(op.Counters,
 		schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
+		balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel),
+	)
+	op.FinishedCounters = append(op.FinishedCounters,
 		l.counter.WithLabelValues("move-leader", sourceLabel+"-out"),
 		l.counter.WithLabelValues("move-leader", targetLabel+"-in"),
-		balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel),
 	)
 	return []*operator.Operator{op}
 }

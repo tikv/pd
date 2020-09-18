@@ -263,3 +263,17 @@ var (
 var (
 	ErrInitLogger = errors.Normalize("init logger error", errors.RFCCodeText("PD:log:ErrInitLogger"))
 )
+
+// encryption
+var (
+	ErrEncryptionInvalidMethod = errors.Normalize("invalid encryption method", errors.RFCCodeText("PD:encryption:ErrEncryptionInvalidMethod"))
+	ErrEncryptionGenerateIV    = errors.Normalize("fail to generate iv", errors.RFCCodeText("PD:encryption:ErrEncryptionGenerateIV"))
+	ErrEncryptionNewDataKey    = errors.Normalize("fail to generate data key", errors.RFCCodeText("PD:encryption:ErrEncryptionNewDataKey"))
+	ErrEncryptionGCMEncrypt    = errors.Normalize("GCM encryption fail", errors.RFCCodeText("PD:encryption:ErrEncryptionGCMEncrypt"))
+	ErrEncryptionGCMDecrypt    = errors.Normalize("GCM decryption fail", errors.RFCCodeText("PD:encryption:ErrEncryptionGCMDecrypt"))
+	ErrEncryptionCTREncrypt    = errors.Normalize("CTR encryption fail", errors.RFCCodeText("PD:encryption:ErrEncryptionCTREncrypt"))
+	ErrEncryptionCTRDecrypt    = errors.Normalize("CTR decryption fail", errors.RFCCodeText("PD:encryption:ErrEncryptionCTRDecrypt"))
+	ErrEncryptionEncryptRegion = errors.Normalize("encrypt region fail", errors.RFCCodeText("PD:encryption:ErrEncryptionEncryptRegion"))
+	ErrEncryptionDecryptRegion = errors.Normalize("decrypt region fail", errors.RFCCodeText("PD:encryption:ErrEncryptionDecryptRegion"))
+	ErrEncryptionNewMasterKey  = errors.Normalize("fail to get master key", errors.RFCCodeText("PD:encryption:ErrEncryptionNewMasterKey"))
+)

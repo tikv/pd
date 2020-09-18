@@ -22,12 +22,12 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/versioninfo"
 )
@@ -507,7 +507,8 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestSingleRangeBalance(c *C) {
 	ops := lb.Schedule(s.tc)
 	c.Assert(ops, NotNil)
 	c.Assert(ops, HasLen, 1)
-	c.Assert(ops[0].Counters, HasLen, 5)
+	c.Assert(ops[0].Counters, HasLen, 3)
+	c.Assert(ops[0].FinishedCounters, HasLen, 2)
 	lb, err = schedule.CreateScheduler(BalanceLeaderType, s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"h", "n"}))
 	c.Assert(err, IsNil)
 	c.Assert(lb.Schedule(s.tc), IsNil)
@@ -854,7 +855,8 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
-	oc := schedule.NewOperatorController(s.ctx, tc, mockhbstream.NewHeartbeatStream())
+	stream := hbstream.NewTestHeartbeatStreams(s.ctx, tc.ID, tc, false /* no need to run */)
+	oc := schedule.NewOperatorController(s.ctx, tc, stream)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	opt.SetMaxReplicas(1)
@@ -908,8 +910,8 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMergeScheduleLimit(1)
-	hb := mockhbstream.NewHeartbeatStreams(tc.ID, false /* need to run */)
-	oc := schedule.NewOperatorController(ctx, tc, hb)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, true /* need to run */)
+	oc := schedule.NewOperatorController(ctx, tc, stream)
 
 	mb, err := schedule.CreateScheduler(RandomMergeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(RandomMergeType, []string{"", ""}))
 	c.Assert(err, IsNil)
