@@ -175,7 +175,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			}
 			// Check region whether have leader
 			if region.GetLeader() == nil {
-				log.Debug("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
+				log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 				schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 				continue
 			}

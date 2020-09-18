@@ -584,7 +584,6 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
 		RegionEpoch: epoch,
 	}
-	region.Peers = []*metapb.Peer{}
 	var leader *metapb.Peer
 	if leaderStoreID != 0 {
 		leader, _ = mc.AllocPeer(leaderStoreID)
