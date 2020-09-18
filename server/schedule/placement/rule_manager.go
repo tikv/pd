@@ -595,3 +595,10 @@ func (m *RuleManager) DeleteGroupBundle(id string, regex bool) error {
 	log.Info("groups are removed", zap.String("id", id), zap.Bool("regexp", regex))
 	return nil
 }
+
+// IsInitialized returns whether the rule manager is initialized.
+func (m *RuleManager) IsInitialized() bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.initialized
+}

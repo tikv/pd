@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -31,6 +32,7 @@ import (
 )
 
 const (
+	timestampKey = "timestamp"
 	// UpdateTimestampStep is used to update timestamp.
 	UpdateTimestampStep = 50 * time.Millisecond
 	// updateTimestampGuard is the min timestamp interval.
@@ -54,13 +56,12 @@ type timestampOracle struct {
 	// TODO: remove saveInterval
 	saveInterval  time.Duration
 	maxResetTSGap func() time.Duration
-	// For TSO, set after the PD becomes a leader.
-	TSO           unsafe.Pointer
+	tso           unsafe.Pointer
 	lastSavedTime atomic.Value
 }
 
 func (t *timestampOracle) getTimestampPath() string {
-	return path.Join(t.rootPath, "timestamp")
+	return path.Join(t.rootPath, timestampKey)
 }
 
 func (t *timestampOracle) loadTimestamp() (time.Time, error) {
@@ -131,7 +132,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	current := &atomicObject{
 		physical: next,
 	}
-	atomic.StorePointer(&t.TSO, unsafe.Pointer(current))
+	atomic.StorePointer(&t.tso, unsafe.Pointer(current))
 
 	return nil
 }
@@ -141,7 +142,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 // 1. When the SyncTimestamp has not been called yet.
 // 2. When the ResetUserTimestamp has been called already.
 func (t *timestampOracle) isInitialized() bool {
-	tsoNow := (*atomicObject)(atomic.LoadPointer(&t.TSO))
+	tsoNow := (*atomicObject)(atomic.LoadPointer(&t.tso))
 	if tsoNow == nil || tsoNow.physical == typeutil.ZeroTime {
 		return false
 	}
@@ -156,7 +157,7 @@ func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, ts
 	}
 	physical, _ := tsoutil.ParseTS(tso)
 	next := physical.Add(time.Millisecond)
-	prev := (*atomicObject)(atomic.LoadPointer(&t.TSO))
+	prev := (*atomicObject)(atomic.LoadPointer(&t.tso))
 
 	// do not update
 	if typeutil.SubTimeByWallClock(next, prev.physical) <= 3*updateTimestampGuard {
@@ -177,7 +178,7 @@ func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, ts
 	update := &atomicObject{
 		physical: next,
 	}
-	atomic.CompareAndSwapPointer(&t.TSO, unsafe.Pointer(prev), unsafe.Pointer(update))
+	atomic.CompareAndSwapPointer(&t.tso, unsafe.Pointer(prev), unsafe.Pointer(update))
 	tsoCounter.WithLabelValues("reset_tso_ok").Inc()
 	return nil
 }
@@ -194,7 +195,7 @@ func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, ts
 // 2. The physical time is monotonically increasing.
 // 3. The physical time is always less than the saved timestamp.
 func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error {
-	prev := (*atomicObject)(atomic.LoadPointer(&t.TSO))
+	prev := (*atomicObject)(atomic.LoadPointer(&t.tso))
 	now := time.Now()
 
 	failpoint.Inject("fallBackUpdate", func() {
@@ -244,10 +245,55 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 		logical:  0,
 	}
 
-	atomic.StorePointer(&t.TSO, unsafe.Pointer(current))
+	atomic.StorePointer(&t.tso, unsafe.Pointer(current))
 	tsoGauge.WithLabelValues("tso").Set(float64(next.Unix()))
 
 	return nil
+}
+
+// getTS is used to get a timestamp.
+func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (pdpb.Timestamp, error) {
+	var resp pdpb.Timestamp
+
+	if count == 0 {
+		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
+	}
+
+	maxRetryCount := 10
+	failpoint.Inject("skipRetryGetTS", func() {
+		maxRetryCount = 1
+	})
+
+	for i := 0; i < maxRetryCount; i++ {
+		current := (*atomicObject)(atomic.LoadPointer(&t.tso))
+		if current == nil || current.physical == typeutil.ZeroTime {
+			// If it's leader, maybe SyncTimestamp hasn't completed yet
+			if leadership.Check() {
+				log.Info("sync hasn't completed yet, wait for a while")
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			log.Error("invalid timestamp", zap.Any("timestamp", current), errs.ZapError(errs.ErrInvalidTimestamp))
+			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
+		}
+
+		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
+		resp.Logical = atomic.AddInt64(&current.logical, int64(count))
+		if resp.Logical >= maxLogical {
+			log.Error("logical part outside of max logical interval, please check ntp time",
+				zap.Reflect("response", resp),
+				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
+			tsoCounter.WithLabelValues("logical_overflow").Inc()
+			time.Sleep(UpdateTimestampStep)
+			continue
+		}
+		// In case lease expired after the first check.
+		if !leadership.Check() {
+			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd or local tso allocator leader")
+		}
+		return resp, nil
+	}
+	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
 }
 
 // ResetTimestamp is used to reset the timestamp in memory.
@@ -256,5 +302,5 @@ func (t *timestampOracle) ResetTimestamp() {
 	zero := &atomicObject{
 		physical: typeutil.ZeroTime,
 	}
-	atomic.StorePointer(&t.TSO, unsafe.Pointer(zero))
+	atomic.StorePointer(&t.tso, unsafe.Pointer(zero))
 }

@@ -233,9 +233,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.Counters = append(op.Counters,
+			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+		)
+		op.FinishedCounters = append(op.FinishedCounters,
 			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
 			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
 		)
 		return op
 	}
