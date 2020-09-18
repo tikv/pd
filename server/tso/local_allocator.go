@@ -125,7 +125,7 @@ func (lta *LocalTSOAllocator) GetMember() *pdpb.Member {
 // GetCurrentTSO returns current TSO in memory.
 func (lta *LocalTSOAllocator) GetCurrentTSO() (pdpb.Timestamp, error) {
 	var currentTSO pdpb.Timestamp
-	current := (*atomicObject)(atomic.LoadPointer(&lta.timestampOracle.TSO))
+	current := (*atomicObject)(atomic.LoadPointer(&lta.timestampOracle.tso))
 	if current == nil || current.physical == typeutil.ZeroTime {
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 	}
