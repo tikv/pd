@@ -139,6 +139,9 @@ func (am *AllocatorManager) GetClusterDCLocations() (map[string][]uint64, error)
 		// The key will contain the member ID and the value is its dcLocation
 		serverPath := strings.Split(string(kv.Key), "/")
 		dcLocation := string(kv.Value)
+		if len(strings.TrimSpace(dcLocation)) == 0 {
+			continue
+		}
 		// Get serverID from serverPath, e.g, /pd/dc-location/1232143243253 -> 1232143243253
 		serverID, err := strconv.ParseUint(serverPath[len(serverPath)-1], 10, 64)
 		if err != nil {
@@ -344,7 +347,7 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 		log.Error("check new allocators failed, can't get cluster dc-locations", errs.ZapError(err))
 	}
 	// Collect all dc-locations
-	dcLocations := make([]string, len(clusterDCLocations))
+	dcLocations := make([]string, 0, len(clusterDCLocations))
 	for dcLocation := range clusterDCLocations {
 		dcLocations = append(dcLocations, dcLocation)
 	}
