@@ -16,6 +16,7 @@ package filter
 import (
 	"fmt"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
@@ -683,11 +684,7 @@ func (f *isolationFilter) Target(opt *config.PersistOptions, store *core.StoreIn
 // FitRegion in filter
 func createRegionForRuleFit(startKey, endKey []byte,
 	peers []*metapb.Peer, leader *metapb.Peer, opts ...core.RegionCreateOption) *core.RegionInfo {
-	copyLeader := &metapb.Peer{
-		Id:      leader.Id,
-		StoreId: leader.StoreId,
-		Role:    leader.Role,
-	}
+	copyLeader := proto.Clone(leader).(*metapb.Peer)
 	copyPeers := make([]*metapb.Peer, 0, len(peers))
 	for _, p := range peers {
 		peer := &metapb.Peer{
