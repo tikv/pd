@@ -110,6 +110,7 @@ func (s *Storage) storeRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
 }
 
+// EncryptionKeysPath returns the path to save encryption keys.
 func (s *Storage) EncryptionKeysPath() string {
 	return path.Join(encryptionKeysPath, "keys")
 }
