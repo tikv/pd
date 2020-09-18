@@ -93,7 +93,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.tsoAllocatorManager.HandleTSORequest(config.GlobalDCLocation, count)
+		ts, err := s.tsoAllocatorManager.HandleTSORequest(request.GetDcLocation(), count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
@@ -907,4 +907,95 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
 		Message: msg,
 	})
+}
+
+// PrewriteMaxTS is the first part of 2PC for global MaxTS synchronization,
+// it compares the MaxTS received with each Local TSO Allocator leader's TSO
+// and prewrite it into memory to wait for the next phase of formal writing.
+func (s *Server) PrewriteMaxTS(ctx context.Context, request *pdpb.PrewriteMaxTSRequest) (*pdpb.PrewriteMaxTSResponse, error) {
+	if err := s.validateInternalRequest(); err != nil {
+		return nil, err
+	}
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	// Get all Local TSO Allocator leaders
+	allocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	if err != nil {
+		return nil, err
+	}
+	for _, allocator := range allocatorLeaders {
+		currentLocalTSO, err := allocator.GetCurrentTSO()
+		if err != nil {
+			return nil, err
+		}
+		// Validate whether the MaxTs is greater than all other local TSOs
+		if currentLocalTSO.Physical > request.MaxTs.Physical {
+			return &pdpb.PrewriteMaxTSResponse{
+				Header:     s.header(),
+				Prewritten: false,
+				MaxLocalTs: &currentLocalTSO,
+			}, nil
+		}
+		// Do the prewriting
+		allocator.PrewriteTSO(request.MaxTs)
+	}
+	return &pdpb.PrewriteMaxTSResponse{
+		Header:     s.header(),
+		Prewritten: true,
+	}, nil
+}
+
+// WriteMaxTS is the second part of 2PC for global MaxTS synchronization,
+// it compares the MaxTS received with each Local TSO Allocator leader's
+// prewritten TSO in memory and write it into memory to finish the global
+// TSO synchronization progress.
+func (s *Server) WriteMaxTS(ctx context.Context, request *pdpb.WriteMaxTSRequest) (*pdpb.WriteMaxTSResponse, error) {
+	if err := s.validateInternalRequest(); err != nil {
+		return nil, err
+	}
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	// Get all Local TSO Allocator leaders
+	allocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	if err != nil {
+		return nil, err
+	}
+	for _, allocator := range allocatorLeaders {
+		// Validate whether the prewritten TSO is consistent
+		currentPrewrittenTSO := allocator.GetPrewrittenTSO()
+		if currentPrewrittenTSO == nil {
+			return &pdpb.WriteMaxTSResponse{
+				Header: s.errorHeader(&pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: "prewritten tso doesn't exist",
+				}),
+				Written: false,
+			}, nil
+
+		}
+		if currentPrewrittenTSO.Physical != request.MaxTs.Physical {
+			return &pdpb.WriteMaxTSResponse{
+				Header: s.errorHeader(&pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: "prewritten tso is not same with the MaxTS",
+				}),
+				Written: false,
+			}, nil
+		}
+		// Do the writing
+		if err := allocator.WriteTSO(); err != nil {
+			return nil, err
+		}
+	}
+	return &pdpb.WriteMaxTSResponse{
+		Header:  s.header(),
+		Written: true,
+	}, nil
+}
+
+// validateInternalRequest checks if server is closed, which is used to valide
+// the gRPC communication between PD servers internally.
+func (s *Server) validateInternalRequest() error {
+	if s.IsClosed() {
+		return errors.WithStack(ErrNotStarted)
+	}
+	return nil
 }

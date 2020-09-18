@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/member"
 	"go.uber.org/zap"
@@ -33,6 +34,10 @@ type LocalTSOAllocator struct {
 	// leadership is used to campaign the corresponding DC's Local TSO Allocator.
 	leadership      *election.Leadership
 	timestampOracle *timestampOracle
+	// prewrittenTSO is used to store the MaxTS from Global TSO Allocator that
+	// is ready to write the TSO in memory.
+	// Todo: gc for unused prewrittenTSO
+	prewrittenTSO atomic.Value // stored as *pdpb.Timestamp
 	// for election use, notice that the leadership that member holds is
 	// the leadership for PD leader. Local TSO Allocator's leadership is for the
 	// election of Local TSO Allocator leader among several PD servers and
@@ -115,6 +120,50 @@ func (lta *LocalTSOAllocator) GetAllocatorLeader() *pdpb.Member {
 // GetMember returns the Local TSO Allocator's member value.
 func (lta *LocalTSOAllocator) GetMember() *pdpb.Member {
 	return lta.member.Member()
+}
+
+// GetCurrentTSO returns current TSO in memory.
+func (lta *LocalTSOAllocator) GetCurrentTSO() (pdpb.Timestamp, error) {
+	var currentTSO pdpb.Timestamp
+	current := (*atomicObject)(atomic.LoadPointer(&lta.timestampOracle.TSO))
+	if current == nil || current.physical == typeutil.ZeroTime {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
+	}
+	currentTSO.Physical = current.physical.UnixNano() / int64(time.Millisecond)
+	currentTSO.Logical = current.logical
+	return currentTSO, nil
+}
+
+// PrewriteTSO is used to prewrite the MaxTS into memory.
+func (lta *LocalTSOAllocator) PrewriteTSO(maxTS *pdpb.Timestamp) {
+	lta.prewrittenTSO.Store(maxTS)
+}
+
+// GetPrewrittenTSO is used to return the current prewrittenTSO in memory.
+func (lta *LocalTSOAllocator) GetPrewrittenTSO() *pdpb.Timestamp {
+	prewrittenTSO := lta.prewrittenTSO.Load()
+	if prewrittenTSO == nil {
+		return nil
+	}
+	return prewrittenTSO.(*pdpb.Timestamp)
+}
+
+// WriteTSO is used to set the prewrittenTSO as current TSO in memory.
+func (lta *LocalTSOAllocator) WriteTSO() error {
+	prewrittenTSO := lta.GetPrewrittenTSO()
+	if prewrittenTSO == nil {
+		return nil
+	}
+	currentTSO, err := lta.GetCurrentTSO()
+	if err != nil {
+		return err
+	}
+	// If current local TSO has already been greater than prewritten TSO.
+	// then do not update
+	if currentTSO.Physical >= prewrittenTSO.Physical {
+		return nil
+	}
+	return lta.SetTSO(uint64(prewrittenTSO.Physical))
 }
 
 // EnableAllocatorLeader sets the Local TSO Allocator itself to a leader.

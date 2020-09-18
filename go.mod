@@ -2,6 +2,8 @@ module github.com/tikv/pd
 
 go 1.13
 
+replace github.com/pingcap/kvproto v0.0.0-20200916031750-f9473f2c5379 => github.com/JmPotato/kvproto v0.0.0-20200917100829-ccf2beb76408
+
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
