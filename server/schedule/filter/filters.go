@@ -16,6 +16,7 @@ package filter
 import (
 	"fmt"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
@@ -722,11 +723,15 @@ var allSpeicalEngines = []string{EngineTiFlash}
 // FitRegion in filter
 func createRegionForRuleFit(startKey, endKey []byte,
 	peers []*metapb.Peer, leader *metapb.Peer, opts ...core.RegionCreateOption) *core.RegionInfo {
+<<<<<<< HEAD
 	copyLeader := &metapb.Peer{
 		Id:        leader.Id,
 		StoreId:   leader.StoreId,
 		IsLearner: leader.IsLearner,
 	}
+=======
+	copyLeader := proto.Clone(leader).(*metapb.Peer)
+>>>>>>> 4a95bca... scheduler: add leader verify in balance-region scheduler (#2966)
 	copyPeers := make([]*metapb.Peer, 0, len(peers))
 	for _, p := range peers {
 		peer := &metapb.Peer{
