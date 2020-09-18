@@ -35,6 +35,7 @@ const (
 	defaultDataKeyRotationPeriod = "168h" // 7 days
 )
 
+// Config define the encryption config structure.
 type Config struct {
 	// Encryption method to use for PD data.
 	DataEncryptionMethod string `toml:"data-encryption-method" json:"data-encryption-method"`
@@ -44,6 +45,7 @@ type Config struct {
 	MasterKey MasterKeyConfig `toml:"master-key" json:"master-key"`
 }
 
+// Adjust validates the config and sets default values.
 func (c *Config) Adjust() error {
 	if len(c.DataEncryptionMethod) == 0 {
 		c.DataEncryptionMethod = defaultDataEncryptionMethod
@@ -71,6 +73,7 @@ func (c *Config) Adjust() error {
 	return nil
 }
 
+// GetMethod gets the encryption method.
 func (c *Config) GetMethod() (encryptionpb.EncryptionMethod, error) {
 	switch c.DataEncryptionMethod {
 	case methodPlaintext:
@@ -87,6 +90,7 @@ func (c *Config) GetMethod() (encryptionpb.EncryptionMethod, error) {
 	}
 }
 
+// GetMasterKey gets the master key config.
 func (c *Config) GetMasterKey() (*encryptionpb.MasterKey, error) {
 	switch c.MasterKey.Type {
 	case masterKeyTypePlaintext:
@@ -120,6 +124,7 @@ func (c *Config) GetMasterKey() (*encryptionpb.MasterKey, error) {
 	}
 }
 
+// MasterKeyConfig defines master key config structure.
 type MasterKeyConfig struct {
 	// Master key type, one of "plaintext", "kms" or "file".
 	Type string `toml:"type" json:"type"`
@@ -128,6 +133,7 @@ type MasterKeyConfig struct {
 	MasterKeyFileConfig
 }
 
+// MasterKeyKMSConfig defines a KMS master key config structure.
 type MasterKeyKMSConfig struct {
 	// KMS CMK key id.
 	KmsKeyID string `toml:"key-id" json:"key-id"`
@@ -137,6 +143,7 @@ type MasterKeyKMSConfig struct {
 	KmsEndpoint string `toml:"endpoint" json:"endpoint"`
 }
 
+// MasterKeyFileConfig defines a file-based master key config structure.
 type MasterKeyFileConfig struct {
 	// Master key file path.
 	FilePath string `toml:"path" json:"path"`

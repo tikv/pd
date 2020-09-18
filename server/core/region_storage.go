@@ -51,7 +51,7 @@ const (
 	defaultBatchSize = 100
 )
 
-// newRegionStorage returns a region storage that is used to save regions.
+// NewRegionStorage returns a region storage that is used to save regions.
 func NewRegionStorage(
 	ctx context.Context,
 	path string,
