@@ -284,7 +284,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(parentCtx context.Context, a
 
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
 // any new local allocator that needs to be set up.
-func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context, serverCtxCancel context.CancelFunc) {
+func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	tsTicker := time.NewTicker(UpdateTimestampStep)
 	defer tsTicker.Stop()
 	checkerTicker := time.NewTicker(checkAllocatorStep)
@@ -298,30 +298,6 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context, serverCtx
 			am.allocatorPatroller(serverCtx)
 		case <-serverCtx.Done():
 			return
-		}
-	}
-}
-
-// Check if we have any new dc-location configured, if yes,
-// then set up the corresponding local allocator.
-func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
-	clusterDCLocations, err := am.GetClusterDCLocations()
-	if err != nil {
-		log.Error("check new allocators failed, can't get cluster dc-locations", errs.ZapError(err))
-	}
-	allocatorGroups := am.getAllocatorGroups()
-	for dcLocation := range clusterDCLocations {
-		if slice.NoneOf(allocatorGroups, func(i int) bool {
-			return allocatorGroups[i].dcLocation == dcLocation
-		}) {
-			if err := am.SetUpAllocator(serverCtx, dcLocation, election.NewLeadership(
-				am.member.Client(),
-				am.getAllocatorPath(dcLocation),
-				fmt.Sprintf("%s local allocator leader election", dcLocation),
-			)); err != nil {
-				log.Error("check new allocators failed, can't set up a new local allocator", zap.String("dc-location", dcLocation), errs.ZapError(err))
-				continue
-			}
 		}
 	}
 }
@@ -358,6 +334,55 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 		am.resetAllocatorGroup(ag.dcLocation)
 		return
 	}
+}
+
+// Check if we have any new dc-location configured, if yes,
+// then set up the corresponding local allocator.
+func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
+	clusterDCLocations, err := am.GetClusterDCLocations()
+	if err != nil {
+		log.Error("check new allocators failed, can't get cluster dc-locations", errs.ZapError(err))
+	}
+	// Collect all dc-locations
+	dcLocations := make([]string, len(clusterDCLocations))
+	for dcLocation := range clusterDCLocations {
+		dcLocations = append(dcLocations, dcLocation)
+	}
+	// Get all Local TSO Allocators
+	allocatorGroups := am.getAllocatorGroups(FilterDCLocation(config.GlobalDCLocation))
+	// Set up the new one
+	for _, dcLocation := range dcLocations {
+		if slice.NoneOf(allocatorGroups, func(i int) bool {
+			return allocatorGroups[i].dcLocation == dcLocation
+		}) {
+			if err := am.SetUpAllocator(serverCtx, dcLocation, election.NewLeadership(
+				am.member.Client(),
+				am.getAllocatorPath(dcLocation),
+				fmt.Sprintf("%s local allocator leader election", dcLocation),
+			)); err != nil {
+				log.Error("check new allocators failed, can't set up a new local allocator", zap.String("dc-location", dcLocation), errs.ZapError(err))
+				continue
+			}
+		}
+	}
+	// Clean up the unused one
+	for _, ag := range allocatorGroups {
+		if slice.NoneOf(dcLocations, func(i int) bool {
+			return dcLocations[i] == ag.dcLocation
+		}) {
+			am.deleteAllocatorGroup(ag.dcLocation)
+		}
+	}
+}
+
+func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
+	am.Lock()
+	defer am.Unlock()
+	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
+		allocatorGroup.allocator.Reset()
+		allocatorGroup.leadership.Reset()
+	}
+	delete(am.allocatorGroups, dcLocation)
 }
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.

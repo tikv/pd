@@ -510,7 +510,7 @@ func (s *Server) tsoAllocatorLoop() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-	s.tsoAllocatorManager.AllocatorDaemon(ctx, cancel)
+	s.tsoAllocatorManager.AllocatorDaemon(ctx)
 	log.Info("server is closed, exit allocator loop")
 }
 
