@@ -30,11 +30,12 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
-	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 )
@@ -247,7 +248,7 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream opt.Hear
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpt())
+		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil)
 	}, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
@@ -282,7 +283,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 		setCfg(cfg)
 	}
 	tc := newTestCluster(opt)
-	hbStreams := mockhbstream.NewHeartbeatStreams(tc.getClusterID(), false /* need to run */)
+	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.getClusterID(), tc, true /* need to run */)
 	if setTc != nil {
 		setTc(tc)
 	}
@@ -362,7 +363,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	defer cleanup()
 
 	c.Assert(tc.addRegionStore(1, 0), IsNil)
-	num := 1 + typeutil.MaxUint64(co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
+	num := 1 + typeutil.MaxUint64(tc.opt.GetReplicaScheduleLimit(), tc.opt.GetMergeScheduleLimit())
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
@@ -803,7 +804,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co.stop()
 	co.wg.Wait()
 
-	// Recreate coodinator then add another replica on store 3.
+	// Recreate coordinator then add another replica on store 3.
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
@@ -912,7 +913,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	oc := co.opController
 	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
-	opt := tc.GetOpt()
+	opt := tc.GetOpts()
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
 	c.Assert(tc.addRegionStore(3, 100), IsNil)
 	c.Assert(tc.addRegionStore(2, 100), IsNil)

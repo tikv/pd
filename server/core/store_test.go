@@ -14,7 +14,6 @@
 package core
 
 import (
-	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -48,12 +47,12 @@ func (s *testDistinctScoreSuite) TestDistinctScore(c *C) {
 				stores = append(stores, store)
 
 				// Number of stores in different zones.
-				nzones := i * len(racks) * len(hosts)
+				numZones := i * len(racks) * len(hosts)
 				// Number of stores in the same zone but in different racks.
-				nracks := j * len(hosts)
+				numRacks := j * len(hosts)
 				// Number of stores in the same rack but in different hosts.
-				nhosts := k
-				score := (nzones*replicaBaseScore+nracks)*replicaBaseScore + nhosts
+				numHosts := k
+				score := (numZones*replicaBaseScore+numRacks)*replicaBaseScore + numHosts
 				c.Assert(DistinctScore(labels, stores, store), Equals, float64(score))
 			}
 		}
@@ -99,31 +98,6 @@ func (s *testConcurrencySuite) TestCloneStore(c *C) {
 var _ = Suite(&testStoreSuite{})
 
 type testStoreSuite struct{}
-
-func (s *testStoreSuite) TestLowSpaceThreshold(c *C) {
-	stats := &pdpb.StoreStats{}
-	stats.Capacity = 10 * (1 << 40) // 10 TB
-	stats.Available = 1 * (1 << 40) // 1 TB
-
-	store := NewStoreInfo(
-		&metapb.Store{Id: 1},
-		SetStoreStats(stats),
-	)
-	threshold := store.GetSpaceThreshold(0.8, lowSpaceThreshold)
-	c.Assert(threshold, Equals, float64(lowSpaceThreshold))
-	c.Assert(store.IsLowSpace(0.8), Equals, false)
-	stats = &pdpb.StoreStats{}
-	stats.Capacity = 100 * (1 << 20) // 100 MB
-	stats.Available = 10 * (1 << 20) // 10 MB
-
-	store = NewStoreInfo(
-		&metapb.Store{Id: 1},
-		SetStoreStats(stats),
-	)
-	threshold = store.GetSpaceThreshold(0.8, lowSpaceThreshold)
-	c.Assert(fmt.Sprintf("%.2f", threshold), Equals, fmt.Sprintf("%.2f", 100*0.2))
-	c.Assert(store.IsLowSpace(0.8), Equals, true)
-}
 
 func (s *testStoreSuite) TestRegionScore(c *C) {
 	stats := &pdpb.StoreStats{}

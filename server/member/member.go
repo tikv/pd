@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -36,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
 )
 
@@ -47,7 +45,7 @@ const (
 
 // Member is used for the election related logic.
 type Member struct {
-	Leadership *election.Leadership
+	leadership *election.Leadership
 	leader     atomic.Value // stored as *pdpb.Member
 	// etcd and cluster information.
 	etcd     *embed.Etcd
@@ -64,10 +62,9 @@ type Member struct {
 // NewMember create a new Member.
 func NewMember(etcd *embed.Etcd, client *clientv3.Client, id uint64) *Member {
 	return &Member{
-		Leadership: election.NewLeadership(client, "pd leader election"),
-		etcd:       etcd,
-		client:     client,
-		id:         id,
+		etcd:   etcd,
+		client: client,
+		id:     id,
 	}
 }
 
@@ -89,6 +86,11 @@ func (m *Member) Member() *pdpb.Member {
 // Etcd returns etcd related information.
 func (m *Member) Etcd() *embed.Etcd {
 	return m.etcd
+}
+
+// Client returns the etcd client.
+func (m *Member) Client() *clientv3.Client {
+	return m.client
 }
 
 // IsLeader returns whether the server is PD leader or not.
@@ -115,14 +117,19 @@ func (m *Member) GetLeader() *pdpb.Member {
 	return member
 }
 
-// EnableLeader sets the member to PD leader.
-func (m *Member) EnableLeader() {
-	m.leader.Store(m.member)
+// setLeader sets the member's PD leader.
+func (m *Member) setLeader(member *pdpb.Member) {
+	m.leader.Store(member)
 }
 
-// DisableLeader reset the PD leader value.
-func (m *Member) DisableLeader() {
+// unsetLeader unsets the member's PD leader.
+func (m *Member) unsetLeader() {
 	m.leader.Store(&pdpb.Member{})
+}
+
+// EnableLeader sets the member itself to a PD leader.
+func (m *Member) EnableLeader() {
+	m.setLeader(m.member)
 }
 
 // GetLeaderPath returns the path of the PD leader.
@@ -130,17 +137,39 @@ func (m *Member) GetLeaderPath() string {
 	return path.Join(m.rootPath, "leader")
 }
 
+// GetLeadership returns the leadership of the PD member.
+func (m *Member) GetLeadership() *election.Leadership {
+	return m.leadership
+}
+
+// CampaignLeader is used to campaign a PD member's leadership
+// and make it become a PD leader.
+func (m *Member) CampaignLeader(leaseTimeout int64) error {
+	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
+}
+
+// KeepLeader is used to keep the PD leader's leadership.
+func (m *Member) KeepLeader(ctx context.Context) {
+	m.leadership.Keep(ctx)
+}
+
+// IsStillLeader returns whether the PD leader is still a PD leader
+// by checking its leadership's lease.
+func (m *Member) IsStillLeader() bool {
+	return m.leadership.Check()
+}
+
 // CheckLeader checks returns true if it is needed to check later.
-func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
+func (m *Member) CheckLeader() (*pdpb.Member, int64, bool) {
 	if m.GetEtcdLeader() == 0 {
-		log.Error("no etcd leader, check pd leader later", zap.Error(errs.ErretcdLeaderNotFound.FastGenByArgs()))
+		log.Error("no etcd leader, check pd leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}
 
 	leader, rev, err := election.GetLeader(m.client, m.GetLeaderPath())
 	if err != nil {
-		log.Error("getting pd leader meets error", errs.ZapError(errs.ErrGetLeader, err))
+		log.Error("getting pd leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}
@@ -149,14 +178,28 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 			// oh, we are already a PD leader, which indicates we may meet something wrong
 			// in previous CampaignLeader. We should delete the leadership and campaign again.
 			log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
-			if err = m.Leadership.DeleteLeader(); err != nil {
-				log.Error("deleting pd leader key meets error", errs.ZapError(errs.ErrDeleteLeaderKey, err))
+			if err = m.leadership.DeleteLeader(); err != nil {
+				log.Error("deleting pd leader key meets error", errs.ZapError(err))
 				time.Sleep(200 * time.Millisecond)
 				return nil, 0, true
 			}
 		}
 	}
 	return leader, rev, false
+}
+
+// WatchLeader is used to watch the changes of the leader.
+func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
+	m.setLeader(leader)
+	m.leadership.Watch(serverCtx, revision)
+	m.unsetLeader()
+}
+
+// ResetLeader is used to reset the PD member's current leadership.
+// Basically it will reset the leader lease and unset leader info.
+func (m *Member) ResetLeader() {
+	m.leadership.Reset()
+	m.unsetLeader()
 }
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
@@ -167,18 +210,18 @@ func (m *Member) CheckPriority(ctx context.Context) {
 	}
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
-		log.Error("failed to load etcd leader priority", errs.ZapError(errs.ErrLoadLeaderPriority, err))
+		log.Error("failed to load leader priority", errs.ZapError(err))
 		return
 	}
 	leaderPriority, err := m.GetMemberLeaderPriority(etcdLeader)
 	if err != nil {
-		log.Error("failed to load etcd leader priority", errs.ZapError(errs.ErrLoadetcdLeaderPriority, err))
+		log.Error("failed to load etcd leader priority", errs.ZapError(err))
 		return
 	}
 	if myPriority > leaderPriority {
 		err := m.MoveEtcdLeader(ctx, etcdLeader, m.ID())
 		if err != nil {
-			log.Error("failed to transfer etcd leader", errs.ZapError(errs.ErrTransferetcdLeader, err))
+			log.Error("failed to transfer etcd leader", errs.ZapError(err))
 		} else {
 			log.Info("transfer etcd leader",
 				zap.Uint64("from", etcdLeader),
@@ -191,7 +234,11 @@ func (m *Member) CheckPriority(ctx context.Context) {
 func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
 	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
 	defer cancel()
-	return errors.WithStack(m.etcd.Server.MoveLeader(moveCtx, old, new))
+	err := m.etcd.Server.MoveLeader(moveCtx, old, new)
+	if err != nil {
+		return errs.ErrEtcdMoveLeader.Wrap(err).GenWithStackByCause()
+	}
+	return nil
 }
 
 // GetEtcdLeader returns the etcd leader ID.
@@ -221,6 +268,7 @@ func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
 	m.member = leader
 	m.memberValue = string(data)
 	m.rootPath = rootPath
+	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "pd leader election")
 }
 
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all
@@ -252,7 +300,7 @@ func (m *Member) getMemberLeaderPriorityPath(id uint64) string {
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
 func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 	key := m.getMemberLeaderPriorityPath(id)
-	res, err := m.Leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
+	res, err := m.leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -262,10 +310,10 @@ func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 	return nil
 }
 
-// DeleteMemberLeaderPriority removes a member's ectd leader priority config.
+// DeleteMemberLeaderPriority removes a member's etcd leader priority config.
 func (m *Member) DeleteMemberLeaderPriority(id uint64) error {
 	key := m.getMemberLeaderPriorityPath(id)
-	res, err := m.Leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
+	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -287,7 +335,7 @@ func (m *Member) GetMemberLeaderPriority(id uint64) (int, error) {
 	}
 	priority, err := strconv.ParseInt(string(res.Kvs[0].Value), 10, 32)
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, errs.ErrStrconvParseInt.Wrap(err).GenWithStackByCause()
 	}
 	return int(priority), nil
 }
@@ -304,7 +352,7 @@ func (m *Member) GetMemberDeployPath(id uint64) (string, error) {
 		return "", err
 	}
 	if len(res.Kvs) == 0 {
-		return "", errors.New("no value")
+		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
 	}
 	return string(res.Kvs[0].Value), nil
 }
@@ -344,7 +392,7 @@ func (m *Member) GetMemberBinaryVersion(id uint64) (string, error) {
 		return "", err
 	}
 	if len(res.Kvs) == 0 {
-		return "", errors.New("no value")
+		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
 	}
 	return string(res.Kvs[0].Value), nil
 }
@@ -357,7 +405,7 @@ func (m *Member) GetMemberGitHash(id uint64) (string, error) {
 		return "", err
 	}
 	if len(res.Kvs) == 0 {
-		return "", errors.New("no value")
+		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
 	}
 	return string(res.Kvs[0].Value), nil
 }
@@ -388,54 +436,6 @@ func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
 		return errors.New("failed to save git hash")
 	}
 	return nil
-}
-
-// WatchLeader is used to watch the changes of the leader.
-func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
-	m.leader.Store(leader)
-	defer m.leader.Store(&pdpb.Member{})
-
-	watcher := clientv3.NewWatcher(m.client)
-	defer watcher.Close()
-
-	ctx, cancel := context.WithCancel(serverCtx)
-	defer cancel()
-
-	// The revision is the revision of last modification on this key.
-	// If the revision is compacted, will meet required revision has been compacted error.
-	// In this case, use the compact revision to re-watch the key.
-	for {
-		failpoint.Inject("delayWatcher", nil)
-		rch := watcher.Watch(ctx, m.GetLeaderPath(), clientv3.WithRev(revision))
-		for wresp := range rch {
-			// meet compacted error, use the compact revision.
-			if wresp.CompactRevision != 0 {
-				log.Warn("required revision has been compacted, use the compact revision",
-					zap.Int64("required-revision", revision),
-					zap.Int64("compact-revision", wresp.CompactRevision))
-				revision = wresp.CompactRevision
-				break
-			}
-			if wresp.Canceled {
-				log.Error("pd leader watcher is canceled with", zap.Int64("revision", revision), errs.ZapError(errs.ErrWatcherCancel, wresp.Err()))
-				return
-			}
-
-			for _, ev := range wresp.Events {
-				if ev.Type == mvccpb.DELETE {
-					log.Info("current pd leader is deleted")
-					return
-				}
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			// server closed, return
-			return
-		default:
-		}
-	}
 }
 
 // Close gracefully shuts down all servers/listeners.

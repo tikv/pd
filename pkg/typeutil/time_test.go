@@ -24,7 +24,7 @@ var _ = Suite(&testTimeSuite{})
 
 type testTimeSuite struct{}
 
-func (s *testTimeSuite) TestParseTimestap(c *C) {
+func (s *testTimeSuite) TestParseTimestamp(c *C) {
 	for i := 0; i < 3; i++ {
 		t := time.Now().Add(time.Second * time.Duration(rand.Int31n(1000)))
 		data := Uint64ToBytes(uint64(t.UnixNano()))

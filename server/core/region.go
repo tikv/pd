@@ -23,10 +23,16 @@ import (
 	"unsafe"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 )
+
+// errRegionIsStale is error info for region is stale.
+var errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
+	return errors.Errorf("region is stale: region %v origin %v", region, origin)
+}
 
 // RegionInfo records detail region info.
 // Read-Only once created.
@@ -503,15 +509,13 @@ func (rst *regionSubTree) scanRanges() []*RegionInfo {
 }
 
 func (rst *regionSubTree) update(region *RegionInfo) {
-	if r := rst.find(region); r != nil {
-		rst.totalSize += region.approximateSize - r.region.approximateSize
-		rst.totalKeys += region.approximateKeys - r.region.approximateKeys
-		r.region = region
-		return
-	}
+	overlaps := rst.regionTree.update(region)
 	rst.totalSize += region.approximateSize
 	rst.totalKeys += region.approximateKeys
-	rst.regionTree.update(region)
+	for _, r := range overlaps {
+		rst.totalSize -= r.approximateSize
+		rst.totalKeys -= r.approximateKeys
+	}
 }
 
 func (rst *regionSubTree) remove(region *RegionInfo) {
@@ -889,12 +893,18 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 
 // GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
-	return r.leaders[storeID].find(region).region
+	if leaders, ok := r.leaders[storeID]; ok {
+		return leaders.find(region).region
+	}
+	return nil
 }
 
 // GetFollower return follower RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
-	return r.followers[storeID].find(region).region
+	if followers, ok := r.followers[storeID]; ok {
+		return followers.find(region).region
+	}
+	return nil
 }
 
 // ScanRange scans regions intersecting [start key, end key), returns at most

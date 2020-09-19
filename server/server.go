@@ -38,20 +38,21 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/urfave/negroni"
@@ -116,14 +117,14 @@ type Server struct {
 	idAllocator *id.AllocatorImpl
 	// for storage operation.
 	storage *core.Storage
-	// for baiscCluster operation.
+	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
-	tsoAllocator tso.Allocator
+	tsoAllocatorManager *tso.AllocatorManager
 	// for raft cluster
 	cluster *cluster.RaftCluster
 	// For async region heartbeat.
-	hbStreams *heartbeatStreams
+	hbStreams *hbstream.HeartbeatStreams
 	// Zap logger
 	lg       *zap.Logger
 	logProps *log.ZapProperties
@@ -169,7 +170,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			return nil, err
 		}
 		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
-			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
+			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs(info.Name, info.Version)
 		}
 		var pathPrefix string
 		if len(info.PathPrefix) != 0 {
@@ -180,7 +181,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
 		}
 		if _, ok := registerMap[pathPrefix]; ok {
-			return nil, errors.Errorf("service with path [%s] already registered", pathPrefix)
+			return nil, errs.ErrServiceRegistered.FastGenByArgs(pathPrefix)
 		}
 
 		log.Info("register REST path", zap.String("path", pathPrefix))
@@ -260,20 +261,20 @@ func (s *Server) startEtcd(ctx context.Context) error {
 
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
 
 	// Check cluster ID
-	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
+	urlMap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdURLMap.Wrap(err).GenWithStackByCause()
 	}
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
 	}
 
-	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap, tlsConfig); err != nil {
+	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlMap, tlsConfig); err != nil {
 		return err
 	}
 
@@ -281,7 +282,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	// Wait etcd until it is ready to use
 	case <-etcd.Server.ReadyNotify():
 	case <-newCtx.Done():
-		return errors.Errorf("canceled when waiting embed etcd to be ready")
+		return errs.ErrCancelStartEtcd.FastGenByArgs()
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
@@ -293,7 +294,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		TLS:         tlsConfig,
 	})
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 
 	etcdServerID := uint64(etcd.Server.ID())
@@ -348,12 +349,13 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
-	s.tsoAllocator = tso.NewGlobalTSOAllocator(
-		s.member.Leadership,
-		s.rootPath,
-		s.cfg.TsoSaveInterval.Duration,
+	s.tsoAllocatorManager = tso.NewAllocatorManager(
+		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 	)
+	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
+		return err
+	}
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
 	regionStorage, err := core.NewRegionStorage(ctx, path)
@@ -363,7 +365,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
-	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
@@ -408,7 +410,13 @@ func (s *Server) Close() {
 	s.stopServerLoop()
 
 	if s.client != nil {
-		s.client.Close()
+		if err := s.client.Close(); err != nil {
+			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+
+	if s.httpClient != nil {
+		s.httpClient.CloseIdleConnections()
 	}
 
 	if s.member.Etcd() != nil {
@@ -419,7 +427,7 @@ func (s *Server) Close() {
 		s.hbStreams.Close()
 	}
 	if err := s.storage.Close(); err != nil {
-		log.Error("close storage meet error", zap.Error(err))
+		log.Error("close storage meet error", errs.ZapError(err))
 	}
 
 	// Run callbacks
@@ -437,8 +445,8 @@ func (s *Server) IsClosed() bool {
 
 // Run runs the pd server.
 func (s *Server) Run() error {
-	go StartMonitor(s.ctx, time.Now, func() {
-		log.Error("system time jumps backward")
+	go systimemon.StartMonitor(s.ctx, time.Now, func() {
+		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
 	})
 	if err := s.startEtcd(s.ctx); err != nil {
@@ -466,10 +474,11 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(3)
+	s.serverLoopWg.Add(4)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
+	go s.tsoAllocatorLoop()
 }
 
 func (s *Server) stopServerLoop() {
@@ -492,6 +501,17 @@ func (s *Server) serverMetricsLoop() {
 			return
 		}
 	}
+}
+
+// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
+func (s *Server) tsoAllocatorLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	s.tsoAllocatorManager.AllocatorDaemon(ctx)
+	log.Info("server is closed, exit allocator loop")
 }
 
 func (s *Server) collectEtcdStateMetrics() {
@@ -555,21 +575,21 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
 	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
 		log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
-		return nil, errors.Errorf("cluster %d already bootstrapped", clusterID)
+		return nil, errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
 	err = s.storage.SaveRegion(req.GetRegion())
 	if err != nil {
-		log.Warn("save the bootstrap region failed", zap.Error(err))
+		log.Warn("save the bootstrap region failed", errs.ZapError(err))
 	}
 	err = s.storage.Flush()
 	if err != nil {
-		log.Warn("flush the bootstrap region failed", zap.Error(err))
+		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
 	}
 
 	if err := s.cluster.Start(s); err != nil {
@@ -631,11 +651,6 @@ func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
 }
 
-// GetLeadership returns the member's leadership
-func (s *Server) GetLeadership() *election.Leadership {
-	return s.member.Leadership
-}
-
 // GetLeader returns the leader of PD cluster(i.e the PD leader).
 func (s *Server) GetLeader() *pdpb.Member {
 	return s.member.GetLeader()
@@ -668,13 +683,18 @@ func (s *Server) GetPersistOptions() *config.PersistOptions {
 }
 
 // GetHBStreams returns the heartbeat streams.
-func (s *Server) GetHBStreams() opt.HeartbeatStreams {
+func (s *Server) GetHBStreams() *hbstream.HeartbeatStreams {
 	return s.hbStreams
 }
 
 // GetAllocator returns the ID allocator of server.
 func (s *Server) GetAllocator() *id.AllocatorImpl {
 	return s.idAllocator
+}
+
+// GetTSOAllocatorManager returns the manager of TSO Allocator.
+func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
+	return s.tsoAllocatorManager
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.
@@ -717,7 +737,7 @@ func (s *Server) GetConfig() *config.Config {
 			log.Error("failed to decode scheduler config",
 				zap.String("config", configs[i]),
 				zap.String("scheduler", sche),
-				zap.Error(err))
+				errs.ZapError(err))
 			continue
 		}
 		payload[sche] = config
@@ -749,7 +769,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 		log.Error("failed to update schedule config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -772,7 +792,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
-			return errors.WithStack(cluster.ErrNotBootstrapped)
+			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.
@@ -795,7 +815,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -833,7 +853,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 		log.Error("failed to update PDServer config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("PD server config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -849,7 +869,7 @@ func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 		log.Error("failed to update label property config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", &old),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("label property config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -867,7 +887,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 
@@ -886,7 +906,7 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 
@@ -913,7 +933,7 @@ func (s *Server) SetClusterVersion(v string) error {
 		log.Error("failed to update cluster version",
 			zap.String("old-version", old.String()),
 			zap.String("new-version", v),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("cluster version is updated", zap.String("new-version", v))
@@ -928,6 +948,11 @@ func (s *Server) GetClusterVersion() semver.Version {
 // GetSecurityConfig get the security config.
 func (s *Server) GetSecurityConfig() *grpcutil.SecurityConfig {
 	return &s.cfg.Security
+}
+
+// GetServerRootPath returns the server root path.
+func (s *Server) GetServerRootPath() string {
+	return s.rootPath
 }
 
 // GetClusterRootPath returns the cluster root path.
@@ -1020,7 +1045,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 		log.Error("failed to update replication mode config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", &old),
-			zap.Error(err))
+			errs.ZapError(err))
 		return err
 	}
 	log.Info("replication mode config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -1029,7 +1054,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	if cluster != nil {
 		err := cluster.GetReplicationMode().UpdateConfig(cfg)
 		if err != nil {
-			log.Warn("failed to update replication mode", zap.Error(err))
+			log.Warn("failed to update replication mode", errs.ZapError(err))
 			// revert to old config
 			// NOTE: since we can't put the 2 storage mutations in a batch, it
 			// is possible that memory and persistent data become different
@@ -1038,7 +1063,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 			s.persistOptions.SetReplicationModeConfig(old)
 			revertErr := s.persistOptions.Persist(s.storage)
 			if revertErr != nil {
-				log.Error("failed to revert replication mode persistent config", zap.Error(err))
+				log.Error("failed to revert replication mode persistent config", errs.ZapError(revertErr))
 			}
 		}
 		return err
@@ -1057,31 +1082,34 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
-		leader, rev, checkAgain := s.member.CheckLeader(s.Name())
+		leader, rev, checkAgain := s.member.CheckLeader()
 		if checkAgain {
 			continue
 		}
 		if leader != nil {
 			err := s.reloadConfigFromKV()
 			if err != nil {
-				log.Error("reload config failed", zap.Error(err))
+				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
-			log.Info("start watch pd leader", zap.Stringer("pd-leader", leader))
+			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
+			// WatchLeader will keep looping and never return unless the PD leader has changed.
 			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
 			syncer.StopSyncWithLeader()
-			log.Info("pd leader changed, try to re-campaign a pd leader")
+			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
 
+		// To make sure the etcd leader and PD leader are on the same server.
 		etcdLeader := s.member.GetEtcdLeader()
 		if etcdLeader != s.member.ID() {
 			log.Info("skip campaigning of pd leader and check later",
 				zap.String("server-name", s.Name()),
-				zap.Uint64("etcd-leader-id", etcdLeader))
+				zap.Uint64("etcd-leader-id", etcdLeader),
+				zap.Uint64("member-id", s.member.ID()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -1090,11 +1118,9 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign pd leader",
-		zap.String("campaign-pd-leader-name", s.Name()),
-		zap.String("purpose", s.member.Leadership.Purpose))
-	if err := s.member.Leadership.Campaign(s.cfg.LeaderLease, s.member.GetLeaderPath(), s.member.MemberValue()); err != nil {
-		log.Error("campaign pd leader meet error", zap.Error(err))
+	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
+	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
+		log.Error("campaign pd leader meet error", errs.ZapError(err))
 		return
 	}
 
@@ -1105,55 +1131,46 @@ func (s *Server) campaignLeader() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-	defer s.member.Leadership.Reset()
-	// maintain the leadership
-	go s.member.Leadership.Keep(ctx)
+	defer s.member.ResetLeader()
+	// maintain the PD leader
+	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
-	log.Info("initialize the global TSO allocator")
-	if err := s.tsoAllocator.Initialize(); err != nil {
-		log.Error("failed to initialize the global TSO allocator", zap.Error(err))
+	log.Info("setting up the global TSO allocator")
+	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, cancel, config.GlobalDCLocation, s.member.GetLeadership()); err != nil {
+		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
 		return
 	}
-	defer s.tsoAllocator.Reset()
 
 	if err := s.reloadConfigFromKV(); err != nil {
-		log.Error("failed to reload configuration", zap.Error(err))
+		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
 	}
 	// Try to create raft cluster.
 	if err := s.createRaftCluster(); err != nil {
-		log.Error("failed to create raft cluster", zap.Error(err))
+		log.Error("failed to create raft cluster", errs.ZapError(err))
 		return
 	}
 	defer s.stopRaftCluster()
 
 	s.member.EnableLeader()
-	defer s.member.DisableLeader()
 
 	CheckPDVersion(s.persistOptions)
 	log.Info("PD cluster leader is ready to serve", zap.String("pd-leader-name", s.Name()))
 
-	tsTicker := time.NewTicker(tso.UpdateTimestampStep)
-	defer tsTicker.Stop()
 	leaderTicker := time.NewTicker(leaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !s.member.Leadership.Check() {
-				log.Info("leadership is invalid because lease has expired, pd leader will step down")
+			if !s.member.IsStillLeader() {
+				log.Info("no longer a leader because lease has expired, pd leader will step down")
 				return
 			}
 			etcdLeader := s.member.GetEtcdLeader()
 			if etcdLeader != s.member.ID() {
 				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
-				return
-			}
-		case <-tsTicker.C:
-			if err := s.tsoAllocator.UpdateTSO(); err != nil {
-				log.Error("failed to update timestamp", zap.Error(err))
 				return
 			}
 		case <-ctx.Done():
@@ -1206,20 +1223,20 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 	for _, member := range resp.Members {
 		clientUrls := member.GetClientUrls()
 		if len(clientUrls) == 0 {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
-			return errors.Errorf("failed to replicate to member %s: clientUrls is empty", member.GetName())
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
+			return errs.ErrClientURLEmpty.FastGenByArgs()
 		}
 		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
 		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
 		req.Header.Set("PD-Allow-follower-handle", "true")
 		res, err := s.httpClient.Do(req)
 		if err != nil {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
-			return errors.Errorf("failed to replicate to member %s", member.GetName())
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
+			return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
 		}
 		if res.StatusCode != http.StatusOK {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
-			return errors.Errorf("failed to replicate to member %s", member.GetName())
+			return errs.ErrSendRequest.FastGenByArgs()
 		}
 	}
 	return nil

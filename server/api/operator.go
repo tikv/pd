@@ -275,7 +275,8 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		if err := h.AddScatterRegionOperator(uint64(regionID)); err != nil {
+		group, _ := input["group"].(string)
+		if err := h.AddScatterRegionOperator(uint64(regionID), group); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

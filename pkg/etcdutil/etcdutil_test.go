@@ -121,9 +121,9 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 	}
 
 	// Test CheckClusterID
-	urlmap, err := types.NewURLsMap(cfg2.InitialCluster)
+	urlsMap, err := types.NewURLsMap(cfg2.InitialCluster)
 	c.Assert(err, IsNil)
-	err = CheckClusterID(etcd1.Server.Cluster().ID(), urlmap, &tls.Config{})
+	err = CheckClusterID(etcd1.Server.Cluster().ID(), urlsMap, &tls.Config{})
 	c.Assert(err, IsNil)
 
 	// Test RemoveEtcdMember

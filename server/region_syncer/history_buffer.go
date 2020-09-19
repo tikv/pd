@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
 	"go.uber.org/zap"
@@ -140,7 +141,7 @@ func (h *historyBuffer) reload() {
 	if v != "" {
 		h.index, err = strconv.ParseUint(v, 10, 64)
 		if err != nil {
-			log.Fatal("load history index failed", zap.Error(err))
+			log.Fatal("load history index failed", errs.ZapError(errs.ErrStrconvParseUint, err))
 		}
 	}
 	log.Info("start from history index", zap.Uint64("start-index", h.firstIndex()))
@@ -151,6 +152,6 @@ func (h *historyBuffer) persist() {
 	regionSyncerStatus.WithLabelValues("last_index").Set(float64(h.nextIndex()))
 	err := h.kv.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
 	if err != nil {
-		log.Warn("persist history index failed", zap.Uint64("persist-index", h.nextIndex()), zap.Error(err))
+		log.Warn("persist history index failed", zap.Uint64("persist-index", h.nextIndex()), errs.ZapError(err))
 	}
 }

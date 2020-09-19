@@ -42,6 +42,8 @@ type Region struct {
 type Client interface {
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
+	// GetMemberInfo gets the members Info from PD
+	GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error)
 	// GetLeaderAddr returns current leader's address. It returns "" before
 	// syncing leader from server.
 	GetLeaderAddr() string
@@ -55,7 +57,7 @@ type Client interface {
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
 	GetRegion(ctx context.Context, key []byte) (*Region, error)
-	// GetRegionFromMember gets a region from certain members
+	// GetRegionFromMember gets a region from certain members.
 	GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error)
 	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
 	GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
@@ -81,12 +83,15 @@ type Client interface {
 
 	// UpdateServiceGCSafePoint updates the safepoint for specific service and
 	// returns the minimum safepoint across all services, this value is used to
-	// determine the safepoint for multiple services, it does not tigger a GC
+	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	ScatterRegion(ctx context.Context, regionID uint64) error
+	// ScatterRegionWithOption scatters the specified region with the given options, should use it
+	// for a batch of regions.
+	ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...ScatterRegionOption) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 	// Close closes the client.
@@ -104,6 +109,19 @@ type GetStoreOption func(*GetStoreOp)
 // WithExcludeTombstone excludes tombstone stores from the result.
 func WithExcludeTombstone() GetStoreOption {
 	return func(op *GetStoreOp) { op.excludeTombstone = true }
+}
+
+// ScatterRegionOp represents available options when scatter regions
+type ScatterRegionOp struct {
+	group string
+}
+
+// ScatterRegionOption configures ScatterRegionOp
+type ScatterRegionOption func(op *ScatterRegionOp)
+
+// WithGroup specify the group during ScatterRegion
+func WithGroup(group string) ScatterRegionOption {
+	return func(op *ScatterRegionOp) { op.group = group }
 }
 
 type tsoRequest struct {
@@ -183,7 +201,7 @@ func (c *client) tsCancelLoop() {
 		case d := <-c.tsDeadlineCh:
 			select {
 			case <-d.timer:
-				log.Error("tso request is canceled due to timeout", zap.Error(errs.ErrGetTSO.FastGenByArgs()))
+				log.Error("tso request is canceled due to timeout", errs.ZapError(errs.ErrClientGetTSOTimeout))
 				d.cancel()
 			case <-d.done:
 			case <-ctx.Done():
@@ -204,6 +222,24 @@ func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.Canc
 	case <-loopCtx.Done():
 		return
 	}
+}
+
+func (c *client) GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error) {
+	start := time.Now()
+	defer func() { cmdDurationGetMemberInfo.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	resp, err := c.leaderClient().GetMembers(ctx, &pdpb.GetMembersRequest{
+		Header: c.requestHeader(),
+	})
+	cancel()
+	if err != nil {
+		cmdFailDurationGetMemberInfo.Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return nil, errors.WithStack(err)
+	}
+	members := resp.GetMembers()
+	return members, nil
 }
 
 func (c *client) tsLoop() {
@@ -238,7 +274,7 @@ func (c *client) tsLoop() {
 					return
 				default:
 				}
-				log.Error("[pd] create tso stream error", errs.ZapError(errs.ErrCreateTSOStream, err))
+				log.Error("[pd] create tso stream error", errs.ZapError(errs.ErrClientCreateTSOStream, err))
 				c.ScheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(errors.WithStack(err))
@@ -285,7 +321,7 @@ func (c *client) tsLoop() {
 				return
 			default:
 			}
-			log.Error("[pd] getTS error", errs.ZapError(errs.ErrGetTSO, err))
+			log.Error("[pd] getTS error", errs.ZapError(errs.ErrClientGetTSO, err))
 			c.ScheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil
@@ -491,33 +527,6 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 	return c.parseRegionResponse(resp), nil
 }
 
-func (c *client) waitForRegion(ctx context.Context, key []byte, memberURLs []string) (*pdpb.GetRegionResponse, error) {
-	for _, memberURL := range memberURLs {
-		if resp, err := c.getRegionResponse(ctx, memberURL, key); err == nil && resp != nil {
-			return resp, nil
-		}
-	}
-
-	errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %v", memberURLs)
-	return nil, errors.New(errorMsg)
-}
-
-func (c *client) getRegionResponse(ctx context.Context, url string, key []byte) (*pdpb.GetRegionResponse, error) {
-	conn, _ := c.getOrCreateGRPCConn(url)
-	cc := pdpb.NewPDClient(conn)
-	resp, err := cc.GetRegion(ctx, &pdpb.GetRegionRequest{
-		Header:    c.requestHeader(),
-		RegionKey: key,
-	})
-
-	if err != nil {
-		log.Error("[pd] get region error", errs.ZapError(errs.ErrGetRegion, err))
-		return resp, err
-	}
-
-	return resp, nil
-}
-
 func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
@@ -527,10 +536,26 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
 	childContext, cancel := context.WithTimeout(ctx, c.timeout)
-	resp, err := c.waitForRegion(childContext, key, memberURLs)
+	var (
+		resp *pdpb.GetRegionResponse
+		err  error
+	)
+	for _, url := range memberURLs {
+		conn, _ := c.getOrCreateGRPCConn(url)
+		cc := pdpb.NewPDClient(conn)
+		resp, err = cc.GetRegion(childContext, &pdpb.GetRegionRequest{
+			Header:    c.requestHeader(),
+			RegionKey: key,
+		})
+		if err == nil && resp != nil {
+			break
+		}
+	}
 	cancel()
 
-	if err != nil {
+	if resp == nil {
+		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %v", memberURLs)
+		err = errors.New(errorMsg)
 		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
@@ -723,7 +748,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 
 // UpdateServiceGCSafePoint updates the safepoint for specific service and
 // returns the minimum safepoint across all services, this value is used to
-// determine the safepoint for multiple services, it does not tigger a GC
+// determine the safepoint for multiple services, it does not trigger a GC
 // job. Use UpdateGCSafePoint to trigger the GC job if needed.
 func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
@@ -756,22 +781,19 @@ func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
 		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
-	start := time.Now()
-	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
+	return c.scatterRegionsWithGroup(ctx, regionID, "")
+}
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
-		Header:   c.requestHeader(),
-		RegionId: regionID,
-	})
-	cancel()
-	if err != nil {
-		return err
+func (c *client) ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...ScatterRegionOption) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.ScatterRegionWithOption", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
 	}
-	if resp.Header.GetError() != nil {
-		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	options := &ScatterRegionOp{}
+	for _, opt := range opts {
+		opt(options)
 	}
-	return nil
+	return c.scatterRegionsWithGroup(ctx, regionID, options.group)
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
@@ -794,6 +816,26 @@ func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
 		ClusterId: c.clusterID,
 	}
+}
+
+func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, group string) error {
+	start := time.Now()
+	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+		Group:    group,
+	})
+	cancel()
+	if err != nil {
+		return err
+	}
+	if resp.Header.GetError() != nil {
+		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	}
+	return nil
 }
 
 func addrsToUrls(addrs []string) []string {

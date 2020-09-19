@@ -24,11 +24,11 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
-	"go.uber.org/zap"
 )
 
 const (
@@ -93,7 +93,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		s, err := ioutil.ReadFile(filePath)
 		if err != nil {
-			log.Fatal("read the join config meet error", zap.Error(err))
+			log.Fatal("read the join config meet error", errs.ZapError(errs.ErrIORead, err))
 		}
 		cfg.InitialCluster = strings.TrimSpace(string(s))
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
@@ -210,14 +210,14 @@ func PrepareJoinCluster(cfg *config.Config) error {
 func isDataExist(d string) bool {
 	dir, err := os.Open(d)
 	if err != nil {
-		log.Error("failed to open directory", zap.Error(err))
+		log.Error("failed to open directory", errs.ZapError(errs.ErrOSOpen, err))
 		return false
 	}
 	defer dir.Close()
 
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
-		log.Error("failed to list directory", zap.Error(err))
+		log.Error("failed to list directory", errs.ZapError(errs.ErrReadDirName, err))
 		return false
 	}
 	return len(names) != 0

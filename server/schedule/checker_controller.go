@@ -16,6 +16,7 @@ package schedule
 import (
 	"context"
 
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -25,24 +26,28 @@ import (
 
 // CheckerController is used to manage all checkers.
 type CheckerController struct {
-	cluster        opt.Cluster
-	opController   *OperatorController
-	learnerChecker *checker.LearnerChecker
-	replicaChecker *checker.ReplicaChecker
-	ruleChecker    *checker.RuleChecker
-	mergeChecker   *checker.MergeChecker
+	cluster           opt.Cluster
+	opts              *config.PersistOptions
+	opController      *OperatorController
+	learnerChecker    *checker.LearnerChecker
+	replicaChecker    *checker.ReplicaChecker
+	ruleChecker       *checker.RuleChecker
+	mergeChecker      *checker.MergeChecker
+	jointStateChecker *checker.JointStateChecker
 }
 
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
 func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, opController *OperatorController) *CheckerController {
 	return &CheckerController{
-		cluster:        cluster,
-		opController:   opController,
-		learnerChecker: checker.NewLearnerChecker(cluster),
-		replicaChecker: checker.NewReplicaChecker(cluster),
-		ruleChecker:    checker.NewRuleChecker(cluster, ruleManager),
-		mergeChecker:   checker.NewMergeChecker(ctx, cluster),
+		cluster:           cluster,
+		opts:              cluster.GetOpts(),
+		opController:      opController,
+		learnerChecker:    checker.NewLearnerChecker(cluster),
+		replicaChecker:    checker.NewReplicaChecker(cluster),
+		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager),
+		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
+		jointStateChecker: checker.NewJointStateChecker(cluster),
 	}
 }
 
@@ -52,8 +57,13 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 	checkerIsBusy := true
-	if c.cluster.IsPlacementRulesEnabled() {
-		if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+
+	if op := c.jointStateChecker.Check(region); op != nil {
+		return false, []*operator.Operator{op}
+	}
+
+	if c.opts.IsPlacementRulesEnabled() {
+		if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 			checkerIsBusy = false
 			if op := c.ruleChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
@@ -63,7 +73,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 		if op := c.learnerChecker.Check(region); op != nil {
 			return false, []*operator.Operator{op}
 		}
-		if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+		if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 			checkerIsBusy = false
 			if op := c.replicaChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
@@ -71,7 +81,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 		}
 	}
 
-	if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+	if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.opts.GetMergeScheduleLimit() {
 		checkerIsBusy = false
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.

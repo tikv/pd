@@ -16,6 +16,7 @@ package versioninfo
 import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 )
 
@@ -58,7 +59,7 @@ var featuresDict = map[Feature]string{
 func MinSupportedVersion(v Feature) *semver.Version {
 	target, ok := featuresDict[v]
 	if !ok {
-		log.Fatal("the corresponding version of the feature doesn't exist", zap.Int("feature-number", int(v)))
+		log.Fatal("the corresponding version of the feature doesn't exist", zap.Int("feature-number", int(v)), errs.ZapError(errs.ErrFeatureNotExisted))
 	}
 	version := MustParseVersion(target)
 	return version

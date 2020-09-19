@@ -20,10 +20,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 var _ = Suite(&testRuleCheckerSuite{})
@@ -35,9 +36,10 @@ type testRuleCheckerSuite struct {
 }
 
 func (s *testRuleCheckerSuite) SetUpTest(c *C) {
-	cfg := mockoption.NewScheduleOptions()
-	cfg.EnablePlacementRules = true
+	cfg := config.NewTestOptions()
 	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	s.cluster.SetEnablePlacementRules(true)
 	s.ruleManager = s.cluster.RuleManager
 	s.rc = NewRuleChecker(s.cluster, s.ruleManager)
 }

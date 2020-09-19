@@ -14,7 +14,6 @@
 package config
 
 import (
-	"context"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -25,9 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
-	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/core/storelimit"
 )
 
 // PersistOptions wraps all configurations that need to persist to storage and
@@ -133,6 +130,13 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// SetPlacementRuleEnabled set PlacementRuleEnabled
+func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
+	v := o.GetReplicationConfig().Clone()
+	v.EnablePlacementRules = enabled
+	o.SetReplicationConfig(v)
+}
+
 // GetStrictlyMatchLabel returns whether check label strict.
 func (o *PersistOptions) GetStrictlyMatchLabel() bool {
 	return o.GetReplicationConfig().StrictlyMatchLabel
@@ -145,7 +149,7 @@ func (o *PersistOptions) GetMaxReplicas() int {
 
 // SetMaxReplicas sets the number of replicas for each region.
 func (o *PersistOptions) SetMaxReplicas(replicas int) {
-	v := o.GetReplicationConfig().clone()
+	v := o.GetReplicationConfig().Clone()
 	v.MaxReplicas = uint64(replicas)
 	o.SetReplicationConfig(v)
 }
@@ -238,7 +242,7 @@ func (o *PersistOptions) IsCrossTableMergeEnabled() bool {
 	return o.GetScheduleConfig().EnableCrossTableMerge
 }
 
-// GetPatrolRegionInterval returns the interval of patroling region.
+// GetPatrolRegionInterval returns the interval of patrolling region.
 func (o *PersistOptions) GetPatrolRegionInterval() time.Duration {
 	return o.GetScheduleConfig().PatrolRegionInterval.Duration
 }
@@ -381,9 +385,14 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
 
-// IsDebugMetricsEnabled mocks method
+// IsDebugMetricsEnabled returns if debug metrics is enabled.
 func (o *PersistOptions) IsDebugMetricsEnabled() bool {
 	return o.GetScheduleConfig().EnableDebugMetrics
+}
+
+// IsUseJointConsensus returns if using joint consensus as a operator step is enabled.
+func (o *PersistOptions) IsUseJointConsensus() bool {
+	return o.GetScheduleConfig().EnableJointConsensus
 }
 
 // GetHotRegionCacheHitsThreshold is a threshold to decide if a region is hot.
@@ -416,30 +425,6 @@ func (o *PersistOptions) AddSchedulerCfg(tp string, args []string) {
 	}
 	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args, Disable: false})
 	o.SetScheduleConfig(v)
-}
-
-// RemoveSchedulerCfg removes the scheduler configurations.
-func (o *PersistOptions) RemoveSchedulerCfg(ctx context.Context, name string) error {
-	v := o.GetScheduleConfig().Clone()
-	for i, schedulerCfg := range v.Schedulers {
-		// To create a temporary scheduler is just used to get scheduler's name
-		decoder := schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
-		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), decoder)
-		if err != nil {
-			return err
-		}
-		if tmp.GetName() == name {
-			if IsDefaultScheduler(tmp.GetType()) {
-				schedulerCfg.Disable = true
-				v.Schedulers[i] = schedulerCfg
-			} else {
-				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
-			}
-			o.SetScheduleConfig(v)
-			return nil
-		}
-	}
-	return nil
 }
 
 // SetLabelProperty sets the label property.
@@ -481,8 +466,7 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 		LabelProperty:   o.GetLabelPropertyConfig(),
 		ClusterVersion:  *o.GetClusterVersion(),
 	}
-	err := storage.SaveConfig(cfg)
-	return err
+	return storage.SaveConfig(cfg)
 }
 
 // Reload reloads the configuration from the storage.

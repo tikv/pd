@@ -67,8 +67,9 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	apiRouter.HandleFunc("/schedulers", schedulerHandler.Post).Methods("POST")
 	apiRouter.HandleFunc("/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
 	apiRouter.HandleFunc("/schedulers/{name}", schedulerHandler.PauseOrResume).Methods("POST")
+
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	rootRouter.PathPrefix(server.SchedulerConfigHandlerPath).Handler(schedulerConfigHandler)
+	apiRouter.PathPrefix("/scheduler-config").Handler(schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
 	apiRouter.Handle("/cluster", clusterHandler).Methods("GET")
@@ -104,6 +105,15 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	clusterRouter.HandleFunc("/config/rule_group", rulesHandler.SetGroupConfig).Methods("POST")
 	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.DeleteGroupConfig).Methods("DELETE")
 	clusterRouter.HandleFunc("/config/rule_groups", rulesHandler.GetAllGroupConfigs).Methods("GET")
+
+	clusterRouter.HandleFunc("/config/placement-rule", rulesHandler.GetAllGroupBundles).Methods("GET")
+	clusterRouter.HandleFunc("/config/placement-rule", rulesHandler.SetAllGroupBundles).Methods("POST")
+	// {group} can be a regular expression, we should enable path encode to
+	// support special characters.
+	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
+	clusterRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.GetGroupBundle).Methods("GET")
+	clusterRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.SetGroupBundle).Methods("POST")
+	escapeRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.DeleteGroupBundle).Methods("DELETE")
 
 	storeHandler := newStoreHandler(handler, rd)
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Get).Methods("GET")
@@ -181,8 +191,9 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	clusterRouter.HandleFunc("/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion).Methods("DELETE")
 	clusterRouter.HandleFunc("/admin/reset-ts", adminHandler.ResetTS).Methods("POST")
 	apiRouter.HandleFunc("/admin/persist-file/{file_name}", adminHandler.persistFile).Methods("POST")
+	clusterRouter.HandleFunc("/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime).Methods("POST")
 
-	logHandler := newlogHandler(svr, rd)
+	logHandler := newLogHandler(svr, rd)
 	apiRouter.HandleFunc("/admin/log", logHandler.Handle).Methods("POST")
 
 	replicationModeHandler := newReplicationModeHandler(svr, rd)
