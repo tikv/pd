@@ -535,30 +535,32 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	start := time.Now()
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
-	childContext, cancel := context.WithTimeout(ctx, c.timeout)
-	var (
-		resp *pdpb.GetRegionResponse
-		err  error
-	)
+	var resp *pdpb.GetRegionResponse
 	for _, url := range memberURLs {
-		conn, _ := c.getOrCreateGRPCConn(url)
+		conn, err := c.getOrCreateGRPCConn(url)
+		if err != nil {
+			log.Error("[pd] can't get grpc connection", zap.String("memberURL", url), errs.ZapError(err))
+			continue
+		}
 		cc := pdpb.NewPDClient(conn)
-		resp, err = cc.GetRegion(childContext, &pdpb.GetRegionRequest{
+		resp, err = cc.GetRegion(ctx, &pdpb.GetRegionRequest{
 			Header:    c.requestHeader(),
 			RegionKey: key,
 		})
-		if err == nil && resp != nil {
+		if err != nil {
+			log.Error("[pd] can't get region info", zap.String("memberURL", url), errs.ZapError(err))
+			continue
+		}
+		if resp != nil {
 			break
 		}
 	}
-	cancel()
 
 	if resp == nil {
-		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %v", memberURLs)
-		err = errors.New(errorMsg)
 		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err)
+		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
+		return nil, errors.WithStack(errors.New(errorMsg))
 	}
 	return c.parseRegionResponse(resp), nil
 }
