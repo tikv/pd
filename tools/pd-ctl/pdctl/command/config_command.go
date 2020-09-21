@@ -771,8 +771,8 @@ func saveRuleBundle(cmd *cobra.Command, args []string) {
 	}
 
 	path := ruleBundlePrefix
-	if ok, _ := cmd.Flags().GetBool("partial"); !ok {
-		path += "?override=true"
+	if ok, _ := cmd.Flags().GetBool("partial"); ok {
+		path += "?partial=true"
 	}
 
 	res, err := doRequest(cmd, path, http.MethodPost, WithBody("application/json", bytes.NewReader(content)))
