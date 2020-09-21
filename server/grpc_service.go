@@ -922,20 +922,27 @@ func (s *Server) PrewriteMaxTS(ctx context.Context, request *pdpb.PrewriteMaxTSR
 	if err != nil {
 		return nil, err
 	}
+	// Iterate all Local TSO Allocator leaders to get the max local TSO
+	var maxLocalTS pdpb.Timestamp
 	for _, allocator := range allocatorLeaders {
 		currentLocalTSO, err := allocator.GetCurrentTSO()
 		if err != nil {
 			return nil, err
 		}
-		// Validate whether the MaxTs is greater than all other local TSOs
-		if currentLocalTSO.Physical > request.MaxTs.Physical {
-			return &pdpb.PrewriteMaxTSResponse{
-				Header:     s.header(),
-				Prewritten: false,
-				MaxLocalTs: &currentLocalTSO,
-			}, nil
+		if currentLocalTSO.Physical > maxLocalTS.Physical {
+			maxLocalTS.Physical = currentLocalTSO.Physical
 		}
-		// Do the prewriting
+	}
+	// Validate whether the MaxTs is greater than all other local TSOs
+	if maxLocalTS.Physical > request.MaxTs.Physical {
+		return &pdpb.PrewriteMaxTSResponse{
+			Header:     s.header(),
+			Prewritten: false,
+			MaxLocalTs: &maxLocalTS,
+		}, nil
+	}
+	// Do the prewriting
+	for _, allocator := range allocatorLeaders {
 		allocator.PrewriteTSO(request.MaxTs)
 	}
 	return &pdpb.PrewriteMaxTSResponse{
@@ -958,8 +965,8 @@ func (s *Server) WriteMaxTS(ctx context.Context, request *pdpb.WriteMaxTSRequest
 	if err != nil {
 		return nil, err
 	}
+	// Iterate all Local TSO Allocator leaders to validate whether the prewritten TSO is consistent
 	for _, allocator := range allocatorLeaders {
-		// Validate whether the prewritten TSO is consistent
 		currentPrewrittenTSO := allocator.GetPrewrittenTSO()
 		if currentPrewrittenTSO == nil {
 			return &pdpb.WriteMaxTSResponse{
@@ -969,7 +976,6 @@ func (s *Server) WriteMaxTS(ctx context.Context, request *pdpb.WriteMaxTSRequest
 				}),
 				Written: false,
 			}, nil
-
 		}
 		if currentPrewrittenTSO.Physical != request.MaxTs.Physical {
 			return &pdpb.WriteMaxTSResponse{
@@ -980,7 +986,9 @@ func (s *Server) WriteMaxTS(ctx context.Context, request *pdpb.WriteMaxTSRequest
 				Written: false,
 			}, nil
 		}
-		// Do the writing
+	}
+	// Do the writing
+	for _, allocator := range allocatorLeaders {
 		if err := allocator.WriteTSO(); err != nil {
 			return nil, err
 		}
