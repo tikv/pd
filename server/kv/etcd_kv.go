@@ -90,7 +90,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 		return e
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxn.GenWithStackByArgs()
+		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 	return nil
 }
@@ -106,7 +106,7 @@ func (kv *etcdKVBase) Remove(key string) error {
 		return err
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxn.GenWithStackByArgs()
+		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 	return nil
 }
