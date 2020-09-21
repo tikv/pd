@@ -203,5 +203,8 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 // Reset does some defer job such as closing lease, resetting lease etc.
 func (ls *Leadership) Reset() {
+	if ls == nil || ls.getLease() == nil {
+		return
+	}
 	ls.getLease().Close()
 }
