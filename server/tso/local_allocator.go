@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/member"
@@ -164,7 +165,7 @@ func (lta *LocalTSOAllocator) WriteTSO() error {
 	if currentTSO.Physical >= prewrittenTSO.Physical {
 		return nil
 	}
-	return lta.SetTSO(uint64(prewrittenTSO.Physical))
+	return lta.SetTSO(tsoutil.GenerateTS(prewrittenTSO))
 }
 
 // EnableAllocatorLeader sets the Local TSO Allocator itself to a leader.

@@ -39,3 +39,8 @@ func ParseTimestamp(ts pdpb.Timestamp) (time.Time, uint64) {
 	physicalTime := time.Unix(int64(physical/1000), int64(physical)%1000*time.Millisecond.Nanoseconds())
 	return physicalTime, logical
 }
+
+// GenerateTS generate an `uint64` TS by passing a `pdpb.Timestamp`.
+func GenerateTS(ts *pdpb.Timestamp) uint64 {
+	return uint64(ts.Physical<<18 | ts.Logical&0x3FFFF)
+}
