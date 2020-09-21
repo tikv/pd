@@ -19,14 +19,28 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockoption"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 var _ = Suite(&testRegionStatisticsSuite{})
 
-type testRegionStatisticsSuite struct{}
+type testRegionStatisticsSuite struct {
+	store   *core.Storage
+	manager *placement.RuleManager
+}
+
+func (t *testRegionStatisticsSuite) SetUpTest(c *C) {
+	t.store = core.NewStorage(kv.NewMemoryKV())
+	var err error
+	t.manager = placement.NewRuleManager(t.store)
+	err = t.manager.Initialize(3, []string{"zone", "rack", "host"})
+	c.Assert(err, IsNil)
+}
 
 func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	opt := mockoption.NewScheduleOptions()
+	opt.EnablePlacementRules = false
 	peers := []*metapb.Peer{
 		{Id: 5, StoreId: 1},
 		{Id: 6, StoreId: 2},
@@ -58,7 +72,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
 	region2 := core.NewRegionInfo(r2, peers[0])
-	regionStats := NewRegionStatistics(opt)
+	regionStats := NewRegionStatistics(opt, t.manager)
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
@@ -99,6 +113,46 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	stores[3] = store3
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[OfflinePeer]), Equals, 0)
+}
+
+func (t *testRegionStatisticsSuite) TestRegionStatisticsWithPlacementRule(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	opt.EnablePlacementRules = true
+	peers := []*metapb.Peer{
+		{Id: 5, StoreId: 1},
+		{Id: 6, StoreId: 2},
+		{Id: 4, StoreId: 3},
+		{Id: 8, StoreId: 7, IsLearner: true},
+	}
+	metaStores := []*metapb.Store{
+		{Id: 1, Address: "mock://tikv-1"},
+		{Id: 2, Address: "mock://tikv-2"},
+		{Id: 3, Address: "mock://tikv-3"},
+		{Id: 7, Address: "mock://tikv-7"},
+	}
+
+	stores := make([]*core.StoreInfo, 0, len(metaStores))
+	for _, m := range metaStores {
+		s := core.NewStoreInfo(m)
+		stores = append(stores, s)
+	}
+	r2 := &metapb.Region{Id: 0, Peers: peers[0:1], StartKey: []byte("aa"), EndKey: []byte("bb")}
+	r3 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("ee"), EndKey: []byte("ff")}
+	r4 := &metapb.Region{Id: 2, Peers: peers[0:3], StartKey: []byte("gg"), EndKey: []byte("hh")}
+	region2 := core.NewRegionInfo(r2, peers[0])
+	region3 := core.NewRegionInfo(r3, peers[0])
+	region4 := core.NewRegionInfo(r4, peers[0])
+	regionStats := NewRegionStatistics(opt, t.manager)
+	// r2 didn't match the rules
+	regionStats.Observe(region2, stores)
+	c.Assert(len(regionStats.stats[MissPeer]), Equals, 1)
+	regionStats.Observe(region3, stores)
+	// r3 didn't match the rules
+	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
+	regionStats.Observe(region4, stores)
+	// r4 match the rules
+	c.Assert(len(regionStats.stats[MissPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
 }
 
 func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {

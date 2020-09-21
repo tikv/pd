@@ -14,7 +14,9 @@
 package statistics
 
 import (
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 // RegionStatisticType represents the type of the region's status.
@@ -35,13 +37,14 @@ const nonIsolation = "none"
 
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
-	opt   ScheduleOptions
-	stats map[RegionStatisticType]map[uint64]*core.RegionInfo
-	index map[uint64]RegionStatisticType
+	opt         ScheduleOptions
+	stats       map[RegionStatisticType]map[uint64]*core.RegionInfo
+	index       map[uint64]RegionStatisticType
+	ruleManager *placement.RuleManager
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
-func NewRegionStatistics(opt ScheduleOptions) *RegionStatistics {
+func NewRegionStatistics(opt ScheduleOptions, ruleManager *placement.RuleManager) *RegionStatistics {
 	r := &RegionStatistics{
 		opt:   opt,
 		stats: make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
@@ -54,6 +57,7 @@ func NewRegionStatistics(opt ScheduleOptions) *RegionStatistics {
 	r.stats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
+	r.ruleManager = ruleManager
 	return r
 }
 
@@ -82,10 +86,23 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		peerTypeIndex RegionStatisticType
 		deleteIndex   RegionStatisticType
 	)
-	if len(region.GetPeers()) < r.opt.GetMaxReplicas() {
+	desiredReplicas := r.opt.GetMaxReplicas()
+	if r.opt.IsPlacementRulesEnabled() {
+		if !r.ruleManager.IsInitialized() {
+			log.Warn("ruleManager haven't been initialized")
+			return
+		}
+		desiredReplicas = 0
+		rules := r.ruleManager.GetRulesForApplyRegion(region)
+		for _, rule := range rules {
+			desiredReplicas += rule.Count
+		}
+	}
+
+	if len(region.GetPeers()) < desiredReplicas {
 		r.stats[MissPeer][regionID] = region
 		peerTypeIndex |= MissPeer
-	} else if len(region.GetPeers()) > r.opt.GetMaxReplicas() {
+	} else if len(region.GetPeers()) > desiredReplicas {
 		r.stats[ExtraPeer][regionID] = region
 		peerTypeIndex |= ExtraPeer
 	}
