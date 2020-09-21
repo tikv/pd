@@ -509,15 +509,13 @@ func (rst *regionSubTree) scanRanges() []*RegionInfo {
 }
 
 func (rst *regionSubTree) update(region *RegionInfo) {
-	if r := rst.find(region); r != nil {
-		rst.totalSize += region.approximateSize - r.region.approximateSize
-		rst.totalKeys += region.approximateKeys - r.region.approximateKeys
-		r.region = region
-		return
-	}
+	overlaps := rst.regionTree.update(region)
 	rst.totalSize += region.approximateSize
 	rst.totalKeys += region.approximateKeys
-	rst.regionTree.update(region)
+	for _, r := range overlaps {
+		rst.totalSize -= r.approximateSize
+		rst.totalKeys -= r.approximateKeys
+	}
 }
 
 func (rst *regionSubTree) remove(region *RegionInfo) {
