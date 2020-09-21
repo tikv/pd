@@ -274,3 +274,10 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 	rules := m.GetRulesForApplyRegion(region)
 	return FitRegion(stores, region, rules)
 }
+
+// IsInitialized returns whether the rule manager is initialized.
+func (m *RuleManager) IsInitialized() bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.initialized
+}

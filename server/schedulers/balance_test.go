@@ -1125,6 +1125,22 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 }
 
+func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
+	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	c.Assert(err, IsNil)
+	region := tc.MockRegionInfo(1, 0, []uint64{2, 3, 4}, nil, nil)
+	tc.PutRegion(region)
+	operators := sb.Schedule(tc)
+	if operators != nil {
+		c.Assert(len(operators), Equals, 0)
+	} else {
+		c.Assert(operators, IsNil)
+	}
+}
+
 var _ = Suite(&testRandomMergeSchedulerSuite{})
 
 type testRandomMergeSchedulerSuite struct{}
