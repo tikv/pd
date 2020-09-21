@@ -1126,9 +1126,8 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
-	opt := config.NewTestOptions()
+	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
