@@ -152,14 +152,15 @@ func (lta *LocalTSOAllocator) GetPrewrittenTSO() *pdpb.Timestamp {
 func (lta *LocalTSOAllocator) WriteTSO() error {
 	prewrittenTSO := lta.GetPrewrittenTSO()
 	if prewrittenTSO == nil {
+		log.Info("no prewritten tso to be written")
 		return nil
 	}
 	currentTSO, err := lta.GetCurrentTSO()
 	if err != nil {
 		return err
 	}
-	// If current local TSO has already been greater than prewritten TSO.
-	// then do not update
+	// If current local TSO has already been greater than
+	// the prewritten TSO, then do not update it.
 	if currentTSO.Physical >= prewrittenTSO.Physical {
 		return nil
 	}
