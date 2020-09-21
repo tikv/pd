@@ -539,6 +539,9 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ..
 			zap.Reflect("operator", op))
 		operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 		operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
+		for _, counter := range op.FinishedCounters {
+			counter.Inc()
+		}
 	case operator.REPLACED:
 		log.Info("replace old operator",
 			zap.Uint64("region-id", op.RegionID()),

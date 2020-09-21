@@ -264,11 +264,11 @@ func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) e
 	args = args[len(args)-1:]
 	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
 	resp, err := doDelete(h.svr.GetHTTPClient(), url)
-	if resp.StatusCode != 200 {
-		return errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
 	if err != nil {
 		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return nil
 }
