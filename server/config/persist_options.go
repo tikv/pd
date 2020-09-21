@@ -128,6 +128,13 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// SetPlacementRuleEnabled set PlacementRuleEnabled
+func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
+	v := o.GetReplicationConfig().clone()
+	v.EnablePlacementRules = enabled
+	o.SetReplicationConfig(v)
+}
+
 // GetStrictlyMatchLabel returns whether check label strict.
 func (o *PersistOptions) GetStrictlyMatchLabel() bool {
 	return o.GetReplicationConfig().StrictlyMatchLabel

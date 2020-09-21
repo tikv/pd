@@ -51,4 +51,5 @@ type ScheduleOptions interface {
 	IsReplaceOfflineReplicaEnabled() bool
 
 	GetMaxStoreDownTime() time.Duration
+	IsPlacementRulesEnabled() bool
 }
