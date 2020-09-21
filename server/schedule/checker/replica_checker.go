@@ -89,12 +89,13 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 			checkerCounter.WithLabelValues("replica_checker", "no-target-store").Inc()
 			return nil
 		}
-		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
 		op, err := operator.CreateAddPeerOperator("make-up-replica", r.cluster, region, newPeer, operator.OpReplica)
 		if err != nil {
 			log.Debug("create make-up-replica operator fail", errs.ZapError(err))
 			return nil
 		}
+		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
+		op.SetPriorityLevel(core.HighPriority)
 		return op
 	}
 
