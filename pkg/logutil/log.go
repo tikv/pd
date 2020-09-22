@@ -298,14 +298,17 @@ var (
 	enabledRedactLog atomic.Value
 )
 
+// IsRedactLogEnabled indicates whether the log desensitization is enabled
 func IsRedactLogEnabled() bool {
 	return enabledRedactLog.Load().(bool)
 }
 
+// SetRedactLog sets enabledRedactLog
 func SetRedactLog(enabled bool) {
 	enabledRedactLog.Store(enabled)
 }
 
+// RedactArgIfNeeded will omit the argument if RedactLog is enabled
 func RedactArgIfNeeded(arg interface{}) interface{} {
 	if IsRedactLogEnabled() {
 		switch arg.(type) {
