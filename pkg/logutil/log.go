@@ -298,6 +298,10 @@ var (
 	enabledRedactLog atomic.Value
 )
 
+func init() {
+	SetRedactLog(false)
+}
+
 // IsRedactLogEnabled indicates whether the log desensitization is enabled
 func IsRedactLogEnabled() bool {
 	return enabledRedactLog.Load().(bool)
