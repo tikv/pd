@@ -51,7 +51,10 @@ func (s *testClusterSuite) TestCluster(c *C) {
 	c.Assert(err, IsNil)
 
 	c2 := &metapb.Cluster{}
-	r := config.ReplicationConfig{MaxReplicas: 6}
+	r := config.ReplicationConfig{
+		EnablePlacementRules: true,
+		MaxReplicas:          6,
+	}
 	c.Assert(s.svr.SetReplicationConfig(r), IsNil)
 	err = readJSON(testDialClient, url, c2)
 	c.Assert(err, IsNil)

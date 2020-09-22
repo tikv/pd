@@ -131,6 +131,8 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
+	// TODO: enable palcement rules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})

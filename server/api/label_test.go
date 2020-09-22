@@ -184,9 +184,11 @@ type testStrictlyLabelsStoreSuite struct {
 }
 
 func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
+	// TODO: enable placementrules
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.LocationLabels = []string{"zone", "disk"}
 		cfg.Replication.StrictlyMatchLabel = true
+		cfg.Replication.EnablePlacementRules = false
 	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
