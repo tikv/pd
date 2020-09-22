@@ -144,6 +144,8 @@ type Config struct {
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
+	// EnableRedactLog indicates that whether redact log, 0 is disable. 1 is enable.
+	EnableRedactLog int32 `toml:"enable-redact-log" json:"enable-redact-log"`
 }
 
 // NewConfig creates a new config.
@@ -221,6 +223,7 @@ const (
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
+	defaultEnableRedactLog    = 0
 )
 
 var (
@@ -542,6 +545,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	c.Dashboard.adjust(configMetaData.Child("dashboard"))
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
+
+	if !configMetaData.IsDefined("enable-redact-log") {
+		c.EnableRedactLog = defaultEnableRedactLog
+	}
 
 	return nil
 }

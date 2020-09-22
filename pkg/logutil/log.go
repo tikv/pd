@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/coreos/pkg/capnslog"
 	zaplog "github.com/pingcap/log"
@@ -291,4 +292,30 @@ func LogPanic() {
 	if e := recover(); e != nil {
 		zaplog.Fatal("panic", zap.Reflect("recover", e))
 	}
+}
+
+var (
+	enabledRedactLog atomic.Value
+)
+
+func IsRedactLogEnabled() bool {
+	return enabledRedactLog.Load().(bool)
+}
+
+func SetRedactLog(enabled bool) {
+	enabledRedactLog.Store(enabled)
+}
+
+func RedactArgIfNeeded(arg interface{}) interface{} {
+	if IsRedactLogEnabled() {
+		switch arg.(type) {
+		case []byte:
+			return []byte("?")
+		case string:
+			return "?"
+		default:
+			return "?"
+		}
+	}
+	return arg
 }
