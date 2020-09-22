@@ -486,6 +486,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   saveRuleBundle,
 	}
 	ruleBundleSave.Flags().String("in", "rules.json", "the file contains all group configs and all rules")
+	ruleBundleSave.Flags().Bool("partial", false, "do not drop all old configurations, partial update")
 	ruleBundle.AddCommand(ruleBundleGet, ruleBundleSet, ruleBundleDelete, ruleBundleLoad, ruleBundleSave)
 	c.AddCommand(enable, disable, show, load, save, ruleGroup, ruleBundle)
 	return c
@@ -721,7 +722,7 @@ func delRuleBundle(cmd *cobra.Command, args []string) {
 
 	reqPath := path.Join(ruleBundlePrefix, url.PathEscape(args[0]))
 
-	if f := cmd.Flag("regexp"); f != nil {
+	if ok, _ := cmd.Flags().GetBool("regexp"); ok {
 		reqPath += "?regexp"
 	}
 
@@ -769,7 +770,12 @@ func saveRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodPost, WithBody("application/json", bytes.NewReader(content)))
+	path := ruleBundlePrefix
+	if ok, _ := cmd.Flags().GetBool("partial"); ok {
+		path += "?partial=true"
+	}
+
+	res, err := doRequest(cmd, path, http.MethodPost, WithBody("application/json", bytes.NewReader(content)))
 	if err != nil {
 		cmd.Printf("failed to save rule bundles %s: %s\n", content, err)
 		return
