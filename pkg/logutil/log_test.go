@@ -130,7 +130,7 @@ func (s *testLogSuite) TestRedactLog(c *C) {
 			expect:          "foo",
 		},
 		{
-			name:            "[]byte arg",
+			name:            "[]byte arg, enable redact",
 			arg:             []byte("foo"),
 			enableRedactLog: true,
 			expect:          []byte("?"),
@@ -141,16 +141,27 @@ func (s *testLogSuite) TestRedactLog(c *C) {
 			enableRedactLog: false,
 			expect:          []byte("foo"),
 		},
+		{
+			name:            "nil",
+			arg:             nil,
+			enableRedactLog: true,
+			expect:          nil,
+		},
 	}
 
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		SetRedactLog(testcase.enableRedactLog)
+		r := RedactArgIfNeeded(testcase.arg)
+		if testcase.expect == nil {
+			c.Assert(r, IsNil)
+			continue
+		}
 		switch testcase.expect.(type) {
 		case []byte:
-			c.Assert(bytes.Equal(testcase.expect.([]byte), RedactArgIfNeeded(testcase.arg).([]byte)), Equals, true)
+			c.Assert(bytes.Equal(testcase.expect.([]byte), r.([]byte)), Equals, true)
 		default:
-			c.Assert(RedactArgIfNeeded(testcase.arg), Equals, testcase.expect)
+			c.Assert(r, Equals, testcase.expect)
 		}
 	}
 }

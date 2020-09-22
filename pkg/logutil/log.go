@@ -311,6 +311,9 @@ func SetRedactLog(enabled bool) {
 // RedactArgIfNeeded will omit the argument if RedactLog is enabled
 func RedactArgIfNeeded(arg interface{}) interface{} {
 	if IsRedactLogEnabled() {
+		if arg == nil {
+			return nil
+		}
 		switch arg.(type) {
 		case []byte:
 			return []byte("?")
