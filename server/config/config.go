@@ -223,7 +223,7 @@ const (
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
-	defaultEnableRedactLog    = 0
+	defaultEnableRedactLog    = int32(0)
 )
 
 var (

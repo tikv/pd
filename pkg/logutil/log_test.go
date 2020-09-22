@@ -109,3 +109,48 @@ func (s *testLogSuite) TestFileLog(c *C) {
 	c.Assert(InitFileLog(&zaplog.FileLogConfig{Filename: "/tmp"}), NotNil)
 	c.Assert(InitFileLog(&zaplog.FileLogConfig{Filename: "/tmp/test_file_log", MaxSize: 0}), IsNil)
 }
+
+func (s *testLogSuite) TestRedactLog(c *C) {
+	testcases := []struct {
+		name            string
+		arg             interface{}
+		enableRedactLog bool
+		expect          interface{}
+	}{
+		{
+			name:            "string arg, enable redact",
+			arg:             "foo",
+			enableRedactLog: true,
+			expect:          "?",
+		},
+		{
+			name:            "string arg",
+			arg:             "foo",
+			enableRedactLog: false,
+			expect:          "foo",
+		},
+		{
+			name:            "[]byte arg",
+			arg:             []byte("foo"),
+			enableRedactLog: true,
+			expect:          []byte("?"),
+		},
+		{
+			name:            "[]byte arg",
+			arg:             []byte("foo"),
+			enableRedactLog: false,
+			expect:          []byte("foo"),
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		SetRedactLog(testcase.enableRedactLog)
+		switch testcase.expect.(type) {
+		case []byte:
+			c.Assert(bytes.Equal(testcase.expect.([]byte), RedactArgIfNeeded(testcase.arg).([]byte)), Equals, true)
+		default:
+			c.Assert(RedactArgIfNeeded(testcase.arg), Equals, testcase.expect)
+		}
+	}
+}
