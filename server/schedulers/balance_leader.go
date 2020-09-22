@@ -272,8 +272,14 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	targetID := target.GetID()
 
 	opInfluence := l.opController.GetOpInfluence(cluster)
+<<<<<<< HEAD
 	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetLeaderSchedulePolicy())
 	if !shouldBalance(cluster, source, target, region, kind, opInfluence, l.GetName()) {
+=======
+	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetOpts().GetLeaderSchedulePolicy())
+	shouldBalance, sourceScore, targetScore := shouldBalance(cluster, source, target, region, kind, opInfluence, l.GetName())
+	if !shouldBalance {
+>>>>>>> fd4e434... operator: add additional info for operator (#2993)
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
@@ -293,5 +299,7 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 		l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel),
 		l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel),
 	)
+	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(sourceScore, 'f', 2, 64)
+	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(targetScore, 'f', 2, 64)
 	return []*operator.Operator{op}
 }

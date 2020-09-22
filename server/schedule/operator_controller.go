@@ -423,7 +423,8 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 
 	log.Info("add operator",
 		zap.Uint64("region-id", regionID),
-		zap.Reflect("operator", op))
+		zap.Reflect("operator", op),
+		zap.String("additional info", op.GetAdditionalInfo()))
 
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
@@ -536,7 +537,8 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ..
 		log.Info("operator finish",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
-			zap.Reflect("operator", op))
+			zap.Reflect("operator", op),
+			zap.String("additional info", op.GetAdditionalInfo()))
 		operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 		operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
 		for _, counter := range op.FinishedCounters {

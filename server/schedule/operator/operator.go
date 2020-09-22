@@ -14,6 +14,7 @@
 package operator
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -61,6 +62,7 @@ type Operator struct {
 	level            core.PriorityLevel
 	Counters         []prometheus.Counter
 	FinishedCounters []prometheus.Counter
+	AdditionalInfos  map[string]string
 }
 
 // NewOperator creates a new operator.
@@ -70,6 +72,7 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		level = core.HighPriority
 	}
 	return &Operator{
+<<<<<<< HEAD
 		desc:        desc,
 		brief:       brief,
 		regionID:    regionID,
@@ -78,6 +81,18 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		steps:       steps,
 		status:      NewOpStatusTracker(),
 		level:       level,
+=======
+		desc:            desc,
+		brief:           brief,
+		regionID:        regionID,
+		regionEpoch:     regionEpoch,
+		kind:            kind,
+		steps:           steps,
+		stepsTime:       make([]int64, len(steps)),
+		status:          NewOpStatusTracker(),
+		level:           level,
+		AdditionalInfos: make(map[string]string),
+>>>>>>> fd4e434... operator: add additional info for operator (#2993)
 	}
 }
 
@@ -339,4 +354,15 @@ func (o *Operator) History() []OpHistory {
 		}
 	}
 	return histories
+}
+
+// GetAdditionalInfo returns additional info with string
+func (o *Operator) GetAdditionalInfo() string {
+	if len(o.AdditionalInfos) != 0 {
+		additionalInfo, err := json.Marshal(o.AdditionalInfos)
+		if err == nil {
+			return string(additionalInfo)
+		}
+	}
+	return ""
 }
