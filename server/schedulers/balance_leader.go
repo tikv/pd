@@ -295,7 +295,7 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 		l.counter.WithLabelValues("move-leader", sourceLabel+"-out"),
 		l.counter.WithLabelValues("move-leader", targetLabel+"-in"),
 	)
-	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(sourceScore, 'f', -1, 64)
-	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(targetScore, 'f', -1, 64)
+	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(sourceScore, 'f', 2, 64)
+	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(targetScore, 'f', 2, 64)
 	return []*operator.Operator{op}
 }

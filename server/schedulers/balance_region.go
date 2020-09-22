@@ -234,8 +234,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
 			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
 		)
-		op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(sourceScore, 'f', -1, 64)
-		op.AdditionalInfos["targetScore"] = strconv.FormatFloat(targetScore, 'f', -1, 64)
+		op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(sourceScore, 'f', 2, 64)
+		op.AdditionalInfos["targetScore"] = strconv.FormatFloat(targetScore, 'f', 2, 64)
 		return op
 	}
 
