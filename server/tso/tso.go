@@ -57,8 +57,10 @@ type timestampOracle struct {
 	saveInterval  time.Duration
 	maxResetTSGap func() time.Duration
 	// tso info stored in the memory
-	tsoMux sync.RWMutex
-	tso    *tsoObject
+	tsoMux struct {
+		sync.RWMutex
+		tso *tsoObject
+	}
 	// last timestamp window stored in etcd
 	lastSavedTime atomic.Value // stored as time.Time
 }
@@ -130,7 +132,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	tsoCounter.WithLabelValues("sync_ok").Inc()
 	log.Info("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
 	t.tsoMux.Lock()
-	t.tso = &tsoObject{physical: next}
+	t.tsoMux.tso = &tsoObject{physical: next}
 	t.tsoMux.Unlock()
 	return nil
 }
@@ -142,10 +144,10 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 func (t *timestampOracle) isInitialized() bool {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	if t.tso == nil {
+	if t.tsoMux.tso == nil {
 		return false
 	}
-	return t.tso.physical != typeutil.ZeroTime
+	return t.tsoMux.tso.physical != typeutil.ZeroTime
 }
 
 // ResetUserTimestamp update the physical part with specified TSO.
@@ -157,7 +159,7 @@ func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, ts
 	physical, _ := tsoutil.ParseTS(tso)
 	next := physical.Add(time.Millisecond)
 	t.tsoMux.RLock()
-	prev := t.tso.physical
+	prev := t.tsoMux.tso.physical
 	t.tsoMux.RUnlock()
 	// do not update if next is less/before than prev
 	if next.Before(prev) {
@@ -179,7 +181,7 @@ func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, ts
 	}
 	// save into memory
 	t.tsoMux.Lock()
-	t.tso = &tsoObject{physical: next}
+	t.tsoMux.tso = &tsoObject{physical: next}
 	t.tsoMux.Unlock()
 	tsoCounter.WithLabelValues("reset_tso_ok").Inc()
 	return nil
@@ -198,7 +200,7 @@ func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, ts
 // 3. The physical time is always less than the saved timestamp.
 func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error {
 	t.tsoMux.RLock()
-	prevPhysical := t.tso.physical
+	prevPhysical := t.tsoMux.tso.physical
 	now := time.Now()
 
 	failpoint.Inject("fallBackUpdate", func() {
@@ -218,7 +220,8 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	}
 
 	var next time.Time
-	prevLogical := t.tso.logical
+	prevLogical := t.tsoMux.tso.logical
+	t.tsoMux.RUnlock()
 	// If the system time is greater, it will be synchronized with the system time.
 	if jetLag > updateTimestampGuard {
 		next = now
@@ -226,13 +229,12 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 		// The reason choosing maxLogical/2 here is that it's big enough for common cases.
 		// Because there is enough timestamp can be allocated before next update.
 		log.Warn("the logical time may be not enough", zap.Int64("prev-logical", prevLogical))
-		next = t.tso.physical.Add(time.Millisecond)
+		next = prevPhysical.Add(time.Millisecond)
 	} else {
 		// It will still use the previous physical time to alloc the timestamp.
 		tsoCounter.WithLabelValues("skip_save").Inc()
 		return nil
 	}
-	t.tsoMux.RUnlock()
 
 	// It is not safe to increase the physical time to `next`.
 	// The time window needs to be updated and saved to etcd.
@@ -244,7 +246,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 		}
 	}
 	t.tsoMux.Lock()
-	t.tso = &tsoObject{
+	t.tsoMux.tso = &tsoObject{
 		physical: next,
 		logical:  0,
 	}
@@ -269,7 +271,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (
 
 	for i := 0; i < maxRetryCount; i++ {
 		t.tsoMux.RLock()
-		current := t.tso
+		current := t.tsoMux.tso
 		t.tsoMux.RUnlock()
 		if current == nil || current.physical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
@@ -308,7 +310,7 @@ func (t *timestampOracle) ResetTimestamp() {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	log.Info("reset the timestamp in memory")
-	t.tso = &tsoObject{
+	t.tsoMux.tso = &tsoObject{
 		physical: typeutil.ZeroTime,
 	}
 }
