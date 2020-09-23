@@ -181,7 +181,10 @@ func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, ts
 	}
 	// save into memory
 	t.tsoMux.Lock()
-	t.tsoMux.tso = &tsoObject{physical: next}
+	// make sure the ts won't fall back
+	if t.tsoMux.tso.physical.Before(next) {
+		t.tsoMux.tso = &tsoObject{physical: next}
+	}
 	t.tsoMux.Unlock()
 	tsoCounter.WithLabelValues("reset_tso_ok").Inc()
 	return nil
@@ -246,9 +249,12 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 		}
 	}
 	t.tsoMux.Lock()
-	t.tsoMux.tso = &tsoObject{
-		physical: next,
-		logical:  0,
+	// make sure the ts won't fall back
+	if t.tsoMux.tso.physical.Before(next) {
+		t.tsoMux.tso = &tsoObject{
+			physical: next,
+			logical:  0,
+		}
 	}
 	t.tsoMux.Unlock()
 	tsoGauge.WithLabelValues("tso").Set(float64(next.Unix()))
@@ -310,7 +316,5 @@ func (t *timestampOracle) ResetTimestamp() {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	log.Info("reset the timestamp in memory")
-	t.tsoMux.tso = &tsoObject{
-		physical: typeutil.ZeroTime,
-	}
+	t.tsoMux.tso = nil
 }
