@@ -78,7 +78,6 @@ func main() {
 	if err != nil {
 		log.Fatal("initialize logger error", errs.ZapError(err))
 	}
-	logutil.SetRedactLog(cfg.EnableRedactLog == int32(1))
 
 	server.LogPDInfo()
 

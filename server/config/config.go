@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/tikv/pd/pkg/logutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1150,6 +1151,7 @@ func (c *Config) SetupLogger() error {
 	}
 	c.logger = lg
 	c.logProps = p
+	logutil.SetRedactLog(c.EnableRedactLog == int32(1))
 	return nil
 }
 
