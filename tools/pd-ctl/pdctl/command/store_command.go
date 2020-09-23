@@ -20,6 +20,7 @@ import (
 	"path"
 	"strconv"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +44,7 @@ func NewStoreCommand() *cobra.Command {
 	s.AddCommand(NewRemoveTombStoneCommand())
 	s.AddCommand(NewStoreLimitSceneCommand())
 	s.Flags().String("jq", "", "jq query")
+	s.Flags().String("state", "", "state filter")
 	return s
 }
 
@@ -228,12 +230,25 @@ func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
 
 func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := storesPrefix
+	if len(args) > 1 {
+		cmd.Usage()
+		return
+	}
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			cmd.Println("store_id should be a number")
 			return
 		}
 		prefix = fmt.Sprintf(storePrefix, args[0])
+	} else {
+		if state := cmd.Flag("state"); state != nil && state.Value.String() != "" {
+			stateValue, ok := metapb.StoreState_value[state.Value.String()]
+			if !ok {
+				cmd.Println("unknown state: " + state.Value.String())
+				return
+			}
+			prefix = fmt.Sprintf("%v?state=%v", storesPrefix, stateValue)
+		}
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
