@@ -57,9 +57,10 @@ type timestampOracle struct {
 	saveInterval  time.Duration
 	maxResetTSGap func() time.Duration
 	// tso info stored in the memory
-	mux           sync.RWMutex
-	tso           *tsoObject
-	lastSavedTime time.Time
+	tsoMux sync.RWMutex
+	tso    *tsoObject
+	// last timestamp window stored in etcd
+	lastSavedTime atomic.Value // stored as time.Time
 }
 
 func (t *timestampOracle) getTimestampPath() string {
@@ -91,14 +92,12 @@ func (t *timestampOracle) saveTimestamp(leadership *election.Leadership, ts time
 	if !resp.Succeeded {
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
-	t.lastSavedTime = ts
+	t.lastSavedTime.Store(ts)
 	return nil
 }
 
 // SyncTimestamp is used to synchronize the timestamp.
 func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
-	t.mux.Lock()
-	defer t.mux.Unlock()
 	tsoCounter.WithLabelValues("sync").Inc()
 
 	failpoint.Inject("delaySyncTimestamp", func() {
@@ -130,9 +129,9 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 
 	tsoCounter.WithLabelValues("sync_ok").Inc()
 	log.Info("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
-
+	t.tsoMux.Lock()
 	t.tso = &tsoObject{physical: next}
-
+	t.tsoMux.Unlock()
 	return nil
 }
 
@@ -141,25 +140,25 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 // 1. When the SyncTimestamp has not been called yet.
 // 2. When the ResetUserTimestamp has been called already.
 func (t *timestampOracle) isInitialized() bool {
-	t.mux.RLock()
-	defer t.mux.RUnlock()
-	if t.tso == nil || t.tso.physical == typeutil.ZeroTime {
+	t.tsoMux.RLock()
+	defer t.tsoMux.RUnlock()
+	if t.tso == nil {
 		return false
 	}
-	return true
+	return t.tso.physical != typeutil.ZeroTime
 }
 
 // ResetUserTimestamp update the physical part with specified TSO.
 func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, tso uint64) error {
-	t.mux.Lock()
-	defer t.mux.Unlock()
 	if !leadership.Check() {
 		tsoCounter.WithLabelValues("err_lease_reset_ts").Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs("lease expired")
 	}
 	physical, _ := tsoutil.ParseTS(tso)
 	next := physical.Add(time.Millisecond)
+	t.tsoMux.RLock()
 	prev := t.tso.physical
+	t.tsoMux.RUnlock()
 	// do not update if next is less/before than prev
 	if next.Before(prev) {
 		tsoCounter.WithLabelValues("err_reset_small_ts").Inc()
@@ -179,7 +178,9 @@ func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, ts
 		}
 	}
 	// save into memory
+	t.tsoMux.Lock()
 	t.tso = &tsoObject{physical: next}
+	t.tsoMux.Unlock()
 	tsoCounter.WithLabelValues("reset_tso_ok").Inc()
 	return nil
 }
@@ -196,8 +197,7 @@ func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, ts
 // 2. The physical time is monotonically increasing.
 // 3. The physical time is always less than the saved timestamp.
 func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error {
-	t.mux.Lock()
-	defer t.mux.Unlock()
+	t.tsoMux.RLock()
 	prevPhysical := t.tso.physical
 	now := time.Now()
 
@@ -232,21 +232,23 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 		tsoCounter.WithLabelValues("skip_save").Inc()
 		return nil
 	}
+	t.tsoMux.RUnlock()
 
 	// It is not safe to increase the physical time to `next`.
 	// The time window needs to be updated and saved to etcd.
-	if typeutil.SubTimeByWallClock(t.lastSavedTime, next) <= updateTimestampGuard {
+	if typeutil.SubTimeByWallClock(t.lastSavedTime.Load().(time.Time), next) <= updateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		if err := t.saveTimestamp(leadership, save); err != nil {
 			tsoCounter.WithLabelValues("err_save_update_ts").Inc()
 			return err
 		}
 	}
-
+	t.tsoMux.Lock()
 	t.tso = &tsoObject{
 		physical: next,
 		logical:  0,
 	}
+	t.tsoMux.Unlock()
 	tsoGauge.WithLabelValues("tso").Set(float64(next.Unix()))
 
 	return nil
@@ -266,9 +268,9 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (
 	})
 
 	for i := 0; i < maxRetryCount; i++ {
-		t.mux.RLock()
+		t.tsoMux.RLock()
 		current := t.tso
-		t.mux.RUnlock()
+		t.tsoMux.RUnlock()
 		if current == nil || current.physical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
 			if leadership.Check() {
@@ -281,9 +283,9 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (
 		}
 
 		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
-		t.mux.Lock()
+		t.tsoMux.Lock()
 		resp.Logical = atomic.AddInt64(&current.logical, int64(count))
-		t.mux.Unlock()
+		t.tsoMux.Unlock()
 		if resp.Logical >= maxLogical {
 			log.Error("logical part outside of max logical interval, please check ntp time",
 				zap.Reflect("response", resp),
@@ -303,8 +305,8 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (
 
 // ResetTimestamp is used to reset the timestamp in memory.
 func (t *timestampOracle) ResetTimestamp() {
-	t.mux.Lock()
-	defer t.mux.Unlock()
+	t.tsoMux.Lock()
+	defer t.tsoMux.Unlock()
 	log.Info("reset the timestamp in memory")
 	t.tso = &tsoObject{
 		physical: typeutil.ZeroTime,

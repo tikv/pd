@@ -371,8 +371,8 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 	// Server returns the highest ts.
 	logical -= int64(resp.GetCount() - 1)
 	if tsLessEqual(physical, logical, c.lastPhysical, c.lastLogical) {
-		panic(errors.Errorf("timestamp fallback, newly acquired ts (%d,%d) is less or equal to last one (%d, %d)",
-			physical, logical, c.lastLogical, c.lastLogical))
+		panic(errors.Errorf("timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
+			physical, logical, c.lastPhysical, c.lastLogical))
 	}
 	c.lastPhysical = physical
 	c.lastLogical = logical + int64(len(requests)) - 1
