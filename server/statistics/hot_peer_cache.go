@@ -117,6 +117,17 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 	byteRate := totalBytes / float64(interval)
 	keyRate := totalKeys / float64(interval)
 	qps := totalQPS / float64(interval)
+	if f.kind == ReadFlow {
+		readByteStat.Observe(byteRate)
+		readKeyStat.Observe(keyRate)
+		readQPSStat.Observe(qps)
+	}
+	//if f.kind == WriteFlow {
+	//	writeByteStat.Observe(byteRate)
+	//	writeKeyStat.Observe(keyRate)
+	//	writeQPSStat.Observe(qps)
+	//}
+
 	// old region is in the front and new region is in the back
 	// which ensures it will hit the cache if moving peer or transfer leader occurs with the same replica number
 
@@ -313,16 +324,6 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 	thresholds := f.calcHotThresholds(newItem.StoreID)
 	isHot := newItem.ByteRate >= thresholds[ByteDim] ||
 		newItem.KeyRate >= thresholds[KeyDim] || newItem.QPS >= thresholds[QPSDim]
-	if f.kind == ReadFlow {
-		readByteStat.Observe(newItem.ByteRate)
-		readKeyStat.Observe(newItem.KeyRate)
-		readQPSStat.Observe(newItem.QPS)
-	}
-	//if f.kind == WriteFlow {
-	//	writeByteStat.Observe(newItem.ByteRate)
-	//	writeKeyStat.Observe(newItem.KeyRate)
-	//	writeQPSStat.Observe(newItem.QPS)
-	//}
 
 	if newItem.needDelete {
 		return newItem
