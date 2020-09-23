@@ -14,6 +14,8 @@
 package statistics
 
 import (
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"math"
 	"time"
 
@@ -121,6 +123,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 		readByteStat.Observe(byteRate)
 		readKeyStat.Observe(keyRate)
 		readQPSStat.Observe(qps)
+		log.Info("CheckRegionFlow", zap.Float64("byte", byteRate), zap.Float64("key", keyRate), zap.Float64("qps", qps))
 	}
 	//if f.kind == WriteFlow {
 	//	writeByteStat.Observe(byteRate)
