@@ -312,8 +312,18 @@ func SetRedactLog(enabled bool) {
 	enabledRedactLog.Store(enabled)
 }
 
-// RedactArgIfNeeded will omit the argument if RedactLog is enabled
-func RedactArgIfNeeded(arg interface{}) interface{} {
+// RedactBytesArgIfNeeded receives []byte argument and return omitted information if redact log enabled
+func RedactBytesArgIfNeeded(arg []byte) []byte {
+	return redactArgIfNeeded(arg).([]byte)
+}
+
+// RedactStringArgIfNeeded receives string argument and return omitted information if redact log enabled
+func RedactStringArgIfNeeded(arg string) string {
+	return redactArgIfNeeded(arg).(string)
+}
+
+// redactArgIfNeeded will omit the argument if RedactLog is enabled
+func redactArgIfNeeded(arg interface{}) interface{} {
 	if IsRedactLogEnabled() {
 		if arg == nil {
 			return nil

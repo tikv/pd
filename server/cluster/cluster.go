@@ -554,7 +554,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if r.GetVersion() > o.GetVersion() {
 			log.Info("region Version changed",
 				zap.Uint64("region-id", region.GetID()),
-				zap.String("detail", logutil.RedactArgIfNeeded(core.DiffRegionKeyInfo(origin, region)).(string)),
+				zap.String("detail", logutil.RedactStringArgIfNeeded(core.DiffRegionKeyInfo(origin, region))),
 				zap.Uint64("old-version", o.GetVersion()),
 				zap.Uint64("new-version", r.GetVersion()),
 			)

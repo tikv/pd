@@ -230,8 +230,8 @@ func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 		if endIndex <= startIndex {
 			if len(endKey) > 0 && bytes.Compare(startKey, endKey) > 0 {
 				log.Error("wrong range keys",
-					zap.String("start-key", logutil.RedactArgIfNeeded(string(HexRegionKey(startKey))).(string)),
-					zap.String("end-key", logutil.RedactArgIfNeeded(string(HexRegionKey(endKey))).(string)),
+					zap.String("start-key", logutil.RedactStringArgIfNeeded(string(HexRegionKey(startKey)))),
+					zap.String("end-key", logutil.RedactStringArgIfNeeded(string(HexRegionKey(endKey)))),
 					errs.ZapError(errs.ErrWrongRangeKeys))
 			}
 			continue

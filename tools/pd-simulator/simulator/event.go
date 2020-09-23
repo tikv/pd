@@ -16,7 +16,6 @@ package simulator
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -87,7 +86,7 @@ func (e *WriteFlowOnSpot) Run(raft *RaftEngine, tickCount int64) bool {
 		region := raft.SearchRegion([]byte(key))
 		simutil.Logger.Debug("search the region", zap.Reflect("region", region.GetMeta()))
 		if region == nil {
-			simutil.Logger.Error("region not found for key", zap.String("key", logutil.RedactArgIfNeeded(key).(string)))
+			simutil.Logger.Error("region not found for key", zap.String("key", key))
 			continue
 		}
 		raft.updateRegionStore(region, size)

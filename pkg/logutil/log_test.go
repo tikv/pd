@@ -152,16 +152,11 @@ func (s *testLogSuite) TestRedactLog(c *C) {
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		SetRedactLog(testcase.enableRedactLog)
-		r := RedactArgIfNeeded(testcase.arg)
+		r := redactArgIfNeeded(testcase.arg)
 		if testcase.expect == nil {
 			c.Assert(r, IsNil)
 			continue
 		}
-		switch testcase.expect.(type) {
-		case []byte:
-			c.Assert(bytes.Equal(testcase.expect.([]byte), r.([]byte)), Equals, true)
-		default:
-			c.Assert(r, Equals, testcase.expect)
-		}
+		c.Assert(r, DeepEquals, testcase.expect)
 	}
 }
