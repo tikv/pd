@@ -312,14 +312,28 @@ func SetRedactLog(enabled bool) {
 	enabledRedactLog.Store(enabled)
 }
 
-// RedactBytesArgIfNeeded receives []byte argument and return omitted information if redact log enabled
-func RedactBytesArgIfNeeded(arg []byte) []byte {
+// RedactBytes receives []byte argument and return omitted information if redact log enabled
+func RedactBytes(arg []byte) []byte {
 	return redactArgIfNeeded(arg).([]byte)
 }
 
-// RedactStringArgIfNeeded receives string argument and return omitted information if redact log enabled
-func RedactStringArgIfNeeded(arg string) string {
+// RedactString receives string argument and return omitted information if redact log enabled
+func RedactString(arg string) string {
 	return redactArgIfNeeded(arg).(string)
+}
+
+// RedactStringer receives stringer argument and return omitted information if redact log enabled
+func RedactStringer(arg fmt.Stringer) fmt.Stringer {
+	return redactArgIfNeeded(arg).(*stringer)
+}
+
+type stringer struct {
+	s string
+}
+
+// String implement fmt.Stringer
+func (s *stringer) String() string {
+	return s.s
 }
 
 // redactArgIfNeeded will omit the argument if RedactLog is enabled
@@ -333,8 +347,10 @@ func redactArgIfNeeded(arg interface{}) interface{} {
 			return []byte("?")
 		case string:
 			return "?"
+		case fmt.Stringer:
+			return &stringer{s: "?"}
 		default:
-			return "?"
+			return nil
 		}
 	}
 	return arg

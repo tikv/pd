@@ -96,8 +96,8 @@ func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
 	for _, item := range overlaps {
 		log.Debug("overlapping region",
 			zap.Uint64("region-id", item.GetID()),
-			zap.Stringer("delete-region", RegionToHexMeta(item.GetMeta())),
-			zap.Stringer("update-region", RegionToHexMeta(region.GetMeta())))
+			zap.Stringer("delete-region", logutil.RedactStringer(RegionToHexMeta(item.GetMeta()))),
+			zap.Stringer("update-region", logutil.RedactStringer(RegionToHexMeta(region.GetMeta()))))
 		t.tree.Delete(&regionItem{item})
 	}
 
@@ -230,8 +230,8 @@ func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 		if endIndex <= startIndex {
 			if len(endKey) > 0 && bytes.Compare(startKey, endKey) > 0 {
 				log.Error("wrong range keys",
-					zap.String("start-key", logutil.RedactStringArgIfNeeded(string(HexRegionKey(startKey)))),
-					zap.String("end-key", logutil.RedactStringArgIfNeeded(string(HexRegionKey(endKey)))),
+					zap.String("start-key", logutil.RedactString(string(HexRegionKey(startKey)))),
+					zap.String("end-key", logutil.RedactString(string(HexRegionKey(endKey)))),
 					errs.ZapError(errs.ErrWrongRangeKeys))
 			}
 			continue
