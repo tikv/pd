@@ -36,7 +36,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 		ChangePeer: &pdpb.ChangePeer{Peer: &metapb.Peer{Id: 2, StoreId: 2}, ChangeType: eraftpb.ConfChangeType_AddLearnerNode},
 	}
 
-	hbs := NewHeartbeatStreams(ctx, 1, cluster)
+	hbs := NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true)
 	stream1, stream2 := mockhbstream.NewHeartbeatStream(), mockhbstream.NewHeartbeatStream()
 
 	// Active stream is stream1.
