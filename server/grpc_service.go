@@ -909,9 +909,9 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	})
 }
 
-// PrewriteMaxTS is the first part of 2PC for global MaxTS synchronization,
+// PrewriteMaxTS is the first phase of 2PC for global MaxTS synchronization,
 // it compares the MaxTS received with each Local TSO Allocator leader's TSO
-// and prewrite it into memory to wait for the next phase of formal writing.
+// to check if the MaxTS is the greatest timestamp among all Local TSO Allocators.
 func (s *Server) PrewriteMaxTS(ctx context.Context, request *pdpb.PrewriteMaxTSRequest) (*pdpb.PrewriteMaxTSResponse, error) {
 	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
 		return nil, err
@@ -941,20 +941,16 @@ func (s *Server) PrewriteMaxTS(ctx context.Context, request *pdpb.PrewriteMaxTSR
 			MaxLocalTs: &maxLocalTS,
 		}, nil
 	}
-	// Do the prewriting
-	for _, allocator := range allocatorLeaders {
-		allocator.PrewriteTSO(request.MaxTs)
-	}
 	return &pdpb.PrewriteMaxTSResponse{
 		Header:     s.header(),
 		Prewritten: true,
 	}, nil
 }
 
-// WriteMaxTS is the second part of 2PC for global MaxTS synchronization,
+// WriteMaxTS is the second phase of 2PC for global MaxTS synchronization,
 // it compares the MaxTS received with each Local TSO Allocator leader's
-// prewritten TSO in memory and write it into memory to finish the global
-// TSO synchronization progress.
+// current TSO in memory to make sure the local TSO is not less than it
+// and write MaxTS into memory to finish the global TSO synchronization progress.
 func (s *Server) WriteMaxTS(ctx context.Context, request *pdpb.WriteMaxTSRequest) (*pdpb.WriteMaxTSResponse, error) {
 	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
 		return nil, err
@@ -965,31 +961,9 @@ func (s *Server) WriteMaxTS(ctx context.Context, request *pdpb.WriteMaxTSRequest
 	if err != nil {
 		return nil, err
 	}
-	// Iterate all Local TSO Allocator leaders to validate whether the prewritten TSO is consistent
-	for _, allocator := range allocatorLeaders {
-		currentPrewrittenTSO := allocator.GetPrewrittenTSO()
-		if currentPrewrittenTSO == nil {
-			return &pdpb.WriteMaxTSResponse{
-				Header: s.errorHeader(&pdpb.Error{
-					Type:    pdpb.ErrorType_UNKNOWN,
-					Message: "prewritten tso doesn't exist",
-				}),
-				Written: false,
-			}, nil
-		}
-		if currentPrewrittenTSO.Physical != request.MaxTs.Physical {
-			return &pdpb.WriteMaxTSResponse{
-				Header: s.errorHeader(&pdpb.Error{
-					Type:    pdpb.ErrorType_UNKNOWN,
-					Message: "prewritten tso is not same with the MaxTS",
-				}),
-				Written: false,
-			}, nil
-		}
-	}
 	// Do the writing
 	for _, allocator := range allocatorLeaders {
-		if err := allocator.WriteTSO(); err != nil {
+		if err := allocator.WriteTSO(request.MaxTs); err != nil {
 			return nil, err
 		}
 	}

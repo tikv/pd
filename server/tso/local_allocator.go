@@ -35,10 +35,6 @@ type LocalTSOAllocator struct {
 	// leadership is used to campaign the corresponding DC's Local TSO Allocator.
 	leadership      *election.Leadership
 	timestampOracle *timestampOracle
-	// prewrittenTSO is used to store the MaxTS from Global TSO Allocator that
-	// is ready to write the TSO in memory.
-	// Todo: gc for unused prewrittenTSO
-	prewrittenTSO atomic.Value // stored as *pdpb.Timestamp
 	// for election use, notice that the leadership that member holds is
 	// the leadership for PD leader. Local TSO Allocator's leadership is for the
 	// election of Local TSO Allocator leader among several PD servers and
@@ -135,27 +131,8 @@ func (lta *LocalTSOAllocator) GetCurrentTSO() (pdpb.Timestamp, error) {
 	return currentTSO, nil
 }
 
-// PrewriteTSO is used to prewrite the MaxTS into memory.
-func (lta *LocalTSOAllocator) PrewriteTSO(maxTS *pdpb.Timestamp) {
-	lta.prewrittenTSO.Store(maxTS)
-}
-
-// GetPrewrittenTSO is used to return the current prewrittenTSO in memory.
-func (lta *LocalTSOAllocator) GetPrewrittenTSO() *pdpb.Timestamp {
-	prewrittenTSO := lta.prewrittenTSO.Load()
-	if prewrittenTSO == nil {
-		return nil
-	}
-	return prewrittenTSO.(*pdpb.Timestamp)
-}
-
 // WriteTSO is used to set the prewrittenTSO as current TSO in memory.
-func (lta *LocalTSOAllocator) WriteTSO() error {
-	prewrittenTSO := lta.GetPrewrittenTSO()
-	if prewrittenTSO == nil {
-		log.Info("no prewritten tso to be written")
-		return nil
-	}
+func (lta *LocalTSOAllocator) WriteTSO(prewrittenTSO *pdpb.Timestamp) error {
 	currentTSO, err := lta.GetCurrentTSO()
 	if err != nil {
 		return err
