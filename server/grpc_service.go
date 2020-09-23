@@ -909,10 +909,15 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	})
 }
 
-// PrewriteMaxTS is the first phase of 2PC for global MaxTS synchronization,
-// it compares the MaxTS received with each Local TSO Allocator leader's TSO
-// to check if the MaxTS is the greatest timestamp among all Local TSO Allocators.
-func (s *Server) PrewriteMaxTS(ctx context.Context, request *pdpb.PrewriteMaxTSRequest) (*pdpb.PrewriteMaxTSResponse, error) {
+// SyncMaxTS is a RPC method used to synchronize the timestamp of TSO between a
+// Global TSO Allocator and multi Local TSO Allocator leaders. It contains two
+// phases:
+// 1. Collect timestamps among all Local TSO Allocator leaders, and choose the
+//    greatest one as MaxTS.
+// 2. Send the MaxTS to all Local TSO Allocator leaders. They will compare MaxTS
+//    with its current TSO in memory to make sure their local TSOs are not less
+//    than MaxTS by writing MaxTS into memory to finish the global TSO synchronization.
+func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -922,54 +927,31 @@ func (s *Server) PrewriteMaxTS(ctx context.Context, request *pdpb.PrewriteMaxTSR
 	if err != nil {
 		return nil, err
 	}
-	// Iterate all Local TSO Allocator leaders to get the max local TSO
-	var maxLocalTS pdpb.Timestamp
-	for _, allocator := range allocatorLeaders {
-		currentLocalTSO, err := allocator.GetCurrentTSO()
-		if err != nil {
-			return nil, err
+	if request.GetMaxTs() == nil || request.GetMaxTs().Physical == 0 {
+		// The first phase of synchronization: collect the max local ts
+		var maxLocalTS pdpb.Timestamp
+		for _, allocator := range allocatorLeaders {
+			currentLocalTSO, err := allocator.GetCurrentTSO()
+			if err != nil {
+				return nil, err
+			}
+			if currentLocalTSO.Physical > maxLocalTS.Physical {
+				maxLocalTS.Physical = currentLocalTSO.Physical
+			}
 		}
-		if currentLocalTSO.Physical > maxLocalTS.Physical {
-			maxLocalTS.Physical = currentLocalTSO.Physical
-		}
-	}
-	// Validate whether the MaxTs is greater than all other local TSOs
-	if maxLocalTS.Physical > request.MaxTs.Physical {
-		return &pdpb.PrewriteMaxTSResponse{
+		return &pdpb.SyncMaxTSResponse{
 			Header:     s.header(),
-			Prewritten: false,
 			MaxLocalTs: &maxLocalTS,
 		}, nil
 	}
-	return &pdpb.PrewriteMaxTSResponse{
-		Header:     s.header(),
-		Prewritten: true,
-	}, nil
-}
-
-// WriteMaxTS is the second phase of 2PC for global MaxTS synchronization,
-// it compares the MaxTS received with each Local TSO Allocator leader's
-// current TSO in memory to make sure the local TSO is not less than it
-// and write MaxTS into memory to finish the global TSO synchronization progress.
-func (s *Server) WriteMaxTS(ctx context.Context, request *pdpb.WriteMaxTSRequest) (*pdpb.WriteMaxTSResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
-		return nil, err
-	}
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	// Get all Local TSO Allocator leaders
-	allocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
-	if err != nil {
-		return nil, err
-	}
-	// Do the writing
+	// The second phase of synchronization: do the writing
 	for _, allocator := range allocatorLeaders {
-		if err := allocator.WriteTSO(request.MaxTs); err != nil {
+		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
 			return nil, err
 		}
 	}
-	return &pdpb.WriteMaxTSResponse{
-		Header:  s.header(),
-		Written: true,
+	return &pdpb.SyncMaxTSResponse{
+		Header: s.header(),
 	}, nil
 }
 

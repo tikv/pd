@@ -121,28 +121,25 @@ func (lta *LocalTSOAllocator) GetMember() *pdpb.Member {
 
 // GetCurrentTSO returns current TSO in memory.
 func (lta *LocalTSOAllocator) GetCurrentTSO() (pdpb.Timestamp, error) {
-	var currentTSO pdpb.Timestamp
 	current := (*atomicObject)(atomic.LoadPointer(&lta.timestampOracle.tso))
 	if current == nil || current.physical == typeutil.ZeroTime {
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 	}
-	currentTSO.Physical = current.physical.UnixNano() / int64(time.Millisecond)
-	currentTSO.Logical = current.logical
-	return currentTSO, nil
+	return *tsoutil.GenerateTimestamp(current.physical, uint64(current.logical)), nil
 }
 
-// WriteTSO is used to set the prewrittenTSO as current TSO in memory.
-func (lta *LocalTSOAllocator) WriteTSO(prewrittenTSO *pdpb.Timestamp) error {
+// WriteTSO is used to set the maxTS as current TSO in memory.
+func (lta *LocalTSOAllocator) WriteTSO(maxTS *pdpb.Timestamp) error {
 	currentTSO, err := lta.GetCurrentTSO()
 	if err != nil {
 		return err
 	}
 	// If current local TSO has already been greater than
-	// the prewritten TSO, then do not update it.
-	if currentTSO.Physical >= prewrittenTSO.Physical {
+	// maxTS, then do not update it.
+	if currentTSO.Physical >= maxTS.Physical {
 		return nil
 	}
-	return lta.SetTSO(tsoutil.GenerateTS(prewrittenTSO))
+	return lta.SetTSO(tsoutil.GenerateTS(maxTS))
 }
 
 // EnableAllocatorLeader sets the Local TSO Allocator itself to a leader.
