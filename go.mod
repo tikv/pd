@@ -29,10 +29,10 @@ require (
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
-	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200908071351-a715a95c7de2
+	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200921100341-0e148dfc0029
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
-	github.com/pingcap/errors v0.11.5-0.20200902104258-eba4f1d8f6de
+	github.com/pingcap/errors v0.11.5-0.20200917111840-a15ef68f753d
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
 	github.com/pingcap/kvproto v0.0.0-20200916031750-f9473f2c5379
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
