@@ -207,9 +207,9 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	if err = c.AddScheduler(s, args...); err != nil {
-		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
+		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 	} else if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", errs.ZapError(err))
 	}
