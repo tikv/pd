@@ -146,7 +146,7 @@ type Config struct {
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
 	// EnableRedactLog indicates that whether redact log, 0 is disable. 1 is enable.
-	EnableRedactLog int32 `toml:"enable-redact-log" json:"enable-redact-log"`
+	EnableRedactLog bool `toml:"enable-redact-log" json:"enable-redact-log"`
 }
 
 // NewConfig creates a new config.
@@ -224,7 +224,7 @@ const (
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
-	defaultEnableRedactLog    = int32(0)
+	defaultEnableRedactLog    = false
 )
 
 var (
@@ -1151,7 +1151,7 @@ func (c *Config) SetupLogger() error {
 	}
 	c.logger = lg
 	c.logProps = p
-	logutil.SetRedactLog(c.EnableRedactLog == int32(1))
+	logutil.SetRedactLog(c.EnableRedactLog)
 	return nil
 }
 
