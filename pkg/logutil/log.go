@@ -324,7 +324,7 @@ func RedactString(arg string) string {
 
 // RedactStringer receives stringer argument and return omitted information if redact log enabled
 func RedactStringer(arg fmt.Stringer) fmt.Stringer {
-	return redactArgIfNeeded(arg).(*stringer)
+	return redactArgIfNeeded(arg).(fmt.Stringer)
 }
 
 type stringer struct {
