@@ -47,7 +47,10 @@ type AllocatorGroupFilter func(ag *allocatorGroup) bool
 
 type allocatorGroup struct {
 	dcLocation string
-	serverCtx  context.Context
+	// Because an allocator may be set up with different context,
+	// we need to store the parent context for each allocator in
+	// order to receive the Done() signal correctly.
+	parentCtx context.Context
 	// For the Global TSO Allocator, leadership is a PD leader's
 	// leadership, and for the Local TSO Allocator, leadership
 	// is a DC-level certificate to allow an allocator to generate
@@ -158,7 +161,7 @@ func (am *AllocatorManager) getLocalTSOConfigPath() string {
 }
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
-func (am *AllocatorManager) SetUpAllocator(serverCtx context.Context, dcLocation string, leadership *election.Leadership) error {
+func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) error {
 	am.Lock()
 	defer am.Unlock()
 	var allocator Allocator
@@ -170,7 +173,7 @@ func (am *AllocatorManager) SetUpAllocator(serverCtx context.Context, dcLocation
 	// Update or create a new allocatorGroup
 	am.allocatorGroups[dcLocation] = &allocatorGroup{
 		dcLocation: dcLocation,
-		serverCtx:  serverCtx,
+		parentCtx:  parentCtx,
 		leadership: leadership,
 		allocator:  allocator,
 	}
@@ -187,7 +190,7 @@ func (am *AllocatorManager) SetUpAllocator(serverCtx context.Context, dcLocation
 	default:
 		// Join in a Local TSO Allocator election
 		localTSOAllocator, _ := allocator.(*LocalTSOAllocator)
-		go am.allocatorLeaderLoop(serverCtx, localTSOAllocator)
+		go am.allocatorLeaderLoop(parentCtx, localTSOAllocator)
 	}
 	return nil
 }
@@ -201,10 +204,10 @@ func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
 }
 
 // similar logic with leaderLoop in server/server.go
-func (am *AllocatorManager) allocatorLeaderLoop(parentCtx context.Context, allocator *LocalTSOAllocator) {
+func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *LocalTSOAllocator) {
 	for {
 		select {
-		case <-parentCtx.Done():
+		case <-ctx.Done():
 			log.Info("server is closed, return local tso allocator leader loop",
 				zap.String("dc-location", allocator.dcLocation),
 				zap.String("local-tso-allocator-name", am.member.Member().Name))
@@ -221,15 +224,15 @@ func (am *AllocatorManager) allocatorLeaderLoop(parentCtx context.Context, alloc
 				zap.Stringer(fmt.Sprintf("%s-allocator-leader", allocator.dcLocation), allocatorLeader),
 				zap.String("local-tso-allocator-name", am.member.Member().Name))
 			// WatchAllocatorLeader will keep looping and never return unless the Local TSO Allocator leader has changed.
-			allocator.WatchAllocatorLeader(parentCtx, allocatorLeader, rev)
+			allocator.WatchAllocatorLeader(ctx, allocatorLeader, rev)
 			log.Info("local tso allocator leader has changed, try to re-campaign a local tso allocator leader",
 				zap.String("dc-location", allocator.dcLocation))
 		}
-		am.campaignAllocatorLeader(parentCtx, allocator)
+		am.campaignAllocatorLeader(ctx, allocator)
 	}
 }
 
-func (am *AllocatorManager) campaignAllocatorLeader(parentCtx context.Context, allocator *LocalTSOAllocator) {
+func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, allocator *LocalTSOAllocator) {
 	log.Info("start to campaign local tso allocator leader",
 		zap.String("dc-location", allocator.dcLocation),
 		zap.String("name", am.member.Member().Name))
@@ -239,7 +242,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(parentCtx context.Context, a
 	}
 
 	// Start keepalive the Local TSO Allocator leadership and enable Local TSO service.
-	ctx, cancel := context.WithCancel(parentCtx)
+	ctx, cancel := context.WithCancel(loopCtx)
 	defer cancel()
 	defer am.resetAllocatorGroup(allocator.dcLocation)
 	// maintain the Local TSO Allocator leader
@@ -318,7 +321,7 @@ func (am *AllocatorManager) allocatorUpdater() {
 func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 	defer am.wg.Done()
 	select {
-	case <-ag.serverCtx.Done():
+	case <-ag.parentCtx.Done():
 		// Resetting the allocator will clear TSO in memory
 		ag.allocator.Reset()
 		return
