@@ -3,7 +3,6 @@ package hbstream
 import (
 	"context"
 	"testing"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
@@ -11,6 +10,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -41,26 +41,25 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 
 	// Active stream is stream1.
 	hbs.BindStream(1, stream1)
-	time.Sleep(50 * time.Millisecond)
-	hbs.SendMsg(region, msg)
-	c.Assert(stream1.Recv(), NotNil)
-	c.Assert(stream2.Recv(), IsNil)
+	testutil.WaitUntil(c, func(c *C) bool {
+		hbs.SendMsg(region, msg)
+		return stream1.Recv() != nil && stream2.Recv() == nil
+	})
 	// Rebind to stream2.
 	hbs.BindStream(1, stream2)
-	time.Sleep(50 * time.Millisecond)
-	hbs.SendMsg(region, msg)
-	c.Assert(stream1.Recv(), IsNil)
-	c.Assert(stream2.Recv(), NotNil)
+	testutil.WaitUntil(c, func(c *C) bool {
+		hbs.SendMsg(region, msg)
+		return stream1.Recv() == nil && stream2.Recv() != nil
+	})
 	// SendErr to stream2.
 	hbs.SendErr(pdpb.ErrorType_UNKNOWN, "test error", &metapb.Peer{Id: 1, StoreId: 1})
-	time.Sleep(50 * time.Millisecond)
 	res := stream2.Recv()
 	c.Assert(res, NotNil)
 	c.Assert(res.GetHeader().GetError(), NotNil)
 	// Switch back to 1 again.
 	hbs.BindStream(1, stream1)
-	time.Sleep(50 * time.Millisecond)
-	hbs.SendMsg(region, msg)
-	c.Assert(stream1.Recv(), NotNil)
-	c.Assert(stream2.Recv(), IsNil)
+	testutil.WaitUntil(c, func(c *C) bool {
+		hbs.SendMsg(region, msg)
+		return stream1.Recv() != nil && stream2.Recv() == nil
+	})
 }
