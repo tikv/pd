@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/encryption"
@@ -129,43 +128,6 @@ func (s *RegionStorage) SaveRegion(region *metapb.Region) error {
 
 func deleteRegion(kv kv.Base, region *metapb.Region) error {
 	return kv.Remove(regionPath(region.GetId()))
-}
-
-func saveRegion(
-	kv kv.Base,
-	encryptionKeyManager *encryptionkm.KeyManager,
-	region *metapb.Region,
-) error {
-	err := encryption.EncryptRegion(region, encryptionKeyManager)
-	if err != nil {
-		return err
-	}
-	value, err := proto.Marshal(region)
-	if err != nil {
-		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByArgs()
-	}
-	return kv.Save(regionPath(region.GetId()), string(value))
-}
-
-func loadRegion(
-	kv kv.Base,
-	encryptionKeyManager *encryptionkm.KeyManager,
-	regionID uint64,
-	region *metapb.Region,
-) (ok bool, err error) {
-	value, err := kv.Load(regionPath(regionID))
-	if err != nil {
-		return false, err
-	}
-	if value == "" {
-		return false, nil
-	}
-	err = proto.Unmarshal([]byte(value), region)
-	if err != nil {
-		return true, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
-	}
-	err = encryption.DecryptRegion(region, encryptionKeyManager)
-	return true, err
 }
 
 func loadRegions(
