@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
-	"go.uber.org/zap"
 )
 
 // MergeChecker ensures region to merge with adjacent region when size is small
@@ -125,8 +124,8 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	log.Debug("try to merge region",
-		zap.Stringer("from", logutil.RedactStringer(core.RegionToHexMeta(region.GetMeta()))),
-		zap.Stringer("to", logutil.RedactStringer(core.RegionToHexMeta(target.GetMeta()))))
+		logutil.ZapRedactStringer("from", core.RegionToHexMeta(region.GetMeta())),
+		logutil.ZapRedactStringer("to", core.RegionToHexMeta(target.GetMeta())))
 	ops, err := operator.CreateMergeRegionOperator("merge-region", m.cluster, region, target, operator.OpMerge)
 	if err != nil {
 		log.Warn("create merge region operator failed", errs.ZapError(err))

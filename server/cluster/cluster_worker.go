@@ -204,7 +204,7 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	originRegion.StartKey = left.GetStartKey()
 	log.Info("region split, generate new region",
 		zap.Uint64("region-id", originRegion.GetId()),
-		zap.Stringer("region-meta", logutil.RedactStringer(core.RegionToHexMeta(left))))
+		logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(left)))
 	return &pdpb.ReportSplitResponse{}, nil
 }
 
