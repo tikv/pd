@@ -393,6 +393,14 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "max-replicas", "1")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "please update rule instead"), IsTrue)
+
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "location-labels", "dc,rack")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "please update rule instead"), IsTrue)
+
 	// test get
 	var bundle placement.GroupBundle
 	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pd")
