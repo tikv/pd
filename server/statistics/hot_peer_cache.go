@@ -109,12 +109,15 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 
 // CheckRegionFlow checks the flow information of region.
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *StoresStats) (ret []*HotPeerStat) {
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	if interval == 0 {
+		return
+	}
+
 	totalBytes := float64(f.getTotalBytes(region))
 	totalKeys := float64(f.getTotalKeys(region))
 	totalQPS := float64(f.getTotalQPS(region))
-
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
 	byteRate := totalBytes / float64(interval)
 	keyRate := totalKeys / float64(interval)
@@ -123,7 +126,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 		readByteStat.Observe(byteRate)
 		readKeyStat.Observe(keyRate)
 		readQPSStat.Observe(qps)
-		log.Info("CheckRegionFlow", zap.Float64("byte", byteRate), zap.Float64("key", keyRate), zap.Float64("qps", qps))
+		log.Info("CheckRegionFlow", zap.Uint64("region-id", region.GetID()), zap.Float64("byte", byteRate), zap.Float64("key", keyRate), zap.Float64("qps", qps))
 	}
 	//if f.kind == WriteFlow {
 	//	writeByteStat.Observe(byteRate)
