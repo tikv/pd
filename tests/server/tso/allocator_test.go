@@ -15,14 +15,12 @@ package tso_test
 
 import (
 	"context"
-	"path"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
@@ -45,39 +43,35 @@ func (s *testAllocatorSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
 
-// Make sure we have the correct number of allocator leaders.
+// Make sure we have the correct number of Local TSO Allocator leaders.
 func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
-	var err error
-	cluster, err := tests.NewTestCluster(s.ctx, 6)
+	// There will be three Local TSO Allocator leaders elected
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	ctx, cancel := context.WithCancel(s.ctx)
-	defer cancel()
-	// There will be three Local TSO Allocator leaders elected
-	testDCLocations := []string{"dc-1", "dc-2", "dc-3"}
-	dcLocationNum := len(testDCLocations)
-	for _, dcLocation := range testDCLocations {
-		for _, server := range cluster.GetServers() {
-			tsoAllocatorManager := server.GetTSOAllocatorManager()
-			leadership := election.NewLeadership(
-				server.GetEtcdClient(),
-				path.Join(server.GetServer().GetServerRootPath(), dcLocation),
-				"campaign-local-allocator-test")
-			tsoAllocatorManager.SetUpAllocator(ctx, cancel, dcLocation, leadership)
-
-		}
-	}
 	// Wait for a while to check
 	time.Sleep(waitAllocatorLeaderCheckInterval)
 	// To check whether we have enough Local TSO Allocator leaders
 	allAllocatorLeaders := make([]tso.Allocator, 0, dcLocationNum)
 	for _, server := range cluster.GetServers() {
-		// Filter out Global TSO Allocator and uninitialized Local TSO Allocator
-		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(config.GlobalDCLocation), tso.FilterUninitialized())
+		// Filter out Global TSO Allocator and Local TSO Allocator followers
+		allocators := server.GetTSOAllocatorManager().GetAllocators(
+			tso.FilterDCLocation(config.GlobalDCLocation),
+			tso.FilterUnavailableLeadership(),
+			tso.FilterUninitialized())
 		// One PD server will have at most three initialized Local TSO Allocators,
 		// which also means three allocator leaders
 		c.Assert(len(allocators), LessEqual, dcLocationNum)

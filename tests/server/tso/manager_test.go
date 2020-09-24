@@ -15,13 +15,11 @@ package tso_test
 
 import (
 	"context"
-	"path"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/tests"
 )
 
@@ -110,19 +108,7 @@ func (s *testManagerSuite) TestAllocatorPriority(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	ctx, cancel := context.WithCancel(s.ctx)
-	defer cancel()
-	for _, server := range cluster.GetServers() {
-		tsoAllocatorManager := server.GetTSOAllocatorManager()
-		for _, dcLocation := range dcLocationConfig {
-			leadership := election.NewLeadership(
-				server.GetEtcdClient(),
-				path.Join(server.GetServer().GetServerRootPath(), dcLocation),
-				"campaign-local-allocator-priority-test")
-			tsoAllocatorManager.SetUpAllocator(ctx, cancel, dcLocation, leadership)
-		}
-	}
-	// Before the priority is checked, we will have allocators typology like this:
+	// Before the priority is checked, we may have allocators typology like this:
 	// pd1: dc-1, dc-2 and dc-3 allocator leader
 	// pd2: None
 	// pd3: None
@@ -130,6 +116,7 @@ func (s *testManagerSuite) TestAllocatorPriority(c *C) {
 	// pd1: dc-1 allocator leader
 	// pd2: dc-2 allocator leader
 	// pd3: dc-3 allocator leader
+
 	// Because the default priority checking period is 1 minute,
 	// so we sleep longer here.
 	time.Sleep(waitAllocatorPriorityCheckInterval)
