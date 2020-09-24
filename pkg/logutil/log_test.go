@@ -15,6 +15,7 @@ package logutil
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -141,22 +142,23 @@ func (s *testLogSuite) TestRedactLog(c *C) {
 			enableRedactLog: false,
 			expect:          []byte("foo"),
 		},
-		{
-			name:            "nil",
-			arg:             nil,
-			enableRedactLog: true,
-			expect:          nil,
-		},
 	}
 
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		SetRedactLog(testcase.enableRedactLog)
-		r := redactArgIfNeeded(testcase.arg)
-		if testcase.expect == nil {
-			c.Assert(r, IsNil)
-			continue
+		switch testcase.arg.(type) {
+		case []byte:
+			r := RedactBytes(testcase.arg.([]byte))
+			c.Assert(r, DeepEquals, testcase.expect)
+		case string:
+			r := RedactString(testcase.arg.(string))
+			c.Assert(r, DeepEquals, testcase.expect)
+		case fmt.Stringer:
+			r := RedactStringer(testcase.arg.(fmt.Stringer))
+			c.Assert(r, DeepEquals, testcase.expect)
+		default:
+			panic("unmatched case")
 		}
-		c.Assert(r, DeepEquals, testcase.expect)
 	}
 }

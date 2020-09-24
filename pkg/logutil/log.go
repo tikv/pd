@@ -329,17 +329,26 @@ func ZapRedactStringer(key string, arg fmt.Stringer) zap.Field {
 
 // RedactBytes receives []byte argument and return omitted information if redact log enabled
 func RedactBytes(arg []byte) []byte {
-	return redactArgIfNeeded(arg).([]byte)
+	if IsRedactLogEnabled() {
+		return []byte("?")
+	}
+	return arg
 }
 
 // RedactString receives string argument and return omitted information if redact log enabled
 func RedactString(arg string) string {
-	return redactArgIfNeeded(arg).(string)
+	if IsRedactLogEnabled() {
+		return "?"
+	}
+	return arg
 }
 
 // RedactStringer receives stringer argument and return omitted information if redact log enabled
 func RedactStringer(arg fmt.Stringer) fmt.Stringer {
-	return redactArgIfNeeded(arg).(fmt.Stringer)
+	if IsRedactLogEnabled() {
+		return stringer{}
+	}
+	return arg
 }
 
 type stringer struct {
@@ -348,24 +357,4 @@ type stringer struct {
 // String implement fmt.Stringer
 func (s stringer) String() string {
 	return "?"
-}
-
-// redactArgIfNeeded will omit the argument if RedactLog is enabled
-func redactArgIfNeeded(arg interface{}) interface{} {
-	if IsRedactLogEnabled() {
-		if arg == nil {
-			return nil
-		}
-		switch arg.(type) {
-		case []byte:
-			return []byte("?")
-		case string:
-			return "?"
-		case fmt.Stringer:
-			return stringer{}
-		default:
-			return nil
-		}
-	}
-	return arg
 }
