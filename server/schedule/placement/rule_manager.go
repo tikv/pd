@@ -502,16 +502,28 @@ func (m *RuleManager) GetGroupBundle(id string) (b GroupBundle) {
 	return
 }
 
-// SetAllGroupBundles resets full configuration. All old configurations are dropped.
-func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle) error {
+// SetAllGroupBundles resets configuration. If override is true, all old configurations are dropped.
+func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle, override bool) error {
 	m.Lock()
 	defer m.Unlock()
 	p := m.beginPatch()
+	matchID := func(a string) bool {
+		for _, g := range groups {
+			if g.ID == a {
+				return true
+			}
+		}
+		return false
+	}
 	for k := range m.ruleConfig.rules {
-		p.deleteRule(k[0], k[1])
+		if override || matchID(k[0]) {
+			p.deleteRule(k[0], k[1])
+		}
 	}
 	for id := range m.ruleConfig.groups {
-		p.deleteGroup(id)
+		if override || matchID(id) {
+			p.deleteGroup(id)
+		}
 	}
 	for _, g := range groups {
 		p.setGroup(&RuleGroup{
@@ -594,4 +606,11 @@ func (m *RuleManager) DeleteGroupBundle(id string, regex bool) error {
 	}
 	log.Info("groups are removed", zap.String("id", id), zap.Bool("regexp", regex))
 	return nil
+}
+
+// IsInitialized returns whether the rule manager is initialized.
+func (m *RuleManager) IsInitialized() bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.initialized
 }

@@ -16,6 +16,7 @@ package api
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -430,6 +431,7 @@ func (h *ruleHandler) GetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 
 // @Tags rule
 // @Summary Update all rules and groups configuration.
+// @Param partial query bool false "if partially update rules" default(false)
 // @Produce json
 // @Success 200 {string} string "Update rules and groups successfully."
 // @Failure 400 {string} string "The input is invalid."
@@ -452,9 +454,14 @@ func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 				h.rd.JSON(w, http.StatusBadRequest, err.Error())
 				return
 			}
+			if rule.GroupID != g.ID {
+				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule group %s does not match group ID %s", rule.GroupID, g.ID))
+				return
+			}
 		}
 	}
-	if err := cluster.GetRuleManager().SetAllGroupBundles(groups); err != nil {
+	_, partial := r.URL.Query()["partial"]
+	if err := cluster.GetRuleManager().SetAllGroupBundles(groups, !partial); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -521,13 +528,22 @@ func (h *ruleHandler) SetGroupBundle(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
+	groupID := mux.Vars(r)["group"]
 	var group placement.GroupBundle
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &group); err != nil {
+		return
+	}
+	if group.ID != groupID {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("group id %s does not match request URI %s", group.ID, groupID))
 		return
 	}
 	for _, rule := range group.Rules {
 		if err := h.checkRule(rule); err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if rule.GroupID != groupID {
+			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule group %s does not match group ID %s", rule.GroupID, groupID))
 			return
 		}
 	}

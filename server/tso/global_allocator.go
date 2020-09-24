@@ -14,16 +14,10 @@
 package tso
 
 import (
-	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
-	"go.uber.org/zap"
 )
 
 // Allocator is a Timestamp Oracle allocator.
@@ -90,47 +84,8 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	var resp pdpb.Timestamp
-
-	if count == 0 {
-		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
-	}
-
-	maxRetryCount := 10
-	failpoint.Inject("skipRetryGetTS", func() {
-		maxRetryCount = 1
-	})
-
-	for i := 0; i < maxRetryCount; i++ {
-		current := (*atomicObject)(atomic.LoadPointer(&gta.timestampOracle.TSO))
-		if current == nil || current.physical == typeutil.ZeroTime {
-			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			if gta.leadership.Check() {
-				log.Info("sync hasn't completed yet, wait for a while")
-				time.Sleep(200 * time.Millisecond)
-				continue
-			}
-			log.Error("invalid timestamp", zap.Any("timestamp", current), errs.ZapError(errs.ErrInvalidTimestamp))
-			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
-		}
-
-		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
-		resp.Logical = atomic.AddInt64(&current.logical, int64(count))
-		if resp.Logical >= maxLogical {
-			log.Error("logical part outside of max logical interval, please check ntp time",
-				zap.Reflect("response", resp),
-				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
-			tsoCounter.WithLabelValues("logical_overflow").Inc()
-			time.Sleep(UpdateTimestampStep)
-			continue
-		}
-		// In case lease expired after the first check.
-		if !gta.leadership.Check() {
-			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd leader")
-		}
-		return resp, nil
-	}
-	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
+	// Todo: implement the synchronization algorithm for global TSO generation
+	return gta.timestampOracle.getTS(gta.leadership, count)
 }
 
 // Reset is used to reset the TSO allocator.

@@ -36,7 +36,7 @@ const (
 	minTolerantSizeRatio    float64 = 1.0
 )
 
-func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) bool {
+func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) (shouldBalance bool, sourceScore float64, targetScore float64) {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
@@ -46,15 +46,15 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceProperty(kind)
 	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
 	opts := cluster.GetOpts()
-	sourceScore := source.ResourceScore(kind, opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
-	targetScore := target.ResourceScore(kind, opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetInfluence+tolerantResource)
+	sourceScore = source.ResourceScore(kind, opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
+	targetScore = target.ResourceScore(kind, opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetInfluence+tolerantResource)
 	if opts.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(targetInfluence))
 		tolerantResourceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), strconv.FormatUint(targetID, 10)).Set(float64(tolerantResource))
 	}
 	// Make sure after move, source score is still greater than target score.
-	shouldBalance := sourceScore > targetScore
+	shouldBalance = sourceScore > targetScore
 
 	if !shouldBalance {
 		log.Debug("skip balance "+kind.Resource.String(),
@@ -66,7 +66,7 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 			zap.Int64("average-region-size", cluster.GetAverageRegionSize()),
 			zap.Int64("tolerant-resource", tolerantResource))
 	}
-	return shouldBalance
+	return shouldBalance, sourceScore, targetScore
 }
 
 func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
