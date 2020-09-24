@@ -233,8 +233,8 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) [dimLen]float64 {
 		return minThresholds
 	}
 	ret := [dimLen]float64{
-		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate,
-		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).KeyRate,
+		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).GetByteRate(),
+		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).GetKeyRate(),
 	}
 	for k := 0; k < dimLen; k++ {
 		ret[k] = math.Max(ret[k]*hotThresholdRatio, minThresholds[k])

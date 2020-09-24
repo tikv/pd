@@ -80,7 +80,8 @@ func (aot *AvgOverTime) Set(avg float64) {
 
 // TimeMedian is AvgOverTime + MedianFilter
 // Size of MedianFilter should be larger than double size of AvgOverTime to denoisy.
-// Delay is aotSize /2, delay is not related with mfSize
+// Delay is aotSize * mfSize * StoreHeartBeatReportInterval/2
+// and the min filled period is aotSize * StoreHeartBeatReportInterval, which is not related with mfSize
 type TimeMedian struct {
 	aotInterval time.Duration
 	aot         *AvgOverTime
