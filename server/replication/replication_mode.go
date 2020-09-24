@@ -436,7 +436,8 @@ func (m *ModeManager) updateProgress() {
 	for len(m.drRecoverKey) > 0 || m.drRecoverCount == 0 {
 		regions := m.cluster.ScanRegions(m.drRecoverKey, nil, regionScanBatchSize)
 		if len(regions) == 0 {
-			log.Warn("scan empty regions", zap.ByteString("recover-key", logutil.RedactBytes(m.drRecoverKey)))
+			log.Warn("scan empty regions",
+				logutil.ZapRedactByteString("recover-key", m.drRecoverKey))
 			return
 		}
 		for i, r := range regions {
@@ -487,8 +488,9 @@ func (m *ModeManager) estimateProgress() float32 {
 
 func (m *ModeManager) checkRegionRecover(region *core.RegionInfo, startKey []byte) bool {
 	if !bytes.Equal(startKey, region.GetStartKey()) {
-		log.Warn("found region gap", zap.ByteString("key", logutil.RedactBytes(startKey)),
-			zap.ByteString("region-start-key", logutil.RedactBytes(region.GetStartKey())),
+		log.Warn("found region gap",
+			logutil.ZapRedactByteString("key", startKey),
+			logutil.ZapRedactByteString("region-start-key", region.GetStartKey()),
 			zap.Uint64("region-id", region.GetID()))
 		return false
 	}

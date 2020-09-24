@@ -38,7 +38,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warn("invalid region, zero region peer count",
-			zap.Stringer("region-meta", logutil.RedactStringer(core.RegionToHexMeta(region.GetMeta()))))
+			logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
 		return errors.Errorf("invalid region, zero region peer count: %v", logutil.RedactStringer(core.RegionToHexMeta(region.GetMeta())))
 	}
 
@@ -192,8 +192,8 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	err := c.checkSplitRegion(left, right)
 	if err != nil {
 		log.Warn("report split region is invalid",
-			zap.Stringer("left-region", logutil.RedactStringer(core.RegionToHexMeta(left))),
-			zap.Stringer("right-region", logutil.RedactStringer(core.RegionToHexMeta(right))),
+			logutil.ZapRedactStringer("left-region", core.RegionToHexMeta(left)),
+			logutil.ZapRedactStringer("right-region", core.RegionToHexMeta(right)),
 			errs.ZapError(err))
 		return nil, err
 	}
