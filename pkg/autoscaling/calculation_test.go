@@ -14,6 +14,7 @@
 package autoscaling
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"testing"
@@ -254,4 +255,45 @@ func (s *calculationTestSuite) TestGetTotalCPUQuota(c *C) {
 	totalCPUQuota, _ := getTotalCPUQuota(querier, TiDB, instances, time.Now())
 	expected := uint64(mockResultValue * float64(len(instances)*milliCores))
 	c.Assert(totalCPUQuota, Equals, expected)
+}
+
+func (s *calculationTestSuite) TestScaleOutGroupLabel(c *C) {
+	var jsonStr = []byte(`
+{
+    "rules":[
+        {
+            "component":"tikv",
+            "cpu_rule":{
+                "max_threshold":0.8,
+                "min_threshold":0.2,
+                "resource_types":["resource_a"]
+            }
+        },
+        {
+            "component":"tidb",
+            "cpu_rule":{
+                "max_threshold":0.8,
+                "min_threshold":0.2,
+                "max_count":2,
+                "resource_types":["resource_a"]
+            }
+        }
+    ],
+    "resources":[
+        {
+            "resource_type":"resource_a",
+            "cpu":1,
+            "memory":8,
+            "storage":1000,
+            "count": 2
+        }
+    ]
+}`)
+	strategy := &Strategy{}
+	err := json.Unmarshal(jsonStr, strategy)
+	c.Assert(err, IsNil)
+	plan := findBestGroupToScaleOut(strategy, 0, nil, TiKV)
+	c.Assert(plan.Labels["specialUse"], Equals, "hotRegion")
+	plan = findBestGroupToScaleOut(strategy, 0, nil, TiDB)
+	c.Assert(plan.Labels["specialUse"], Equals, "")
 }

@@ -83,6 +83,11 @@ func (ls *Leadership) GetClient() *clientv3.Client {
 	return ls.client
 }
 
+// GetLeaderKey is used to get the leader key of etcd.
+func (ls *Leadership) GetLeaderKey() string {
+	return ls.leaderKey
+}
+
 // Campaign is used to campaign the leader with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 	ls.leaderValue = leaderData
@@ -198,5 +203,8 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 // Reset does some defer job such as closing lease, resetting lease etc.
 func (ls *Leadership) Reset() {
+	if ls == nil || ls.getLease() == nil {
+		return
+	}
 	ls.getLease().Close()
 }
