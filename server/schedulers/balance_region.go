@@ -173,6 +173,12 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 				schedulerCounter.WithLabelValues(s.GetName(), "region-hot").Inc()
 				continue
 			}
+			// Check region whether have leader
+			if region.GetLeader() == nil {
+				log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
+				schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
+				continue
+			}
 
 			oldPeer := region.GetStorePeer(sourceID)
 			if op := s.transferPeer(cluster, region, oldPeer); op != nil {
@@ -213,13 +219,14 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 
 		opInfluence := s.opController.GetOpInfluence(cluster)
 		kind := core.NewScheduleKind(core.RegionKind, core.BySize)
-		if !shouldBalance(cluster, source, target, region, kind, opInfluence, s.GetName()) {
+		shouldBalance, sourceScore, targetScore := shouldBalance(cluster, source, target, region, kind, opInfluence, s.GetName())
+		if !shouldBalance {
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 			continue
 		}
 
 		newPeer := &metapb.Peer{StoreId: target.GetID(), Role: oldPeer.Role}
-		op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+		op, err := operator.CreateMovePeerOperator(BalanceRegionType, cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil
@@ -233,6 +240,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
 			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
 		)
+		op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(sourceScore, 'f', 2, 64)
+		op.AdditionalInfos["targetScore"] = strconv.FormatFloat(targetScore, 'f', 2, 64)
 		return op
 	}
 

@@ -574,6 +574,7 @@ func (mc *Cluster) RemoveScheduler(name string) error {
 }
 
 // MockRegionInfo returns a mock region
+// If leaderStoreID is zero, the regions would have no leader
 func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	followerStoreIDs, learnerStoreIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
 
@@ -583,8 +584,11 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
 		RegionEpoch: epoch,
 	}
-	leader, _ := mc.AllocPeer(leaderStoreID)
-	region.Peers = []*metapb.Peer{leader}
+	var leader *metapb.Peer
+	if leaderStoreID != 0 {
+		leader, _ = mc.AllocPeer(leaderStoreID)
+		region.Peers = append(region.Peers, leader)
+	}
 	for _, storeID := range followerStoreIDs {
 		peer, _ := mc.AllocPeer(storeID)
 		region.Peers = append(region.Peers, peer)

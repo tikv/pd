@@ -45,17 +45,17 @@ type LocalTSOAllocator struct {
 }
 
 // NewLocalTSOAllocator creates a new local TSO allocator.
-func NewLocalTSOAllocator(member *member.Member, leadership *election.Leadership, rootPath, dcLocation string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
+func NewLocalTSOAllocator(member *member.Member, leadership *election.Leadership, dcLocation string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
 	return &LocalTSOAllocator{
 		leadership: leadership,
 		timestampOracle: &timestampOracle{
 			client:        leadership.GetClient(),
-			rootPath:      rootPath,
+			rootPath:      leadership.GetLeaderKey(),
 			saveInterval:  saveInterval,
 			maxResetTSGap: maxResetTSGap,
 		},
 		member:     member,
-		rootPath:   rootPath,
+		rootPath:   leadership.GetLeaderKey(),
 		dcLocation: dcLocation,
 	}
 }
@@ -84,8 +84,8 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	// Todo: update both Local and Global TSO generating logic
-	return pdpb.Timestamp{}, nil
+	// Todo: use the low bits of TSO's logical part to distinguish the different local TSO
+	return lta.timestampOracle.getTS(lta.leadership, count)
 }
 
 // Reset is used to reset the TSO allocator.
