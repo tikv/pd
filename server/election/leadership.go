@@ -112,7 +112,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 	if !resp.Succeeded {
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
-	log.Info("write leaderDate to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
+	log.Info("write leaderData to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
 }
 
