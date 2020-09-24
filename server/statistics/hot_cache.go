@@ -115,6 +115,7 @@ func (w *HotCache) incMetrics(name string, storeID uint64, kind FlowKind) {
 	}
 }
 
-func (w *HotCache) GetPeriod(kind FlowKind) int {
-	return w.readFlow.getDefaultTimeMedian().GetMinFilledNum()
+// GetFilledPeriod returns filled period.
+func (w *HotCache) GetFilledPeriod(kind FlowKind) int {
+	return w.readFlow.getDefaultTimeMedian().GetFilledPeriod()
 }

@@ -123,6 +123,7 @@ func (t *TimeMedian) Set(avg float64) {
 	t.mf.Set(avg)
 }
 
-func (t *TimeMedian) GetMinFilledNum() int { // it is unrelated with mfSize
+// GetFilledPeriod returns filled period.
+func (t *TimeMedian) GetFilledPeriod() int { // it is unrelated with mfSize
 	return t.aotSize
 }

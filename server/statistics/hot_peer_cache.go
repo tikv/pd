@@ -293,7 +293,7 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 }
 
 func (f *hotPeerCache) getHotRegionAntiCount() int {
-	return hotRegionAntiCount + f.getDefaultTimeMedian().GetMinFilledNum()
+	return hotRegionAntiCount + f.getDefaultTimeMedian().GetFilledPeriod()
 }
 
 func (f *hotPeerCache) getDefaultTimeMedian() *TimeMedian {
