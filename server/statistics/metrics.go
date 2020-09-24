@@ -77,7 +77,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "read_byte_hist",
 			Help:      "Bucketed histogram of the batch size of handled requests.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 17),
+			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
 		})
 	readKeyStat = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
@@ -85,7 +85,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "read_key_hist",
 			Help:      "Bucketed histogram of the batch size of handled requests.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 15),
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 16),
 		})
 	readQPSStat = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
