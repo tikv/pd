@@ -96,6 +96,7 @@ func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
 
 func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
 	testCluster := mockcluster.NewCluster(opt)
 	testCluster.SetLocationLabels([]string{"zone"})
 	testCluster.SetEnablePlacementRules(true)
