@@ -909,7 +909,7 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	})
 }
 
-// SyncMaxTS is a RPC method used to synchronize the timestamp of TSO between a
+// SyncMaxTS is a RPC method used to synchronize the timestamp of TSO between the
 // Global TSO Allocator and multi Local TSO Allocator leaders. It contains two
 // phases:
 // 1. Collect timestamps among all Local TSO Allocator leaders, and choose the
@@ -931,6 +931,13 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		// The first phase of synchronization: collect the max local ts
 		var maxLocalTS pdpb.Timestamp
 		for _, allocator := range allocatorLeaders {
+			if !allocator.IsStillAllocatorLeader() {
+				return nil, errs.ErrNotLocalAllocatorLeader.FastGenByArgs(
+					fmt.Sprintf("dc-location: %s, memberID %d",
+						allocator.GetDCLocation(), allocator.GetMember().GetMemberId(),
+					),
+				)
+			}
 			currentLocalTSO, err := allocator.GetCurrentTSO()
 			if err != nil {
 				return nil, err
@@ -946,6 +953,13 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	}
 	// The second phase of synchronization: do the writing
 	for _, allocator := range allocatorLeaders {
+		if !allocator.IsStillAllocatorLeader() {
+			return nil, errs.ErrNotLocalAllocatorLeader.FastGenByArgs(
+				fmt.Sprintf("dc-location: %s, memberID %d",
+					allocator.GetDCLocation(), allocator.GetMember().GetMemberId(),
+				),
+			)
+		}
 		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
 			return nil, err
 		}

@@ -62,6 +62,11 @@ func NewLocalTSOAllocator(member *member.Member, leadership *election.Leadership
 	}
 }
 
+// GetDCLocation returns the local allocator's dc-location.
+func (lta *LocalTSOAllocator) GetDCLocation() string {
+	return lta.dcLocation
+}
+
 // Initialize will initialize the created local TSO allocator.
 func (lta *LocalTSOAllocator) Initialize() error {
 	return lta.timestampOracle.SyncTimestamp(lta.leadership)
