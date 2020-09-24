@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/filter"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -224,7 +225,7 @@ func getResourcesByComponent(strategy *Strategy, component ComponentType) []*Res
 }
 
 func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64, instances []instance, groups []*Plan) []*Plan {
-	group := findBestGroupToScaleOut(rc, strategy, scaleOutQuota, groups, component)
+	group := findBestGroupToScaleOut(strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
 	if math.Abs(resCPU) <= 1e-6 {
@@ -257,7 +258,7 @@ func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component
 	if len(groups) == 0 {
 		return nil
 	}
-	group := findBestGroupToScaleIn(rc, strategy, scaleInQuota, groups)
+	group := findBestGroupToScaleIn(strategy, scaleInQuota, groups)
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
 	if math.Abs(resCPU) <= 1e-6 {
 		log.Error("resource CPU is zero, exiting calculation")
@@ -400,13 +401,13 @@ func buildPlans(planMap map[string]map[string]struct{}, resourceTypeMap map[stri
 	return plans
 }
 
-// TODO: implement heterogeneous logic
-func findBestGroupToScaleIn(rc *cluster.RaftCluster, strategy *Strategy, scaleInQuota float64, groups []*Plan) Plan {
+// TODO: implement heterogeneous logic and take cluster information into consideration.
+func findBestGroupToScaleIn(strategy *Strategy, scaleInQuota float64, groups []*Plan) Plan {
 	return *groups[0]
 }
 
-// TODO: implement heterogeneous logic
-func findBestGroupToScaleOut(rc *cluster.RaftCluster, strategy *Strategy, scaleOutQuota float64, groups []*Plan, component ComponentType) Plan {
+// TODO: implement heterogeneous logic and take cluster information into consideration.
+func findBestGroupToScaleOut(strategy *Strategy, scaleOutQuota float64, groups []*Plan, component ComponentType) Plan {
 	if len(groups) != 0 {
 		return *groups[0]
 	}
@@ -421,6 +422,11 @@ func findBestGroupToScaleOut(rc *cluster.RaftCluster, strategy *Strategy, scaleO
 			groupLabelKey:        autoScalingGroupLabelKeyPrefix + component.String(),
 			resourceTypeLabelKey: resources[0].ResourceType,
 		},
+	}
+
+	// TODO: we can provide different senerios by using options and remove this kind of special judgement.
+	if component == TiKV {
+		group.Labels[filter.SpecialUseKey] = filter.SpecialUseHotRegion
 	}
 
 	return group
