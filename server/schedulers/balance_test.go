@@ -751,15 +751,9 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
-<<<<<<< HEAD
-	s.checkReplacePendingRegion(c, tc, opt, sb)
+	s.checkReplacePendingRegion(c, tc, sb)
 	opt.EnablePlacementRules = true
-	s.checkReplacePendingRegion(c, tc, opt, sb)
-=======
 	s.checkReplacePendingRegion(c, tc, sb)
-	tc.SetEnablePlacementRules(true)
-	s.checkReplacePendingRegion(c, tc, sb)
->>>>>>> fd4e434... operator: add additional info for operator (#2993)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
@@ -789,11 +783,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], operator.OpBalance, 3, 1)
 }
 
-<<<<<<< HEAD
-func (s *testBalanceRegionSchedulerSuite) checkReplacePendingRegion(c *C, tc *mockcluster.Cluster, opt *mockoption.ScheduleOptions, sb schedule.Scheduler) {
-=======
 func (s *testBalanceRegionSchedulerSuite) checkReplacePendingRegion(c *C, tc *mockcluster.Cluster, sb schedule.Scheduler) {
->>>>>>> fd4e434... operator: add additional info for operator (#2993)
 	// Store 1 has the largest region score, so the balance scheduler try to replace peer in store 1.
 	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 7, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})

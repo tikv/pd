@@ -72,27 +72,15 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		level = core.HighPriority
 	}
 	return &Operator{
-<<<<<<< HEAD
-		desc:        desc,
-		brief:       brief,
-		regionID:    regionID,
-		regionEpoch: regionEpoch,
-		kind:        kind,
-		steps:       steps,
-		status:      NewOpStatusTracker(),
-		level:       level,
-=======
 		desc:            desc,
 		brief:           brief,
 		regionID:        regionID,
 		regionEpoch:     regionEpoch,
 		kind:            kind,
 		steps:           steps,
-		stepsTime:       make([]int64, len(steps)),
 		status:          NewOpStatusTracker(),
 		level:           level,
 		AdditionalInfos: make(map[string]string),
->>>>>>> fd4e434... operator: add additional info for operator (#2993)
 	}
 }
 
