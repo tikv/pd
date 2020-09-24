@@ -17,6 +17,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -55,13 +56,13 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	// Active stream is stream1.
 	hbs.BindStream(1, stream1)
 	testutil.WaitUntil(c, func(c *C) bool {
-		hbs.SendMsg(region, msg)
+		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 	// Rebind to stream2.
 	hbs.BindStream(1, stream2)
 	testutil.WaitUntil(c, func(c *C) bool {
-		hbs.SendMsg(region, msg)
+		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() == nil && stream2.Recv() != nil
 	})
 	// SendErr to stream2.
@@ -72,7 +73,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	// Switch back to 1 again.
 	hbs.BindStream(1, stream1)
 	testutil.WaitUntil(c, func(c *C) bool {
-		hbs.SendMsg(region, msg)
+		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 }
