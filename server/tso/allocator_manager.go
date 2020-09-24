@@ -390,6 +390,7 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 				log.Error("check new allocators failed, can't set up a new local allocator", zap.String("dc-location", dcLocation), errs.ZapError(err))
 				continue
 			}
+			am.priorityChecker()
 		}
 	}
 	// Clean up the unused one
@@ -514,6 +515,7 @@ func (am *AllocatorManager) deleteNextLeaderID(dcLocation string) error {
 	}
 	return nil
 }
+
 func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 	am.Lock()
 	defer am.Unlock()
