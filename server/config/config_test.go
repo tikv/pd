@@ -160,6 +160,7 @@ leader-schedule-limit = 0
 	c.Assert(cfg.PreVote, IsTrue)
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
 	c.Assert(cfg.PDServerCfg.MetricStorage, Equals, "http://127.0.0.1:9090")
+	c.Assert(cfg.EnableRedactLog, Equals, defaultEnableRedactLog)
 
 	// Check undefined config fields
 	cfgData = `

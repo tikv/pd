@@ -22,11 +22,15 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
+<<<<<<< HEAD
+=======
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/server/config"
+>>>>>>> 941b5fef... logutil, *: implement log desensitization  (#3011)
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
-	"go.uber.org/zap"
 )
 
 // MergeChecker ensures region to merge with adjacent region when size is small
@@ -119,7 +123,9 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	log.Debug("try to merge region", zap.Stringer("from", core.RegionToHexMeta(region.GetMeta())), zap.Stringer("to", core.RegionToHexMeta(target.GetMeta())))
+	log.Debug("try to merge region",
+		logutil.ZapRedactStringer("from", core.RegionToHexMeta(region.GetMeta())),
+		logutil.ZapRedactStringer("to", core.RegionToHexMeta(target.GetMeta())))
 	ops, err := operator.CreateMergeRegionOperator("merge-region", m.cluster, region, target, operator.OpMerge)
 	if err != nil {
 		log.Warn("create merge region operator failed", errs.ZapError(err))
