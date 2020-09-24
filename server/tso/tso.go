@@ -33,8 +33,6 @@ import (
 
 const (
 	timestampKey = "timestamp"
-	// UpdateTimestampStep is used to update timestamp.
-	UpdateTimestampStep = 50 * time.Millisecond
 	// updateTimestampGuard is the min timestamp interval.
 	updateTimestampGuard = time.Millisecond
 	// maxLogical is the max upper limit for logical time.
@@ -54,10 +52,11 @@ type timestampOracle struct {
 	client   *clientv3.Client
 	rootPath string
 	// TODO: remove saveInterval
-	saveInterval  time.Duration
-	maxResetTSGap func() time.Duration
-	tso           unsafe.Pointer
-	lastSavedTime atomic.Value
+	saveInterval           time.Duration
+	updatePhysicalInterval time.Duration
+	maxResetTSGap          func() time.Duration
+	tso                    unsafe.Pointer
+	lastSavedTime          atomic.Value
 }
 
 func (t *timestampOracle) getTimestampPath() string {
@@ -205,7 +204,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	tsoCounter.WithLabelValues("save").Inc()
 
 	jetLag := typeutil.SubTimeByWallClock(now, prev.physical)
-	if jetLag > 3*UpdateTimestampStep {
+	if jetLag > 3*t.updatePhysicalInterval {
 		log.Warn("clock offset", zap.Duration("jet-lag", jetLag), zap.Time("prev-physical", prev.physical), zap.Time("now", now))
 		tsoCounter.WithLabelValues("slow_save").Inc()
 	}
@@ -284,7 +283,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			tsoCounter.WithLabelValues("logical_overflow").Inc()
-			time.Sleep(UpdateTimestampStep)
+			time.Sleep(t.updatePhysicalInterval)
 			continue
 		}
 		// In case lease expired after the first check.

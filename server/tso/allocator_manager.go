@@ -74,19 +74,21 @@ type AllocatorManager struct {
 	// for election use
 	member *member.Member
 	// TSO config
-	rootPath      string
-	saveInterval  time.Duration
-	maxResetTSGap func() time.Duration
+	rootPath               string
+	saveInterval           time.Duration
+	updatePhysicalInterval time.Duration
+	maxResetTSGap          func() time.Duration
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
-func NewAllocatorManager(m *member.Member, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration) *AllocatorManager {
+func NewAllocatorManager(m *member.Member, rootPath string, saveInterval time.Duration, updatePhysicalInterval time.Duration, maxResetTSGap func() time.Duration) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
-		allocatorGroups: make(map[string]*allocatorGroup),
-		member:          m,
-		rootPath:        rootPath,
-		saveInterval:    saveInterval,
-		maxResetTSGap:   maxResetTSGap,
+		allocatorGroups:        make(map[string]*allocatorGroup),
+		member:                 m,
+		rootPath:               rootPath,
+		saveInterval:           saveInterval,
+		updatePhysicalInterval: updatePhysicalInterval,
+		maxResetTSGap:          maxResetTSGap,
 	}
 	return allocatorManager
 }
@@ -166,9 +168,9 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 	defer am.Unlock()
 	var allocator Allocator
 	if dcLocation == config.GlobalDCLocation {
-		allocator = NewGlobalTSOAllocator(leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.maxResetTSGap)
+		allocator = NewGlobalTSOAllocator(leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
 	} else {
-		allocator = NewLocalTSOAllocator(am.member, leadership, dcLocation, am.saveInterval, am.maxResetTSGap)
+		allocator = NewLocalTSOAllocator(am.member, leadership, dcLocation, am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
 	}
 	// Update or create a new allocatorGroup
 	am.allocatorGroups[dcLocation] = &allocatorGroup{
@@ -288,7 +290,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
 // any new local allocator that needs to be set up.
 func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
-	tsTicker := time.NewTicker(UpdateTimestampStep)
+	tsTicker := time.NewTicker(am.updatePhysicalInterval)
 	defer tsTicker.Stop()
 	checkerTicker := time.NewTicker(checkAllocatorStep)
 	defer checkerTicker.Stop()

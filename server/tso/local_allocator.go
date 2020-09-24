@@ -45,14 +45,22 @@ type LocalTSOAllocator struct {
 }
 
 // NewLocalTSOAllocator creates a new local TSO allocator.
-func NewLocalTSOAllocator(member *member.Member, leadership *election.Leadership, dcLocation string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
+func NewLocalTSOAllocator(
+	member *member.Member,
+	leadership *election.Leadership,
+	dcLocation string,
+	saveInterval time.Duration,
+	updatePhysicalInterval time.Duration,
+	maxResetTSGap func() time.Duration,
+) Allocator {
 	return &LocalTSOAllocator{
 		leadership: leadership,
 		timestampOracle: &timestampOracle{
-			client:        leadership.GetClient(),
-			rootPath:      leadership.GetLeaderKey(),
-			saveInterval:  saveInterval,
-			maxResetTSGap: maxResetTSGap,
+			client:                 leadership.GetClient(),
+			rootPath:               leadership.GetLeaderKey(),
+			saveInterval:           saveInterval,
+			updatePhysicalInterval: updatePhysicalInterval,
+			maxResetTSGap:          maxResetTSGap,
 		},
 		member:     member,
 		rootPath:   leadership.GetLeaderKey(),
