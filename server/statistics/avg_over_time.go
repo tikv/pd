@@ -80,7 +80,7 @@ func (aot *AvgOverTime) Set(avg float64) {
 
 // TimeMedian is AvgOverTime + MedianFilter
 // Size of MedianFilter should be larger than double size of AvgOverTime to denoisy.
-// Delay is aotSize * mfSize * StoreHeartBeatReportInterval /4
+// Delay is aotSize * mfSize * interval /4
 type TimeMedian struct {
 	aotInterval time.Duration
 	aot         *AvgOverTime
