@@ -617,7 +617,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	c.Assert(len(stats), Equals, 2)
 	for _, ss := range stats {
 		for _, s := range ss {
-			c.Assert(s.ByteRate, Equals, 512.0*KB)
+			c.Assert(s.GetByteRate(), Equals, 512.0*KB)
 		}
 	}
 
