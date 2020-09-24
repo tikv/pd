@@ -19,7 +19,6 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/typeutil"
 )
 
 const (
@@ -85,16 +84,5 @@ func NewTestOptions() *PersistOptions {
 	}
 	c := NewConfig()
 	c.Adjust(nil)
-
-	// setup configurations that have different default values.
-	// TODO: remove them and setup in tests.
-	c.Schedule.MaxMergeRegionSize = 0
-	c.Schedule.MaxMergeRegionKeys = 0
-	c.Schedule.SplitMergeInterval = typeutil.NewDuration(0)
-	c.Schedule.RegionScheduleLimit = 64
-	c.Schedule.TolerantSizeRatio = 2.5
-	c.Schedule.HighSpaceRatio = 0.6
-	c.Schedule.SchedulerMaxWaitingOperator = 3
-
 	return NewPersistOptions(c)
 }

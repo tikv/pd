@@ -30,8 +30,8 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
@@ -63,12 +63,12 @@ type coordinator struct {
 	regionScatterer *schedule.RegionScatterer
 	schedulers      map[string]*scheduleController
 	opController    *schedule.OperatorController
-	hbStreams       opt.HeartbeatStreams
+	hbStreams       *hbstream.HeartbeatStreams
 	pluginInterface *schedule.PluginInterface
 }
 
 // newCoordinator creates a new coordinator.
-func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams opt.HeartbeatStreams) *coordinator {
+func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstream.HeartbeatStreams) *coordinator {
 	ctx, cancel := context.WithCancel(ctx)
 	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
 	return &coordinator{

@@ -508,6 +508,7 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 		DRAutoSync: config.DRAutoSyncReplicationConfig{
 			WaitStoreTimeout: typeutil.NewDuration(time.Minute),
 			WaitSyncTimeout:  typeutil.NewDuration(time.Minute),
+			WaitAsyncTimeout: typeutil.NewDuration(2 * time.Minute),
 		},
 	}
 	check := func() {

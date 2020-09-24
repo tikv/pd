@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/versioninfo"
 
 	"github.com/BurntSushi/toml"
@@ -220,6 +220,7 @@ const (
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
+	defaultDRWaitAsyncTimeout = 2 * time.Minute
 )
 
 var (
@@ -668,6 +669,8 @@ type ScheduleConfig struct {
 	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
 	// EnableDebugMetrics is the option to enable debug metrics.
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
+	// EnableJointConsensus is the option to enable using joint consensus as a operator step.
+	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
@@ -726,6 +729,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
 		EnableLocationReplacement:    c.EnableLocationReplacement,
 		EnableDebugMetrics:           c.EnableDebugMetrics,
+		EnableJointConsensus:         c.EnableJointConsensus,
 		StoreLimitMode:               c.StoreLimitMode,
 		Schedulers:                   schedulers,
 	}
@@ -754,6 +758,7 @@ const (
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
+	defaultEnableJointConsensus        = true
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -801,6 +806,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("store-limit-mode") {
 		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
+	}
+	if !meta.IsDefined("enable-joint-consensus") {
+		c.EnableJointConsensus = defaultEnableJointConsensus
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
@@ -1317,14 +1325,18 @@ type DRAutoSyncReplicationConfig struct {
 	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
 	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
 	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
+	WaitAsyncTimeout typeutil.Duration `toml:"wait-async-timeout" json:"wait-async-timeout"`
 }
 
 func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
-		c.WaitStoreTimeout = typeutil.Duration{Duration: defaultDRWaitStoreTimeout}
+		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
 	}
 	if !meta.IsDefined("wait-sync-timeout") {
-		c.WaitSyncTimeout = typeutil.Duration{Duration: defaultDRWaitSyncTimeout}
+		c.WaitSyncTimeout = typeutil.NewDuration(defaultDRWaitSyncTimeout)
+	}
+	if !meta.IsDefined("wait-async-timeout") {
+		c.WaitAsyncTimeout = typeutil.NewDuration(defaultDRWaitAsyncTimeout)
 	}
 }
 

@@ -36,7 +36,9 @@ type CommandFlags struct {
 }
 
 var (
-	commandFlags = CommandFlags{}
+	commandFlags = CommandFlags{
+		URL: "http://127.0.0.1:2379",
+	}
 
 	detach            bool
 	interact          bool
@@ -64,10 +66,10 @@ func getBasicCmd() *cobra.Command {
 		Short: "Placement Driver control",
 	}
 
-	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "http://127.0.0.1:2379", "address of pd")
-	rootCmd.PersistentFlags().StringVar(&commandFlags.CAPath, "cacert", "", "path of file that contains list of trusted SSL CAs")
-	rootCmd.PersistentFlags().StringVar(&commandFlags.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
-	rootCmd.PersistentFlags().StringVar(&commandFlags.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
+	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", commandFlags.URL, "address of pd")
+	rootCmd.PersistentFlags().StringVar(&commandFlags.CAPath, "cacert", commandFlags.CAPath, "path of file that contains list of trusted SSL CAs")
+	rootCmd.PersistentFlags().StringVar(&commandFlags.CertPath, "cert", commandFlags.CertPath, "path of file that contains X509 certificate in PEM format")
+	rootCmd.PersistentFlags().StringVar(&commandFlags.KeyPath, "key", commandFlags.KeyPath, "path of file that contains X509 key in PEM format")
 	rootCmd.PersistentFlags().BoolVarP(&commandFlags.Help, "help", "h", false, "help message")
 
 	rootCmd.AddCommand(
@@ -187,10 +189,6 @@ func loop() {
 		if err != nil {
 			fmt.Printf("parse command err: %v\n", err)
 			continue
-		}
-		args = append(args, "-u", commandFlags.URL)
-		if commandFlags.CAPath != "" && commandFlags.CertPath != "" && commandFlags.KeyPath != "" {
-			args = append(args, "--cacert", commandFlags.CAPath, "--cert", commandFlags.CertPath, "--key", commandFlags.KeyPath)
 		}
 		Start(args)
 	}

@@ -24,8 +24,8 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/opt"
-	"github.com/tikv/pd/server/schedule/storelimit"
 )
 
 func Test(t *testing.T) {

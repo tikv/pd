@@ -30,9 +30,10 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
-	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
 
@@ -59,7 +60,7 @@ type OperatorController struct {
 	ctx             context.Context
 	cluster         opt.Cluster
 	operators       map[uint64]*operator.Operator
-	hbStreams       opt.HeartbeatStreams
+	hbStreams       *hbstream.HeartbeatStreams
 	histories       *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
@@ -70,7 +71,7 @@ type OperatorController struct {
 }
 
 // NewOperatorController creates a OperatorController.
-func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams opt.HeartbeatStreams) *OperatorController {
+func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams *hbstream.HeartbeatStreams) *OperatorController {
 	return &OperatorController{
 		ctx:             ctx,
 		cluster:         cluster,
@@ -183,7 +184,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 func (oc *OperatorController) getNextPushOperatorTime(step operator.OpStep, now time.Time) time.Time {
 	nextTime := slowNotifyInterval
 	switch step.(type) {
-	case operator.TransferLeader, operator.PromoteLearner:
+	case operator.TransferLeader, operator.PromoteLearner, operator.DemoteFollower, operator.ChangePeerV2Enter, operator.ChangePeerV2Leave:
 		nextTime = fastNotifyInterval
 	}
 	return now.Add(nextTime)
@@ -616,20 +617,21 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		zap.Uint64("region-id", region.GetID()),
 		zap.Stringer("step", step),
 		zap.String("source", source))
+
+	var cmd *pdpb.RegionHeartbeatResponse
 	switch st := step.(type) {
 	case operator.TransferLeader:
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			TransferLeader: &pdpb.TransferLeader{
 				Peer: region.GetStorePeer(st.ToStore),
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.AddPeer:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
@@ -639,13 +641,12 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				},
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.AddLightPeer:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
@@ -655,13 +656,12 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				},
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.AddLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 				Peer: &metapb.Peer{
@@ -671,13 +671,12 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				},
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 				Peer: &metapb.Peer{
@@ -687,48 +686,66 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				},
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.PromoteLearner:
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				// reuse AddNode type
 				ChangeType: eraftpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
 					Id:      st.PeerID,
 					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Voter,
 				},
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
+	case operator.DemoteFollower:
+		cmd = &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				// reuse AddLearnerNode type
+				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+				Peer: &metapb.Peer{
+					Id:      st.PeerID,
+					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Learner,
+				},
+			},
+		}
 	case operator.RemovePeer:
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_RemoveNode,
 				Peer:       region.GetStorePeer(st.FromStore),
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.MergeRegion:
 		if st.IsPassive {
 			return
 		}
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			Merge: &pdpb.Merge{
 				Target: st.ToRegion,
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
 	case operator.SplitRegion:
-		cmd := &pdpb.RegionHeartbeatResponse{
+		cmd = &pdpb.RegionHeartbeatResponse{
 			SplitRegion: &pdpb.SplitRegion{
 				Policy: st.Policy,
 				Keys:   st.SplitKeys,
 			},
 		}
-		oc.hbStreams.SendMsg(region, cmd)
+	case operator.ChangePeerV2Enter:
+		cmd = &pdpb.RegionHeartbeatResponse{
+			ChangePeerV2: st.GetRequest(),
+		}
+	case operator.ChangePeerV2Leave:
+		cmd = &pdpb.RegionHeartbeatResponse{
+			ChangePeerV2: &pdpb.ChangePeerV2{},
+		}
 	default:
 		log.Error("unknown operator step", zap.Reflect("step", step), errs.ZapError(errs.ErrUnknownOperatorStep))
+		return
 	}
+	oc.hbStreams.SendMsg(region, cmd)
 }
 
 func (oc *OperatorController) pushHistory(op *operator.Operator) {
