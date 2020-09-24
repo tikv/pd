@@ -34,7 +34,7 @@ type testKVSuite struct {
 }
 
 func (s *testKVSuite) TestBasic(c *C) {
-	storage := NewStorage(kv.NewMemoryKV(), nil, nil)
+	storage := NewStorage(kv.NewMemoryKV())
 
 	c.Assert(storage.storePath(123), Equals, "raft/s/00000000000000000123")
 	c.Assert(regionPath(123), Equals, "raft/r/00000000000000000123")
@@ -68,8 +68,8 @@ func (s *testKVSuite) TestBasic(c *C) {
 	c.Assert(storage.SaveRegion(region), IsNil)
 	newRegion := &metapb.Region{}
 	ok, err = storage.LoadRegion(123, newRegion)
-	c.Assert(err, IsNil)
 	c.Assert(ok, IsTrue)
+	c.Assert(err, IsNil)
 	c.Assert(newRegion, DeepEquals, region)
 	err = storage.DeleteRegion(region)
 	c.Assert(err, IsNil)
@@ -93,7 +93,7 @@ func mustSaveStores(c *C, s *Storage, n int) []*metapb.Store {
 }
 
 func (s *testKVSuite) TestLoadStores(c *C) {
-	storage := NewStorage(kv.NewMemoryKV(), nil, nil)
+	storage := NewStorage(kv.NewMemoryKV())
 	cache := NewStoresInfo()
 
 	n := 10
@@ -107,7 +107,7 @@ func (s *testKVSuite) TestLoadStores(c *C) {
 }
 
 func (s *testKVSuite) TestStoreWeight(c *C) {
-	storage := NewStorage(kv.NewMemoryKV(), nil, nil)
+	storage := NewStorage(kv.NewMemoryKV())
 	cache := NewStoresInfo()
 	const n = 3
 
@@ -138,7 +138,7 @@ func mustSaveRegions(c *C, s *Storage, n int) []*metapb.Region {
 }
 
 func (s *testKVSuite) TestLoadRegions(c *C) {
-	storage := NewStorage(kv.NewMemoryKV(), nil, nil)
+	storage := NewStorage(kv.NewMemoryKV())
 	cache := NewRegionsInfo()
 
 	n := 10
@@ -152,7 +152,7 @@ func (s *testKVSuite) TestLoadRegions(c *C) {
 }
 
 func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
-	storage := NewStorage(kv.NewMemoryKV(), nil, nil)
+	storage := NewStorage(kv.NewMemoryKV())
 	cache := NewRegionsInfo()
 
 	n := 10
@@ -171,7 +171,7 @@ func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
 }
 
 func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
-	storage := NewStorage(&KVWithMaxRangeLimit{Base: kv.NewMemoryKV(), rangeLimit: 500}, nil, nil)
+	storage := NewStorage(&KVWithMaxRangeLimit{Base: kv.NewMemoryKV(), rangeLimit: 500})
 	cache := NewRegionsInfo()
 
 	n := 1000
@@ -184,7 +184,7 @@ func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
 }
 
 func (s *testKVSuite) TestLoadGCSafePoint(c *C) {
-	storage := NewStorage(kv.NewMemoryKV(), nil, nil)
+	storage := NewStorage(kv.NewMemoryKV())
 	testData := []uint64{0, 1, 2, 233, 2333, 23333333333, math.MaxUint64}
 
 	r, e := storage.LoadGCSafePoint()
@@ -201,7 +201,7 @@ func (s *testKVSuite) TestLoadGCSafePoint(c *C) {
 
 func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
 	mem := kv.NewMemoryKV()
-	storage := NewStorage(mem, nil, nil)
+	storage := NewStorage(mem)
 	expireAt := time.Now().Add(100 * time.Second).Unix()
 	serviceSafePoints := []*ServiceSafePoint{
 		{"1", expireAt, 1},
@@ -233,7 +233,7 @@ func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
 
 func (s *testKVSuite) TestLoadMinServiceGCSafePoint(c *C) {
 	mem := kv.NewMemoryKV()
-	storage := NewStorage(mem, nil, nil)
+	storage := NewStorage(mem)
 	expireAt := time.Now().Add(1000 * time.Second).Unix()
 	serviceSafePoints := []*ServiceSafePoint{
 		{"1", 0, 1},

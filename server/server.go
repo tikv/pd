@@ -371,7 +371,11 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 
-	s.storage = core.NewStorage(kvBase, regionStorage, encryptionKeyManager)
+	s.storage = core.NewStorage(
+		kvBase,
+		core.WithRegionStorage(regionStorage),
+		core.WithEncryptionKeyManager(encryptionKeyManager),
+	)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)

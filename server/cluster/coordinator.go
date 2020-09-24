@@ -590,12 +590,7 @@ func (c *coordinator) removeOptScheduler(o *config.PersistOptions, name string) 
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
 		decoder := schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
-		tmp, err := schedule.CreateScheduler(
-			schedulerCfg.Type,
-			schedule.NewOperatorController(c.ctx, nil, nil),
-			core.NewStorage(kv.NewMemoryKV(), nil, nil),
-			decoder,
-		)
+		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(c.ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), decoder)
 		if err != nil {
 			return err
 		}

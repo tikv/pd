@@ -61,16 +61,39 @@ type Storage struct {
 	mu                   sync.Mutex
 }
 
+// StorageOpt represents available options to create Storage.
+type StorageOpt struct {
+	regionStorage        *RegionStorage
+	encryptionKeyManager *encryptionkm.KeyManager
+}
+
+// StorageOption configures StorageOpt
+type StorageOption func(*StorageOpt)
+
+// WithRegionStorage sets RegionStorage to the Storage
+func WithRegionStorage(regionStorage *RegionStorage) StorageOption {
+	return func(opt *StorageOpt) {
+		opt.regionStorage = regionStorage
+	}
+}
+
+// WithEncryptionManager sets EncryptionManager to the Storage
+func WithEncryptionKeyManager(encryptionKeyManager *encryptionkm.KeyManager) StorageOption {
+	return func(opt *StorageOpt) {
+		opt.encryptionKeyManager = encryptionKeyManager
+	}
+}
+
 // NewStorage creates Storage instance with Base.
-func NewStorage(
-	base kv.Base,
-	regionStorage *RegionStorage,
-	encryptionKeyManager *encryptionkm.KeyManager,
-) *Storage {
+func NewStorage(base kv.Base, opts ...StorageOption) *Storage {
+	options := &StorageOpt{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	return &Storage{
 		Base:                 base,
-		regionStorage:        regionStorage,
-		encryptionKeyManager: encryptionKeyManager,
+		regionStorage:        options.regionStorage,
+		encryptionKeyManager: options.encryptionKeyManager,
 	}
 }
 

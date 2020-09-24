@@ -31,7 +31,7 @@ type testClusterWorkerSuite struct{}
 func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	left := &metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("b")}
 	right := &metapb.Region{Id: 2, StartKey: []byte("b"), EndKey: []byte("c")}
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: left, Right: right})
@@ -43,7 +43,7 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV(), nil, nil), core.NewBasicCluster())
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	regions := []*metapb.Region{
 		{Id: 1, StartKey: []byte(""), EndKey: []byte("a")},
 		{Id: 2, StartKey: []byte("a"), EndKey: []byte("b")},

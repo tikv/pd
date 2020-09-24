@@ -30,7 +30,7 @@ type testManagerSuite struct {
 }
 
 func (s *testManagerSuite) SetUpTest(c *C) {
-	s.store = core.NewStorage(kv.NewMemoryKV(), nil, nil)
+	s.store = core.NewStorage(kv.NewMemoryKV())
 	var err error
 	s.manager = NewRuleManager(s.store)
 	err = s.manager.Initialize(3, []string{"zone", "rack", "host"})

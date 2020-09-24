@@ -460,7 +460,7 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV(), nil, nil))
+	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
 	var stores []*metapb.Store
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
@@ -607,7 +607,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 
 	// PUT GET failed
 	oldStorage := svr.GetStorage()
-	svr.SetStorage(core.NewStorage(&testErrorKV{}, nil, nil))
+	svr.SetStorage(core.NewStorage(&testErrorKV{}))
 	replicationCfg.MaxReplicas = 7
 	scheduleCfg.MaxSnapshotCount = 20
 	pdServerCfg.UseRegionStorage = false
@@ -626,7 +626,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	svr.SetStorage(oldStorage)
 	c.Assert(svr.SetReplicationConfig(*replicationCfg), IsNil)
 
-	svr.SetStorage(core.NewStorage(&testErrorKV{}, nil, nil))
+	svr.SetStorage(core.NewStorage(&testErrorKV{}))
 	c.Assert(svr.DeleteLabelProperty(typ, labelKey, labelValue), NotNil)
 
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
@@ -894,7 +894,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1"}
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV(), nil, nil))
+	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
 		storeID, err := id.Alloc()
@@ -981,7 +981,7 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV(), nil, nil))
+	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
 	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up, "test/store1")
 	_, err = putStore(c, grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
@@ -1039,7 +1039,7 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV(), nil, nil))
+	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
 	var peers []*metapb.Peer
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
