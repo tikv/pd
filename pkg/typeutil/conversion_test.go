@@ -19,7 +19,7 @@ import (
 	. "github.com/pingcap/check"
 )
 
-func TestConvension(t *testing.T) {
+func TestConversion(t *testing.T) {
 	TestingT(t)
 }
 
