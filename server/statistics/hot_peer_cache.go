@@ -233,8 +233,8 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) [dimLen]float64 {
 		return minThresholds
 	}
 	ret := [dimLen]float64{
-		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).RollingByteRate.Get(),
-		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).RollingKeyRate.Get(),
+		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate,
+		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).KeyRate,
 	}
 	for k := 0; k < dimLen; k++ {
 		ret[k] = math.Max(ret[k]*hotThresholdRatio, minThresholds[k])
@@ -292,8 +292,12 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 	return false
 }
 
-func getHotRegionAntiCount() int {
-	return hotRegionAntiCount + DefaultAotSize*rollingWindowsSize/4
+func (f *hotPeerCache) getHotRegionAntiCount() int {
+	return hotRegionAntiCount + f.getDefaultTimeMedian().GetMinFilledNum()
+}
+
+func (f *hotPeerCache) getDefaultTimeMedian() *TimeMedian {
+	return NewTimeMedian(DefaultAotSize, rollingWindowsSize, RegionHeartBeatReportInterval)
 }
 
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, keys float64, interval time.Duration) *HotPeerStat {
@@ -310,7 +314,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		newItem.RollingKeyRate = oldItem.RollingKeyRate
 		if isHot {
 			newItem.HotDegree = oldItem.HotDegree + 1
-			newItem.AntiCount = getHotRegionAntiCount()
+			newItem.AntiCount = f.getHotRegionAntiCount()
 		} else if interval != 0 {
 			newItem.HotDegree = oldItem.HotDegree - 1
 			newItem.AntiCount = oldItem.AntiCount - 1
@@ -322,14 +326,13 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		if !isHot {
 			return nil
 		}
-		newItem.RollingByteRate = NewTimeMedian(DefaultAotSize, rollingWindowsSize)
-		newItem.RollingKeyRate = NewTimeMedian(DefaultAotSize, rollingWindowsSize)
-		newItem.AntiCount = getHotRegionAntiCount()
+		newItem.RollingByteRate = f.getDefaultTimeMedian()
+		newItem.RollingKeyRate = f.getDefaultTimeMedian()
+		newItem.AntiCount = f.getHotRegionAntiCount()
 		newItem.isNew = true
 	}
-
-	newItem.RollingByteRate.Add(bytes, interval)
-	newItem.RollingKeyRate.Add(keys, interval)
+	newItem.RollingByteRate.Add(bytes, interval*time.Second)
+	newItem.RollingKeyRate.Add(keys, interval*time.Second)
 
 	return newItem
 }

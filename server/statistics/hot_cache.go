@@ -114,3 +114,7 @@ func (w *HotCache) incMetrics(name string, storeID uint64, kind FlowKind) {
 		hotCacheStatusGauge.WithLabelValues(name, store, "read").Inc()
 	}
 }
+
+func (w *HotCache) GetPeriod(kind FlowKind) int {
+	return w.readFlow.getDefaultTimeMedian().GetMinFilledNum()
+}
