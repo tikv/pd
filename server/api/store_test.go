@@ -183,7 +183,6 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	c.Assert(err, IsNil)
 	// TODO: supports strictly match check in placement rules
 	err = postJSON(testDialClient, url+"/label", b)
-	fmt.Println("Debuging", err)
 	c.Assert(strings.Contains(err.Error(), "key matching the label was not found"), IsTrue)
 	locationLabels := map[string]string{"location-labels": "zone,host"}
 	ll, _ := json.Marshal(locationLabels)
