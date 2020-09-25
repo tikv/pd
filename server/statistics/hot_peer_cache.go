@@ -14,8 +14,6 @@
 package statistics
 
 import (
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 	"math"
 	"time"
 
@@ -107,6 +105,23 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	}
 }
 
+func (f *hotPeerCache) collectRegionMetrics(byteRate, keyRate, qps float64, interval uint64) {
+	regionHeartbeatIntervalHist.Observe(float64(interval))
+	if interval == 0 {
+		return
+	}
+	if f.kind == ReadFlow {
+		readByteHist.Observe(byteRate)
+		readKeyHist.Observe(keyRate)
+		readQPSHist.Observe(qps)
+	}
+	if f.kind == WriteFlow {
+		writeByteHist.Observe(byteRate)
+		writeKeyHist.Observe(keyRate)
+		writeKeyHist.Observe(qps)
+	}
+}
+
 // CheckRegionFlow checks the flow information of region.
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *StoresStats) (ret []*HotPeerStat) {
 	reportInterval := region.GetInterval()
@@ -119,19 +134,8 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 	byteRate := totalBytes / float64(interval)
 	keyRate := totalKeys / float64(interval)
 	qps := totalQPS / float64(interval)
-	if f.kind == ReadFlow {
-		readByteHist.Observe(byteRate)
-		readKeyHist.Observe(keyRate)
-		readQPSHist.Observe(qps)
-		log.Info("CheckRegionFlow", zap.Uint64("region-id", region.GetID()), zap.Float64("byte", byteRate), zap.Float64("key", keyRate), zap.Float64("qps", qps))
-	}
-	regionHeartbeatIntervalHist.Observe(float64(interval))
 
-	//if f.kind == WriteFlow {
-	//	writeByteStat.Observe(byteRate)
-	//	writeKeyStat.Observe(keyRate)
-	//	writeQPSStat.Observe(qps)
-	//}
+	f.collectRegionMetrics(byteRate, keyRate, qps, interval)
 
 	// old region is in the front and new region is in the back
 	// which ensures it will hit the cache if moving peer or transfer leader occurs with the same replica number

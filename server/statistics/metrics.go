@@ -76,7 +76,15 @@ var (
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "read_byte_hist",
-			Help:      "Bucketed histogram of the batch size of handled requests.",
+			Help:      "The distribution of region read bytes",
+			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
+		})
+	writeByteHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "write_byte_hist",
+			Help:      "The distribution of region write bytes",
 			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
 		})
 	readKeyHist = prometheus.NewHistogram(
@@ -84,7 +92,15 @@ var (
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "read_key_hist",
-			Help:      "Bucketed histogram of the batch size of handled requests.",
+			Help:      "The distribution of region read keys",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 18),
+		})
+	writeKeyHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "write_key_hist",
+			Help:      "The distribution of region write keys",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 18),
 		})
 	readQPSHist = prometheus.NewHistogram(
@@ -95,13 +111,21 @@ var (
 			Help:      "Bucketed histogram of the batch size of handled requests.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 14),
 		})
+	writeQPSHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "write_qps_hist",
+			Help:      "Bucketed histogram of the batch size of handled requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 14),
+		})
 	regionHeartbeatIntervalHist = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "region_heartbeat_interval_hist",
 			Help:      "Bucketed histogram of the batch size of handled requests.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
+			Buckets:   prometheus.LinearBuckets(0, 30, 20),
 		})
 	storeHeartbeatIntervalHist = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
@@ -124,6 +148,9 @@ func init() {
 	prometheus.MustRegister(readByteHist)
 	prometheus.MustRegister(readKeyHist)
 	prometheus.MustRegister(readQPSHist)
+	prometheus.MustRegister(writeKeyHist)
+	prometheus.MustRegister(writeByteHist)
+	prometheus.MustRegister(writeQPSHist)
 	prometheus.MustRegister(regionHeartbeatIntervalHist)
 	prometheus.MustRegister(storeHeartbeatIntervalHist)
 }

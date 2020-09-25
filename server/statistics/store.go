@@ -158,11 +158,6 @@ func (s *StoresStats) UpdateTotalQPS(f func() []*core.StoreInfo) {
 	s.read.qps = totalReadQPS
 }
 
-// UpdateStoreHeartbeatMetrics
-func (s *StoresStats) UpdateStoreHeartbeatMetrics(store *core.StoreInfo) {
-	storeHeartbeatIntervalHist.Observe(time.Since(store.GetLastHeartbeatTS()).Seconds())
-}
-
 // TotalBytesWriteRate returns the total written bytes rate of all StoreInfo.
 func (s *StoresStats) TotalBytesWriteRate() float64 {
 	return s.write.bytes
@@ -354,6 +349,11 @@ func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
 			delete(s.rollingStoresStats, storeID)
 		}
 	}
+}
+
+// UpdateStoreHeartbeatMetrics is used to update store heartbeat interval metrics
+func (s *StoresStats) UpdateStoreHeartbeatMetrics(store *core.StoreInfo) {
+	storeHeartbeatIntervalHist.Observe(time.Since(store.GetLastHeartbeatTS()).Seconds())
 }
 
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
