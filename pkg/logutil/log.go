@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/coreos/pkg/capnslog"
 	zaplog "github.com/pingcap/log"
@@ -291,4 +292,69 @@ func LogPanic() {
 	if e := recover(); e != nil {
 		zaplog.Fatal("panic", zap.Reflect("recover", e))
 	}
+}
+
+var (
+	enabledRedactLog atomic.Value
+)
+
+func init() {
+	SetRedactLog(false)
+}
+
+// IsRedactLogEnabled indicates whether the log desensitization is enabled
+func IsRedactLogEnabled() bool {
+	return enabledRedactLog.Load().(bool)
+}
+
+// SetRedactLog sets enabledRedactLog
+func SetRedactLog(enabled bool) {
+	enabledRedactLog.Store(enabled)
+}
+
+// ZapRedactByteString receives []byte argument and return omitted information zap.Field if redact log enabled
+func ZapRedactByteString(key string, arg []byte) zap.Field {
+	return zap.ByteString(key, RedactBytes(arg))
+}
+
+// ZapRedactString receives string argument and return omitted information in zap.Field if redact log enabled
+func ZapRedactString(key, arg string) zap.Field {
+	return zap.String(key, RedactString(arg))
+}
+
+// ZapRedactStringer receives stringer argument and return omitted information in zap.Field  if redact log enabled
+func ZapRedactStringer(key string, arg fmt.Stringer) zap.Field {
+	return zap.Stringer(key, RedactStringer(arg))
+}
+
+// RedactBytes receives []byte argument and return omitted information if redact log enabled
+func RedactBytes(arg []byte) []byte {
+	if IsRedactLogEnabled() {
+		return []byte("?")
+	}
+	return arg
+}
+
+// RedactString receives string argument and return omitted information if redact log enabled
+func RedactString(arg string) string {
+	if IsRedactLogEnabled() {
+		return "?"
+	}
+	return arg
+}
+
+// RedactStringer receives stringer argument and return omitted information if redact log enabled
+func RedactStringer(arg fmt.Stringer) fmt.Stringer {
+	if IsRedactLogEnabled() {
+		return stringer{}
+	}
+	return arg
+}
+
+type stringer struct {
+}
+
+// String implement fmt.Stringer
+func (s stringer) String() string {
+	return "?"
 }

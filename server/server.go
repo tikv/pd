@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -806,6 +807,15 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}
+		}
+	}
+	if cfg.EnablePlacementRules {
+		// replication.MaxReplicas and replication.LocationLabels won't work when placement rule is enabled
+		if cfg.MaxReplicas != old.MaxReplicas {
+			return errors.New("cannot update MaxReplicas when placement rules feature is enabled, please update rule instead")
+		}
+		if !reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels) {
+			return errors.New("cannot update LocationLabels when placement rules feature is enabled, please update rule instead")
 		}
 	}
 
