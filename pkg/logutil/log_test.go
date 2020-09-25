@@ -15,6 +15,7 @@ package logutil
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -108,4 +109,56 @@ func (s *testLogSuite) TestLogging(c *C) {
 func (s *testLogSuite) TestFileLog(c *C) {
 	c.Assert(InitFileLog(&zaplog.FileLogConfig{Filename: "/tmp"}), NotNil)
 	c.Assert(InitFileLog(&zaplog.FileLogConfig{Filename: "/tmp/test_file_log", MaxSize: 0}), IsNil)
+}
+
+func (s *testLogSuite) TestRedactLog(c *C) {
+	testcases := []struct {
+		name            string
+		arg             interface{}
+		enableRedactLog bool
+		expect          interface{}
+	}{
+		{
+			name:            "string arg, enable redact",
+			arg:             "foo",
+			enableRedactLog: true,
+			expect:          "?",
+		},
+		{
+			name:            "string arg",
+			arg:             "foo",
+			enableRedactLog: false,
+			expect:          "foo",
+		},
+		{
+			name:            "[]byte arg, enable redact",
+			arg:             []byte("foo"),
+			enableRedactLog: true,
+			expect:          []byte("?"),
+		},
+		{
+			name:            "[]byte arg",
+			arg:             []byte("foo"),
+			enableRedactLog: false,
+			expect:          []byte("foo"),
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		SetRedactLog(testcase.enableRedactLog)
+		switch testcase.arg.(type) {
+		case []byte:
+			r := RedactBytes(testcase.arg.([]byte))
+			c.Assert(r, DeepEquals, testcase.expect)
+		case string:
+			r := RedactString(testcase.arg.(string))
+			c.Assert(r, DeepEquals, testcase.expect)
+		case fmt.Stringer:
+			r := RedactStringer(testcase.arg.(fmt.Stringer))
+			c.Assert(r, DeepEquals, testcase.expect)
+		default:
+			panic("unmatched case")
+		}
+	}
 }
