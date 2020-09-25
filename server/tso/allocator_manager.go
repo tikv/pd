@@ -81,7 +81,13 @@ type AllocatorManager struct {
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
-func NewAllocatorManager(m *member.Member, rootPath string, saveInterval time.Duration, updatePhysicalInterval time.Duration, maxResetTSGap func() time.Duration) *AllocatorManager {
+func NewAllocatorManager(
+	m *member.Member,
+	rootPath string,
+	saveInterval time.Duration,
+	updatePhysicalInterval time.Duration,
+	maxResetTSGap func() time.Duration,
+) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
 		allocatorGroups:        make(map[string]*allocatorGroup),
 		member:                 m,
@@ -166,6 +172,12 @@ func (am *AllocatorManager) getLocalTSOConfigPath() string {
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) error {
 	am.Lock()
 	defer am.Unlock()
+
+	if am.updatePhysicalInterval != config.DefaultTSOUpdatePhysicalInterval {
+		log.Warn("tso update physical interval is non-default",
+			zap.Duration("update-physical-interval", am.updatePhysicalInterval))
+	}
+
 	var allocator Allocator
 	if dcLocation == config.GlobalDCLocation {
 		allocator = NewGlobalTSOAllocator(leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
