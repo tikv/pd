@@ -71,7 +71,7 @@ var (
 			Name:      "label_level",
 			Help:      "Number of regions in the different label level.",
 		}, []string{"type"})
-	readByteStat = prometheus.NewHistogram(
+	readByteHist = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
@@ -79,21 +79,37 @@ var (
 			Help:      "Bucketed histogram of the batch size of handled requests.",
 			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
 		})
-	readKeyStat = prometheus.NewHistogram(
+	readKeyHist = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "read_key_hist",
 			Help:      "Bucketed histogram of the batch size of handled requests.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 16),
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 18),
 		})
-	readQPSStat = prometheus.NewHistogram(
+	readQPSHist = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "read_qps_hist",
 			Help:      "Bucketed histogram of the batch size of handled requests.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 14),
+		})
+	regionHeartbeatIntervalHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "region_heartbeat_interval_hist",
+			Help:      "Bucketed histogram of the batch size of handled requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
+		})
+	storeHeartbeatIntervalHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "store_heartbeat_interval_hist",
+			Help:      "Bucketed histogram of the batch size of handled requests.",
+			Buckets:   prometheus.LinearBuckets(0, 5, 12),
 		})
 )
 
@@ -105,7 +121,9 @@ func init() {
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
-	prometheus.MustRegister(readByteStat)
-	prometheus.MustRegister(readKeyStat)
-	prometheus.MustRegister(readQPSStat)
+	prometheus.MustRegister(readByteHist)
+	prometheus.MustRegister(readKeyHist)
+	prometheus.MustRegister(readQPSHist)
+	prometheus.MustRegister(regionHeartbeatIntervalHist)
+	prometheus.MustRegister(storeHeartbeatIntervalHist)
 }
