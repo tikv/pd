@@ -78,7 +78,7 @@ func WithRegionStorage(regionStorage *RegionStorage) StorageOption {
 	}
 }
 
-// WithEncryptionManager sets EncryptionManager to the Storage
+// WithEncryptionKeyManager sets EncryptionManager to the Storage
 func WithEncryptionKeyManager(encryptionKeyManager *encryptionkm.KeyManager) StorageOption {
 	return func(opt *StorageOpt) {
 		opt.encryptionKeyManager = encryptionKeyManager
