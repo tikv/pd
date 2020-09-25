@@ -927,17 +927,15 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	if err != nil {
 		return nil, err
 	}
-	processedDCs := make([]string, 0)
+	var processedDCs []string
 	if request.GetMaxTs() == nil || request.GetMaxTs().Physical == 0 {
 		// The first phase of synchronization: collect the max local ts
 		var maxLocalTS pdpb.Timestamp
 		for _, allocator := range allocatorLeaders {
+			// No longer leader, just skip here because
+			// the global allocator will check if all DCs are handled.
 			if !allocator.IsStillAllocatorLeader() {
-				return nil, errs.ErrNotLocalAllocatorLeader.FastGenByArgs(
-					fmt.Sprintf("dc-location: %s, memberID %d",
-						allocator.GetDCLocation(), allocator.GetMember().GetMemberId(),
-					),
-				)
+				continue
 			}
 			currentLocalTSO, err := allocator.GetCurrentTSO()
 			if err != nil {
@@ -957,11 +955,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	// The second phase of synchronization: do the writing
 	for _, allocator := range allocatorLeaders {
 		if !allocator.IsStillAllocatorLeader() {
-			return nil, errs.ErrNotLocalAllocatorLeader.FastGenByArgs(
-				fmt.Sprintf("dc-location: %s, memberID %d",
-					allocator.GetDCLocation(), allocator.GetMember().GetMemberId(),
-				),
-			)
+			continue
 		}
 		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
 			return nil, err
