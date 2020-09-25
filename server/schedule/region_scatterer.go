@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -167,10 +168,12 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 	ops := make([]*operator.Operator, len(regions))
 	for _, region := range regions {
 		op, err := r.Scatter(region, group)
-		if err != nil {
-			if failures == nil {
-				failures = make(map[uint64]error, len(regions))
+		failpoint.Inject("scatterFail", func() {
+			if region.GetID() == 1 {
+				err = errors.New("mock error")
 			}
+		})
+		if err != nil {
 			failures[region.GetID()] = err
 			continue
 		}
