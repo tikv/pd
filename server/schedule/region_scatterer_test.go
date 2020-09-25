@@ -350,36 +350,33 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	scatterer := NewRegionScatterer(tc)
-	regions := map[uint64]*core.RegionInfo{}
-	for i := 1; i <= 100; i++ {
-		regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
-	}
-
 	testcases := []struct {
 		name    string
 		failure bool
 	}{
 		{
-			name:    "no failure",
-			failure: false,
-		},
-		{
 			name:    "have failure",
 			failure: true,
+		},
+		{
+			name:    "no failure",
+			failure: false,
 		},
 	}
 	group := "group"
 	for _, testcase := range testcases {
+		scatterer := NewRegionScatterer(tc)
+		regions := map[uint64]*core.RegionInfo{}
+		for i := 1; i <= 100; i++ {
+			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+		}
 		c.Log(testcase.name)
 		failures := map[uint64]error{}
 		if testcase.failure {
 			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`), IsNil)
 		}
+
 		scatterer.ScatterRegions(regions, failures, group, 0, 3)
-		if testcase.failure {
-			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterFail"), IsNil)
-		}
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
 		for _, count := range scatterer.ordinaryEngine.selectedLeader.groupDistribution[group] {
@@ -398,6 +395,7 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 			c.Assert(len(failures), Equals, 1)
 			_, ok := failures[1]
 			c.Assert(ok, Equals, true)
+			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterFail"), IsNil)
 		} else {
 			c.Assert(len(failures), Equals, 0)
 		}
