@@ -22,3 +22,12 @@ import (
 func BuildKeyRangeKey(startKey, endKey []byte) string {
 	return fmt.Sprintf("%s-%s", hex.EncodeToString(startKey), hex.EncodeToString(endKey))
 }
+
+// ParseRawKey parse hex format rawKey into []byte
+func ParseRawKey(key string) ([]byte, string, error) {
+	returned, err := hex.DecodeString(key)
+	if err != nil {
+		return nil, "", fmt.Errorf("raw key %s is not in hex format", key)
+	}
+	return returned, key, nil
+}

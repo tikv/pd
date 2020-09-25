@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -773,13 +774,23 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 }
 
 // AddScatterRegionsOperators add operators to scatter regions.
-func (h *Handler) AddScatterRegionsOperators(regions []*core.RegionInfo, group string, retryTimes int64) (directlyRetry bool, retryRegions []uint64, errs []error) {
+func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group string, retryTimes int64) (retryRegions []uint64, errs []error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
-		return true, nil, append(errs, err)
+		return nil, append(errs, err)
 	}
+	startKey, _, err := keyutil.ParseRawKey(startRawKey)
+	if err != nil {
+		return nil, append(errs, err)
+	}
+	endKey, _, err := keyutil.ParseRawKey(endRawKey)
+	if err != nil {
+		return nil, append(errs, err)
+	}
+	regions := c.ScanRegions(startKey, endKey, -1)
 	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
 	for _, region := range regions {
+		// If region is Hot, add it into retryRegions response
 		if c.IsRegionHot(region) {
 			retryRegions = append(retryRegions, region.GetID())
 			errs = append(errs, err)
@@ -788,18 +799,20 @@ func (h *Handler) AddScatterRegionsOperators(regions []*core.RegionInfo, group s
 		regionMap[region.GetID()] = region
 	}
 	failures := make(map[uint64]error, len(regionMap))
+	// If there existed any region failed to relocated after retry, add it into retryRegions response
 	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, 0, retryTimes)
 	for regionID, err := range failures {
 		retryRegions = append(retryRegions, regionID)
 		errs = append(errs, err)
 	}
+	// If there existed any operator failed to be added into Operator Controller, add its regions into retryRegions response
 	for _, op := range ops {
 		if ok := c.GetOperatorController().AddOperator(op); !ok {
 			retryRegions = append(retryRegions, op.RegionID())
 			errs = append(errs, errors.WithStack(ErrAddOperator))
 		}
 	}
-	return false, retryRegions, errs
+	return retryRegions, errs
 }
 
 // GetDownPeerRegions gets the region with down peer.
