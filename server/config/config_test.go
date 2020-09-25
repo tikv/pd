@@ -167,6 +167,8 @@ leader-schedule-limit = 0
 	c.Assert(cfg.PDServerCfg.MetricStorage, Equals, "http://127.0.0.1:9090")
 	c.Assert(cfg.EnableRedactLog, Equals, defaultEnableRedactLog)
 
+	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, defaultTSOUpdatePhysicalInterval)
+
 	// Check undefined config fields
 	cfgData = `
 type = "pd"
