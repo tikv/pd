@@ -116,7 +116,8 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 		tc.PutRegion(region)
 		tc.SetLeaderSchedulePolicy(t.kind.String())
 		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
-		c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
+		shouldBalance, _, _ := shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), "")
+		c.Assert(shouldBalance, Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -128,7 +129,8 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 			tc.PutRegion(region)
 			kind := core.NewScheduleKind(core.RegionKind, t.kind)
-			c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
+			shouldBalance, _, _ := shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), "")
+			c.Assert(shouldBalance, Equals, t.expectedResult)
 		}
 	}
 }
@@ -855,9 +857,9 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
-	s.checkReplacePendingRegion(c, tc, opt, sb)
+	s.checkReplacePendingRegion(c, tc, sb)
 	tc.SetEnablePlacementRules(true)
-	s.checkReplacePendingRegion(c, tc, opt, sb)
+	s.checkReplacePendingRegion(c, tc, sb)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
@@ -891,7 +893,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], operator.OpKind(0), 3, 1)
 }
 
-func (s *testBalanceRegionSchedulerSuite) checkReplacePendingRegion(c *C, tc *mockcluster.Cluster, opt *config.PersistOptions, sb schedule.Scheduler) {
+func (s *testBalanceRegionSchedulerSuite) checkReplacePendingRegion(c *C, tc *mockcluster.Cluster, sb schedule.Scheduler) {
 	// Store 1 has the largest region score, so the balance scheduler try to replace peer in store 1.
 	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 7, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
