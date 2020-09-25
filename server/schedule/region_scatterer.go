@@ -17,11 +17,13 @@ import (
 	"math"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -143,6 +145,34 @@ func newEngineContext(filters ...filter.Filter) engineContext {
 		selectedPeer:   newSelectedStores(true),
 		selectedLeader: newSelectedStores(false),
 	}
+}
+
+const maxSleepDuration = 1 * time.Minute
+const initialSleepDuration = 100 * time.Millisecond
+
+// ScatterRegions relocates the regions. If the group is defined, the regions' leader with the same group would be scattered
+//// in a group level instead of cluster level.
+func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, currentRetry, retryTimes int64) []*operator.Operator {
+	if currentRetry >= retryTimes || len(regions) < 1 {
+		return nil
+	}
+	if len(failures) > 0 {
+		time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(currentRetry)))*initialSleepDuration))
+	}
+	ops := make([]*operator.Operator, len(regions))
+	for _, region := range regions {
+		op, err := r.Scatter(region, group)
+		if err != nil {
+			failures[region.GetID()] = err
+			continue
+		}
+		ops = append(ops, op)
+		delete(regions, region.GetID())
+		if _, ok := failures[region.GetID()]; ok {
+			delete(failures, region.GetID())
+		}
+	}
+	return append(ops, r.ScatterRegions(regions, failures, group, currentRetry+1, retryTimes)...)
 }
 
 // Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
