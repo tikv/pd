@@ -927,6 +927,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	if err != nil {
 		return nil, err
 	}
+	syncedDCs := make([]string, 0)
 	if request.GetMaxTs() == nil || request.GetMaxTs().Physical == 0 {
 		// The first phase of synchronization: collect the max local ts
 		var maxLocalTS pdpb.Timestamp
@@ -945,10 +946,12 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			if currentLocalTSO.Physical > maxLocalTS.Physical {
 				maxLocalTS.Physical = currentLocalTSO.Physical
 			}
+			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 		}
 		return &pdpb.SyncMaxTSResponse{
 			Header:     s.header(),
 			MaxLocalTs: &maxLocalTS,
+			SyncedDcs:  syncedDCs,
 		}, nil
 	}
 	// The second phase of synchronization: do the writing
@@ -963,9 +966,11 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
 			return nil, err
 		}
+		syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 	}
 	return &pdpb.SyncMaxTSResponse{
-		Header: s.header(),
+		Header:    s.header(),
+		SyncedDcs: syncedDCs,
 	}, nil
 }
 
