@@ -772,6 +772,36 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 	return nil
 }
 
+// AddScatterRegionsOperators add operators to scatter regions.
+func (h *Handler) AddScatterRegionsOperators(regions []*core.RegionInfo, group string, retryTimes int64) (directlyRetry bool, retryRegions []uint64, errs []error) {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return true, nil, append(errs, err)
+	}
+	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
+	for _, region := range regions {
+		if c.IsRegionHot(region) {
+			retryRegions = append(retryRegions, region.GetID())
+			errs = append(errs, err)
+			continue
+		}
+		regionMap[region.GetID()] = region
+	}
+	failures := make(map[uint64]error, len(regionMap))
+	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, 0, retryTimes)
+	for regionID, err := range failures {
+		retryRegions = append(retryRegions, regionID)
+		errs = append(errs, err)
+	}
+	for _, op := range ops {
+		if ok := c.GetOperatorController().AddOperator(op); !ok {
+			retryRegions = append(retryRegions, op.RegionID())
+			errs = append(errs, errors.WithStack(ErrAddOperator))
+		}
+	}
+	return false, retryRegions, errs
+}
+
 // GetDownPeerRegions gets the region with down peer.
 func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()

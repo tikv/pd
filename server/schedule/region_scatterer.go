@@ -151,8 +151,13 @@ const maxSleepDuration = 1 * time.Minute
 const initialSleepDuration = 100 * time.Millisecond
 
 // ScatterRegions relocates the regions. If the group is defined, the regions' leader with the same group would be scattered
-//// in a group level instead of cluster level.
-func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, currentRetry, retryTimes int64) []*operator.Operator {
+// in a group level instead of cluster level.
+// RetryTimes indicates the retry times if any of the regions failed to relocate during scattering. There will be
+// time.Sleep between each retry.
+// Failures indicates the regions which are failed to be  relocated, the key of the failures indicates the regionID
+// and the value of the failures indicates the failure error.
+func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string,
+	currentRetry, retryTimes int64) []*operator.Operator {
 	if currentRetry >= retryTimes || len(regions) < 1 {
 		return nil
 	}
@@ -163,14 +168,15 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 	for _, region := range regions {
 		op, err := r.Scatter(region, group)
 		if err != nil {
+			if failures == nil {
+				failures = make(map[uint64]error, len(regions))
+			}
 			failures[region.GetID()] = err
 			continue
 		}
 		ops = append(ops, op)
 		delete(regions, region.GetID())
-		if _, ok := failures[region.GetID()]; ok {
-			delete(failures, region.GetID())
-		}
+		delete(failures, region.GetID())
 	}
 	return append(ops, r.ScatterRegions(regions, failures, group, currentRetry+1, retryTimes)...)
 }
