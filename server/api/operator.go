@@ -19,7 +19,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/apiutil"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/unrolled/render"
@@ -295,25 +294,23 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 		group, _ := input["group"].(string)
 		retryTimes, ok := input["retry_times"].(int64)
 		if !ok {
+			// retry 5 times if retryTimes not defined
 			retryTimes = 5
 		}
-		retryRegions, errorList := h.AddScatterRegionsOperators(startKey, endKey, group, retryTimes)
-		if len(errorList) > 0 {
-			s := struct {
-				RetryRegions []uint64 `json:"retry-regions"`
-				Error        string   `json:"error"`
-			}{
-				RetryRegions: retryRegions,
-				Error:        errs.AggregateErrors(errorList).Error(),
-			}
-			h.r.JSON(w, http.StatusBadRequest, &s)
-			return
+		processedPercentage, err := h.AddScatterRegionsOperators(startKey, endKey, group, retryTimes)
+		s := struct {
+			ProcessedPercentage int    `json:"processed-percentage"`
+			Error               string `json:"error"`
+		}{
+			ProcessedPercentage: processedPercentage,
+			Error:               err.Error(),
 		}
+		h.r.JSON(w, http.StatusOK, &s)
+		return
 	default:
 		h.r.JSON(w, http.StatusBadRequest, "unknown operator")
 		return
 	}
-
 	h.r.JSON(w, http.StatusOK, "The operator is created.")
 }
 

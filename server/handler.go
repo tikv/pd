@@ -773,46 +773,48 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 	return nil
 }
 
-// AddScatterRegionsOperators add operators to scatter regions.
-func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group string, retryTimes int64) (retryRegions []uint64, errs []error) {
+// AddScatterRegionsOperators add operators to scatter regions and return the processed percentage and error
+func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group string, retryTimes int64) (int, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
-		return nil, append(errs, err)
+		return 0, err
 	}
 	startKey, _, err := keyutil.ParseRawKey(startRawKey)
 	if err != nil {
-		return nil, append(errs, err)
+		return 0, err
 	}
 	endKey, _, err := keyutil.ParseRawKey(endRawKey)
 	if err != nil {
-		return nil, append(errs, err)
+		return 0, err
 	}
 	regions := c.ScanRegions(startKey, endKey, -1)
 	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
+	errList := make([]error, len(regions))
+	unProcessedRegions := make([]uint64, len(regions))
 	for _, region := range regions {
-		// If region is Hot, add it into retryRegions response
+		// If region is Hot, add it into unProcessedRegions
 		if c.IsRegionHot(region) {
-			retryRegions = append(retryRegions, region.GetID())
-			errs = append(errs, err)
+			unProcessedRegions = append(unProcessedRegions, region.GetID())
+			errList = append(errList, err)
 			continue
 		}
 		regionMap[region.GetID()] = region
 	}
 	failures := make(map[uint64]error, len(regionMap))
-	// If there existed any region failed to relocated after retry, add it into retryRegions response
+	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
 	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, 0, retryTimes)
 	for regionID, err := range failures {
-		retryRegions = append(retryRegions, regionID)
-		errs = append(errs, err)
+		unProcessedRegions = append(unProcessedRegions, regionID)
+		errList = append(errList, err)
 	}
-	// If there existed any operator failed to be added into Operator Controller, add its regions into retryRegions response
+	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
 		if ok := c.GetOperatorController().AddOperator(op); !ok {
-			retryRegions = append(retryRegions, op.RegionID())
-			errs = append(errs, errors.WithStack(ErrAddOperator))
+			unProcessedRegions = append(unProcessedRegions, op.RegionID())
+			errList = append(errList, errors.WithStack(ErrAddOperator))
 		}
 	}
-	return retryRegions, errs
+	return 100 - (len(unProcessedRegions)/len(regions))*100, errs.AggregateErrors(errList)
 }
 
 // GetDownPeerRegions gets the region with down peer.
