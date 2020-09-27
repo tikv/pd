@@ -16,6 +16,7 @@ package server
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"path"
 	"strconv"
@@ -28,7 +29,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -779,23 +779,21 @@ func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group strin
 	if err != nil {
 		return 0, err
 	}
-	startKey, _, err := keyutil.ParseRawKey(startRawKey)
+	startKey, err := hex.DecodeString(startRawKey)
 	if err != nil {
 		return 0, err
 	}
-	endKey, _, err := keyutil.ParseRawKey(endRawKey)
+	endKey, err := hex.DecodeString(endRawKey)
 	if err != nil {
 		return 0, err
 	}
 	regions := c.ScanRegions(startKey, endKey, -1)
 	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
-	errList := make([]error, len(regions))
-	unProcessedRegionsCount := 0
+	failureRegionID := make([]string, 0, len(regions))
 	for _, region := range regions {
 		// If region is Hot, add it into unProcessedRegions
 		if c.IsRegionHot(region) {
-			unProcessedRegionsCount++
-			errList = append(errList, errors.Errorf("region %d is a hot region", region.GetID()))
+			failureRegionID = append(failureRegionID, fmt.Sprintf("%v", region.GetID()))
 			continue
 		}
 		regionMap[region.GetID()] = region
@@ -803,18 +801,16 @@ func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group strin
 	failures := make(map[uint64]error, len(regionMap))
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
 	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, retryLimit)
-	for _, failureErr := range failures {
-		unProcessedRegionsCount++
-		errList = append(errList, failureErr)
+	for regionID := range failures {
+		failureRegionID = append(failureRegionID, fmt.Sprintf("%v", regionID))
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
 		if ok := c.GetOperatorController().AddOperator(op); !ok {
-			unProcessedRegionsCount++
-			errList = append(errList, errors.WithStack(ErrAddOperator))
+			failureRegionID = append(failureRegionID, fmt.Sprintf("%v", op.RegionID()))
 		}
 	}
-	return 100 - (unProcessedRegionsCount/len(regions))*100, errs.AggregateErrors(errList)
+	return 100 - (len(failureRegionID) * 100 / len(regions)), errors.New("unprocessed regions:[" + strings.Join(failureRegionID, ",") + "]")
 }
 
 // GetDownPeerRegions gets the region with down peer.
