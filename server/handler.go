@@ -795,7 +795,7 @@ func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group strin
 		// If region is Hot, add it into unProcessedRegions
 		if c.IsRegionHot(region) {
 			unProcessedRegionsCount++
-			errList = append(errList, err)
+			errList = append(errList, errors.Errorf("region %d is a hot region", region.GetID()))
 			continue
 		}
 		regionMap[region.GetID()] = region
@@ -803,9 +803,9 @@ func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group strin
 	failures := make(map[uint64]error, len(regionMap))
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
 	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, 0, retryLimit)
-	for _, err := range failures {
+	for _, failureErr := range failures {
 		unProcessedRegionsCount++
-		errList = append(errList, err)
+		errList = append(errList, failureErr)
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
