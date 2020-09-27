@@ -99,11 +99,9 @@ func bench(mainCtx context.Context) {
 	ctx, cancel := context.WithCancel(mainCtx)
 	// To avoid the first time high latency.
 	for idx, pdCli := range pdClients {
-		for i := 0; i < *concurrency; i++ {
-			_, _, err := pdCli.GetTS(ctx)
-			if err != nil {
-				log.Fatal("get tso failed", zap.Int("client-number", idx), zap.Error(err))
-			}
+		_, _, err := pdCli.GetTS(ctx)
+		if err != nil {
+			log.Fatal("get first time tso failed", zap.Int("client-number", idx), zap.Error(err))
 		}
 	}
 
