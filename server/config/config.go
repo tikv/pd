@@ -86,10 +86,10 @@ type Config struct {
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
-	// The interval to update physical part of timestamp. Usually this config should not be set.
-	// It's only useful for test purpose.
-	// This config is only valid in 50ms to 10s. If it's configured too long or to short, it will be
-	// automatically clamped to the range.
+	// The interval to update physical part of timestamp. Usually, this config should not be set.
+	// It's only useful for test purposes.
+	// This config is only valid in 50ms to 10s. If it's configured too long or too short, it will
+	// be automatically clamped to the range.
 	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
 
 	// Local TSO service related configuration.
@@ -232,6 +232,7 @@ const (
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
 	defaultEnableRedactLog    = false
 
+	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
