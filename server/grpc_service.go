@@ -928,7 +928,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		return nil, err
 	}
 	var processedDCs []string
-	if request.GetMaxTs() == nil || request.GetMaxTs().Physical == 0 {
+	if request.GetMaxTs() == nil || request.GetMaxTs().GetPhysical() == 0 {
 		// The first phase of synchronization: collect the max local ts
 		var maxLocalTS pdpb.Timestamp
 		for _, allocator := range allocatorLeaders {
@@ -941,8 +941,10 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			if err != nil {
 				return nil, err
 			}
-			if currentLocalTSO.Physical > maxLocalTS.Physical {
-				maxLocalTS.Physical = currentLocalTSO.Physical
+			if currentLocalTSO.GetPhysical() > maxLocalTS.GetPhysical() {
+				maxLocalTS.Physical = currentLocalTSO.GetPhysical()
+			} else if currentLocalTSO.GetPhysical() == maxLocalTS.GetPhysical() && currentLocalTSO.GetLogical() > maxLocalTS.GetLogical() {
+				maxLocalTS.Logical = currentLocalTSO.GetLogical()
 			}
 			processedDCs = append(processedDCs, allocator.GetDCLocation())
 		}

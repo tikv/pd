@@ -69,8 +69,23 @@ func (t *timestampOracle) setTSOPhysical(next time.Time) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// make sure the ts won't fall back
-	if t.tsoMux.tso == nil || typeutil.SubTimeByWallClock(next, t.tsoMux.tso.physical) >= updateTimestampGuard {
+	if t.tsoMux.tso == nil || typeutil.SubTimeByWallClock(next, t.tsoMux.tso.physical) > 0 {
 		t.tsoMux.tso = &tsoObject{physical: next}
+	}
+}
+
+func (t *timestampOracle) setTSO(nextPhysical time.Time, nextLogical int64) {
+	t.tsoMux.Lock()
+	defer t.tsoMux.Unlock()
+	// make sure the ts won't fall back
+	if t.tsoMux.tso == nil {
+		t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: nextLogical}
+	}
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) > 0 {
+		t.tsoMux.tso = &tsoObject{physical: nextPhysical}
+	}
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) == 0 && nextLogical > t.tsoMux.tso.logical {
+		t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: nextLogical}
 	}
 }
 
@@ -177,35 +192,40 @@ func (t *timestampOracle) isInitialized() bool {
 	return t.tsoMux.tso != nil
 }
 
-// ResetUserTimestamp update the physical part with specified TSO.
+// ResetUserTimestamp update the TSO in memory with specified TSO.
 func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, tso uint64) error {
 	if !leadership.Check() {
 		tsoCounter.WithLabelValues("err_lease_reset_ts").Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs("lease expired")
 	}
-	physical, _ := tsoutil.ParseTS(tso)
-	next := physical.Add(time.Millisecond)
-	prev, _ := t.getTSO()
-	// do not update if next is less/before than prev
-	if typeutil.SubTimeByWallClock(next, prev) < updateTimestampGuard {
-		tsoCounter.WithLabelValues("err_reset_small_ts").Inc()
-		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too small than now")
+	nextPhysical, nextLogical := tsoutil.ParseTS(tso)
+	nextPhysical = nextPhysical.Add(updateTimestampGuard)
+	prevPhysical, prevLogical := t.getTSO()
+	// do not update if next logical time is less/before than prev
+	if typeutil.SubTimeByWallClock(nextPhysical, prevPhysical) == 0 && int64(nextLogical) <= prevLogical {
+		tsoCounter.WithLabelValues("err_reset_small_counter").Inc()
+		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified counter is smaller than now")
 	}
-	// do not update if next is too greater than prev
-	if typeutil.SubTimeByWallClock(next, prev) >= t.maxResetTSGap() {
+	// do not update if next physical time is less/before than prev
+	if typeutil.SubTimeByWallClock(nextPhysical, prevPhysical) < 0 {
+		tsoCounter.WithLabelValues("err_reset_small_ts").Inc()
+		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is smaller than now")
+	}
+	// do not update if physical time is too greater than prev
+	if typeutil.SubTimeByWallClock(nextPhysical, prevPhysical) >= t.maxResetTSGap() {
 		tsoCounter.WithLabelValues("err_reset_large_ts").Inc()
-		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too large than now")
+		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
 	}
 	// save into etcd only if the time difference is big enough
-	if typeutil.SubTimeByWallClock(next, prev) > 3*updateTimestampGuard {
-		save := next.Add(t.saveInterval)
+	if typeutil.SubTimeByWallClock(nextPhysical, prevPhysical) > 3*updateTimestampGuard {
+		save := nextPhysical.Add(t.saveInterval)
 		if err := t.saveTimestamp(leadership, save); err != nil {
 			tsoCounter.WithLabelValues("err_save_reset_ts").Inc()
 			return err
 		}
 	}
 	// save into memory
-	t.setTSOPhysical(next)
+	t.setTSO(nextPhysical, int64(nextLogical))
 	tsoCounter.WithLabelValues("reset_tso_ok").Inc()
 	return nil
 }
@@ -302,10 +322,10 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (
 		}
 		// Get a new TSO result with the given count
 		resp.Physical, resp.Logical = t.generateTSO(int64(count))
-		if resp.Physical == 0 {
+		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
-		if resp.Logical >= maxLogical {
+		if resp.GetLogical() >= maxLogical {
 			log.Error("logical part outside of max logical interval, please check ntp time",
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))

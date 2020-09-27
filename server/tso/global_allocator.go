@@ -25,7 +25,6 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/tsoutil"
-	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -135,22 +134,21 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	// Send maxTS to all Local TSO Allocator leaders to prewrite
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var maxTS time.Time
+	maxTSO := &pdpb.Timestamp{}
 	// Collect the MaxTS with all Local TSO Allocator leaders first
-	if maxTS, err = gta.syncMaxTS(ctx, leaderURLs, dcLocationMap, maxTS); err != nil {
+	if err = gta.syncMaxTS(ctx, leaderURLs, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
-	maxTS = maxTS.Add(updateTimestampGuard)
+	maxTSO.Logical += int64(count)
 	// Sync the MaxTS with all Local TSO Allocator leaders then
-	if _, err := gta.syncMaxTS(ctx, leaderURLs, dcLocationMap, maxTS); err != nil {
+	if err := gta.syncMaxTS(ctx, leaderURLs, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
-	globalTSO := tsoutil.GenerateTimestamp(maxTS, 0)
 	// Update the global TSO in memory
-	if err := gta.SetTSO(tsoutil.GenerateTS(globalTSO)); err != nil {
+	if err := gta.SetTSO(tsoutil.GenerateTS(maxTSO)); err != nil {
 		return pdpb.Timestamp{}, err
 	}
-	return *globalTSO, nil
+	return *maxTSO, nil
 }
 
 const (
@@ -158,58 +156,68 @@ const (
 	rpcTimeout  = 3 * time.Second
 )
 
-func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, leaderURLs []string, dcLocationMap map[string][]uint64, maxTS time.Time) (time.Time, error) {
-	respCh := make(chan *pdpb.SyncMaxTSResponse, len(leaderURLs))
-	errCh := make(chan error, len(leaderURLs))
-	wg := sync.WaitGroup{}
-	for _, leaderURL := range leaderURLs {
-		leaderConn, err := gta.getOrCreateGRPCConn(ctx, leaderURL)
-		if err != nil {
-			return typeutil.ZeroTime, err
-		}
-		wg.Add(1)
-		go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *pdpb.SyncMaxTSResponse, errCh chan<- error) {
-			request := &pdpb.SyncMaxTSRequest{
-				Header: &pdpb.RequestHeader{
-					SenderId: gta.allocatorManager.member.ID(),
-				},
-			}
-			if maxTS != typeutil.ZeroTime {
-				request.MaxTs = tsoutil.GenerateTimestamp(maxTS, 0)
-			}
-			syncCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
-			resp, err := pdpb.NewPDClient(conn).SyncMaxTS(syncCtx, request)
-			cancel()
+func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, leaderURLs []string, dcLocationMap map[string][]uint64, maxTSO *pdpb.Timestamp) error {
+	maxRetryCount := 1
+	for i := 0; i < maxRetryCount; i++ {
+		respCh := make(chan *pdpb.SyncMaxTSResponse, len(leaderURLs))
+		errCh := make(chan error, len(leaderURLs))
+		wg := sync.WaitGroup{}
+		for _, leaderURL := range leaderURLs {
+			leaderConn, err := gta.getOrCreateGRPCConn(ctx, leaderURL)
 			if err != nil {
-				errCh <- err
+				return err
 			}
-			respCh <- resp
-			wg.Done()
-		}(ctx, leaderConn, respCh, errCh)
-	}
-	wg.Wait()
-	close(respCh)
-	close(errCh)
-	// If any error occurs, the synchronization process will fail
-	if err := <-errCh; err != nil {
-		return typeutil.ZeroTime, err
-	}
-	for resp := range respCh {
-		if resp == nil {
-			return typeutil.ZeroTime, errs.ErrSyncMaxTS.FastGenWithCause("got nil response")
+			wg.Add(1)
+			go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *pdpb.SyncMaxTSResponse, errCh chan<- error) {
+				request := &pdpb.SyncMaxTSRequest{
+					Header: &pdpb.RequestHeader{
+						SenderId: gta.allocatorManager.member.ID(),
+					},
+				}
+				if maxTSO.GetPhysical() != 0 {
+					request.MaxTs = maxTSO
+				}
+				syncCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
+				resp, err := pdpb.NewPDClient(conn).SyncMaxTS(syncCtx, request)
+				cancel()
+				if err != nil {
+					errCh <- err
+				}
+				respCh <- resp
+				wg.Done()
+			}(ctx, leaderConn, respCh, errCh)
 		}
-		if notSyncedDCs := gta.checkSyncedDCs(dcLocationMap, resp.GetDcs()); len(notSyncedDCs) > 0 {
-			return typeutil.ZeroTime, errs.ErrSyncMaxTS.FastGenWithCause(fmt.Sprintf("got unsynced dc-locations: %+v", notSyncedDCs))
+		wg.Wait()
+		close(respCh)
+		close(errCh)
+		// If any error occurs, the synchronization process will fail
+		if err := <-errCh; err != nil {
+			return err
 		}
-		// Compare and get the max one
-		if resp.GetMaxLocalTs() != nil && resp.GetMaxLocalTs().GetPhysical() != 0 {
-			localTS, _ := tsoutil.ParseTimestamp(*resp.GetMaxLocalTs())
-			if localTS.After(maxTS) {
-				maxTS = localTS
+		var syncedDCs []string
+		for resp := range respCh {
+			if resp == nil {
+				return errs.ErrSyncMaxTS.FastGenWithCause("got nil response")
+			}
+			syncedDCs = append(syncedDCs, resp.GetDcs()...)
+			// Compare and get the max one
+			if resp.GetMaxLocalTs() != nil && resp.GetMaxLocalTs().GetPhysical() != 0 {
+				if tsoutil.CompareTimestamp(resp.GetMaxLocalTs(), maxTSO) == 1 {
+					*maxTSO = *(resp.GetMaxLocalTs())
+				}
 			}
 		}
+		if unSyncedDCs := gta.checkSyncedDCs(dcLocationMap, syncedDCs); len(unSyncedDCs) > 0 {
+			// Only retry one time
+			if maxRetryCount == 1 {
+				log.Warn("got unsynced dc-locations, will retry", zap.Any("unSyncedDCs", unSyncedDCs), zap.Any("syncedDCs", syncedDCs))
+				maxRetryCount++
+				continue
+			}
+			return errs.ErrSyncMaxTS.FastGenWithCause(fmt.Sprintf("got unsynced dc-locations: %+v", unSyncedDCs))
+		}
 	}
-	return maxTS, nil
+	return nil
 }
 
 func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string][]uint64, syncedDCs []string) []string {

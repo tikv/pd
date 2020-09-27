@@ -475,7 +475,10 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 	// Get a global TSO then
 	globalTSO := s.testGetTimestamp(ctx, c, tsoCount, config.GlobalDCLocation)
 	for _, oldLocalTSO := range oldLocalTSOs {
-		c.Assert(globalTSO.Physical, Greater, oldLocalTSO.Physical)
+		c.Assert(globalTSO.GetPhysical(), GreaterEqual, oldLocalTSO.GetPhysical())
+		if globalTSO.GetPhysical() == oldLocalTSO.GetPhysical() {
+			c.Assert(globalTSO.GetLogical(), Greater, oldLocalTSO.GetLogical())
+		}
 	}
 	// Get some local TSOs again
 	newLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
@@ -483,7 +486,10 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 		newLocalTSOs = append(newLocalTSOs, s.testGetTimestamp(ctx, c, tsoCount, dcLocation))
 	}
 	for _, newLocalTSO := range newLocalTSOs {
-		c.Assert(globalTSO.Physical, Less, newLocalTSO.Physical)
+		c.Assert(globalTSO.GetPhysical(), LessEqual, newLocalTSO.GetPhysical())
+		if globalTSO.GetPhysical() == newLocalTSO.GetPhysical() {
+			c.Assert(globalTSO.GetLogical(), Less, newLocalTSO.GetLogical())
+		}
 	}
 }
 
@@ -504,10 +510,6 @@ func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, 
 	c.Assert(err, IsNil)
 	c.Assert(resp.GetCount(), Equals, uint32(n))
 	res := resp.GetTimestamp()
-	if dcLocation != config.GlobalDCLocation {
-		c.Assert(res.GetLogical(), Greater, int64(0))
-	} else {
-		c.Assert(res.GetLogical(), Equals, int64(0))
-	}
+	c.Assert(res.GetLogical(), Greater, int64(0))
 	return res
 }
