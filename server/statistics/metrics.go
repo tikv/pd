@@ -40,6 +40,14 @@ var (
 			Help:      "Status of the regions.",
 		}, []string{"type"})
 
+	offlineRegionStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "offline_status",
+			Help:      "Status of the offline regions.",
+		}, []string{"type"})
+
 	clusterStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",

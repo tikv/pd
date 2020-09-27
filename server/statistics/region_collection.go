@@ -38,26 +38,37 @@ const nonIsolation = "none"
 
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
-	opt         *config.PersistOptions
-	stats       map[RegionStatisticType]map[uint64]*core.RegionInfo
-	index       map[uint64]RegionStatisticType
-	ruleManager *placement.RuleManager
+	opt          *config.PersistOptions
+	stats        map[RegionStatisticType]map[uint64]*core.RegionInfo
+	offlineStats map[RegionStatisticType]map[uint64]*core.RegionInfo
+	index        map[uint64]RegionStatisticType
+	offlineIndex map[uint64]RegionStatisticType
+	ruleManager  *placement.RuleManager
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
 func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.RuleManager) *RegionStatistics {
 	r := &RegionStatistics{
-		opt:   opt,
-		stats: make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
-		index: make(map[uint64]RegionStatisticType),
+		opt:          opt,
+		stats:        make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
+		offlineStats: make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
+		index:        make(map[uint64]RegionStatisticType),
+		offlineIndex: make(map[uint64]RegionStatisticType),
 	}
 	r.stats[MissPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[DownPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[PendingPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
+
+	r.offlineStats[MissPeer] = make(map[uint64]*core.RegionInfo)
+	r.offlineStats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
+	r.offlineStats[DownPeer] = make(map[uint64]*core.RegionInfo)
+	r.offlineStats[PendingPeer] = make(map[uint64]*core.RegionInfo)
+	r.offlineStats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
+	r.offlineStats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
+	r.offlineStats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
 	r.ruleManager = ruleManager
 	return r
 }
@@ -71,10 +82,27 @@ func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core
 	return res
 }
 
+// GetOfflineRegionStatsByType gets the status of the offline region by types.
+func (r *RegionStatistics) GetOfflineRegionStatsByType(typ RegionStatisticType) []*core.RegionInfo {
+	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
+	for _, r := range r.offlineStats[typ] {
+		res = append(res, r)
+	}
+	return res
+}
+
 func (r *RegionStatistics) deleteEntry(deleteIndex RegionStatisticType, regionID uint64) {
 	for typ := RegionStatisticType(1); typ <= deleteIndex; typ <<= 1 {
 		if deleteIndex&typ != 0 {
 			delete(r.stats[typ], regionID)
+		}
+	}
+}
+
+func (r *RegionStatistics) deleteOfflineEntry(deleteIndex RegionStatisticType, regionID uint64) {
+	for typ := RegionStatisticType(1); typ <= deleteIndex; typ <<= 1 {
+		if deleteIndex&typ != 0 {
+			delete(r.offlineStats[typ], regionID)
 		}
 	}
 }
@@ -84,8 +112,9 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	// Region state.
 	regionID := region.GetID()
 	var (
-		peerTypeIndex RegionStatisticType
-		deleteIndex   RegionStatisticType
+		peerTypeIndex        RegionStatisticType
+		offlinePeerTypeIndex RegionStatisticType
+		deleteIndex          RegionStatisticType
 	)
 	desiredReplicas := r.opt.GetMaxReplicas()
 	if r.opt.IsPlacementRulesEnabled() {
@@ -100,43 +129,47 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		}
 	}
 
-	if len(region.GetPeers()) < desiredReplicas {
-		r.stats[MissPeer][regionID] = region
-		peerTypeIndex |= MissPeer
-	} else if len(region.GetPeers()) > desiredReplicas {
-		r.stats[ExtraPeer][regionID] = region
-		peerTypeIndex |= ExtraPeer
-	}
-
-	if len(region.GetDownPeers()) > 0 {
-		r.stats[DownPeer][regionID] = region
-		peerTypeIndex |= DownPeer
-	}
-
-	if len(region.GetPendingPeers()) > 0 {
-		r.stats[PendingPeer][regionID] = region
-		peerTypeIndex |= PendingPeer
-	}
-
-	if len(region.GetLearners()) > 0 {
-		r.stats[LearnerPeer][regionID] = region
-		peerTypeIndex |= LearnerPeer
-	}
-
-	if region.GetApproximateSize() <= core.EmptyRegionApproximateSize {
-		r.stats[EmptyRegion][regionID] = region
-		peerTypeIndex |= EmptyRegion
-	}
+	var isOffline bool
 
 	for _, store := range stores {
 		if store.IsOffline() {
 			peer := region.GetStorePeer(store.GetID())
 			if peer != nil {
-				r.stats[OfflinePeer][regionID] = region
-				peerTypeIndex |= OfflinePeer
+				isOffline = true
 			}
 		}
 	}
+
+	conditions := map[RegionStatisticType]bool{
+		MissPeer:    len(region.GetPeers()) < desiredReplicas,
+		ExtraPeer:   len(region.GetPeers()) > desiredReplicas,
+		DownPeer:    len(region.GetDownPeers()) > 0,
+		PendingPeer: len(region.GetPendingPeers()) > 0,
+		LearnerPeer: len(region.GetLearners()) > 0,
+		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
+	}
+
+	for typ, c := range conditions {
+		if c {
+			if isOffline {
+				r.offlineStats[typ][regionID] = region
+				offlinePeerTypeIndex |= typ
+			}
+			r.stats[typ][regionID] = region
+			peerTypeIndex |= typ
+		}
+	}
+
+	if isOffline {
+		r.offlineStats[OfflinePeer][regionID] = region
+		offlinePeerTypeIndex |= OfflinePeer
+	}
+
+	if oldIndex, ok := r.offlineIndex[regionID]; ok {
+		deleteIndex = oldIndex &^ offlinePeerTypeIndex
+	}
+	r.deleteOfflineEntry(deleteIndex, regionID)
+	r.offlineIndex[regionID] = offlinePeerTypeIndex
 
 	if oldIndex, ok := r.index[regionID]; ok {
 		deleteIndex = oldIndex &^ peerTypeIndex
@@ -158,14 +191,22 @@ func (r *RegionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.stats[ExtraPeer])))
 	regionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.stats[DownPeer])))
 	regionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.stats[PendingPeer])))
-	regionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.stats[OfflinePeer])))
 	regionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.stats[LearnerPeer])))
 	regionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.stats[EmptyRegion])))
+
+	offlineRegionStatusGauge.WithLabelValues("miss-peer-region-count").Set(float64(len(r.offlineStats[MissPeer])))
+	offlineRegionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.offlineStats[ExtraPeer])))
+	offlineRegionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.offlineStats[DownPeer])))
+	offlineRegionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.offlineStats[PendingPeer])))
+	offlineRegionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.offlineStats[LearnerPeer])))
+	offlineRegionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.offlineStats[EmptyRegion])))
+	offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.offlineStats[OfflinePeer])))
 }
 
 // Reset resets the metrics of the regions' status.
 func (r *RegionStatistics) Reset() {
 	regionStatusGauge.Reset()
+	offlineRegionStatusGauge.Reset()
 }
 
 // LabelStatistics is the statistics of the level of labels.
