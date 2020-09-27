@@ -298,12 +298,16 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			retryLimit = 5
 		}
 		processedPercentage, err := h.AddScatterRegionsOperators(startKey, endKey, group, retryLimit)
+		errorMessage := ""
+		if err != nil {
+			errorMessage = err.Error()
+		}
 		s := struct {
 			ProcessedPercentage int    `json:"processed-percentage"`
 			Error               string `json:"error"`
 		}{
 			ProcessedPercentage: processedPercentage,
-			Error:               err.Error(),
+			Error:               errorMessage,
 		}
 		h.r.JSON(w, http.StatusOK, &s)
 		return
