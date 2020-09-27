@@ -292,7 +292,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		group, _ := input["group"].(string)
-		retryLimit, ok := input["retry_limit"].(int64)
+		retryLimit, ok := input["retry_limit"].(int)
 		if !ok {
 			// retry 5 times if retryLimit not defined
 			retryLimit = 5

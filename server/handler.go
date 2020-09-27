@@ -774,7 +774,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 }
 
 // AddScatterRegionsOperators add operators to scatter regions and return the processed percentage and error
-func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group string, retryLimit int64) (int, error) {
+func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group string, retryLimit int) (int, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return 0, err
@@ -802,7 +802,7 @@ func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group strin
 	}
 	failures := make(map[uint64]error, len(regionMap))
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, 0, retryLimit)
+	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, retryLimit)
 	for _, failureErr := range failures {
 		unProcessedRegionsCount++
 		errList = append(errList, failureErr)
