@@ -781,6 +781,15 @@ func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 	return c.GetRegionStatsByType(statistics.DownPeer), nil
 }
 
+// GetLearnerPeerRegions gets the region with learner peer.
+func (h *Handler) GetLearnerPeerRegions() ([]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	return c.GetRegionStatsByType(statistics.LearnerPeer), nil
+}
+
 // GetExtraPeerRegions gets the region exceeds the specified number of peers.
 func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()

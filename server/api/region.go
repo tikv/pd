@@ -328,6 +328,23 @@ func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Reque
 }
 
 // @Tags region
+// @Summary List all regions that has learner peer.
+// @Produce json
+// @Success 200 {object} RegionsInfo
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /regions/check/learner-peer [get]
+func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	regions, err := handler.GetLearnerPeerRegions()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	regionsInfo := convertToAPIRegions(regions)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+// @Tags region
 // @Summary List all regions that has offline peer.
 // @Produce json
 // @Success 200 {object} RegionsInfo
