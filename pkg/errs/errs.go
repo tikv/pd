@@ -14,8 +14,6 @@
 package errs
 
 import (
-	"strings"
-
 	"github.com/pingcap/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -34,19 +32,4 @@ func ZapError(err error, causeError ...error) zap.Field {
 		}
 	}
 	return zap.Field{Key: "error", Type: zapcore.ErrorType, Interface: err}
-}
-
-// AggregateErrors aggregate errors into one error
-func AggregateErrors(errs []error) error {
-	if len(errs) < 1 {
-		return nil
-	}
-	if len(errs) == 1 {
-		return errs[0]
-	}
-	s := make([]string, 0, len(errs))
-	for id, err := range errs {
-		s[id] = err.Error()
-	}
-	return errors.New("[" + strings.Join(s, ",") + "]")
 }
