@@ -353,7 +353,7 @@ func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Re
 // @Router /regions/check/offline-peer [get]
 func (h *regionsHandler) GetOfflinePeer(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.OfflinePeer)
+	regions, err := handler.GetOfflinePeer(statistics.OfflinePeer)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
