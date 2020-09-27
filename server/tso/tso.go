@@ -52,9 +52,9 @@ type timestampOracle struct {
 	client   *clientv3.Client
 	rootPath string
 	// TODO: remove saveInterval
-	saveInterval  time.Duration
+	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
-	maxResetTSGap func() time.Duration
+	maxResetTSGap          func() time.Duration
 	// tso info stored in the memory
 	tsoMux struct {
 		sync.RWMutex
