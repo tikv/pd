@@ -774,7 +774,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 }
 
 // AddScatterRegionsOperators add operators to scatter regions and return the processed percentage and error
-func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group string, retryTimes int64) (int, error) {
+func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group string, retryLimit int64) (int, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return 0, err
@@ -790,11 +790,11 @@ func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group strin
 	regions := c.ScanRegions(startKey, endKey, -1)
 	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
 	errList := make([]error, len(regions))
-	unProcessedRegions := make([]uint64, len(regions))
+	unProcessedRegionsCount := 0
 	for _, region := range regions {
 		// If region is Hot, add it into unProcessedRegions
 		if c.IsRegionHot(region) {
-			unProcessedRegions = append(unProcessedRegions, region.GetID())
+			unProcessedRegionsCount++
 			errList = append(errList, err)
 			continue
 		}
@@ -802,19 +802,19 @@ func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group strin
 	}
 	failures := make(map[uint64]error, len(regionMap))
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, 0, retryTimes)
-	for regionID, err := range failures {
-		unProcessedRegions = append(unProcessedRegions, regionID)
+	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, 0, retryLimit)
+	for _, err := range failures {
+		unProcessedRegionsCount++
 		errList = append(errList, err)
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
 		if ok := c.GetOperatorController().AddOperator(op); !ok {
-			unProcessedRegions = append(unProcessedRegions, op.RegionID())
+			unProcessedRegionsCount++
 			errList = append(errList, errors.WithStack(ErrAddOperator))
 		}
 	}
-	return 100 - (len(unProcessedRegions)/len(regions))*100, errs.AggregateErrors(errList)
+	return 100 - (unProcessedRegionsCount/len(regions))*100, errs.AggregateErrors(errList)
 }
 
 // GetDownPeerRegions gets the region with down peer.

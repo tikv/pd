@@ -292,12 +292,12 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		group, _ := input["group"].(string)
-		retryTimes, ok := input["retry_times"].(int64)
+		retryLimit, ok := input["retry_limit"].(int64)
 		if !ok {
-			// retry 5 times if retryTimes not defined
-			retryTimes = 5
+			// retry 5 times if retryLimit not defined
+			retryLimit = 5
 		}
-		processedPercentage, err := h.AddScatterRegionsOperators(startKey, endKey, group, retryTimes)
+		processedPercentage, err := h.AddScatterRegionsOperators(startKey, endKey, group, retryLimit)
 		s := struct {
 			ProcessedPercentage int    `json:"processed-percentage"`
 			Error               string `json:"error"`

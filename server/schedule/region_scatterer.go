@@ -158,8 +158,8 @@ const initialSleepDuration = 100 * time.Millisecond
 // Failures indicates the regions which are failed to be  relocated, the key of the failures indicates the regionID
 // and the value of the failures indicates the failure error.
 func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string,
-	currentRetry, retryTimes int64) []*operator.Operator {
-	if currentRetry >= retryTimes || len(regions) < 1 {
+	currentRetry, retryLimit int64) []*operator.Operator {
+	if currentRetry >= retryLimit || len(regions) < 1 {
 		return nil
 	}
 	if len(failures) > 0 {
@@ -181,7 +181,7 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 		delete(regions, region.GetID())
 		delete(failures, region.GetID())
 	}
-	return append(ops, r.ScatterRegions(regions, failures, group, currentRetry+1, retryTimes)...)
+	return append(ops, r.ScatterRegions(regions, failures, group, currentRetry+1, retryLimit)...)
 }
 
 // Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
