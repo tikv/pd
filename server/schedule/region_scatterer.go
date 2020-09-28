@@ -15,6 +15,11 @@ package schedule
 
 import (
 	"context"
+	"math"
+	"math/rand"
+	"sync"
+	"time"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -25,13 +30,11 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
-	"math"
-	"math/rand"
-	"sync"
-	"time"
 )
 
 const regionScatterName = "region-scatter"
+const gcInterval = time.Minute
+const gcTTL = time.Minute * 3
 
 type selectedStores struct {
 	mu sync.Mutex
@@ -46,30 +49,53 @@ type selectedStores struct {
 func newSelectedStores(ctx context.Context, checkExist bool) *selectedStores {
 	return &selectedStores{
 		checkExist:        checkExist,
-		stores:            cache.NewStringTTL(ctx, time.Minute, time.Minute*3),
-		groupDistribution: cache.NewStringTTL(ctx, time.Minute, time.Minute*3),
+		stores:            cache.NewStringTTL(ctx, gcInterval, gcTTL),
+		groupDistribution: cache.NewStringTTL(ctx, gcInterval, gcTTL),
 	}
+}
+
+func (s *selectedStores) getStore(group string) (map[uint64]struct{}, bool) {
+	if result, ok := s.stores.Get(group); ok {
+		return result.(map[uint64]struct{}), true
+	} else {
+		return nil, false
+	}
+}
+
+func (s *selectedStores) getGroupDistribution(group string) (map[uint64]uint64, bool) {
+	if result, ok := s.groupDistribution.Get(group); ok {
+		return result.(map[uint64]uint64), true
+	}
+	return nil, false
+}
+
+func (s *selectedStores) getStoreOrDefault(group string) map[uint64]struct{} {
+	if result, ok := s.getStore(group); ok {
+		return result
+	}
+	return make(map[uint64]struct{})
+}
+
+func (s *selectedStores) getGroupDistributionOrDefault(group string) map[uint64]uint64 {
+	if result, ok := s.getGroupDistribution(group); ok {
+		return result
+	}
+	return make(map[uint64]uint64)
 }
 
 func (s *selectedStores) put(id uint64, group string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.checkExist {
-		placed, ok := s.stores.Get(group)
-		if !ok {
-			placed = map[uint64]struct{}{}
-		}
-		if _, ok := placed.(map[uint64]struct{})[id]; ok {
+		placed := s.getStoreOrDefault(group)
+		if _, ok := placed[id]; ok {
 			return false
 		}
-		placed.(map[uint64]struct{})[id] = struct{}{}
+		placed[id] = struct{}{}
 		s.stores.Put(group, placed)
 	}
-	distribution, ok := s.groupDistribution.Get(group)
-	if !ok {
-		distribution = make(map[uint64]uint64)
-	}
-	distribution.(map[uint64]uint64)[id] = distribution.(map[uint64]uint64)[id] + 1
+	distribution := s.getGroupDistributionOrDefault(group)
+	distribution[id] = distribution[id] + 1
 	s.groupDistribution.Put(group, distribution)
 	return true
 }
@@ -86,11 +112,11 @@ func (s *selectedStores) reset() {
 func (s *selectedStores) get(id uint64, group string) uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	distribution, ok := s.groupDistribution.Get(group)
+	distribution, ok := s.getGroupDistribution(group)
 	if !ok {
 		return 0
 	}
-	count, ok := distribution.(map[uint64]uint64)[id]
+	count, ok := distribution[id]
 	if !ok {
 		return 0
 	}
@@ -104,8 +130,8 @@ func (s *selectedStores) newFilters(scope, group string) []filter.Filter {
 		return nil
 	}
 	cloned := make(map[uint64]struct{})
-	if groupPlaced, ok := s.stores.Get(group); ok {
-		for id := range groupPlaced.(map[uint64]struct{}) {
+	if groupPlaced, ok := s.getStore(group); ok {
+		for id := range groupPlaced {
 			cloned[id] = struct{}{}
 		}
 	}
