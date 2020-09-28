@@ -19,7 +19,9 @@ import (
 	"net/http"
 	"path"
 	"strconv"
+	"strings"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +45,7 @@ func NewStoreCommand() *cobra.Command {
 	s.AddCommand(NewRemoveTombStoneCommand())
 	s.AddCommand(NewStoreLimitSceneCommand())
 	s.Flags().String("jq", "", "jq query")
+	s.Flags().StringSlice("state", nil, "state filter")
 	return s
 }
 
@@ -109,6 +112,7 @@ func NewStoresCommand() *cobra.Command {
 	s.AddCommand(NewSetStoresCommand())
 	s.AddCommand(NewShowStoresCommand())
 	s.Flags().String("jq", "", "jq query")
+	s.Flags().StringSlice("state", nil, "state filter")
 	return s
 }
 
@@ -228,12 +232,34 @@ func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
 
 func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := storesPrefix
+	if len(args) > 1 {
+		cmd.Usage()
+		return
+	}
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			cmd.Println("store_id should be a number")
 			return
 		}
 		prefix = fmt.Sprintf(storePrefix, args[0])
+	} else {
+		flags := cmd.Flags()
+		states, err := flags.GetStringSlice("state")
+		if err != nil {
+			cmd.Printf("Failed to get state: %s\n", err)
+		}
+		stateValues := make([]string, 0, len(states))
+		for _, state := range states {
+			stateValue, ok := metapb.StoreState_value[state]
+			if !ok {
+				cmd.Println("Unknown state: " + state)
+				return
+			}
+			stateValues = append(stateValues, fmt.Sprintf("state=%v", stateValue))
+		}
+		if len(stateValues) != 0 {
+			prefix = fmt.Sprintf("%v?%v", storesPrefix, strings.Join(stateValues, "&"))
+		}
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {

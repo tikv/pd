@@ -88,6 +88,14 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
 	pdctl.CheckStoresInfo(c, storesInfo.Stores, stores[:2])
 
+	// store --state=<query states> command
+	args = []string{"-u", pdAddr, "store", "--state", "Up,Tombstone"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	storesInfo = new(api.StoresInfo)
+	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
+	pdctl.CheckStoresInfo(c, storesInfo.Stores, stores)
+
 	// store <store_id> command
 	args = []string{"-u", pdAddr, "store", "1"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
@@ -298,4 +306,5 @@ func (s *storeTestSuite) TestStore(c *C) {
 	err = json.Unmarshal(output, scene)
 	c.Assert(err, IsNil)
 	c.Assert(scene.Idle, Equals, 100)
+
 }
