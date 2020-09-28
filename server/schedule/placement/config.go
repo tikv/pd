@@ -16,6 +16,7 @@ package placement
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 )
 
 // ruleConfig contains rule and rule group configurations.
@@ -82,6 +83,10 @@ func (c *ruleConfig) beginPatch() *ruleConfigPatch {
 		c:   c,
 		mut: newRuleConfig(),
 	}
+}
+
+func (c *ruleConfig) String() string {
+	return fmt.Sprintf("rules: %v, groups: %v", c.rules, c.groups)
 }
 
 // A helper data structure to update ruleConfig.
@@ -161,6 +166,10 @@ func (p *ruleConfigPatch) commit() {
 		p.c.groups[id] = group
 	}
 	p.c.adjust()
+}
+
+func (p *ruleConfigPatch) String() string {
+	return fmt.Sprintf("c: %s, mut: %s", p.c.String(), p.mut.String())
 }
 
 func jsonEquals(a, b interface{}) bool {

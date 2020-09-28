@@ -271,6 +271,7 @@ func (m *RuleManager) beginPatch() *ruleConfigPatch {
 }
 
 func (m *RuleManager) tryCommitPatch(patch *ruleConfigPatch) error {
+	log.Error("Before tryCommitPatch", zap.String("patch", patch.String()))
 	patch.adjust()
 
 	ruleList, err := buildRuleList(patch)
@@ -507,6 +508,7 @@ func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle, override bool) er
 	m.Lock()
 	defer m.Unlock()
 	p := m.beginPatch()
+	log.Error("Before SetAllGroupBundles", zap.String("patch", p.String()), zap.Any("groups", groups))
 	matchID := func(a string) bool {
 		for _, g := range groups {
 			if g.ID == a {

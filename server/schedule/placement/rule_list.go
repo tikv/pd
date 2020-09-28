@@ -17,6 +17,8 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"sort"
 	"strings"
 
@@ -100,11 +102,13 @@ type ruleList struct {
 
 type ruleContainer interface {
 	iterateRules(func(*Rule))
+	String() string
 }
 
 // buildRuleList builds the applied ruleList for the give rules
 // rules indicates the map (rule's GroupID, ID) => rule
 func buildRuleList(rules ruleContainer) (ruleList, error) {
+	log.Error("Before buildRuleList", zap.String("patch", rules.String()))
 	// collect and sort split points.
 	var points []splitPoint
 	rules.iterateRules(func(r *Rule) {
