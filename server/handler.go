@@ -789,7 +789,7 @@ func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group strin
 	}
 	regions := c.ScanRegions(startKey, endKey, -1)
 	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
-	failureRegionID := make([]string, 0, len(regions))
+	var failureRegionID []string
 	for _, region := range regions {
 		// If region is Hot, add it into unProcessedRegions
 		if c.IsRegionHot(region) {
