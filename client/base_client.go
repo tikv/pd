@@ -35,8 +35,9 @@ type baseClient struct {
 	clusterID uint64
 	connMu    struct {
 		sync.RWMutex
-		clientConns map[string]*grpc.ClientConn
-		leader      string
+		clientConns     map[string]*grpc.ClientConn
+		leader          string
+		allocatorLeader map[string]string
 	}
 
 	checkLeaderCh chan struct{}
@@ -87,6 +88,7 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption, 
 		timeout:       defaultPDTimeout,
 	}
 	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
+	c.connMu.allocatorLeader = make(map[string]string)
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -169,6 +171,26 @@ func (c *baseClient) GetURLs() []string {
 	return c.urls
 }
 
+func (c *baseClient) GetAllocatorLeaderURLs() map[string]string {
+	c.connMu.RLock()
+	defer c.connMu.RUnlock()
+	allocatorLeader := make(map[string]string)
+	for dcLocation, url := range c.connMu.allocatorLeader {
+		allocatorLeader[dcLocation] = url
+	}
+	return allocatorLeader
+}
+
+func (c *baseClient) GetDCLocations() []string {
+	c.connMu.RLock()
+	defer c.connMu.RUnlock()
+	dcLocations := make([]string, 0, len(c.connMu.allocatorLeader))
+	for dcLocation := range c.connMu.allocatorLeader {
+		dcLocations = append(dcLocations, dcLocation)
+	}
+	return dcLocations
+}
+
 func (c *baseClient) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
@@ -194,6 +216,9 @@ func (c *baseClient) updateLeader() error {
 			log.Warn("[pd] cannot update leader", zap.String("address", u), errs.ZapError(err))
 		}
 		cancel()
+		if err := c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeader()); err != nil {
+			return err
+		}
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			select {
 			case <-c.ctx.Done():
@@ -237,6 +262,8 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 	c.urls = urls
 }
 
+const globalDCLocation = "global"
+
 func (c *baseClient) switchLeader(addrs []string) error {
 	// FIXME: How to safely compare leader urls? For now, only allows one client url.
 	addr := addrs[0]
@@ -257,6 +284,49 @@ func (c *baseClient) switchLeader(addrs []string) error {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 	c.connMu.leader = addr
+	c.connMu.allocatorLeader[globalDCLocation] = addr
+	return nil
+}
+
+func (c *baseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Member) error {
+	if len(allocatorMap) == 0 {
+		return nil
+	}
+	// Switch to the new one
+	for dcLocation, member := range allocatorMap {
+		if len(member.GetClientUrls()) == 0 {
+			continue
+		}
+		addr := member.GetClientUrls()[0]
+		c.connMu.RLock()
+		oldAddr, exist := c.connMu.allocatorLeader[dcLocation]
+		c.connMu.RUnlock()
+		if exist && addr == oldAddr {
+			continue
+		}
+		log.Info("[pd] switch dc tso allocator leader",
+			zap.String("dc-location", dcLocation),
+			zap.String("new-leader", addr),
+			zap.String("old-leader", oldAddr))
+		if _, err := c.getOrCreateGRPCConn(addr); err != nil {
+			return err
+		}
+		c.connMu.Lock()
+		c.connMu.allocatorLeader[dcLocation] = addr
+		c.connMu.Unlock()
+	}
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	// Clean up the old one
+	for dcLocation := range c.connMu.allocatorLeader {
+		if dcLocation == globalDCLocation {
+			continue
+		}
+		_, exist := allocatorMap[dcLocation]
+		if !exist {
+			delete(c.connMu.allocatorLeader, dcLocation)
+		}
+	}
 	return nil
 }
 
@@ -267,7 +337,7 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 	if ok {
 		return conn, nil
 	}
-	tlsCfg, err := grpcutil.SecurityConfig{
+	tlsCfg, err := grpcutil.TLSConfig{
 		CAPath:   c.security.CAPath,
 		CertPath: c.security.CertPath,
 		KeyPath:  c.security.KeyPath,

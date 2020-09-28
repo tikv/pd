@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -66,11 +67,18 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 		}
 	}
 
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	tsoAllocatorLeader, err := tsoAllocatorManager.GetLocalAllocatorLeadersMember()
+	if err != nil {
+		return nil, status.Errorf(codes.Unknown, err.Error())
+	}
+
 	return &pdpb.GetMembersResponse{
-		Header:     s.header(),
-		Members:    members,
-		Leader:     s.member.GetLeader(),
-		EtcdLeader: etcdLeader,
+		Header:             s.header(),
+		Members:            members,
+		Leader:             s.member.GetLeader(),
+		EtcdLeader:         etcdLeader,
+		TsoAllocatorLeader: tsoAllocatorLeader,
 	}, nil
 }
 
@@ -415,6 +423,16 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		if region.GetID() == 0 {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
 			msg := fmt.Sprintf("invalid request region, %v", request)
+			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
+			continue
+		}
+
+		// If the region peer count is 0, then we should not handle this.
+		if len(region.GetPeers()) == 0 {
+			log.Warn("invalid region, zero region peer count",
+				logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
+			msg := fmt.Sprintf("invalid region, zero region peer count: %v", logutil.RedactStringer(core.RegionToHexMeta(region.GetMeta())))
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
