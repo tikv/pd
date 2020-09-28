@@ -57,9 +57,8 @@ func newSelectedStores(ctx context.Context, checkExist bool) *selectedStores {
 func (s *selectedStores) getStore(group string) (map[uint64]struct{}, bool) {
 	if result, ok := s.stores.Get(group); ok {
 		return result.(map[uint64]struct{}), true
-	} else {
-		return nil, false
 	}
+	return nil, false
 }
 
 func (s *selectedStores) getGroupDistribution(group string) (map[uint64]uint64, bool) {
