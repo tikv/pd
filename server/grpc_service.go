@@ -941,7 +941,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			if err != nil {
 				return nil, err
 			}
-			if tsoutil.CompareTimestamp(&currentLocalTSO, &maxLocalTS) == 1 {
+			if tsoutil.CompareTimestamp(&currentLocalTSO, &maxLocalTS) > 0 {
 				maxLocalTS = currentLocalTSO
 			}
 			processedDCs = append(processedDCs, allocator.GetDCLocation())

@@ -67,7 +67,7 @@ type GlobalTSOAllocator struct {
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
 func NewGlobalTSOAllocator(am *AllocatorManager, leadership *election.Leadership, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
-	return &GlobalTSOAllocator{
+	gta := &GlobalTSOAllocator{
 		leadership: leadership,
 		timestampOracle: &timestampOracle{
 			client:        leadership.GetClient(),
@@ -76,13 +76,9 @@ func NewGlobalTSOAllocator(am *AllocatorManager, leadership *election.Leadership
 			maxResetTSGap: maxResetTSGap,
 		},
 		allocatorManager: am,
-		localAllocatorConn: struct {
-			sync.RWMutex
-			clientConns map[string]*grpc.ClientConn
-		}{
-			clientConns: make(map[string]*grpc.ClientConn),
-		},
 	}
+	gta.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
+	return gta
 }
 
 // Initialize will initialize the created global TSO allocator.
@@ -118,30 +114,17 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	if len(dcLocationMap) == 0 {
 		return gta.timestampOracle.getTS(gta.leadership, count)
 	}
-	// Collect all allocator leaders' client URLs
-	allocatorLeaders, err := gta.allocatorManager.GetLocalAllocatorLeaders()
-	if err != nil {
-		return pdpb.Timestamp{}, err
-	}
-	leaderURLs := make([]string, 0, len(allocatorLeaders))
-	for _, allocator := range allocatorLeaders {
-		for _, leaderURL := range allocator.GetMember().GetClientUrls() {
-			if slice.NoneOf(leaderURLs, func(i int) bool { return leaderURLs[i] == leaderURL }) {
-				leaderURLs = append(leaderURLs, leaderURL)
-			}
-		}
-	}
 	// Send maxTS to all Local TSO Allocator leaders to prewrite
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	maxTSO := &pdpb.Timestamp{}
 	// Collect the MaxTS with all Local TSO Allocator leaders first
-	if err = gta.syncMaxTS(ctx, leaderURLs, dcLocationMap, maxTSO); err != nil {
+	if err = gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
 	maxTSO.Logical += int64(count)
 	// Sync the MaxTS with all Local TSO Allocator leaders then
-	if err := gta.syncMaxTS(ctx, leaderURLs, dcLocationMap, maxTSO); err != nil {
+	if err := gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
 	// Update the global TSO in memory
@@ -156,9 +139,23 @@ const (
 	rpcTimeout  = 3 * time.Second
 )
 
-func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, leaderURLs []string, dcLocationMap map[string][]uint64, maxTSO *pdpb.Timestamp) error {
+func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[string][]uint64, maxTSO *pdpb.Timestamp) error {
 	maxRetryCount := 1
 	for i := 0; i < maxRetryCount; i++ {
+		// Collect all allocator leaders' client URLs
+		allocatorLeaders, err := gta.allocatorManager.GetLocalAllocatorLeaders()
+		if err != nil {
+			return err
+		}
+		leaderURLs := make([]string, 0, len(allocatorLeaders))
+		for _, allocator := range allocatorLeaders {
+			for _, leaderURL := range allocator.GetMember().GetClientUrls() {
+				if slice.NoneOf(leaderURLs, func(i int) bool { return leaderURLs[i] == leaderURL }) {
+					leaderURLs = append(leaderURLs, leaderURL)
+				}
+			}
+		}
+		// Prepare to make RPC requests concurrently
 		respCh := make(chan *pdpb.SyncMaxTSResponse, len(leaderURLs))
 		errCh := make(chan error, len(leaderURLs))
 		var errList []error
@@ -206,7 +203,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, leaderURLs []strin
 			syncedDCs = append(syncedDCs, resp.GetDcs()...)
 			// Compare and get the max one
 			if resp.GetMaxLocalTs() != nil && resp.GetMaxLocalTs().GetPhysical() != 0 {
-				if tsoutil.CompareTimestamp(resp.GetMaxLocalTs(), maxTSO) == 1 {
+				if tsoutil.CompareTimestamp(resp.GetMaxLocalTs(), maxTSO) > 0 {
 					*maxTSO = *(resp.GetMaxLocalTs())
 				}
 			}
