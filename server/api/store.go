@@ -143,6 +143,7 @@ func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 // @Produce json
 // @Success 200 {object} StoreInfo
 // @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The store does not exist."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id} [get]
 func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +157,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	store := rc.GetStore(storeID)
 	if store == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID).Error())
+		h.rd.JSON(w, http.StatusNotFound, server.ErrStoreNotFound(storeID).Error())
 		return
 	}
 
