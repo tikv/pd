@@ -156,7 +156,7 @@ const maxRetryLimit = 30
 // in a group level instead of cluster level.
 // RetryTimes indicates the retry times if any of the regions failed to relocate during scattering. There will be
 // time.Sleep between each retry.
-// Failures indicates the regions which are failed to be  relocated, the key of the failures indicates the regionID
+// Failures indicates the regions which are failed to be relocated, the key of the failures indicates the regionID
 // and the value of the failures indicates the failure error.
 func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) []*operator.Operator {
 	if retryLimit > maxRetryLimit {
