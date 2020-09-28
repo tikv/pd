@@ -52,19 +52,16 @@ func GenerateTimestamp(physical time.Time, logical uint64) *pdpb.Timestamp {
 	}
 }
 
-// CompareTimestamp is used to compare the two timestamps.
+// CompareTimestamp is used to compare two timestamps.
 // If tsoOne > tsoTwo, returns 1.
 // If tsoOne = tsoTwo, returns 0.
 // If tsoOne < tsoTwo, returns -1.
 func CompareTimestamp(tsoOne, tsoTwo *pdpb.Timestamp) int {
-	if tsoOne.GetPhysical() > tsoTwo.GetPhysical() {
+	if tsoOne.GetPhysical() > tsoTwo.GetPhysical() || (tsoOne.GetPhysical() == tsoTwo.GetPhysical() && tsoOne.GetLogical() > tsoTwo.GetLogical()) {
 		return 1
-	} else if tsoOne.GetPhysical() == tsoTwo.GetPhysical() {
-		if tsoOne.GetLogical() > tsoTwo.GetLogical() {
-			return 1
-		} else if tsoOne.GetLogical() == tsoTwo.GetLogical() {
-			return 0
-		}
+	}
+	if tsoOne.GetPhysical() == tsoTwo.GetPhysical() && tsoOne.GetLogical() == tsoTwo.GetLogical() {
+		return 0
 	}
 	return -1
 }
