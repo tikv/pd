@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/encryption"
@@ -104,6 +105,7 @@ func (s *RegionStorage) backgroundFlush() {
 
 // SaveRegion saves one region to storage.
 func (s *RegionStorage) SaveRegion(region *metapb.Region) error {
+	region = proto.Clone(region).(*metapb.Region)
 	err := encryption.EncryptRegion(region, s.encryptionKeyManager)
 	if err != nil {
 		return err
