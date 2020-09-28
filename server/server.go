@@ -957,7 +957,7 @@ func (s *Server) GetClusterVersion() semver.Version {
 
 // GetTLSConfig get the security config.
 func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
-	return s.cfg.Security.TLSConfig
+	return &s.cfg.Security.TLSConfig
 }
 
 // GetServerRootPath returns the server root path.
