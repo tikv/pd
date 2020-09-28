@@ -955,9 +955,9 @@ func (s *Server) GetClusterVersion() semver.Version {
 	return *s.persistOptions.GetClusterVersion()
 }
 
-// GetSecurityConfig get the security config.
-func (s *Server) GetSecurityConfig() *grpcutil.SecurityConfig {
-	return s.cfg.Security.SecurityConfig
+// GetTLSConfig get the security config.
+func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
+	return s.cfg.Security.TLSConfig
 }
 
 // GetServerRootPath returns the server root path.

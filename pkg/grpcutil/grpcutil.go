@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-// SecurityConfig is the configuration for supporting tls.
-type SecurityConfig struct {
+// TLSConfig is the configuration for supporting tls.
+type TLSConfig struct {
 	// CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
 	CAPath string `toml:"cacert-path" json:"cacert-path"`
 	// CertPath is the path of file that contains X509 certificate in PEM format.
@@ -37,7 +37,7 @@ type SecurityConfig struct {
 }
 
 // ToTLSConfig generates tls config.
-func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
+func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
 		return nil, nil
 	}
@@ -61,7 +61,7 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 }
 
 // GetOneAllowedCN only gets the first one CN.
-func (s SecurityConfig) GetOneAllowedCN() (string, error) {
+func (s TLSConfig) GetOneAllowedCN() (string, error) {
 	switch len(s.CertAllowedCN) {
 	case 1:
 		return s.CertAllowedCN[0], nil

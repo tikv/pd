@@ -1369,7 +1369,7 @@ func (c *LocalTSOConfig) Validate() error {
 
 // SecurityConfig indicates the security configuration for pd server
 type SecurityConfig struct {
-	*grpcutil.SecurityConfig
+	*grpcutil.TLSConfig
 	// RedactInfoLog indicates that whether enabling redact log
 	RedactInfoLog bool `toml:"redact-info-log" json:"redact-info-log"`
 }
