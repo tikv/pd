@@ -477,7 +477,7 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 	for _, oldLocalTSO := range oldLocalTSOs {
 		c.Assert(globalTSO.GetPhysical(), GreaterEqual, oldLocalTSO.GetPhysical())
 		if globalTSO.GetPhysical() == oldLocalTSO.GetPhysical() {
-			c.Assert(globalTSO.GetLogical(), Greater, oldLocalTSO.GetLogical())
+			c.Assert(globalTSO.GetLogical(), GreaterEqual, oldLocalTSO.GetLogical())
 		}
 	}
 	// Get some local TSOs again
