@@ -15,22 +15,20 @@ package schedule
 
 import (
 	"context"
-	"math"
-	"math/rand"
-	"sync"
-	"time"
-
-	"github.com/tikv/pd/pkg/cache"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
+	"math"
+	"math/rand"
+	"sync"
+	"time"
 )
 
 const regionScatterName = "region-scatter"
