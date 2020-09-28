@@ -34,13 +34,17 @@ import (
 )
 
 var (
-	pdAddrs     = flag.String("pd", "127.0.0.1:2379", "pd address")
-	concurrency = flag.Int("C", 1000, "concurrency")
-	interval    = flag.Duration("interval", time.Second, "interval to output the statistics")
-	caPath      = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
-	certPath    = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
-	keyPath     = flag.String("key", "", "path of file that contains X509 key in PEM format")
-	wg          sync.WaitGroup
+	pdAddrs      = flag.String("pd", "127.0.0.1:2379", "pd address")
+	clientNumber = flag.Int("client", 1, "the number of pd clients involved in each benchmark")
+	concurrency  = flag.Int("c", 1000, "concurrency")
+	count        = flag.Int("count", 1, "the count number that the test will run")
+	duration     = flag.Duration("duration", 60*time.Second, "how many seconds the test will last")
+	verbose      = flag.Bool("v", false, "output statistics info every interval and output metrics info at the end")
+	interval     = flag.Duration("interval", time.Second, "interval to output the statistics")
+	caPath       = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
+	certPath     = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
+	keyPath      = flag.String("key", "", "path of file that contains X509 key in PEM format")
+	wg           sync.WaitGroup
 )
 
 var promServer *httptest.Server
@@ -54,36 +58,8 @@ func collectMetrics(server *httptest.Server) string {
 }
 
 func main() {
-	promServer = httptest.NewServer(promhttp.Handler())
 	flag.Parse()
-
-	pdCli, err := pd.NewClient([]string{*pdAddrs}, pd.SecurityOption{
-		CAPath:   *caPath,
-		CertPath: *certPath,
-		KeyPath:  *keyPath,
-	})
-	if err != nil {
-		log.Fatal(fmt.Sprintf("%v", err))
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
-	// To avoid the first time high latency.
-	for i := 0; i < *concurrency; i++ {
-		_, _, err = pdCli.GetTS(ctx)
-		if err != nil {
-			log.Fatal("get tso failed", zap.Error(err))
-		}
-	}
-
-	durCh := make(chan time.Duration, *concurrency*2)
-
-	wg.Add(*concurrency)
-	for i := 0; i < *concurrency; i++ {
-		go reqWorker(ctx, pdCli, durCh)
-	}
-
-	wg.Add(1)
-	go showStats(ctx, durCh)
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
@@ -91,15 +67,64 @@ func main() {
 		syscall.SIGINT,
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
-
 	go func() {
 		<-sc
 		cancel()
 	}()
 
+	for i := 0; i < *count; i++ {
+		fmt.Printf("\nStart benchmark #%d, duration: %+vs\n", i, (*duration).Seconds())
+		bench(ctx)
+	}
+}
+
+func bench(mainCtx context.Context) {
+	promServer = httptest.NewServer(promhttp.Handler())
+
+	// Initialize all clients
+	fmt.Printf("Create %d client(s) for benchmark\n", *count)
+	pdClients := make([]pd.Client, *clientNumber)
+	for idx := range pdClients {
+		pdCli, err := pd.NewClient([]string{*pdAddrs}, pd.SecurityOption{
+			CAPath:   *caPath,
+			CertPath: *certPath,
+			KeyPath:  *keyPath,
+		})
+		if err != nil {
+			log.Fatal(fmt.Sprintf("create pd client #%d failed: %v", idx, err))
+		}
+		pdClients[idx] = pdCli
+	}
+
+	ctx, cancel := context.WithCancel(mainCtx)
+	// To avoid the first time high latency.
+	for idx, pdCli := range pdClients {
+		_, _, err := pdCli.GetTS(ctx)
+		if err != nil {
+			log.Fatal("get first time tso failed", zap.Int("client-number", idx), zap.Error(err))
+		}
+	}
+
+	durCh := make(chan time.Duration, 2*(*concurrency)*(*clientNumber))
+
+	wg.Add((*concurrency) * (*clientNumber))
+	for _, pdCli := range pdClients {
+		for i := 0; i < *concurrency; i++ {
+			go reqWorker(ctx, pdCli, durCh)
+		}
+	}
+
+	wg.Add(1)
+	go showStats(ctx, durCh)
+
+	time.Sleep(*duration)
+	cancel()
+
 	wg.Wait()
 
-	pdCli.Close()
+	for _, pdCli := range pdClients {
+		pdCli.Close()
+	}
 }
 
 func showStats(ctx context.Context, durCh chan time.Duration) {
@@ -117,36 +142,53 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 		select {
 		case <-ticker.C:
 			//runtime.GC()
-			println(s.String())
+			if *verbose {
+				fmt.Println(s.Counter())
+			}
 			total.merge(s)
 			s = newStats()
 		case d := <-durCh:
 			s.update(d)
 		case <-statCtx.Done():
-			println("\nTotal:")
-			println(total.String())
-			println(collectMetrics(promServer))
+			fmt.Println("\nTotal:")
+			fmt.Println(total.Counter())
+			fmt.Println(total.Percentage())
+			if *verbose {
+				fmt.Println(collectMetrics(promServer))
+			}
 			return
 		}
 	}
 }
 
 const (
-	twoDur    = time.Millisecond * 2
-	fiveDur   = time.Millisecond * 5
-	tenDur    = time.Millisecond * 10
-	thirtyDur = time.Millisecond * 30
+	twoDur          = time.Millisecond * 2
+	fiveDur         = time.Millisecond * 5
+	tenDur          = time.Millisecond * 10
+	thirtyDur       = time.Millisecond * 30
+	fiftyDur        = time.Millisecond * 50
+	oneHundredDur   = time.Millisecond * 100
+	twoHundredDur   = time.Millisecond * 200
+	fourHundredDur  = time.Millisecond * 400
+	eightHundredDur = time.Millisecond * 800
+	oneThousandDur  = time.Millisecond * 1000
 )
 
 type stats struct {
-	maxDur       time.Duration
-	minDur       time.Duration
-	count        int
-	milliCnt     int
-	twoMilliCnt  int
-	fiveMilliCnt int
-	tenMSCnt     int
-	thirtyCnt    int
+	maxDur          time.Duration
+	minDur          time.Duration
+	count           int
+	milliCnt        int
+	twoMilliCnt     int
+	fiveMilliCnt    int
+	tenMSCnt        int
+	thirtyCnt       int
+	fiftyCnt        int
+	oneHundredCnt   int
+	twoHundredCnt   int
+	fourHundredCnt  int
+	eightHundredCnt int
+	oneThousandCnt  int
 }
 
 func newStats() *stats {
@@ -164,6 +206,36 @@ func (s *stats) update(dur time.Duration) {
 	}
 	if dur < s.minDur {
 		s.minDur = dur
+	}
+
+	if dur > oneThousandDur {
+		s.oneThousandCnt++
+		return
+	}
+
+	if dur > eightHundredDur {
+		s.eightHundredCnt++
+		return
+	}
+
+	if dur > fourHundredDur {
+		s.fourHundredCnt++
+		return
+	}
+
+	if dur > twoHundredDur {
+		s.twoHundredCnt++
+		return
+	}
+
+	if dur > oneHundredDur {
+		s.oneHundredCnt++
+		return
+	}
+
+	if dur > fiftyDur {
+		s.fiftyCnt++
+		return
 	}
 
 	if dur > thirtyDur {
@@ -206,12 +278,31 @@ func (s *stats) merge(other *stats) {
 	s.fiveMilliCnt += other.fiveMilliCnt
 	s.tenMSCnt += other.tenMSCnt
 	s.thirtyCnt += other.thirtyCnt
+	s.fiftyCnt += other.fiftyCnt
+	s.oneHundredCnt += other.oneHundredCnt
+	s.twoHundredCnt += other.twoHundredCnt
+	s.fourHundredCnt += other.fourHundredCnt
+	s.eightHundredCnt += other.eightHundredCnt
+	s.oneThousandCnt += other.oneThousandCnt
 }
 
-func (s *stats) String() string {
-	return fmt.Sprintf("count:%d, max:%d, min:%d, >1ms:%d, >2ms:%d, >5ms:%d, >10ms:%d, >30ms:%d",
+func (s *stats) Counter() string {
+	return fmt.Sprintf(
+		"count:%d, max:%d, min:%d, >1ms:%d, >2ms:%d, >5ms:%d, >10ms:%d, >30ms:%d >50ms:%d >100ms:%d >200ms:%d >400ms:%d >800ms:%d >1s:%d",
 		s.count, s.maxDur.Nanoseconds()/int64(time.Millisecond), s.minDur.Nanoseconds()/int64(time.Millisecond),
-		s.milliCnt, s.twoMilliCnt, s.fiveMilliCnt, s.tenMSCnt, s.thirtyCnt)
+		s.milliCnt, s.twoMilliCnt, s.fiveMilliCnt, s.tenMSCnt, s.thirtyCnt, s.fiftyCnt, s.oneHundredCnt, s.twoHundredCnt, s.fourHundredCnt,
+		s.eightHundredCnt, s.oneThousandCnt)
+}
+
+func (s *stats) Percentage() string {
+	return fmt.Sprintf(
+		"count:%d, >1ms:%2.2f%%, >2ms:%2.2f%%, >5ms:%2.2f%%, >10ms:%2.2f%%, >30ms:%2.2f%% >50ms:%2.2f%% >100ms:%2.2f%% >200ms:%2.2f%% >400ms:%2.2f%% >800ms:%2.2f%% >1s:%2.2f%%", s.count,
+		s.calculate(s.milliCnt), s.calculate(s.twoMilliCnt), s.calculate(s.fiveMilliCnt), s.calculate(s.tenMSCnt), s.calculate(s.thirtyCnt), s.calculate(s.fiftyCnt),
+		s.calculate(s.oneHundredCnt), s.calculate(s.twoHundredCnt), s.calculate(s.fourHundredCnt), s.calculate(s.eightHundredCnt), s.calculate(s.oneThousandCnt))
+}
+
+func (s *stats) calculate(count int) float64 {
+	return float64(count) * 100 / float64(s.count)
 }
 
 func reqWorker(ctx context.Context, pdCli pd.Client, durCh chan time.Duration) {
