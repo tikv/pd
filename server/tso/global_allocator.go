@@ -118,7 +118,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	if len(dcLocationMap) == 0 {
 		return gta.timestampOracle.getTS(gta.leadership, count)
 	}
-	// Colletc all allocator leaders' client URLs
+	// Collect all allocator leaders' client URLs
 	allocatorLeaders, err := gta.allocatorManager.GetLocalAllocatorLeaders()
 	if err != nil {
 		return pdpb.Timestamp{}, err
@@ -161,6 +161,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, leaderURLs []strin
 	for i := 0; i < maxRetryCount; i++ {
 		respCh := make(chan *pdpb.SyncMaxTSResponse, len(leaderURLs))
 		errCh := make(chan error, len(leaderURLs))
+		var errList []error
 		wg := sync.WaitGroup{}
 		for _, leaderURL := range leaderURLs {
 			leaderConn, err := gta.getOrCreateGRPCConn(ctx, leaderURL)
@@ -192,7 +193,10 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, leaderURLs []strin
 		close(errCh)
 		// If any error occurs, the synchronization process will fail
 		if err := <-errCh; err != nil {
-			return err
+			errList = append(errList, err)
+		}
+		if len(errList) > 0 {
+			return errs.ErrSyncMaxTS.FastGenWithCause(errList)
 		}
 		var syncedDCs []string
 		for resp := range respCh {
