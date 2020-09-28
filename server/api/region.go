@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 )
 
@@ -267,7 +268,7 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 // @Router /regions/check/miss-peer [get]
 func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetMissPeerRegions()
+	regions, err := handler.GetRegionsByType(statistics.MissPeer)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -284,7 +285,7 @@ func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Reque
 // @Router /regions/check/extra-peer [get]
 func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetExtraPeerRegions()
+	regions, err := handler.GetRegionsByType(statistics.ExtraPeer)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -301,7 +302,7 @@ func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, r *http.Requ
 // @Router /regions/check/pending-peer [get]
 func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetPendingPeerRegions()
+	regions, err := handler.GetRegionsByType(statistics.PendingPeer)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -318,7 +319,7 @@ func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Re
 // @Router /regions/check/down-peer [get]
 func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetDownPeerRegions()
+	regions, err := handler.GetRegionsByType(statistics.DownPeer)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -335,7 +336,7 @@ func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Reque
 // @Router /regions/check/learner-peer [get]
 func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetLearnerPeerRegions()
+	regions, err := handler.GetRegionsByType(statistics.LearnerPeer)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -352,7 +353,7 @@ func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Re
 // @Router /regions/check/offline-peer [get]
 func (h *regionsHandler) GetOfflinePeer(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetOfflinePeer()
+	regions, err := handler.GetRegionsByType(statistics.OfflinePeer)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -369,7 +370,7 @@ func (h *regionsHandler) GetOfflinePeer(w http.ResponseWriter, r *http.Request) 
 // @Router /regions/check/empty-region [get]
 func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetEmptyRegion()
+	regions, err := handler.GetRegionsByType(statistics.EmptyRegion)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

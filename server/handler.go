@@ -772,49 +772,13 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 	return nil
 }
 
-// GetDownPeerRegions gets the region with down peer.
-func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
+// GetRegionsByType gets the region with specified type.
+func (h *Handler) GetRegionsByType(typ statistics.RegionStatisticType) ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
 		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	return c.GetRegionStatsByType(statistics.DownPeer), nil
-}
-
-// GetLearnerPeerRegions gets the region with learner peer.
-func (h *Handler) GetLearnerPeerRegions() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetRegionStatsByType(statistics.LearnerPeer), nil
-}
-
-// GetExtraPeerRegions gets the region exceeds the specified number of peers.
-func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetRegionStatsByType(statistics.ExtraPeer), nil
-}
-
-// GetMissPeerRegions gets the region less than the specified number of peers.
-func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetRegionStatsByType(statistics.MissPeer), nil
-}
-
-// GetPendingPeerRegions gets the region with pending peer.
-func (h *Handler) GetPendingPeerRegions() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetRegionStatsByType(statistics.PendingPeer), nil
+	return c.GetRegionStatsByType(typ), nil
 }
 
 // GetSchedulerConfigHandler gets the handler of schedulers.
@@ -830,24 +794,6 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
 	return mux
-}
-
-// GetOfflinePeer gets the region with offline peer.
-func (h *Handler) GetOfflinePeer() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetRegionStatsByType(statistics.OfflinePeer), nil
-}
-
-// GetEmptyRegion gets the region with empty size.
-func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetRegionStatsByType(statistics.EmptyRegion), nil
 }
 
 // ResetTS resets the ts with specified tso.
