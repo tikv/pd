@@ -431,6 +431,7 @@ func (h *ruleHandler) GetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 
 // @Tags rule
 // @Summary Update all rules and groups configuration.
+// @Param partial query bool false "if partially update rules" default(false)
 // @Produce json
 // @Success 200 {string} string "Update rules and groups successfully."
 // @Failure 400 {string} string "The input is invalid."
@@ -459,7 +460,8 @@ func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 			}
 		}
 	}
-	if err := cluster.GetRuleManager().SetAllGroupBundles(groups); err != nil {
+	_, partial := r.URL.Query()["partial"]
+	if err := cluster.GetRuleManager().SetAllGroupBundles(groups, !partial); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

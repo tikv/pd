@@ -45,6 +45,7 @@ var (
 	caseName                    = flag.String("case", "", "case name")
 	serverLogLevel              = flag.String("serverLog", "fatal", "pd server log level")
 	simLogLevel                 = flag.String("simLog", "fatal", "simulator log level")
+	simLogFile                  = flag.String("simLogFile", "", "simulator log file")
 	regionNum                   = flag.Int("regionNum", 0, "regionNum of one store")
 	storeNum                    = flag.Int("storeNum", 0, "storeNum")
 	enableTransferRegionCounter = flag.Bool("enableTransferRegionCounter", false, "enableTransferRegionCounter")
@@ -53,7 +54,7 @@ var (
 func main() {
 	flag.Parse()
 
-	simutil.InitLogger(*simLogLevel)
+	simutil.InitLogger(*simLogLevel, *simLogFile)
 	simutil.InitCaseConfig(*storeNum, *regionNum, *enableTransferRegionCounter)
 	statistics.Denoising = false
 	if simutil.CaseConfigure.EnableTransferRegionCounter {

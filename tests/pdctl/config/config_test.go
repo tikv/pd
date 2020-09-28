@@ -393,6 +393,14 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "max-replicas", "1")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "please update rule instead"), IsTrue)
+
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "location-labels", "dc,rack")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "please update rule instead"), IsTrue)
+
 	// test get
 	var bundle placement.GroupBundle
 	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pd")
@@ -427,21 +435,26 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	c.Assert(err, IsNil)
 
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pe")
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
-	err = json.Unmarshal(output, &bundle)
-	c.Assert(err, IsNil)
-	c.Assert(bundle, DeepEquals, placement.GroupBundle{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}})
+	b, _ = ioutil.ReadFile(fname)
+	c.Assert(json.Unmarshal(b, &bundles), IsNil)
+	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}},
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
+	})
 
 	// test delete
 	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "pd")
 	c.Assert(err, IsNil)
 
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pd")
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
-	err = json.Unmarshal(output, &bundle)
-	c.Assert(err, IsNil)
-	c.Assert(bundle, DeepEquals, placement.GroupBundle{ID: "pd", Index: 0, Override: false})
+	b, _ = ioutil.ReadFile(fname)
+	c.Assert(json.Unmarshal(b, &bundles), IsNil)
+	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
+	})
 
 	// test delete regexp
 	bundle.ID = "pf"
@@ -455,11 +468,13 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "--regexp", ".*f")
 	c.Assert(err, IsNil)
 
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pf")
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
-	err = json.Unmarshal(output, &bundle)
-	c.Assert(err, IsNil)
-	c.Assert(bundle, DeepEquals, placement.GroupBundle{ID: "pf", Index: 0, Override: false})
+	b, _ = ioutil.ReadFile(fname)
+	c.Assert(json.Unmarshal(b, &bundles), IsNil)
+	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
+	})
 
 	// test save
 	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}
@@ -475,9 +490,25 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	b, err = ioutil.ReadFile(fname)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, HasLen, 2)
 	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
-		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}},
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
+		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
+	})
+
+	// partial update, so still one group is left, no error
+	bundles = []placement.GroupBundle{{ID: "pe", Rules: []*placement.Rule{}}}
+	b, err = json.Marshal(bundles)
+	c.Assert(err, IsNil)
+	c.Assert(ioutil.WriteFile(fname, b, 0644), IsNil)
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname, "--partial")
+	c.Assert(err, IsNil)
+
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
+	c.Assert(err, IsNil)
+	b, err = ioutil.ReadFile(fname)
+	c.Assert(err, IsNil)
+	c.Assert(json.Unmarshal(b, &bundles), IsNil)
+	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
 		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
 	})
 }
