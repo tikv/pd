@@ -281,23 +281,17 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "scatter-regions":
-		startKey, ok := input["start_key"].(string)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing start key")
-			return
-		}
-		endKey, ok := input["end_key"].(string)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing end key")
-			return
-		}
+		// support both receiving key ranges or regionIDs
+		startKey, _ := input["start_key"].(string)
+		endKey, _ := input["end_key"].(string)
+		regionIDs, _ := input["region_ids"].([]uint64)
 		group, _ := input["group"].(string)
 		retryLimit, ok := input["retry_limit"].(int)
 		if !ok {
 			// retry 5 times if retryLimit not defined
 			retryLimit = 5
 		}
-		processedPercentage, err := h.AddScatterRegionsOperators(startKey, endKey, group, retryLimit)
+		processedPercentage, err := h.AddScatterRegionsOperators(regionIDs, startKey, endKey, group, retryLimit)
 		errorMessage := ""
 		if err != nil {
 			errorMessage = err.Error()

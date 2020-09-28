@@ -774,22 +774,36 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 }
 
 // AddScatterRegionsOperators add operators to scatter regions and return the processed percentage and error
-func (h *Handler) AddScatterRegionsOperators(startRawKey, endRawKey, group string, retryLimit int) (int, error) {
+func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, endRawKey, group string, retryLimit int) (int, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return 0, err
 	}
-	startKey, err := hex.DecodeString(startRawKey)
-	if err != nil {
-		return 0, err
-	}
-	endKey, err := hex.DecodeString(endRawKey)
-	if err != nil {
-		return 0, err
-	}
-	regions := c.ScanRegions(startKey, endKey, -1)
-	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
 	var failureRegionID []string
+	var regions []*core.RegionInfo
+	// If startKey and endKey are both defined, use them first.
+	if len(startRawKey) > 0 && len(endRawKey) > 0 {
+		startKey, err := hex.DecodeString(startRawKey)
+		if err != nil {
+			return 0, err
+		}
+		endKey, err := hex.DecodeString(endRawKey)
+		if err != nil {
+			return 0, err
+		}
+		regions = c.ScanRegions(startKey, endKey, -1)
+	} else {
+		for _, id := range regionIDs {
+			region := c.GetRegion(id)
+			if region == nil {
+				failureRegionID = append(failureRegionID, fmt.Sprintf("%v", id))
+				continue
+			}
+			regions = append(regions, region)
+		}
+	}
+	// check region hot status
+	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
 	for _, region := range regions {
 		// If region is Hot, add it into unProcessedRegions
 		if c.IsRegionHot(region) {
