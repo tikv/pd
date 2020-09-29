@@ -80,7 +80,7 @@ func (s *RegionRequestSender) SendReq(regionRequest *RegionRequest) (*rpc.Respon
 		}
 		// If the error is the regionErr, the error should be directly returned.
 		if regionErr != nil {
-			return nil, errors.Errorf("regionErr, err: %v", regionErr.Message)
+			return resp, errors.Errorf("regionErr, err: %v", regionErr.Message)
 		}
 		return resp, nil
 	}
