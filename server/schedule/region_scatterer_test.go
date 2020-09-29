@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -349,4 +350,20 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 		}
 		cancel()
 	}
+}
+
+func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stores := newSelectedStores(ctx, true)
+	stores.put(1, "testgroup")
+	_, ok := stores.getStore("testgroup")
+	c.Assert(ok, Equals, true)
+	_, ok = stores.getGroupDistribution("testgroup")
+	c.Assert(ok, Equals, true)
+	time.Sleep(gcTTL)
+	_, ok = stores.getStore("testgroup")
+	c.Assert(ok, Equals, false)
+	_, ok = stores.getGroupDistribution("testgroup")
+	c.Assert(ok, Equals, false)
 }
