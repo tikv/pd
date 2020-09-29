@@ -78,11 +78,11 @@ type AllocatorManager struct {
 	rootPath       string
 	saveInterval   time.Duration
 	maxResetTSGap  func() time.Duration
-	securityConfig *grpcutil.SecurityConfig
+	securityConfig *grpcutil.TLSConfig
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
-func NewAllocatorManager(m *member.Member, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration, sc *grpcutil.SecurityConfig) *AllocatorManager {
+func NewAllocatorManager(m *member.Member, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration, sc *grpcutil.TLSConfig) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
 		allocatorGroups: make(map[string]*allocatorGroup),
 		member:          m,
