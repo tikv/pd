@@ -28,13 +28,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
-
+// RegionRequestSender send the region request to Store.
 type RegionRequestSender struct {
 	client   rpc.Client
 	rpcError error
 }
 
-// NewRegionRequestSender creates a new sender without regionCache.
+// NewRegionRequestSender creates a new RegionRequestSender.
 func NewRegionRequestSender(conf *config.RPC) *RegionRequestSender {
 	return &RegionRequestSender{
 		client: rpc.NewRPCClient(conf),
