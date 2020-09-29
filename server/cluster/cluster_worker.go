@@ -33,12 +33,6 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 
-	// If the region peer count is 0, then we should not handle this.
-	if len(region.GetPeers()) == 0 {
-		log.Warn("invalid region, zero region peer count", zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
-		return errors.Errorf("invalid region, zero region peer count: %v", core.RegionToHexMeta(region.GetMeta()))
-	}
-
 	c.RLock()
 	co := c.coordinator
 	c.RUnlock()

@@ -414,6 +414,15 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			continue
 		}
 
+		// If the region peer count is 0, then we should not handle this.
+		if len(region.GetPeers()) == 0 {
+			log.Warn("invalid region, zero region peer count", zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
+			msg := fmt.Sprintf("invalid region, zero region peer count: %v", core.RegionToHexMeta(region.GetMeta()))
+			s.hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
+			continue
+		}
+
 		start := time.Now()
 
 		err = rc.HandleRegionHeartbeat(region)
