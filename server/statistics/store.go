@@ -328,9 +328,9 @@ type rollingStats struct {
 
 func newRollingStats() *rollingStats {
 	return &rollingStats{
-		bytes:    NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
-		keys:     NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
-		qps:      NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
+		bytes:    NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
+		keys:     NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
+		qps:      NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
 		diskRate: NewMedianFilter(storeStatsRollingWindows),
 	}
 }

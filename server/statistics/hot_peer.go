@@ -39,7 +39,7 @@ type HotPeerStat struct {
 	Kind     FlowKind `json:"kind"`
 	ByteRate float64  `json:"flow_bytes"`
 	KeyRate  float64  `json:"flow_keys"`
-	QPS      float64  `json:"QPS"`
+	QPS      float64  `json:"qps"`
 
 	// rolling statistics, recording some recently added records.
 	RollingByteRate *TimeMedian
