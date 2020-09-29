@@ -61,7 +61,7 @@ func (s *RegionSyncer) reset() {
 func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 	s.reset()
 	ctx, cancel := context.WithCancel(s.server.LoopContext())
-	tlsCfg, err := s.securityConfig.ToTLSConfig()
+	tlsCfg, err := s.tlsConfig.ToTLSConfig()
 	if err != nil {
 		cancel()
 		return nil, err
