@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/client-go/config"
-	"github.com/tikv/client-go/retry"
 	"github.com/tikv/client-go/rpc"
 	"github.com/tikv/pd/server/core"
 )
@@ -47,8 +46,9 @@ type RegionRequest struct {
 }
 
 // NewRegionRequest create a new RegionRequest
-func NewRegionRequest(bo *retry.Backoffer,
-	req *rpc.Request, region *core.RegionInfo,
+func NewRegionRequest(
+	req *rpc.Request,
+	region *core.RegionInfo,
 	leaderStore *core.StoreInfo,
 	timeout time.Duration) *RegionRequest {
 	return &RegionRequest{
