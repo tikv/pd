@@ -21,10 +21,12 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -173,6 +175,47 @@ func newEngineContext(ctx context.Context, filters ...filter.Filter) engineConte
 	}
 }
 
+const maxSleepDuration = 1 * time.Minute
+const initialSleepDuration = 100 * time.Millisecond
+const maxRetryLimit = 30
+
+// ScatterRegions relocates the regions. If the group is defined, the regions' leader with the same group would be scattered
+// in a group level instead of cluster level.
+// RetryTimes indicates the retry times if any of the regions failed to relocate during scattering. There will be
+// time.Sleep between each retry.
+// Failures indicates the regions which are failed to be relocated, the key of the failures indicates the regionID
+// and the value of the failures indicates the failure error.
+func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) []*operator.Operator {
+	if retryLimit > maxRetryLimit {
+		retryLimit = maxRetryLimit
+	}
+	ops := make([]*operator.Operator, 0, len(regions))
+	for currentRetry := 0; currentRetry < retryLimit; currentRetry++ {
+		for _, region := range regions {
+			op, err := r.Scatter(region, group)
+			failpoint.Inject("scatterFail", func() {
+				if region.GetID() == 1 {
+					err = errors.New("mock error")
+				}
+			})
+			if err != nil {
+				failures[region.GetID()] = err
+				continue
+			}
+			ops = append(ops, op)
+			delete(regions, region.GetID())
+			delete(failures, region.GetID())
+		}
+		// all regions have been relocated, break the loop.
+		if len(regions) < 1 {
+			break
+		}
+		// Wait for a while if there are some regions failed to be relocated
+		time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(currentRetry)))*initialSleepDuration))
+	}
+	return ops
+}
+
 // Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
 // in a group level instead of cluster level.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*operator.Operator, error) {
@@ -183,6 +226,10 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*opera
 
 	if region.GetLeader() == nil {
 		return nil, errors.Errorf("region %d has no leader", region.GetID())
+	}
+
+	if r.cluster.IsRegionHot(region) {
+		return nil, errors.Errorf("region %d is hot", region.GetID())
 	}
 
 	return r.scatterRegion(region, group), nil

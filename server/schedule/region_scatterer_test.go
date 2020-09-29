@@ -7,6 +7,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -347,6 +348,67 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 			c.Assert(min, LessEqual, uint64(20))
 			c.Assert(max, GreaterEqual, uint64(20))
 			c.Assert(max-min, LessEqual, uint64(3))
+		}
+		cancel()
+	}
+}
+
+func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	// Add 5 stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	testcases := []struct {
+		name    string
+		failure bool
+	}{
+		{
+			name:    "have failure",
+			failure: true,
+		},
+		{
+			name:    "no failure",
+			failure: false,
+		},
+	}
+	group := "group"
+	for _, testcase := range testcases {
+		ctx, cancel := context.WithCancel(context.Background())
+		scatterer := NewRegionScatterer(ctx, tc)
+		regions := map[uint64]*core.RegionInfo{}
+		for i := 1; i <= 100; i++ {
+			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+		}
+		c.Log(testcase.name)
+		failures := map[uint64]error{}
+		if testcase.failure {
+			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`), IsNil)
+		}
+
+		scatterer.ScatterRegions(regions, failures, group, 3)
+		max := uint64(0)
+		min := uint64(math.MaxUint64)
+		for _, count := range scatterer.ordinaryEngine.selectedLeader.getGroupDistributionOrDefault(group) {
+			if count > max {
+				max = count
+			}
+			if count < min {
+				min = count
+			}
+		}
+		// 100 regions divided 5 stores, each store expected to have about 20 regions.
+		c.Assert(min, LessEqual, uint64(20))
+		c.Assert(max, GreaterEqual, uint64(20))
+		c.Assert(max-min, LessEqual, uint64(3))
+		if testcase.failure {
+			c.Assert(len(failures), Equals, 1)
+			_, ok := failures[1]
+			c.Assert(ok, Equals, true)
+			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterFail"), IsNil)
+		} else {
+			c.Assert(len(failures), Equals, 0)
 		}
 		cancel()
 	}
