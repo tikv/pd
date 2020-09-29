@@ -224,14 +224,7 @@ func (c *client) tsCancelLoop() {
 			}
 		}(dcLocation, c.tsDeadlineCh[dcLocation])
 	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-	}
+	<-ctx.Done()
 }
 
 func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.CancelFunc, createdCh chan struct{}) {
