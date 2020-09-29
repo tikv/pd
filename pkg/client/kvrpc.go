@@ -26,8 +26,7 @@ import (
 
 // RegionRequestSender send the region request to Store.
 type RegionRequestSender struct {
-	client   rpc.Client
-	rpcError error
+	client rpc.Client
 }
 
 // NewRegionRequestSender creates a new RegionRequestSender.
