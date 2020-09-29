@@ -182,6 +182,7 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 		{2, []uint64{1, 3, 4}, 512 * KB, 0},
 		{3, []uint64{1, 2, 4}, 512 * KB, 0},
 	})
+	c.Assert(len(hb.Schedule(tc)) == 0, IsFalse)
 
 	// Will transfer a hot region from store 1, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
@@ -616,7 +617,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	c.Assert(len(stats), Equals, 2)
 	for _, ss := range stats {
 		for _, s := range ss {
-			c.Assert(s.ByteRate, Equals, 512.0*KB)
+			c.Assert(s.GetByteRate(), Equals, 512.0*KB)
 		}
 	}
 

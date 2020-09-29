@@ -42,9 +42,9 @@ type HotPeerStat struct {
 	QPS      float64  `json:"QPS"`
 
 	// rolling statistics, recording some recently added records.
-	rollingByteRate MovingAvg
-	rollingKeyRate  MovingAvg
-	rollingQPS      MovingAvg
+	RollingByteRate *TimeMedian
+	RollingKeyRate  *TimeMedian
+	RollingQPS      *TimeMedian
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
@@ -93,36 +93,36 @@ func (stat *HotPeerStat) IsNew() bool {
 
 // GetByteRate returns denoised BytesRate if possible.
 func (stat *HotPeerStat) GetByteRate() float64 {
-	if stat.rollingByteRate == nil {
+	if stat.RollingByteRate == nil {
 		return stat.ByteRate
 	}
-	return stat.rollingByteRate.Get()
+	return stat.RollingByteRate.Get()
 }
 
 // GetKeyRate returns denoised KeysRate if possible.
 func (stat *HotPeerStat) GetKeyRate() float64 {
-	if stat.rollingKeyRate == nil {
+	if stat.RollingKeyRate == nil {
 		return stat.KeyRate
 	}
-	return stat.rollingKeyRate.Get()
+	return stat.RollingKeyRate.Get()
 }
 
 // GetQPS returns denoised QPS if possible.
 func (stat *HotPeerStat) GetQPS() float64 {
-	if stat.rollingQPS == nil {
+	if stat.RollingQPS == nil {
 		return stat.QPS
 	}
-	return stat.rollingQPS.Get()
+	return stat.RollingQPS.Get()
 }
 
 // Clone clones the HotPeerStat
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
 	ret.ByteRate = stat.GetByteRate()
-	ret.rollingByteRate = nil
+	ret.RollingByteRate = nil
 	ret.KeyRate = stat.GetKeyRate()
-	ret.rollingKeyRate = nil
+	ret.RollingKeyRate = nil
 	ret.QPS = stat.GetQPS()
-	ret.rollingQPS = nil
+	ret.RollingQPS = nil
 	return &ret
 }
