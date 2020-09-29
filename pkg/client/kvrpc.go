@@ -61,21 +61,19 @@ func NewRegionRequest(bo *retry.Backoffer,
 
 // SendReq sends a request to tikv server.
 func (s *RegionRequestSender) SendReq(ctx context.Context, regionRequest *RegionRequest) (*rpc.Response, error) {
-	for {
-		resp, err := s.sendReqToRegion(ctx, regionRequest)
-		if err != nil {
-			return nil, err
-		}
-		regionErr, err := resp.GetRegionError()
-		if err != nil {
-			return nil, err
-		}
-		// If the error is the regionErr, the error should be directly returned.
-		if regionErr != nil {
-			return resp, errors.Errorf("regionErr, err: %v", regionErr.Message)
-		}
-		return resp, nil
+	resp, err := s.sendReqToRegion(ctx, regionRequest)
+	if err != nil {
+		return nil, err
 	}
+	regionErr, err := resp.GetRegionError()
+	if err != nil {
+		return nil, err
+	}
+	// If the error is the regionErr, the error should be directly returned.
+	if regionErr != nil {
+		return resp, errors.Errorf("regionErr, err: %v", regionErr.Message)
+	}
+	return resp, nil
 }
 
 func (s *RegionRequestSender) sendReqToRegion(ctx context.Context, request *RegionRequest) (resp *rpc.Response, err error) {
