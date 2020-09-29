@@ -128,7 +128,7 @@ func (s *clientTLSTestSuite) testTLSReload(
 	tlsInfo := cloneFunc()
 	// 1. start cluster with valid certs
 	clus, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) {
-		conf.Security = grpcutil.SecurityConfig{
+		conf.Security.TLSConfig = grpcutil.TLSConfig{
 			KeyPath:  tlsInfo.KeyFile,
 			CertPath: tlsInfo.CertFile,
 			CAPath:   tlsInfo.TrustedCAFile,
