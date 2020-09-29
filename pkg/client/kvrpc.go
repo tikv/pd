@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
 // RegionRequestSender send the region request to Store.
 type RegionRequestSender struct {
 	client   rpc.Client
