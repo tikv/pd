@@ -53,3 +53,5 @@ require (
 )
 
 replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
+
+replace github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
