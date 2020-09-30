@@ -292,10 +292,6 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 	return false
 }
 
-func (f *hotPeerCache) getHotRegionAntiCount() int {
-	return hotRegionAntiCount + f.getDefaultTimeMedian().GetFilledPeriod()
-}
-
 func (f *hotPeerCache) getDefaultTimeMedian() *TimeMedian {
 	return NewTimeMedian(DefaultAotSize, rollingWindowsSize, RegionHeartBeatReportInterval)
 }
@@ -314,7 +310,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		newItem.RollingKeyRate = oldItem.RollingKeyRate
 		if isHot {
 			newItem.HotDegree = oldItem.HotDegree + 1
-			newItem.AntiCount = f.getHotRegionAntiCount()
+			newItem.AntiCount = hotRegionAntiCount
 		} else if interval != 0 {
 			newItem.HotDegree = oldItem.HotDegree - 1
 			newItem.AntiCount = oldItem.AntiCount - 1
@@ -328,7 +324,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		}
 		newItem.RollingByteRate = f.getDefaultTimeMedian()
 		newItem.RollingKeyRate = f.getDefaultTimeMedian()
-		newItem.AntiCount = f.getHotRegionAntiCount()
+		newItem.AntiCount = hotRegionAntiCount
 		newItem.isNew = true
 	}
 	newItem.RollingByteRate.Add(bytes, interval*time.Second)
