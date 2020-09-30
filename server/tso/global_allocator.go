@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/tsoutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -127,9 +128,15 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	if err := gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
-	// Update the global TSO in memory
-	if err := gta.SetTSO(tsoutil.GenerateTS(maxTSO)); err != nil {
+	var currentGlobalTSO pdpb.Timestamp
+	if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
 		return pdpb.Timestamp{}, err
+	}
+	if tsoutil.CompareTimestamp(&currentGlobalTSO, maxTSO) < 0 {
+		// Update the global TSO in memory
+		if err := gta.SetTSO(tsoutil.GenerateTS(maxTSO)); err != nil {
+			return pdpb.Timestamp{}, err
+		}
 	}
 	return *maxTSO, nil
 }
@@ -257,6 +264,14 @@ func (gta *GlobalTSOAllocator) getOrCreateGRPCConn(ctx context.Context, addr str
 	}
 	gta.localAllocatorConn.clientConns[addr] = cc
 	return cc, nil
+}
+
+func (gta *GlobalTSOAllocator) getCurrentTSO() (pdpb.Timestamp, error) {
+	currentPhysical, currentLogical := gta.timestampOracle.getTSO()
+	if currentPhysical == typeutil.ZeroTime {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
+	}
+	return *tsoutil.GenerateTimestamp(currentPhysical, uint64(currentLogical)), nil
 }
 
 // Reset is used to reset the TSO allocator.
