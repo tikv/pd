@@ -23,8 +23,6 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-const waitAllocatorPriorityCheckInterval = 90 * time.Second
-
 var _ = Suite(&testManagerSuite{})
 
 type testManagerSuite struct {
@@ -91,7 +89,25 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	}
 }
 
-func (s *testManagerSuite) TestAllocatorPriority(c *C) {
+const waitAllocatorPriorityCheckInterval = 3 * time.Minute
+
+var _ = Suite(&testPrioritySuite{})
+
+type testPrioritySuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testPrioritySuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *testPrioritySuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+func (s *testPrioritySuite) TestAllocatorPriority(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
@@ -120,6 +136,7 @@ func (s *testManagerSuite) TestAllocatorPriority(c *C) {
 	// Because the default priority checking period is 1 minute,
 	// so we sleep longer here.
 	time.Sleep(waitAllocatorPriorityCheckInterval)
+
 	for serverName, dcLocation := range dcLocationConfig {
 		currentLeaderName := cluster.WaitAllocatorLeader(dcLocation)
 		c.Assert(currentLeaderName, Equals, serverName)
