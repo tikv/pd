@@ -23,7 +23,7 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-const waitAllocatorPriorityCheckInterval = 2 * time.Minute
+const waitAllocatorPriorityCheckInterval = 90 * time.Second
 
 var _ = Suite(&testManagerSuite{})
 

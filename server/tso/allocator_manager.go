@@ -36,7 +36,7 @@ import (
 )
 
 const (
-	checkPriorityStep           = 1 * time.Minute
+	checkPriorityStep           = 30 * time.Second
 	checkAllocatorStep          = 1 * time.Second
 	dcLocationConfigEtcdPrefix  = "dc-location"
 	defaultAllocatorLeaderLease = 3
@@ -390,7 +390,6 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 				log.Error("check new allocators failed, can't set up a new local allocator", zap.String("dc-location", dcLocation), errs.ZapError(err))
 				continue
 			}
-			am.priorityChecker()
 		}
 	}
 	// Clean up the unused one
@@ -445,9 +444,19 @@ func (am *AllocatorManager) priorityChecker() {
 				zap.Uint64("next-leader-id", serverID),
 				zap.String("next-dc-location", myServerDCLocation))
 			nextLeaderKey := path.Join(am.rootPath, allocatorGroup.dcLocation, "next-leader")
+			// Grant a 60s etcd lease
+			nextLeaderLease := clientv3.NewLease(am.member.Client())
+			ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)
+			leaseResp, err := nextLeaderLease.Grant(ctx, 60)
+			cancel()
+			if err != nil {
+				err = errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
+				log.Error("failed to grant the lease of the next leader id key", errs.ZapError(err))
+				continue
+			}
 			resp, err := kv.NewSlowLogTxn(am.member.Client()).
 				If(clientv3.Compare(clientv3.CreateRevision(nextLeaderKey), "=", 0)).
-				Then(clientv3.OpPut(nextLeaderKey, fmt.Sprint(serverID))).
+				Then(clientv3.OpPut(nextLeaderKey, fmt.Sprint(serverID), clientv3.WithLease(leaseResp.ID))).
 				Commit()
 			if err != nil {
 				err = errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
