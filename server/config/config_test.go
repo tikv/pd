@@ -44,6 +44,11 @@ func (s *testConfigSuite) SetUpSuite(c *C) {
 	RegisterScheduler("adjacent-region")
 }
 
+func (s *testConfigSuite) TestSecurity(c *C) {
+	cfg := NewConfig()
+	c.Assert(cfg.Security.RedactInfoLog, Equals, false)
+}
+
 func (s *testConfigSuite) TestTLS(c *C) {
 	cfg := NewConfig()
 	tls, err := cfg.Security.ToTLSConfig()
@@ -165,7 +170,6 @@ leader-schedule-limit = 0
 	c.Assert(cfg.PreVote, IsTrue)
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
 	c.Assert(cfg.PDServerCfg.MetricStorage, Equals, "http://127.0.0.1:9090")
-	c.Assert(cfg.EnableRedactLog, Equals, defaultEnableRedactLog)
 
 	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, DefaultTSOUpdatePhysicalInterval)
 
