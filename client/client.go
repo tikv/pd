@@ -17,6 +17,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -154,11 +155,14 @@ var (
 type client struct {
 	*baseClient
 	tsoRequests chan *tsoRequest
-
-	// dc-location -> int64
-	lastPhysical map[string]int64
-	lastLogical  map[string]int64
+	// dc-location -> deadline
 	tsDeadlineCh map[string]chan deadline
+	// dc-location -> int64
+	lastTSO struct {
+		sync.Mutex
+		physical map[string]int64
+		logical  map[string]int64
+	}
 }
 
 // NewClient creates a PD client.
@@ -177,13 +181,12 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		baseClient:   base,
 		tsoRequests:  make(chan *tsoRequest, maxMergeTSORequests),
 		tsDeadlineCh: make(map[string]chan deadline),
-		lastPhysical: make(map[string]int64),
-		lastLogical:  make(map[string]int64),
 	}
-
-	for _, dcLocation := range c.GetDCLocations() {
+	for _, dcLocation := range c.getDCLocations() {
 		c.tsDeadlineCh[dcLocation] = make(chan deadline, 1)
 	}
+	c.lastTSO.physical = make(map[string]int64)
+	c.lastTSO.logical = make(map[string]int64)
 
 	c.wg.Add(2)
 	go c.tsLoop()
@@ -205,7 +208,7 @@ func (c *client) tsCancelLoop() {
 	defer cancel()
 
 	// Watch every dc-location's tsDeadlineCh
-	for _, dcLocation := range c.GetDCLocations() {
+	for dcLocation, deadlineCh := range c.tsDeadlineCh {
 		go func(dc string, tsDeadlineCh <-chan deadline) {
 			for {
 				select {
@@ -222,7 +225,7 @@ func (c *client) tsCancelLoop() {
 					return
 				}
 			}
-		}(dcLocation, c.tsDeadlineCh[dcLocation])
+		}(dcLocation, deadlineCh)
 	}
 	<-ctx.Done()
 }
@@ -262,15 +265,12 @@ func (c *client) tsLoop() {
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
 	defer loopCancel()
 
-	var (
-		ctx     context.Context
-		cancel  context.CancelFunc
-		opts    []opentracing.StartSpanOption
-		streams = make(map[string]pdpb.PD_TsoClient)
-	)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	streams := make(map[string]pdpb.PD_TsoClient)
 
 	for {
-		if len(streams) != c.allocatorLeaderNum() {
+		if !c.checkTSOStreams(streams) {
 			ctx, cancel = context.WithCancel(loopCtx)
 			if err := c.createTSOStreams(ctx, cancel, streams); err != nil {
 				select {
@@ -289,12 +289,10 @@ func (c *client) tsLoop() {
 				}
 			}
 		}
-		var (
-			err                error
-			requestsDispatcher = make(map[string][]*tsoRequest)
-		)
+		var err atomic.Value // stored as error
+		requestsDispatcher := make(map[string][]*tsoRequest)
 		// Initialize the requests dispatcher
-		for dcLocation := range c.GetAllocatorLeaderURLs() {
+		for dcLocation := range streams {
 			requestsDispatcher[dcLocation] = make([]*tsoRequest, 0, maxMergeTSORequests+1)
 		}
 		// Dispatch different dc-locations requests to corresponding TSO stream
@@ -325,8 +323,10 @@ func (c *client) tsLoop() {
 						cancel()
 						return
 					}
-					opts = extractSpanReference(reqs, opts[:0])
-					err = c.processTSORequests(streams[dc], dc, reqs, opts)
+					opts := extractSpanReference(reqs)
+					if processErr := c.processTSORequests(streams[dc], dc, reqs, opts); processErr != nil {
+						err.Store(processErr)
+					}
 					close(done)
 				}(dcLocation, requests)
 			}
@@ -335,20 +335,33 @@ func (c *client) tsLoop() {
 			cancel()
 			return
 		}
-
-		if err != nil {
+		if err.Load() != nil {
 			select {
 			case <-loopCtx.Done():
 				cancel()
 				return
 			default:
 			}
-			log.Error("[pd] getTS error", errs.ZapError(errs.ErrClientGetTSO, err))
+			log.Error("[pd] getTS error", errs.ZapError(errs.ErrClientGetTSO, err.Load().(error)))
 			c.ScheduleCheckLeader()
 			cancel()
 			streams, cancel = make(map[string]pdpb.PD_TsoClient), nil
 		}
 	}
+}
+
+func (c *client) checkTSOStreams(streams map[string]pdpb.PD_TsoClient) bool {
+	dcLocations := c.getDCLocations()
+	if len(streams) != len(dcLocations) {
+		return false
+	}
+	for _, dcLocation := range dcLocations {
+		stream, exist := streams[dcLocation]
+		if !exist || stream == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *client) createTSOStreams(ctx context.Context, ctxCancel context.CancelFunc, streams map[string]pdpb.PD_TsoClient) error {
@@ -370,13 +383,8 @@ func (c *client) createTSOStreams(ctx context.Context, ctxCancel context.CancelF
 	return nil
 }
 
-func (c *client) allocatorLeaderNum() int {
-	c.connMu.RLock()
-	defer c.connMu.RUnlock()
-	return len(c.connMu.allocatorLeader)
-}
-
-func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
+func extractSpanReference(requests []*tsoRequest) []opentracing.StartSpanOption {
+	var opts []opentracing.StartSpanOption
 	for _, req := range requests {
 		if span := opentracing.SpanFromContext(req.ctx); span != nil {
 			opts = append(opts, opentracing.ChildOf(span.Context()))
@@ -421,14 +429,17 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 	physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
 	// Server returns the highest ts.
 	logical -= int64(resp.GetCount() - 1)
-	lastPhysical := c.lastPhysical[dcLocation]
-	lastLogical := c.lastLogical[dcLocation]
+	c.lastTSO.Lock()
+	lastPhysical := c.lastTSO.physical[dcLocation]
+	lastLogical := c.lastTSO.logical[dcLocation]
 	if tsLessEqual(physical, logical, lastPhysical, lastLogical) {
 		panic(errors.Errorf("%s timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
 			dcLocation, physical, logical, lastPhysical, lastLogical))
 	}
-	c.lastPhysical[dcLocation] = physical
-	c.lastLogical[dcLocation] = logical + int64(len(requests)) - 1
+	c.lastTSO.physical[dcLocation] = physical
+	c.lastTSO.logical[dcLocation] = logical + int64(len(requests)) - 1
+	c.lastTSO.Unlock()
+
 	c.finishTSORequest(requests, physical, logical, nil)
 	return nil
 }

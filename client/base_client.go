@@ -181,7 +181,7 @@ func (c *baseClient) GetAllocatorLeaderURLs() map[string]string {
 	return allocatorLeader
 }
 
-func (c *baseClient) GetDCLocations() []string {
+func (c *baseClient) getDCLocations() []string {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
 	dcLocations := make([]string, 0, len(c.connMu.allocatorLeader))

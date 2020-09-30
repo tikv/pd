@@ -273,27 +273,34 @@ func (s *clientTestSuite) TestLocalTSO(c *C) {
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
+	wg := sync.WaitGroup{}
 	for _, dcLocation := range dcLocationConfig {
-		var p1, l1 int64
-		testutil.WaitUntil(c, func(c *C) bool {
-			p1, l1, err = cli.GetLocalTS(context.TODO(), dcLocation)
-			if err == nil {
-				return true
-			}
-			c.Log(err)
-			return false
-		})
-		time.Sleep(10 * time.Millisecond)
-		testutil.WaitUntil(c, func(c *C) bool {
-			p2, l2, err := cli.GetLocalTS(context.TODO(), dcLocation)
-			if err != nil {
+		wg.Add(1)
+		go func(dc string) {
+			defer wg.Done()
+			var err error
+			var p1, l1 int64
+			testutil.WaitUntil(c, func(c *C) bool {
+				p1, l1, err = cli.GetLocalTS(context.TODO(), dc)
+				if err == nil {
+					return true
+				}
 				c.Log(err)
 				return false
-			}
-			c.Assert(p1<<18+l1, Less, p2<<18+l2)
-			return true
-		})
+			})
+			time.Sleep(10 * time.Millisecond)
+			testutil.WaitUntil(c, func(c *C) bool {
+				p2, l2, err := cli.GetLocalTS(context.TODO(), dc)
+				if err != nil {
+					c.Log(err)
+					return false
+				}
+				c.Assert(p1<<18+l1, Less, p2<<18+l2)
+				return true
+			})
+		}(dcLocation)
 	}
+	wg.Wait()
 }
 
 func (s *clientTestSuite) TestCustomTimeout(c *C) {
