@@ -139,11 +139,8 @@ func (lta *LocalTSOAllocator) WriteTSO(maxTS *pdpb.Timestamp) error {
 	if err != nil {
 		return err
 	}
-	// If current local TSO has already been greater than
-	// maxTS, then do not update it.
-	if currentTSO.GetPhysical() > maxTS.GetPhysical() {
-		return nil
-	} else if currentTSO.GetPhysical() == maxTS.GetPhysical() && currentTSO.GetLogical() >= maxTS.GetLogical() {
+	// If current local TSO has already been greater or equal to maxTS, then do not update it.
+	if tsoutil.CompareTimestamp(&currentTSO, maxTS) >= 0 {
 		return nil
 	}
 	return lta.SetTSO(tsoutil.GenerateTS(maxTS))

@@ -463,8 +463,6 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 	c.Assert(s.leaderServer, NotNil)
 	s.dcClientMap[config.GlobalDCLocation] = testutil.MustNewGrpcClient(c, s.leaderServer.GetAddr())
 
-	// Wait for a while to check
-	time.Sleep(waitAllocatorCheckInterval)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// Get some local TSOs first
