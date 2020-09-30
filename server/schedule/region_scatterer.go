@@ -35,8 +35,9 @@ import (
 )
 
 const regionScatterName = "region-scatter"
-const gcInterval = time.Minute
-const gcTTL = time.Minute * 3
+
+var gcInterval = time.Minute
+var gcTTL = time.Minute * 3
 
 type selectedStores struct {
 	mu sync.Mutex

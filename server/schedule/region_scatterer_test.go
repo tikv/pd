@@ -415,6 +415,9 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 }
 
 func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
+	// use a shorter gcTTL and gcInterval during the test
+	gcInterval = time.Second
+	gcTTL = time.Second * 3
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stores := newSelectedStores(ctx, true)
