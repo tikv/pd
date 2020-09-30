@@ -59,7 +59,7 @@ var (
 	cmdDurationTSO                      = cmdDuration.WithLabelValues("tso")
 	cmdDurationTSOAsyncWait             = cmdDuration.WithLabelValues("tso_async_wait")
 	cmdDurationGetRegion                = cmdDuration.WithLabelValues("get_region")
-	cmdDurationGetMemberInfo            = cmdDuration.WithLabelValues("get_member_info")
+	cmdDurationGetAllMembers            = cmdDuration.WithLabelValues("get_member_info")
 	cmdDurationGetPrevRegion            = cmdDuration.WithLabelValues("get_prev_region")
 	cmdDurationGetRegionByID            = cmdDuration.WithLabelValues("get_region_byid")
 	cmdDurationScanRegions              = cmdDuration.WithLabelValues("scan_regions")
@@ -72,7 +72,7 @@ var (
 
 	cmdFailDurationGetRegion                  = cmdFailedDuration.WithLabelValues("get_region")
 	cmdFailDurationTSO                        = cmdFailedDuration.WithLabelValues("tso")
-	cmdFailDurationGetMemberInfo              = cmdFailedDuration.WithLabelValues("get_member_info")
+	cmdFailDurationGetAllMembers              = cmdFailedDuration.WithLabelValues("get_member_info")
 	cmdFailDurationGetPrevRegion              = cmdFailedDuration.WithLabelValues("get_prev_region")
 	cmdFailedDurationGetRegionByID            = cmdFailedDuration.WithLabelValues("get_region_byid")
 	cmdFailedDurationScanRegions              = cmdFailedDuration.WithLabelValues("scan_regions")

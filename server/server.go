@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -808,6 +809,15 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			}
 		}
 	}
+	if cfg.EnablePlacementRules {
+		// replication.MaxReplicas and replication.LocationLabels won't work when placement rule is enabled
+		if cfg.MaxReplicas != old.MaxReplicas {
+			return errors.New("cannot update MaxReplicas when placement rules feature is enabled, please update rule instead")
+		}
+		if !reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels) {
+			return errors.New("cannot update LocationLabels when placement rules feature is enabled, please update rule instead")
+		}
+	}
 
 	s.persistOptions.SetReplicationConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
@@ -945,9 +955,9 @@ func (s *Server) GetClusterVersion() semver.Version {
 	return *s.persistOptions.GetClusterVersion()
 }
 
-// GetSecurityConfig get the security config.
-func (s *Server) GetSecurityConfig() *grpcutil.SecurityConfig {
-	return &s.cfg.Security
+// GetTLSConfig get the security config.
+func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
+	return &s.cfg.Security.TLSConfig
 }
 
 // GetServerRootPath returns the server root path.

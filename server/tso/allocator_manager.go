@@ -530,6 +530,9 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
 	am.RLock()
 	defer am.RUnlock()
+	if len(dcLocation) == 0 {
+		dcLocation = config.GlobalDCLocation
+	}
 	allocatorGroup, exist := am.allocatorGroups[dcLocation]
 	if !exist {
 		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
@@ -580,4 +583,21 @@ func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []All
 		allocators = append(allocators, ag.allocator)
 	}
 	return allocators
+}
+
+// GetLocalAllocatorLeaders returns all Local TSO Allocator leaders this server holds.
+func (am *AllocatorManager) GetLocalAllocatorLeaders() ([]*LocalTSOAllocator, error) {
+	localAllocators := am.GetAllocators(
+		FilterDCLocation(config.GlobalDCLocation),
+		FilterUnavailableLeadership(),
+		FilterUninitialized())
+	localAllocatorLeaders := make([]*LocalTSOAllocator, len(localAllocators))
+	for _, localAllocator := range localAllocators {
+		localAllocatorLeader, ok := localAllocator.(*LocalTSOAllocator)
+		if !ok {
+			return nil, errs.ErrGetLocalAllocator.FastGenByArgs("invalid local tso allocator found")
+		}
+		localAllocatorLeaders = append(localAllocatorLeaders, localAllocatorLeader)
+	}
+	return localAllocatorLeaders, nil
 }

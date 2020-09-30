@@ -28,6 +28,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -121,7 +122,7 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
-	Security grpcutil.SecurityConfig `toml:"security" json:"security"`
+	Security SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
@@ -1143,6 +1144,7 @@ func (c *Config) SetupLogger() error {
 	}
 	c.logger = lg
 	c.logProps = p
+	logutil.SetRedactLog(c.Security.RedactInfoLog)
 	return nil
 }
 
@@ -1363,4 +1365,11 @@ func (c *LocalTSOConfig) Validate() error {
 		return errors.New(errMsg)
 	}
 	return nil
+}
+
+// SecurityConfig indicates the security configuration for pd server
+type SecurityConfig struct {
+	grpcutil.TLSConfig
+	// RedactInfoLog indicates that whether enabling redact log
+	RedactInfoLog bool `toml:"redact-info-log" json:"redact-info-log"`
 }

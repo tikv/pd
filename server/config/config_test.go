@@ -44,6 +44,11 @@ func (s *testConfigSuite) SetUpSuite(c *C) {
 	RegisterScheduler("adjacent-region")
 }
 
+func (s *testConfigSuite) TestSecurity(c *C) {
+	cfg := NewConfig()
+	c.Assert(cfg.Security.RedactInfoLog, Equals, false)
+}
+
 func (s *testConfigSuite) TestTLS(c *C) {
 	cfg := NewConfig()
 	tls, err := cfg.Security.ToTLSConfig()

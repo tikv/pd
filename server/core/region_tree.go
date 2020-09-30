@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"go.uber.org/zap"
 )
 
@@ -95,8 +96,8 @@ func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
 	for _, item := range overlaps {
 		log.Debug("overlapping region",
 			zap.Uint64("region-id", item.GetID()),
-			zap.Stringer("delete-region", RegionToHexMeta(item.GetMeta())),
-			zap.Stringer("update-region", RegionToHexMeta(region.GetMeta())))
+			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(item.GetMeta())),
+			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
 		t.tree.Delete(&regionItem{item})
 	}
 
@@ -229,8 +230,9 @@ func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 		if endIndex <= startIndex {
 			if len(endKey) > 0 && bytes.Compare(startKey, endKey) > 0 {
 				log.Error("wrong range keys",
-					zap.String("start-key", string(HexRegionKey(startKey))),
-					zap.String("end-key", string(HexRegionKey(endKey))), errs.ZapError(errs.ErrWrongRangeKeys))
+					logutil.ZapRedactString("start-key", string(HexRegionKey(startKey))),
+					logutil.ZapRedactString("end-key", string(HexRegionKey(endKey))),
+					errs.ZapError(errs.ErrWrongRangeKeys))
 			}
 			continue
 		}
