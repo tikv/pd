@@ -62,11 +62,14 @@ func (c *Config) Adjust() error {
 				defaultDataKeyRotationPeriod)
 		}
 		c.DataKeyRotationPeriod.Duration = duration
+	} else if c.DataKeyRotationPeriod.Duration < 0 {
+		return errs.ErrEncryptionInvalidConfig.GenWithStack(
+			"data-key-rotation-period must be greater than 0")
 	}
 	if len(c.MasterKey.Type) == 0 {
 		c.MasterKey.Type = masterKeyTypePlaintext
 	} else {
-		if _, err := c.GetMasterKey(); err != nil {
+		if _, err := c.GetMasterKeyMeta(); err != nil {
 			return err
 		}
 	}
@@ -91,7 +94,7 @@ func (c *Config) GetMethod() (encryptionpb.EncryptionMethod, error) {
 }
 
 // GetMasterKey gets the master key config.
-func (c *Config) GetMasterKey() (*encryptionpb.MasterKey, error) {
+func (c *Config) GetMasterKeyMeta() (*encryptionpb.MasterKey, error) {
 	switch c.MasterKey.Type {
 	case masterKeyTypePlaintext:
 		return &encryptionpb.MasterKey{

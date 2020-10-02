@@ -360,12 +360,12 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
 		return err
 	}
-	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
-	encryptionKeyManager, err := encryptionkm.NewKeyManager(kvBase, &s.cfg.Security.Encryption)
+	encryptionKeyManager, err := encryptionkm.NewKeyManager(ctx, s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
 	s.encryptionKeyManager = encryptionKeyManager
+	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
 	regionStorage, err := core.NewRegionStorage(ctx, path, encryptionKeyManager)
 	if err != nil {

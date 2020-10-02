@@ -14,41 +14,420 @@
 package encryptionkm
 
 import (
+	"bytes"
+	"context"
+	"sync"
+	"time"
+
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
-	lib "github.com/tikv/pd/pkg/encryption"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/encryption"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/kv"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/mvcc/mvccpb"
+	"go.uber.org/zap"
+)
+
+const (
+	// Special key id to denote encryption is currently not enabled.
+	disableEncryptionKeyID = 0
+	// Check interval for data key rotation.
+	keyRotationCheckPeriod = time.Minute * 10
+	// Times to retry generating new data key.
+	keyRotationRetryLimit = 10
 )
 
 // KeyManager maintains the list to encryption keys. It handles encryption key generation and
 // rotation, persisting and loading encryption keys.
-type KeyManager struct{}
+type KeyManager struct {
+	// Backing storage for key dictionary.
+	etcdClient *clientv3.Client
+	// Encryption method used to encrypt data
+	method encryptionpb.EncryptionMethod
+	// Time interval between data key rotation.
+	dataKeyRotationPeriod time.Duration
+	// Metadata defines the master key to use.
+	masterKeyMeta *encryptionpb.MasterKey
+	// Encryption config from config file. Only used when current node is PD leader.
+	config *encryption.Config
+	// Mutex for updating keys.
+	muUpdate sync.Mutex
+	// PD leadership of the current PD node. Only the PD leader will rotate data keys,
+	// or change current encryption method. Guarded by muUpdate.
+	leadership *election.Leadership
+	// ModRevision of the encryption keys data stored in etcd.
+	// Used to do CAS update to encryption keys.
+	keysRevision int64
+	// Mutex for accessing keys.
+	mu sync.Mutex
+	// List of all encryption keys and current encryption key id. Guarded by mu.
+	keys *encryptionpb.KeyDictionary
+	// Error hit when loading encryption keys.
+	keysError error
+}
+
+// EncryptionKeysPath return the path to store key dictionary in etcd.
+func EncryptionKeysPath() string {
+	return "encryption/keys"
+}
 
 // NewKeyManager creates a new key manager.
-func NewKeyManager(kv kv.Base, config *lib.Config) (*KeyManager, error) {
-	// TODO: Implement
-	return &KeyManager{}, nil
+func NewKeyManager(
+	ctx context.Context,
+	etcdClient *clientv3.Client,
+	config *encryption.Config,
+) (*KeyManager, error) {
+	method, err := config.GetMethod()
+	if err != nil {
+		return nil, err
+	}
+	masterKeyMeta, err := config.GetMasterKeyMeta()
+	if err != nil {
+		return nil, err
+	}
+	m := &KeyManager{
+		etcdClient:            etcdClient,
+		method:                method,
+		dataKeyRotationPeriod: config.DataKeyRotationPeriod.Duration,
+		masterKeyMeta:         masterKeyMeta,
+	}
+	// Load encryption keys from storage.
+	_, err = m.loadKeys()
+	if err != nil {
+		return nil, err
+	}
+	// Start periodic check for keys change and rotation key if needed.
+	go m.startBackgroundLoop(ctx, m.keysRevision)
+	return m, nil
+}
+
+func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
+	// Create new context for the loop.
+	loopCtx, _ := context.WithCancel(ctx)
+	// Setup key dictionary watcher
+	watcher := clientv3.NewWatcher(m.etcdClient)
+	defer watcher.Close()
+	watcherCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	watchChan := watcher.Watch(watcherCtx, EncryptionKeysPath(), clientv3.WithRev(m.keysRevision))
+	// Check data key rotation every min(DataKeyRotationPeriod, keyRotationCheckPeriod).
+	checkPeriod := m.config.DataKeyRotationPeriod.Duration
+	if keyRotationCheckPeriod < checkPeriod {
+		checkPeriod = keyRotationCheckPeriod
+	}
+	ticker := time.NewTicker(checkPeriod)
+	defer ticker.Stop()
+	// Loop
+	for {
+		select {
+		// Reload encryption keys updated by PD leader (could be ourselves).
+		case resp := <-watchChan:
+			if resp.Canceled {
+				log.Warn("encryption key watcher canceled")
+				m.setKeysError(errs.ErrEncryptionKeysWatcher.GenWithStack("watcher is canceled"))
+				return
+			}
+			for _, event := range resp.Events {
+				if event.Type != mvccpb.PUT {
+					m.setKeysError(errs.ErrEncryptionKeysWatcher.GenWithStack("encryption keys deleted"))
+					return
+				}
+				if !bytes.Equal([]byte(EncryptionKeysPath()), event.Kv.Key) {
+					m.setKeysError(errs.ErrEncryptionKeysWatcher.GenWithStack("encryption keys path not equal"))
+					return
+				}
+				{
+					m.muUpdate.Lock()
+					m.loadKeysFromKV(event.Kv)
+					m.muUpdate.Unlock()
+				}
+			}
+			// Check data key rotation in case we are the PD leader.
+		case <-ticker.C:
+			m.muUpdate.Lock()
+			err := m.rotateKeyIfNeeded(false /*forceUpdate*/)
+			m.muUpdate.Unlock()
+			if err != nil {
+				log.Warn("fail to rotate encryption master key", zap.Error(err))
+			}
+			// Server shutdown.
+		case <-loopCtx.Done():
+			log.Info("encryption key manager is closed")
+			return
+		}
+	}
+}
+
+func (m *KeyManager) setKeysError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.keysError = err
+}
+
+func (m *KeyManager) loadKeysFromKV(
+	kv *mvccpb.KeyValue,
+) (*encryptionpb.KeyDictionary, error) {
+	content := &encryptionpb.EncryptedContent{}
+	err := content.Unmarshal(kv.Value)
+	if err != nil {
+		return nil, errs.ErrProtoUnmarshal.Wrap(err).GenWithStack(
+			"fail to unmarshal encrypted encryption keys")
+	}
+	masterKeyConfig := content.MasterKey
+	if masterKeyConfig == nil {
+		return nil, errs.ErrEncryptionLoadKeys.GenWithStack(
+			"no master key config found with encryption keys")
+	}
+	masterKey, err := encryption.NewMasterKey(masterKeyConfig)
+	if err != nil {
+		return nil, err
+	}
+	plaintextContent, err := masterKey.Decrypt(content.Content, content.Iv)
+	if err != nil {
+		return nil, err
+	}
+	keys := &encryptionpb.KeyDictionary{}
+	err = keys.Unmarshal(plaintextContent)
+	if err != nil {
+		return nil, errs.ErrProtoUnmarshal.Wrap(err).GenWithStack(
+			"fail to unmarshal encryption keys")
+	}
+	{
+		m.mu.Lock()
+		m.keys = keys
+		m.mu.Unlock()
+	}
+	m.keysRevision = kv.ModRevision
+	return keys, nil
+}
+
+func (m *KeyManager) loadKeys() (*encryptionpb.KeyDictionary, error) {
+	resp, err := etcdutil.EtcdKVGet(m.etcdClient, EncryptionKeysPath())
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || len(resp.Kvs) == 0 {
+		return nil, nil
+	}
+	return m.loadKeysFromKV(resp.Kvs[0])
+}
+
+func (m *KeyManager) saveKeys(keys *encryptionpb.KeyDictionary) error {
+	// Get master key.
+	masterKeyMeta, err := m.config.GetMasterKeyMeta()
+	if err != nil {
+		return err
+	}
+	masterKey, err := encryption.NewMasterKey(masterKeyMeta)
+	if err != nil {
+		return err
+	}
+	// Set was_exposed flag if master key is plaintext (no-op).
+	if masterKey.IsPlaintext() {
+		for _, key := range keys.Keys {
+			key.WasExposed = true
+		}
+	}
+	// Encode and encrypt data keys.
+	plaintextContent, err := proto.Marshal(keys)
+	if err != nil {
+		return errs.ErrProtoMarshal.Wrap(err).GenWithStack("fail to marshal encrypion keys")
+	}
+	ciphertextContent, iv, err := masterKey.Encrypt(plaintextContent)
+	if err != nil {
+		return err
+	}
+	content := &encryptionpb.EncryptedContent{
+		Content:   ciphertextContent,
+		MasterKey: masterKeyMeta,
+		Iv:        iv,
+	}
+	value, err := proto.Marshal(content)
+	if err != nil {
+		return errs.ErrProtoMarshal.Wrap(err).GenWithStack("fail to marshal encrypted encryption keys")
+	}
+	resp, err := kv.NewSlowLogTxn(m.etcdClient).
+		If(clientv3.Compare(clientv3.ModRevision(EncryptionKeysPath()), "=", m.keysRevision)).
+		Then(clientv3.OpPut(EncryptionKeysPath(), string(value))).
+		Commit()
+	if err != nil {
+		return errs.ErrEtcdTxn.Wrap(err).GenWithStack("fail to save encryption keys")
+	}
+	if !resp.Succeeded {
+		return errs.ErrEncryptionSaveDataKeys.GenWithStack(
+			"write conflict, expected revision %d", m.keysRevision)
+	}
+	// Leave for the watcher to load the updated keys.
+	return nil
+}
+
+func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
+	if m.leadership == nil || !m.leadership.Check() {
+		// We are not leader.
+		m.leadership = nil
+		return nil
+	}
+	var keys *encryptionpb.KeyDictionary
+	// Make a clone of encryption keys.
+	{
+		m.mu.Lock()
+		keys = proto.Clone(m.keys).(*encryptionpb.KeyDictionary)
+		m.mu.Unlock()
+	}
+	// Initialize if empty.
+	if keys == nil {
+		keys = &encryptionpb.KeyDictionary{
+			CurrentKeyId: disableEncryptionKeyID,
+		}
+	}
+	if keys.Keys == nil {
+		keys.Keys = make(map[uint64]*encryptionpb.DataKey)
+	}
+	method, err := m.config.GetMethod()
+	if err != nil {
+		return err
+	}
+	needUpdate := forceUpdate
+	if method == encryptionpb.EncryptionMethod_PLAINTEXT {
+		if keys.CurrentKeyId == disableEncryptionKeyID {
+			// Encryption is not enabled.
+			return nil
+		}
+		keys.CurrentKeyId = disableEncryptionKeyID
+		needUpdate = true
+	} else {
+		needRotate := false
+		if keys.CurrentKeyId == disableEncryptionKeyID {
+			needRotate = true
+		} else {
+			currentKey := keys.Keys[keys.CurrentKeyId]
+			if currentKey == nil {
+				return errs.ErrEncryptionCurrentKeyNotFound.GenWithStack("keyId = %d", keys.CurrentKeyId)
+			}
+			// Rotate key in case of:
+			// * Encryption method is changed.
+			// * Currnet key is exposed.
+			// * Current key expired.
+			if currentKey.Method != method || currentKey.WasExposed ||
+				time.Unix(int64(currentKey.CreationTime), 0).
+					Add(m.config.DataKeyRotationPeriod.Duration).Before(time.Now()) {
+				needRotate = true
+			}
+		}
+		if needRotate {
+			rotated := false
+			for attempt := 0; attempt < keyRotationRetryLimit; attempt += 1 {
+				keyID, key, err := encryption.NewDataKey(method)
+				if err != nil {
+					return nil
+				}
+				if keys.Keys[keyID] == nil {
+					keys.Keys[keyID] = key
+					keys.CurrentKeyId = keyID
+					rotated = true
+					break
+				}
+				// Duplicated key id. retry.
+			}
+			if !rotated {
+				return errs.ErrEncryptionRotateDataKey.GenWithStack("maximum attempts reached")
+			}
+			needUpdate = true
+		}
+	}
+	if !needUpdate {
+		return nil
+	}
+	return m.saveKeys(keys)
 }
 
 // GetCurrentKey get the current encryption key. The key is nil if encryption is not enabled.
 func (m *KeyManager) GetCurrentKey() (keyID uint64, key *encryptionpb.DataKey, err error) {
-	// TODO: Implement
-	return 0, nil, nil
+	if m.method == encryptionpb.EncryptionMethod_PLAINTEXT {
+		// Encryption is not enabled.
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.keysError != nil {
+		return 0, nil, m.keysError
+	}
+	if m.keys.CurrentKeyId == disableEncryptionKeyID {
+		// Encryption is not enabled.
+		return 0, nil, nil
+	}
+	keyID = m.keys.CurrentKeyId
+	if m.keys == nil {
+		return 0, nil, errs.ErrEncryptionCurrentKeyNotFound.GenWithStack(
+			"empty key list, currentKeyID = %d", keyID)
+	}
+	key = m.keys.Keys[keyID]
+	if key == nil {
+		// Shouldn't happen, unless key dictionary is corrupted.
+		return 0, nil, errs.ErrEncryptionCurrentKeyNotFound.GenWithStack("currentKeyID = %d", keyID)
+	}
+	return
 }
 
 // GetKey get the encryption key with the specific key id.
-func (m *KeyManager) GetKey(keyID uint64) (key *encryptionpb.DataKey, err error) {
-	// TODO: Implement
-	return nil, nil
+func (m *KeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
+	localGetKey := func(keyId uint64) (*encryptionpb.DataKey, error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.keysError != nil {
+			return nil, m.keysError
+		}
+		return m.keys.Keys[keyId], nil
+	}
+	key, err := localGetKey(keyID)
+	if err != nil {
+		return nil, err
+	}
+	if key != nil {
+		return key, nil
+	}
+	// Key not found in memory.
+	// The key could be generated by another PD node, which shouldn't happen normally.
+	m.muUpdate.Lock()
+	defer m.muUpdate.Unlock()
+	// Double check, in case keys is updated by watcher or another GetKey call.
+	key, err = localGetKey(keyID)
+	if err != nil {
+		return nil, err
+	}
+	if key != nil {
+		return key, nil
+	}
+	// Reload keys from storage.
+	keys, err := m.loadKeys()
+	if err != nil {
+		return nil, err
+	}
+	if keys == nil {
+		key = nil
+	} else {
+		key = keys.Keys[keyID]
+	}
+	if key == nil {
+		return nil, errs.ErrEncryptionKeyNotFound.GenWithStack("keyId = %d", keyID)
+	}
+	return key, nil
 }
 
 // SetLeadership sets the PD leadership of the current node. PD leader is responsible to update
 // encryption keys, e.g. key rotation.
-func (m *KeyManager) SetLeadership(leadership *election.Leadership) {
-	// TODO: Implement
-}
-
-// Close close the key manager on PD server shutdown
-func (m *KeyManager) Close() {
-	// TODO: Implement
+func (m *KeyManager) SetLeadership(leadership *election.Leadership) error {
+	m.muUpdate.Lock()
+	defer m.muUpdate.Unlock()
+	m.leadership = leadership
+	// Reload keys just in case we are not up-to-date.
+	_, err := m.loadKeys()
+	if err != nil {
+		return err
+	}
+	return m.rotateKeyIfNeeded(true /*forceUpdate*/)
 }

@@ -30,8 +30,6 @@ const (
 
 // MasterKey is used to encrypt and decrypt encryption metadata (i.e. data encryption keys).
 type MasterKey struct {
-	// Master key config. Used to compare if two master key is the same.
-	Config *encryptionpb.MasterKey
 	// Encryption key in plaintext. If it is nil, encryption is no-op.
 	// Never output it to info log or persist it on disk.
 	key []byte
@@ -45,8 +43,7 @@ func NewMasterKey(config *encryptionpb.MasterKey) (*MasterKey, error) {
 	}
 	if plaintext := config.GetPlaintext(); plaintext != nil {
 		return &MasterKey{
-			Config: config,
-			key:    nil,
+			key: nil,
 		}, nil
 	}
 	if file := config.GetFile(); file != nil {
@@ -55,8 +52,7 @@ func NewMasterKey(config *encryptionpb.MasterKey) (*MasterKey, error) {
 			return nil, err
 		}
 		return &MasterKey{
-			Config: config,
-			key:    key,
+			key: key,
 		}, nil
 	}
 	return nil, errors.New("unrecognized master key type")
