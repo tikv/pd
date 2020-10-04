@@ -30,6 +30,7 @@ import (
 )
 
 var _ = Suite(&testOperatorSuite{})
+var _ = Suite(&testTransferRegionOperatorSuite{})
 
 type testOperatorSuite struct {
 	svr       *server.Server
@@ -133,6 +134,123 @@ func (s *testOperatorSuite) TestMergeRegionOperator(c *C) {
 
 	c.Assert(strings.Contains(err.Error(), "not adjacent"), IsTrue)
 	c.Assert(err, NotNil)
+}
+
+type testTransferRegionOperatorSuite struct {
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
+}
+
+func (s *testTransferRegionOperatorSuite) SetUpSuite(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 3 })
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+
+	mustBootstrapCluster(c, s.svr)
+}
+
+func (s *testTransferRegionOperatorSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
+func (s *testTransferRegionOperatorSuite) TestTransferRegionOperator(c *C) {
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, nil)
+	mustPutStore(c, s.svr, 2, metapb.StoreState_Up, nil)
+	mustPutStore(c, s.svr, 3, metapb.StoreState_Up, nil)
+
+	peer1 := &metapb.Peer{Id: 1, StoreId: 1}
+	peer2 := &metapb.Peer{Id: 2, StoreId: 2}
+	region := &metapb.Region{
+		Id:    1,
+		Peers: []*metapb.Peer{peer1, peer2},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+	}
+	regionInfo := core.NewRegionInfo(region, peer1)
+	mustRegionHeartbeat(c, s.svr, regionInfo)
+
+	regionURL := fmt.Sprintf("%s/operators/%d", s.urlPrefix, region.GetId())
+	operator := mustReadURL(c, regionURL)
+	c.Assert(strings.Contains(operator, "operator not found"), IsTrue)
+
+	s.svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(false)
+
+	err := postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`))
+	c.Assert(err, IsNil)
+	operator = mustReadURL(c, regionURL)
+	c.Assert(strings.Contains(operator, "add learner peer 1 on store 3"), IsTrue)
+	c.Assert(strings.Contains(operator, "promote learner peer 1 on store 3 to voter"), IsTrue)
+	c.Assert(strings.Contains(operator, "transfer leader from store 1 to store 2"), IsTrue)
+	c.Assert(strings.Contains(operator, "remove peer on store 1"), IsTrue)
+
+	_, err = doDelete(testDialClient, regionURL)
+	c.Assert(err, IsNil)
+
+	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles": ["follower", "leader"]}`))
+	c.Assert(err, IsNil)
+	operator = mustReadURL(c, regionURL)
+	c.Assert(strings.Contains(operator, "add learner peer 2 on store 3"), IsTrue)
+	c.Assert(strings.Contains(operator, "promote learner peer 2 on store 3 to voter"), IsTrue)
+	c.Assert(strings.Contains(operator, "transfer leader from store 1 to store 2"), IsTrue)
+	c.Assert(strings.Contains(operator, "remove peer on store 1"), IsTrue)
+	c.Assert(strings.Contains(operator, "transfer leader from store 2 to store 3"), IsTrue)
+
+	_, err = doDelete(testDialClient, regionURL)
+	c.Assert(err, IsNil)
+
+	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2], "peer_roles": ["follower", "voter"]}`))
+	c.Assert(err, IsNil)
+	operator = mustReadURL(c, regionURL)
+	c.Assert(strings.Contains(operator, "transfer leader from store 1 to store 2"), IsTrue)
+
+	_, err = doDelete(testDialClient, regionURL)
+	c.Assert(err, IsNil)
+
+	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles": ["follower", "follower"]}`))
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "no valid leader"), IsTrue)
+
+	_, err = doDelete(testDialClient, regionURL)
+	c.Assert(err, IsNil)
+
+	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2], "peer_roles": ["voter", "voter"]}`))
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "no operator step is built"), IsTrue)
+
+	_, err = doDelete(testDialClient, regionURL)
+	c.Assert(err, IsNil)
+
+	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3], "peer_roles": ["follower", "learner", "voter"]}`))
+	c.Assert(err, IsNil)
+	operator = mustReadURL(c, regionURL)
+	isEitherStepsOne :=
+		strings.Contains(operator, "add learner peer 4 on store 3") &&
+			strings.Contains(operator, "promote learner peer 4 on store 3 to voter") &&
+			strings.Contains(operator, "remove peer on store 2") &&
+			strings.Contains(operator, "add learner peer 5 on store 2") &&
+			strings.Contains(operator, "transfer leader from store 1 to store 3")
+	isEitherStepsTwo :=
+		strings.Contains(operator, "add learner peer 5 on store 3") &&
+			strings.Contains(operator, "promote learner peer 5 on store 3 to voter") &&
+			strings.Contains(operator, "remove peer on store 2") &&
+			strings.Contains(operator, "add learner peer 4 on store 2") &&
+			strings.Contains(operator, "transfer leader from store 1 to store 3")
+	c.Assert(isEitherStepsOne || isEitherStepsTwo, IsTrue)
+
+	_, err = doDelete(testDialClient, regionURL)
+	c.Assert(err, IsNil)
+
+	s.svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(true)
+
+	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`))
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "peer role must be provided when placement rules enabled"), IsTrue)
 }
 
 func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {

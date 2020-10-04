@@ -206,9 +206,23 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	echo = pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
 	c.Assert(strings.Contains(echo, "Success!"), IsFalse)
 
+	// operator add transfer-region <region_id> <store_id> [peer_role] ...
+	// placement rules enabled
 	_, _, err = pdctl.ExecuteCommandC(cmd, "config", "set", "enable-placement-rules", "true")
 	c.Assert(err, IsNil)
 	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "3")
 	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "not supported"), IsTrue)
+	c.Assert(strings.Contains(string(output), "peer role must be provided when placement rules enabled"), IsTrue) // placement rules enabled
+	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "follower", "3", "leader")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "random")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "invalid peer role"), IsTrue)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "3", "leader")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "invalid syntax"), IsTrue)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "leader", "follower")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "invalid syntax"), IsTrue)
 }

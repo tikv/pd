@@ -21,6 +21,7 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/unrolled/render"
 )
 
@@ -150,16 +151,16 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		storeIDs, ok := parseStoreIDs(input["to_store_ids"])
+		storeIDsAndPeerRoles, ok := parseStoreIDsAndPeerRoles(input["to_store_ids"], input["peer_roles"])
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "invalid store ids to transfer region to")
 			return
 		}
-		if len(storeIDs) == 0 {
+		if len(storeIDsAndPeerRoles) == 0 {
 			h.r.JSON(w, http.StatusBadRequest, "missing store ids to transfer region to")
 			return
 		}
-		if err := h.AddTransferRegionOperator(uint64(regionID), storeIDs); err != nil {
+		if err := h.AddTransferRegionOperator(uint64(regionID), storeIDsAndPeerRoles); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -337,18 +338,33 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, "The pending operator is canceled.")
 }
 
-func parseStoreIDs(v interface{}) (map[uint64]struct{}, bool) {
-	items, ok := v.([]interface{})
+func parseStoreIDsAndPeerRoles(rawStoreIDs interface{}, rawPeerRoles interface{}) (map[uint64]placement.PeerRoleType, bool) {
+	storeIDs, ok := rawStoreIDs.([]interface{})
 	if !ok {
 		return nil, false
 	}
-	ids := make(map[uint64]struct{})
-	for _, item := range items {
-		id, ok := item.(float64)
+
+	var peerRoles []interface{}
+	peerRoles, ok = rawPeerRoles.([]interface{})
+	if !ok {
+		peerRoles = nil
+	}
+
+	hasRoles := len(peerRoles) >= len(storeIDs)
+	result := make(map[uint64]placement.PeerRoleType)
+	for i, storeID := range storeIDs {
+		id, ok := storeID.(float64)
 		if !ok {
 			return nil, false
 		}
-		ids[uint64(id)] = struct{}{}
+		if hasRoles {
+			role, ok := peerRoles[i].(string)
+			if ok {
+				result[uint64(id)] = placement.PeerRoleType(role)
+				continue
+			}
+		}
+		result[uint64(id)] = ""
 	}
-	return ids, true
+	return result, true
 }

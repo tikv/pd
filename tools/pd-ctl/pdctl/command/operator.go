@@ -23,7 +23,13 @@ import (
 )
 
 var (
-	operatorsPrefix = "pd/api/v1/operators"
+	operatorsPrefix    = "pd/api/v1/operators"
+	availablePeerRoles = map[string]struct{}{
+		"voter":    {},
+		"leader":   {},
+		"follower": {},
+		"learner":  {},
+	}
 )
 
 // NewOperatorCommand returns a operator command.
@@ -147,7 +153,7 @@ func transferLeaderCommandFunc(cmd *cobra.Command, args []string) {
 // NewTransferRegionCommand returns a command to transfer region.
 func NewTransferRegionCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "transfer-region <region_id> <to_store_id>...",
+		Use:   "transfer-region <region_id> <to_store_id> [peer_role] ...",
 		Short: "transfer a region's peers to the specified stores",
 		Run:   transferRegionCommandFunc,
 	}
@@ -160,7 +166,7 @@ func transferRegionCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	ids, err := parseUint64s(args)
+	regionID, storeIDs, peerRoles, err := parseUint64sAndRoles(args)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -168,8 +174,9 @@ func transferRegionCommandFunc(cmd *cobra.Command, args []string) {
 
 	input := make(map[string]interface{})
 	input["name"] = cmd.Name()
-	input["region_id"] = ids[0]
-	input["to_store_ids"] = ids[1:]
+	input["region_id"] = regionID
+	input["to_store_ids"] = storeIDs
+	input["peer_roles"] = peerRoles
 	postJSON(cmd, operatorsPrefix, input)
 }
 
@@ -422,4 +429,35 @@ func parseUint64s(args []string) ([]uint64, error) {
 		results = append(results, v)
 	}
 	return results, nil
+}
+
+func parseUint64sAndRoles(args []string) (uint64, []uint64, []string, error) {
+	regionID, err := strconv.ParseUint(args[0], 10, 64)
+	if err != nil {
+		return 0, nil, nil, errors.WithStack(err)
+	}
+
+	if _, err := strconv.ParseUint(args[2], 10, 64); err == nil {
+		// No peer roles provided in arguments
+		storeIDs, err := parseUint64s(args[1:])
+		return regionID, storeIDs, nil, err
+	}
+
+	storeIDs, peerRoles := make([]uint64, 0, len(args)), make([]string, 0, len(args))
+	for i, arg := range args[1:] {
+		if i%2 == 0 {
+			storeID, err := strconv.ParseUint(arg, 10, 64)
+			if err != nil {
+				return 0, nil, nil, errors.WithStack(err)
+			}
+
+			storeIDs = append(storeIDs, storeID)
+		} else if _, ok := availablePeerRoles[arg]; ok {
+			peerRoles = append(peerRoles, arg)
+		} else {
+			return 0, nil, nil, errors.New("invalid peer role")
+		}
+	}
+
+	return regionID, storeIDs, peerRoles, nil
 }

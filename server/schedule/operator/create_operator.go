@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
@@ -62,10 +63,18 @@ func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region 
 }
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
-func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, peers map[uint64]*metapb.Peer) (*Operator, error) {
-	return NewBuilder(desc, cluster, region).
-		SetPeers(peers).
-		Build(kind)
+func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, peers map[uint64]*metapb.Peer, roles map[uint64]placement.PeerRoleType) (*Operator, error) {
+	builder := NewBuilder(desc, cluster, region).
+		SetPeers(peers)
+	for key, role := range roles {
+		switch role {
+		case placement.Leader:
+			builder = builder.SetLeader(key)
+		case placement.Follower:
+			builder.targetFollowerStoreIDs[key] = struct{}{}
+		}
+	}
+	return builder.Build(kind)
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.

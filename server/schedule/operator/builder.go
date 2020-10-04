@@ -44,12 +44,13 @@ type Builder struct {
 	rules       []*placement.Rule
 
 	// operation record
-	originPeers         peersMap
-	unhealthyPeers      peersMap
-	originLeaderStoreID uint64
-	targetPeers         peersMap
-	targetLeaderStoreID uint64
-	err                 error
+	originPeers            peersMap
+	unhealthyPeers         peersMap
+	originLeaderStoreID    uint64
+	targetPeers            peersMap
+	targetLeaderStoreID    uint64
+	targetFollowerStoreIDs map[uint64]struct{}
+	err                    error
 
 	// skip origin check flags
 	skipOriginJointStateCheck bool
@@ -87,6 +88,8 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 		regionID:    region.GetID(),
 		regionEpoch: region.GetRegionEpoch(),
 	}
+
+	b.targetFollowerStoreIDs = make(map[uint64]struct{})
 
 	// options
 	for _, option := range opts {
@@ -510,6 +513,11 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 		if !b.allowLeader(peer, false) {
 			continue
 		}
+		if _, ok := b.targetFollowerStoreIDs[peer.GetStoreId()]; ok {
+			// new leader must not be one of target followers
+			continue
+		}
+
 		if b.targetLeaderStoreID == 0 {
 			b.targetLeaderStoreID = targetLeaderStoreID
 			continue
@@ -578,6 +586,22 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 		// Transfer only when target leader is legal.
 		b.execTransferLeader(b.targetLeaderStoreID)
 		kind |= OpLeader
+	}
+
+	if _, ok := b.targetFollowerStoreIDs[b.currentLeaderStoreID]; ok {
+		// Current leader is illegal. Transfer to a new one.
+		// TODO modify peerPlan to avoid unnecessary leader transfers
+		isLeaderTransferred := false
+		for id, peer := range b.currentPeers {
+			if _, ok := b.targetFollowerStoreIDs[id]; !ok && b.allowLeader(peer, false) {
+				b.execTransferLeader(id)
+				isLeaderTransferred = true
+				break
+			}
+		}
+		if !isLeaderTransferred {
+			return kind, errors.New("no valid leader")
+		}
 	}
 
 	if len(b.steps) == 0 {
@@ -665,10 +689,11 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 		return false
 	}
 
-	// store does not exist
 	if peer.GetStoreId() == b.currentLeaderStoreID {
 		return true
 	}
+
+	// store does not exist
 	store := b.cluster.GetStore(peer.GetStoreId())
 	if store == nil {
 		return false
