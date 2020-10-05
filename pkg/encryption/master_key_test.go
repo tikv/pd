@@ -18,7 +18,6 @@ import (
 	"io/ioutil"
 	"testing"
 
-	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 )
@@ -40,7 +39,6 @@ func (s *testMasterKeySuite) TestPlaintextMasterKey(c *C) {
 	masterKey, err := NewMasterKey(config)
 	c.Assert(err, IsNil)
 	c.Assert(masterKey, Not(IsNil))
-	c.Assert(proto.Equal(config, masterKey.Config), IsTrue)
 	c.Assert(len(masterKey.key), Equals, 0)
 
 	plaintext := "this is a plaintext"
@@ -159,6 +157,5 @@ func (s *testMasterKeySuite) TestNewFileMasterKey(c *C) {
 	}
 	masterKey, err := NewMasterKey(config)
 	c.Assert(err, IsNil)
-	c.Assert(proto.Equal(masterKey.Config, config), IsTrue)
 	c.Assert(hex.EncodeToString(masterKey.key), Equals, key)
 }
