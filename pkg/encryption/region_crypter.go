@@ -16,6 +16,7 @@ package encryption
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"reflect"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
@@ -47,7 +48,8 @@ func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
 		return errs.ErrEncryptionEncryptRegion.GenWithStack(
 			"region already encrypted, region id = %d", region.Id)
 	}
-	if keyManager == nil {
+	if keyManager == nil ||
+		(reflect.TypeOf(keyManager).Kind() == reflect.Ptr && reflect.ValueOf(keyManager).IsNil()) {
 		// encryption is not enabled.
 		return nil
 	}
@@ -88,7 +90,8 @@ func DecryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	if region.EncryptionMeta == nil {
 		return nil
 	}
-	if keyManager == nil {
+	if keyManager == nil ||
+		(reflect.TypeOf(keyManager).Kind() == reflect.Ptr && reflect.ValueOf(keyManager).IsNil()) {
 		return errs.ErrEncryptionDecryptRegion.GenWithStack(
 			"unable to decrypt region without encryption keys")
 	}
