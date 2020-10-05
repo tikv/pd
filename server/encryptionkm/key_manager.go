@@ -32,6 +32,9 @@ import (
 )
 
 const (
+	// EncryptionKeysPath is the path to store keys in etcd.
+	EncryptionKeysPath = "encryption_keys"
+
 	// Special key id to denote encryption is currently not enabled.
 	disableEncryptionKeyID = 0
 	// Check interval for data key rotation.
@@ -42,10 +45,10 @@ const (
 
 // Test helpers
 var (
-	now                       = func() time.Time { return time.Now() }
-	tick                      = func(ticker *time.Ticker) <-chan time.Time { return ticker.C }
-	eventAfterReloadByWatcher = func() {}
-	eventAfterTicker          = func() {}
+	now              = func() time.Time { return time.Now() }
+	tick             = func(ticker *time.Ticker) <-chan time.Time { return ticker.C }
+	eventAfterReload = func() {}
+	eventAfterTicker = func() {}
 )
 
 // KeyManager maintains the list to encryption keys. It handles encryption key generation and
@@ -67,11 +70,6 @@ type KeyManager struct {
 	// List of all encryption keys and current encryption key id,
 	// with type *encryptionpb.KeyDictionary
 	keys atomic.Value
-}
-
-// EncryptionKeysPath return the path to store key dictionary in etcd.
-func EncryptionKeysPath() string {
-	return "encryption/keys"
 }
 
 // saveKeys saves encryption keys in etcd. Fail if given leadership is not current.
@@ -112,7 +110,7 @@ func saveKeys(
 	}
 	// Avoid write conflict with PD peer by checking if we are leader.
 	resp, err := leadership.LeaderTxn().
-		Then(clientv3.OpPut(EncryptionKeysPath(), string(value))).
+		Then(clientv3.OpPut(EncryptionKeysPath, string(value))).
 		Commit()
 	if err != nil {
 		return errs.ErrEtcdTxn.Wrap(err).GenWithStack("fail to save encryption keys")
@@ -191,7 +189,7 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 	defer watcher.Close()
 	watcherCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	watchChan := watcher.Watch(watcherCtx, EncryptionKeysPath(), clientv3.WithRev(revision))
+	watchChan := watcher.Watch(watcherCtx, EncryptionKeysPath, clientv3.WithRev(revision))
 	// Check data key rotation every min(dataKeyRotationPeriod, keyRotationCheckPeriod).
 	checkPeriod := m.dataKeyRotationPeriod
 	if keyRotationCheckPeriod < checkPeriod {
@@ -220,7 +218,7 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 					m.muUpdate.Unlock()
 				}
 			}
-			eventAfterReloadByWatcher()
+			eventAfterReload()
 			// Check data key rotation in case we are the PD leader.
 		case <-tick(ticker):
 			m.muUpdate.Lock()
@@ -251,7 +249,7 @@ func (m *KeyManager) loadKeysFromKV(
 }
 
 func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, revision int64, err error) {
-	resp, err := etcdutil.EtcdKVGet(m.etcdClient, EncryptionKeysPath())
+	resp, err := etcdutil.EtcdKVGet(m.etcdClient, EncryptionKeysPath)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -336,12 +334,12 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 	if !needUpdate {
 		return nil
 	}
+	// Store updated keys in etcd.
 	err = saveKeys(m.etcdClient, m.leadership, m.masterKeyMeta, keys)
 	if err != nil {
 		return err
 	}
-	// Update local keys.
-	m.keys.Store(keys)
+	// m.keys is not updated immediately. Defer to have watcher reload keys.
 	return err
 }
 

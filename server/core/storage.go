@@ -44,9 +44,6 @@ const (
 	replicationPath          = "replication_mode"
 	componentPath            = "component"
 	customScheduleConfigPath = "scheduler_config"
-
-	// Reserved to encryption
-	encryptionKeysPath = "encryption"
 )
 
 const (

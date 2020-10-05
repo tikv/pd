@@ -142,7 +142,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerBasic(c *C) {
 	// Check loaded keys.
 	c.Assert(m.keys.Load(), IsNil)
 	// Check etcd KV.
-	value, err := etcdutil.GetValue(client, EncryptionKeysPath())
+	value, err := etcdutil.GetValue(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	c.Assert(value, IsNil)
 }
@@ -185,7 +185,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerWithCustomConfig(c *C) {
 	// Check loaded keys.
 	c.Assert(m.keys.Load(), IsNil)
 	// Check etcd KV.
-	value, err := etcdutil.GetValue(client, EncryptionKeysPath())
+	value, err := etcdutil.GetValue(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	c.Assert(value, IsNil)
 }
@@ -234,7 +234,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerLoadKeys(c *C) {
 	// Check loaded keys.
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Check etcd KV.
-	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath())
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
 	c.Assert(err, IsNil)
@@ -364,11 +364,11 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	leadership := newTestLeader(c, client)
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	eventAfterReloadByWatcher = func() {
+	eventAfterReload = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
-	defer func() { eventAfterReloadByWatcher = func() {} }()
+	defer func() { eventAfterReload = func() {} }()
 	// Use default config.
 	config := &encryption.Config{}
 	err := config.Adjust()
@@ -458,7 +458,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionOff(c *C) {
 	c.Assert(err, IsNil)
 	// Check encryption stays off.
 	c.Assert(m.keys.Load(), IsNil)
-	value, err := etcdutil.GetValue(client, EncryptionKeysPath())
+	value, err := etcdutil.GetValue(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	c.Assert(value, IsNil)
 }
@@ -472,8 +472,13 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
-	// Cancel background loop.
-	cancel()
+	// Listen on watcher event
+	reloadEvent := make(chan struct{}, 1)
+	eventAfterReload = func() {
+		var e struct{}
+		reloadEvent <- e
+	}
+	defer func() { eventAfterReload = func() {} }()
 	// Config with encryption on.
 	config := &encryption.Config{
 		DataEncryptionMethod: "aes128-ctr",
@@ -494,6 +499,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
 	// Check encryption is on and persisted.
+	<-reloadEvent
 	c.Assert(m.keys.Load(), NotNil)
 	currentKeyID, currentKey, err := m.GetCurrentKey()
 	c.Assert(err, IsNil)
@@ -502,7 +508,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	c.Assert(currentKey.Method, Equals, method)
 	loadedKeys := m.keys.Load().(*encryptionpb.KeyDictionary)
 	c.Assert(proto.Equal(loadedKeys.Keys[currentKeyID], currentKey), IsTrue)
-	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath())
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
@@ -521,8 +527,12 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	originalNow := now
 	now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	defer func() { now = originalNow }()
-	// Cancel background loop.
-	cancel()
+	// Listen on watcher event
+	reloadEvent := make(chan struct{}, 1)
+	eventAfterReload = func() {
+		var e struct{}
+		reloadEvent <- e
+	}
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -564,6 +574,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
 	// Check encryption method is updated.
+	<-reloadEvent
 	c.Assert(m.keys.Load(), NotNil)
 	currentKeyID, currentKey, err := m.GetCurrentKey()
 	c.Assert(err, IsNil)
@@ -572,7 +583,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	loadedKeys := m.keys.Load().(*encryptionpb.KeyDictionary)
 	c.Assert(loadedKeys.CurrentKeyId, Equals, currentKeyID)
 	c.Assert(proto.Equal(loadedKeys.Keys[123], keys.Keys[123]), IsTrue)
-	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath())
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
@@ -591,8 +602,13 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	originalNow := now
 	now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	defer func() { now = originalNow }()
-	// Cancel background loop.
-	cancel()
+	// Listen on watcher event
+	reloadEvent := make(chan struct{}, 1)
+	eventAfterReload = func() {
+		var e struct{}
+		reloadEvent <- e
+	}
+	defer func() { eventAfterReload = func() {} }()
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -634,6 +650,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
 	// Check encryption method is updated.
+	<-reloadEvent
 	c.Assert(m.keys.Load(), NotNil)
 	currentKeyID, currentKey, err := m.GetCurrentKey()
 	c.Assert(err, IsNil)
@@ -643,7 +660,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	loadedKeys := m.keys.Load().(*encryptionpb.KeyDictionary)
 	c.Assert(loadedKeys.CurrentKeyId, Equals, currentKeyID)
 	c.Assert(proto.Equal(loadedKeys.Keys[123], keys.Keys[123]), IsTrue)
-	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath())
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
@@ -662,8 +679,13 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	originalNow := now
 	now = func() time.Time { return time.Unix(int64(1601679533+101), 0) }
 	defer func() { now = originalNow }()
-	// Cancel background loop.
-	cancel()
+	// Listen on watcher event
+	reloadEvent := make(chan struct{}, 1)
+	eventAfterReload = func() {
+		var e struct{}
+		reloadEvent <- e
+	}
+	defer func() { eventAfterReload = func() {} }()
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -708,6 +730,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
 	// Check encryption method is updated.
+	<-reloadEvent
 	c.Assert(m.keys.Load(), NotNil)
 	currentKeyID, currentKey, err := m.GetCurrentKey()
 	c.Assert(err, IsNil)
@@ -718,7 +741,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	loadedKeys := m.keys.Load().(*encryptionpb.KeyDictionary)
 	c.Assert(loadedKeys.CurrentKeyId, Equals, currentKeyID)
 	c.Assert(proto.Equal(loadedKeys.Keys[123], keys.Keys[123]), IsTrue)
-	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath())
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
@@ -739,8 +762,13 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	originalNow := now
 	now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	defer func() { now = originalNow }()
-	// Cancel background loop.
-	cancel()
+	// Listen on watcher event
+	reloadEvent := make(chan struct{}, 1)
+	eventAfterReload = func() {
+		var e struct{}
+		reloadEvent <- e
+	}
+	defer func() { eventAfterReload = func() {} }()
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -782,8 +810,9 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
 	// Check keys are the same, but encrypted with the new master key.
+	<-reloadEvent
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
-	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath())
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
 	c.Assert(err, IsNil)
@@ -802,8 +831,13 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
-	// Cancel background loop.
-	cancel()
+	// Listen on watcher event
+	reloadEvent := make(chan struct{}, 1)
+	eventAfterReload = func() {
+		var e struct{}
+		reloadEvent <- e
+	}
+	defer func() { eventAfterReload = func() {} }()
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -837,11 +871,12 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
 	// Check encryption is disabled
+	<-reloadEvent
 	expectedKeys := proto.Clone(keys).(*encryptionpb.KeyDictionary)
 	expectedKeys.CurrentKeyId = disableEncryptionKeyID
 	expectedKeys.Keys[123].WasExposed = true
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), expectedKeys), IsTrue)
-	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath())
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
 	c.Assert(err, IsNil)
@@ -866,6 +901,13 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	mockTick := make(chan time.Time)
 	tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
 	defer func() { tick = originalTick }()
+	// Listen on watcher event
+	reloadEvent := make(chan struct{}, 1)
+	eventAfterReload = func() {
+		var e struct{}
+		reloadEvent <- e
+	}
+	defer func() { eventAfterReload = func() {} }()
 	// Listen on ticker event
 	tickerEvent := make(chan struct{}, 1)
 	eventAfterTicker = func() {
@@ -918,7 +960,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	c.Assert(err, IsNil)
 	// Check keys
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
-	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath())
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
 	c.Assert(err, IsNil)
@@ -927,6 +969,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	atomic.AddInt64(&mockNow, int64(101))
 	mockTick <- time.Unix(atomic.LoadInt64(&mockNow), 0)
 	<-tickerEvent
+	<-reloadEvent
 	// Check key is rotated.
 	currentKeyID, currentKey, err := m.GetCurrentKey()
 	c.Assert(currentKey.Method, Equals, encryptionpb.EncryptionMethod_AES128_CTR)
@@ -937,7 +980,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	c.Assert(loadedKeys.CurrentKeyId, Equals, currentKeyID)
 	c.Assert(proto.Equal(loadedKeys.Keys[123], keys.Keys[123]), IsTrue)
 	c.Assert(proto.Equal(loadedKeys.Keys[currentKeyID], currentKey), IsTrue)
-	resp, err = etcdutil.EtcdKVGet(client, EncryptionKeysPath())
+	resp, err = etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err = loadKeysFromKV(resp.Kvs[0])
 	c.Assert(err, IsNil)
