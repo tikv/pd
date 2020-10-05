@@ -67,8 +67,11 @@ type KeyManager struct {
 	// Mutex for updating keys. Used for both of LoadKeys() and rotateKeyIfNeeded().
 	muUpdate sync.Mutex
 	// PD leadership of the current PD node. Only the PD leader will rotate data keys,
-	// or change current encryption method. Guarded by muUpdate.
+	// or change current encryption method.
+	// Guarded by muUpdate.
 	leadership *election.Leadership
+	// Revision of keys loaded from etcd. Guarded by muUpdate.
+	keysRevision int64
 	// List of all encryption keys and current encryption key id,
 	// with type *encryptionpb.KeyDictionary
 	keys atomic.Value
@@ -174,16 +177,16 @@ func NewKeyManager(
 		masterKeyMeta:         masterKeyMeta,
 	}
 	// Load encryption keys from storage.
-	_, revision, err := m.loadKeys()
+	_, err = m.loadKeys()
 	if err != nil {
 		return nil, err
 	}
 	// Start periodic check for keys change and rotation key if needed.
-	go m.startBackgroundLoop(ctx, revision)
+	go m.startBackgroundLoop(ctx)
 	return m, nil
 }
 
-func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
+func (m *KeyManager) startBackgroundLoop(ctx context.Context) {
 	// Create new context for the loop.
 	loopCtx, _ := context.WithCancel(ctx)
 	// Setup key dictionary watcher
@@ -191,7 +194,7 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 	defer watcher.Close()
 	watcherCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	watchChan := watcher.Watch(watcherCtx, EncryptionKeysPath, clientv3.WithRev(revision))
+	watchChan := watcher.Watch(watcherCtx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision))
 	// Check data key rotation every min(dataKeyRotationPeriod, keyRotationCheckPeriod).
 	checkPeriod := m.dataKeyRotationPeriod
 	if keyRotationCheckPeriod < checkPeriod {
@@ -205,7 +208,7 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 		// Reload encryption keys updated by PD leader (could be ourselves).
 		case resp := <-watchChan:
 			if resp.Canceled {
-				// If the watcher failed, we rely solely on rotateKeyIfNeeded to reload encryption keys.
+				// If the watcher failed, we rely solely on rotateKeyIfNeeded() to reload encryption keys.
 				log.Warn("encryption key watcher canceled")
 				continue
 			}
@@ -241,28 +244,35 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 func (m *KeyManager) loadKeysFromKV(
 	kv *mvccpb.KeyValue,
 ) (*encryptionpb.KeyDictionary, error) {
+	// Sanity check if keys revision is in order.
+	// etcd docs indicates watcher event can be out of order:
+	// https://etcd.io/docs/v3.4.0/learning/api_guarantees/#isolation-level-and-consistency-of-replicas
+	if kv.ModRevision <= m.keysRevision {
+		return m.getKeys(), nil
+	}
 	keys, err := loadKeysFromKV(kv)
 	if err != nil {
 		return nil, err
 	}
+	m.keysRevision = kv.ModRevision
 	m.keys.Store(keys)
 	log.Info("reloaded encryption keys", zap.Int64("revision", kv.ModRevision))
 	return keys, nil
 }
 
-func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, revision int64, err error) {
+func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, err error) {
 	resp, err := etcdutil.EtcdKVGet(m.etcdClient, EncryptionKeysPath)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	if resp == nil || len(resp.Kvs) == 0 {
-		return nil, 0, nil
+		return nil, nil
 	}
 	keys, err = m.loadKeysFromKV(resp.Kvs[0])
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	return keys, resp.Kvs[0].ModRevision, err
+	return keys, err
 }
 
 func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
@@ -273,7 +283,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 	}
 	eventAfterLeaderCheck()
 	// Reload encryption keys in case we are not up-to-date.
-	keys, _, err := m.loadKeys()
+	keys, err := m.loadKeys()
 	if err != nil {
 		return err
 	}
@@ -343,7 +353,8 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 		eventSaveKeysFailure()
 		return err
 	}
-	// m.keys is not updated immediately. Defer to have watcher reload keys.
+	// Reload keys.
+	_, err = m.loadKeys()
 	return err
 }
 
@@ -398,7 +409,7 @@ func (m *KeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
 		return key, nil
 	}
 	// Reload keys from storage.
-	keys, _, err := m.loadKeys()
+	keys, err := m.loadKeys()
 	if err != nil {
 		return nil, err
 	}

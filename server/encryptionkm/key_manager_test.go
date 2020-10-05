@@ -344,6 +344,7 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 	loadedKeys = proto.Clone(loadedKeys).(*encryptionpb.KeyDictionary)
 	delete(loadedKeys.Keys, 456)
 	m.keys.Store(loadedKeys)
+	m.keysRevision = 0
 	key, err = m.GetKey(uint64(456))
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(key, keys.Keys[456]), IsTrue)
