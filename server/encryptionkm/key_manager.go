@@ -85,7 +85,7 @@ func saveKeys(
 	keys *encryptionpb.KeyDictionary,
 ) error {
 	// Get master key.
-	masterKey, err := encryption.NewMasterKey(masterKeyMeta)
+	masterKey, err := encryption.NewMasterKey(masterKeyMeta, nil)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func loadKeysFromKV(kv *mvccpb.KeyValue) (*encryptionpb.KeyDictionary, error) {
 		return nil, errs.ErrEncryptionLoadKeys.GenWithStack(
 			"no master key config found with encryption keys")
 	}
-	masterKey, err := encryption.NewMasterKey(masterKeyConfig)
+	masterKey, err := encryption.NewMasterKey(masterKeyConfig, content.CiphertextKey)
 	if err != nil {
 		return nil, err
 	}
