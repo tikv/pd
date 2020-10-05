@@ -972,6 +972,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	<-reloadEvent
 	// Check key is rotated.
 	currentKeyID, currentKey, err := m.GetCurrentKey()
+	c.Assert(currentKeyID, Not(Equals), uint64(123))
 	c.Assert(currentKey.Method, Equals, encryptionpb.EncryptionMethod_AES128_CTR)
 	c.Assert(currentKey.Key, HasLen, 16)
 	c.Assert(currentKey.CreationTime, Equals, uint64(mockNow))
@@ -985,4 +986,104 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	storedKeys, err = loadKeysFromKV(resp.Kvs[0])
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, loadedKeys), IsTrue)
+}
+
+func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
+	// Initialize.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client, cleanupEtcd := newTestEtcd(c)
+	defer cleanupEtcd()
+	keyFile, cleanupKeyFile := newTestKeyFile(c)
+	defer cleanupKeyFile()
+	leadership := newTestLeader(c, client)
+	// Mock time
+	originalNow := now
+	mockNow := int64(1601679533)
+	now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
+	defer func() { now = originalNow }()
+	originalTick := tick
+	mockTick := make(chan time.Time)
+	tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
+	defer func() { tick = originalTick }()
+	// Listen on ticker event
+	tickerEvent := make(chan struct{}, 1)
+	eventAfterTicker = func() {
+		var e struct{}
+		tickerEvent <- e
+	}
+	defer func() { eventAfterTicker = func() {} }()
+	// Update keys in etcd
+	masterKeyMeta := &encryptionpb.MasterKey{
+		Backend: &encryptionpb.MasterKey_File{
+			File: &encryptionpb.MasterKeyFile{
+				Path: keyFile,
+			},
+		},
+	}
+	keys := &encryptionpb.KeyDictionary{
+		CurrentKeyId: 123,
+		Keys: map[uint64]*encryptionpb.DataKey{
+			123: &encryptionpb.DataKey{
+				Key:          getTestDataKey(),
+				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
+				CreationTime: uint64(1601679533),
+				WasExposed:   false,
+			},
+		},
+	}
+	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	c.Assert(err, IsNil)
+	// Config with 100s rotation period.
+	rotationPeriod, err := time.ParseDuration("100s")
+	c.Assert(err, IsNil)
+	config := &encryption.Config{
+		DataEncryptionMethod:  "aes128-ctr",
+		DataKeyRotationPeriod: typeutil.NewDuration(rotationPeriod),
+		MasterKey: encryption.MasterKeyConfig{
+			Type: "file",
+			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+				FilePath: keyFile,
+			},
+		},
+	}
+	err = config.Adjust()
+	c.Assert(err, IsNil)
+	// Create the key manager.
+	m, err := NewKeyManager(ctx, client, config)
+	c.Assert(err, IsNil)
+	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	// Set leadership
+	err = m.SetLeadership(leadership)
+	c.Assert(err, IsNil)
+	// Check keys
+	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
+	c.Assert(err, IsNil)
+	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
+	c.Assert(err, IsNil)
+	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
+	// Invalidate leader after leader check.
+	eventAfterLeaderCheck = func() {
+		leadership.Reset()
+	}
+	defer func() { eventAfterLeaderCheck = func() {} }()
+	// Listen on save key failure event
+	saveKeysFailureEvent := make(chan struct{}, 1)
+	eventSaveKeysFailure = func() {
+		var e struct{}
+		saveKeysFailureEvent <- e
+	}
+	defer func() { eventSaveKeysFailure = func() {} }()
+	// Advance time and trigger ticker
+	atomic.AddInt64(&mockNow, int64(101))
+	mockTick <- time.Unix(atomic.LoadInt64(&mockNow), 0)
+	<-tickerEvent
+	<-saveKeysFailureEvent
+	// Check keys is unchanged.
+	resp, err = etcdutil.EtcdKVGet(client, EncryptionKeysPath)
+	c.Assert(err, IsNil)
+	storedKeys, err = loadKeysFromKV(resp.Kvs[0])
+	c.Assert(err, IsNil)
+	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
 }

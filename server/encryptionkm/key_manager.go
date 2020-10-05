@@ -45,10 +45,12 @@ const (
 
 // Test helpers
 var (
-	now              = func() time.Time { return time.Now() }
-	tick             = func(ticker *time.Ticker) <-chan time.Time { return ticker.C }
-	eventAfterReload = func() {}
-	eventAfterTicker = func() {}
+	now                   = func() time.Time { return time.Now() }
+	tick                  = func(ticker *time.Ticker) <-chan time.Time { return ticker.C }
+	eventAfterReload      = func() {}
+	eventAfterTicker      = func() {}
+	eventAfterLeaderCheck = func() {}
+	eventSaveKeysFailure  = func() {}
 )
 
 // KeyManager maintains the list to encryption keys. It handles encryption key generation and
@@ -269,6 +271,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 		m.leadership = nil
 		return nil
 	}
+	eventAfterLeaderCheck()
 	// Reload encryption keys in case we are not up-to-date.
 	keys, _, err := m.loadKeys()
 	if err != nil {
@@ -337,6 +340,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 	// Store updated keys in etcd.
 	err = saveKeys(m.etcdClient, m.leadership, m.masterKeyMeta, keys)
 	if err != nil {
+		eventSaveKeysFailure()
 		return err
 	}
 	// m.keys is not updated immediately. Defer to have watcher reload keys.
