@@ -57,6 +57,15 @@ func NewMasterKey(config *encryptionpb.MasterKey, ciphertextKey []byte) (*Master
 	return nil, errors.New("unrecognized master key type")
 }
 
+// NewCustomMasterKey construct a master key instance from raw key and ciphertext key bytes.
+// Used for test only.
+func NewCustomMasterKey(key []byte, ciphertextKey []byte) *MasterKey {
+	return &MasterKey{
+		key:           key,
+		ciphertextKey: ciphertextKey,
+	}
+}
+
 // Encrypt encrypts given plaintext using the master key.
 // IV is randomly generated and included in the result. Caller is expected to pass the same IV back
 // for decryption.
