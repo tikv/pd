@@ -47,6 +47,7 @@ const (
 var (
 	now                   = func() time.Time { return time.Now() }
 	tick                  = func(ticker *time.Ticker) <-chan time.Time { return ticker.C }
+	newMasterKey          = encryption.NewMasterKey
 	eventAfterReload      = func() {}
 	eventAfterTicker      = func() {}
 	eventAfterLeaderCheck = func() {}
@@ -85,7 +86,7 @@ func saveKeys(
 	keys *encryptionpb.KeyDictionary,
 ) error {
 	// Get master key.
-	masterKey, err := encryption.NewMasterKey(masterKeyMeta, nil)
+	masterKey, err := newMasterKey(masterKeyMeta, nil)
 	if err != nil {
 		return err
 	}
@@ -105,9 +106,10 @@ func saveKeys(
 		return err
 	}
 	content := &encryptionpb.EncryptedContent{
-		Content:   ciphertextContent,
-		MasterKey: masterKeyMeta,
-		Iv:        iv,
+		Content:       ciphertextContent,
+		MasterKey:     masterKeyMeta,
+		Iv:            iv,
+		CiphertextKey: masterKey.CiphertextKey(),
 	}
 	value, err := proto.Marshal(content)
 	if err != nil {
@@ -139,7 +141,7 @@ func loadKeysFromKV(kv *mvccpb.KeyValue) (*encryptionpb.KeyDictionary, error) {
 		return nil, errs.ErrEncryptionLoadKeys.GenWithStack(
 			"no master key config found with encryption keys")
 	}
-	masterKey, err := encryption.NewMasterKey(masterKeyConfig, content.CiphertextKey)
+	masterKey, err := newMasterKey(masterKeyConfig, content.CiphertextKey)
 	if err != nil {
 		return nil, err
 	}

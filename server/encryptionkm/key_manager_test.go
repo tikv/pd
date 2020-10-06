@@ -14,6 +14,7 @@
 package encryptionkm
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -45,9 +46,10 @@ type testKeyManagerSuite struct{}
 var _ = Suite(&testKeyManagerSuite{})
 
 const (
-	testMasterKey  = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b530"
-	testMasterKey2 = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b531"
-	testDataKey    = "be798242dde0c40d9a65cdbc36c1c9ac"
+	testMasterKey     = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b530"
+	testMasterKey2    = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b531"
+	testCiphertextKey = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b532"
+	testDataKey       = "be798242dde0c40d9a65cdbc36c1c9ac"
 )
 
 func getTestDataKey() []byte {
@@ -114,11 +116,12 @@ func newTestLeader(c *C, client *clientv3.Client) *election.Leadership {
 	return leader
 }
 
-func checkMasterKeyMeta(c *C, value []byte, meta *encryptionpb.MasterKey) {
+func checkMasterKeyMeta(c *C, value []byte, meta *encryptionpb.MasterKey, ciphertextKey []byte) {
 	content := &encryptionpb.EncryptedContent{}
 	err := content.Unmarshal(value)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(content.MasterKey, meta), IsTrue)
+	c.Assert(bytes.Equal(content.CiphertextKey, ciphertextKey), IsTrue)
 }
 
 func (s *testKeyManagerSuite) TestNewKeyManagerBasic(c *C) {
@@ -820,7 +823,92 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
 	meta, err := config.GetMasterKeyMeta()
 	c.Assert(err, IsNil)
-	checkMasterKeyMeta(c, resp.Kvs[0].Value, meta)
+	checkMasterKeyMeta(c, resp.Kvs[0].Value, meta, nil)
+}
+
+func (s *testKeyManagerSuite) TestSetLeadershipMasterKeyWithCiphertextKey(c *C) {
+	// Initialize.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client, cleanupEtcd := newTestEtcd(c)
+	defer cleanupEtcd()
+	keyFile, cleanupKeyFile := newTestKeyFile(c)
+	defer cleanupKeyFile()
+	leadership := newTestLeader(c, client)
+	// Cancel background loop.
+	cancel()
+	// Update keys in etcd
+	masterKeyMeta := &encryptionpb.MasterKey{
+		Backend: &encryptionpb.MasterKey_File{
+			File: &encryptionpb.MasterKeyFile{
+				Path: keyFile,
+			},
+		},
+	}
+	keys := &encryptionpb.KeyDictionary{
+		CurrentKeyId: 123,
+		Keys: map[uint64]*encryptionpb.DataKey{
+			123: &encryptionpb.DataKey{
+				Key:          getTestDataKey(),
+				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
+				CreationTime: uint64(1601679533),
+				WasExposed:   false,
+			},
+		},
+	}
+	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	c.Assert(err, IsNil)
+	// Config with a different master key.
+	config := &encryption.Config{
+		DataEncryptionMethod: "aes128-ctr",
+		MasterKey: encryption.MasterKeyConfig{
+			Type: "file",
+			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+				FilePath: keyFile,
+			},
+		},
+	}
+	err = config.Adjust()
+	c.Assert(err, IsNil)
+	// Create the key manager.
+	m, err := NewKeyManager(ctx, client, config)
+	c.Assert(err, IsNil)
+	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	// mock NewMasterKey
+	originalNewMasterKey := newMasterKey
+	newMasterKeyCalled := 0
+	outputMasterKey, _ := hex.DecodeString(testMasterKey)
+	outputCiphertextKey, _ := hex.DecodeString(testCiphertextKey)
+	newMasterKey = func(
+		meta *encryptionpb.MasterKey,
+		ciphertext []byte,
+	) (*encryption.MasterKey, error) {
+		if newMasterKeyCalled == 0 {
+			// called by saveKeys
+			c.Assert(ciphertext, IsNil)
+		} else {
+			// called by loadKeys after saveKeys
+			c.Assert(bytes.Equal(ciphertext, outputCiphertextKey), IsTrue)
+		}
+		newMasterKeyCalled += 1
+		return encryption.NewCustomMasterKey(outputMasterKey, outputCiphertextKey), nil
+	}
+	defer func() { newMasterKey = originalNewMasterKey }()
+	// Set leadership
+	err = m.SetLeadership(leadership)
+	c.Assert(err, IsNil)
+	c.Assert(newMasterKeyCalled, Equals, 2)
+	// Check if keys are the same
+	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
+	c.Assert(err, IsNil)
+	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
+	c.Assert(err, IsNil)
+	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
+	meta, err := config.GetMasterKeyMeta()
+	c.Assert(err, IsNil)
+	// Check ciphertext key is stored with keys.
+	checkMasterKeyMeta(c, resp.Kvs[0].Value, meta, outputCiphertextKey)
 }
 
 func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
