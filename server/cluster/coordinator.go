@@ -76,7 +76,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		cancel:          cancel,
 		cluster:         cluster,
 		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, opController),
-		regionScatterer: schedule.NewRegionScatterer(cluster),
+		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
 		hbStreams:       hbStreams,
