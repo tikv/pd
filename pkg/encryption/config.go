@@ -62,6 +62,10 @@ func (c *Config) Adjust() error {
 				defaultDataKeyRotationPeriod)
 		}
 		c.DataKeyRotationPeriod.Duration = duration
+	} else if c.DataKeyRotationPeriod.Duration < 0 {
+		return errs.ErrEncryptionInvalidConfig.GenWithStack(
+			"negative data-key-rotation-period %d",
+			c.DataKeyRotationPeriod.Duration)
 	}
 	if len(c.MasterKey.Type) == 0 {
 		c.MasterKey.Type = masterKeyTypePlaintext
