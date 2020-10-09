@@ -665,6 +665,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	var regionMap map[uint64]*core.RegionInfo
 	_, ok1 := input["start_key"].(string)
 	_, ok2 := input["end_key"].(string)
+	regionsCount := 0
 	if ok1 && ok2 {
 		startKey, _, err := parseKey("start_key", input)
 		if err != nil {
@@ -682,12 +683,18 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 		for _, region := range regions {
 			regionMap[region.GetID()] = region
 		}
+		regionsCount = len(regionMap)
 	} else {
 		regionsID := input["regions_id"].([]uint64)
 		regionMap = make(map[uint64]*core.RegionInfo, len(regionsID))
 		for _, id := range regionsID {
 			regionMap[id] = rc.GetRegion(id)
 		}
+		regionsCount = len(regionsID)
+	}
+	if regionsCount < 1 {
+		h.rd.JSON(w, http.StatusBadRequest, "empty regions")
+		return
 	}
 	group, ok := input["group"].(string)
 	if !ok {
@@ -713,7 +720,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 		ProcessedPercentage int    `json:"processed-percentage"`
 		Error               string `json:"error"`
 	}{
-		ProcessedPercentage: 100 - (len(failureRegionID) * 100 / len(regionMap)),
+		ProcessedPercentage: 100 - (len(failureRegionID) * 100 / regionsCount),
 		Error:               "unprocessed regions:[" + strings.Join(failureRegionID, ",") + "]",
 	}
 	h.rd.JSON(w, http.StatusOK, &s)
