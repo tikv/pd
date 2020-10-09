@@ -44,7 +44,7 @@ func (s *testkvRPCSuite) TestSendReqErr(c *C) {
 	}{
 		{
 			injectPath: "getRegionError",
-			expectErr:  errors.New("getRegionError"),
+			expectErr:  errors.New("regionErr, err: getRegionError"),
 		},
 		{
 			injectPath: "sendRegionRequestErr",
