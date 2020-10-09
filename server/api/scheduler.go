@@ -60,7 +60,7 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	switch status {
 	case "paused":
-		var pausedScehdulers []string
+		var pausedSchedulers []string
 		for _, scheduler := range schedulers {
 			paused, err := h.IsSchedulerPaused(scheduler)
 			if err != nil {
@@ -69,14 +69,14 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if paused {
-				pausedScehdulers = append(pausedScehdulers, scheduler)
+				pausedSchedulers = append(pausedSchedulers, scheduler)
 			}
 		}
-		h.r.JSON(w, http.StatusOK, pausedScehdulers)
+		h.r.JSON(w, http.StatusOK, pausedSchedulers)
 		return
 	default:
+		h.r.JSON(w, http.StatusOK, schedulers)
 	}
-	h.r.JSON(w, http.StatusOK, schedulers)
 }
 
 // FIXME: details of input json body params
