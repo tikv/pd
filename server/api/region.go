@@ -653,9 +653,9 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 // @Accept json
 // @Param body body object true "json params"
 // @Produce json
-// @Success 200 {string} string "Accelerate regions scheduling in a given range[startKey,endKey)"
+// @Success 200 {string} string "Scatter regions by given key ranges or regions id distributed by given group with given retry limit"
 // @Failure 400 {string} string "The input is invalid."
-// @Router /regions/accelerate-schedule [post]
+// @Router /regions/scatter [post]
 func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
 	var input map[string]interface{}
