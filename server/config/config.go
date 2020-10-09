@@ -122,7 +122,7 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
-	Security grpcutil.SecurityConfig `toml:"security" json:"security"`
+	Security SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
@@ -145,8 +145,6 @@ type Config struct {
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
-	// EnableRedactLog indicates that whether redact log, 0 is disable. 1 is enable.
-	EnableRedactLog bool `toml:"enable-redact-log" json:"enable-redact-log"`
 }
 
 // NewConfig creates a new config.
@@ -224,7 +222,6 @@ const (
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
-	defaultEnableRedactLog    = false
 )
 
 var (
@@ -546,10 +543,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	c.Dashboard.adjust(configMetaData.Child("dashboard"))
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
-
-	if !configMetaData.IsDefined("enable-redact-log") {
-		c.EnableRedactLog = defaultEnableRedactLog
-	}
 
 	return nil
 }
@@ -1151,7 +1144,7 @@ func (c *Config) SetupLogger() error {
 	}
 	c.logger = lg
 	c.logProps = p
-	logutil.SetRedactLog(c.EnableRedactLog)
+	logutil.SetRedactLog(c.Security.RedactInfoLog)
 	return nil
 }
 
@@ -1372,4 +1365,11 @@ func (c *LocalTSOConfig) Validate() error {
 		return errors.New(errMsg)
 	}
 	return nil
+}
+
+// SecurityConfig indicates the security configuration for pd server
+type SecurityConfig struct {
+	grpcutil.TLSConfig
+	// RedactInfoLog indicates that whether enabling redact log
+	RedactInfoLog bool `toml:"redact-info-log" json:"redact-info-log"`
 }
