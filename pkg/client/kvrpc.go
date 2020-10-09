@@ -18,6 +18,9 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/errorpb"
+	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/client-go/config"
 	"github.com/tikv/client-go/rpc"
@@ -64,6 +67,17 @@ func (s *RegionRequestSender) SendReq(ctx context.Context, regionRequest *Region
 	if err != nil {
 		return nil, err
 	}
+	failpoint.Inject("getRegionError", func() {
+		resp = &rpc.Response{
+			Type: rpc.CmdGet,
+			Get: &kvrpcpb.GetResponse{
+				RegionError: &errorpb.Error{
+					Message: "getRegionError",
+				},
+			},
+		}
+	})
+
 	regionErr, err := resp.GetRegionError()
 	if err != nil {
 		return nil, err
@@ -86,6 +100,9 @@ func (s *RegionRequestSender) sendReqToRegion(ctx context.Context, request *Regi
 		return nil, err
 	}
 	resp, err = s.client.SendRequest(ctx, request.leaderStore.GetAddress(), request.req, request.timeout)
+	failpoint.Inject("sendRegionRequestErr", func() {
+		err = errors.New("sendRegionRequestErr")
+	})
 	if err != nil {
 		return nil, err
 	}
