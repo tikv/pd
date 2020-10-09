@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"testing"
 	"time"
@@ -49,6 +50,10 @@ func (s *testkvRPCSuite) TestSendReqErr(c *C) {
 			injectPath: "sendRegionRequestErr",
 			expectErr:  errors.New("sendRegionRequestErr"),
 		},
+		{
+			injectPath: "setContextErr",
+			expectErr:  errors.New("setContextErr"),
+		},
 	}
 
 	conf := config.DefaultRPC()
@@ -69,7 +74,12 @@ func (s *testkvRPCSuite) TestSendReqErr(c *C) {
 			Id:      1,
 			Address: "mock://tikv-1",
 		})
-		_, err := sender.SendReq(ctx, NewRegionRequest(&rpc.Request{}, mockRegion, mockStore, time.Second))
+		_, err := sender.SendReq(ctx, NewRegionRequest(&rpc.Request{
+			Type: rpc.CmdGet,
+			Get: &kvrpcpb.GetRequest{
+				Context: &kvrpcpb.Context{},
+			},
+		}, mockRegion, mockStore, time.Second))
 		if testcase.expectErr != nil {
 			c.Assert(err != nil, Equals, true)
 			c.Assert(err.Error(), Equals, testcase.expectErr.Error())
