@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
@@ -95,7 +96,9 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 		tc.AddLeaderRegion(i, 1, 2, 3)
 	}
 
-	scatterer := NewRegionScatterer(tc)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scatterer := NewRegionScatterer(ctx, tc)
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
@@ -161,7 +164,9 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 		)
 	}
 
-	scatterer := NewRegionScatterer(tc)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scatterer := NewRegionScatterer(ctx, tc)
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
@@ -226,7 +231,7 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
 	}
 
-	scatterer := NewRegionScatterer(tc)
+	scatterer := NewRegionScatterer(ctx, tc)
 
 	for i := uint64(1); i <= 5; i++ {
 		region := tc.GetRegion(i)
@@ -266,7 +271,8 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 	}
 	for _, testcase := range testcases {
 		c.Logf(testcase.name)
-		scatterer := NewRegionScatterer(tc)
+		ctx, cancel := context.WithCancel(context.Background())
+		scatterer := NewRegionScatterer(ctx, tc)
 		_, err := scatterer.Scatter(testcase.checkRegion, "")
 		if testcase.needFix {
 			c.Assert(err, NotNil)
@@ -276,6 +282,7 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, false)
 		}
 		tc.ResetSuspectRegions()
+		cancel()
 	}
 }
 
@@ -307,7 +314,8 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 
 	for _, testcase := range testcases {
 		c.Logf(testcase.name)
-		scatterer := NewRegionScatterer(tc)
+		ctx, cancel := context.WithCancel(context.Background())
+		scatterer := NewRegionScatterer(ctx, tc)
 		regionID := 1
 		for i := 0; i < 100; i++ {
 			for j := 0; j < testcase.groupCount; j++ {
@@ -327,7 +335,8 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 			group := fmt.Sprintf("group-%v", i)
 			max := uint64(0)
 			min := uint64(math.MaxUint64)
-			for _, count := range scatterer.ordinaryEngine.selectedLeader.groupDistribution[group] {
+			groupDistribution, _ := scatterer.ordinaryEngine.selectedLeader.groupDistribution.Get(group)
+			for _, count := range groupDistribution.(map[uint64]uint64) {
 				if count > max {
 					max = count
 				}
@@ -340,6 +349,7 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 			c.Assert(max, GreaterEqual, uint64(20))
 			c.Assert(max-min, LessEqual, uint64(3))
 		}
+		cancel()
 	}
 }
 
@@ -365,7 +375,8 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 	}
 	group := "group"
 	for _, testcase := range testcases {
-		scatterer := NewRegionScatterer(tc)
+		ctx, cancel := context.WithCancel(context.Background())
+		scatterer := NewRegionScatterer(ctx, tc)
 		regions := map[uint64]*core.RegionInfo{}
 		for i := 1; i <= 100; i++ {
 			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
@@ -379,7 +390,7 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 		scatterer.ScatterRegions(regions, failures, group, 3)
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
-		for _, count := range scatterer.ordinaryEngine.selectedLeader.groupDistribution[group] {
+		for _, count := range scatterer.ordinaryEngine.selectedLeader.getGroupDistributionOrDefault(group) {
 			if count > max {
 				max = count
 			}
@@ -399,5 +410,25 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 		} else {
 			c.Assert(len(failures), Equals, 0)
 		}
+		cancel()
 	}
+}
+
+func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
+	// use a shorter gcTTL and gcInterval during the test
+	gcInterval = time.Second
+	gcTTL = time.Second * 3
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stores := newSelectedStores(ctx, true)
+	stores.put(1, "testgroup")
+	_, ok := stores.getStore("testgroup")
+	c.Assert(ok, Equals, true)
+	_, ok = stores.getGroupDistribution("testgroup")
+	c.Assert(ok, Equals, true)
+	time.Sleep(gcTTL)
+	_, ok = stores.getStore("testgroup")
+	c.Assert(ok, Equals, false)
+	_, ok = stores.getGroupDistribution("testgroup")
+	c.Assert(ok, Equals, false)
 }
