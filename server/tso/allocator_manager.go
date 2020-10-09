@@ -36,6 +36,7 @@ import (
 )
 
 const (
+	checkPriorityStep           = 1 * time.Minute
 	checkAllocatorStep          = 1 * time.Second
 	dcLocationConfigEtcdPrefix  = "dc-location"
 	defaultAllocatorLeaderLease = 3
@@ -228,6 +229,23 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 			log.Info("local tso allocator leader has changed, try to re-campaign a local tso allocator leader",
 				zap.String("dc-location", allocator.dcLocation))
 		}
+		// Check the next-leader key
+		nextLeader, err := am.getNextLeaderID(allocator.dcLocation)
+		if err != nil {
+			log.Error("get next leader from etcd failed",
+				zap.String("dc-location", allocator.dcLocation),
+				errs.ZapError(err))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		if nextLeader != 0 && nextLeader != am.member.ID() {
+			log.Info("skip campaigning of the local tso allocator leader and check later",
+				zap.String("server-name", am.member.Member().Name),
+				zap.Uint64("server-id", am.member.ID()),
+				zap.Uint64("next-leader-id", nextLeader))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
 		am.campaignAllocatorLeader(ctx, allocator)
 	}
 }
@@ -259,6 +277,8 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 		return
 	}
 	allocator.EnableAllocatorLeader()
+	// The next leader is me, delete it to finish campaigning
+	am.deleteNextLeaderID(allocator.dcLocation)
 	log.Info("local tso allocator leader is ready to serve",
 		zap.String("dc-location", allocator.dcLocation),
 		zap.String("name", am.member.Member().Name))
@@ -292,6 +312,8 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	defer tsTicker.Stop()
 	checkerTicker := time.NewTicker(checkAllocatorStep)
 	defer checkerTicker.Stop()
+	priorityTicker := time.NewTicker(checkPriorityStep)
+	defer priorityTicker.Stop()
 
 	for {
 		select {
@@ -299,6 +321,8 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 			am.allocatorUpdater()
 		case <-checkerTicker.C:
 			am.allocatorPatroller(serverCtx)
+		case <-priorityTicker.C:
+			am.priorityChecker()
 		case <-serverCtx.Done():
 			return
 		}
@@ -376,6 +400,129 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 			am.deleteAllocatorGroup(ag.dcLocation)
 		}
 	}
+}
+
+// priorityChecker is used to check the election priority of a Local TSO Allocator.
+// In the normal case, if we want to elect a Local TSO Allocator for a certain DC,
+// such as dc-1, we need to make sure the follow priority rules:
+// 1. The PD server with dc-location="dc-1" needs to be elected as the allocator
+// leader with the highest priority.
+// 2. If all PD servers with dc-location="dc-1" are down, then the other PD servers
+// of DC could be elected.
+func (am *AllocatorManager) priorityChecker() {
+	serverID := am.member.ID()
+	myServerDCLocation, err := am.getServerDCLocation(serverID)
+	if err != nil {
+		log.Error("skip checking allocator priority, failed to get server's dc-location",
+			zap.Uint64("server-id", serverID),
+			errs.ZapError(err))
+		return
+	}
+	// Check all Local TSO Allocator followers to see if their priorities is higher than the leaders
+	// Filter out allocators with leadership and initialized
+	allocatorGroups := am.getAllocatorGroups(FilterDCLocation(config.GlobalDCLocation), FilterAvailableLeadership())
+	for _, allocatorGroup := range allocatorGroups {
+		localTSOAllocator, _ := allocatorGroup.allocator.(*LocalTSOAllocator)
+		leaderServerID := localTSOAllocator.GetAllocatorLeader().GetMemberId()
+		// No leader, maybe the leader is not been watched yet
+		if leaderServerID == 0 {
+			continue
+		}
+		leaderServerDCLocation, err := am.getServerDCLocation(leaderServerID)
+		if err != nil {
+			log.Error("failed to get local tso allocator leader's dc-location",
+				zap.Uint64("server-id", serverID),
+				errs.ZapError(err))
+			continue
+		}
+		// For example, an allocator leader for dc-1 is elected by a server of dc-2, then the server of dc-1 will
+		// find this allocator's dc-location isn't the same with server of dc-2 but is same with itself.
+		if allocatorGroup.dcLocation != leaderServerDCLocation && allocatorGroup.dcLocation == myServerDCLocation {
+			log.Info("try to move the local tso allocator",
+				zap.Uint64("old-leader-id", leaderServerID),
+				zap.String("old-dc-location", leaderServerDCLocation),
+				zap.Uint64("next-leader-id", serverID),
+				zap.String("next-dc-location", myServerDCLocation))
+			nextLeaderKey := path.Join(am.rootPath, allocatorGroup.dcLocation, "next-leader")
+			// Grant a etcd lease with checkPriorityStep * 1.5
+			nextLeaderLease := clientv3.NewLease(am.member.Client())
+			ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)
+			leaseResp, err := nextLeaderLease.Grant(ctx, int64(checkPriorityStep.Seconds()*1.5))
+			cancel()
+			if err != nil {
+				err = errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
+				log.Error("failed to grant the lease of the next leader id key", errs.ZapError(err))
+				continue
+			}
+			resp, err := kv.NewSlowLogTxn(am.member.Client()).
+				If(clientv3.Compare(clientv3.CreateRevision(nextLeaderKey), "=", 0)).
+				Then(clientv3.OpPut(nextLeaderKey, fmt.Sprint(serverID), clientv3.WithLease(leaseResp.ID))).
+				Commit()
+			if err != nil {
+				err = errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+				log.Error("failed to write next leader id into etcd", errs.ZapError(err))
+				continue
+			}
+			if !resp.Succeeded {
+				log.Warn("write next leader id into etcd unsuccessfully")
+			}
+		}
+	}
+	// Check next leader and resign
+	// Filter out allocators with leadership
+	allocatorGroups = am.getAllocatorGroups(FilterDCLocation(config.GlobalDCLocation), FilterUnavailableLeadership())
+	for _, allocatorGroup := range allocatorGroups {
+		nextLeader, err := am.getNextLeaderID(allocatorGroup.dcLocation)
+		if err != nil {
+			log.Error("get next leader from etcd failed",
+				zap.String("dc-location", allocatorGroup.dcLocation),
+				errs.ZapError(err))
+			continue
+		}
+		// nextLeader is not empty and isn't same with the server ID, resign the leader
+		if nextLeader != 0 && nextLeader != serverID {
+			am.resetAllocatorGroup(allocatorGroup.dcLocation)
+		}
+	}
+}
+
+func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error) {
+	dcLocationMap, err := am.GetClusterDCLocations()
+	if err != nil {
+		return "", err
+	}
+	for dcLocation, serverIDs := range dcLocationMap {
+		if slice.AnyOf(serverIDs, func(i int) bool { return serverIDs[i] == serverID }) {
+			return dcLocation, nil
+		}
+	}
+	return "", nil
+}
+
+func (am *AllocatorManager) getNextLeaderID(dcLocation string) (uint64, error) {
+	nextLeaderKey := path.Join(am.rootPath, dcLocation, "next-leader")
+	nextLeaderValue, err := etcdutil.GetValue(am.member.Client(), nextLeaderKey)
+	if err != nil {
+		return 0, err
+	}
+	if len(nextLeaderValue) == 0 {
+		return 0, nil
+	}
+	return strconv.ParseUint(string(nextLeaderValue), 10, 64)
+}
+
+func (am *AllocatorManager) deleteNextLeaderID(dcLocation string) error {
+	nextLeaderKey := path.Join(am.rootPath, dcLocation, "next-leader")
+	resp, err := kv.NewSlowLogTxn(am.member.Client()).
+		Then(clientv3.OpDelete(nextLeaderKey)).
+		Commit()
+	if err != nil {
+		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
+	}
+	if !resp.Succeeded {
+		return errs.ErrEtcdTxn.FastGenByArgs()
+	}
+	return nil
 }
 
 func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
