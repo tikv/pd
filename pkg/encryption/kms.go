@@ -22,8 +22,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kms"
 	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 const (
@@ -44,7 +45,7 @@ func newMasterKeyFromKMS(
 		return nil, errors.New("missing master key KMS config")
 	}
 	if config.Vendor != kmsVendorAWS {
-		return nil, errors.Errorf("unsupported KMS vendor: %s", config.Vendor)
+		return nil, errs.ErrEncryptionKMS.GenWithStack("unsupported KMS vendor: %s", config.Vendor)
 	}
 	credentials, err := newAwsCredentials()
 	if err != nil {
@@ -56,7 +57,8 @@ func newMasterKeyFromKMS(
 		Endpoint:    &config.Endpoint,
 	})
 	if err != nil {
-		return nil, errors.Wrap(err, "fail to create AWS session to access KMS CMK")
+		return nil, errs.ErrEncryptionKMS.Wrap(err).GenWithStack(
+			"fail to create AWS session to access KMS CMK")
 	}
 	client := kms.New(session)
 	if len(ciphertextKey) == 0 {
@@ -67,10 +69,11 @@ func newMasterKeyFromKMS(
 			NumberOfBytes: &numberOfBytes,
 		})
 		if err != nil {
-			return nil, errors.Wrap(err, "fail to generate data key from AWS KMS")
+			return nil, errs.ErrEncryptionKMS.Wrap(err).GenWithStack(
+				"fail to generate data key from AWS KMS")
 		}
 		if len(output.Plaintext) != masterKeyLength {
-			return nil, errors.Wrapf(err,
+			return nil, errs.ErrEncryptionKMS.GenWithStack(
 				"unexpected data key length generated from AWS KMS, expectd %d vs actual %d",
 				masterKeyLength, len(output.Plaintext))
 		}
@@ -85,10 +88,11 @@ func newMasterKeyFromKMS(
 			CiphertextBlob: ciphertextKey,
 		})
 		if err != nil {
-			return nil, errors.Wrap(err, "fail to decrypt data key from AWS KMS")
+			return nil, errs.ErrEncryptionKMS.Wrap(err).GenWithStack(
+				"fail to decrypt data key from AWS KMS")
 		}
 		if len(output.Plaintext) != masterKeyLength {
-			return nil, errors.Wrapf(err,
+			return nil, errs.ErrEncryptionKMS.GenWithStack(
 				"unexpected data key length decrypted from AWS KMS, expected %d vs actual %d",
 				masterKeyLength, len(output.Plaintext))
 		}
@@ -110,7 +114,8 @@ func newAwsCredentials() (*credentials.Credentials, error) {
 	if roleArn != "" && tokenFile != "" {
 		session, err := session.NewSession()
 		if err != nil {
-			return nil, errors.Wrap(err, "fail to create AWS session to create a WebIdentityRoleProvider")
+			return nil, errs.ErrEncryptionKMS.Wrap(err).GenWithStack(
+				"fail to create AWS session to create a WebIdentityRoleProvider")
 		}
 		webIdentityProvider := stscreds.NewWebIdentityRoleProvider(
 			sts.New(session), roleArn, sessionName, tokenFile)
