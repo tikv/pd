@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ var _ = SerialSuites(&testkvRPCSuite{})
 
 type testkvRPCSuite struct{}
 
-func (s *testkvRPCSuite) TestSendReq(c *C) {
+func (s *testkvRPCSuite) TestSendReqErr(c *C) {
 	testcases := []struct {
 		injectPath string
 		expectErr  error
@@ -57,7 +58,18 @@ func (s *testkvRPCSuite) TestSendReq(c *C) {
 		c.Log(testcase.injectPath)
 		c.Assert(failpoint.Enable(fmt.Sprintf("github.com/tikv/pd/pkg/client/%s", testcase.injectPath), "return(true)"), IsNil)
 		ctx, cancel := context.WithCancel(context.Background())
-		_, err := sender.SendReq(ctx, NewRegionRequest(&rpc.Request{}, &core.RegionInfo{}, &core.StoreInfo{}, time.Second))
+		mockPeer := &metapb.Peer{StoreId: 1, Id: uint64(1)}
+		mockRegion := core.NewRegionInfo(&metapb.Region{
+			Id:       uint64(1),
+			Peers:    []*metapb.Peer{mockPeer},
+			StartKey: []byte(fmt.Sprintf("%20d", 1)),
+			EndKey:   []byte(fmt.Sprintf("%20d", 2)),
+		}, mockPeer)
+		mockStore := core.NewStoreInfo(&metapb.Store{
+			Id:      1,
+			Address: "mock://tikv-1",
+		})
+		_, err := sender.SendReq(ctx, NewRegionRequest(&rpc.Request{}, mockRegion, mockStore, time.Second))
 		if testcase.expectErr != nil {
 			c.Assert(err != nil, Equals, true)
 			c.Assert(err.Error(), Equals, testcase.expectErr.Error())
