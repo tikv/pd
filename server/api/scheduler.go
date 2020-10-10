@@ -45,7 +45,7 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 }
 
 // @Tags scheduler
-// @Summary List running schedulers.
+// @Summary List all schedulers by status.
 // @Produce json
 // @Success 200 {array} string
 // @Failure 500 {string} string "PD server failed to proceed the request."
@@ -56,7 +56,26 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.r.JSON(w, http.StatusOK, schedulers)
+
+	status := r.URL.Query().Get("status")
+	switch status {
+	case "paused":
+		var pausedSchedulers []string
+		for _, scheduler := range schedulers {
+			paused, err := h.IsSchedulerPaused(scheduler)
+			if err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+
+			if paused {
+				pausedSchedulers = append(pausedSchedulers, scheduler)
+			}
+		}
+		h.r.JSON(w, http.StatusOK, pausedSchedulers)
+	default:
+		h.r.JSON(w, http.StatusOK, schedulers)
+	}
 }
 
 // FIXME: details of input json body params
