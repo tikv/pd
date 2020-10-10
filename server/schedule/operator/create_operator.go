@@ -34,6 +34,9 @@ func CreateAddPeerOperator(desc string, cluster opt.Cluster, region *core.Region
 
 // CreatePromoteLearnerOperator creates an operator that promotes a learner.
 func CreatePromoteLearnerOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+	if region.GetPendingPeer(peer.GetId()) != nil {
+		return nil, nil
+	}
 	return NewBuilder(desc, cluster, region).
 		PromoteLearner(peer.GetStoreId()).
 		Build(0)
