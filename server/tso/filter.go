@@ -23,6 +23,11 @@ func FilterUninitialized() func(ag *allocatorGroup) bool {
 	return func(ag *allocatorGroup) bool { return !ag.allocator.IsInitialize() }
 }
 
+// FilterAvailableLeadership will filter out the allocatorGroup whose leadership is available.
+func FilterAvailableLeadership() func(ag *allocatorGroup) bool {
+	return func(ag *allocatorGroup) bool { return ag.leadership.Check() }
+}
+
 // FilterUnavailableLeadership will filter out the allocatorGroup whose leadership is unavailable.
 func FilterUnavailableLeadership() func(ag *allocatorGroup) bool {
 	return func(ag *allocatorGroup) bool { return !ag.leadership.Check() }
