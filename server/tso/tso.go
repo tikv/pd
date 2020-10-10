@@ -73,6 +73,8 @@ func (t *timestampOracle) setTSOPhysical(next time.Time) {
 	}
 }
 
+// setTSO is only used to update the TSO in memory, please make sure you handle
+// the time window persisted in etcd well also while using this method.
 func (t *timestampOracle) setTSO(nextPhysical time.Time, nextLogical int64) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()

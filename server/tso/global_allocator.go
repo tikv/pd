@@ -164,10 +164,13 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 		}
 		leaderURLs := make([]string, 0, len(allocatorLeaders))
 		for _, allocator := range allocatorLeaders {
-			for _, leaderURL := range allocator.GetMember().GetClientUrls() {
-				if slice.NoneOf(leaderURLs, func(i int) bool { return leaderURLs[i] == leaderURL }) {
-					leaderURLs = append(leaderURLs, leaderURL)
-				}
+			// Check if its client URLs are empty
+			if len(allocator.GetMember().GetClientUrls()) < 1 {
+				continue
+			}
+			leaderURL := allocator.GetMember().GetClientUrls()[0]
+			if slice.NoneOf(leaderURLs, func(i int) bool { return leaderURLs[i] == leaderURL }) {
+				leaderURLs = append(leaderURLs, leaderURL)
 			}
 		}
 		// Prepare to make RPC requests concurrently
@@ -195,11 +198,11 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 				cancel()
 				if err != nil {
 					errCh <- err
-					log.Warn("sync max ts rpc failed, got an error", zap.String("local-allocator-leader-url", leaderConn.Target()), zap.Error(err))
+					log.Error("sync max ts rpc failed, got an error", zap.String("local-allocator-leader-url", leaderConn.Target()), zap.Error(err))
 				}
 				respCh <- resp
 				if resp == nil {
-					log.Warn("sync max ts rpc failed, got a nil response", zap.String("local-allocator-leader-url", leaderConn.Target()))
+					log.Error("sync max ts rpc failed, got a nil response", zap.String("local-allocator-leader-url", leaderConn.Target()))
 				}
 				wg.Done()
 			}(ctx, leaderConn, respCh, errCh)
@@ -212,16 +215,12 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 			errList = append(errList, err)
 		}
 		if len(errList) > 0 {
-			err := errs.ErrSyncMaxTS.FastGenWithCause(errList)
-			log.Error("sync max ts failed, got error response", errs.ZapError(err))
-			return err
+			return errs.ErrSyncMaxTS.FastGenWithCause(errList)
 		}
 		var syncedDCs []string
 		for resp := range respCh {
 			if resp == nil {
-				err := errs.ErrSyncMaxTS.FastGenWithCause("got nil response")
-				log.Error("sync max ts failed, got nil response", errs.ZapError(err))
-				return err
+				return errs.ErrSyncMaxTS.FastGenWithCause("got nil response")
 			}
 			syncedDCs = append(syncedDCs, resp.GetDcs()...)
 			// Compare and get the max one
@@ -231,27 +230,28 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 				}
 			}
 		}
-		if unSyncedDCs := gta.checkSyncedDCs(dcLocationMap, syncedDCs); len(unSyncedDCs) > 0 {
+		if !gta.checkSyncedDCs(dcLocationMap, syncedDCs) {
 			// Only retry one time when synchronization is incomplete
 			if maxRetryCount == 1 {
-				log.Warn("got unsynced dc-locations, will retry", zap.Strings("unSyncedDCs", unSyncedDCs), zap.Strings("syncedDCs", syncedDCs))
+				log.Warn("unsynced dc-locations found, will retry", zap.Strings("syncedDCs", syncedDCs))
 				maxRetryCount++
 				continue
 			}
-			return errs.ErrSyncMaxTS.FastGenWithCause(fmt.Sprintf("got unsynced dc-locations: %+v", unSyncedDCs))
+			return errs.ErrSyncMaxTS.FastGenWithCause(fmt.Sprintf("unsynced dc-locations found, synced dc-locations: %+v", syncedDCs))
 		}
 	}
 	return nil
 }
 
-func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string][]uint64, syncedDCs []string) []string {
+func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string][]uint64, syncedDCs []string) bool {
 	unsyncedDCs := make([]string, 0)
 	for dcLocation := range dcLocationMap {
 		if slice.NoneOf(syncedDCs, func(i int) bool { return syncedDCs[i] == dcLocation }) {
 			unsyncedDCs = append(unsyncedDCs, dcLocation)
 		}
 	}
-	return unsyncedDCs
+	log.Info("check unsynced dc-locations", zap.Strings("unsyncedDCs", unsyncedDCs), zap.Strings("syncedDCs", syncedDCs))
+	return len(unsyncedDCs) == 0
 }
 
 func (gta *GlobalTSOAllocator) getOrCreateGRPCConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
