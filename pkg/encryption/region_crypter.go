@@ -18,6 +18,7 @@ import (
 	"crypto/cipher"
 	"reflect"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -37,47 +38,49 @@ func processRegionKeys(region *metapb.Region, key *encryptionpb.DataKey, iv []by
 	return nil
 }
 
-// EncryptRegion encrypt the region start key and end key in-place,
-// using the current key return from the key manager. Encryption meta is updated accordingly.
-// Note: Call may need to make deep copy of the object if changing the object is undesired.
-func EncryptRegion(region *metapb.Region, keyManager KeyManager) error {
+// EncryptRegion encrypt the region start key and end key, using the current key return from the
+// key manager. The return is an encypted copy of the region, with Encryption meta updated.
+func EncryptRegion(region *metapb.Region, keyManager KeyManager) (*metapb.Region, error) {
 	if region == nil {
-		return errs.ErrEncryptionEncryptRegion.GenWithStack("trying to encrypt nil region")
+		return nil, errs.ErrEncryptionEncryptRegion.GenWithStack("trying to encrypt nil region")
 	}
 	if region.EncryptionMeta != nil {
-		return errs.ErrEncryptionEncryptRegion.GenWithStack(
+		return nil, errs.ErrEncryptionEncryptRegion.GenWithStack(
 			"region already encrypted, region id = %d", region.Id)
 	}
 	if keyManager == nil ||
 		(reflect.TypeOf(keyManager).Kind() == reflect.Ptr && reflect.ValueOf(keyManager).IsNil()) {
 		// encryption is not enabled.
-		return nil
+		return region, nil
 	}
 	keyID, key, err := keyManager.GetCurrentKey()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if key == nil {
 		// encryption is not enabled.
-		return nil
+		return region, nil
 	}
 	err = CheckEncryptionMethodSupported(key.Method)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	iv, err := NewIvCTR()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	err = processRegionKeys(region, key, iv)
+	// Deep copy region before altering it.
+	outRegion := proto.Clone(region).(*metapb.Region)
+	// Encrypt and update in-place.
+	err = processRegionKeys(outRegion, key, iv)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	region.EncryptionMeta = &encryptionpb.EncryptionMeta{
+	outRegion.EncryptionMeta = &encryptionpb.EncryptionMeta{
 		KeyId: keyID,
 		Iv:    iv,
 	}
-	return nil
+	return outRegion, nil
 }
 
 // DecryptRegion decrypt the region start key and end key, if the region object was encrypted.
@@ -103,6 +106,7 @@ func DecryptRegion(region *metapb.Region, keyManager KeyManager) error {
 	if err != nil {
 		return err
 	}
+	// Decrypt and update in-place.
 	err = processRegionKeys(region, key, region.EncryptionMeta.Iv)
 	if err != nil {
 		return err

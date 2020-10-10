@@ -596,8 +596,7 @@ func saveRegion(
 	encryptionKeyManager *encryptionkm.KeyManager,
 	region *metapb.Region,
 ) error {
-	region = proto.Clone(region).(*metapb.Region)
-	err := encryption.EncryptRegion(region, encryptionKeyManager)
+	region, err := encryption.EncryptRegion(region, encryptionKeyManager)
 	if err != nil {
 		return err
 	}

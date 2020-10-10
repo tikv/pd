@@ -87,6 +87,12 @@ type Config struct {
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
+	// The interval to update physical part of timestamp. Usually, this config should not be set.
+	// It's only useful for test purposes.
+	// This config is only valid in 50ms to 10s. If it's configured too long or too short, it will
+	// be automatically clamped to the range.
+	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
+
 	// Local TSO service related configuration.
 	LocalTSO LocalTSOConfig `toml:"local-tso" json:"local-tso"`
 
@@ -223,6 +229,11 @@ const (
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
+
+	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
+	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
+	maxTSOUpdatePhysicalInterval     = 10 * time.Second
+	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
 )
 
 var (
@@ -499,6 +510,14 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
 	adjustDuration(&c.TSOSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
+
+	adjustDuration(&c.TSOUpdatePhysicalInterval, DefaultTSOUpdatePhysicalInterval)
+
+	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
+		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
+	} else if c.TSOUpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
+		c.TSOUpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
+	}
 
 	if err := c.LocalTSO.Validate(); err != nil {
 		return err
