@@ -616,8 +616,7 @@ func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []All
 func (am *AllocatorManager) GetLocalAllocatorLeaders() ([]*LocalTSOAllocator, error) {
 	localAllocators := am.GetAllocators(
 		FilterDCLocation(config.GlobalDCLocation),
-		FilterUnavailableLeadership(),
-		FilterUninitialized())
+		FilterUnavailableLeadership())
 	localAllocatorLeaders := make([]*LocalTSOAllocator, 0, len(localAllocators))
 	for _, localAllocator := range localAllocators {
 		localAllocatorLeader, ok := localAllocator.(*LocalTSOAllocator)
