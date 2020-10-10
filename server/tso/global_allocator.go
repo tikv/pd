@@ -195,8 +195,12 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 				cancel()
 				if err != nil {
 					errCh <- err
+					log.Warn("sync max ts rpc failed, got an error", zap.String("local-allocator-leader-url", leaderConn.Target()), zap.Error(err))
 				}
 				respCh <- resp
+				if resp == nil {
+					log.Warn("sync max ts rpc failed, got a nil response", zap.String("local-allocator-leader-url", leaderConn.Target()))
+				}
 				wg.Done()
 			}(ctx, leaderConn, respCh, errCh)
 		}
@@ -208,12 +212,16 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 			errList = append(errList, err)
 		}
 		if len(errList) > 0 {
-			return errs.ErrSyncMaxTS.FastGenWithCause(errList)
+			err := errs.ErrSyncMaxTS.FastGenWithCause(errList)
+			log.Error("sync max ts failed, got error response", errs.ZapError(err))
+			return err
 		}
 		var syncedDCs []string
 		for resp := range respCh {
 			if resp == nil {
-				return errs.ErrSyncMaxTS.FastGenWithCause("got nil response")
+				err := errs.ErrSyncMaxTS.FastGenWithCause("got nil response")
+				log.Error("sync max ts failed, got nil response", errs.ZapError(err))
+				return err
 			}
 			syncedDCs = append(syncedDCs, resp.GetDcs()...)
 			// Compare and get the max one
@@ -224,9 +232,9 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 			}
 		}
 		if unSyncedDCs := gta.checkSyncedDCs(dcLocationMap, syncedDCs); len(unSyncedDCs) > 0 {
-			// Only retry one time
+			// Only retry one time when synchronization is incomplete
 			if maxRetryCount == 1 {
-				log.Warn("got unsynced dc-locations, will retry", zap.Any("unSyncedDCs", unSyncedDCs), zap.Any("syncedDCs", syncedDCs))
+				log.Warn("got unsynced dc-locations, will retry", zap.Strings("unSyncedDCs", unSyncedDCs), zap.Strings("syncedDCs", syncedDCs))
 				maxRetryCount++
 				continue
 			}
