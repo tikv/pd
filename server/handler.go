@@ -495,15 +495,13 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDsAndRoles ma
 				return errors.New("peer role must be provided when placement rules enabled")
 			}
 		}
+	} else if len(storeIDsAndRoles) > c.GetOpts().GetMaxReplicas() {
+		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDsAndRoles))
 	}
 
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
-	}
-
-	if len(storeIDsAndRoles) > c.GetOpts().GetMaxReplicas() {
-		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDsAndRoles))
 	}
 
 	var store *core.StoreInfo
