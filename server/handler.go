@@ -488,12 +488,18 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDsAndRoles ma
 		return err
 	}
 
+	isRolesProvided := true
+	for _, peerRole := range storeIDsAndRoles {
+		if peerRole == "" {
+			isRolesProvided = false
+			break
+		}
+	}
+
 	if c.GetOpts().IsPlacementRulesEnabled() {
-		for _, peerRole := range storeIDsAndRoles {
-			if peerRole == "" {
-				// Cannot omit role when placement rules enabled.
-				return errors.New("peer role must be provided when placement rules enabled")
-			}
+		if !isRolesProvided {
+			// Cannot omit role when placement rules enabled.
+			return errors.New("peer role must be provided when placement rules enabled")
 		}
 	} else if len(storeIDsAndRoles) > c.GetOpts().GetMaxReplicas() {
 		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDsAndRoles))
@@ -517,9 +523,22 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDsAndRoles ma
 
 	peers := make(map[uint64]*metapb.Peer)
 	roles := make(map[uint64]placement.PeerRoleType)
+	hasLeader, hasVoter := false, false
 	for id, role := range storeIDsAndRoles {
 		peers[id] = &metapb.Peer{StoreId: id, Role: role.MetaPeerRole()}
 		roles[id] = role
+		switch role {
+		case placement.Voter:
+			hasVoter = true
+		case placement.Leader:
+			if hasLeader {
+				return errors.New("expected at most one leader, got multiple leaders")
+			}
+			hasLeader = true
+		}
+	}
+	if isRolesProvided && !(hasLeader || hasVoter) {
+		return errors.New("expected at least one voter or leader, got none")
 	}
 
 	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, peers, roles)

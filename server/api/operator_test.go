@@ -214,7 +214,7 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionOperator(c *C) {
 
 	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles": ["follower", "follower"]}`))
 	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "no valid leader"), IsTrue)
+	c.Assert(strings.Contains(err.Error(), "expected at least one voter or leader, got none"), IsTrue)
 
 	_, err = doDelete(testDialClient, regionURL)
 	c.Assert(err, IsNil)
@@ -229,19 +229,12 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionOperator(c *C) {
 	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3], "peer_roles": ["follower", "learner", "voter"]}`))
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
-	isEitherStepsOne :=
-		strings.Contains(operator, "add learner peer 4 on store 3") &&
-			strings.Contains(operator, "promote learner peer 4 on store 3 to voter") &&
-			strings.Contains(operator, "remove peer on store 2") &&
-			strings.Contains(operator, "add learner peer 5 on store 2") &&
-			strings.Contains(operator, "transfer leader from store 1 to store 3")
-	isEitherStepsTwo :=
-		strings.Contains(operator, "add learner peer 5 on store 3") &&
-			strings.Contains(operator, "promote learner peer 5 on store 3 to voter") &&
-			strings.Contains(operator, "remove peer on store 2") &&
-			strings.Contains(operator, "add learner peer 4 on store 2") &&
-			strings.Contains(operator, "transfer leader from store 1 to store 3")
-	c.Assert(isEitherStepsOne || isEitherStepsTwo, IsTrue)
+	println(operator)
+	c.Assert(strings.Contains(operator, "add learner peer 4 on store 3"), IsTrue)
+	c.Assert(strings.Contains(operator, "promote learner peer 4 on store 3 to voter"), IsTrue)
+	c.Assert(strings.Contains(operator, "remove peer on store 2"), IsTrue)
+	c.Assert(strings.Contains(operator, "add learner peer 3 on store 2"), IsTrue)
+	c.Assert(strings.Contains(operator, "transfer leader from store 1 to store 3"), IsTrue)
 
 	_, err = doDelete(testDialClient, regionURL)
 	c.Assert(err, IsNil)
