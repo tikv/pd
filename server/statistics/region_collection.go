@@ -136,6 +136,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			peer := region.GetStorePeer(store.GetID())
 			if peer != nil {
 				isOffline = true
+				break
 			}
 		}
 	}
