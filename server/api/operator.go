@@ -348,16 +348,17 @@ func parseStoreIDsAndPeerRoles(rawStoreIDs interface{}, rawPeerRoles interface{}
 	peerRoles, ok = rawPeerRoles.([]interface{})
 	if !ok {
 		peerRoles = nil
+	} else if len(peerRoles) != len(storeIDs) {
+		return nil, false
 	}
 
-	hasRoles := len(peerRoles) >= len(storeIDs)
 	result := make(map[uint64]placement.PeerRoleType)
 	for i, storeID := range storeIDs {
 		id, ok := storeID.(float64)
 		if !ok {
 			return nil, false
 		}
-		if hasRoles {
+		if peerRoles != nil {
 			role, ok := peerRoles[i].(string)
 			if ok {
 				result[uint64(id)] = placement.PeerRoleType(role)
