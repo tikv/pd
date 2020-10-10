@@ -236,9 +236,68 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot transfer leader to %d: not found", storeID)
 	} else if core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot transfer leader to %d: not voter", storeID)
+	} else if _, ok := b.targetFollowerStoreIDs[storeID]; ok {
+		b.err = errors.Errorf("cannot transfer leader to %d: marked as follower", storeID)
 	} else {
 		b.targetLeaderStoreID = storeID
 	}
+	return b
+}
+
+// AddFollower adds the target follower in Builder.
+func (b *Builder) AddFollower(storeID uint64) *Builder {
+	if b.err != nil {
+		return b
+	}
+
+	if peer, ok := b.targetPeers[storeID]; !ok {
+		b.err = errors.Errorf("cannot add follower %d: not found", storeID)
+	} else if core.IsLearner(peer) {
+		b.err = errors.Errorf("cannot add follower %d: not voter", storeID)
+	} else if b.targetLeaderStoreID == storeID {
+		b.err = errors.Errorf("cannot add follower %d: marked as leader", storeID)
+	} else {
+		b.targetFollowerStoreIDs[storeID] = struct{}{}
+	}
+	return b
+}
+
+// RemoveFollower removes the target follower in Builder.
+func (b *Builder) RemoveFollower(storeID uint64) *Builder {
+	if b.err != nil {
+		return b
+	}
+
+	if _, ok := b.targetPeers[storeID]; !ok {
+		b.err = errors.Errorf("cannot remove follower %d: not found", storeID)
+	} else if _, ok := b.targetFollowerStoreIDs[storeID]; !ok {
+		b.err = errors.Errorf("cannot remove follower %d: not found", storeID)
+	} else {
+		delete(b.targetFollowerStoreIDs, storeID)
+	}
+	return b
+}
+
+// SetFollowers resets the target follower list.
+func (b *Builder) SetFollowers(storeIDs map[uint64]struct{}) *Builder {
+	if b.err != nil {
+		return b
+	}
+
+	for storeID := range storeIDs {
+		if peer, ok := b.targetPeers[storeID]; !ok {
+			b.err = errors.Errorf("setFollowers with missing peer: %d", storeID)
+			return b
+		} else if core.IsLearner(peer) {
+			b.err = errors.Errorf("setFollowers with non-voter peer: %d", storeID)
+			return b
+		} else if storeID == b.targetLeaderStoreID {
+			b.err = errors.Errorf("setFollowers with peer marked as leader: %d", storeID)
+			return b
+		}
+	}
+
+	b.targetFollowerStoreIDs = storeIDs
 	return b
 }
 

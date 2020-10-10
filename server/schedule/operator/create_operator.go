@@ -71,7 +71,7 @@ func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.Reg
 		case placement.Leader:
 			builder = builder.SetLeader(key)
 		case placement.Follower:
-			builder.targetFollowerStoreIDs[key] = struct{}{}
+			builder = builder.AddFollower(key)
 		}
 	}
 	return builder.Build(kind)
