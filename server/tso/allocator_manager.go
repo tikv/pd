@@ -76,21 +76,30 @@ type AllocatorManager struct {
 	// for election use
 	member *member.Member
 	// TSO config
-	rootPath       string
-	saveInterval   time.Duration
-	maxResetTSGap  func() time.Duration
-	securityConfig *grpcutil.TLSConfig
+	rootPath               string
+	saveInterval           time.Duration
+	updatePhysicalInterval time.Duration
+	maxResetTSGap          func() time.Duration
+	securityConfig         *grpcutil.TLSConfig
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
-func NewAllocatorManager(m *member.Member, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration, sc *grpcutil.TLSConfig) *AllocatorManager {
+func NewAllocatorManager(
+	m *member.Member,
+	rootPath string,
+	saveInterval time.Duration,
+	updatePhysicalInterval time.Duration,
+	maxResetTSGap func() time.Duration,
+	sc *grpcutil.TLSConfig,
+) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
-		allocatorGroups: make(map[string]*allocatorGroup),
-		member:          m,
-		rootPath:        rootPath,
-		saveInterval:    saveInterval,
-		maxResetTSGap:   maxResetTSGap,
-		securityConfig:  sc,
+		allocatorGroups:        make(map[string]*allocatorGroup),
+		member:                 m,
+		rootPath:               rootPath,
+		saveInterval:           saveInterval,
+		updatePhysicalInterval: updatePhysicalInterval,
+		maxResetTSGap:          maxResetTSGap,
+		securityConfig:         sc,
 	}
 	return allocatorManager
 }
@@ -168,11 +177,17 @@ func (am *AllocatorManager) getLocalTSOConfigPath() string {
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) error {
 	am.Lock()
 	defer am.Unlock()
+
+	if am.updatePhysicalInterval != config.DefaultTSOUpdatePhysicalInterval {
+		log.Warn("tso update physical interval is non-default",
+			zap.Duration("update-physical-interval", am.updatePhysicalInterval))
+	}
+
 	var allocator Allocator
 	if dcLocation == config.GlobalDCLocation {
-		allocator = NewGlobalTSOAllocator(am, leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.maxResetTSGap)
+		allocator = NewGlobalTSOAllocator(am, leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
 	} else {
-		allocator = NewLocalTSOAllocator(am.member, leadership, dcLocation, am.saveInterval, am.maxResetTSGap)
+		allocator = NewLocalTSOAllocator(am.member, leadership, dcLocation, am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
 	}
 	// Update or create a new allocatorGroup
 	am.allocatorGroups[dcLocation] = &allocatorGroup{
@@ -311,7 +326,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
 // any new local allocator that needs to be set up.
 func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
-	tsTicker := time.NewTicker(UpdateTimestampStep)
+	tsTicker := time.NewTicker(am.updatePhysicalInterval)
 	defer tsTicker.Stop()
 	checkerTicker := time.NewTicker(checkAllocatorStep)
 	defer checkerTicker.Stop()

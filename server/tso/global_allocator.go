@@ -67,14 +67,22 @@ type GlobalTSOAllocator struct {
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
-func NewGlobalTSOAllocator(am *AllocatorManager, leadership *election.Leadership, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
+func NewGlobalTSOAllocator(
+	am *AllocatorManager,
+	leadership *election.Leadership,
+	rootPath string,
+	saveInterval time.Duration,
+	updatePhysicalInterval time.Duration,
+	maxResetTSGap func() time.Duration,
+) Allocator {
 	gta := &GlobalTSOAllocator{
 		leadership: leadership,
 		timestampOracle: &timestampOracle{
-			client:        leadership.GetClient(),
-			rootPath:      rootPath,
-			saveInterval:  saveInterval,
-			maxResetTSGap: maxResetTSGap,
+			client:                 leadership.GetClient(),
+			rootPath:               rootPath,
+			saveInterval:           saveInterval,
+			updatePhysicalInterval: updatePhysicalInterval,
+			maxResetTSGap:          maxResetTSGap,
 		},
 		allocatorManager: am,
 	}
