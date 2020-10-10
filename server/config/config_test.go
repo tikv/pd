@@ -171,6 +171,8 @@ leader-schedule-limit = 0
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
 	c.Assert(cfg.PDServerCfg.MetricStorage, Equals, "http://127.0.0.1:9090")
 
+	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, DefaultTSOUpdatePhysicalInterval)
+
 	// Check undefined config fields
 	cfgData = `
 type = "pd"
@@ -228,6 +230,29 @@ address = "localhost:9090"
 
 	c.Assert(cfg.Metric.PushInterval.Duration, Equals, 35*time.Second)
 	c.Assert(cfg.Metric.PushAddress, Equals, "localhost:9090")
+
+	// Test clamping TSOUpdatePhysicalInterval value
+	cfgData = `
+tso-update-physical-interval = "10ms"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+
+	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, minTSOUpdatePhysicalInterval)
+
+	cfgData = `
+tso-update-physical-interval = "15s"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+
+	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, maxTSOUpdatePhysicalInterval)
 }
 
 func (s *testConfigSuite) TestMigrateFlags(c *C) {
