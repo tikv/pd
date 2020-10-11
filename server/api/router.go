@@ -168,6 +168,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	clusterRouter.HandleFunc("/regions/check/hist-keys", regionsHandler.GetKeysHistogram).Methods("GET")
 	clusterRouter.HandleFunc("/regions/sibling/{id}", regionsHandler.GetRegionSiblings).Methods("GET")
 	clusterRouter.HandleFunc("/regions/accelerate-schedule", regionsHandler.AccelerateRegionsScheduleInRange).Methods("POST")
+	clusterRouter.HandleFunc("/regions/scatter", regionsHandler.ScatterRegions).Methods("POST")
 
 	apiRouter.Handle("/version", newVersionHandler(rd)).Methods("GET")
 	apiRouter.Handle("/status", newStatusHandler(svr, rd)).Methods("GET")

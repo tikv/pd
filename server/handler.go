@@ -805,11 +805,6 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 	// check region hot status
 	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
 	for _, region := range regions {
-		// If region is Hot, add it into unProcessedRegions
-		if c.IsRegionHot(region) {
-			failureRegionID = append(failureRegionID, fmt.Sprintf("%v", region.GetID()))
-			continue
-		}
 		regionMap[region.GetID()] = region
 	}
 	failures := make(map[uint64]error, len(regionMap))
