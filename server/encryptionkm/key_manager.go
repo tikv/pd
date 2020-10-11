@@ -124,6 +124,7 @@ func saveKeys(
 		return errs.ErrEncryptionSaveDataKeys.GenWithStack("leader expired")
 	}
 	// Leave for the watcher to load the updated keys.
+	log.Info("saved encryption keys")
 	return nil
 }
 
@@ -334,11 +335,13 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 					keys.Keys[keyID] = key
 					keys.CurrentKeyId = keyID
 					rotated = true
+					log.Info("ready to create or rotate data encryption key", zap.Uint64("keyID", keyID))
 					break
 				}
 				// Duplicated key id. retry.
 			}
 			if !rotated {
+				log.Warn("failed to rotate keys. maximum attempts reached")
 				return errs.ErrEncryptionRotateDataKey.GenWithStack("maximum attempts reached")
 			}
 			needUpdate = true
