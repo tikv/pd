@@ -1170,7 +1170,10 @@ func (s *Server) campaignLeader() {
 		return
 	}
 
-	s.encryptionKeyManager.SetLeadership(s.member.GetLeadership())
+	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
+		log.Error("failed to initialize encryption", errs.ZapError(err))
+		return
+	}
 
 	// Try to create raft cluster.
 	if err := s.createRaftCluster(); err != nil {

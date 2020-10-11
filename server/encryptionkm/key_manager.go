@@ -354,6 +354,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 	err = saveKeys(m.etcdClient, m.leadership, m.masterKeyMeta, keys)
 	if err != nil {
 		eventSaveKeysFailure()
+		log.Error("failed to save keys", zap.Error(err))
 		return err
 	}
 	// Reload keys.
