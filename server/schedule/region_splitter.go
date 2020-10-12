@@ -22,17 +22,20 @@ import (
 	"go.uber.org/zap"
 )
 
-//TODO: support initialize splitRegionsHandler
+// TODO: support initialize splitRegionsHandler
+// SplitRegionsHandler used to handle region splitting
 type SplitRegionsHandler interface {
 	SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error
 	WatchRegionsByKeyRange(startKey, endKey []byte, timeout, watchInterval time.Duration) []uint64
 }
 
+// RegionSplitter handles split regions
 type RegionSplitter struct {
 	cluster opt.Cluster
 	handler SplitRegionsHandler
 }
 
+// NewRegionSplitter return a region splitter
 func NewRegionSplitter(cluster opt.Cluster, handler SplitRegionsHandler) *RegionSplitter {
 	return &RegionSplitter{
 		cluster: cluster,
@@ -66,8 +69,8 @@ func (r *RegionSplitter) splitRegions(splitKeys [][]byte, newRegions map[uint64]
 		region := r.cluster.GetRegion(regionID)
 		// TODO: assert region is not nil
 		// TODO: assert leader exists
-		// TODO: assert store exists
 		// TODO: assert region replicated
+		// TODO: assert region not hot
 		err := r.handler.SplitRegionByKeys(region, keys)
 		if err != nil {
 			for _, key := range keys {
