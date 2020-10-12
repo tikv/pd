@@ -225,6 +225,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerLoadKeys(c *C) {
 		},
 	}
 	err = saveKeys(client, leadership, masterKeyMeta, keys)
+	c.Assert(err, IsNil)
 	// Create the key manager.
 	m, err := NewKeyManager(ctx, client, config)
 	c.Assert(err, IsNil)
@@ -284,7 +285,7 @@ func (s *testKeyManagerSuite) TestGetCurrentKey(c *C) {
 		Keys:         make(map[uint64]*encryptionpb.DataKey),
 	}
 	m.keys.Store(keys)
-	currentKeyID, currentKey, err = m.GetCurrentKey()
+	_, _, err = m.GetCurrentKey()
 	c.Assert(err, NotNil)
 }
 
@@ -325,6 +326,7 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 		},
 	}
 	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	c.Assert(err, IsNil)
 	// Use default config.
 	config := &encryption.Config{}
 	err = config.Adjust()
@@ -350,7 +352,7 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 	c.Assert(proto.Equal(key, keys.Keys[456]), IsTrue)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Get non-existing key.
-	key, err = m.GetKey(uint64(789))
+	_, err = m.GetKey(uint64(789))
 	c.Assert(err, NotNil)
 }
 
@@ -377,9 +379,9 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	// Create the key manager.
 	m, err := NewKeyManager(ctx, client, config)
 	c.Assert(err, IsNil)
-	key, err := m.GetKey(123)
+	_, err = m.GetKey(123)
 	c.Assert(err, NotNil)
-	key, err = m.GetKey(456)
+	_, err = m.GetKey(456)
 	c.Assert(err, NotNil)
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
@@ -403,7 +405,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	err = saveKeys(client, leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	<-reloadEvent
-	key, err = m.GetKey(123)
+	key, err := m.GetKey(123)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(key, keys.Keys[123]), IsTrue)
 	key, err = m.GetKey(456)
@@ -512,6 +514,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
+	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
 }
 

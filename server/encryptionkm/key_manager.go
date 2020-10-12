@@ -189,7 +189,8 @@ func NewKeyManager(
 
 func (m *KeyManager) startBackgroundLoop(ctx context.Context) {
 	// Create new context for the loop.
-	loopCtx, _ := context.WithCancel(ctx)
+	loopCtx, loopCancel := context.WithCancel(ctx)
+	defer loopCancel()
 	// Setup key dictionary watcher
 	watcher := clientv3.NewWatcher(m.etcdClient)
 	defer watcher.Close()
@@ -215,7 +216,7 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context) {
 			}
 			for _, event := range resp.Events {
 				if event.Type != mvccpb.PUT {
-					log.Warn("encryption keys is deleted unexpectely")
+					log.Warn("encryption keys is deleted unexpectedly")
 					continue
 				}
 				{
