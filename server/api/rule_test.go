@@ -709,8 +709,8 @@ func (s *testRuleSuite) TestBundle(c *C) {
 	compareBundle(c, bundles[0], b1)
 
 	// Set
+	id := "rule-without-group-id"
 	b4 := placement.GroupBundle{
-		ID:    "rule-without-group-id",
 		Index: 4,
 		Rules: []*placement.Rule{
 			{ID: "bar", Index: 1, Override: true, Role: "voter", Count: 1},
@@ -718,18 +718,19 @@ func (s *testRuleSuite) TestBundle(c *C) {
 	}
 	data, err = json.Marshal(b4)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule/"+b4.ID, data)
+	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule/"+id, data)
 	c.Assert(err, IsNil)
 
+	b4.ID = id
 	b4.Rules[0].GroupID = b4.ID
 
 	// Get
-	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule/"+b4.ID, &bundle)
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule/"+id, &bundle)
 	c.Assert(err, IsNil)
 	compareBundle(c, bundle, b4)
 
 	// GetAll again
-	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule/", &bundles)
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
 	c.Assert(err, IsNil)
 	c.Assert(bundles, HasLen, 2)
 	compareBundle(c, bundles[0], b1)
@@ -745,13 +746,13 @@ func (s *testRuleSuite) TestBundle(c *C) {
 	}
 	data, err = json.Marshal([]placement.GroupBundle{b1, b4, b5})
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule/", data)
+	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule", data)
 	c.Assert(err, IsNil)
 
 	b5.Rules[0].GroupID = b5.ID
 
 	// GetAll again
-	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule/", &bundles)
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
 	c.Assert(err, IsNil)
 	c.Assert(bundles, HasLen, 3)
 	compareBundle(c, bundles[0], b1)

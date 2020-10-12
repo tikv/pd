@@ -454,7 +454,7 @@ func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 				h.rd.JSON(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			if len(rule.GroupID) != 0 {
+			if len(rule.GroupID) == 0 {
 				rule.GroupID = g.ID
 			}
 			if rule.GroupID != g.ID {
@@ -535,6 +535,9 @@ func (h *ruleHandler) SetGroupBundle(w http.ResponseWriter, r *http.Request) {
 	var group placement.GroupBundle
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &group); err != nil {
 		return
+	}
+	if len(group.ID) == 0 {
+		group.ID = groupID
 	}
 	if group.ID != groupID {
 		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("group id %s does not match request URI %s", group.ID, groupID))
