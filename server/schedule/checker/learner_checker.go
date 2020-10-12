@@ -39,7 +39,7 @@ func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
 		op, err := operator.CreatePromoteLearnerOperator("promote-learner", l.cluster, region, p)
 		if err != nil {
 			log.Debug("fail to create promote learner operator", errs.ZapError(err))
-			return nil
+			continue
 		}
 		return op
 	}
