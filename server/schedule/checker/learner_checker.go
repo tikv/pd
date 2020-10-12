@@ -36,14 +36,15 @@ func NewLearnerChecker(cluster opt.Cluster) *LearnerChecker {
 // Check verifies a region's role, creating an Operator if need.
 func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
 	for _, p := range region.GetLearners() {
+		//if region.GetPendingLearner(p.GetId()) != nil {
+		//	continue
+		//}
 		op, err := operator.CreatePromoteLearnerOperator("promote-learner", l.cluster, region, p)
 		if err != nil {
 			log.Debug("fail to create promote learner operator", errs.ZapError(err))
 			return nil
 		}
-		if op != nil {
-			return op
-		}
+		return op
 	}
 	return nil
 }
