@@ -22,8 +22,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// TODO: support initialize splitRegionsHandler
 // SplitRegionsHandler used to handle region splitting
+// TODO: support initialize splitRegionsHandler
 type SplitRegionsHandler interface {
 	SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error
 	WatchRegionsByKeyRange(startKey, endKey []byte, timeout, watchInterval time.Duration) []uint64
@@ -48,7 +48,7 @@ func (r *RegionSplitter) SplitRegions(splitKeys [][]byte, retryLimit int) (int, 
 	unprocessedKeys := splitKeys
 	newRegions := make(map[uint64]struct{}, len(splitKeys))
 	for i := 0; i < retryLimit; i++ {
-		unprocessedKeys = r.splitRegions(unprocessedKeys, newRegions)
+		unprocessedKeys = r.splitRegionsByKeys(unprocessedKeys, newRegions)
 		if len(unprocessedKeys) < 1 {
 			break
 		}
@@ -62,7 +62,7 @@ func (r *RegionSplitter) SplitRegions(splitKeys [][]byte, retryLimit int) (int, 
 	return 100 - len(unprocessedKeys)*100/len(splitKeys), returned
 }
 
-func (r *RegionSplitter) splitRegions(splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
+func (r *RegionSplitter) splitRegionsByKeys(splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
 	//TODO: support batch limit
 	groupKeys, unProcessedKeys := r.groupKeysByRegion(splitKeys)
 	for regionID, keys := range groupKeys {
