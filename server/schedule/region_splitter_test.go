@@ -73,7 +73,7 @@ func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 	tc.AddLeaderRegionWithRange(1, "aaa", "zzz", 2, 3)
 	splitter := NewRegionSplitter(tc, handler)
 	newRegions := map[uint64]struct{}{}
-	failureKeys := splitter.splitRegions([][]byte{[]byte("bbb"), []byte("ccc")}, newRegions)
+	failureKeys := splitter.splitRegionsByKeys([][]byte{[]byte("bbb"), []byte("ccc")}, newRegions)
 	c.Assert(len(failureKeys), Equals, 0)
 	c.Assert(len(newRegions), Equals, 3)
 }
