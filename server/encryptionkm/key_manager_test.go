@@ -408,7 +408,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	key, err := m.GetKey(123)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(key, keys.Keys[123]), IsTrue)
-	key, err = m.GetKey(456)
+	_, err = m.GetKey(456)
 	c.Assert(err, NotNil)
 	// Update again
 	keys = &encryptionpb.KeyDictionary{
@@ -590,6 +590,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
+	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
 }
 
@@ -667,6 +668,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
+	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
 }
 
@@ -748,6 +750,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
 	storedKeys, err := loadKeysFromKV(resp.Kvs[0])
+	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
 }
 
