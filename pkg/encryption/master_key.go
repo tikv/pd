@@ -98,7 +98,7 @@ func newMasterKeyFromFile(config *encryptionpb.MasterKeyFile) ([]byte, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, errs.ErrEncryptionNewMasterKey.Wrap(err).GenWithStack(
-			"fail to get encryption key from file %s: %s", path, err.Error())
+			"fail to get encryption key from file %s", path, err.Error())
 	}
 	key, err := hex.DecodeString(strings.TrimSpace(string(data)))
 	if err != nil {
