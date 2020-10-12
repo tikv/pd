@@ -94,7 +94,7 @@ func (c *Config) GetMethod() (encryptionpb.EncryptionMethod, error) {
 	}
 }
 
-// GetMasterKey gets the master key config.
+// GetMasterKeyMeta gets metadata of master key.
 func (c *Config) GetMasterKeyMeta() (*encryptionpb.MasterKey, error) {
 	switch c.MasterKey.Type {
 	case masterKeyTypePlaintext:
