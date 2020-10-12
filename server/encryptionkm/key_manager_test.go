@@ -216,7 +216,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerLoadKeys(c *C) {
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
@@ -265,7 +265,7 @@ func (s *testKeyManagerSuite) TestGetCurrentKey(c *C) {
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
@@ -310,13 +310,13 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
 			},
-			456: &encryptionpb.DataKey{
+			456: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679534),
@@ -392,7 +392,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
@@ -412,13 +412,13 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	keys = &encryptionpb.KeyDictionary{
 		CurrentKeyId: 456,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
 			},
-			456: &encryptionpb.DataKey{
+			456: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679534),
@@ -545,7 +545,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
@@ -621,7 +621,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
@@ -698,7 +698,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
@@ -781,7 +781,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
@@ -850,7 +850,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
@@ -927,7 +927,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
@@ -1025,7 +1025,7 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
