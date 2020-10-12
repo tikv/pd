@@ -96,7 +96,7 @@ func newTestKeyFile(c *C, key ...string) (keyFilePath string, cleanup func()) {
 	tempDir, err := ioutil.TempDir("/tmp", "test_key_file")
 	c.Assert(err, IsNil)
 	keyFilePath = tempDir + "/key"
-	err = ioutil.WriteFile(keyFilePath, []byte(testKey), os.ModeAppend)
+	err = ioutil.WriteFile(keyFilePath, []byte(testKey), 0644)
 	c.Assert(err, IsNil)
 
 	cleanup = func() {
