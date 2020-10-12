@@ -78,8 +78,11 @@ func (m *testKeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
 
 func (s *testRegionCrypterSuite) TestNilRegion(c *C) {
 	m := newTestKeyManager()
-	c.Assert(EncryptRegion(nil, m), Not(IsNil))
-	c.Assert(DecryptRegion(nil, m), Not(IsNil))
+	region, err := EncryptRegion(nil, m)
+	c.Assert(err, NotNil)
+	c.Assert(region, IsNil)
+	err = DecryptRegion(nil, m)
+	c.Assert(err, NotNil)
 }
 
 func (s *testRegionCrypterSuite) TestEncryptRegionWithoutKeyManager(c *C) {
@@ -89,7 +92,7 @@ func (s *testRegionCrypterSuite) TestEncryptRegionWithoutKeyManager(c *C) {
 		EndKey:         []byte("xyz"),
 		EncryptionMeta: nil,
 	}
-	err := EncryptRegion(region, nil)
+	region, err := EncryptRegion(region, nil)
 	c.Assert(err, IsNil)
 	// check the region isn't changed
 	c.Assert(string(region.StartKey), Equals, "abc")
@@ -106,7 +109,7 @@ func (s *testRegionCrypterSuite) TestEncryptRegionWhileEncryptionDisabled(c *C) 
 	}
 	m := newTestKeyManager()
 	m.EncryptionEnabled = false
-	err := EncryptRegion(region, m)
+	region, err := EncryptRegion(region, m)
 	c.Assert(err, IsNil)
 	// check the region isn't changed
 	c.Assert(string(region.StartKey), Equals, "abc")
@@ -126,24 +129,25 @@ func (s *testRegionCrypterSuite) TestEncryptRegion(c *C) {
 	copy(region.StartKey, startKey)
 	copy(region.EndKey, endKey)
 	m := newTestKeyManager()
-	err := EncryptRegion(region, m)
+	outRegion, err := EncryptRegion(region, m)
 	c.Assert(err, IsNil)
+	c.Assert(outRegion, Not(Equals), region)
 	// check region is encrypted
-	c.Assert(region.EncryptionMeta, Not(IsNil))
-	c.Assert(region.EncryptionMeta.KeyId, Equals, uint64(2))
-	c.Assert(len(region.EncryptionMeta.Iv), Equals, ivLengthCTR)
+	c.Assert(outRegion.EncryptionMeta, Not(IsNil))
+	c.Assert(outRegion.EncryptionMeta.KeyId, Equals, uint64(2))
+	c.Assert(outRegion.EncryptionMeta.Iv, HasLen, ivLengthCTR)
 	// Check encrypted content
 	_, currentKey, err := m.GetCurrentKey()
 	c.Assert(err, IsNil)
 	block, err := aes.NewCipher(currentKey.Key)
 	c.Assert(err, IsNil)
-	stream := cipher.NewCTR(block, region.EncryptionMeta.Iv)
+	stream := cipher.NewCTR(block, outRegion.EncryptionMeta.Iv)
 	ciphertextStartKey := make([]byte, len(startKey))
 	stream.XORKeyStream(ciphertextStartKey, startKey)
-	c.Assert(string(region.StartKey), Equals, string(ciphertextStartKey))
+	c.Assert(string(outRegion.StartKey), Equals, string(ciphertextStartKey))
 	ciphertextEndKey := make([]byte, len(endKey))
 	stream.XORKeyStream(ciphertextEndKey, endKey)
-	c.Assert(string(region.EndKey), Equals, string(ciphertextEndKey))
+	c.Assert(string(outRegion.EndKey), Equals, string(ciphertextEndKey))
 }
 
 func (s *testRegionCrypterSuite) TestDecryptRegionNotEncrypted(c *C) {

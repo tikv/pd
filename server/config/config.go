@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -86,6 +87,12 @@ type Config struct {
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
+	// The interval to update physical part of timestamp. Usually, this config should not be set.
+	// It's only useful for test purposes.
+	// This config is only valid in 50ms to 10s. If it's configured too long or too short, it will
+	// be automatically clamped to the range.
+	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
+
 	// Local TSO service related configuration.
 	LocalTSO LocalTSOConfig `toml:"local-tso" json:"local-tso"`
 
@@ -122,7 +129,7 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
-	Security grpcutil.SecurityConfig `toml:"security" json:"security"`
+	Security SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
@@ -145,8 +152,6 @@ type Config struct {
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
-	// EnableRedactLog indicates that whether redact log, 0 is disable. 1 is enable.
-	EnableRedactLog bool `toml:"enable-redact-log" json:"enable-redact-log"`
 }
 
 // NewConfig creates a new config.
@@ -224,7 +229,11 @@ const (
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
-	defaultEnableRedactLog    = false
+
+	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
+	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
+	maxTSOUpdatePhysicalInterval     = 10 * time.Second
+	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
 )
 
 var (
@@ -502,6 +511,14 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustDuration(&c.TSOSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
 
+	adjustDuration(&c.TSOUpdatePhysicalInterval, DefaultTSOUpdatePhysicalInterval)
+
+	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
+		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
+	} else if c.TSOUpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
+		c.TSOUpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
+	}
+
 	if err := c.LocalTSO.Validate(); err != nil {
 		return err
 	}
@@ -547,9 +564,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
-	if !configMetaData.IsDefined("enable-redact-log") {
-		c.EnableRedactLog = defaultEnableRedactLog
-	}
+	c.Security.Encryption.Adjust()
 
 	return nil
 }
@@ -1151,7 +1166,7 @@ func (c *Config) SetupLogger() error {
 	}
 	c.logger = lg
 	c.logProps = p
-	logutil.SetRedactLog(c.EnableRedactLog)
+	logutil.SetRedactLog(c.Security.RedactInfoLog)
 	return nil
 }
 
@@ -1372,4 +1387,12 @@ func (c *LocalTSOConfig) Validate() error {
 		return errors.New(errMsg)
 	}
 	return nil
+}
+
+// SecurityConfig indicates the security configuration for pd server
+type SecurityConfig struct {
+	grpcutil.TLSConfig
+	// RedactInfoLog indicates that whether enabling redact log
+	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
+	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
 }
