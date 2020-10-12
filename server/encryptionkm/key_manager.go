@@ -43,16 +43,6 @@ const (
 	keyRotationRetryLimit = 10
 )
 
-// Test helpers
-var (
-	now                   = func() time.Time { return time.Now() }
-	tick                  = func(ticker *time.Ticker) <-chan time.Time { return ticker.C }
-	eventAfterReload      = func() {}
-	eventAfterTicker      = func() {}
-	eventAfterLeaderCheck = func() {}
-	eventSaveKeysFailure  = func() {}
-)
-
 // KeyManager maintains the list to encryption keys. It handles encryption key generation and
 // rotation, persisting and loading encryption keys.
 type KeyManager struct {
@@ -75,6 +65,8 @@ type KeyManager struct {
 	// List of all encryption keys and current encryption key id,
 	// with type *encryptionpb.KeyDictionary
 	keys atomic.Value
+	// Helper methods. Tests can mock the helper to inject dependencies.
+	helper keyManagerHelper
 }
 
 // saveKeys saves encryption keys in etcd. Fail if given leadership is not current.
@@ -118,9 +110,11 @@ func saveKeys(
 		Then(clientv3.OpPut(EncryptionKeysPath, string(value))).
 		Commit()
 	if err != nil {
+		log.Warn("fail to save encryption keys.", zap.Error(err))
 		return errs.ErrEtcdTxn.Wrap(err).GenWithStack("fail to save encryption keys")
 	}
 	if !resp.Succeeded {
+		log.Warn("fail to save encryption keys. leader expired.")
 		return errs.ErrEncryptionSaveDataKeys.GenWithStack("leader expired")
 	}
 	// Leave for the watcher to load the updated keys.
@@ -163,6 +157,16 @@ func NewKeyManager(
 	etcdClient *clientv3.Client,
 	config *encryption.Config,
 ) (*KeyManager, error) {
+	return newKeyManager(ctx, etcdClient, config, defaultKeyManagerHelper())
+}
+
+// newKeyManager creates a new key manager, and allow tests to set a mocked keyManagerHelper.
+func newKeyManager(
+	ctx context.Context,
+	etcdClient *clientv3.Client,
+	config *encryption.Config,
+	helper keyManagerHelper,
+) (*KeyManager, error) {
 	method, err := config.GetMethod()
 	if err != nil {
 		return nil, err
@@ -176,6 +180,7 @@ func NewKeyManager(
 		method:                method,
 		dataKeyRotationPeriod: config.DataKeyRotationPeriod.Duration,
 		masterKeyMeta:         masterKeyMeta,
+		helper:                helper,
 	}
 	// Load encryption keys from storage.
 	_, err = m.loadKeys()
@@ -225,16 +230,16 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context) {
 					m.muUpdate.Unlock()
 				}
 			}
-			eventAfterReload()
+			m.helper.eventAfterReload()
 			// Check data key rotation in case we are the PD leader.
-		case <-tick(ticker):
+		case <-m.helper.tick(ticker):
 			m.muUpdate.Lock()
 			err := m.rotateKeyIfNeeded(false /*forceUpdate*/)
 			if err != nil {
 				log.Warn("fail to rotate data encryption key", zap.Error(err))
 			}
 			m.muUpdate.Unlock()
-			eventAfterTicker()
+			m.helper.eventAfterTicker()
 			// Server shutdown.
 		case <-loopCtx.Done():
 			log.Info("encryption key manager is closed")
@@ -283,7 +288,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 		m.leadership = nil
 		return nil
 	}
-	eventAfterLeaderCheck()
+	m.helper.eventAfterLeaderCheck()
 	// Reload encryption keys in case we are not up-to-date.
 	keys, err := m.loadKeys()
 	if err != nil {
@@ -321,14 +326,14 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 			// * Current key expired.
 			if currentKey.Method != m.method || currentKey.WasExposed ||
 				time.Unix(int64(currentKey.CreationTime), 0).
-					Add(m.dataKeyRotationPeriod).Before(now()) {
+					Add(m.dataKeyRotationPeriod).Before(m.helper.now()) {
 				needRotate = true
 			}
 		}
 		if needRotate {
 			rotated := false
 			for attempt := 0; attempt < keyRotationRetryLimit; attempt += 1 {
-				keyID, key, err := encryption.NewDataKey(m.method, uint64(now().Unix()))
+				keyID, key, err := encryption.NewDataKey(m.method, uint64(m.helper.now().Unix()))
 				if err != nil {
 					return nil
 				}
@@ -354,7 +359,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 	// Store updated keys in etcd.
 	err = saveKeys(m.etcdClient, m.leadership, m.masterKeyMeta, keys)
 	if err != nil {
-		eventSaveKeysFailure()
+		m.helper.eventSaveKeysFailure()
 		log.Error("failed to save keys", zap.Error(err))
 		return err
 	}
@@ -436,4 +441,25 @@ func (m *KeyManager) SetLeadership(leadership *election.Leadership) error {
 	defer m.muUpdate.Unlock()
 	m.leadership = leadership
 	return m.rotateKeyIfNeeded(true /*forceUpdate*/)
+}
+
+// keyManagerHelper provides interfaces for dependencies and event callbacks where tests can mock.
+type keyManagerHelper struct {
+	now                   func() time.Time
+	tick                  func(ticker *time.Ticker) <-chan time.Time
+	eventAfterReload      func()
+	eventAfterTicker      func()
+	eventAfterLeaderCheck func()
+	eventSaveKeysFailure  func()
+}
+
+func defaultKeyManagerHelper() keyManagerHelper {
+	return keyManagerHelper{
+		now:                   func() time.Time { return time.Now() },
+		tick:                  func(ticker *time.Ticker) <-chan time.Time { return ticker.C },
+		eventAfterReload:      func() {},
+		eventAfterTicker:      func() {},
+		eventAfterLeaderCheck: func() {},
+		eventSaveKeysFailure:  func() {},
+	}
 }

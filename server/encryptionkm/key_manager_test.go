@@ -365,19 +365,20 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
+	// Setup helper
+	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	eventAfterReload = func() {
+	helper.eventAfterReload = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
-	defer func() { eventAfterReload = func() {} }()
 	// Use default config.
 	config := &encryption.Config{}
 	err := config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := newKeyManager(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	_, err = m.GetKey(123)
 	c.Assert(err, NotNil)
@@ -475,13 +476,14 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
+	// Setup helper
+	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	eventAfterReload = func() {
+	helper.eventAfterReload = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
-	defer func() { eventAfterReload = func() {} }()
 	// Config with encryption on.
 	config := &encryption.Config{
 		DataEncryptionMethod: "aes128-ctr",
@@ -495,7 +497,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	err := config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := newKeyManager(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(m.keys.Load(), IsNil)
 	// Set leadership
@@ -527,13 +529,13 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
+	// Setup helper
+	helper := defaultKeyManagerHelper()
 	// Mock time
-	originalNow := now
-	now = func() time.Time { return time.Unix(int64(1601679533), 0) }
-	defer func() { now = originalNow }()
+	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	eventAfterReload = func() {
+	helper.eventAfterReload = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
@@ -571,7 +573,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := newKeyManager(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -603,17 +605,16 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
+	// Setup helper
+	helper := defaultKeyManagerHelper()
 	// Mock time
-	originalNow := now
-	now = func() time.Time { return time.Unix(int64(1601679533), 0) }
-	defer func() { now = originalNow }()
+	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	eventAfterReload = func() {
+	helper.eventAfterReload = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
-	defer func() { eventAfterReload = func() {} }()
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -648,7 +649,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := newKeyManager(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -681,17 +682,16 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
+	// Setup helper
+	helper := defaultKeyManagerHelper()
 	// Mock time
-	originalNow := now
-	now = func() time.Time { return time.Unix(int64(1601679533+101), 0) }
-	defer func() { now = originalNow }()
+	helper.now = func() time.Time { return time.Unix(int64(1601679533+101), 0) }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	eventAfterReload = func() {
+	helper.eventAfterReload = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
-	defer func() { eventAfterReload = func() {} }()
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -729,7 +729,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := newKeyManager(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -743,7 +743,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	c.Assert(currentKey.Method, Equals, encryptionpb.EncryptionMethod_AES128_CTR)
 	c.Assert(currentKey.Key, HasLen, 16)
 	c.Assert(currentKey.WasExposed, IsFalse)
-	c.Assert(currentKey.CreationTime, Equals, uint64(now().Unix()))
+	c.Assert(currentKey.CreationTime, Equals, uint64(helper.now().Unix()))
 	loadedKeys := m.keys.Load().(*encryptionpb.KeyDictionary)
 	c.Assert(loadedKeys.CurrentKeyId, Equals, currentKeyID)
 	c.Assert(proto.Equal(loadedKeys.Keys[123], keys.Keys[123]), IsTrue)
@@ -765,17 +765,16 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	keyFile2, cleanupKeyFile2 := newTestKeyFile(c, testMasterKey2)
 	defer cleanupKeyFile2()
 	leadership := newTestLeader(c, client)
+	// Setup helper
+	helper := defaultKeyManagerHelper()
 	// Mock time
-	originalNow := now
-	now = func() time.Time { return time.Unix(int64(1601679533), 0) }
-	defer func() { now = originalNow }()
+	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	eventAfterReload = func() {
+	helper.eventAfterReload = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
-	defer func() { eventAfterReload = func() {} }()
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -810,7 +809,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := newKeyManager(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -838,13 +837,14 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
+	// Setup helper
+	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	eventAfterReload = func() {
+	helper.eventAfterReload = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
-	defer func() { eventAfterReload = func() {} }()
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -871,7 +871,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := newKeyManager(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -899,29 +899,25 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
+	// Setup helper
+	helper := defaultKeyManagerHelper()
 	// Mock time
-	originalNow := now
 	mockNow := int64(1601679533)
-	now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
-	defer func() { now = originalNow }()
-	originalTick := tick
+	helper.now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
 	mockTick := make(chan time.Time)
-	tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
-	defer func() { tick = originalTick }()
+	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	eventAfterReload = func() {
+	helper.eventAfterReload = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
-	defer func() { eventAfterReload = func() {} }()
 	// Listen on ticker event
 	tickerEvent := make(chan struct{}, 1)
-	eventAfterTicker = func() {
+	helper.eventAfterTicker = func() {
 		var e struct{}
 		tickerEvent <- e
 	}
-	defer func() { eventAfterTicker = func() {} }()
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -959,7 +955,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := newKeyManager(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -1005,22 +1001,35 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
+	// Setup helper
+	helper := defaultKeyManagerHelper()
 	// Mock time
-	originalNow := now
 	mockNow := int64(1601679533)
-	now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
-	defer func() { now = originalNow }()
-	originalTick := tick
-	mockTick := make(chan time.Time)
-	tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
-	defer func() { tick = originalTick }()
+	helper.now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
+	mockTick := make(chan time.Time, 1)
+	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on ticker event
 	tickerEvent := make(chan struct{}, 1)
-	eventAfterTicker = func() {
+	helper.eventAfterTicker = func() {
 		var e struct{}
 		tickerEvent <- e
 	}
-	defer func() { eventAfterTicker = func() {} }()
+	// Listen on leader check event
+	shouldResetLeader := int32(0)
+	helper.eventAfterLeaderCheck = func() {
+		if atomic.LoadInt32(&shouldResetLeader) != 0 {
+			leadership.Reset()
+		}
+	}
+	// Listen on save key failure event
+	shouldListenSaveKeysFailure := int32(0)
+	saveKeysFailureEvent := make(chan struct{}, 1)
+	helper.eventSaveKeysFailure = func() {
+		if atomic.LoadInt32(&shouldListenSaveKeysFailure) != 0 {
+			var e struct{}
+			saveKeysFailureEvent <- e
+		}
+	}
 	// Update keys in etcd
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -1058,7 +1067,7 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := newKeyManager(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -1072,17 +1081,8 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
 	// Invalidate leader after leader check.
-	eventAfterLeaderCheck = func() {
-		leadership.Reset()
-	}
-	defer func() { eventAfterLeaderCheck = func() {} }()
-	// Listen on save key failure event
-	saveKeysFailureEvent := make(chan struct{}, 1)
-	eventSaveKeysFailure = func() {
-		var e struct{}
-		saveKeysFailureEvent <- e
-	}
-	defer func() { eventSaveKeysFailure = func() {} }()
+	atomic.StoreInt32(&shouldResetLeader, 1)
+	atomic.StoreInt32(&shouldListenSaveKeysFailure, 1)
 	// Advance time and trigger ticker
 	atomic.AddInt64(&mockNow, int64(101))
 	mockTick <- time.Unix(atomic.LoadInt64(&mockNow), 0)
