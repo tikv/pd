@@ -203,8 +203,5 @@ func (rl ruleList) getRulesForApplyRegion(start, end []byte) []*Rule {
 	if i != len(rl.ranges) && (len(end) == 0 || bytes.Compare(end, rl.ranges[i].startKey) > 0) {
 		return nil
 	}
-	if i == 0 {
-		return nil
-	}
 	return rl.ranges[i-1].applyRules
 }

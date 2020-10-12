@@ -223,33 +223,38 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 			}, ", "),
 		},
 		{
-			name:                "empty placement rule without peer role",
+			name:                "default placement rule without peer role",
 			placementRuleEnable: true,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`),
 			expectedError:       errors.New("transfer region without peer role is not supported when placement rules enabled"),
 			expectSteps:         "",
 		},
 		{
-			name:                "empty placement rule with peer role",
+			name:                "default placement rule with peer role",
 			placementRuleEnable: true,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
-			expectedError:       errors.New("cannot build operator for region match no placement rule"),
-			expectSteps:         "",
+			expectSteps: strings.Join([]string{
+				pdoperator.AddLearner{ToStore: 3, PeerID: 3}.String(),
+				pdoperator.PromoteLearner{ToStore: 3, PeerID: 3}.String(),
+				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
+			}, ", "),
 		},
 		{
-			name:                "empty placement rule with invalid input",
+			name:                "default placement rule with invalid input",
 			placementRuleEnable: true,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["leader"]}`),
 			expectedError:       errors.New("transfer region without peer role is not supported when placement rules enabled"),
 			expectSteps:         "",
 		},
 		{
-			name:                "any placement rule with invalid peer role",
+			name:                "customized placement rule with invalid peer role",
 			placementRuleEnable: true,
 			rules: []*placement.Rule{
 				{
-					GroupID:  "pd",
-					ID:       "test",
+					GroupID:  "pd1",
+					ID:       "test1",
 					Index:    1,
 					Override: true,
 					Role:     placement.Leader,
@@ -268,12 +273,12 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 			expectSteps:   "",
 		},
 		{
-			name:                "any placement rule with valid peer role1",
+			name:                "customized placement rule with valid peer role1",
 			placementRuleEnable: true,
 			rules: []*placement.Rule{
 				{
-					GroupID:  "pd",
-					ID:       "test",
+					GroupID:  "pd1",
+					ID:       "test1",
 					Index:    1,
 					Override: true,
 					Role:     placement.Leader,
@@ -290,14 +295,14 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError: nil,
 			expectSteps: strings.Join([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 4}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 4}.String(),
+				pdoperator.AddLearner{ToStore: 3, PeerID: 5}.String(),
+				pdoperator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 3}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 4}.String(),
+				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}, ", "),
 		},
 		{
-			name:                "any placement rule with valid peer role2",
+			name:                "customized placement rule with valid peer role2",
 			placementRuleEnable: true,
 			rules: []*placement.Rule{
 				{
@@ -330,10 +335,10 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["leader", "follower"]}`),
 			expectedError: nil,
 			expectSteps: strings.Join([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 5}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
+				pdoperator.AddLearner{ToStore: 3, PeerID: 6}.String(),
+				pdoperator.PromoteLearner{ToStore: 3, PeerID: 6}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 5}.String(),
+				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}, ", "),
 		},
 	}
@@ -341,8 +346,17 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 	for _, tc := range tt {
 		c.Log(tc.name)
 		s.svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(tc.placementRuleEnable)
+		if tc.placementRuleEnable {
+			err := s.svr.GetRaftCluster().GetRuleManager().Initialize(
+				s.svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
+				s.svr.GetRaftCluster().GetOpts().GetLocationLabels())
+			c.Assert(err, IsNil)
+		}
 		if len(tc.rules) > 0 {
+			// add customized rule first and then remove default rule
 			err := s.svr.GetRaftCluster().GetRuleManager().SetRules(tc.rules)
+			c.Assert(err, IsNil)
+			err = s.svr.GetRaftCluster().GetRuleManager().DeleteRule("pd", "default")
 			c.Assert(err, IsNil)
 		}
 		err := postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), tc.input)

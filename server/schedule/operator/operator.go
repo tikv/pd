@@ -209,6 +209,9 @@ func (o *Operator) CheckTimeout() bool {
 
 // Len returns the operator's steps count.
 func (o *Operator) Len() int {
+	if o == nil {
+		return 0
+	}
 	return len(o.steps)
 }
 

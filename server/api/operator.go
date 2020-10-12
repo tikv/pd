@@ -343,6 +343,7 @@ func parseStoreIDsAndPeerRole(ids interface{}, roles interface{}) (map[uint64]pl
 	if !ok {
 		return nil, false
 	}
+	storeIDToPeerRole := make(map[uint64]placement.PeerRoleType)
 	storeIDs := make([]uint64, 0, len(items))
 	for _, item := range items {
 		id, ok := item.(float64)
@@ -350,23 +351,18 @@ func parseStoreIDsAndPeerRole(ids interface{}, roles interface{}) (map[uint64]pl
 			return nil, false
 		}
 		storeIDs = append(storeIDs, uint64(id))
+		storeIDToPeerRole[uint64(id)] = ""
 	}
 
-	storeIDToPeerRole := make(map[uint64]placement.PeerRoleType)
-
 	peerRoles, ok := roles.([]interface{})
-	if ok && len(peerRoles) >= len(storeIDs) {
+	// only consider roles having the same length with ids as the valid case
+	if ok && len(peerRoles) == len(storeIDs) {
 		for i, v := range storeIDs {
 			switch pr := peerRoles[i].(type) {
 			case string:
 				storeIDToPeerRole[v] = placement.PeerRoleType(pr)
 			default:
-				storeIDToPeerRole[v] = ""
 			}
-		}
-	} else {
-		for _, v := range storeIDs {
-			storeIDToPeerRole[v] = ""
 		}
 	}
 	return storeIDToPeerRole, true

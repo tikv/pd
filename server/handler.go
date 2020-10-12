@@ -507,10 +507,6 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		}
 	}
 
-	if len(storeIDs) > c.GetOpts().GetMaxReplicas() {
-		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDs))
-	}
-
 	var store *core.StoreInfo
 	for id := range storeIDs {
 		store = c.GetStore(id)
@@ -522,14 +518,11 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		}
 	}
 
-	peers := make(map[uint64]*metapb.Peer)
 	roles := make(map[uint64]placement.PeerRoleType)
 	for id, peerRole := range storeIDs {
-		peers[id] = &metapb.Peer{StoreId: id, Role: peerRole.MetaPeerRole()}
 		roles[id] = peerRole
 	}
-
-	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, peers, roles)
+	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, roles)
 	if err != nil {
 		log.Debug("fail to create move region operator", errs.ZapError(err))
 		return err
