@@ -97,12 +97,12 @@ func newMasterKeyFromFile(config *encryptionpb.MasterKeyFile) ([]byte, error) {
 	}
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack(
-			"fail to get encryption key from file %s", path)
+		return nil, errs.ErrEncryptionNewMasterKey.Wrap(err).GenWithStack(
+			"fail to get encryption key from file %s: %s", path, err.Error())
 	}
 	key, err := hex.DecodeString(strings.TrimSpace(string(data)))
 	if err != nil {
-		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack(
+		return nil, errs.ErrEncryptionNewMasterKey.Wrap(err).GenWithStack(
 			"failed to decode encryption key from file, the key must be in hex form")
 	}
 	if len(key) != masterKeyLength {
