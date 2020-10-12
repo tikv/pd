@@ -56,8 +56,8 @@ func (r *RegionSplitter) SplitRegions(splitKeys [][]byte, retryLimit int) (int, 
 		time.Sleep(500 * time.Millisecond)
 	}
 	returned := make([]uint64, 0, len(newRegions))
-	for regionId := range newRegions {
-		returned = append(returned, regionId)
+	for regionID := range newRegions {
+		returned = append(returned, regionID)
 	}
 	return 100 - len(unprocessedKeys)*100/len(splitKeys), returned
 }
@@ -73,9 +73,7 @@ func (r *RegionSplitter) splitRegions(splitKeys [][]byte, newRegions map[uint64]
 		// TODO: assert region not hot
 		err := r.handler.SplitRegionByKeys(region, keys)
 		if err != nil {
-			for _, key := range keys {
-				unProcessedKeys = append(unProcessedKeys, key)
-			}
+			unProcessedKeys = append(unProcessedKeys, keys...)
 			continue
 		}
 		// TODO: use goroutine to run watchRegionsByKeyRange asynchronously
