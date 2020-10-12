@@ -89,7 +89,7 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 		defer c.Unlock()
 		origin, err := c.core.PreCheckPutRegion(region)
 		if err != nil {
-			log.Warn("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
+			log.Debug("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
 			// return the state region to delete.
 			return []*metapb.Region{region.GetMeta()}
 		}
