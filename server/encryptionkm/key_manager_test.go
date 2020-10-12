@@ -979,6 +979,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	<-reloadEvent
 	// Check key is rotated.
 	currentKeyID, currentKey, err := m.GetCurrentKey()
+	c.Assert(err, IsNil)
 	c.Assert(currentKeyID, Not(Equals), uint64(123))
 	c.Assert(currentKey.Method, Equals, encryptionpb.EncryptionMethod_AES128_CTR)
 	c.Assert(currentKey.Key, HasLen, 16)
