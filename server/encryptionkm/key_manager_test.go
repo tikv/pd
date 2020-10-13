@@ -338,8 +338,6 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 	key, err := m.GetKey(uint64(123))
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(key, keys.Keys[123]), IsTrue)
-	// Cancel background loop.
-	cancel()
 	// Get key that require a reload.
 	// Deliberately cancel watcher, delete a key and check if it has reloaded.
 	loadedKeys := m.keys.Load().(*encryptionpb.KeyDictionary)
@@ -378,7 +376,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	err := config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManager(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	_, err = m.GetKey(123)
 	c.Assert(err, NotNil)
@@ -497,7 +495,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	err := config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManager(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(m.keys.Load(), IsNil)
 	// Set leadership
@@ -573,7 +571,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManager(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -649,7 +647,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManager(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -729,7 +727,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManager(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -809,7 +807,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManager(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -871,7 +869,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManager(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -955,7 +953,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManager(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership
@@ -1067,7 +1065,7 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManager(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(ctx, client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	// Set leadership

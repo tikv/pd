@@ -157,11 +157,11 @@ func NewKeyManager(
 	etcdClient *clientv3.Client,
 	config *encryption.Config,
 ) (*KeyManager, error) {
-	return newKeyManager(ctx, etcdClient, config, defaultKeyManagerHelper())
+	return newKeyManagerImpl(ctx, etcdClient, config, defaultKeyManagerHelper())
 }
 
 // newKeyManager creates a new key manager, and allow tests to set a mocked keyManagerHelper.
-func newKeyManager(
+func newKeyManagerImpl(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
 	config *encryption.Config,
@@ -188,11 +188,11 @@ func newKeyManager(
 		return nil, err
 	}
 	// Start periodic check for keys change and rotation key if needed.
-	go m.startBackgroundLoop(ctx)
+	go m.startBackgroundLoop(ctx, m.keysRevision)
 	return m, nil
 }
 
-func (m *KeyManager) startBackgroundLoop(ctx context.Context) {
+func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 	// Create new context for the loop.
 	loopCtx, loopCancel := context.WithCancel(ctx)
 	defer loopCancel()
@@ -201,7 +201,7 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context) {
 	defer watcher.Close()
 	watcherCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	watchChan := watcher.Watch(watcherCtx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision))
+	watchChan := watcher.Watch(watcherCtx, EncryptionKeysPath, clientv3.WithRev(revision))
 	// Check data key rotation every min(dataKeyRotationPeriod, keyRotationCheckPeriod).
 	checkPeriod := m.dataKeyRotationPeriod
 	if keyRotationCheckPeriod < checkPeriod {
