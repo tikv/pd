@@ -70,10 +70,17 @@ func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	handler := newMockSplitRegionsHandler()
-	tc.AddLeaderRegionWithRange(1, "aaa", "zzz", 2, 3)
+	tc.AddLeaderRegionWithRange(1, "eee", "hhh", 2, 3)
 	splitter := NewRegionSplitter(tc, handler)
 	newRegions := map[uint64]struct{}{}
-	failureKeys := splitter.splitRegionsByKeys([][]byte{[]byte("bbb"), []byte("ccc")}, newRegions)
+	// assert success
+	failureKeys := splitter.splitRegionsByKeys([][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
 	c.Assert(len(failureKeys), Equals, 0)
 	c.Assert(len(newRegions), Equals, 3)
+
+	// assert out of range
+	newRegions = map[uint64]struct{}{}
+	failureKeys = splitter.splitRegionsByKeys([][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
+	c.Assert(len(failureKeys), Equals, 2)
+	c.Assert(len(newRegions), Equals, 0)
 }
