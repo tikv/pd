@@ -24,16 +24,13 @@ import (
 )
 
 type mockSplitRegionsHandler struct {
-	// regionID -> splitKeys
-	groupKeysByRegion map[uint64][][]byte
 	// regionID -> startKey, endKey
 	regions map[uint64][2][]byte
 }
 
 func newMockSplitRegionsHandler() *mockSplitRegionsHandler {
 	return &mockSplitRegionsHandler{
-		groupKeysByRegion: map[uint64][][]byte{},
-		regions:           map[uint64][2][]byte{},
+		regions: map[uint64][2][]byte{},
 	}
 
 }
@@ -44,16 +41,15 @@ func (m *mockSplitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, spl
 		region.GetStartKey(),
 		region.GetEndKey(),
 	}
-	m.groupKeysByRegion[region.GetID()] = splitKeys
 	return nil
 }
 
 // WatchRegionsByKeyRange mock SplitRegionsHandler
-func (m *mockSplitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, timeout, watchInterval time.Duration) []uint64 {
+func (m *mockSplitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, expectRegionsCount int, timeout, watchInterval time.Duration) []uint64 {
 	for regionID, keyRange := range m.regions {
 		if bytes.Equal(startKey, keyRange[0]) && bytes.Equal(endKey, keyRange[1]) {
 			returned := []uint64{regionID}
-			for i := 0; i < len(m.groupKeysByRegion[regionID]); i++ {
+			for i := 0; i < expectRegionsCount-1; i++ {
 				returned = append(returned, returned[0]+uint64(i)+1000)
 			}
 			return returned

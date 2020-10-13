@@ -15,19 +15,32 @@ package schedule
 
 import (
 	"bytes"
+	"errors"
+	"math"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
 // SplitRegionsHandler used to handle region splitting
-// TODO: support initialize splitRegionsHandler
 type SplitRegionsHandler interface {
 	SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error
-	WatchRegionsByKeyRange(startKey, endKey []byte, timeout, watchInterval time.Duration) []uint64
+	WatchRegionsByKeyRange(startKey, endKey []byte, expectRegionsCount int, timeout, watchInterval time.Duration) []uint64
+}
+
+// NewSplitRegionsHandler return SplitRegionsHandler
+func NewSplitRegionsHandler(cluster opt.Cluster, oc *OperatorController) SplitRegionsHandler {
+	return &splitRegionsHandler{
+		cluster: cluster,
+		oc:      oc,
+	}
 }
 
 // RegionSplitter handles split regions
@@ -48,13 +61,13 @@ func NewRegionSplitter(cluster opt.Cluster, handler SplitRegionsHandler) *Region
 func (r *RegionSplitter) SplitRegions(splitKeys [][]byte, retryLimit int) (int, []uint64) {
 	unprocessedKeys := splitKeys
 	newRegions := make(map[uint64]struct{}, len(splitKeys))
-	for i := 0; i < retryLimit; i++ {
+	for currentRetry := 0; currentRetry < retryLimit; currentRetry++ {
 		unprocessedKeys = r.splitRegionsByKeys(unprocessedKeys, newRegions)
 		if len(unprocessedKeys) < 1 {
 			break
 		}
-		//TODO: sleep for a while
-		time.Sleep(500 * time.Millisecond)
+		// Wait for a while if there are some regions failed to be relocated
+		time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(currentRetry)))*initialSleepDuration))
 	}
 	returned := make([]uint64, 0, len(newRegions))
 	for regionID := range newRegions {
@@ -68,10 +81,14 @@ func (r *RegionSplitter) splitRegionsByKeys(splitKeys [][]byte, newRegions map[u
 	groupKeys, unProcessedKeys := r.groupKeysByRegion(splitKeys)
 	for regionID, keys := range groupKeys {
 		region := r.cluster.GetRegion(regionID)
-		// TODO: assert region is not nil
-		// TODO: assert leader exists
-		// TODO: assert region replicated
-		// TODO: assert region not hot
+		if region == nil {
+			unProcessedKeys = append(unProcessedKeys, keys...)
+			continue
+		}
+		if !r.checkRegionValid(region) {
+			unProcessedKeys = append(unProcessedKeys, keys...)
+			continue
+		}
 		err := r.handler.SplitRegionByKeys(region, keys)
 		if err != nil {
 			unProcessedKeys = append(unProcessedKeys, keys...)
@@ -79,7 +96,8 @@ func (r *RegionSplitter) splitRegionsByKeys(splitKeys [][]byte, newRegions map[u
 		}
 		// TODO: use goroutine to run watchRegionsByKeyRange asynchronously
 		// TODO: support configure timeout and interval
-		splittedRegionsID := r.handler.WatchRegionsByKeyRange(region.GetStartKey(), region.GetEndKey(), time.Minute, 100*time.Millisecond)
+		splittedRegionsID := r.handler.WatchRegionsByKeyRange(region.GetStartKey(), region.GetEndKey(),
+			len(keys)+1, time.Minute, 100*time.Millisecond)
 		for _, id := range splittedRegionsID {
 			newRegions[id] = struct{}{}
 		}
@@ -107,11 +125,61 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64][][]byte, 
 		if !ok {
 			groupKeys[region.GetID()] = [][]byte{}
 		}
-		//TODO: log reduction
 		log.Info("found region",
 			zap.Uint64("regionID", region.GetID()),
-			zap.String("key", string(key[:])))
+			zap.String("key", logutil.RedactString(string(key[:]))))
 		groupKeys[region.GetID()] = append(group, key)
 	}
 	return groupKeys, unProcessedKeys
+}
+
+func (r *RegionSplitter) checkRegionValid(region *core.RegionInfo) bool {
+	if r.cluster.IsRegionHot(region) {
+		return false
+	}
+	if !opt.IsRegionReplicated(r.cluster, region) {
+		r.cluster.AddSuspectRegions(region.GetID())
+		return false
+	}
+	if region.GetLeader() == nil {
+		return false
+	}
+	return true
+}
+
+type splitRegionsHandler struct {
+	cluster opt.Cluster
+	oc      *OperatorController
+}
+
+func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error {
+	op := operator.CreateSplitRegionOperator("region-splitter", region, 0, pdpb.CheckPolicy_USEKEY, splitKeys)
+	if ok := h.oc.AddOperator(op); !ok {
+		log.Info("add region split operator failed", zap.Uint64("regionID", region.GetID()))
+		return errors.New("add region split operator failed")
+	}
+	return nil
+}
+
+func (h *splitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, expectRegionsCount int, timeout, watchInterval time.Duration) []uint64 {
+	after := time.After(timeout)
+	ticker := time.NewTicker(watchInterval)
+	defer ticker.Stop()
+	var regionsID []uint64
+	for {
+		select {
+		case <-ticker.C:
+			regions := h.cluster.ScanRegions(startKey, endKey, expectRegionsCount)
+			regionsID = make([]uint64, 0, expectRegionsCount)
+			for _, region := range regions {
+				regionsID = append(regionsID, region.GetID())
+			}
+			if len(regions) < expectRegionsCount {
+				continue
+			}
+			return regionsID
+		case <-after:
+			return regionsID
+		}
+	}
 }
