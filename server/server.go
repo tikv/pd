@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
@@ -116,6 +117,8 @@ type Server struct {
 	// store, region and peer, because we just need
 	// a unique ID.
 	idAllocator *id.AllocatorImpl
+	// for encryption
+	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
 	storage *core.Storage
 	// for basicCluster operation.
@@ -358,12 +361,22 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
-	path := filepath.Join(s.cfg.DataDir, "region-meta")
-	regionStorage, err := core.NewRegionStorage(ctx, path)
+	encryptionKeyManager, err := encryptionkm.NewKeyManager(kvBase, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
-	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
+	s.encryptionKeyManager = encryptionKeyManager
+	path := filepath.Join(s.cfg.DataDir, "region-meta")
+	regionStorage, err := core.NewRegionStorage(ctx, path, encryptionKeyManager)
+	if err != nil {
+		return err
+	}
+
+	s.storage = core.NewStorage(
+		kvBase,
+		core.WithRegionStorage(regionStorage),
+		core.WithEncryptionKeyManager(encryptionKeyManager),
+	)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -1156,6 +1169,9 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
 	}
+
+	s.encryptionKeyManager.SetLeadership(s.member.GetLeadership())
+
 	// Try to create raft cluster.
 	if err := s.createRaftCluster(); err != nil {
 		log.Error("failed to create raft cluster", errs.ZapError(err))
