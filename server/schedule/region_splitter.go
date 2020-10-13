@@ -59,6 +59,9 @@ func NewRegionSplitter(cluster opt.Cluster, handler SplitRegionsHandler) *Region
 
 // SplitRegions support splitRegions by given split keys.
 func (r *RegionSplitter) SplitRegions(splitKeys [][]byte, retryLimit int) (int, []uint64) {
+	if len(splitKeys) < 1 {
+		return 0, nil
+	}
 	unprocessedKeys := splitKeys
 	newRegions := make(map[uint64]struct{}, len(splitKeys))
 	for currentRetry := 0; currentRetry < retryLimit; currentRetry++ {

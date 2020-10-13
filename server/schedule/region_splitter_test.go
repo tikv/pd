@@ -32,7 +32,6 @@ func newMockSplitRegionsHandler() *mockSplitRegionsHandler {
 	return &mockSplitRegionsHandler{
 		regions: map[uint64][2][]byte{},
 	}
-
 }
 
 // SplitRegionByKeys mock SplitRegionsHandler
@@ -74,11 +73,18 @@ func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 	c.Assert(len(failureKeys), Equals, 0)
 	c.Assert(len(newRegions), Equals, 3)
 
+	percentage, newRegionsID := splitter.SplitRegions([][]byte{[]byte("fff"), []byte("ggg")}, 1)
+	c.Assert(percentage, Equals, 100)
+	c.Assert(len(newRegionsID), Equals, 3)
 	// assert out of range
 	newRegions = map[uint64]struct{}{}
 	failureKeys = splitter.splitRegionsByKeys([][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
 	c.Assert(len(failureKeys), Equals, 2)
 	c.Assert(len(newRegions), Equals, 0)
+
+	percentage, newRegionsID = splitter.SplitRegions([][]byte{[]byte("aaa"), []byte("bbb")}, 1)
+	c.Assert(percentage, Equals, 0)
+	c.Assert(len(newRegionsID), Equals, 0)
 }
 
 func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
