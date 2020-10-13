@@ -14,6 +14,7 @@
 package schedule
 
 import (
+	"bytes"
 	"time"
 
 	"github.com/pingcap/log"
@@ -87,9 +88,8 @@ func (r *RegionSplitter) splitRegionsByKeys(splitKeys [][]byte, newRegions map[u
 }
 
 // GroupKeysByRegion separates keys into groups by their belonging Regions.
-// Specially it also returns the first key's region which may be used as the
-// 'PrimaryLockKey' and should be committed ahead of others.
-// filter is used to filter some unwanted keys.
+// If any key failed to be found its Region, it will be placed into unProcessed key.
+// If the key is exactly the start key of its region, the key would be discarded directly.
 func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64][][]byte, [][]byte) {
 	unProcessedKeys := make([][]byte, 0, len(keys))
 	groupKeys := make(map[uint64][][]byte, len(keys))
@@ -97,6 +97,10 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64][][]byte, 
 		region := r.cluster.GetRegionByKey(key)
 		if region == nil {
 			unProcessedKeys = append(unProcessedKeys, key)
+			continue
+		}
+		// filter start key
+		if bytes.Equal(region.GetStartKey(), key) {
 			continue
 		}
 		group, ok := groupKeys[region.GetID()]

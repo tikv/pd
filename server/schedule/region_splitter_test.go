@@ -84,3 +84,21 @@ func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 	c.Assert(len(failureKeys), Equals, 2)
 	c.Assert(len(newRegions), Equals, 0)
 }
+
+func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	handler := newMockSplitRegionsHandler()
+	tc.AddLeaderRegionWithRange(1, "aaa", "ccc", 2, 3)
+	tc.AddLeaderRegionWithRange(2, "ccc", "eee", 2, 3)
+	tc.AddLeaderRegionWithRange(3, "fff", "ggg", 2, 3)
+	splitter := NewRegionSplitter(tc, handler)
+	groupKeys, unprocessKeys := splitter.groupKeysByRegion([][]byte{
+		[]byte("bbb"),
+		[]byte("ddd"),
+		[]byte("fff"),
+		[]byte("zzz"),
+	})
+	c.Assert(len(groupKeys), Equals, 2)
+	c.Assert(len(unprocessKeys), Equals, 1)
+}
