@@ -633,7 +633,7 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	mc.PutStore(newStore)
 }
 
-// SetStoreLabel set the last heartbeat to the target store
+// SetStoreLastHeartbeatInterval set the last heartbeat to the target store
 func (mc *Cluster) SetStoreLastHeartbeatInterval(storeID uint64, interval time.Duration) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(

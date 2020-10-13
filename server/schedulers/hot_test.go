@@ -364,7 +364,6 @@ func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
 	tc.AddRegionStore(4, 20)
-	tc.AddRegionStore(5, 20)
 
 	tc.UpdateStorageWrittenStats(1, 10.5*MB*statistics.StoreHeartBeatReportInterval, 10.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(2, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
@@ -389,13 +388,6 @@ func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
 	// test dst
 	for _, interval := range intervals {
 		tc.SetStoreLastHeartbeatInterval(4, interval)
-		hb.(*hotScheduler).clearPendingInfluence()
-		hb.Schedule(tc)
-		// no panic
-	}
-	// test src
-	for _, interval := range intervals {
-		tc.SetStoreLastHeartbeatInterval(1, interval)
 		hb.(*hotScheduler).clearPendingInfluence()
 		hb.Schedule(tc)
 		// no panic
