@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
@@ -46,6 +47,9 @@ func NewRegionSplitter(cluster opt.Cluster, handler SplitRegionsHandler) *Region
 
 // SplitRegions support splitRegions by given split keys.
 func (r *RegionSplitter) SplitRegions(splitKeys [][]byte, retryLimit int) (int, []uint64) {
+	if len(splitKeys) < 1 {
+		return 0, nil
+	}
 	unprocessedKeys := splitKeys
 	newRegions := make(map[uint64]struct{}, len(splitKeys))
 	for i := 0; i < retryLimit; i++ {
@@ -107,10 +111,9 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64][][]byte, 
 		if !ok {
 			groupKeys[region.GetID()] = [][]byte{}
 		}
-		//TODO: log reduction
 		log.Info("found region",
 			zap.Uint64("regionID", region.GetID()),
-			zap.String("key", string(key[:])))
+			zap.String("key", logutil.RedactString(string(key[:]))))
 		groupKeys[region.GetID()] = append(group, key)
 	}
 	return groupKeys, unProcessedKeys
