@@ -359,6 +359,53 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	}
 }
 
+func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+
+	tc := mockcluster.NewCluster(opt)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.AddRegionStore(4, 20)
+
+	tc.UpdateStorageWrittenStats(1, 10.5*MB*statistics.StoreHeartBeatReportInterval, 10.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 9.5*MB*statistics.StoreHeartBeatReportInterval, 9.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 0*MB*statistics.StoreHeartBeatReportInterval, 0*MB*statistics.StoreHeartBeatReportInterval)
+	addRegionInfo(tc, write, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 0.5 * MB, 0.5 * MB},
+		{2, []uint64{2, 1, 3}, 0.5 * MB, 0.5 * MB},
+		{3, []uint64{3, 2, 1}, 0.5 * MB, 0.5 * MB},
+	})
+
+	intervals := []time.Duration{
+		9 * time.Second,
+		10 * time.Second,
+		19 * time.Second,
+		20 * time.Second,
+		9 * time.Minute,
+		10 * time.Minute,
+		29 * time.Minute,
+		30 * time.Minute,
+	}
+	// test dst
+	for _, interval := range intervals {
+		tc.SetStoreLastHeartbeatInterval(4, interval)
+		hb.(*hotScheduler).clearPendingInfluence()
+		hb.Schedule(tc)
+		// no panic
+	}
+}
+
 func (s *testHotWriteRegionSchedulerSuite) TestLeader(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
