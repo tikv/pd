@@ -386,9 +386,16 @@ func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
 		29 * time.Minute,
 		30 * time.Minute,
 	}
-
+	// test dst
 	for _, interval := range intervals {
-		tc.SetStoreLastHeartbeatInterval(4,interval)
+		tc.SetStoreLastHeartbeatInterval(4, interval)
+		hb.(*hotScheduler).clearPendingInfluence()
+		hb.Schedule(tc)
+		// no panic
+	}
+	// test src
+	for _, interval := range intervals {
+		tc.SetStoreLastHeartbeatInterval(1, interval)
 		hb.(*hotScheduler).clearPendingInfluence()
 		hb.Schedule(tc)
 		// no panic
