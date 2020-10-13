@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"fmt"
 	"math"
 	"net/url"
 	"sort"
@@ -361,6 +362,7 @@ func newRegionInfo(id uint64, srcStoreID uint64, load1 float64, load2 float64) *
 	return &regionInfo{
 		id:         id,
 		srcStoreID: srcStoreID,
+		dstStoreID: srcStoreID,
 		loads:      [DimensionCount]float64{load1, load2},
 		diffLoad:   math.Abs(load1 - load2),
 	}
@@ -382,6 +384,7 @@ func (r *regionInfo) extract() (*regionInfo, bool) {
 		for dimID := uint64(0); dimID < DimensionCount; dimID++ {
 			r.loads[dimID] = r.splittedLoads[dimID]
 		}
+		r.splitRatio = 0
 		return r, true
 	}
 }
@@ -406,14 +409,12 @@ func (r regionInfoByLoad1) Less(i, j int) bool { return r[i].loads[1] < r[j].loa
 
 type regionContainer struct {
 	candiRegions    [DimensionCount]map[uint64][]*regionInfo
-	migratedRegions map[uint64]*regionInfo
+	migratedRegions []*regionInfo
 	count           [DimensionCount]uint64
 }
 
 func newRegionContainer() *regionContainer {
-	ret := &regionContainer{
-		migratedRegions: make(map[uint64]*regionInfo, 0),
-	}
+	ret := &regionContainer{}
 	for i := range ret.candiRegions {
 		ret.candiRegions[i] = make(map[uint64][]*regionInfo, 0)
 	}
@@ -422,7 +423,6 @@ func newRegionContainer() *regionContainer {
 
 func (rc *regionContainer) push(dimID uint64, region *regionInfo) {
 	rc.candiRegions[dimID][region.srcStoreID] = append(rc.candiRegions[dimID][region.srcStoreID], region)
-	rc.migratedRegions[region.id] = region
 	rc.count[dimID]++
 }
 
@@ -444,6 +444,9 @@ func (rc *regionContainer) pop(dimID uint64, candidateStoreID uint64) *regionInf
 	selectedRegion, finish := region.extract()
 	if selectedRegion != nil {
 		selectedRegion.dstStoreID = candidateStoreID
+		if selectedRegion.dstStoreID != selectedRegion.srcStoreID {
+			rc.migratedRegions = append(rc.migratedRegions, selectedRegion)
+		}
 	} else {
 		log.Info("untracked region", zap.Uint64("regionID", region.id))
 	}
@@ -459,13 +462,7 @@ func (rc *regionContainer) pop(dimID uint64, candidateStoreID uint64) *regionInf
 }
 
 func (rc *regionContainer) getMigratedRegions() []*regionInfo {
-	var ret []*regionInfo
-	for _, region := range rc.migratedRegions {
-		if region.srcStoreID != region.dstStoreID {
-			ret = append(ret, region)
-		}
-	}
-	return ret
+	return rc.migratedRegions
 }
 
 func (rc *regionContainer) getFailedSplitRegions(dimID uint64, storeID uint64) []*regionInfo {
@@ -687,6 +684,10 @@ func checkRegionSplit(region *regionInfo, ratio float64) bool {
 func splitProcedure(storeInfos []*storeInfo, candidateRegions *regionContainer, ratio float64) []*regionInfo {
 	splitRegions := make([]*regionInfo, 0)
 
+	log.Info("greedyBalance: before split",
+		zap.Float64("balanceRatio", calcMaxMeanRatio(storeInfos)),
+	)
+
 	// mark regions that can be removed so that the difference of two dimensions' loads does not exceed `ratio`
 	// identify regions that need to be split
 	for _, store := range storeInfos {
@@ -723,10 +724,17 @@ func splitProcedure(storeInfos []*storeInfo, candidateRegions *regionContainer, 
 		)
 	}
 
+	log.Info("greedyBalance: split",
+		zap.Float64("balanceRatio", calcMaxMeanRatio(storeInfos)),
+	)
+
 	return splitRegions
 }
 
 func migrationProcedure(storeInfos []*storeInfo, candidateRegions *regionContainer, ratio float64) []*regionInfo {
+	log.Info("greedyBalance: before migration",
+		zap.Float64("balanceRatio", calcMaxMeanRatio(storeInfos)),
+	)
 	// step 1: fill back the regions that can not be split
 	for _, store := range storeInfos {
 		for dimID := uint64(0); dimID < DimensionCount; dimID++ {
@@ -748,6 +756,7 @@ func migrationProcedure(storeInfos []*storeInfo, candidateRegions *regionContain
 	// step 2: carefully fill candidate regions into stores to ensure that each store does not overflow too much
 	sort.Sort(storeInfoByLoad0(storeInfos))
 	for _, store := range storeInfos {
+		log.Info("store load start step 2", zap.Uint64("storeID", store.id), zap.Float64("dim0", store.loads[0]), zap.Float64("dim1", store.loads[1]))
 		for getStoreLoadStat(store) != above {
 			var dimID uint64
 			if store.loads[0] > store.loads[1] {
@@ -757,12 +766,14 @@ func migrationProcedure(storeInfos []*storeInfo, candidateRegions *regionContain
 			if !candidateRegions.empty(dimID) {
 				region := candidateRegions.pop(dimID, store.id)
 				if region != nil {
+					log.Info("step 2 add region", zap.Uint64("storeID", store.id), zap.Uint64("whichDim", dimID), zap.Float64("dim0", store.loads[0]), zap.Float64("dim1", store.loads[1]), zap.String("region", fmt.Sprintf("%+v", region)))
 					store.add(region)
 				}
 			} else {
 				break
 			}
 		}
+		log.Info("store load end step 2", zap.Uint64("storeID", store.id), zap.Float64("dim0", store.loads[0]), zap.Float64("dim1", store.loads[1]))
 	}
 
 	// step 3: fill remaining regions
@@ -773,12 +784,15 @@ func migrationProcedure(storeInfos []*storeInfo, candidateRegions *regionContain
 			sort.Sort(storeInfoByLoad1(storeInfos))
 		}
 		for _, store := range storeInfos {
+			log.Info("store load start step 3", zap.Uint64("storeID", store.id), zap.Uint64("wichDim", dimID), zap.Float64("dim0", store.loads[0]), zap.Float64("dim1", store.loads[1]))
 			for store.loads[dimID] < 1 && !candidateRegions.empty(dimID) {
 				region := candidateRegions.pop(dimID, store.id)
 				if region != nil {
+					log.Info("step 3 add region", zap.Uint64("storeID", store.id), zap.Uint64("whichDim", dimID), zap.Float64("dim0", store.loads[0]), zap.Float64("dim1", store.loads[1]), zap.String("region", fmt.Sprintf("%+v", region)))
 					store.add(region)
 				}
 			}
+			log.Info("store load end step 3", zap.Uint64("storeID", store.id), zap.Uint64("wichDim", dimID), zap.Float64("dim0", store.loads[0]), zap.Float64("dim1", store.loads[1]))
 		}
 	}
 

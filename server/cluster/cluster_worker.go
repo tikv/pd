@@ -233,7 +233,7 @@ func (c *RaftCluster) collectSplitRegions(regions []*metapb.Region) {
 	c.Lock()
 	defer c.Unlock()
 
-	regionInfos := make([]uint64, len(regions)-1)
+	regionInfos := make([]uint64, 0, len(regions)-1)
 	for _, r := range regions[:len(regions)-1] {
 		regionInfos = append(regionInfos, r.GetId())
 	}

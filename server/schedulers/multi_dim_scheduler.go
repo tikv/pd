@@ -16,6 +16,7 @@ package schedulers
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
@@ -117,16 +118,15 @@ type multiDimensionScheduler struct {
 func newMultiDimensionScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *multiDimensionScheduler {
 	base := NewBaseScheduler(opController)
 	ret := &multiDimensionScheduler{
-		name:           MultipleDimensionName,
-		BaseScheduler:  base,
-		leaderLimit:    1,
-		peerLimit:      1,
-		types:          []rwType{write, read},
-		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
-		conf:           conf,
-		hotSched:       newHotScheduler(opController, conf),
-		schStatus:      scheduleInit,
-		regionOpRecord: make(map[uint64]*opRecord),
+		name:          MultipleDimensionName,
+		BaseScheduler: base,
+		leaderLimit:   1,
+		peerLimit:     1,
+		types:         []rwType{write, read},
+		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
+		conf:          conf,
+		hotSched:      newHotScheduler(opController, conf),
+		schStatus:     scheduleInit,
 	}
 	return ret
 }
@@ -183,7 +183,6 @@ func (h *multiDimensionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 		case scheduleMigration: // wait the flow data of splitted region to be stable (to be improved)
 			if time.Since(h.splitCompleteTime) < waitSplitInfoStableInterval {
 				log.Info("wait for schedule", zap.Float64("duration", time.Since(h.splitCompleteTime).Seconds()),
-					zap.Int("splittime", h.splitCompleteTime.Second()),
 					zap.Float64("maxTime", waitSplitInfoStableInterval.Seconds()))
 				return nil
 			}
@@ -242,6 +241,7 @@ func (h *multiDimensionScheduler) greedyTwoDimension(bs *balanceSolver) {
 		// pendingRegions = append(pendingRegions, pendingRegions1...)
 	}
 
+	h.regionOpRecord = make(map[uint64]*opRecord, len(pendingRegions))
 	for _, ri := range pendingRegions {
 		log.Info("schedule region", zap.String("regionInfo", fmt.Sprintf("%+v", ri)))
 		h.regionOpRecord[ri.id] = &opRecord{
@@ -331,22 +331,41 @@ func (h *multiDimensionScheduler) updateSplitInfos(bs *balanceSolver, splitRegio
 			region.splittedIDs = splittedIDs
 			region.splittedRegions = make(map[uint64]*regionInfo, len(splittedIDs))
 
+			for _, id := range splittedIDs {
+				region.splittedRegions[id] = newRegionInfo(id, region.srcStoreID,
+					region.loads[0]*region.splitRatio,
+					region.loads[1]*region.splitRatio)
+			}
+			restRatio := 1.0 - math.Floor(1.0/region.splitRatio)*region.splitRatio
+			region.splittedLoads[0] = region.loads[0] * restRatio
+			region.splittedLoads[1] = region.loads[1] * restRatio
+
 			idSet := make(map[uint64]struct{}, len(splittedIDs))
 			for _, id := range splittedIDs {
 				idSet[id] = struct{}{}
 			}
-			// update flow data of splitted regions
+			// update flow data of splitted regions by hotpeer
 			if loadDetail, ok := bs.stLoadDetail[region.srcStoreID]; ok {
 				for _, peer := range loadDetail.HotPeers {
 					if _, exist := idSet[peer.RegionID]; exist { // insert new region info
-						newRegion := newRegionInfo(peer.RegionID, region.srcStoreID,
-							peer.GetByteRate()/loadDetail.LoadPred.Future.ExpByteRate,
-							peer.GetKeyRate()/loadDetail.LoadPred.Future.ExpKeyRate)
-						region.splittedRegions[peer.RegionID] = newRegion
+						splitRegion := region.splittedRegions[peer.RegionID]
+						splitRegion.loads[0] = peer.GetByteRate() / loadDetail.LoadPred.Future.ExpByteRate
+						splitRegion.loads[1] = peer.GetKeyRate() / loadDetail.LoadPred.Future.ExpKeyRate
+						splitRegion.diffLoad = math.Abs(splitRegion.loads[0] - splitRegion.loads[1])
+
+						expectLoads := []float64{region.loads[0] * region.splitRatio, region.loads[1] * region.splitRatio}
+						log.Info("splitInfo",
+							zap.String("splitRegionInfo", fmt.Sprintf("%+v", splitRegion)),
+							zap.String("expectLoads", fmt.Sprintf("%+v", expectLoads)),
+						)
 					} else if peer.RegionID == region.id { // use splittedLoads to store the flow data of current region
+						expectLoads := []float64{region.splittedLoads[0], region.splittedLoads[1]}
 						region.splittedLoads[0] = peer.GetByteRate() / loadDetail.LoadPred.Future.ExpByteRate
 						region.splittedLoads[1] = peer.GetKeyRate() / loadDetail.LoadPred.Future.ExpKeyRate
-						region.splitRatio = 0
+						log.Info("splitInfoRest",
+							zap.String("splitRegionInfo", fmt.Sprintf("%+v", region)),
+							zap.String("expectLoads", fmt.Sprintf("%+v", expectLoads)),
+						)
 					}
 				}
 			}
