@@ -15,6 +15,7 @@ package api
 
 import (
 	"container/heap"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -722,6 +723,41 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	}{
 		ProcessedPercentage: 100 - (len(failureRegionID) * 100 / regionsCount),
 		Error:               "unprocessed regions:[" + strings.Join(failureRegionID, ",") + "]",
+	}
+	h.rd.JSON(w, http.StatusOK, &s)
+}
+
+func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	rawSplitKeys, ok := input["split_keys"].([]string)
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "split_keys should be provided.")
+		return
+	}
+	if len(rawSplitKeys) < 1 {
+		h.rd.JSON(w, http.StatusBadRequest, "empty split keys.")
+		return
+	}
+	splitKeys := make([][]byte, 0, len(rawSplitKeys))
+	for _, rawKey := range rawSplitKeys {
+		key, err := hex.DecodeString(rawKey)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		splitKeys = append(splitKeys, key)
+	}
+	percentage, newRegionsID := rc.GetRegionSplitter().SplitRegions(splitKeys, 10)
+	s := struct {
+		ProcessedPercentage int      `json:"processed-percentage"`
+		NewRegionsID        []uint64 `json:"regions-id"`
+	}{
+		ProcessedPercentage: percentage,
+		NewRegionsID:        newRegionsID,
 	}
 	h.rd.JSON(w, http.StatusOK, &s)
 }

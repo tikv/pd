@@ -385,6 +385,13 @@ func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
 	return c.coordinator.regionScatterer
 }
 
+// GetRegionSplitter returns the region splitter
+func (c *RaftCluster) GetRegionSplitter() *schedule.RegionSplitter {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.regionSplitter
+}
+
 // GetHeartbeatStreams returns the heartbeat streams.
 func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 	c.RLock()
