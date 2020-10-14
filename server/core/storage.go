@@ -27,7 +27,9 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -42,6 +44,7 @@ const (
 	replicationPath          = "replication_mode"
 	componentPath            = "component"
 	customScheduleConfigPath = "scheduler_config"
+	encryptionKeysPath       = "encryption_keys"
 )
 
 const (
@@ -52,23 +55,47 @@ const (
 // Storage wraps all kv operations, keep it stateless.
 type Storage struct {
 	kv.Base
-	regionStorage    *RegionStorage
-	useRegionStorage int32
-	regionLoaded     int32
-	mu               sync.Mutex
+	regionStorage        *RegionStorage
+	encryptionKeyManager *encryptionkm.KeyManager
+	useRegionStorage     int32
+	regionLoaded         int32
+	mu                   sync.Mutex
 }
 
-// NewStorage creates Storage instance with Base.
-func NewStorage(base kv.Base) *Storage {
-	return &Storage{
-		Base: base,
+// StorageOpt represents available options to create Storage.
+type StorageOpt struct {
+	regionStorage        *RegionStorage
+	encryptionKeyManager *encryptionkm.KeyManager
+}
+
+// StorageOption configures StorageOpt
+type StorageOption func(*StorageOpt)
+
+// WithRegionStorage sets RegionStorage to the Storage
+func WithRegionStorage(regionStorage *RegionStorage) StorageOption {
+	return func(opt *StorageOpt) {
+		opt.regionStorage = regionStorage
 	}
 }
 
-// SetRegionStorage sets the region storage.
-func (s *Storage) SetRegionStorage(regionStorage *RegionStorage) *Storage {
-	s.regionStorage = regionStorage
-	return s
+// WithEncryptionKeyManager sets EncryptionManager to the Storage
+func WithEncryptionKeyManager(encryptionKeyManager *encryptionkm.KeyManager) StorageOption {
+	return func(opt *StorageOpt) {
+		opt.encryptionKeyManager = encryptionKeyManager
+	}
+}
+
+// NewStorage creates Storage instance with Base.
+func NewStorage(base kv.Base, opts ...StorageOption) *Storage {
+	options := &StorageOpt{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	return &Storage{
+		Base:                 base,
+		regionStorage:        options.regionStorage,
+		encryptionKeyManager: options.encryptionKeyManager,
+	}
 }
 
 // GetRegionStorage gets the region storage.
@@ -105,6 +132,11 @@ func (s *Storage) storeLeaderWeightPath(storeID uint64) string {
 
 func (s *Storage) storeRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
+}
+
+// EncryptionKeysPath returns the path to save encryption keys.
+func (s *Storage) EncryptionKeysPath() string {
+	return path.Join(encryptionKeysPath, "keys")
 }
 
 // SaveScheduleConfig saves the config of scheduler.
@@ -151,30 +183,30 @@ func (s *Storage) DeleteStore(store *metapb.Store) error {
 }
 
 // LoadRegion loads one region from storage.
-func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
+func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
 	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
-		return loadProto(s.regionStorage, regionPath(regionID), region)
+		return loadRegion(s.regionStorage, s.encryptionKeyManager, regionID, region)
 	}
-	return loadProto(s.Base, regionPath(regionID), region)
+	return loadRegion(s.Base, s.encryptionKeyManager, regionID, region)
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
 func (s *Storage) LoadRegions(f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
-		return loadRegions(s.regionStorage, f)
+		return loadRegions(s.regionStorage, s.encryptionKeyManager, f)
 	}
-	return loadRegions(s.Base, f)
+	return loadRegions(s.Base, s.encryptionKeyManager, f)
 }
 
 // LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
 func (s *Storage) LoadRegionsOnce(f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) == 0 {
-		return loadRegions(s.Base, f)
+		return loadRegions(s.Base, s.encryptionKeyManager, f)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.regionLoaded == 0 {
-		if err := loadRegions(s.regionStorage, f); err != nil {
+		if err := loadRegions(s.regionStorage, s.encryptionKeyManager, f); err != nil {
 			return err
 		}
 		s.regionLoaded = 1
@@ -187,7 +219,7 @@ func (s *Storage) SaveRegion(region *metapb.Region) error {
 	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
 		return s.regionStorage.SaveRegion(region)
 	}
-	return saveProto(s.Base, regionPath(region.GetId()), region)
+	return saveRegion(s.Base, s.encryptionKeyManager, region)
 }
 
 // DeleteRegion deletes one region from storage.
@@ -401,7 +433,13 @@ func (s *Storage) Flush() error {
 // Close closes the s.
 func (s *Storage) Close() error {
 	if s.regionStorage != nil {
-		return s.regionStorage.Close()
+		err := s.regionStorage.Close()
+		if err != nil {
+			return err
+		}
+	}
+	if s.encryptionKeyManager != nil {
+		s.encryptionKeyManager.Close()
 	}
 	return nil
 }
@@ -539,4 +577,41 @@ func saveProto(s kv.Base, key string, msg proto.Message) error {
 		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
 	}
 	return s.Save(key, string(value))
+}
+
+func loadRegion(
+	kv kv.Base,
+	encryptionKeyManager *encryptionkm.KeyManager,
+	regionID uint64,
+	region *metapb.Region,
+) (ok bool, err error) {
+	value, err := kv.Load(regionPath(regionID))
+	if err != nil {
+		return false, err
+	}
+	if value == "" {
+		return false, nil
+	}
+	err = proto.Unmarshal([]byte(value), region)
+	if err != nil {
+		return true, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
+	}
+	err = encryption.DecryptRegion(region, encryptionKeyManager)
+	return true, err
+}
+
+func saveRegion(
+	kv kv.Base,
+	encryptionKeyManager *encryptionkm.KeyManager,
+	region *metapb.Region,
+) error {
+	region, err := encryption.EncryptRegion(region, encryptionKeyManager)
+	if err != nil {
+		return err
+	}
+	value, err := proto.Marshal(region)
+	if err != nil {
+		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByArgs()
+	}
+	return kv.Save(regionPath(region.GetId()), string(value))
 }

@@ -15,12 +15,12 @@ package api
 
 import (
 	"container/heap"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -593,22 +593,6 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	parseKey := func(name string, input map[string]interface{}) (string, string, error) {
-		k, ok := input[name]
-		if !ok {
-			return "", "", fmt.Errorf("missing %s", name)
-		}
-		rawKey, ok := k.(string)
-		if !ok {
-			return "", "", fmt.Errorf("bad format %s", name)
-		}
-		returned, err := hex.DecodeString(rawKey)
-		if err != nil {
-			return "", "", fmt.Errorf("split key %s is not in hex format", name)
-		}
-		return string(returned), rawKey, nil
-	}
-
 	startKey, rawStartKey, err := parseKey("start_key", input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
@@ -634,7 +618,7 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 		limit = maxRegionLimit
 	}
 
-	regions := rc.ScanRegions([]byte(startKey), []byte(endKey), limit)
+	regions := rc.ScanRegions(startKey, endKey, limit)
 	if len(regions) > 0 {
 		regionsIDList := make([]uint64, 0, len(regions))
 		for _, region := range regions {
@@ -662,6 +646,84 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 	regions := TopNRegions(rc.GetRegions(), less, limit)
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+// @Tags region
+// @Summary Scatter regions by given key ranges or regions id distributed by given group with given retry limit
+// @Accept json
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "Scatter regions by given key ranges or regions id distributed by given group with given retry limit"
+// @Failure 400 {string} string "The input is invalid."
+// @Router /regions/scatter [post]
+func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	var regionMap map[uint64]*core.RegionInfo
+	_, ok1 := input["start_key"].(string)
+	_, ok2 := input["end_key"].(string)
+	regionsCount := 0
+	if ok1 && ok2 {
+		startKey, _, err := parseKey("start_key", input)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		endKey, _, err := parseKey("end_key", input)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		regions := rc.ScanRegions(startKey, endKey, -1)
+		regionMap = make(map[uint64]*core.RegionInfo, len(regions))
+		for _, region := range regions {
+			regionMap[region.GetID()] = region
+		}
+		regionsCount = len(regionMap)
+	} else {
+		regionsID := input["regions_id"].([]uint64)
+		regionMap = make(map[uint64]*core.RegionInfo, len(regionsID))
+		for _, id := range regionsID {
+			regionMap[id] = rc.GetRegion(id)
+		}
+		regionsCount = len(regionsID)
+	}
+	if regionsCount < 1 {
+		h.rd.JSON(w, http.StatusBadRequest, "empty regions")
+		return
+	}
+	group, ok := input["group"].(string)
+	if !ok {
+		group = ""
+	}
+	retryLimit, ok := input["retry_limit"].(int)
+	if !ok {
+		retryLimit = 5
+	}
+	failures := make(map[uint64]error, len(regionMap))
+	var failureRegionID []string
+	ops := rc.GetRegionScatter().ScatterRegions(regionMap, failures, group, retryLimit)
+	for regionID := range failures {
+		failureRegionID = append(failureRegionID, fmt.Sprintf("%v", regionID))
+	}
+	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
+	for _, op := range ops {
+		if ok := rc.GetOperatorController().AddOperator(op); !ok {
+			failureRegionID = append(failureRegionID, fmt.Sprintf("%v", op.RegionID()))
+		}
+	}
+	s := struct {
+		ProcessedPercentage int    `json:"processed-percentage"`
+		Error               string `json:"error"`
+	}{
+		ProcessedPercentage: 100 - (len(failureRegionID) * 100 / regionsCount),
+		Error:               "unprocessed regions:[" + strings.Join(failureRegionID, ",") + "]",
+	}
+	h.rd.JSON(w, http.StatusOK, &s)
 }
 
 // RegionHeap implements heap.Interface, used for selecting top n regions.
