@@ -64,13 +64,14 @@ func (r *RegionSplitter) SplitRegions(splitKeys [][]byte, retryLimit int) (int, 
 	}
 	unprocessedKeys := splitKeys
 	newRegions := make(map[uint64]struct{}, len(splitKeys))
-	for currentRetry := 0; currentRetry < retryLimit; currentRetry++ {
+	for i := 0; i <= retryLimit; i++ {
+		if i > 0 {
+			time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(i)))*initialSleepDuration))
+		}
 		unprocessedKeys = r.splitRegionsByKeys(unprocessedKeys, newRegions)
 		if len(unprocessedKeys) < 1 {
 			break
 		}
-		// Wait for a while if there are some regions failed to be relocated
-		time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(currentRetry)))*initialSleepDuration))
 	}
 	returned := make([]uint64, 0, len(newRegions))
 	for regionID := range newRegions {
