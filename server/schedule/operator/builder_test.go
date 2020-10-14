@@ -16,6 +16,7 @@ package operator
 import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -449,6 +450,11 @@ func (s *testBuilderSuite) TestPromotePending(c *C) {
 	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithPendingPeers([]*metapb.Peer{p}))
 	builder := NewBuilder("test", s.cluster, region)
+	builder.PromoteLearner(2)
+	c.Assert(builder.err, NotNil)
+	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
+		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
+	builder = NewBuilder("test", s.cluster, region)
 	builder.PromoteLearner(2)
 	c.Assert(builder.err, NotNil)
 }
