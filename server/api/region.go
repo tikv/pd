@@ -741,7 +741,7 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	rawSplitKeys, ok := input["split_keys"].([]string)
+	rawSplitKeys, ok := input["split_keys"].([]interface{})
 	if !ok {
 		h.rd.JSON(w, http.StatusBadRequest, "split_keys should be provided.")
 		return
@@ -752,7 +752,7 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 	}
 	splitKeys := make([][]byte, 0, len(rawSplitKeys))
 	for _, rawKey := range rawSplitKeys {
-		key, err := hex.DecodeString(rawKey)
+		key, err := hex.DecodeString(rawKey.(string))
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
