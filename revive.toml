@@ -47,3 +47,7 @@ warningCode = 0
 # Not sure if they are already provided by megacheck
 # [rule.var-declaration]
 # [rule.context-keys-type]
+
+[2020/10/14 13:14:18.570 +08:00] [INFO] [split_region.go:202] [splitRegions] [key=74800000000000002d5f72800000000ee6b280]
+[2020/10/14 13:14:18.570 +08:00] [INFO] [split_region.go:202] [splitRegions] [key=74800000000000002d5f72800000001dcd6500]
+[2020/10/14 13:14:18.570 +08:00] [INFO] [split_region.go:202] [splitRegions] [key=74800000000000002d5f72800000002cb41780]

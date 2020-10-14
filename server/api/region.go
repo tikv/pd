@@ -727,6 +727,14 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, &s)
 }
 
+// @Tags region
+// @Summary Split regions with given split keys
+// @Accept json
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "Split regions with given split keys"
+// @Failure 400 {string} string "The input is invalid."
+// @Router /regions/split [post]
 func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
 	var input map[string]interface{}
