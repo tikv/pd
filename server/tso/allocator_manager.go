@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/election"
@@ -79,6 +80,7 @@ type AllocatorManager struct {
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
 	maxResetTSGap          func() time.Duration
+	securityConfig         *grpcutil.TLSConfig
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
@@ -88,6 +90,7 @@ func NewAllocatorManager(
 	saveInterval time.Duration,
 	updatePhysicalInterval time.Duration,
 	maxResetTSGap func() time.Duration,
+	sc *grpcutil.TLSConfig,
 ) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
 		allocatorGroups:        make(map[string]*allocatorGroup),
@@ -96,6 +99,7 @@ func NewAllocatorManager(
 		saveInterval:           saveInterval,
 		updatePhysicalInterval: updatePhysicalInterval,
 		maxResetTSGap:          maxResetTSGap,
+		securityConfig:         sc,
 	}
 	return allocatorManager
 }
@@ -181,7 +185,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 
 	var allocator Allocator
 	if dcLocation == config.GlobalDCLocation {
-		allocator = NewGlobalTSOAllocator(leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
+		allocator = NewGlobalTSOAllocator(am, leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
 	} else {
 		allocator = NewLocalTSOAllocator(am.member, leadership, dcLocation, am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
 	}
@@ -552,11 +556,11 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.
 func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
 	am.RLock()
-	defer am.RUnlock()
 	if len(dcLocation) == 0 {
 		dcLocation = config.GlobalDCLocation
 	}
 	allocatorGroup, exist := am.allocatorGroups[dcLocation]
+	am.RUnlock()
 	if !exist {
 		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
 		return pdpb.Timestamp{}, err
@@ -612,9 +616,8 @@ func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []All
 func (am *AllocatorManager) GetLocalAllocatorLeaders() ([]*LocalTSOAllocator, error) {
 	localAllocators := am.GetAllocators(
 		FilterDCLocation(config.GlobalDCLocation),
-		FilterUnavailableLeadership(),
-		FilterUninitialized())
-	localAllocatorLeaders := make([]*LocalTSOAllocator, len(localAllocators))
+		FilterUnavailableLeadership())
+	localAllocatorLeaders := make([]*LocalTSOAllocator, 0, len(localAllocators))
 	for _, localAllocator := range localAllocators {
 		localAllocatorLeader, ok := localAllocator.(*LocalTSOAllocator)
 		if !ok {
