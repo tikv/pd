@@ -29,7 +29,6 @@ const (
 	OpSplit                        // Include region split.
 	OpAdmin                        // Initiated by admin.
 	OpHotRegion                    // Initiated by hot region scheduler.
-	OpAdjacent                     // Initiated by adjacent region scheduler.
 	OpReplica                      // Initiated by replica checkers.
 	OpMerge                        // Initiated by merge checkers or merge schedulers.
 	OpRange                        // Initiated by range scheduler.
@@ -42,7 +41,6 @@ var flagToName = map[OpKind]string{
 	OpSplit:     "split",
 	OpAdmin:     "admin",
 	OpHotRegion: "hot-region",
-	OpAdjacent:  "adjacent",
 	OpReplica:   "replica",
 	OpMerge:     "merge",
 	OpRange:     "range",
@@ -54,7 +52,6 @@ var nameToFlag = map[string]OpKind{
 	"split":      OpSplit,
 	"admin":      OpAdmin,
 	"hot-region": OpHotRegion,
-	"adjacent":   OpAdjacent,
 	"replica":    OpReplica,
 	"merge":      OpMerge,
 	"range":      OpRange,
