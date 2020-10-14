@@ -445,7 +445,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 }
 
 // Test for issue 3039
-func (s *testBuilderSuite) TestPromotePending(c *C) {
+func (s *testBuilderSuite) TestPromoteUnhealthyPeer(c *C) {
 	p := &metapb.Peer{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}
 	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithPendingPeers([]*metapb.Peer{p}))
