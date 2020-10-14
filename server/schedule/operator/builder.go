@@ -45,7 +45,7 @@ type Builder struct {
 
 	// operation record
 	originPeers         peersMap
-	unhealthyPeers        peersMap
+	unhealthyPeers      peersMap
 	originLeaderStoreID uint64
 	targetPeers         peersMap
 	targetLeaderStoreID uint64
