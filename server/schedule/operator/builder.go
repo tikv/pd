@@ -45,6 +45,7 @@ type Builder struct {
 
 	// operation record
 	originPeers         peersMap
+	unhealthyPeers      peersMap
 	originLeaderStoreID uint64
 	targetPeers         peersMap
 	targetLeaderStoreID uint64
@@ -95,6 +96,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	// origin peers
 	err := b.err
 	originPeers := newPeersMap()
+	unhealthyPeers := newPeersMap()
 
 	for _, p := range region.GetPeers() {
 		if p == nil || p.GetStoreId() == 0 {
@@ -102,6 +104,14 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 			break
 		}
 		originPeers.Set(p)
+	}
+
+	for _, p := range region.GetPendingPeers() {
+		unhealthyPeers.Set(p)
+	}
+
+	for _, p := range region.GetDownPeers() {
+		unhealthyPeers.Set(p.Peer)
 	}
 
 	// origin leader
@@ -132,6 +142,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 
 	b.rules = rules
 	b.originPeers = originPeers
+	b.unhealthyPeers = unhealthyPeers
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
 	b.allowDemote = supportJointConsensus
@@ -182,6 +193,8 @@ func (b *Builder) PromoteLearner(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot promote peer %d: not found", storeID)
 	} else if !core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot promote peer %d: is not learner", storeID)
+	} else if _, ok := b.unhealthyPeers[storeID]; ok {
+		b.err = errors.Errorf("cannot promote peer %d: unhealthy", storeID)
 	} else {
 		b.targetPeers.Set(&metapb.Peer{
 			Id:      peer.GetId(),
