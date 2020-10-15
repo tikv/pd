@@ -774,8 +774,8 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 	if err != nil {
 		return 0, err
 	}
-	var failureRegionID []string
-	var regions []*core.RegionInfo
+	var ops []*operator.Operator
+	var failures map[uint64]error
 	// If startKey and endKey are both defined, use them first.
 	if len(startRawKey) > 0 && len(endRawKey) > 0 {
 		startKey, err := hex.DecodeString(startRawKey)
@@ -786,35 +786,20 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 		if err != nil {
 			return 0, err
 		}
-		regions = c.ScanRegions(startKey, endKey, -1)
+		ops, failures, err = c.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
 	} else {
-		for _, id := range regionIDs {
-			region := c.GetRegion(id)
-			if region == nil {
-				failureRegionID = append(failureRegionID, fmt.Sprintf("%v", id))
-				continue
-			}
-			regions = append(regions, region)
-		}
+		ops, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit)
 	}
-	// check region hot status
-	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
-	for _, region := range regions {
-		regionMap[region.GetID()] = region
-	}
-	failures := make(map[uint64]error, len(regionMap))
-	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, retryLimit)
-	for regionID := range failures {
-		failureRegionID = append(failureRegionID, fmt.Sprintf("%v", regionID))
+	if err != nil {
+		return 0, err
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
 		if ok := c.GetOperatorController().AddOperator(op); !ok {
-			failureRegionID = append(failureRegionID, fmt.Sprintf("%v", op.RegionID()))
+			failures[op.RegionID()] = errors.New(fmt.Sprintf("region %v failed to add operator", op.RegionID()))
 		}
 	}
-	return 100 - (len(failureRegionID) * 100 / len(regions)), errors.New("unprocessed regions:[" + strings.Join(failureRegionID, ",") + "]")
+	return 100 - 100*len(failures)/(len(ops)+len(failures)), nil
 }
 
 // GetRegionsByType gets the region with specified type.

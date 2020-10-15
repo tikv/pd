@@ -15,12 +15,12 @@ package api
 
 import (
 	"container/heap"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 )
@@ -662,40 +663,8 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	var regionMap map[uint64]*core.RegionInfo
 	_, ok1 := input["start_key"].(string)
 	_, ok2 := input["end_key"].(string)
-	regionsCount := 0
-	if ok1 && ok2 {
-		startKey, _, err := parseKey("start_key", input)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		endKey, _, err := parseKey("end_key", input)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		regions := rc.ScanRegions(startKey, endKey, -1)
-		regionMap = make(map[uint64]*core.RegionInfo, len(regions))
-		for _, region := range regions {
-			regionMap[region.GetID()] = region
-		}
-		regionsCount = len(regionMap)
-	} else {
-		regionsID := input["regions_id"].([]uint64)
-		regionMap = make(map[uint64]*core.RegionInfo, len(regionsID))
-		for _, id := range regionsID {
-			regionMap[id] = rc.GetRegion(id)
-		}
-		regionsCount = len(regionsID)
-	}
-	if regionsCount < 1 {
-		h.rd.JSON(w, http.StatusBadRequest, "empty regions")
-		return
-	}
 	group, ok := input["group"].(string)
 	if !ok {
 		group = ""
@@ -704,24 +673,39 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		retryLimit = 5
 	}
-	failures := make(map[uint64]error, len(regionMap))
-	var failureRegionID []string
-	ops := rc.GetRegionScatter().ScatterRegions(regionMap, failures, group, retryLimit)
-	for regionID := range failures {
-		failureRegionID = append(failureRegionID, fmt.Sprintf("%v", regionID))
+	var ops []*operator.Operator
+	var failures map[uint64]error
+	var err error
+	if ok1 && ok2 {
+		startKey, _, err := parseKey("start_key", input)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		endKey, _, err := parseKey("end_key", input)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
+	} else {
+		regionsID := input["regions_id"].([]uint64)
+		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+	}
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
 		if ok := rc.GetOperatorController().AddOperator(op); !ok {
-			failureRegionID = append(failureRegionID, fmt.Sprintf("%v", op.RegionID()))
+			failures[op.RegionID()] = errors.New(fmt.Sprintf("region %v failed to add operator", op.RegionID()))
 		}
 	}
 	s := struct {
-		ProcessedPercentage int    `json:"processed-percentage"`
-		Error               string `json:"error"`
+		ProcessedPercentage int `json:"processed-percentage"`
 	}{
-		ProcessedPercentage: 100 - (len(failureRegionID) * 100 / regionsCount),
-		Error:               "unprocessed regions:[" + strings.Join(failureRegionID, ",") + "]",
+		ProcessedPercentage: 100 - 100*len(failures)/(len(ops)+len(failures)),
 	}
 	h.rd.JSON(w, http.StatusOK, &s)
 }
