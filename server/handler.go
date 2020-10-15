@@ -787,11 +787,14 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 			return 0, err
 		}
 		ops, failures, err = c.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
+		if err != nil {
+			return 0, err
+		}
 	} else {
 		ops, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit)
-	}
-	if err != nil {
-		return 0, err
+		if err != nil {
+			return 0, err
+		}
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {

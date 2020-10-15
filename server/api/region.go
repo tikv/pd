@@ -688,13 +688,17 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	} else {
 		regionsID := input["regions_id"].([]uint64)
 		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
-	}
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
