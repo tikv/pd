@@ -147,21 +147,6 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-	case schedulers.AdjacentRegionName:
-		var args []string
-		leaderLimit, ok := input["leader_limit"].(string)
-		if ok {
-			args = append(args, leaderLimit)
-		}
-		peerLimit, ok := input["peer_limit"].(string)
-		if ok {
-			args = append(args, peerLimit)
-		}
-
-		if err := h.AddAdjacentRegionScheduler(args...); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 	case schedulers.GrantLeaderName:
 		storeID, ok := input["store_id"].(float64)
 		if !ok {
