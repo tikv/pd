@@ -707,6 +707,58 @@ func (s *testRuleSuite) TestBundle(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bundles, HasLen, 1)
 	compareBundle(c, bundles[0], b1)
+
+	// Set
+	id := "rule-without-group-id"
+	b4 := placement.GroupBundle{
+		Index: 4,
+		Rules: []*placement.Rule{
+			{ID: "bar", Index: 1, Override: true, Role: "voter", Count: 1},
+		},
+	}
+	data, err = json.Marshal(b4)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule/"+id, data)
+	c.Assert(err, IsNil)
+
+	b4.ID = id
+	b4.Rules[0].GroupID = b4.ID
+
+	// Get
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule/"+id, &bundle)
+	c.Assert(err, IsNil)
+	compareBundle(c, bundle, b4)
+
+	// GetAll again
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 2)
+	compareBundle(c, bundles[0], b1)
+	compareBundle(c, bundles[1], b4)
+
+	// SetAll
+	b5 := placement.GroupBundle{
+		ID:    "rule-without-group-id-2",
+		Index: 5,
+		Rules: []*placement.Rule{
+			{ID: "bar", Index: 1, Override: true, Role: "voter", Count: 1},
+		},
+	}
+	data, err = json.Marshal([]placement.GroupBundle{b1, b4, b5})
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule", data)
+	c.Assert(err, IsNil)
+
+	b5.Rules[0].GroupID = b5.ID
+
+	// GetAll again
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 3)
+	compareBundle(c, bundles[0], b1)
+	compareBundle(c, bundles[1], b4)
+	compareBundle(c, bundles[2], b5)
+
 }
 
 func (s *testRuleSuite) TestBundleBadRequest(c *C) {

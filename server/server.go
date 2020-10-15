@@ -356,7 +356,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
 		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
-	)
+		s.GetTLSConfig())
 	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
 		return err
 	}
