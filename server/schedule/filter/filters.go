@@ -198,6 +198,33 @@ func (f *healthFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return f.filter(opt, store)
 }
 
+type connectedFilter struct{ scope string }
+
+// NewConnectedFilter creates a Filter that filters all stores that are disconnected.
+func NewConnectedFilter(scope string) Filter {
+	return &connectedFilter{scope: scope}
+}
+
+func (f *connectedFilter) Scope() string {
+	return f.scope
+}
+
+func (f *connectedFilter) Type() string {
+	return "connected-filter"
+}
+
+func (f *connectedFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
+	return !store.IsDisconnected()
+}
+
+func (f *connectedFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return f.filter(opt, store)
+}
+
+func (f *connectedFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	return f.filter(opt, store)
+}
+
 type pendingPeerCountFilter struct{ scope string }
 
 // NewPendingPeerCountFilter creates a Filter that filters all stores that are
