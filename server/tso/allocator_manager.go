@@ -37,8 +37,8 @@ import (
 )
 
 const (
-	checkPriorityStep           = 1 * time.Minute
-	checkAllocatorStep          = 1 * time.Second
+	checkStep                   = 1 * time.Minute
+	patrolStep                  = 1 * time.Second
 	dcLocationConfigEtcdPrefix  = "dc-location"
 	defaultAllocatorLeaderLease = 3
 	leaderTickInterval          = 50 * time.Millisecond
@@ -73,6 +73,8 @@ type AllocatorManager struct {
 	//   2. Local TSO Allocator, servers for DC-level transactions.
 	// dc-location/global (string) -> TSO Allocator
 	allocatorGroups map[string]*allocatorGroup
+	// dc-location/global (string) -> Member ID
+	clusterDCLocations map[string][]uint64
 	// for election use
 	member *member.Member
 	// TSO config
@@ -135,38 +137,21 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 			zap.String("server-id", serverID))
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
+	am.ClusterDCLocationChecker()
 	return nil
 }
 
-// GetClusterDCLocations returns all dc-locations of a cluster and transform it into a map
+// GetClusterDCLocations returns all dc-locations of a cluster with a map
 // which satisfies dcLocation -> []serverID.
-func (am *AllocatorManager) GetClusterDCLocations() (map[string][]uint64, error) {
-	resp, err := etcdutil.EtcdKVGet(
-		am.member.Client(),
-		am.getLocalTSOConfigPath(),
-		clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
-	if err != nil {
-		log.Error("get cluster dc-locations failed", errs.ZapError(err))
-		return nil, err
-	}
+func (am *AllocatorManager) GetClusterDCLocations() map[string][]uint64 {
+	am.RLock()
+	defer am.RUnlock()
 	dcLocationMap := make(map[string][]uint64)
-	for _, kv := range resp.Kvs {
-		// The key will contain the member ID and the value is its dcLocation
-		serverPath := strings.Split(string(kv.Key), "/")
-		dcLocation := string(kv.Value)
-		// Get serverID from serverPath, e.g, /pd/dc-location/1232143243253 -> 1232143243253
-		serverID, err := strconv.ParseUint(serverPath[len(serverPath)-1], 10, 64)
-		if err != nil {
-			log.Warn("get server id and dcLocation from etcd failed, invalid server id",
-				zap.Any("splitted-serverPath", serverPath),
-				zap.String("dc-location", dcLocation),
-				errs.ZapError(err))
-			continue
-		}
-		dcLocationMap[dcLocation] = append(dcLocationMap[dcLocation], serverID)
+	for dcLocation, members := range am.clusterDCLocations {
+		dcLocationMap[dcLocation] = make([]uint64, len(members))
+		copy(dcLocationMap[dcLocation], members)
 	}
-	return dcLocationMap, nil
+	return dcLocationMap
 }
 
 func (am *AllocatorManager) getLocalTSOConfigPath() string {
@@ -328,19 +313,20 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	tsTicker := time.NewTicker(am.updatePhysicalInterval)
 	defer tsTicker.Stop()
-	checkerTicker := time.NewTicker(checkAllocatorStep)
+	patrolTicker := time.NewTicker(patrolStep)
+	defer patrolTicker.Stop()
+	checkerTicker := time.NewTicker(checkStep)
 	defer checkerTicker.Stop()
-	priorityTicker := time.NewTicker(checkPriorityStep)
-	defer priorityTicker.Stop()
 
 	for {
 		select {
 		case <-tsTicker.C:
 			am.allocatorUpdater()
-		case <-checkerTicker.C:
+		case <-patrolTicker.C:
 			am.allocatorPatroller(serverCtx)
-		case <-priorityTicker.C:
-			am.priorityChecker()
+		case <-checkerTicker.C:
+			am.ClusterDCLocationChecker()
+			am.PriorityChecker()
 		case <-serverCtx.Done():
 			return
 		}
@@ -384,19 +370,12 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 // Check if we have any new dc-location configured, if yes,
 // then set up the corresponding local allocator.
 func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
-	clusterDCLocations, err := am.GetClusterDCLocations()
-	if err != nil {
-		log.Error("check new allocators failed, can't get cluster dc-locations", errs.ZapError(err))
-	}
 	// Collect all dc-locations
-	dcLocations := make([]string, 0, len(clusterDCLocations))
-	for dcLocation := range clusterDCLocations {
-		dcLocations = append(dcLocations, dcLocation)
-	}
+	dcLocations := am.GetClusterDCLocations()
 	// Get all Local TSO Allocators
 	allocatorGroups := am.getAllocatorGroups(FilterDCLocation(config.GlobalDCLocation))
 	// Set up the new one
-	for _, dcLocation := range dcLocations {
+	for dcLocation := range dcLocations {
 		if slice.NoneOf(allocatorGroups, func(i int) bool {
 			return allocatorGroups[i].dcLocation == dcLocation
 		}) {
@@ -412,22 +391,52 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 	}
 	// Clean up the unused one
 	for _, ag := range allocatorGroups {
-		if slice.NoneOf(dcLocations, func(i int) bool {
-			return dcLocations[i] == ag.dcLocation
-		}) {
+		if _, exist := dcLocations[ag.dcLocation]; !exist {
 			am.deleteAllocatorGroup(ag.dcLocation)
 		}
 	}
 }
 
-// priorityChecker is used to check the election priority of a Local TSO Allocator.
+// ClusterDCLocationChecker collect all dc-locations of a cluster and transform it into a map
+// which satisfies dcLocation -> []serverID.
+func (am *AllocatorManager) ClusterDCLocationChecker() {
+	resp, err := etcdutil.EtcdKVGet(
+		am.member.Client(),
+		am.getLocalTSOConfigPath(),
+		clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	if err != nil {
+		log.Error("get cluster dc-locations failed", errs.ZapError(err))
+		return
+	}
+	am.Lock()
+	defer am.Unlock()
+	am.clusterDCLocations = make(map[string][]uint64)
+	for _, kv := range resp.Kvs {
+		// The key will contain the member ID and the value is its dcLocation
+		serverPath := strings.Split(string(kv.Key), "/")
+		dcLocation := string(kv.Value)
+		// Get serverID from serverPath, e.g, /pd/dc-location/1232143243253 -> 1232143243253
+		serverID, err := strconv.ParseUint(serverPath[len(serverPath)-1], 10, 64)
+		if err != nil {
+			log.Warn("get server id and dcLocation from etcd failed, invalid server id",
+				zap.Any("splitted-serverPath", serverPath),
+				zap.String("dc-location", dcLocation),
+				errs.ZapError(err))
+			continue
+		}
+		am.clusterDCLocations[dcLocation] = append(am.clusterDCLocations[dcLocation], serverID)
+	}
+}
+
+// PriorityChecker is used to check the election priority of a Local TSO Allocator.
 // In the normal case, if we want to elect a Local TSO Allocator for a certain DC,
 // such as dc-1, we need to make sure the follow priority rules:
 // 1. The PD server with dc-location="dc-1" needs to be elected as the allocator
 // leader with the highest priority.
 // 2. If all PD servers with dc-location="dc-1" are down, then the other PD servers
 // of DC could be elected.
-func (am *AllocatorManager) priorityChecker() {
+func (am *AllocatorManager) PriorityChecker() {
 	serverID := am.member.ID()
 	myServerDCLocation, err := am.getServerDCLocation(serverID)
 	if err != nil {
@@ -462,10 +471,10 @@ func (am *AllocatorManager) priorityChecker() {
 				zap.Uint64("next-leader-id", serverID),
 				zap.String("next-dc-location", myServerDCLocation))
 			nextLeaderKey := path.Join(am.rootPath, allocatorGroup.dcLocation, "next-leader")
-			// Grant a etcd lease with checkPriorityStep * 1.5
+			// Grant a etcd lease with checkStep * 1.5
 			nextLeaderLease := clientv3.NewLease(am.member.Client())
 			ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)
-			leaseResp, err := nextLeaderLease.Grant(ctx, int64(checkPriorityStep.Seconds()*1.5))
+			leaseResp, err := nextLeaderLease.Grant(ctx, int64(checkStep.Seconds()*1.5))
 			cancel()
 			if err != nil {
 				err = errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
@@ -499,17 +508,16 @@ func (am *AllocatorManager) priorityChecker() {
 		}
 		// nextLeader is not empty and isn't same with the server ID, resign the leader
 		if nextLeader != 0 && nextLeader != serverID {
+			log.Info("next leader key found, resign current leader", zap.Uint64("nextLeaderID", nextLeader))
 			am.resetAllocatorGroup(allocatorGroup.dcLocation)
 		}
 	}
 }
 
 func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error) {
-	dcLocationMap, err := am.GetClusterDCLocations()
-	if err != nil {
-		return "", err
-	}
-	for dcLocation, serverIDs := range dcLocationMap {
+	am.RLock()
+	defer am.RUnlock()
+	for dcLocation, serverIDs := range am.clusterDCLocations {
 		if slice.AnyOf(serverIDs, func(i int) bool { return serverIDs[i] == serverID }) {
 			return dcLocation, nil
 		}

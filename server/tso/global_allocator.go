@@ -114,11 +114,7 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 // Make sure you have initialized the TSO allocator before calling.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
 	// To check if we have any dc-location configured in the cluster
-	dcLocationMap, err := gta.allocatorManager.GetClusterDCLocations()
-	if err != nil {
-		log.Error("get cluster dc-locations info failed", errs.ZapError(err))
-		return pdpb.Timestamp{}, err
-	}
+	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
 	// No dc-locations configured in the cluster
 	if len(dcLocationMap) == 0 {
 		return gta.timestampOracle.getTS(gta.leadership, count)
@@ -128,7 +124,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	defer cancel()
 	maxTSO := &pdpb.Timestamp{}
 	// Collect the MaxTS with all Local TSO Allocator leaders first
-	if err = gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
+	if err := gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
 	maxTSO.Logical += int64(count)
@@ -136,7 +132,10 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	if err := gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
-	var currentGlobalTSO pdpb.Timestamp
+	var (
+		currentGlobalTSO pdpb.Timestamp
+		err              error
+	)
 	if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
 		return pdpb.Timestamp{}, err
 	}
