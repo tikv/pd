@@ -768,15 +768,13 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 		ProcessedPercentage int      `json:"processed-percentage"`
 		NewRegionsID        []uint64 `json:"regions-id"`
 	}{}
-	failpoint.Inject("splitResponses", func() {
-		s.ProcessedPercentage = 100
-		s.NewRegionsID = []uint64{99, 100, 101}
-		h.rd.JSON(w, http.StatusOK, &s)
-		return
-	})
 	percentage, newRegionsID := rc.GetRegionSplitter().SplitRegions(splitKeys, retryLimit)
 	s.ProcessedPercentage = percentage
 	s.NewRegionsID = newRegionsID
+	failpoint.Inject("splitResponses", func() {
+		s.ProcessedPercentage = 100
+		s.NewRegionsID = []uint64{99, 100, 101}
+	})
 	h.rd.JSON(w, http.StatusOK, &s)
 }
 
