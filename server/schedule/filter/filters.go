@@ -15,6 +15,7 @@ package filter
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -145,6 +146,42 @@ func (f *storageThresholdFilter) Source(opt *config.PersistOptions, store *core.
 
 func (f *storageThresholdFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	return !store.IsLowSpace(opt.GetLowSpaceRatio())
+}
+
+type restartFilter struct {
+	scope    string
+	interval time.Duration
+}
+
+// NewRestartFilter creates a Filter that filters restart recently
+
+func NewRestartFilter(scope string, interval time.Duration) Filter {
+	return &restartFilter{
+		scope:    scope,
+		interval: interval,
+	}
+}
+
+func (f *restartFilter) Scope() string {
+	return f.scope
+}
+
+func (f *restartFilter) Type() string {
+	return "restart-filter"
+}
+
+func (f *restartFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	return f.isRecentlyRestart(store)
+}
+
+func (f *restartFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	return f.isRecentlyRestart(store)
+}
+
+func (f *restartFilter) isRecentlyRestart(store *core.StoreInfo) bool {
+	timeStamp := store.GetStoreStats().StartTime
+	duration := time.Since(time.Unix(int64(timeStamp), 0))
+	return duration > f.interval
 }
 
 // distinctScoreFilter ensures that distinct score will not decrease.
