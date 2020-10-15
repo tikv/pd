@@ -234,6 +234,8 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 			if maxRetryCount == 1 {
 				log.Warn("unsynced dc-locations found, will retry", zap.Strings("syncedDCs", syncedDCs))
 				maxRetryCount++
+				// To make sure we have the newest dc-location info
+				gta.allocatorManager.ClusterDCLocationChecker()
 				continue
 			}
 			return errs.ErrSyncMaxTS.FastGenWithCause(fmt.Sprintf("unsynced dc-locations found, synced dc-locations: %+v", syncedDCs))
