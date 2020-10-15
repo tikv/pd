@@ -204,6 +204,7 @@ func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes .
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = 1000 * (1 << 20)
 	stats.Available = stats.Capacity - uint64(leaderCount)*10
+	stats.StartTime = uint32(time.Now().Add(-time.Minute * 30).Unix())
 	var leaderSize int64
 	if len(leaderSizes) != 0 {
 		leaderSize = leaderSizes[0]
@@ -228,6 +229,7 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = 1000 * (1 << 20)
 	stats.Available = stats.Capacity - uint64(regionCount)*10
+	stats.StartTime = uint32(time.Now().Add(-time.Minute * 30).Unix())
 	store := core.NewStoreInfo(
 		&metapb.Store{Id: storeID, Labels: []*metapb.StoreLabel{
 			{
@@ -267,6 +269,7 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = 1000 * (1 << 20)
 	stats.Available = stats.Capacity - uint64(regionCount)*10
+	stats.StartTime = uint32(time.Now().Add(-time.Minute * 30).Unix())
 	store := core.NewStoreInfo(
 		&metapb.Store{
 			Id:     storeID,
@@ -346,6 +349,15 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 func (mc *Cluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(core.SetLeaderWeight(weight))
+	mc.PutStore(newStore)
+}
+
+// UpdateStoreStartTime updates store start time.
+func (mc *Cluster) UpdateStoreStartTime(storeID uint64, startTime uint32) {
+	store := mc.GetStore(storeID)
+	stats := store.GetStoreStats()
+	stats.StartTime = startTime
+	newStore := store.Clone(core.SetStoreStats(stats))
 	mc.PutStore(newStore)
 }
 

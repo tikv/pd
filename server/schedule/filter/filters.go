@@ -154,7 +154,6 @@ type restartFilter struct {
 }
 
 // NewRestartFilter creates a Filter that filters restart recently
-
 func NewRestartFilter(scope string, interval time.Duration) Filter {
 	return &restartFilter{
 		scope:    scope,
@@ -171,17 +170,17 @@ func (f *restartFilter) Type() string {
 }
 
 func (f *restartFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return f.isRecentlyRestart(store)
+	return !f.isRecentlyRestart(store)
 }
 
 func (f *restartFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return f.isRecentlyRestart(store)
+	return !f.isRecentlyRestart(store)
 }
 
 func (f *restartFilter) isRecentlyRestart(store *core.StoreInfo) bool {
 	timeStamp := store.GetStoreStats().StartTime
 	duration := time.Since(time.Unix(int64(timeStamp), 0))
-	return duration > f.interval
+	return duration < f.interval
 }
 
 // distinctScoreFilter ensures that distinct score will not decrease.
