@@ -297,6 +297,17 @@ func (s *testRegionSuite) TestScatterRegions(c *C) {
 	c.Assert(op2 != nil, Equals, true)
 }
 
+func (s *testRegionSuite) TestSplitRegions(c *C) {
+	r1 := newTestRegionInfo(601, 13, []byte("aaa"), []byte("ggg"))
+	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 13}, &metapb.Peer{Id: 6, StoreId: 13})
+	mustRegionHeartbeat(c, s.svr, r1)
+	mustPutStore(c, s.svr, 13, metapb.StoreState_Up, []*metapb.StoreLabel{})
+	body := fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`,0,"bbb","ccc","ddd")
+	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/split", s.urlPrefix), []byte(body))
+	c.Assert(err, IsNil)
+
+}
+
 func (s *testRegionSuite) checkTopRegions(c *C, url string, regionIDs []uint64) {
 	regions := &RegionsInfo{}
 	err := readJSON(testDialClient, url, regions)

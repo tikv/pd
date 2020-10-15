@@ -17,13 +17,8 @@ import (
 	"container/heap"
 	"encoding/hex"
 	"fmt"
-	"net/http"
-	"net/url"
-	"sort"
-	"strconv"
-	"strings"
-
 	"github.com/gorilla/mux"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
@@ -32,6 +27,11 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
+	"net/http"
+	"net/url"
+	"sort"
+	"strconv"
+	"strings"
 )
 
 // RegionInfo records detail region info for api usage.
@@ -750,6 +750,10 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "empty split keys.")
 		return
 	}
+	retryLimit, ok := input["retry_limit"].(int)
+	if !ok {
+		retryLimit = 5
+	}
 	splitKeys := make([][]byte, 0, len(rawSplitKeys))
 	for _, rawKey := range rawSplitKeys {
 		key, err := hex.DecodeString(rawKey.(string))
@@ -759,7 +763,11 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 		}
 		splitKeys = append(splitKeys, key)
 	}
-	percentage, newRegionsID := rc.GetRegionSplitter().SplitRegions(splitKeys, 10)
+	percentage, newRegionsID := rc.GetRegionSplitter().SplitRegions(splitKeys, retryLimit)
+	failpoint.Inject("splitResponses", func() {
+		percentage = 100
+		newRegionsID = []uint64{99, 100, 101}
+	})
 	s := struct {
 		ProcessedPercentage int      `json:"processed-percentage"`
 		NewRegionsID        []uint64 `json:"regions-id"`
