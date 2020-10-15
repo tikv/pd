@@ -647,3 +647,10 @@ func (mc *Cluster) ResetSuspectRegions() {
 func (mc *Cluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
 	return mc.SearchRegion(regionKey)
 }
+
+// SetStoreLastHeartbeatInterval set the last heartbeat to the target store
+func (mc *Cluster) SetStoreLastHeartbeatInterval(storeID uint64, interval time.Duration) {
+	store := mc.GetStore(storeID)
+	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-interval)))
+	mc.PutStore(newStore)
+}

@@ -41,7 +41,7 @@ func (s *testConfigSuite) SetUpSuite(c *C) {
 		RegisterScheduler(d.Type)
 	}
 	RegisterScheduler("random-merge")
-	RegisterScheduler("adjacent-region")
+	RegisterScheduler("shuffle-leader")
 }
 
 func (s *testConfigSuite) TestSecurity(c *C) {
@@ -72,8 +72,8 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	opt.GetPDServerConfig().UseRegionStorage = true
 	c.Assert(opt.Persist(storage), IsNil)
 
-	// Add a new default enable scheduler "adjacent-region"
-	DefaultSchedulers = append(DefaultSchedulers, SchedulerConfig{Type: "adjacent-region"})
+	// Add a new default enable scheduler "shuffle-leader"
+	DefaultSchedulers = append(DefaultSchedulers, SchedulerConfig{Type: "shuffle-leader"})
 	defer func() {
 		DefaultSchedulers = DefaultSchedulers[:len(DefaultSchedulers)-1]
 	}()
