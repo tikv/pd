@@ -15,7 +15,6 @@ package api
 
 import (
 	"container/heap"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -703,7 +702,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
 		if ok := rc.GetOperatorController().AddOperator(op); !ok {
-			failures[op.RegionID()] = errors.New(fmt.Sprintf("region %v failed to add operator", op.RegionID()))
+			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}
 	}
 	s := struct {

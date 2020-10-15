@@ -799,7 +799,7 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
 		if ok := c.GetOperatorController().AddOperator(op); !ok {
-			failures[op.RegionID()] = errors.New(fmt.Sprintf("region %v failed to add operator", op.RegionID()))
+			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}
 	}
 	return 100 - 100*len(failures)/(len(ops)+len(failures)), nil
