@@ -124,7 +124,7 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 		r:               rand.New(rand.NewSource(time.Now().UnixNano())),
 		regionPendings:  make(map[uint64][2]*operator.Operator),
 		conf:            conf,
-		restartInterval: time.Minute * 10,
+		restartInterval: time.Minute * 30,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.pendings[ty] = map[*pendingInfluence]struct{}{}
