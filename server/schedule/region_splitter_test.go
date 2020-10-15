@@ -65,7 +65,7 @@ func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	handler := newMockSplitRegionsHandler()
-	tc.AddLeaderRegionWithRange(1, "eee", "hhh", 2, 3)
+	tc.AddLeaderRegionWithRange(1, "eee", "hhh", 2, 3, 4)
 	splitter := NewRegionSplitter(tc, handler)
 	newRegions := map[uint64]struct{}{}
 	// assert success
