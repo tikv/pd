@@ -16,6 +16,7 @@ package api
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/url"
@@ -23,6 +24,7 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server"
@@ -302,10 +304,24 @@ func (s *testRegionSuite) TestSplitRegions(c *C) {
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 13}, &metapb.Peer{Id: 6, StoreId: 13})
 	mustRegionHeartbeat(c, s.svr, r1)
 	mustPutStore(c, s.svr, 13, metapb.StoreState_Up, []*metapb.StoreLabel{})
-	body := fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`,0,"bbb","ccc","ddd")
-	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/split", s.urlPrefix), []byte(body))
+	body := fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`, 0,
+		hex.EncodeToString([]byte("bbb")),
+		hex.EncodeToString([]byte("ccc")),
+		hex.EncodeToString([]byte("ddd")))
+	checkOpt := func(res []byte, code int) {
+		s := &struct {
+			ProcessedPercentage int      `json:"processed-percentage"`
+			NewRegionsID        []uint64 `json:"regions-id"`
+		}{}
+		err := json.Unmarshal(res, s)
+		c.Assert(err, IsNil)
+		c.Assert(s.ProcessedPercentage, Equals, 100)
+		c.Assert(s.NewRegionsID, DeepEquals, []uint64{99, 100, 101})
+	}
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/splitResponses", "return(true)"), IsNil)
+	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/split", s.urlPrefix), []byte(body), checkOpt)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/splitResponses"), IsNil)
 	c.Assert(err, IsNil)
-
 }
 
 func (s *testRegionSuite) checkTopRegions(c *C, url string, regionIDs []uint64) {
