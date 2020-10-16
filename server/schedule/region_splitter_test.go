@@ -106,5 +106,16 @@ func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
 		[]byte("zzz"),
 	})
 	c.Assert(len(groupKeys), Equals, 2)
+	for k, v := range groupKeys {
+		switch k {
+		case uint64(1):
+			c.Assert(len(v), Equals, 1)
+			c.Assert(v[0], DeepEquals, []byte("bbb"))
+		case uint64(2):
+			c.Assert(len(v), Equals, 1)
+			c.Assert(v[0], DeepEquals, []byte("ddd"))
+		}
+	}
 	c.Assert(len(unprocessKeys), Equals, 1)
+	c.Assert(unprocessKeys[0], DeepEquals, []byte("zzz"))
 }
