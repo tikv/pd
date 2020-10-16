@@ -550,12 +550,12 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 	return false
 }
 
-func (o *PersistOptions) SetTTLData(key string, value interface{}, ttl time.Duration) {
+func (o *PersistOptions) SetTTLData(ctx context.Context, key string, value interface{}, ttl time.Duration) {
 	if data, ok := o.ttl[key]; ok {
 		data.Clear()
 	}
-	o.ttl[key] = cache.NewStringTTL(context.Background(), 1*time.Minute, ttl)
-	o.ttl[key].Put(key, value)
+	o.ttl[key] = cache.NewStringTTL(ctx, 5*time.Second, ttl)
+	o.ttl[key].Put(key, uint64(value.(float64)))
 }
 
 func (o *PersistOptions) getTTLData(key string) (interface{}, bool) {

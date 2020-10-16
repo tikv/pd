@@ -1635,12 +1635,6 @@ func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 	return c.etcdClient
 }
 
-func (c *RaftCluster) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) {
-	for k, v := range data {
-		c.opt.SetTTLData(k, v, ttl)
-	}
-}
-
 var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.

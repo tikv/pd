@@ -47,7 +47,6 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 }
 
 func (h *confHandler) SetTTLConfig(w http.ResponseWriter, r *http.Request) {
-	rc := getCluster(r.Context())
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -61,7 +60,7 @@ func (h *confHandler) SetTTLConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rc.SaveTTLConfig(input, time.Duration(ttls)*time.Second)
+	h.svr.SaveTTLConfig(input, time.Duration(ttls)*time.Second)
 	h.rd.JSON(w, http.StatusOK, "success")
 }
 
