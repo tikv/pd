@@ -802,7 +802,11 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}
 	}
-	return 100 - 100*len(failures)/(len(ops)+len(failures)), nil
+	percentage := 0
+	if len(failures) > 0 {
+		percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+	}
+	return percentage, nil
 }
 
 // GetRegionsByType gets the region with specified type.

@@ -705,10 +705,14 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}
 	}
+	percentage := 0
+	if len(failures) > 0 {
+		percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+	}
 	s := struct {
 		ProcessedPercentage int `json:"processed-percentage"`
 	}{
-		ProcessedPercentage: 100 - 100*len(failures)/(len(ops)+len(failures)),
+		ProcessedPercentage: percentage,
 	}
 	h.rd.JSON(w, http.StatusOK, &s)
 }
