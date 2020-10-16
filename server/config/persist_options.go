@@ -14,6 +14,8 @@
 package config
 
 import (
+	"context"
+	"github.com/tikv/pd/pkg/cache"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -30,6 +32,7 @@ import (
 // PersistOptions wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistOptions struct {
+	ttl             map[string]*cache.TTLString
 	schedule        atomic.Value
 	replication     atomic.Value
 	pdServerConfig  atomic.Value
@@ -47,6 +50,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
+	o.ttl = make(map[string]*cache.TTLString, 6)
 	return o
 }
 
@@ -156,6 +160,12 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
 func (o *PersistOptions) GetMaxSnapshotCount() uint64 {
+	if v, ok := o.getTTLData("max-snapshot-count"); ok {
+		r, ok := v.(uint64)
+		if ok {
+			return r
+		}
+	}
 	return o.GetScheduleConfig().MaxSnapshotCount
 }
 
@@ -166,11 +176,23 @@ func (o *PersistOptions) GetMaxPendingPeerCount() uint64 {
 
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
+	if v, ok := o.getTTLData("max-merge-region-size"); ok {
+		r, ok := v.(uint64)
+		if ok {
+			return r
+		}
+	}
 	return o.GetScheduleConfig().MaxMergeRegionSize
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
+	if v, ok := o.getTTLData("max-merge-region-keys"); ok {
+		r, ok := v.(uint64)
+		if ok {
+			return r
+		}
+	}
 	return o.GetScheduleConfig().MaxMergeRegionKeys
 }
 
@@ -254,11 +276,23 @@ func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
+	if v, ok := o.getTTLData("leader-schedule-limit"); ok {
+		r, ok := v.(uint64)
+		if ok {
+			return r
+		}
+	}
 	return o.GetScheduleConfig().LeaderScheduleLimit
 }
 
 // GetRegionScheduleLimit returns the limit for region schedule.
 func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
+	if v, ok := o.getTTLData("region-schedule-limit"); ok {
+		r, ok := v.(uint64)
+		if ok {
+			return r
+		}
+	}
 	return o.GetScheduleConfig().RegionScheduleLimit
 }
 
@@ -514,4 +548,19 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 		}
 	}
 	return false
+}
+
+func (o *PersistOptions) SetTTLData(key string, value interface{}, ttl time.Duration) {
+	if data, ok := o.ttl[key]; ok {
+		data.Clear()
+	}
+	o.ttl[key] = cache.NewStringTTL(context.Background(), 1*time.Minute, ttl)
+	o.ttl[key].Put(key, value)
+}
+
+func (o *PersistOptions) getTTLData(key string) (interface{}, bool) {
+	if data, ok := o.ttl[key]; ok {
+		return data.Get(key)
+	}
+	return nil, false
 }

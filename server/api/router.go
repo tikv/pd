@@ -76,6 +76,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	apiRouter.HandleFunc("/cluster/status", clusterHandler.GetClusterStatus).Methods("GET")
 
 	confHandler := newConfHandler(svr, rd)
+	apiRouter.HandleFunc("/config/ttl", confHandler.SetTTLConfig).Methods("POST")
 	apiRouter.HandleFunc("/config", confHandler.Get).Methods("GET")
 	apiRouter.HandleFunc("/config", confHandler.Post).Methods("POST")
 	apiRouter.HandleFunc("/config/default", confHandler.GetDefault).Methods("GET")

@@ -20,7 +20,9 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
@@ -42,6 +44,25 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 		svr: svr,
 		rd:  rd,
 	}
+}
+
+func (h *confHandler) SetTTLConfig(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	var ttls int
+	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
+		var err error
+		ttls, err = strconv.Atoi(ttlSec)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	rc.SaveTTLConfig(input, time.Duration(ttls)*time.Second)
+	h.rd.JSON(w, http.StatusOK, "success")
 }
 
 // @Tags config

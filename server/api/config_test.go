@@ -275,3 +275,20 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	c.Assert(defaultCfg.Schedule.RegionScheduleLimit, Equals, uint64(2048))
 	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
 }
+
+func (s *testConfigSuite) TestConfigTTL(c *C) {
+	addr := fmt.Sprintf("%s/config", s.urlPrefix)
+	r := map[string]int{"max-snapshot-count": 999}
+	postData, err := json.Marshal(r)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr+"?ttlSecond=10", postData)
+	c.Assert(err, IsNil)
+	cfg := &config.Config{}
+	err = readJSON(testDialClient, addr, cfg)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Schedule.MaxSnapshotCount, Equals, uint64(999))
+	time.Sleep(20 * time.Second)
+	err = readJSON(testDialClient, addr, cfg)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Schedule.MaxSnapshotCount, Not(Equals), uint64(999))
+}
