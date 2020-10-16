@@ -688,14 +688,14 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 		}
 		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
 		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	} else {
 		regionsID := input["regions_id"].([]uint64)
 		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
 		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
