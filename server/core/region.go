@@ -912,12 +912,15 @@ func (r *RegionsInfo) GetRegions() []*RegionInfo {
 
 // GetStoreRegions gets all RegionInfo with a given storeID
 func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
-	regions := make([]*RegionInfo, 0, r.GetStoreLeaderCount(storeID)+r.GetStoreFollowerCount(storeID))
+	regions := make([]*RegionInfo, 0, r.GetStoreRegionCount(storeID))
 	if leaders, ok := r.leaders[storeID]; ok {
 		regions = append(regions, leaders.scanRanges()...)
 	}
 	if followers, ok := r.followers[storeID]; ok {
 		regions = append(regions, followers.scanRanges()...)
+	}
+	if learners, ok := r.learners[storeID]; ok {
+		regions = append(regions, learners.scanRanges()...)
 	}
 	return regions
 }
@@ -956,7 +959,7 @@ func (r *RegionsInfo) GetRegionCount() int {
 	return r.regions.Len()
 }
 
-// GetStoreRegionCount gets the total count of a store's leader and follower RegionInfo by storeID
+// GetStoreRegionCount gets the total count of a store's leader, follower and learner RegionInfo by storeID
 func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
 	return r.GetStoreLeaderCount(storeID) + r.GetStoreFollowerCount(storeID) + r.GetStoreLearnerCount(storeID)
 }
