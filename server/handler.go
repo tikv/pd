@@ -802,7 +802,7 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}
 	}
-	percentage := 0
+	percentage := 100
 	if len(failures) > 0 {
 		percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
 	}
