@@ -109,22 +109,19 @@ type hotScheduler struct {
 	pendingSums [resourceTypeLen]map[uint64]Influence
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
-	// skip interval
-	restartInterval time.Duration
 }
 
 func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
 	base := NewBaseScheduler(opController)
 	ret := &hotScheduler{
-		name:            HotRegionName,
-		BaseScheduler:   base,
-		leaderLimit:     1,
-		peerLimit:       1,
-		types:           []rwType{write, read},
-		r:               rand.New(rand.NewSource(time.Now().UnixNano())),
-		regionPendings:  make(map[uint64][2]*operator.Operator),
-		conf:            conf,
-		restartInterval: time.Minute * 30,
+		name:           HotRegionName,
+		BaseScheduler:  base,
+		leaderLimit:    1,
+		peerLimit:      1,
+		types:          []rwType{write, read},
+		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
+		regionPendings: make(map[uint64][2]*operator.Operator),
+		conf:           conf,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.pendings[ty] = map[*pendingInfluence]struct{}{}
@@ -804,7 +801,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIds(), bs.cur.region.GetStoreIds()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
-			filter.NewRestartFilter(bs.sche.GetName(), bs.sche.restartInterval),
+			filter.NewRestartFilter(bs.sche.GetName(), time.Duration(bs.sche.conf.GetRestartInterval())*time.Minute),
 		}
 
 		candidates = bs.cluster.GetStores()

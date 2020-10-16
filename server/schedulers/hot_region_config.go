@@ -44,6 +44,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MaxPeerNum:            1000,
 		SrcToleranceRatio:     1.05, // Tolerate 5% difference
 		DstToleranceRatio:     1.05, // Tolerate 5% difference
+		RestartInterval:       10,   // Default 10 Minutes
 	}
 }
 
@@ -65,6 +66,7 @@ type hotRegionSchedulerConfig struct {
 	MinorDecRatio         float64 `json:"minor-dec-ratio"`
 	SrcToleranceRatio     float64 `json:"src-tolerance-ratio"`
 	DstToleranceRatio     float64 `json:"dst-tolerance-ratio"`
+	RestartInterval       int     `json:"restart-interval"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
@@ -149,6 +151,12 @@ func (conf *hotRegionSchedulerConfig) GetMinHotByteRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotByteRate
+}
+
+func (conf *hotRegionSchedulerConfig) GetRestartInterval() int {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.RestartInterval
 }
 
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
