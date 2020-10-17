@@ -153,7 +153,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 		}
 		storeIDsAndPeerRoles, ok := parseStoreIDsAndPeerRoles(input["to_store_ids"], input["peer_roles"])
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store ids to transfer region to")
+			h.r.JSON(w, http.StatusBadRequest, "invalid store ids or peer roles")
 			return
 		}
 		if len(storeIDsAndPeerRoles) == 0 {
