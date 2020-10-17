@@ -443,7 +443,7 @@ func parseUint64sAndRoles(args []string) (uint64, []uint64, []string, error) {
 		return regionID, storeIDs, nil, err
 	}
 
-	storeIDs, peerRoles := make([]uint64, 0, len(args)), make([]string, 0, len(args))
+	storeIDs, peerRoles := make([]uint64, 0), make([]string, 0)
 	for i, arg := range args[1:] {
 		if i%2 == 0 {
 			storeID, err := strconv.ParseUint(arg, 10, 64)
