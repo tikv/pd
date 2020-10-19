@@ -277,13 +277,27 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 }
 
 func (s *testConfigSuite) TestConfigTTL(c *C) {
-	addr := fmt.Sprintf("%s/config/ttl?ttlSecond=3", s.urlPrefix)
-	r := map[string]int{"max-snapshot-count": 999}
+	addr := fmt.Sprintf("%s/config/ttl?ttlSecond=5", s.urlPrefix)
+	r := map[string]int{
+		"max-snapshot-count":      999,
+		"store-limit-add-peer":    999,
+		"max-merge-region-size":   999,
+		"max-merge-region-keys":   999,
+		"store-limit-remove-peer": 999,
+	}
 	postData, err := json.Marshal(r)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 	c.Assert(s.svr.GetPersistOptions().GetMaxSnapshotCount(), Equals, uint64(999))
-	time.Sleep(6 * time.Second)
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(1).AddPeer, Equals, float64(999))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(1).RemovePeer, Equals, float64(999))
+	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionSize(), Equals, uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionKeys(), Equals, uint64(999))
+	time.Sleep(10 * time.Second)
 	c.Assert(s.svr.GetPersistOptions().GetMaxSnapshotCount(), Not(Equals), uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(1).AddPeer, Not(Equals), float64(999))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(1).RemovePeer, Not(Equals), float64(999))
+	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionSize(), Not(Equals), uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionKeys(), Not(Equals), uint64(999))
 }

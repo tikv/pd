@@ -32,6 +32,7 @@ import (
 // PersistOptions wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistOptions struct {
+	// configuration -> ttl value
 	ttl             map[string]*cache.TTLString
 	schedule        atomic.Value
 	replication     atomic.Value
@@ -276,23 +277,11 @@ func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
-	if v, ok := o.getTTLData("leader-schedule-limit"); ok {
-		r, ok := v.(uint64)
-		if ok {
-			return r
-		}
-	}
 	return o.GetScheduleConfig().LeaderScheduleLimit
 }
 
 // GetRegionScheduleLimit returns the limit for region schedule.
 func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
-	if v, ok := o.getTTLData("region-schedule-limit"); ok {
-		r, ok := v.(uint64)
-		if ok {
-			return r
-		}
-	}
 	return o.GetScheduleConfig().RegionScheduleLimit
 }
 
@@ -312,7 +301,21 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 }
 
 // GetStoreLimit returns the limit of a store.
-func (o *PersistOptions) GetStoreLimit(storeID uint64) StoreLimitConfig {
+func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfig) {
+	defer func() {
+		if v, ok := o.getTTLData("store-limit-remove-peer"); ok {
+			r, ok := v.(uint64)
+			if ok {
+				returnSC.RemovePeer = float64(r)
+			}
+		}
+		if v, ok := o.getTTLData("store-limit-add-peer"); ok {
+			r, ok := v.(uint64)
+			if ok {
+				returnSC.AddPeer = float64(r)
+			}
+		}
+	}()
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
@@ -366,6 +369,12 @@ func (o *PersistOptions) GetHighSpaceRatio() float64 {
 
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
 func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
+	if v, ok := o.getTTLData("scheduler-max-waiting-operator"); ok {
+		r, ok := v.(uint64)
+		if ok {
+			return r
+		}
+	}
 	return o.GetScheduleConfig().SchedulerMaxWaitingOperator
 }
 
