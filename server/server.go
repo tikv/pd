@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
@@ -116,6 +117,8 @@ type Server struct {
 	// store, region and peer, because we just need
 	// a unique ID.
 	idAllocator *id.AllocatorImpl
+	// for encryption
+	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
 	storage *core.Storage
 	// for basicCluster operation.
@@ -351,19 +354,29 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration,
+		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
-	)
+		s.GetTLSConfig())
 	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
 		return err
 	}
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
-	path := filepath.Join(s.cfg.DataDir, "region-meta")
-	regionStorage, err := core.NewRegionStorage(ctx, path)
+	encryptionKeyManager, err := encryptionkm.NewKeyManager(kvBase, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
-	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
+	s.encryptionKeyManager = encryptionKeyManager
+	path := filepath.Join(s.cfg.DataDir, "region-meta")
+	regionStorage, err := core.NewRegionStorage(ctx, path, encryptionKeyManager)
+	if err != nil {
+		return err
+	}
+
+	s.storage = core.NewStorage(
+		kvBase,
+		core.WithRegionStorage(regionStorage),
+		core.WithEncryptionKeyManager(encryptionKeyManager),
+	)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -955,9 +968,9 @@ func (s *Server) GetClusterVersion() semver.Version {
 	return *s.persistOptions.GetClusterVersion()
 }
 
-// GetSecurityConfig get the security config.
-func (s *Server) GetSecurityConfig() *grpcutil.SecurityConfig {
-	return &s.cfg.Security
+// GetTLSConfig get the security config.
+func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
+	return &s.cfg.Security.TLSConfig
 }
 
 // GetServerRootPath returns the server root path.
@@ -1156,6 +1169,9 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
 	}
+
+	s.encryptionKeyManager.SetLeadership(s.member.GetLeadership())
+
 	// Try to create raft cluster.
 	if err := s.createRaftCluster(); err != nil {
 		log.Error("failed to create raft cluster", errs.ZapError(err))

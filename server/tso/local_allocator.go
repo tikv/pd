@@ -21,6 +21,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/tsoutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/member"
 	"go.uber.org/zap"
@@ -45,19 +47,32 @@ type LocalTSOAllocator struct {
 }
 
 // NewLocalTSOAllocator creates a new local TSO allocator.
-func NewLocalTSOAllocator(member *member.Member, leadership *election.Leadership, dcLocation string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
+func NewLocalTSOAllocator(
+	member *member.Member,
+	leadership *election.Leadership,
+	dcLocation string,
+	saveInterval time.Duration,
+	updatePhysicalInterval time.Duration,
+	maxResetTSGap func() time.Duration,
+) Allocator {
 	return &LocalTSOAllocator{
 		leadership: leadership,
 		timestampOracle: &timestampOracle{
-			client:        leadership.GetClient(),
-			rootPath:      leadership.GetLeaderKey(),
-			saveInterval:  saveInterval,
-			maxResetTSGap: maxResetTSGap,
+			client:                 leadership.GetClient(),
+			rootPath:               leadership.GetLeaderKey(),
+			saveInterval:           saveInterval,
+			updatePhysicalInterval: updatePhysicalInterval,
+			maxResetTSGap:          maxResetTSGap,
 		},
 		member:     member,
 		rootPath:   leadership.GetLeaderKey(),
 		dcLocation: dcLocation,
 	}
+}
+
+// GetDCLocation returns the local allocator's dc-location.
+func (lta *LocalTSOAllocator) GetDCLocation() string {
+	return lta.dcLocation
 }
 
 // Initialize will initialize the created local TSO allocator.
@@ -115,6 +130,28 @@ func (lta *LocalTSOAllocator) GetAllocatorLeader() *pdpb.Member {
 // GetMember returns the Local TSO Allocator's member value.
 func (lta *LocalTSOAllocator) GetMember() *pdpb.Member {
 	return lta.member.Member()
+}
+
+// GetCurrentTSO returns current TSO in memory.
+func (lta *LocalTSOAllocator) GetCurrentTSO() (pdpb.Timestamp, error) {
+	currentPhysical, currentLogical := lta.timestampOracle.getTSO()
+	if currentPhysical == typeutil.ZeroTime {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
+	}
+	return *tsoutil.GenerateTimestamp(currentPhysical, uint64(currentLogical)), nil
+}
+
+// WriteTSO is used to set the maxTS as current TSO in memory.
+func (lta *LocalTSOAllocator) WriteTSO(maxTS *pdpb.Timestamp) error {
+	currentTSO, err := lta.GetCurrentTSO()
+	if err != nil {
+		return err
+	}
+	// If current local TSO has already been greater or equal to maxTS, then do not update it.
+	if tsoutil.CompareTimestamp(&currentTSO, maxTS) >= 0 {
+		return nil
+	}
+	return lta.SetTSO(tsoutil.GenerateTS(maxTS))
 }
 
 // EnableAllocatorLeader sets the Local TSO Allocator itself to a leader.

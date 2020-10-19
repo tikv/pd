@@ -512,6 +512,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
 		}
 	}
+	if store := c.core.GetStore(newStore.GetID()); store != nil {
+		c.storesStats.UpdateStoreHeartbeatMetrics(store)
+	}
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)

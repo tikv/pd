@@ -95,168 +95,83 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	r3 := pdctl.MustPutRegion(c, cluster, 3, 1, []byte("c"), []byte("d"),
 		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2), core.SetApproximateSize(30),
 		core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}),
-		core.WithPendingPeers([]*metapb.Peer{downPeer}))
+		core.WithPendingPeers([]*metapb.Peer{downPeer}), core.WithLearners([]*metapb.Peer{{Id: 3, StoreId: 1}}))
 	r4 := pdctl.MustPutRegion(c, cluster, 4, 1, []byte("d"), []byte("e"),
 		core.SetWrittenBytes(100), core.SetReadBytes(100), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetApproximateSize(10))
 	defer cluster.Destroy()
 
-	// region command
-	args := []string{"-u", pdAddr, "region"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo := api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	regions := leaderServer.GetRegions()
-	pdctl.CheckRegionsInfo(c, regionsInfo, regions)
+	var testRegionsCases = []struct {
+		args   []string
+		expect []*core.RegionInfo
+	}{
+		// region command
+		{[]string{"region"}, leaderServer.GetRegions()},
+		// region sibling <region_id> command
+		{[]string{"region", "sibling", "2"}, leaderServer.GetAdjacentRegions(leaderServer.GetRegionInfoByID(2))},
+		// region store <store_id> command
+		{[]string{"region", "store", "1"}, leaderServer.GetStoreRegions(1)},
+		{[]string{"region", "store", "1"}, []*core.RegionInfo{r1, r2, r3, r4}},
+		// region topread [limit] command
+		{[]string{"region", "topread", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 2)},
+		// region topwrite [limit] command
+		{[]string{"region", "topwrite", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, 2)},
+		// region topconfver [limit] command
+		{[]string{"region", "topconfver", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+			return a.GetMeta().GetRegionEpoch().GetConfVer() < b.GetMeta().GetRegionEpoch().GetConfVer()
+		}, 2)},
+		// region topversion [limit] command
+		{[]string{"region", "topversion", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+			return a.GetMeta().GetRegionEpoch().GetVersion() < b.GetMeta().GetRegionEpoch().GetVersion()
+		}, 2)},
+		// region topsize [limit] command
+		{[]string{"region", "topsize", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+			return a.GetApproximateSize() < b.GetApproximateSize()
+		}, 2)},
+		// region check extra-peer command
+		{[]string{"region", "check", "extra-peer"}, []*core.RegionInfo{r1}},
+		// region check miss-peer command
+		{[]string{"region", "check", "miss-peer"}, []*core.RegionInfo{r2, r3, r4}},
+		// region check pending-peer command
+		{[]string{"region", "check", "pending-peer"}, []*core.RegionInfo{r3}},
+		// region check down-peer command
+		{[]string{"region", "check", "down-peer"}, []*core.RegionInfo{r3}},
+		// region check learner-peer command
+		{[]string{"region", "check", "learner-peer"}, []*core.RegionInfo{r3}},
+		// region startkey --format=raw <key> command
+		{[]string{"region", "startkey", "--format=raw", "b", "2"}, []*core.RegionInfo{r2, r3}},
+		// region startkey --format=hex <key> command
+		{[]string{"region", "startkey", "--format=hex", "63", "2"}, []*core.RegionInfo{r3, r4}},
+	}
 
-	// region <region_id> command
-	args = []string{"-u", pdAddr, "region", "1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionInfo := api.RegionInfo{}
-	c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
-	region := leaderServer.GetRegionInfoByID(1)
-	c.Assert(api.NewRegionInfo(region), DeepEquals, &regionInfo)
+	for _, testCase := range testRegionsCases {
+		args := append([]string{"-u", pdAddr}, testCase.args...)
+		_, output, e := pdctl.ExecuteCommandC(cmd, args...)
+		c.Assert(e, IsNil)
+		regionsInfo := api.RegionsInfo{}
+		c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
+		pdctl.CheckRegionsInfo(c, regionsInfo, testCase.expect)
+	}
 
-	// region sibling <region_id> command
-	args = []string{"-u", pdAddr, "region", "sibling", "2"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	region = leaderServer.GetRegionInfoByID(2)
-	regions = leaderServer.GetAdjacentRegions(region)
-	pdctl.CheckRegionsInfo(c, regionsInfo, regions)
+	var testRegionCases = []struct {
+		args   []string
+		expect *api.RegionInfo
+	}{
+		// region <region_id> command
+		{[]string{"region", "1"}, api.NewRegionInfo(leaderServer.GetRegionInfoByID(1))},
+		// region key --format=raw <key> command
+		{[]string{"region", "key", "--format=raw", "b"}, api.NewRegionInfo(r2)},
+		// region key --format=hex <key> command
+		{[]string{"region", "key", "--format=hex", "62"}, api.NewRegionInfo(r2)},
+		// issue #2351
+		{[]string{"region", "key", "--format=hex", "622f62"}, api.NewRegionInfo(r2)},
+	}
 
-	// region store <store_id> command
-	args = []string{"-u", pdAddr, "region", "store", "1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	regions = leaderServer.GetStoreRegions(1)
-	pdctl.CheckRegionsInfo(c, regionsInfo, regions)
-
-	// region topread [limit] command
-	args = []string{"-u", pdAddr, "region", "topread", "2"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 2)
-	pdctl.CheckRegionsInfo(c, regionsInfo, regions)
-
-	// region topwrite [limit] command
-	args = []string{"-u", pdAddr, "region", "topwrite", "2"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, 2)
-	pdctl.CheckRegionsInfo(c, regionsInfo, regions)
-
-	// region topconfver [limit] command
-	args = []string{"-u", pdAddr, "region", "topconfver", "2"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
-		return a.GetMeta().GetRegionEpoch().GetConfVer() < b.GetMeta().GetRegionEpoch().GetConfVer()
-	}, 2)
-	pdctl.CheckRegionsInfo(c, regionsInfo, regions)
-
-	// region topversion [limit] command
-	args = []string{"-u", pdAddr, "region", "topversion", "2"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
-		return a.GetMeta().GetRegionEpoch().GetVersion() < b.GetMeta().GetRegionEpoch().GetVersion()
-	}, 2)
-	pdctl.CheckRegionsInfo(c, regionsInfo, regions)
-
-	// region topsize [limit] command
-	args = []string{"-u", pdAddr, "region", "topsize", "2"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
-		return a.GetApproximateSize() < b.GetApproximateSize()
-	}, 2)
-	pdctl.CheckRegionsInfo(c, regionsInfo, regions)
-
-	// region check extra-peer command
-	args = []string{"-u", pdAddr, "region", "check", "extra-peer"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	pdctl.CheckRegionsInfo(c, regionsInfo, []*core.RegionInfo{r1})
-
-	// region check miss-peer command
-	args = []string{"-u", pdAddr, "region", "check", "miss-peer"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	pdctl.CheckRegionsInfo(c, regionsInfo, []*core.RegionInfo{r2, r3, r4})
-
-	// region check pending-peer command
-	args = []string{"-u", pdAddr, "region", "check", "pending-peer"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	pdctl.CheckRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3})
-
-	// region check down-peer command
-	args = []string{"-u", pdAddr, "region", "check", "down-peer"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	pdctl.CheckRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3})
-
-	// region key --format=raw <key> command
-	args = []string{"-u", pdAddr, "region", "key", "--format=raw", "b"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionInfo = api.RegionInfo{}
-	c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
-	c.Assert(&regionInfo, DeepEquals, api.NewRegionInfo(r2))
-
-	// region key --format=hex <key> command
-	args = []string{"-u", pdAddr, "region", "key", "--format=hex", "62"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionInfo = api.RegionInfo{}
-	c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
-	c.Assert(&regionInfo, DeepEquals, api.NewRegionInfo(r2))
-
-	// issue #2351
-	args = []string{"-u", pdAddr, "region", "key", "--format=hex", "622f62"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionInfo = api.RegionInfo{}
-	c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
-	c.Assert(&regionInfo, DeepEquals, api.NewRegionInfo(r2))
-
-	// region startkey --format=raw <key> command
-	args = []string{"-u", pdAddr, "region", "startkey", "--format=raw", "b", "2"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	pdctl.CheckRegionsInfo(c, regionsInfo, []*core.RegionInfo{r2, r3})
-
-	// region startkey --format=hex <key> command
-	args = []string{"-u", pdAddr, "region", "startkey", "--format=hex", "63", "2"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	regionsInfo = api.RegionsInfo{}
-	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-	pdctl.CheckRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3, r4})
+	for _, testCase := range testRegionCases {
+		args := append([]string{"-u", pdAddr}, testCase.args...)
+		_, output, e := pdctl.ExecuteCommandC(cmd, args...)
+		c.Assert(e, IsNil)
+		regionInfo := api.RegionInfo{}
+		c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
+		c.Assert(&regionInfo, DeepEquals, testCase.expect)
+	}
 }
