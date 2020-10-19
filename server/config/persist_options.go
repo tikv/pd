@@ -559,6 +559,7 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 	return false
 }
 
+// SetTTLData set temporary configuration
 func (o *PersistOptions) SetTTLData(ctx context.Context, key string, value interface{}, ttl time.Duration) {
 	if data, ok := o.ttl[key]; ok {
 		data.Clear()
