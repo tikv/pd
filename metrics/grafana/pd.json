@@ -5913,13 +5913,115 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
           "description": "The merge checker's status",
           "fill": 0,
+=======
+          "fill": 1,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 21
+          },
+          "id": 1422,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "percentage": false,
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "etcd_debugging_mvcc_db_total_size_in_bytes{job=\"pd\"}",
+              "format": "time_series",
+              "hide": false,
+              "intervalFactor": 1,
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "MVCC DB total size",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "decbytes",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": false
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "The rate of handling etcd transactions",
+          "editable": true,
+          "error": false,
+          "fill": 1,
+          "grid": {},
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
+<<<<<<< HEAD
             "y": 95
+=======
+            "y": 21
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           },
           "id": 71,
           "legend": {
@@ -5950,7 +6052,11 @@
           "steppedLine": false,
           "targets": [
             {
+<<<<<<< HEAD
               "expr": "sum(delta(pd_checker_event_count{instance=\"$instance\", type=\"merge_checker\"}[1m])) by (name)",
+=======
+              "expr": "sum(rate(pd_txn_handle_txns_duration_seconds_count[5m])) by (instance, result)",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7232,207 +7338,8 @@
             "align": false,
             "alignLevel": null
           }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The time consumed of handling TiDB requests",
-          "editable": true,
-          "error": false,
-          "fill": 1,
-          "grid": {},
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 12,
-            "y": 114
-          },
-          "id": 142,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "sideWidth": 300,
-            "sort": "current",
-            "sortDesc": false,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null as zero",
-          "paceLength": 10,
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "histogram_quantile(0.98, sum(rate(pd_client_request_handle_requests_duration_seconds_bucket[30s])) by (type, le))",
-              "hide": false,
-              "intervalFactor": 2,
-              "legendFormat": "{{type}} 98th percentile",
-              "refId": "A",
-              "step": 2
-            },
-            {
-              "expr": "avg(rate(pd_client_request_handle_requests_duration_seconds_sum[30s])) by (type) /  avg(rate(pd_client_request_handle_requests_duration_seconds_count[30s])) by (type)",
-              "intervalFactor": 2,
-              "legendFormat": "{{type}} average",
-              "refId": "B",
-              "step": 2
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Handle requests duration",
-          "tooltip": {
-            "msResolution": false,
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "s",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": "0",
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The count of TiDB requests",
-          "editable": true,
-          "error": false,
-          "fill": 1,
-          "grid": {},
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 0,
-            "y": 123
-          },
-          "id": 28,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "sideWidth": 300,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null",
-          "paceLength": 10,
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "sum(rate(pd_client_request_handle_requests_duration_seconds_count[1m])) by (type)",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{type}}",
-              "refId": "A",
-              "step": 2
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Handle requests count",
-          "tooltip": {
-            "msResolution": false,
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
+<<<<<<< HEAD
+=======
         }
       ],
       "repeat": null,
@@ -7445,7 +7352,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 22
       },
       "id": 126,
       "panels": [
@@ -7642,6 +7549,7 @@
             "align": false,
             "alignLevel": null
           }
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
         },
         {
           "aliasColors": {},
@@ -7649,7 +7557,531 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
+          "description": "The time consumed of handling TiDB requests",
+=======
           "description": "The count of the heartbeats which each TiKV instance reports to PD",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "editable": true,
+          "error": false,
+          "fill": 1,
+          "grid": {},
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+<<<<<<< HEAD
+            "x": 12,
+            "y": 114
+          },
+          "id": 142,
+=======
+            "x": 0,
+            "y": 31
+          },
+          "id": 54,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sideWidth": 300,
+            "sort": "current",
+            "sortDesc": false,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null as zero",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+<<<<<<< HEAD
+              "expr": "histogram_quantile(0.98, sum(rate(pd_client_request_handle_requests_duration_seconds_bucket[30s])) by (type, le))",
+              "hide": false,
+              "intervalFactor": 2,
+              "legendFormat": "{{type}} 98th percentile",
+=======
+              "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"ok\"}[1m])) by (address, store)",
+              "format": "time_series",
+              "hide": false,
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+              "refId": "A",
+              "step": 2
+            },
+            {
+              "expr": "avg(rate(pd_client_request_handle_requests_duration_seconds_sum[30s])) by (type) /  avg(rate(pd_client_request_handle_requests_duration_seconds_count[30s])) by (type)",
+              "intervalFactor": 2,
+              "legendFormat": "{{type}} average",
+              "refId": "B",
+              "step": 2
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+<<<<<<< HEAD
+          "title": "Handle requests duration",
+=======
+          "title": "Region heartbeat report",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "tooltip": {
+            "msResolution": false,
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+<<<<<<< HEAD
+              "format": "s",
+=======
+              "format": "opm",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": "0",
+              "show": true
+            },
+            {
+<<<<<<< HEAD
+              "format": "short",
+=======
+              "format": "s",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
+          "description": "The count of TiDB requests",
+=======
+          "description": "The count of the corresponding schedule commands which PD sends to each TiKV instance",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "editable": true,
+          "error": false,
+          "fill": 1,
+          "grid": {},
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+<<<<<<< HEAD
+            "x": 0,
+            "y": 123
+          },
+          "id": 28,
+=======
+            "x": 12,
+            "y": 31
+          },
+          "id": 64,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": true,
+<<<<<<< HEAD
+=======
+            "hideEmpty": true,
+            "hideZero": true,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sideWidth": 300,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+<<<<<<< HEAD
+              "expr": "sum(rate(pd_client_request_handle_requests_duration_seconds_count[1m])) by (type)",
+=======
+              "expr": "sum(rate(pd_scheduler_region_heartbeat{store=~\"$store\", type=\"push\",instance=\"$instance\"}[5m])*60) by (address, store, status)",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+              "format": "time_series",
+              "intervalFactor": 2,
+<<<<<<< HEAD
+              "legendFormat": "{{type}}",
+=======
+              "legendFormat": "{{address}}-{{status}}-store-{{store}}",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+              "refId": "A",
+              "step": 2
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+<<<<<<< HEAD
+          "title": "Handle requests count",
+=======
+          "title": "Region schedule push",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "tooltip": {
+            "msResolution": false,
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+<<<<<<< HEAD
+              "format": "short",
+=======
+              "format": "opm",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+<<<<<<< HEAD
+              "format": "short",
+=======
+              "format": "s",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        }
+      ],
+      "repeat": null,
+      "title": "TiDB",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 92
+      },
+      "id": 126,
+      "panels": [
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
+          "description": "The heartbeat latency of each TiKV instance in .99",
+          "editable": true,
+          "error": false,
+          "fill": 0,
+          "grid": {},
+=======
+          "description": "The count of the heartbeats with the error status",
+          "fill": 1,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+<<<<<<< HEAD
+            "y": 23
+          },
+          "id": 74,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+=======
+            "y": 39
+          },
+          "id": 133,
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": false,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+            "hideEmpty": true,
+            "hideZero": false,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+<<<<<<< HEAD
+              "expr": "sum(rate(pd_cluster_region_event{store=~\"$store\", instance=\"$instance\"}[1m])) by (address, store, event)",
+=======
+              "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"err\"}[1m])) by (address, store)",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+              "format": "time_series",
+              "intervalFactor": 2,
+<<<<<<< HEAD
+              "legendFormat": "{{event}}",
+              "refId": "A",
+              "step": 4
+=======
+              "legendFormat": "{{address}}-store-{{store}}",
+              "refId": "A"
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+<<<<<<< HEAD
+          "title": "Heartbeat  region event QPS",
+=======
+          "title": "Region heartbeat report error",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "ops",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "ms",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
+          "description": "The heartbeat latency of each TiKV instance in .99",
+          "editable": true,
+          "error": false,
+=======
+          "description": "The count of the heartbeats with the ok status",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "fill": 0,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+<<<<<<< HEAD
+            "y": 23
+          },
+          "id": 140,
+=======
+            "y": 39
+          },
+          "id": 131,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": false,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null as zero",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+<<<<<<< HEAD
+              "expr": "round(histogram_quantile(0.99, sum(rate(pd_scheduler_region_heartbeat_latency_seconds_bucket{store=~\"$store\"}[5m])) by (address, store, le)), 1000)",
+=======
+              "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"bind\"}[1m])) by (address, store)",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}",
+<<<<<<< HEAD
+              "refId": "A",
+              "step": 4
+=======
+              "refId": "A"
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+<<<<<<< HEAD
+          "title": "99% Region heartbeat latency",
+=======
+          "title": "Region heartbeat report active",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "ms",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": "0",
+              "show": true
+            },
+            {
+              "format": "ms",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
+          "description": "The count of the heartbeats which each TiKV instance reports to PD",
+=======
+          "description": "The store heartbeat handle duration in .99",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "editable": true,
           "error": false,
           "fill": 0,
@@ -7658,15 +8090,24 @@
             "h": 8,
             "w": 12,
             "x": 0,
+<<<<<<< HEAD
             "y": 31
           },
           "id": 54,
           "legend": {
             "alignAsTable": true,
             "avg": true,
+=======
+            "y": 47
+          },
+          "id": 1400,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
             "current": true,
             "hideEmpty": true,
-            "hideZero": true,
+            "hideZero": false,
             "max": true,
             "min": false,
             "rightSide": true,
@@ -7689,7 +8130,11 @@
           "steppedLine": false,
           "targets": [
             {
+<<<<<<< HEAD
               "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"ok\"}[1m])) by (address, store)",
+=======
+              "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_store_heartbeat_duration_seconds_bucket{store=~\"$store\"}[1m])) by (address, store, le))",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -7702,7 +8147,11 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
+<<<<<<< HEAD
           "title": "Region heartbeat report",
+=======
+          "title": "99% store heartbeat handle duration",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "tooltip": {
             "msResolution": false,
             "shared": true,
@@ -7719,7 +8168,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ms",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -7727,7 +8176,7 @@
               "show": true
             },
             {
-              "format": "s",
+              "format": "ms",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -7746,7 +8195,11 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
           "description": "The count of the corresponding schedule commands which PD sends to each TiKV instance",
+=======
+          "description": "The region heartbeat handle duration in .99",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "editable": true,
           "error": false,
           "fill": 0,
@@ -7755,15 +8208,21 @@
             "h": 8,
             "w": 12,
             "x": 12,
+<<<<<<< HEAD
             "y": 31
           },
           "id": 64,
+=======
+            "y": 47
+          },
+          "id": 1401,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "legend": {
             "alignAsTable": true,
-            "avg": true,
+            "avg": false,
             "current": true,
             "hideEmpty": true,
-            "hideZero": true,
+            "hideZero": false,
             "max": true,
             "min": false,
             "rightSide": true,
@@ -7786,11 +8245,19 @@
           "steppedLine": false,
           "targets": [
             {
+<<<<<<< HEAD
               "expr": "sum(rate(pd_scheduler_region_heartbeat{store=~\"$store\", type=\"push\",instance=\"$instance\"}[5m])*60) by (address, store, status)",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
               "legendFormat": "{{address}}-{{status}}-store-{{store}}",
+=======
+              "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_region_heartbeat_duration_seconds_bucket{store=~\"$store\"}[1m])) by (address, store, le))",
+              "format": "time_series",
+              "hide": false,
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
               "refId": "A",
               "step": 4
             }
@@ -7799,7 +8266,11 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
+<<<<<<< HEAD
           "title": "Region schedule push",
+=======
+          "title": "99% region heartbeat handle duration",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "tooltip": {
             "msResolution": false,
             "shared": true,
@@ -7816,7 +8287,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ms",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -7824,7 +8295,7 @@
               "show": true
             },
             {
-              "format": "s",
+              "format": "ms",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -7843,12 +8314,21 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
           "description": "The count of the heartbeats with the error status",
           "fill": 1,
+=======
+          "description": "The count of the message which PD send to each TiKV instance",
+          "editable": true,
+          "error": false,
+          "fill": 0,
+          "grid": {},
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
+<<<<<<< HEAD
             "y": 39
           },
           "id": 133,
@@ -7856,6 +8336,15 @@
             "alignAsTable": true,
             "avg": true,
             "current": false,
+=======
+            "y": 55
+          },
+          "id": 1402,
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": true,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
             "hideEmpty": true,
             "hideZero": true,
             "max": true,
@@ -7879,7 +8368,11 @@
           "steppedLine": false,
           "targets": [
             {
+<<<<<<< HEAD
               "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"err\"}[1m])) by (address, store)",
+=======
+              "expr": "sum(delta(pd_hbstream_region_message{store=~\"$store\", instance=\"$instance\", type=\"push\", status=\"ok\"}[1m])) by (address, store)",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -7890,7 +8383,11 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
+<<<<<<< HEAD
           "title": "Region heartbeat report error",
+=======
+          "title": "Heartbeat stream report",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -7933,15 +8430,27 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
           "description": "The count of the heartbeats with the ok status",
+=======
+          "description": "The count of the message which PD send to each TiKV instance with error status",
+          "editable": true,
+          "error": false,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "fill": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
+<<<<<<< HEAD
             "y": 39
           },
           "id": 131,
+=======
+            "y": 55
+          },
+          "id": 1403,
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "legend": {
             "alignAsTable": true,
             "avg": true,
@@ -7969,7 +8478,11 @@
           "steppedLine": false,
           "targets": [
             {
+<<<<<<< HEAD
               "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"bind\"}[1m])) by (address, store)",
+=======
+              "expr": "sum(delta(pd_hbstream_region_message{store=~\"$store\", instance=\"$instance\", type=\"push\", status=\"err\"}[1m])) by (address, store)",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -7980,7 +8493,11 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
+<<<<<<< HEAD
           "title": "Region heartbeat report active",
+=======
+          "title": "Heartbeat stream report error",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -8016,22 +8533,175 @@
             "align": false,
             "alignLevel": null
           }
+        }
+      ],
+      "repeat": null,
+      "title": "Heartbeat",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 1420,
+      "panels": [
+        {
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {},
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 24
+          },
+          "id": 1407,
+          "options": {
+            "displayMode": "lcd",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "mean"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "pluginVersion": "7.1.5",
+          "targets": [
+            {
+              "expr": "sum(delta(pd_scheduler_read_byte_hist_bucket{instance=~\"$instance\"}[1m])) by (le)",
+              "format": "heatmap",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "{{le}}",
+              "refId": "B"
+            }
+          ],
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "Read Region Byte",
+          "transparent": true,
+          "type": "bargauge"
         },
         {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
           "description": "The store heartbeat handle duration in .99",
           "editable": true,
           "error": false,
           "fill": 0,
           "grid": {},
+=======
+          "fieldConfig": {
+            "defaults": {
+              "custom": {},
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 24
+          },
+          "id": 1411,
+          "options": {
+            "displayMode": "lcd",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "mean"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "pluginVersion": "7.1.5",
+          "targets": [
+            {
+              "expr": "sum(delta(pd_scheduler_write_byte_hist_bucket{instance=~\"$instance\"}[1m])) by (le)",
+              "format": "heatmap",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "{{le}}",
+              "refId": "B"
+            }
+          ],
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "Write Region Byte",
+          "transparent": true,
+          "type": "bargauge"
+        },
+        {
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": null
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
+<<<<<<< HEAD
             "y": 47
           },
           "id": 1400,
@@ -8047,50 +8717,145 @@
             "show": true,
             "total": false,
             "values": true
+=======
+            "y": 32
           },
-          "lines": true,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null as zero",
-          "paceLength": 10,
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
+          "id": 1406,
+          "options": {
+            "displayMode": "lcd",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "mean"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "pluginVersion": "7.1.5",
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_store_heartbeat_duration_seconds_bucket{store=~\"$store\"}[1m])) by (address, store, le))",
-              "format": "time_series",
+              "expr": "sum(delta(pd_scheduler_read_key_hist_bucket{instance=~\"$instance\"}[1m])) by (le)",
+              "format": "heatmap",
               "hide": false,
-              "intervalFactor": 2,
-              "legendFormat": "{{address}}-store-{{store}}",
-              "refId": "A",
-              "step": 4
+              "interval": "",
+              "legendFormat": "{{le}}",
+              "refId": "C"
             }
           ],
-          "thresholds": [],
           "timeFrom": null,
-          "timeRegions": [],
           "timeShift": null,
+          "title": "Read Region Key",
+          "transparent": true,
+          "type": "bargauge"
+        },
+        {
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": null
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 32
+          },
+          "id": 1412,
+          "options": {
+            "displayMode": "lcd",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "mean"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          },
+          "pluginVersion": "7.1.5",
+          "targets": [
+            {
+<<<<<<< HEAD
+              "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_store_heartbeat_duration_seconds_bucket{store=~\"$store\"}[1m])) by (address, store, le))",
+              "format": "time_series",
+=======
+              "expr": "sum(delta(pd_scheduler_write_key_hist_bucket{instance=~\"$instance\"}[1m])) by (le)",
+              "format": "heatmap",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+              "hide": false,
+              "interval": "",
+              "legendFormat": "{{le}}",
+              "refId": "C"
+            }
+          ],
+          "timeFrom": null,
+          "timeShift": null,
+<<<<<<< HEAD
           "title": "99% store heartbeat handle duration",
           "tooltip": {
             "msResolution": false,
             "shared": true,
             "sort": 0,
             "value_type": "individual"
+=======
+          "title": "Write Region Key",
+          "transparent": true,
+          "type": "bargauge"
+        },
+        {
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": null
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 40
           },
+<<<<<<< HEAD
           "yaxes": [
             {
               "format": "ms",
@@ -8099,36 +8864,86 @@
               "max": null,
               "min": "0",
               "show": true
+=======
+          "id": 1408,
+          "interval": "",
+          "options": {
+            "displayMode": "lcd",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "mean"
+              ],
+              "fields": "",
+              "values": false
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
             },
+            "showUnfilled": true
+          },
+          "pluginVersion": "7.1.5",
+          "repeatDirection": "h",
+          "targets": [
             {
+<<<<<<< HEAD
               "format": "ms",
               "label": null,
               "logBase": 1,
               "max": null,
               "min": null,
               "show": true
+=======
+              "expr": "sum(delta(pd_scheduler_store_heartbeat_interval_hist_bucket{instance=~\"$instance\"}[1m])) by (le)",
+              "format": "heatmap",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "{{le}}",
+              "refId": "A"
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
             }
           ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "Store Heartbeat Interval",
+          "transparent": true,
+          "type": "bargauge"
         },
         {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+<<<<<<< HEAD
           "description": "The region heartbeat handle duration in .99",
           "editable": true,
           "error": false,
           "fill": 0,
           "grid": {},
+=======
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": null
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
+<<<<<<< HEAD
             "y": 47 
           },
           "id": 1401,
@@ -8144,35 +8959,44 @@
             "show": true,
             "total": false,
             "values": true
+=======
+            "y": 40
           },
-          "lines": true,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null as zero",
-          "paceLength": 10,
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
+          "id": 1409,
+          "interval": "",
+          "options": {
+            "displayMode": "lcd",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "mean"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
+          },
+          "pluginVersion": "7.1.5",
+          "repeatDirection": "h",
           "targets": [
             {
+<<<<<<< HEAD
               "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_region_heartbeat_duration_seconds_bucket{store=~\"$store\"}[1m])) by (address, store, le))",
               "format": "time_series",
+=======
+              "expr": "sum(delta(pd_scheduler_region_heartbeat_interval_hist_bucket{instance=~\"$instance\"}[1m])) by (le)",
+              "format": "heatmap",
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
               "hide": false,
-              "intervalFactor": 2,
-              "legendFormat": "{{address}}-store-{{store}}",
-              "refId": "A",
-              "step": 4
+              "interval": "",
+              "legendFormat": "{{le}}",
+              "refId": "A"
             }
           ],
-          "thresholds": [],
           "timeFrom": null,
-          "timeRegions": [],
           "timeShift": null,
+<<<<<<< HEAD
           "title": "99% region heartbeat handle duration",
           "tooltip": {
             "msResolution": false,
@@ -8210,10 +9034,14 @@
             "align": false,
             "alignLevel": null
           }
+=======
+          "title": "Region Heartbeat Interval",
+          "transparent": true,
+          "type": "bargauge"
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
         }
       ],
-      "repeat": null,
-      "title": "Heartbeat",
+      "title": "Heartbeat distribution ",
       "type": "row"
     },
     {
@@ -8222,7 +9050,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
+<<<<<<< HEAD
         "y": 93
+=======
+        "y": 24
+>>>>>>> 3cfe3505... metrics: show db size of etcd (#3079)
       },
       "id": 127,
       "panels": [
