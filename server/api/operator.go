@@ -280,11 +280,35 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case "scatter-regions":
+		// support both receiving key ranges or regionIDs
+		startKey, _ := input["start_key"].(string)
+		endKey, _ := input["end_key"].(string)
+		regionIDs, _ := input["region_ids"].([]uint64)
+		group, _ := input["group"].(string)
+		retryLimit, ok := input["retry_limit"].(int)
+		if !ok {
+			// retry 5 times if retryLimit not defined
+			retryLimit = 5
+		}
+		processedPercentage, err := h.AddScatterRegionsOperators(regionIDs, startKey, endKey, group, retryLimit)
+		errorMessage := ""
+		if err != nil {
+			errorMessage = err.Error()
+		}
+		s := struct {
+			ProcessedPercentage int    `json:"processed-percentage"`
+			Error               string `json:"error"`
+		}{
+			ProcessedPercentage: processedPercentage,
+			Error:               errorMessage,
+		}
+		h.r.JSON(w, http.StatusOK, &s)
+		return
 	default:
 		h.r.JSON(w, http.StatusBadRequest, "unknown operator")
 		return
 	}
-
 	h.r.JSON(w, http.StatusOK, "The operator is created.")
 }
 

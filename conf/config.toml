@@ -32,6 +32,53 @@ key-path = ""
 
 cert-allowed-cn = ["example.com"]
 
+[security.encryption]
+## Encryption method to use for PD data. One of "plaintext", "aes128-ctr", "aes192-ctr" and "aes256-ctr".
+## Defaults to "plaintext" if not set.
+# data-encryption-method = "plaintext"
+## Specifies how often PD rotates data encryption key. Default is 7 days.
+# data-key-rotation-period = "168h"
+
+## Specifies master key if encryption is enabled. There are three types of master key:
+##
+##   * "plaintext":
+##
+##     Plaintext as master key means no master key is given and only applicable when
+##     encryption is not enabled, i.e. data-encryption-method = "plaintext". This type doesn't
+##     have sub-config items. Example:
+##     
+##     [security.encryption.master-key]
+##     type = "plaintext"
+##
+##   * "kms":
+##
+##     Use a KMS service to supply master key. Currently only AWS KMS is supported. This type of
+##     master key is recommended for production use. Example:
+##
+##     [security.encryption.master-key]
+##     type = "kms"
+##     ## KMS CMK key id. Must be a valid KMS CMK where the TiKV process has access to.
+##     ## In production is recommended to grant access of the CMK to TiKV using IAM.
+##     key-id = "1234abcd-12ab-34cd-56ef-1234567890ab"
+##     ## AWS region of the KMS CMK.
+##     region = "us-west-2"
+##     ## (Optional) AWS KMS service endpoint. Only required when non-default KMS endpoint is
+##     ## desired.
+##     endpoint = "https://kms.us-west-2.amazonaws.com"
+##
+##   * "file":
+##
+##     Supply a custom encryption key stored in a file. It is recommended NOT to use in production,
+##     as it breaks the purpose of encryption at rest, unless the file is stored in tempfs.
+##     The file must contain a 256-bits (32 bytes, regardless of key length implied by 
+##     data-encryption-method) key encoded as hex string and end with newline ("\n"). Example:
+##
+##     [security.encryption.master-key]
+##     type = "file"
+##     path = "/path/to/master/key/file"
+# [security.encryption.master-key]
+# type = "plaintext"
+
 [log]
 level = "info"
 

@@ -1,4 +1,4 @@
-// Copyright 2017 TiKV Project Authors.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,19 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package simutil
+package encryption
 
-import (
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
+const (
+	// We only support AWS KMS right now.
+	kmsVendorAWS = "AWS"
 )
-
-// Logger is the global logger used for simulator.
-var Logger *zap.Logger
-
-// InitLogger initializes the Logger with -log level.
-func InitLogger(l, file string) {
-	conf := &log.Config{Level: l, File: log.FileLogConfig{Filename: file}}
-	lg, _, _ := log.InitLogger(conf)
-	Logger = lg
-}

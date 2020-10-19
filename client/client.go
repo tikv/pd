@@ -42,8 +42,8 @@ type Region struct {
 type Client interface {
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
-	// GetMemberInfo gets the members Info from PD
-	GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error)
+	// GetAllMembers gets the members Info from PD
+	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
 	// GetLeaderAddr returns current leader's address. It returns "" before
 	// syncing leader from server.
 	GetLeaderAddr() string
@@ -224,9 +224,9 @@ func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.Canc
 	}
 }
 
-func (c *client) GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error) {
+func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	start := time.Now()
-	defer func() { cmdDurationGetMemberInfo.Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	resp, err := c.leaderClient().GetMembers(ctx, &pdpb.GetMembersRequest{
@@ -234,7 +234,7 @@ func (c *client) GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error) {
 	})
 	cancel()
 	if err != nil {
-		cmdFailDurationGetMemberInfo.Observe(time.Since(start).Seconds())
+		cmdFailDurationGetAllMembers.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
 	}
@@ -374,8 +374,8 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 	// Server returns the highest ts.
 	logical -= int64(resp.GetCount() - 1)
 	if tsLessEqual(physical, logical, c.lastPhysical, c.lastLogical) {
-		panic(errors.Errorf("timestamp fallback, newly acquired ts (%d,%d) is less or equal to last one (%d, %d)",
-			physical, logical, c.lastLogical, c.lastLogical))
+		panic(errors.Errorf("timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
+			physical, logical, c.lastPhysical, c.lastLogical))
 	}
 	c.lastPhysical = physical
 	c.lastLogical = logical + int64(len(requests)) - 1

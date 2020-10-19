@@ -76,7 +76,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		cancel:          cancel,
 		cluster:         cluster,
 		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, opController),
-		regionScatterer: schedule.NewRegionScatterer(cluster),
+		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
 		hbStreams:       hbStreams,
@@ -263,17 +263,17 @@ func (c *coordinator) run() {
 			continue
 		}
 		if cfg.Disable {
-			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type))
+			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
 			continue
 		}
 		s, err := schedule.CreateScheduler(cfg.Type, c.opController, c.cluster.storage, schedule.ConfigJSONDecoder([]byte(data)))
 		if err != nil {
-			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), errs.ZapError(err))
+			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
 		}
 		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
 		if err = c.addScheduler(s); err != nil {
-			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
+			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 		}
 	}
 
@@ -283,19 +283,19 @@ func (c *coordinator) run() {
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
-			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type))
+			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args))
 			continue
 		}
 
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args))
 		if err != nil {
-			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), errs.ZapError(err))
+			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			continue
 		}
 
-		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
 		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 		} else {
 			// Only records the valid scheduler config.
 			scheduleCfg.Schedulers[k] = schedulerCfg

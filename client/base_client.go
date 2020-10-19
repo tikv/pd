@@ -267,7 +267,7 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 	if ok {
 		return conn, nil
 	}
-	tlsCfg, err := grpcutil.SecurityConfig{
+	tlsCfg, err := grpcutil.TLSConfig{
 		CAPath:   c.security.CAPath,
 		CertPath: c.security.CertPath,
 		KeyPath:  c.security.KeyPath,
