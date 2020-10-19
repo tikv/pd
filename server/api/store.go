@@ -14,6 +14,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -385,14 +386,29 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
+	var ttl int
+	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
+		var err error
+		ttl, err = strconv.Atoi(ttlSec)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	for _, typ := range typeValues {
+		if ttl > 0 {
+			key := fmt.Sprintf("add-peer-%v", storeID)
+			if typ == storelimit.RemovePeer {
+				key = fmt.Sprintf("remove-peer-%v", storeID)
+			}
+			h.Handler.SetStoreLimitTTL(key, ratePerMin, time.Duration(ttl)*time.Second)
+			continue
+		}
 		if err := h.SetStoreLimit(storeID, ratePerMin, typ); err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
-
 	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
@@ -458,11 +474,28 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var ttl int
+	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
+		var err error
+		ttl, err = strconv.Atoi(ttlSec)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	if _, ok := input["labels"]; !ok {
 		for _, typ := range typeValues {
-			if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
-				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-				return
+			if ttl > 0 {
+				if err := h.SetAllStoresLimitTTL(ratePerMin, typ, time.Duration(ttl)*time.Second); err != nil {
+					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			} else {
+				if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
+					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+					return
+				}
 			}
 		}
 	} else {
