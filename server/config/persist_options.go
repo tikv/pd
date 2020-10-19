@@ -15,7 +15,6 @@ package config
 
 import (
 	"context"
-	"github.com/tikv/pd/pkg/cache"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"

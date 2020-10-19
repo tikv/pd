@@ -47,7 +47,7 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 }
 
 // @Tags config
-// @Summary Update temporary configuration. Note that this is a temporary api and only support for lightning and BR. Don't call this API.
+// @Summary Update temporary configuration. Note that this is a temporary api and only support for lightning and BR. Don't call this API and it will be removed in release-5.0.
 // @Produce json
 // @Success 200 {object} config.Config
 // @Router /config/ttl [post]
