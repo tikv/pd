@@ -46,6 +46,11 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 	}
 }
 
+// @Tags config
+// @Summary Update temporary configuration. Note that this is a temporary api and only support for lightning and BR. Don't call this API.
+// @Produce json
+// @Success 200 {object} config.Config
+// @Router /config/ttl [post]
 func (h *confHandler) SetTTLConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
