@@ -15,6 +15,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -161,10 +162,10 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
 func (o *PersistOptions) GetMaxSnapshotCount() uint64 {
-	if v, ok := o.getTTLData("max-snapshot-count"); ok {
-		r, ok := v.(uint64)
+	if v, ok := o.getTTLData("schedule.max-snapshot-count"); ok {
+		r, ok := v.(float64)
 		if ok {
-			return r
+			return uint64(r)
 		}
 	}
 	return o.GetScheduleConfig().MaxSnapshotCount
@@ -177,10 +178,10 @@ func (o *PersistOptions) GetMaxPendingPeerCount() uint64 {
 
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
-	if v, ok := o.getTTLData("max-merge-region-size"); ok {
-		r, ok := v.(uint64)
+	if v, ok := o.getTTLData("schedule.max-merge-region-size"); ok {
+		r, ok := v.(float64)
 		if ok {
-			return r
+			return uint64(r)
 		}
 	}
 	return o.GetScheduleConfig().MaxMergeRegionSize
@@ -188,10 +189,10 @@ func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
 
 // GetMaxMergeRegionKeys returns the max number of keys.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
-	if v, ok := o.getTTLData("max-merge-region-keys"); ok {
-		r, ok := v.(uint64)
+	if v, ok := o.getTTLData("schedule.max-merge-region-keys"); ok {
+		r, ok := v.(float64)
 		if ok {
-			return r
+			return uint64(r)
 		}
 	}
 	return o.GetScheduleConfig().MaxMergeRegionKeys
@@ -303,16 +304,16 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 // GetStoreLimit returns the limit of a store.
 func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfig) {
 	defer func() {
-		if v, ok := o.getTTLData("store-limit-remove-peer"); ok {
-			r, ok := v.(uint64)
+		if v, ok := o.getTTLData(fmt.Sprintf("remove-peer-%v", storeID)); ok {
+			r, ok := v.(float64)
 			if ok {
-				returnSC.RemovePeer = float64(r)
+				returnSC.RemovePeer = r
 			}
 		}
-		if v, ok := o.getTTLData("store-limit-add-peer"); ok {
-			r, ok := v.(uint64)
+		if v, ok := o.getTTLData(fmt.Sprintf("add-peer-%v", storeID)); ok {
+			r, ok := v.(float64)
 			if ok {
-				returnSC.AddPeer = float64(r)
+				returnSC.AddPeer = r
 			}
 		}
 	}()
@@ -369,10 +370,10 @@ func (o *PersistOptions) GetHighSpaceRatio() float64 {
 
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
 func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
-	if v, ok := o.getTTLData("scheduler-max-waiting-operator"); ok {
-		r, ok := v.(uint64)
+	if v, ok := o.getTTLData("schedule.scheduler-max-waiting-operator"); ok {
+		r, ok := v.(float64)
 		if ok {
-			return r
+			return uint64(r)
 		}
 	}
 	return o.GetScheduleConfig().SchedulerMaxWaitingOperator
@@ -425,6 +426,12 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
+	if v, ok := o.getTTLData("schedule.enable-location-replacement"); ok {
+		r, ok := v.(bool)
+		if ok {
+			return r
+		}
+	}
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
 
@@ -565,7 +572,7 @@ func (o *PersistOptions) SetTTLData(ctx context.Context, key string, value inter
 		data.Clear()
 	}
 	o.ttl[key] = cache.NewStringTTL(ctx, 5*time.Second, ttl)
-	o.ttl[key].Put(key, uint64(value.(float64)))
+	o.ttl[key].Put(key, value)
 }
 
 func (o *PersistOptions) getTTLData(key string) (interface{}, bool) {

@@ -47,9 +47,10 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 }
 
 // @Tags config
-// @Summary Update temporary configuration. Note that this is a temporary api and only support for lightning and BR. Don't call this API and it will be removed in release-5.0.
+// @Summary Update temporary configuration.
+// @Warning Note that this is a temporary api and only support for lightning and BR. Don't call this API
 // @Produce json
-// @Success 200 {object} config.Config
+// @Success 200 {string} string "The config is updated."
 // @Router /config/ttl [post]
 func (h *confHandler) SetTTLConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
@@ -66,7 +67,7 @@ func (h *confHandler) SetTTLConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.svr.SaveTTLConfig(input, time.Duration(ttls)*time.Second)
-	h.rd.JSON(w, http.StatusOK, "success")
+	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
 // @Tags config
