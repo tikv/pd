@@ -653,6 +653,11 @@ func (mc *Cluster) ResetSuspectRegions() {
 	mc.suspectRegions = map[uint64]struct{}{}
 }
 
+// GetRegionByKey get region by key
+func (mc *Cluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
+	return mc.SearchRegion(regionKey)
+}
+
 // SetStoreLastHeartbeatInterval set the last heartbeat to the target store
 func (mc *Cluster) SetStoreLastHeartbeatInterval(storeID uint64, interval time.Duration) {
 	store := mc.GetStore(storeID)
