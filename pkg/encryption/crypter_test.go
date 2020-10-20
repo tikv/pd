@@ -55,10 +55,10 @@ func (s *testCrypterSuite) TestKeyLength(c *C) {
 }
 
 func (s *testCrypterSuite) TestNewIv(c *C) {
-	ivCtr, err := NewIvCtr()
+	ivCtr, err := NewIvCTR()
 	c.Assert(err, IsNil)
 	c.Assert(len([]byte(ivCtr)), Equals, ivLengthCTR)
-	ivGcm, err := NewIvGcm()
+	ivGcm, err := NewIvGCM()
 	c.Assert(err, IsNil)
 	c.Assert(len([]byte(ivGcm)), Equals, ivLengthGCM)
 }
@@ -88,7 +88,7 @@ func (s *testCrypterSuite) TestAesGcmCrypter(c *C) {
 	// encrypt
 	ivBytes, err := hex.DecodeString("ba432b70336c40c39ba14c1b")
 	c.Assert(err, IsNil)
-	iv := IvGcm(ivBytes)
+	iv := IvGCM(ivBytes)
 	ciphertext, err := aesGcmEncryptImpl(key, plaintext, iv)
 	c.Assert(err, IsNil)
 	c.Assert(len([]byte(iv)), Equals, ivLengthGCM)

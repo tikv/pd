@@ -15,7 +15,6 @@ package tso_test
 
 import (
 	"context"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/slice"
@@ -24,8 +23,6 @@ import (
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
-
-const waitAllocatorCheckInterval = 2 * time.Second
 
 var _ = Suite(&testAllocatorSuite{})
 
@@ -61,9 +58,11 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-
-	// Wait for a while to check
-	time.Sleep(waitAllocatorCheckInterval)
+	// Wait for each DC's Local TSO Allocator leader
+	for _, dcLocation := range dcLocationConfig {
+		leaderName := cluster.WaitAllocatorLeader(dcLocation)
+		c.Assert(len(leaderName), Greater, 0)
+	}
 	// To check whether we have enough Local TSO Allocator leaders
 	allAllocatorLeaders := make([]tso.Allocator, 0, dcLocationNum)
 	for _, server := range cluster.GetServers() {

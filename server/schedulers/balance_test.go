@@ -579,6 +579,8 @@ func (s *testBalanceRegionSchedulerSuite) TearDownSuite(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	opt := config.NewTestOptions()
+	// TODO: enable placementrules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
@@ -613,6 +615,8 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	opt := config.NewTestOptions()
+	//TODO: enable placementrules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
@@ -675,6 +679,8 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cl
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	opt := config.NewTestOptions()
+	//TODO: enable placementrules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMaxReplicas(5)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
@@ -738,6 +744,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica5(c *C, tc *mockcluster.Cl
 // the source region is more likely distributed in store[1, 2, 3].
 func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetTolerantSizeRatio(1)
@@ -814,6 +821,8 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	// TODO: enable placementrules
+	tc.SetPlacementRuleEnabled(false)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
@@ -856,6 +865,8 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	//TODO: enable placementrules
+	tc.SetEnablePlacementRules(false)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	stream := hbstream.NewTestHeartbeatStreams(s.ctx, tc.ID, tc, false /* no need to run */)
 	oc := schedule.NewOperatorController(s.ctx, tc, stream)
@@ -927,6 +938,8 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
+	//TODO: enable palcementrules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMergeScheduleLimit(1)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, true /* need to run */)
@@ -972,6 +985,8 @@ func (s *testScatterRangeLeaderSuite) TearDownSuite(c *C) {
 
 func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	opt := config.NewTestOptions()
+	// TODO: enable palcementrules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetTolerantSizeRatio(2.5)

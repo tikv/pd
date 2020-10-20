@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -93,7 +94,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.tsoAllocatorManager.HandleTSORequest(config.GlobalDCLocation, count)
+		ts, err := s.tsoAllocatorManager.HandleTSORequest(request.GetDcLocation(), count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
@@ -415,6 +416,16 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		if region.GetID() == 0 {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
 			msg := fmt.Sprintf("invalid request region, %v", request)
+			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
+			continue
+		}
+
+		// If the region peer count is 0, then we should not handle this.
+		if len(region.GetPeers()) == 0 {
+			log.Warn("invalid region, zero region peer count",
+				logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
+			msg := fmt.Sprintf("invalid region, zero region peer count: %v", logutil.RedactStringer(core.RegionToHexMeta(region.GetMeta())))
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
@@ -907,4 +918,76 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
 		Message: msg,
 	})
+}
+
+// SyncMaxTS is a RPC method used to synchronize the timestamp of TSO between the
+// Global TSO Allocator and multi Local TSO Allocator leaders. It contains two
+// phases:
+// 1. Collect timestamps among all Local TSO Allocator leaders, and choose the
+//    greatest one as MaxTS.
+// 2. Send the MaxTS to all Local TSO Allocator leaders. They will compare MaxTS
+//    with its current TSO in memory to make sure their local TSOs are not less
+//    than MaxTS by writing MaxTS into memory to finish the global TSO synchronization.
+func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
+	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	// Get all Local TSO Allocator leaders
+	allocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	if err != nil {
+		return nil, err
+	}
+	var processedDCs []string
+	if request.GetMaxTs() == nil || request.GetMaxTs().GetPhysical() == 0 {
+		// The first phase of synchronization: collect the max local ts
+		var maxLocalTS pdpb.Timestamp
+		for _, allocator := range allocatorLeaders {
+			// No longer leader, just skip here because
+			// the global allocator will check if all DCs are handled.
+			if !allocator.IsStillAllocatorLeader() {
+				continue
+			}
+			currentLocalTSO, err := allocator.GetCurrentTSO()
+			if err != nil {
+				return nil, err
+			}
+			if tsoutil.CompareTimestamp(&currentLocalTSO, &maxLocalTS) > 0 {
+				maxLocalTS = currentLocalTSO
+			}
+			processedDCs = append(processedDCs, allocator.GetDCLocation())
+		}
+		return &pdpb.SyncMaxTSResponse{
+			Header:     s.header(),
+			MaxLocalTs: &maxLocalTS,
+			Dcs:        processedDCs,
+		}, nil
+	}
+	// The second phase of synchronization: do the writing
+	for _, allocator := range allocatorLeaders {
+		if !allocator.IsStillAllocatorLeader() {
+			continue
+		}
+		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
+			return nil, err
+		}
+		processedDCs = append(processedDCs, allocator.GetDCLocation())
+	}
+	return &pdpb.SyncMaxTSResponse{
+		Header: s.header(),
+		Dcs:    processedDCs,
+	}, nil
+}
+
+// validateInternalRequest checks if server is closed, which is used to validate
+// the gRPC communication between PD servers internally.
+func (s *Server) validateInternalRequest(header *pdpb.RequestHeader) error {
+	if s.IsClosed() {
+		return errors.WithStack(ErrNotStarted)
+	}
+	leaderID := s.GetLeader().GetMemberId()
+	if leaderID != header.GetSenderId() {
+		return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
+	}
+	return nil
 }

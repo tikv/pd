@@ -15,6 +15,7 @@ package tso_test
 
 import (
 	"context"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server"
@@ -42,11 +43,9 @@ func (s *testManagerSuite) TearDownSuite(c *C) {
 // and test whether we can get the whole dc-location config from each server.
 func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	testCase := struct {
-		serverNumber     int
 		dcLocationNumber int
 		dcLocationConfig map[string]string
 	}{
-		serverNumber:     6,
 		dcLocationNumber: 3,
 		dcLocationConfig: map[string]string{
 			"pd1": "dc-1",
@@ -57,7 +56,8 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 			"pd6": "dc-3",
 		},
 	}
-	cluster, err := tests.NewTestCluster(s.ctx, testCase.serverNumber, func(conf *config.Config, serverName string) {
+	serverNumber := len(testCase.dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
 		conf.LocalTSO.EnableLocalTSO = true
 		conf.LocalTSO.DCLocation = testCase.dcLocationConfig[serverName]
 	})
@@ -85,6 +85,60 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 				c.Assert(obtainedDCLocation, Equals, expectedDCLocation)
 			}
 		}
-		c.Assert(obtainedServerNumber, Equals, testCase.serverNumber)
+		c.Assert(obtainedServerNumber, Equals, serverNumber)
+	}
+}
+
+const waitAllocatorPriorityCheckInterval = 3 * time.Minute
+
+var _ = Suite(&testPrioritySuite{})
+
+type testPrioritySuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testPrioritySuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *testPrioritySuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+func (s *testPrioritySuite) TestAllocatorPriority(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	serverNumber := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	// Before the priority is checked, we may have allocators typology like this:
+	// pd1: dc-1, dc-2 and dc-3 allocator leader
+	// pd2: None
+	// pd3: None
+	// After the priority is checked, we should have allocators typology like this:
+	// pd1: dc-1 allocator leader
+	// pd2: dc-2 allocator leader
+	// pd3: dc-3 allocator leader
+
+	// Because the default priority checking period is 1 minute,
+	// so we sleep longer here.
+	time.Sleep(waitAllocatorPriorityCheckInterval)
+
+	for serverName, dcLocation := range dcLocationConfig {
+		currentLeaderName := cluster.WaitAllocatorLeader(dcLocation)
+		c.Assert(currentLeaderName, Equals, serverName)
 	}
 }

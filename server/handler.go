@@ -16,6 +16,7 @@ package server
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"path"
 	"strconv"
@@ -35,6 +36,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
@@ -271,11 +273,6 @@ func (h *Handler) AddScatterRangeScheduler(args ...string) error {
 	return h.AddScheduler(schedulers.ScatterRangeType, args...)
 }
 
-// AddAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
-func (h *Handler) AddAdjacentRegionScheduler(args ...string) error {
-	return h.AddScheduler(schedulers.AdjacentRegionType, args...)
-}
-
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 	return h.AddScheduler(schedulers.GrantLeaderType, strconv.FormatUint(storeID, 10))
@@ -485,15 +482,10 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 }
 
 // AddTransferRegionOperator adds an operator to transfer region to the stores.
-func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]struct{}) error {
+func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]placement.PeerRoleType) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
-	}
-
-	if c.GetOpts().IsPlacementRulesEnabled() {
-		// Cannot determine role when placement rules enabled. Not supported now.
-		return errors.New("transfer region is not supported when placement rules enabled")
 	}
 
 	region := c.GetRegion(regionID)
@@ -501,8 +493,13 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return ErrRegionNotFound(regionID)
 	}
 
-	if len(storeIDs) > c.GetOpts().GetMaxReplicas() {
-		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDs))
+	if c.GetOpts().IsPlacementRulesEnabled() {
+		// Cannot determine role without peer role when placement rules enabled. Not supported now.
+		for _, role := range storeIDs {
+			if len(role) == 0 {
+				return errors.New("transfer region without peer role is not supported when placement rules enabled")
+			}
+		}
 	}
 
 	var store *core.StoreInfo
@@ -516,12 +513,11 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		}
 	}
 
-	peers := make(map[uint64]*metapb.Peer)
-	for id := range storeIDs {
-		peers[id] = &metapb.Peer{StoreId: id}
+	roles := make(map[uint64]placement.PeerRoleType)
+	for id, peerRole := range storeIDs {
+		roles[id] = peerRole
 	}
-
-	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, peers)
+	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, roles)
 	if err != nil {
 		log.Debug("fail to create move region operator", errs.ZapError(err))
 		return err
@@ -772,40 +768,62 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 	return nil
 }
 
-// GetDownPeerRegions gets the region with down peer.
-func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
+// AddScatterRegionsOperators add operators to scatter regions and return the processed percentage and error
+func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, endRawKey, group string, retryLimit int) (int, error) {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return 0, err
 	}
-	return c.GetRegionStatsByType(statistics.DownPeer), nil
+	var failureRegionID []string
+	var regions []*core.RegionInfo
+	// If startKey and endKey are both defined, use them first.
+	if len(startRawKey) > 0 && len(endRawKey) > 0 {
+		startKey, err := hex.DecodeString(startRawKey)
+		if err != nil {
+			return 0, err
+		}
+		endKey, err := hex.DecodeString(endRawKey)
+		if err != nil {
+			return 0, err
+		}
+		regions = c.ScanRegions(startKey, endKey, -1)
+	} else {
+		for _, id := range regionIDs {
+			region := c.GetRegion(id)
+			if region == nil {
+				failureRegionID = append(failureRegionID, fmt.Sprintf("%v", id))
+				continue
+			}
+			regions = append(regions, region)
+		}
+	}
+	// check region hot status
+	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
+	for _, region := range regions {
+		regionMap[region.GetID()] = region
+	}
+	failures := make(map[uint64]error, len(regionMap))
+	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
+	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, retryLimit)
+	for regionID := range failures {
+		failureRegionID = append(failureRegionID, fmt.Sprintf("%v", regionID))
+	}
+	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
+	for _, op := range ops {
+		if ok := c.GetOperatorController().AddOperator(op); !ok {
+			failureRegionID = append(failureRegionID, fmt.Sprintf("%v", op.RegionID()))
+		}
+	}
+	return 100 - (len(failureRegionID) * 100 / len(regions)), errors.New("unprocessed regions:[" + strings.Join(failureRegionID, ",") + "]")
 }
 
-// GetExtraPeerRegions gets the region exceeds the specified number of peers.
-func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
+// GetRegionsByType gets the region with specified type.
+func (h *Handler) GetRegionsByType(typ statistics.RegionStatisticType) ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
 		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	return c.GetRegionStatsByType(statistics.ExtraPeer), nil
-}
-
-// GetMissPeerRegions gets the region less than the specified number of peers.
-func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetRegionStatsByType(statistics.MissPeer), nil
-}
-
-// GetPendingPeerRegions gets the region with pending peer.
-func (h *Handler) GetPendingPeerRegions() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetRegionStatsByType(statistics.PendingPeer), nil
+	return c.GetRegionStatsByType(typ), nil
 }
 
 // GetSchedulerConfigHandler gets the handler of schedulers.
@@ -821,24 +839,6 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
 	return mux
-}
-
-// GetOfflinePeer gets the region with offline peer.
-func (h *Handler) GetOfflinePeer() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetRegionStatsByType(statistics.OfflinePeer), nil
-}
-
-// GetEmptyRegion gets the region with empty size.
-func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetRegionStatsByType(statistics.EmptyRegion), nil
 }
 
 // ResetTS resets the ts with specified tso.

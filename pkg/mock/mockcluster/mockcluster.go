@@ -47,7 +47,7 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(opts *config.PersistOptions) *Cluster {
-	return &Cluster{
+	clus := &Cluster{
 		BasicCluster:     core.NewBasicCluster(),
 		IDAllocator:      mockid.NewIDAllocator(),
 		HotCache:         statistics.NewHotCache(),
@@ -56,6 +56,10 @@ func NewCluster(opts *config.PersistOptions) *Cluster {
 		suspectRegions:   map[uint64]struct{}{},
 		disabledFeatures: make(map[versioninfo.Feature]struct{}),
 	}
+	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
+		clus.initRuleManager()
+	}
+	return clus
 }
 
 // GetOpts returns the cluster configuration.
@@ -647,4 +651,11 @@ func (mc *Cluster) CheckRegionUnderSuspect(id uint64) bool {
 // ResetSuspectRegions only used for unit test
 func (mc *Cluster) ResetSuspectRegions() {
 	mc.suspectRegions = map[uint64]struct{}{}
+}
+
+// SetStoreLastHeartbeatInterval set the last heartbeat to the target store
+func (mc *Cluster) SetStoreLastHeartbeatInterval(storeID uint64, interval time.Duration) {
+	store := mc.GetStore(storeID)
+	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-interval)))
+	mc.PutStore(newStore)
 }

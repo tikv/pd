@@ -42,9 +42,11 @@ type Builder struct {
 	regionID    uint64
 	regionEpoch *metapb.RegionEpoch
 	rules       []*placement.Rule
+	roles       map[uint64]placement.PeerRoleType
 
 	// operation record
 	originPeers         peersMap
+	unhealthyPeers      peersMap
 	originLeaderStoreID uint64
 	targetPeers         peersMap
 	targetLeaderStoreID uint64
@@ -78,6 +80,13 @@ func SkipOriginJointStateCheck(b *Builder) {
 	b.skipOriginJointStateCheck = true
 }
 
+// SetPeerRole set peer role info into builder
+func SetPeerRole(roles map[uint64]placement.PeerRoleType) BuilderOption {
+	return func(builder *Builder) {
+		builder.roles = roles
+	}
+}
+
 // NewBuilder creates a Builder.
 func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
@@ -95,6 +104,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	// origin peers
 	err := b.err
 	originPeers := newPeersMap()
+	unhealthyPeers := newPeersMap()
 
 	for _, p := range region.GetPeers() {
 		if p == nil || p.GetStoreId() == 0 {
@@ -102,6 +112,14 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 			break
 		}
 		originPeers.Set(p)
+	}
+
+	for _, p := range region.GetPendingPeers() {
+		unhealthyPeers.Set(p)
+	}
+
+	for _, p := range region.GetDownPeers() {
+		unhealthyPeers.Set(p.Peer)
 	}
 
 	// origin leader
@@ -132,6 +150,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 
 	b.rules = rules
 	b.originPeers = originPeers
+	b.unhealthyPeers = unhealthyPeers
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
 	b.allowDemote = supportJointConsensus
@@ -182,6 +201,8 @@ func (b *Builder) PromoteLearner(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot promote peer %d: not found", storeID)
 	} else if !core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot promote peer %d: is not learner", storeID)
+	} else if _, ok := b.unhealthyPeers[storeID]; ok {
+		b.err = errors.Errorf("cannot promote peer %d: unhealthy", storeID)
 	} else {
 		b.targetPeers.Set(&metapb.Peer{
 			Id:      peer.GetId(),
@@ -368,7 +389,11 @@ func (b *Builder) prepareBuild() (string, error) {
 
 	// If no target leader is specified, try not to change the leader as much as possible.
 	if b.targetLeaderStoreID == 0 {
-		if peer, ok := b.targetPeers[b.originLeaderStoreID]; ok && !core.IsLearner(peer) {
+		originLeaderStepDown := false
+		if role, ok := b.roles[b.originLeaderStoreID]; ok && role == placement.Follower {
+			originLeaderStepDown = true
+		}
+		if peer, ok := b.targetPeers[b.originLeaderStoreID]; ok && !core.IsLearner(peer) && !originLeaderStepDown {
 			b.targetLeaderStoreID = b.originLeaderStoreID
 		}
 	}
@@ -434,7 +459,6 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 			b.execAddPeer(peer)
 		}
 	}
-
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
 		return kind, errors.New("no valid leader")
@@ -495,6 +519,10 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[targetLeaderStoreID]
 		if !b.allowLeader(peer, false) {
+			continue
+		}
+		// if role info is given, store having role follower should not be target leader.
+		if role, ok := b.roles[targetLeaderStoreID]; ok && role == placement.Follower {
 			continue
 		}
 		if b.targetLeaderStoreID == 0 {

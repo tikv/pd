@@ -26,8 +26,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -85,6 +87,12 @@ type Config struct {
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
+	// The interval to update physical part of timestamp. Usually, this config should not be set.
+	// It's only useful for test purposes.
+	// This config is only valid in 50ms to 10s. If it's configured too long or too short, it will
+	// be automatically clamped to the range.
+	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
+
 	// Local TSO service related configuration.
 	LocalTSO LocalTSOConfig `toml:"local-tso" json:"local-tso"`
 
@@ -121,7 +129,7 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
-	Security grpcutil.SecurityConfig `toml:"security" json:"security"`
+	Security SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
@@ -213,6 +221,7 @@ const (
 	defaultKeyType          = "table"
 
 	defaultStrictlyMatchLabel  = false
+	defaultEnablePlacmentRules = true
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 
@@ -221,6 +230,11 @@ const (
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
+
+	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
+	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
+	maxTSOUpdatePhysicalInterval     = 10 * time.Second
+	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
 )
 
 var (
@@ -498,6 +512,14 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustDuration(&c.TSOSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
 
+	adjustDuration(&c.TSOUpdatePhysicalInterval, DefaultTSOUpdatePhysicalInterval)
+
+	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
+		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
+	} else if c.TSOUpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
+		c.TSOUpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
+	}
+
 	if err := c.LocalTSO.Validate(); err != nil {
 		return err
 	}
@@ -542,6 +564,8 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	c.Dashboard.adjust(configMetaData.Child("dashboard"))
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
+
+	c.Security.Encryption.Adjust()
 
 	return nil
 }
@@ -1021,6 +1045,9 @@ func (c *ReplicationConfig) Validate() error {
 
 func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
+	if !meta.IsDefined("enable-placement-rules") {
+		c.EnablePlacementRules = defaultEnablePlacmentRules
+	}
 	if !meta.IsDefined("strictly-match-label") {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
 	}
@@ -1143,6 +1170,7 @@ func (c *Config) SetupLogger() error {
 	}
 	c.logger = lg
 	c.logProps = p
+	logutil.SetRedactLog(c.Security.RedactInfoLog)
 	return nil
 }
 
@@ -1363,4 +1391,12 @@ func (c *LocalTSOConfig) Validate() error {
 		return errors.New(errMsg)
 	}
 	return nil
+}
+
+// SecurityConfig indicates the security configuration for pd server
+type SecurityConfig struct {
+	grpcutil.TLSConfig
+	// RedactInfoLog indicates that whether enabling redact log
+	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
+	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
 }

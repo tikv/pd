@@ -45,7 +45,7 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 }
 
 // @Tags scheduler
-// @Summary List running schedulers.
+// @Summary List all schedulers by status.
 // @Produce json
 // @Success 200 {array} string
 // @Failure 500 {string} string "PD server failed to proceed the request."
@@ -56,7 +56,27 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.r.JSON(w, http.StatusOK, schedulers)
+
+	status := r.URL.Query().Get("status")
+	switch status {
+	case "paused":
+		var pausedSchedulers []string
+		for _, scheduler := range schedulers {
+			paused, err := h.IsSchedulerPaused(scheduler)
+			if err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+
+			if paused {
+				pausedSchedulers = append(pausedSchedulers, scheduler)
+			}
+		}
+		h.r.JSON(w, http.StatusOK, pausedSchedulers)
+		return
+	default:
+		h.r.JSON(w, http.StatusOK, schedulers)
+	}
 }
 
 // FIXME: details of input json body params
@@ -127,21 +147,6 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-	case schedulers.AdjacentRegionName:
-		var args []string
-		leaderLimit, ok := input["leader_limit"].(string)
-		if ok {
-			args = append(args, leaderLimit)
-		}
-		peerLimit, ok := input["peer_limit"].(string)
-		if ok {
-			args = append(args, peerLimit)
-		}
-
-		if err := h.AddAdjacentRegionScheduler(args...); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 	case schedulers.GrantLeaderName:
 		storeID, ok := input["store_id"].(float64)
 		if !ok {

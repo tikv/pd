@@ -15,6 +15,7 @@ package pd
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -41,8 +42,8 @@ type Region struct {
 type Client interface {
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
-	// GetMemberInfo gets the members Info from PD
-	GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error)
+	// GetAllMembers gets the members Info from PD
+	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
 	// GetLeaderAddr returns current leader's address. It returns "" before
 	// syncing leader from server.
 	GetLeaderAddr() string
@@ -56,6 +57,8 @@ type Client interface {
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
 	GetRegion(ctx context.Context, key []byte) (*Region, error)
+	// GetRegionFromMember gets a region from certain members.
+	GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error)
 	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
 	GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
@@ -221,9 +224,9 @@ func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.Canc
 	}
 }
 
-func (c *client) GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error) {
+func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	start := time.Now()
-	defer func() { cmdDurationGetMemberInfo.Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	resp, err := c.leaderClient().GetMembers(ctx, &pdpb.GetMembersRequest{
@@ -231,7 +234,7 @@ func (c *client) GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error) {
 	})
 	cancel()
 	if err != nil {
-		cmdFailDurationGetMemberInfo.Observe(time.Since(start).Seconds())
+		cmdFailDurationGetAllMembers.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
 	}
@@ -371,8 +374,8 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 	// Server returns the highest ts.
 	logical -= int64(resp.GetCount() - 1)
 	if tsLessEqual(physical, logical, c.lastPhysical, c.lastLogical) {
-		panic(errors.Errorf("timestamp fallback, newly acquired ts (%d,%d) is less or equal to last one (%d, %d)",
-			physical, logical, c.lastLogical, c.lastLogical))
+		panic(errors.Errorf("timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
+			physical, logical, c.lastPhysical, c.lastLogical))
 	}
 	c.lastPhysical = physical
 	c.lastLogical = logical + int64(len(requests)) - 1
@@ -520,6 +523,44 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
+	}
+	return c.parseRegionResponse(resp), nil
+}
+
+func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+
+	var resp *pdpb.GetRegionResponse
+	for _, url := range memberURLs {
+		conn, err := c.getOrCreateGRPCConn(url)
+		if err != nil {
+			log.Error("[pd] can't get grpc connection", zap.String("memberURL", url), errs.ZapError(err))
+			continue
+		}
+		cc := pdpb.NewPDClient(conn)
+		resp, err = cc.GetRegion(ctx, &pdpb.GetRegionRequest{
+			Header:    c.requestHeader(),
+			RegionKey: key,
+		})
+		if err != nil {
+			log.Error("[pd] can't get region info", zap.String("memberURL", url), errs.ZapError(err))
+			continue
+		}
+		if resp != nil {
+			break
+		}
+	}
+
+	if resp == nil {
+		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
+		return nil, errors.WithStack(errors.New(errorMsg))
 	}
 	return c.parseRegionResponse(resp), nil
 }

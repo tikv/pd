@@ -34,8 +34,34 @@ func ParseTS(ts uint64) (time.Time, uint64) {
 
 // ParseTimestamp parses `pdpb.Timestamp` to `time.Time`
 func ParseTimestamp(ts pdpb.Timestamp) (time.Time, uint64) {
-	logical := uint64(ts.Logical)
-	physical := ts.Physical
-	physicalTime := time.Unix(int64(physical/1000), int64(physical)%1000*time.Millisecond.Nanoseconds())
+	logical := uint64(ts.GetLogical())
+	physicalTime := time.Unix(ts.GetPhysical()/1000, ts.GetPhysical()%1000*time.Millisecond.Nanoseconds())
 	return physicalTime, logical
+}
+
+// GenerateTS generate an `uint64` TS by passing a `pdpb.Timestamp`.
+func GenerateTS(ts *pdpb.Timestamp) uint64 {
+	return uint64(ts.GetPhysical())<<18 | uint64(ts.GetLogical())&0x3FFFF
+}
+
+// GenerateTimestamp generate a `pdpb.Timestamp` by passing `time.Time` and `uint64`
+func GenerateTimestamp(physical time.Time, logical uint64) *pdpb.Timestamp {
+	return &pdpb.Timestamp{
+		Physical: physical.UnixNano() / int64(time.Millisecond),
+		Logical:  int64(logical),
+	}
+}
+
+// CompareTimestamp is used to compare two timestamps.
+// If tsoOne > tsoTwo, returns 1.
+// If tsoOne = tsoTwo, returns 0.
+// If tsoOne < tsoTwo, returns -1.
+func CompareTimestamp(tsoOne, tsoTwo *pdpb.Timestamp) int {
+	if tsoOne.GetPhysical() > tsoTwo.GetPhysical() || (tsoOne.GetPhysical() == tsoTwo.GetPhysical() && tsoOne.GetLogical() > tsoTwo.GetLogical()) {
+		return 1
+	}
+	if tsoOne.GetPhysical() == tsoTwo.GetPhysical() && tsoOne.GetLogical() == tsoTwo.GetLogical() {
+		return 0
+	}
+	return -1
 }

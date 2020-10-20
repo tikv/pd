@@ -21,8 +21,10 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
@@ -62,10 +64,28 @@ func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region 
 }
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
-func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, peers map[uint64]*metapb.Peer) (*Operator, error) {
-	return NewBuilder(desc, cluster, region).
-		SetPeers(peers).
-		Build(kind)
+func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, roles map[uint64]placement.PeerRoleType) (*Operator, error) {
+	// construct the peers from roles
+	peers := make(map[uint64]*metapb.Peer)
+	for storeID, role := range roles {
+		peers[storeID] = &metapb.Peer{
+			StoreId: storeID,
+			Role:    role.MetaPeerRole(),
+		}
+	}
+	builder := NewBuilder(desc, cluster, region, SetPeerRole(roles)).SetPeers(peers)
+	for storeID, role := range roles {
+		switch role {
+		case placement.Leader:
+			builder.SetLeader(storeID)
+		case placement.Follower:
+			// if all roles are follower, the originLeaderStoreID may be selected in prepare build phase.
+		case placement.Voter, placement.Learner:
+			// peer's role is already assigned at the begin of the function
+			// no need to process Learner again.
+		}
+	}
+	return builder.Build(kind)
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.

@@ -103,6 +103,21 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	}
 }
 
+func (f *hotPeerCache) collectRegionMetrics(byteRate, keyRate float64, interval uint64) {
+	regionHeartbeatIntervalHist.Observe(float64(interval))
+	if interval == 0 {
+		return
+	}
+	if f.kind == ReadFlow {
+		readByteHist.Observe(byteRate)
+		readKeyHist.Observe(keyRate)
+	}
+	if f.kind == WriteFlow {
+		writeByteHist.Observe(byteRate)
+		writeKeyHist.Observe(keyRate)
+	}
+}
+
 // CheckRegionFlow checks the flow information of region.
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
 	bytes := float64(f.getRegionBytes(region))
@@ -113,6 +128,8 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 
 	byteRate := bytes / float64(interval)
 	keyRate := keys / float64(interval)
+
+	f.collectRegionMetrics(byteRate, keyRate, interval)
 
 	// old region is in the front and new region is in the back
 	// which ensures it will hit the cache if moving peer or transfer leader occurs with the same replica number
