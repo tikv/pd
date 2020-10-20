@@ -35,7 +35,9 @@ type testConfigSuite struct {
 }
 
 func (s *testConfigSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
+		cfg.Replication.EnablePlacementRules = false
+	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()

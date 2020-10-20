@@ -24,6 +24,12 @@ import (
 
 var (
 	operatorsPrefix = "pd/api/v1/operators"
+	peerRoles       = map[string]struct{}{
+		"leader":   {},
+		"voter":    {},
+		"follower": {},
+		"learner":  {},
+	}
 )
 
 // NewOperatorCommand returns a operator command.
@@ -147,7 +153,7 @@ func transferLeaderCommandFunc(cmd *cobra.Command, args []string) {
 // NewTransferRegionCommand returns a command to transfer region.
 func NewTransferRegionCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "transfer-region <region_id> <to_store_id>...",
+		Use:   "transfer-region <region_id> <to_store_id> [leader|voter|follower|learner] ...",
 		Short: "transfer a region's peers to the specified stores",
 		Run:   transferRegionCommandFunc,
 	}
@@ -160,9 +166,14 @@ func transferRegionCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	ids, err := parseUint64s(args)
+	ids, roles, err := parseUit64sAndPeerRole(args)
 	if err != nil {
 		cmd.Println(err)
+		return
+	}
+
+	if len(roles) > 0 && len(roles)+1 != len(ids) {
+		cmd.Println("peer role is not match with store")
 		return
 	}
 
@@ -170,6 +181,9 @@ func transferRegionCommandFunc(cmd *cobra.Command, args []string) {
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["to_store_ids"] = ids[1:]
+	if len(roles) > 0 {
+		input["peer_roles"] = roles
+	}
 	postJSON(cmd, operatorsPrefix, input)
 }
 
@@ -422,4 +436,32 @@ func parseUint64s(args []string) ([]uint64, error) {
 		results = append(results, v)
 	}
 	return results, nil
+}
+
+func parseUit64sAndPeerRole(args []string) ([]uint64, []string, error) {
+	if len(args) <= 2 {
+		ids, err := parseUint64s(args)
+		return ids, nil, err
+	}
+	if _, ok := peerRoles[args[2]]; !ok {
+		ids, err := parseUint64s(args)
+		return ids, nil, err
+	}
+
+	ids := make([]uint64, 0, len(args))
+	roles := make([]string, 0, len(args))
+	for idx, arg := range args {
+		if idx == 0 || idx&1 == 1 {
+			v, err := strconv.ParseUint(arg, 10, 64)
+			if err != nil {
+				return nil, nil, errors.WithStack(err)
+			}
+			ids = append(ids, v)
+			continue
+		}
+		if _, ok := peerRoles[arg]; ok {
+			roles = append(roles, arg)
+		}
+	}
+	return ids, roles, nil
 }
