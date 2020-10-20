@@ -40,8 +40,8 @@ var (
 			keyDim:  32,
 		},
 		ReadFlow: {
-			byteDim: 8 * 1024,
-			keyDim:  128,
+			byteDim: 256,
+			keyDim:  16,
 		},
 	}
 )
