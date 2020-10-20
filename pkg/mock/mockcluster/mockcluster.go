@@ -642,3 +642,10 @@ func (mc *Cluster) CheckRegionUnderSuspect(id uint64) bool {
 func (mc *Cluster) ResetSuspectRegions() {
 	mc.suspectRegions = map[uint64]struct{}{}
 }
+
+// SetStoreLastHeartbeatInterval set the last heartbeat to the target store
+func (mc *Cluster) SetStoreLastHeartbeatInterval(storeID uint64, interval time.Duration) {
+	store := mc.GetStore(storeID)
+	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-interval)))
+	mc.PutStore(newStore)
+}

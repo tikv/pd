@@ -272,11 +272,6 @@ func (h *Handler) AddScatterRangeScheduler(args ...string) error {
 	return h.AddScheduler(schedulers.ScatterRangeType, args...)
 }
 
-// AddAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
-func (h *Handler) AddAdjacentRegionScheduler(args ...string) error {
-	return h.AddScheduler(schedulers.AdjacentRegionType, args...)
-}
-
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 	return h.AddScheduler(schedulers.GrantLeaderType, strconv.FormatUint(storeID, 10))
