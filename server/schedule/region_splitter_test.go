@@ -63,6 +63,7 @@ type testRegionSplitterSuite struct{}
 
 func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	handler := newMockSplitRegionsHandler()
 	tc.AddLeaderRegionWithRange(1, "eee", "hhh", 2, 3, 4)
@@ -89,6 +90,7 @@ func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 
 func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
 	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	handler := newMockSplitRegionsHandler()
 	tc.AddLeaderRegionWithRange(1, "aaa", "ccc", 2, 3)
