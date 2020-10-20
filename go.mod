@@ -7,8 +7,8 @@ require (
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
-	github.com/coreos/go-semver v0.2.0
-	github.com/coreos/pkg v0.0.0-20160727233714-3ac0863d7acf
+	github.com/coreos/go-semver v0.3.0
+	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f
 	github.com/docker/go-units v0.4.0
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
 	github.com/go-playground/overalls v0.0.0-20180201144345-22ec1a223b7c
@@ -19,6 +19,8 @@ require (
 	github.com/gorilla/mux v1.7.3
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/juju/ratelimit v1.0.1
+	github.com/mattn/go-colorable v0.1.8 // indirect
+	github.com/mattn/go-runewidth v0.0.9 // indirect
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.0.0-20151014174947-eeaced052adb
@@ -37,9 +39,9 @@ require (
 	github.com/prometheus/client_golang v1.0.0
 	github.com/prometheus/common v0.4.1
 	github.com/sasha-s/go-deadlock v0.2.0
-	github.com/sirupsen/logrus v1.2.0
-	github.com/spf13/cobra v0.0.3
-	github.com/spf13/pflag v1.0.1
+	github.com/sirupsen/logrus v1.7.0
+	github.com/spf13/cobra v1.1.1
+	github.com/spf13/pflag v1.0.5
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
 	github.com/swaggo/swag v1.6.6-0.20200529100950-7c765ddd0476
 	github.com/syndtr/goleveldb v0.0.0-20180815032940-ae2bd5eed72d
@@ -48,9 +50,11 @@ require (
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.uber.org/goleak v0.10.0
 	go.uber.org/zap v1.15.0
+	golang.org/x/sys v0.0.0-20201018230417-eeed37f84f13 // indirect
 	golang.org/x/tools v0.0.0-20200527183253-8e7acdbce89d
 	google.golang.org/grpc v1.25.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
+	gopkg.in/yaml.v2 v2.3.0 // indirect
 )
 
 replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5

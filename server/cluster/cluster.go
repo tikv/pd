@@ -133,13 +133,14 @@ type Status struct {
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		ctx:          ctx,
-		running:      false,
-		clusterID:    clusterID,
-		clusterRoot:  root,
-		regionSyncer: regionSyncer,
-		httpClient:   httpClient,
-		etcdClient:   etcdClient,
+		ctx:              ctx,
+		running:          false,
+		clusterID:        clusterID,
+		clusterRoot:      root,
+		regionSyncer:     regionSyncer,
+		httpClient:       httpClient,
+		etcdClient:       etcdClient,
+		splitRegionInfos: make(map[uint64][]uint64),
 	}
 }
 

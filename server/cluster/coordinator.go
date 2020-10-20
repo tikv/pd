@@ -456,8 +456,11 @@ func (c *coordinator) collectHotSpotMetrics() {
 	// Collects hot write region metrics.
 	s, ok := c.schedulers[schedulers.HotRegionName]
 	if !ok {
-		c.RUnlock()
-		return
+		s, ok = c.schedulers[schedulers.MultipleDimensionName]
+		if !ok {
+			c.RUnlock()
+			return
+		}
 	}
 	c.RUnlock()
 	stores := c.cluster.GetStores()

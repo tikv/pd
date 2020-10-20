@@ -342,6 +342,23 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	}
 }
 
+func calcCV(data []float64) float64 {
+	var stdVar, mean float64
+	for _, d := range data {
+		mean += d
+	}
+	if len(data) <= 1 || mean == 0 {
+		return 0
+	}
+	mean /= float64(len(data))
+	for _, d := range data {
+		delta := d - mean
+		stdVar += delta * delta
+	}
+	stdVar /= float64(len(data) - 1)
+	return math.Sqrt(stdVar) / mean
+}
+
 // DimensionCount defines the number of dimensions
 const DimensionCount = 2
 
@@ -350,7 +367,6 @@ type regionInfo struct {
 	srcStoreID      uint64
 	dstStoreID      uint64
 	loads           [DimensionCount]float64
-	splittedLoads   [DimensionCount]float64
 	diffLoad        float64
 	splitRatio      float64
 	splitDimID      uint64
@@ -370,23 +386,6 @@ func newRegionInfo(id uint64, srcStoreID uint64, load1 float64, load2 float64) *
 
 func (r *regionInfo) NeedSplit() bool {
 	return r.splitRatio != 0
-}
-
-func (r *regionInfo) extract() (*regionInfo, bool) {
-	if !r.NeedSplit() {
-		return r, true
-	} else if len(r.splittedIDs) != 0 {
-		length := len(r.splittedIDs)
-		last := r.splittedIDs[length-1]
-		r.splittedIDs = r.splittedIDs[:length-1]
-		return r.splittedRegions[last], false
-	} else { // restore splitted loads
-		for dimID := uint64(0); dimID < DimensionCount; dimID++ {
-			r.loads[dimID] = r.splittedLoads[dimID]
-		}
-		r.splitRatio = 0
-		return r, true
-	}
 }
 
 type regionInfoByDiff []*regionInfo
@@ -437,20 +436,20 @@ func (rc *regionContainer) pop(dimID uint64, candidateStoreID uint64) *regionInf
 		}
 	}
 
-	var region *regionInfo
-	length := len(rc.candiRegions[dimID][sid])
-	region = rc.candiRegions[dimID][sid][length-1]
-
-	selectedRegion, finish := region.extract()
-	if selectedRegion != nil {
-		selectedRegion.dstStoreID = candidateStoreID
-		if selectedRegion.dstStoreID != selectedRegion.srcStoreID {
-			rc.migratedRegions = append(rc.migratedRegions, selectedRegion)
-		}
-	} else {
-		log.Info("untracked region", zap.Uint64("regionID", region.id))
+	if len(rc.candiRegions[dimID][sid]) == 0 {
+		log.Info("candiRegions should not empty",
+			zap.Uint64("dimID", dimID),
+			zap.Uint64("candidateStoreID", candidateStoreID),
+			zap.Uint64("sid", sid),
+			zap.Uint64("count", rc.count[dimID]),
+		)
+		return nil
 	}
-	if finish {
+
+	var selectedRegion *regionInfo
+	{
+		length := len(rc.candiRegions[dimID][sid])
+		selectedRegion = rc.candiRegions[dimID][sid][length-1]
 		rc.candiRegions[dimID][sid] = rc.candiRegions[dimID][sid][:length-1]
 		rc.count[dimID]--
 		if len(rc.candiRegions[dimID][sid]) == 0 {
@@ -458,6 +457,11 @@ func (rc *regionContainer) pop(dimID uint64, candidateStoreID uint64) *regionInf
 		}
 	}
 
+	selectedRegion.dstStoreID = candidateStoreID
+	// track region that needs to be migrated
+	if selectedRegion.dstStoreID != selectedRegion.srcStoreID {
+		rc.migratedRegions = append(rc.migratedRegions, selectedRegion)
+	}
 	return selectedRegion
 }
 
@@ -465,17 +469,23 @@ func (rc *regionContainer) getMigratedRegions() []*regionInfo {
 	return rc.migratedRegions
 }
 
-func (rc *regionContainer) getFailedSplitRegions(dimID uint64, storeID uint64) []*regionInfo {
-	var failedRegions, normalRegions []*regionInfo
+func (rc *regionContainer) getSplitFailedRegions(dimID uint64, storeID uint64, highLoadRegions map[uint64]*regionInfo, ratio float64) []*regionInfo {
+	var splitFailedRegions, normalRegions []*regionInfo
 	for _, region := range rc.candiRegions[dimID][storeID] {
-		if region.NeedSplit() && region.splittedIDs == nil {
-			failedRegions = append(failedRegions, region)
+		if region.NeedSplit() {
+			splitFailedRegions = append(splitFailedRegions, region)
 		} else {
 			normalRegions = append(normalRegions, region)
+
+			if dimID == 0 && region.loads[dimID] > ratio*2 {
+				highLoadRegions[region.id] = region
+				log.Info("highLoadRegion", zap.String("region", fmt.Sprintf("%+v", region)))
+			}
 		}
 	}
 	rc.candiRegions[dimID][storeID] = normalRegions
-	return failedRegions
+	rc.count[dimID] -= uint64(len(splitFailedRegions))
+	return splitFailedRegions
 }
 
 func (rc *regionContainer) empty(dimID uint64) bool {
@@ -552,7 +562,7 @@ func (si *storeInfo) sortBy(dimID uint64) {
 	}
 }
 
-func calcMaxMeanRatio(storeInfos []*storeInfo) float64 {
+func calcMaxMeanRatio(storeInfos []*storeInfo) (float64, float64) {
 	var ratios []float64
 	for dimID := uint64(0); dimID < DimensionCount; dimID++ {
 		var maxLoad, avgLoad float64
@@ -563,10 +573,21 @@ func calcMaxMeanRatio(storeInfos []*storeInfo) float64 {
 		avgLoad /= float64(len(storeInfos))
 		ratios = append(ratios, maxLoad/avgLoad)
 	}
-	return math.Max(ratios[0], ratios[1])
+	return ratios[0], ratios[1]
 }
 
-func greedySingle(storeInfos []*storeInfo, ratio float64, dimID uint64) (ret []*regionInfo, needSplit bool) {
+func loadBalanced(loads []float64, balanceRatio float64) bool {
+	var maxLoad, avgLoad float64
+	for _, load := range loads {
+		avgLoad += load
+		maxLoad = math.Max(maxLoad, load)
+	}
+	avgLoad /= float64(len(loads))
+	ratio := maxLoad / avgLoad
+	return ratio <= 1+2*balanceRatio
+}
+
+func greedySingle(storeInfos []*storeInfo, ratio float64, dimID uint64, candidateRegions map[uint64]*regionInfo) (ret []*regionInfo) {
 	if dimID == 0 {
 		sort.Sort(storeInfoByLoad0(storeInfos))
 	} else {
@@ -591,6 +612,11 @@ func greedySingle(storeInfos []*storeInfo, ratio float64, dimID uint64) (ret []*
 			if hStore.loads[dimID]-curRegion.loads[dimID] < 1-ratio {
 				continue
 			}
+			if len(candidateRegions) != 0 {
+				if _, exist := candidateRegions[curRegion.id]; !exist {
+					continue
+				}
+			}
 
 			for j := low; j < high; j++ {
 				lStore := storeInfos[j]
@@ -606,9 +632,11 @@ func greedySingle(storeInfos []*storeInfo, ratio float64, dimID uint64) (ret []*
 
 		high--
 	}
+	balanceRatio0, balanceRatio1 := calcMaxMeanRatio(storeInfos)
 	log.Info("greedySingle: summary",
 		zap.Int("migrationCost", len(ret)),
-		zap.Float64("balanceRatio", calcMaxMeanRatio(storeInfos)),
+		zap.Float64("balanceRatio0", balanceRatio0),
+		zap.Float64("balanceRatio1", balanceRatio1),
 	)
 	return
 }
@@ -667,7 +695,7 @@ func checkRegionSplit(region *regionInfo, ratio float64) bool {
 	region.splitRatio = ratio / region.loads[splitDimID]
 	region.splitDimID = splitDimID
 
-	if region.splitRatio > 0.9 && region.loads[splitDimID]*(1-region.splitRatio) < ratio/2 { // avoid splitting small regions
+	if region.splitRatio > 0.5 && region.loads[splitDimID]*(1-region.splitRatio) < ratio/2 { // avoid splitting small regions
 		region.splitRatio = 0.0
 		return false
 	}
@@ -684,8 +712,10 @@ func checkRegionSplit(region *regionInfo, ratio float64) bool {
 func splitProcedure(storeInfos []*storeInfo, candidateRegions *regionContainer, ratio float64) []*regionInfo {
 	splitRegions := make([]*regionInfo, 0)
 
+	balanceRatio0, balanceRatio1 := calcMaxMeanRatio(storeInfos)
 	log.Info("greedyBalance: before split",
-		zap.Float64("balanceRatio", calcMaxMeanRatio(storeInfos)),
+		zap.Float64("balanceRatio0", balanceRatio0),
+		zap.Float64("balanceRatio1", balanceRatio1),
 	)
 
 	// mark regions that can be removed so that the difference of two dimensions' loads does not exceed `ratio`
@@ -724,22 +754,16 @@ func splitProcedure(storeInfos []*storeInfo, candidateRegions *regionContainer, 
 		)
 	}
 
-	log.Info("greedyBalance: split",
-		zap.Float64("balanceRatio", calcMaxMeanRatio(storeInfos)),
-	)
-
 	return splitRegions
 }
 
 func migrationProcedure(storeInfos []*storeInfo, candidateRegions *regionContainer, ratio float64) []*regionInfo {
-	log.Info("greedyBalance: before migration",
-		zap.Float64("balanceRatio", calcMaxMeanRatio(storeInfos)),
-	)
+	highLoadRegions := make(map[uint64]*regionInfo)
 	// step 1: fill back the regions that can not be split
 	for _, store := range storeInfos {
 		for dimID := uint64(0); dimID < DimensionCount; dimID++ {
-			failedRegions := candidateRegions.getFailedSplitRegions(dimID, store.id)
-			for _, region := range failedRegions {
+			splitFailedRegions := candidateRegions.getSplitFailedRegions(dimID, store.id, highLoadRegions, ratio)
+			for _, region := range splitFailedRegions {
 				store.add(region)
 				log.Info("region can not be split",
 					zap.Uint64("storeID", store.id),
@@ -801,9 +825,24 @@ func migrationProcedure(storeInfos []*storeInfo, candidateRegions *regionContain
 	}
 
 	ret := candidateRegions.getMigratedRegions()
+	balanceRatio0, balanceRatio1 := calcMaxMeanRatio(storeInfos)
 	log.Info("greedyBalance: summary",
 		zap.Int("migrationCost", len(ret)),
-		zap.Float64("balanceRatio", calcMaxMeanRatio(storeInfos)),
+		zap.Float64("balanceRatio0", balanceRatio0),
+		zap.Float64("balanceRatio1", balanceRatio1),
 	)
+
+	if balanceRatio0 > 1+2*ratio && balanceRatio1 <= 1+2*ratio && len(highLoadRegions) > 0 {
+		extra := greedySingle(storeInfos, ratio*2, 0, highLoadRegions)
+		ret = append(ret, extra...)
+
+		balanceRatio0, balanceRatio1 := calcMaxMeanRatio(storeInfos)
+		log.Info("greedyBalance: adjust",
+			zap.Int("migrationCost", len(ret)),
+			zap.Float64("balanceRatio0", balanceRatio0),
+			zap.Float64("balanceRatio1", balanceRatio1),
+		)
+	}
+
 	return ret
 }
