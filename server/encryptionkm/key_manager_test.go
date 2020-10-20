@@ -224,7 +224,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerLoadKeys(c *C) {
 			},
 		},
 	}
-	err = saveKeys(client, leadership, masterKeyMeta, keys)
+	err = saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	// Create the key manager.
 	m, err := NewKeyManager(ctx, client, config)
@@ -325,7 +325,7 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 			},
 		},
 	}
-	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	// Use default config.
 	config := &encryption.Config{}
@@ -344,7 +344,7 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 	loadedKeys = proto.Clone(loadedKeys).(*encryptionpb.KeyDictionary)
 	delete(loadedKeys.Keys, 456)
 	m.keys.Store(loadedKeys)
-	m.keysRevision = 0
+	m.mu.keysRevision = 0
 	key, err = m.GetKey(uint64(456))
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(key, keys.Keys[456]), IsTrue)
@@ -367,7 +367,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	helper.eventAfterReload = func() {
+	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
@@ -401,7 +401,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 			},
 		},
 	}
-	err = saveKeys(client, leadership, masterKeyMeta, keys)
+	err = saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	<-reloadEvent
 	key, err := m.GetKey(123)
@@ -427,7 +427,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 			},
 		},
 	}
-	err = saveKeys(client, leadership, masterKeyMeta, keys)
+	err = saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	<-reloadEvent
 	key, err = m.GetKey(123)
@@ -478,7 +478,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	helper.eventAfterReload = func() {
+	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
@@ -533,7 +533,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	helper.eventAfterReload = func() {
+	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
@@ -556,7 +556,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 			},
 		},
 	}
-	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	// Config with different encrption method.
 	config := &encryption.Config{
@@ -609,7 +609,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	helper.eventAfterReload = func() {
+	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
@@ -632,7 +632,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 			},
 		},
 	}
-	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	// Config with different encrption method.
 	config := &encryption.Config{
@@ -686,7 +686,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	helper.now = func() time.Time { return time.Unix(int64(1601679533+101), 0) }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	helper.eventAfterReload = func() {
+	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
@@ -709,7 +709,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 			},
 		},
 	}
-	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	// Config with 100s rotation period.
 	rotationPeriod, err := time.ParseDuration("100s")
@@ -769,7 +769,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	helper.eventAfterReload = func() {
+	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
@@ -792,7 +792,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 			},
 		},
 	}
-	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	// Config with a different master key.
 	config := &encryption.Config{
@@ -839,7 +839,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	helper.eventAfterReload = func() {
+	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
@@ -862,7 +862,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 			},
 		},
 	}
-	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	// Use default config.
 	config := &encryption.Config{}
@@ -906,7 +906,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 1)
-	helper.eventAfterReload = func() {
+	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
@@ -935,7 +935,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 			},
 		},
 	}
-	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	// Config with 100s rotation period.
 	rotationPeriod, err := time.ParseDuration("100s")
@@ -1014,7 +1014,7 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	}
 	// Listen on leader check event
 	shouldResetLeader := int32(0)
-	helper.eventAfterLeaderCheck = func() {
+	helper.eventAfterLeaderCheckSuccess = func() {
 		if atomic.LoadInt32(&shouldResetLeader) != 0 {
 			leadership.Reset()
 		}
@@ -1047,7 +1047,7 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 			},
 		},
 	}
-	err := saveKeys(client, leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	// Config with 100s rotation period.
 	rotationPeriod, err := time.ParseDuration("100s")

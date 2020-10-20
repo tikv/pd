@@ -54,24 +54,25 @@ type KeyManager struct {
 	dataKeyRotationPeriod time.Duration
 	// Metadata defines the master key to use.
 	masterKeyMeta *encryptionpb.MasterKey
-	// Mutex for updating keys. Used for both of LoadKeys() and rotateKeyIfNeeded().
-	muUpdate sync.Mutex
-	// PD leadership of the current PD node. Only the PD leader will rotate data keys,
-	// or change current encryption method.
-	// Guarded by muUpdate.
-	leadership *election.Leadership
-	// Revision of keys loaded from etcd. Guarded by muUpdate.
-	keysRevision int64
-	// List of all encryption keys and current encryption key id,
-	// with type *encryptionpb.KeyDictionary
-	keys atomic.Value
 	// Helper methods. Tests can mock the helper to inject dependencies.
 	helper keyManagerHelper
+	// Mutex for updating keys. Used for both of LoadKeys() and rotateKeyIfNeeded().
+	mu struct {
+		sync.Mutex
+		// PD leadership of the current PD node. Only the PD leader will rotate data keys,
+		// or change current encryption method.
+		// Guarded by mu.
+		leadership *election.Leadership
+		// Revision of keys loaded from etcd. Guarded by mu.
+		keysRevision int64
+	}
+	// List of all encryption keys and current encryption key id,
+	// with type *encryptionpb.KeyDictionary. The content is read-only.
+	keys atomic.Value
 }
 
 // saveKeys saves encryption keys in etcd. Fail if given leadership is not current.
 func saveKeys(
-	etcdClient *clientv3.Client,
 	leadership *election.Leadership,
 	masterKeyMeta *encryptionpb.MasterKey,
 	keys *encryptionpb.KeyDictionary,
@@ -188,20 +189,19 @@ func newKeyManagerImpl(
 		return nil, err
 	}
 	// Start periodic check for keys change and rotation key if needed.
-	go m.startBackgroundLoop(ctx, m.keysRevision)
+	go m.startBackgroundLoop(ctx, m.mu.keysRevision)
 	return m, nil
 }
 
 func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 	// Create new context for the loop.
-	loopCtx, loopCancel := context.WithCancel(ctx)
-	defer loopCancel()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	// Setup key dictionary watcher
 	watcher := clientv3.NewWatcher(m.etcdClient)
+	watchChan := watcher.Watch(ctx, EncryptionKeysPath, clientv3.WithRev(revision))
+	watcherEnabled := true
 	defer watcher.Close()
-	watcherCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	watchChan := watcher.Watch(watcherCtx, EncryptionKeysPath, clientv3.WithRev(revision))
 	// Check data key rotation every min(dataKeyRotationPeriod, keyRotationCheckPeriod).
 	checkPeriod := m.dataKeyRotationPeriod
 	if keyRotationCheckPeriod < checkPeriod {
@@ -215,8 +215,9 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 		// Reload encryption keys updated by PD leader (could be ourselves).
 		case resp := <-watchChan:
 			if resp.Canceled {
-				// If the watcher failed, we rely solely on rotateKeyIfNeeded() to reload encryption keys.
+				// If the watcher failed, we fallback to reload every 10 minutes.
 				log.Warn("encryption key watcher canceled")
+				watcherEnabled = false
 				continue
 			}
 			for _, event := range resp.Events {
@@ -224,49 +225,61 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 					log.Warn("encryption keys is deleted unexpectedly")
 					continue
 				}
-				{
-					m.muUpdate.Lock()
-					m.loadKeysFromKV(event.Kv)
-					m.muUpdate.Unlock()
+				m.mu.Lock()
+				_, err := m.loadKeysFromKV(event.Kv)
+				m.mu.Unlock()
+				if err != nil {
+					log.Warn("fail to get encryption keys from watcher result", zap.Error(err))
 				}
 			}
-			m.helper.eventAfterReload()
+			m.helper.eventAfterReloadByWatcher()
 			// Check data key rotation in case we are the PD leader.
 		case <-m.helper.tick(ticker):
-			m.muUpdate.Lock()
+			m.mu.Lock()
 			err := m.rotateKeyIfNeeded(false /*forceUpdate*/)
 			if err != nil {
 				log.Warn("fail to rotate data encryption key", zap.Error(err))
 			}
-			m.muUpdate.Unlock()
+			// Fallback mechanism to reload keys if watcher failed.
+			if !watcherEnabled {
+				_, err = m.loadKeys()
+				if err != nil {
+					log.Warn("fail to reload keys after watcher failed", zap.Error(err))
+				}
+			}
+			m.mu.Unlock()
 			m.helper.eventAfterTicker()
 			// Server shutdown.
-		case <-loopCtx.Done():
+		case <-ctx.Done():
 			log.Info("encryption key manager is closed")
 			return
 		}
 	}
 }
 
+// loadKeysFromKV reload keys from etcd result.
+// Require mu lock to be held.
 func (m *KeyManager) loadKeysFromKV(
 	kv *mvccpb.KeyValue,
 ) (*encryptionpb.KeyDictionary, error) {
 	// Sanity check if keys revision is in order.
 	// etcd docs indicates watcher event can be out of order:
 	// https://etcd.io/docs/v3.4.0/learning/api_guarantees/#isolation-level-and-consistency-of-replicas
-	if kv.ModRevision <= m.keysRevision {
+	if kv.ModRevision <= m.mu.keysRevision {
 		return m.getKeys(), nil
 	}
 	keys, err := loadKeysFromKV(kv)
 	if err != nil {
 		return nil, err
 	}
-	m.keysRevision = kv.ModRevision
+	m.mu.keysRevision = kv.ModRevision
 	m.keys.Store(keys)
 	log.Info("reloaded encryption keys", zap.Int64("revision", kv.ModRevision))
 	return keys, nil
 }
 
+// loadKeys reload keys from etcd storage.
+// Require mu lock to be held.
 func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, err error) {
 	resp, err := etcdutil.EtcdKVGet(m.etcdClient, EncryptionKeysPath)
 	if err != nil {
@@ -279,16 +292,22 @@ func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return keys, err
+	return keys, nil
 }
 
+// rotateKeyIfNeeded rotate key if one of the following condition is meet.
+//   * Encryption method is changed.
+//   * Current key is exposed.
+//   * Current key expired.
+// Otherwise re-save all keys to finish master key rotation if forceUpdate = true.
+// Require mu lock to be held.
 func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
-	if m.leadership == nil || !m.leadership.Check() {
+	if m.mu.leadership == nil || !m.mu.leadership.Check() {
 		// We are not leader.
-		m.leadership = nil
+		m.mu.leadership = nil
 		return nil
 	}
-	m.helper.eventAfterLeaderCheck()
+	m.helper.eventAfterLeaderCheckSuccess()
 	// Reload encryption keys in case we are not up-to-date.
 	keys, err := m.loadKeys()
 	if err != nil {
@@ -320,10 +339,6 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 			if currentKey == nil {
 				return errs.ErrEncryptionCurrentKeyNotFound.GenWithStack("keyId = %d", keys.CurrentKeyId)
 			}
-			// Rotate key in case of:
-			// * Encryption method is changed.
-			// * Currnet key is exposed.
-			// * Current key expired.
 			if currentKey.Method != m.method || currentKey.WasExposed ||
 				time.Unix(int64(currentKey.CreationTime), 0).
 					Add(m.dataKeyRotationPeriod).Before(m.helper.now()) {
@@ -357,7 +372,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 		return nil
 	}
 	// Store updated keys in etcd.
-	err = saveKeys(m.etcdClient, m.leadership, m.masterKeyMeta, keys)
+	err = saveKeys(m.mu.leadership, m.masterKeyMeta, keys)
 	if err != nil {
 		m.helper.eventSaveKeysFailure()
 		log.Error("failed to save keys", zap.Error(err))
@@ -396,25 +411,27 @@ func (m *KeyManager) GetCurrentKey() (keyID uint64, key *encryptionpb.DataKey, e
 	return keyID, key, nil
 }
 
-// GetKey get the encryption key with the specific key id.
-func (m *KeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
-	localGetKey := func(keyId uint64) *encryptionpb.DataKey {
-		keys := m.getKeys()
-		if keys == nil || keys.Keys == nil {
-			return nil
-		}
-		return keys.Keys[keyId]
+// getKeyLocal gets specific encryption key by key id, from local cache.
+func (m *KeyManager) getKeyLocal(keyID uint64) *encryptionpb.DataKey {
+	keys := m.getKeys()
+	if keys == nil || keys.Keys == nil {
+		return nil
 	}
-	key := localGetKey(keyID)
+	return keys.Keys[keyID]
+}
+
+// GetKey gets specific encryption key by key id.
+func (m *KeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
+	key := m.getKeyLocal(keyID)
 	if key != nil {
 		return key, nil
 	}
 	// Key not found in memory.
 	// The key could be generated by another PD node, which shouldn't happen normally.
-	m.muUpdate.Lock()
-	defer m.muUpdate.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// Double check, in case keys is updated by watcher or another GetKey call.
-	key = localGetKey(keyID)
+	key = m.getKeyLocal(keyID)
 	if key != nil {
 		return key, nil
 	}
@@ -437,29 +454,29 @@ func (m *KeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
 // SetLeadership sets the PD leadership of the current node. PD leader is responsible to update
 // encryption keys, e.g. key rotation.
 func (m *KeyManager) SetLeadership(leadership *election.Leadership) error {
-	m.muUpdate.Lock()
-	defer m.muUpdate.Unlock()
-	m.leadership = leadership
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mu.leadership = leadership
 	return m.rotateKeyIfNeeded(true /*forceUpdate*/)
 }
 
 // keyManagerHelper provides interfaces for dependencies and event callbacks where tests can mock.
 type keyManagerHelper struct {
-	now                   func() time.Time
-	tick                  func(ticker *time.Ticker) <-chan time.Time
-	eventAfterReload      func()
-	eventAfterTicker      func()
-	eventAfterLeaderCheck func()
-	eventSaveKeysFailure  func()
+	now                          func() time.Time
+	tick                         func(ticker *time.Ticker) <-chan time.Time
+	eventAfterReloadByWatcher    func()
+	eventAfterTicker             func()
+	eventAfterLeaderCheckSuccess func()
+	eventSaveKeysFailure         func()
 }
 
 func defaultKeyManagerHelper() keyManagerHelper {
 	return keyManagerHelper{
-		now:                   func() time.Time { return time.Now() },
-		tick:                  func(ticker *time.Ticker) <-chan time.Time { return ticker.C },
-		eventAfterReload:      func() {},
-		eventAfterTicker:      func() {},
-		eventAfterLeaderCheck: func() {},
-		eventSaveKeysFailure:  func() {},
+		now:                          func() time.Time { return time.Now() },
+		tick:                         func(ticker *time.Ticker) <-chan time.Time { return ticker.C },
+		eventAfterReloadByWatcher:    func() {},
+		eventAfterTicker:             func() {},
+		eventAfterLeaderCheckSuccess: func() {},
+		eventSaveKeysFailure:         func() {},
 	}
 }
