@@ -65,13 +65,12 @@ func (r *RegionSplitter) SplitRegions(splitKeys [][]byte, retryLimit int) (int, 
 	unprocessedKeys := splitKeys
 	newRegions := make(map[uint64]struct{}, len(splitKeys))
 	for i := 0; i <= retryLimit; i++ {
-		if i > 0 {
-			time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(i)))*initialSleepDuration))
-		}
 		unprocessedKeys = r.splitRegionsByKeys(unprocessedKeys, newRegions)
 		if len(unprocessedKeys) < 1 {
 			break
 		}
+		// sleep for a while between each retry
+		time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(i)))*initialSleepDuration))
 	}
 	returned := make([]uint64, 0, len(newRegions))
 	for regionID := range newRegions {
@@ -118,6 +117,7 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64][][]byte, 
 	for _, key := range keys {
 		region := r.cluster.GetRegionByKey(key)
 		if region == nil {
+			log.Info("region hollow", logutil.ZapRedactByteString("key", key))
 			unProcessedKeys = append(unProcessedKeys, key)
 			continue
 		}
@@ -125,14 +125,14 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64][][]byte, 
 		if bytes.Equal(region.GetStartKey(), key) {
 			continue
 		}
-		group, ok := groupKeys[region.GetID()]
+		_, ok := groupKeys[region.GetID()]
 		if !ok {
 			groupKeys[region.GetID()] = [][]byte{}
 		}
 		log.Info("found region",
 			zap.Uint64("regionID", region.GetID()),
-			zap.String("key", logutil.RedactString(string(key[:]))))
-		groupKeys[region.GetID()] = append(group, key)
+			logutil.ZapRedactByteString("key", key))
+		groupKeys[region.GetID()] = append(groupKeys[region.GetID()], key)
 	}
 	return groupKeys, unProcessedKeys
 }

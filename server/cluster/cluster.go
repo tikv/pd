@@ -1442,12 +1442,12 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
 func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotSpotCache.CheckWrite(region, c.storesStats)
+	return c.hotSpotCache.CheckWrite(region)
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
 func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotSpotCache.CheckRead(region, c.storesStats)
+	return c.hotSpotCache.CheckRead(region)
 }
 
 // TODO: remove me.

@@ -36,8 +36,8 @@ type HotPeerStat struct {
 	KeyRate  float64  `json:"flow_keys"`
 
 	// rolling statistics, recording some recently added records.
-	rollingByteRate MovingAvg
-	rollingKeyRate  MovingAvg
+	RollingByteRate *TimeMedian
+	RollingKeyRate  *TimeMedian
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
@@ -84,26 +84,26 @@ func (stat *HotPeerStat) IsNew() bool {
 
 // GetByteRate returns denoised BytesRate if possible.
 func (stat *HotPeerStat) GetByteRate() float64 {
-	if stat.rollingByteRate == nil {
+	if stat.RollingByteRate == nil {
 		return stat.ByteRate
 	}
-	return stat.rollingByteRate.Get()
+	return stat.RollingByteRate.Get()
 }
 
 // GetKeyRate returns denoised KeysRate if possible.
 func (stat *HotPeerStat) GetKeyRate() float64 {
-	if stat.rollingKeyRate == nil {
+	if stat.RollingKeyRate == nil {
 		return stat.KeyRate
 	}
-	return stat.rollingKeyRate.Get()
+	return stat.RollingKeyRate.Get()
 }
 
 // Clone clones the HotPeerStat
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
 	ret.ByteRate = stat.GetByteRate()
-	ret.rollingByteRate = nil
+	ret.RollingByteRate = nil
 	ret.KeyRate = stat.GetKeyRate()
-	ret.rollingKeyRate = nil
+	ret.RollingKeyRate = nil
 	return &ret
 }

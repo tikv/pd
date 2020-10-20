@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
@@ -272,11 +273,6 @@ func (h *Handler) AddScatterRangeScheduler(args ...string) error {
 	return h.AddScheduler(schedulers.ScatterRangeType, args...)
 }
 
-// AddAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
-func (h *Handler) AddAdjacentRegionScheduler(args ...string) error {
-	return h.AddScheduler(schedulers.AdjacentRegionType, args...)
-}
-
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 	return h.AddScheduler(schedulers.GrantLeaderType, strconv.FormatUint(storeID, 10))
@@ -486,15 +482,10 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 }
 
 // AddTransferRegionOperator adds an operator to transfer region to the stores.
-func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]struct{}) error {
+func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]placement.PeerRoleType) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
-	}
-
-	if c.GetOpts().IsPlacementRulesEnabled() {
-		// Cannot determine role when placement rules enabled. Not supported now.
-		return errors.New("transfer region is not supported when placement rules enabled")
 	}
 
 	region := c.GetRegion(regionID)
@@ -502,8 +493,13 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return ErrRegionNotFound(regionID)
 	}
 
-	if len(storeIDs) > c.GetOpts().GetMaxReplicas() {
-		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDs))
+	if c.GetOpts().IsPlacementRulesEnabled() {
+		// Cannot determine role without peer role when placement rules enabled. Not supported now.
+		for _, role := range storeIDs {
+			if len(role) == 0 {
+				return errors.New("transfer region without peer role is not supported when placement rules enabled")
+			}
+		}
 	}
 
 	var store *core.StoreInfo
@@ -517,12 +513,11 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		}
 	}
 
-	peers := make(map[uint64]*metapb.Peer)
-	for id := range storeIDs {
-		peers[id] = &metapb.Peer{StoreId: id}
+	roles := make(map[uint64]placement.PeerRoleType)
+	for id, peerRole := range storeIDs {
+		roles[id] = peerRole
 	}
-
-	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, peers)
+	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, roles)
 	if err != nil {
 		log.Debug("fail to create move region operator", errs.ZapError(err))
 		return err
