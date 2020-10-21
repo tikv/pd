@@ -68,3 +68,18 @@ func (t *testAvgOverTimeSuite) TestChange(c *C) {
 	c.Assert(aot.Get(), LessEqual, 678.)
 	c.Assert(aot.Get(), GreaterEqual, 99.)
 }
+
+func (t *testAvgOverTimeSuite) TestMinFilled(c *C) {
+	interval := 10
+	rate := 1.0
+	for aotSize := 2; aotSize < 10; aotSize++ {
+		for mfSize := 2; mfSize < 10; mfSize++ {
+			tm := NewTimeMedian(aotSize, mfSize, interval)
+			for i := 0; i < tm.GetFilledPeriod(); i++ {
+				c.Assert(tm.Get(), Equals, 0.0)
+				tm.Add(rate*float64(interval), time.Duration(interval)*time.Second)
+			}
+			c.Assert(tm.Get(), Equals, rate)
+		}
+	}
+}

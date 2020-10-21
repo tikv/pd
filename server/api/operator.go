@@ -21,6 +21,7 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/unrolled/render"
 )
 
@@ -150,7 +151,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		storeIDs, ok := parseStoreIDs(input["to_store_ids"])
+		storeIDs, ok := parseStoreIDsAndPeerRole(input["to_store_ids"], input["peer_roles"])
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "invalid store ids to transfer region to")
 			return
@@ -337,18 +338,32 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, "The pending operator is canceled.")
 }
 
-func parseStoreIDs(v interface{}) (map[uint64]struct{}, bool) {
-	items, ok := v.([]interface{})
+func parseStoreIDsAndPeerRole(ids interface{}, roles interface{}) (map[uint64]placement.PeerRoleType, bool) {
+	items, ok := ids.([]interface{})
 	if !ok {
 		return nil, false
 	}
-	ids := make(map[uint64]struct{})
+	storeIDToPeerRole := make(map[uint64]placement.PeerRoleType)
+	storeIDs := make([]uint64, 0, len(items))
 	for _, item := range items {
 		id, ok := item.(float64)
 		if !ok {
 			return nil, false
 		}
-		ids[uint64(id)] = struct{}{}
+		storeIDs = append(storeIDs, uint64(id))
+		storeIDToPeerRole[uint64(id)] = ""
 	}
-	return ids, true
+
+	peerRoles, ok := roles.([]interface{})
+	// only consider roles having the same length with ids as the valid case
+	if ok && len(peerRoles) == len(storeIDs) {
+		for i, v := range storeIDs {
+			switch pr := peerRoles[i].(type) {
+			case string:
+				storeIDToPeerRole[v] = placement.PeerRoleType(pr)
+			default:
+			}
+		}
+	}
+	return storeIDToPeerRole, true
 }

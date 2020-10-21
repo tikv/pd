@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -83,7 +84,8 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 			Version: "2.0.0",
 		},
 	}
-	s.svr, s.cleanup = mustNewServer(c)
+	// TODO: enable placmentrules
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.Replication.EnablePlacementRules = false })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -179,6 +181,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
+	// TODO: supports strictly match check in placement rules
 	err = postJSON(testDialClient, url+"/label", b)
 	c.Assert(strings.Contains(err.Error(), "key matching the label was not found"), IsTrue)
 	locationLabels := map[string]string{"location-labels": "zone,host"}
