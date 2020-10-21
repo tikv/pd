@@ -119,15 +119,15 @@ func (f *hotPeerCache) collectRegionMetrics(byteRate, keyRate float64, interval 
 }
 
 // CheckRegionFlow checks the flow information of region.
-func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *StoresStats) (ret []*HotPeerStat) {
-	totalBytes := float64(f.getTotalBytes(region))
-	totalKeys := float64(f.getTotalKeys(region))
+func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
+	bytes := float64(f.getRegionBytes(region))
+	keys := float64(f.getRegionKeys(region))
 
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
-	byteRate := totalBytes / float64(interval)
-	keyRate := totalKeys / float64(interval)
+	byteRate := bytes / float64(interval)
+	keyRate := keys / float64(interval)
 
 	f.collectRegionMetrics(byteRate, keyRate, interval)
 
@@ -139,7 +139,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 	for _, storeID := range storeIDs {
 		isExpired := f.isRegionExpired(region, storeID) // transfer leader or remove peer
 		oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
-		if isExpired && oldItem != nil {
+		if isExpired && oldItem != nil { // it may has been moved to other store, we save it to tmpItem
 			tmpItem = oldItem
 		}
 
@@ -173,7 +173,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 			}
 		}
 
-		newItem = f.updateHotPeerStat(newItem, oldItem, storesStats)
+		newItem = f.updateHotPeerStat(newItem, oldItem, bytes, keys, time.Duration(interval))
 		if newItem != nil {
 			ret = append(ret, newItem)
 		}
@@ -204,7 +204,7 @@ func (f *hotPeerCache) CollectMetrics(typ string) {
 	}
 }
 
-func (f *hotPeerCache) getTotalBytes(region *core.RegionInfo) uint64 {
+func (f *hotPeerCache) getRegionBytes(region *core.RegionInfo) uint64 {
 	switch f.kind {
 	case WriteFlow:
 		return region.GetBytesWritten()
@@ -214,7 +214,7 @@ func (f *hotPeerCache) getTotalBytes(region *core.RegionInfo) uint64 {
 	return 0
 }
 
-func (f *hotPeerCache) getTotalKeys(region *core.RegionInfo) uint64 {
+func (f *hotPeerCache) getRegionKeys(region *core.RegionInfo) uint64 {
 	switch f.kind {
 	case WriteFlow:
 		return region.GetKeysWritten()
@@ -250,8 +250,8 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) [dimLen]float64 {
 		return minThresholds
 	}
 	ret := [dimLen]float64{
-		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate,
-		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).KeyRate,
+		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).GetByteRate(),
+		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).GetKeyRate(),
 	}
 	for k := 0; k < dimLen; k++ {
 		ret[k] = math.Max(ret[k]*hotThresholdRatio, minThresholds[k])
@@ -309,9 +309,13 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 	return false
 }
 
-func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesStats *StoresStats) *HotPeerStat {
+func (f *hotPeerCache) getDefaultTimeMedian() *TimeMedian {
+	return NewTimeMedian(DefaultAotSize, rollingWindowsSize, RegionHeartBeatReportInterval)
+}
+
+func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, keys float64, interval time.Duration) *HotPeerStat {
 	thresholds := f.calcHotThresholds(newItem.StoreID)
-	isHot := newItem.ByteRate >= thresholds[byteDim] ||
+	isHot := newItem.ByteRate >= thresholds[byteDim] || // if interval is zero, rate will be NaN, isHot will be false
 		newItem.KeyRate >= thresholds[keyDim]
 
 	if newItem.needDelete {
@@ -319,12 +323,12 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 	}
 
 	if oldItem != nil {
-		newItem.rollingByteRate = oldItem.rollingByteRate
-		newItem.rollingKeyRate = oldItem.rollingKeyRate
+		newItem.RollingByteRate = oldItem.RollingByteRate
+		newItem.RollingKeyRate = oldItem.RollingKeyRate
 		if isHot {
 			newItem.HotDegree = oldItem.HotDegree + 1
 			newItem.AntiCount = hotRegionAntiCount
-		} else {
+		} else if interval != 0 {
 			newItem.HotDegree = oldItem.HotDegree - 1
 			newItem.AntiCount = oldItem.AntiCount - 1
 			if newItem.AntiCount <= 0 {
@@ -335,14 +339,13 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 		if !isHot {
 			return nil
 		}
-		newItem.rollingByteRate = NewMedianFilter(rollingWindowsSize)
-		newItem.rollingKeyRate = NewMedianFilter(rollingWindowsSize)
+		newItem.RollingByteRate = f.getDefaultTimeMedian()
+		newItem.RollingKeyRate = f.getDefaultTimeMedian()
 		newItem.AntiCount = hotRegionAntiCount
 		newItem.isNew = true
 	}
-
-	newItem.rollingByteRate.Add(newItem.ByteRate)
-	newItem.rollingKeyRate.Add(newItem.KeyRate)
+	newItem.RollingByteRate.Add(bytes, interval*time.Second)
+	newItem.RollingKeyRate.Add(keys, interval*time.Second)
 
 	return newItem
 }

@@ -45,13 +45,23 @@ func (s *testClusterSuite) TearDownSuite(c *C) {
 }
 
 func (s *testClusterSuite) TestCluster(c *C) {
+	// Test get cluster status, and bootstrap cluster
+	s.testGetClusterStatus(c)
+
+	// Test set the config
 	url := fmt.Sprintf("%s/cluster", s.urlPrefix)
 	c1 := &metapb.Cluster{}
 	err := readJSON(testDialClient, url, c1)
 	c.Assert(err, IsNil)
 
 	c2 := &metapb.Cluster{}
-	r := config.ReplicationConfig{MaxReplicas: 6}
+	r := config.ReplicationConfig{
+		EnablePlacementRules: true,
+		MaxReplicas:          6,
+	}
+	// Cannot set the replicas when placement rules is enabled.
+	c.Assert(s.svr.SetReplicationConfig(r), NotNil)
+	r.EnablePlacementRules = false
 	c.Assert(s.svr.SetReplicationConfig(r), IsNil)
 	err = readJSON(testDialClient, url, c2)
 	c.Assert(err, IsNil)
@@ -60,7 +70,7 @@ func (s *testClusterSuite) TestCluster(c *C) {
 	c.Assert(c1, DeepEquals, c2)
 }
 
-func (s *testClusterSuite) TestGetClusterStatus(c *C) {
+func (s *testClusterSuite) testGetClusterStatus(c *C) {
 	url := fmt.Sprintf("%s/cluster/status", s.urlPrefix)
 	status := cluster.Status{}
 	err := readJSON(testDialClient, url, &status)

@@ -110,6 +110,7 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		{[]string{"region", "sibling", "2"}, leaderServer.GetAdjacentRegions(leaderServer.GetRegionInfoByID(2))},
 		// region store <store_id> command
 		{[]string{"region", "store", "1"}, leaderServer.GetStoreRegions(1)},
+		{[]string{"region", "store", "1"}, []*core.RegionInfo{r1, r2, r3, r4}},
 		// region topread [limit] command
 		{[]string{"region", "topread", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 2)},
 		// region topwrite [limit] command
