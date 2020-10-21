@@ -47,7 +47,11 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	var t time.Time
 	t = t.Add(time.Hour)
 	cluster, err := tests.NewTestCluster(ctx, 1,
-		func(conf *config.Config, serverName string) { conf.Replication.MaxReplicas = 2 },
+		// TODO: enable placementrules
+		func(conf *config.Config, serverName string) {
+			conf.Replication.MaxReplicas = 2
+			conf.Replication.EnablePlacementRules = false
+		},
 		func(conf *config.Config, serverName string) { conf.Schedule.MaxStoreDownTime.Duration = time.Since(t) },
 	)
 	c.Assert(err, IsNil)
@@ -211,4 +215,16 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "3")
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "not supported"), IsTrue)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "follower", "3")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "not match"), IsTrue)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "follower", "leader", "3", "follower")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "invalid"), IsTrue)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "leader", "2", "follower", "3")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "invalid"), IsTrue)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "leader", "3", "follower")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 }

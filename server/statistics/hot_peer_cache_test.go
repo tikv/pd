@@ -27,7 +27,6 @@ type testHotPeerCache struct{}
 
 func (t *testHotPeerCache) TestStoreTimeUnsync(c *C) {
 	cache := NewHotStoresStats(WriteFlow)
-	stats := NewStoresStats()
 	peers := newPeers(3,
 		func(i int) uint64 { return uint64(10000 + i) },
 		func(i int) uint64 { return uint64(i) })
@@ -45,7 +44,7 @@ func (t *testHotPeerCache) TestStoreTimeUnsync(c *C) {
 			core.SetReportInterval(interval),
 			core.SetWrittenBytes(interval*100*1024))
 
-		checkAndUpdate(c, cache, region, stats, 3)
+		checkAndUpdate(c, cache, region, 3)
 		{
 			stats := cache.RegionStats()
 			c.Assert(stats, HasLen, 3)
@@ -90,21 +89,20 @@ func testCache(c *C, t *testCacheCase) {
 		WriteFlow: 3, // all peers
 	}
 	cache := NewHotStoresStats(t.kind)
-	stats := NewStoresStats()
 	region := buildRegion(nil, nil, t.kind)
-	checkAndUpdate(c, cache, region, stats, defaultSize[t.kind])
+	checkAndUpdate(c, cache, region, defaultSize[t.kind])
 	checkHit(c, cache, region, t.kind, false) // all peers are new
 
 	srcStore, region := schedule(t.operator, region, t.kind)
-	res := checkAndUpdate(c, cache, region, stats, t.expect)
+	res := checkAndUpdate(c, cache, region, t.expect)
 	checkHit(c, cache, region, t.kind, true) // hit cache
 	if t.expect != defaultSize[t.kind] {
 		checkNeedDelete(c, res, srcStore)
 	}
 }
 
-func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, stats *StoresStats, expect int) []*HotPeerStat {
-	res := cache.CheckRegionFlow(region, stats)
+func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect int) []*HotPeerStat {
+	res := cache.CheckRegionFlow(region)
 	c.Assert(res, HasLen, expect)
 	for _, p := range res {
 		cache.Update(p)

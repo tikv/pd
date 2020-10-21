@@ -80,20 +80,25 @@ func (aot *AvgOverTime) Set(avg float64) {
 
 // TimeMedian is AvgOverTime + MedianFilter
 // Size of MedianFilter should be larger than double size of AvgOverTime to denoisy.
-// Delay is aotSize * mfSize * StoreHeartBeatReportInterval /4
+// Delay is aotSize * mfSize * StoreHeartBeatReportInterval/2
+// and the min filled period is aotSize * StoreHeartBeatReportInterval, which is not related with mfSize
 type TimeMedian struct {
 	aotInterval time.Duration
 	aot         *AvgOverTime
 	mf          *MedianFilter
+	aotSize     int
+	mfSize      int
 }
 
 // NewTimeMedian returns a TimeMedian with given size.
-func NewTimeMedian(aotSize, mfSize int) *TimeMedian {
-	interval := time.Duration(aotSize*StoreHeartBeatReportInterval) * time.Second
+func NewTimeMedian(aotSize, mfSize, reportInterval int) *TimeMedian {
+	interval := time.Duration(aotSize*reportInterval) * time.Second
 	return &TimeMedian{
 		aotInterval: interval,
 		aot:         NewAvgOverTime(interval),
 		mf:          NewMedianFilter(mfSize),
+		aotSize:     aotSize,
+		mfSize:      mfSize,
 	}
 }
 
@@ -104,7 +109,7 @@ func (t *TimeMedian) Get() float64 {
 
 // Add adds recent change to TimeMedian.
 func (t *TimeMedian) Add(delta float64, interval time.Duration) {
-	if interval < 1 {
+	if interval < time.Second {
 		return
 	}
 	t.aot.Add(delta, interval)
@@ -117,4 +122,9 @@ func (t *TimeMedian) Add(delta float64, interval time.Duration) {
 // Set sets the given average.
 func (t *TimeMedian) Set(avg float64) {
 	t.mf.Set(avg)
+}
+
+// GetFilledPeriod returns filled period.
+func (t *TimeMedian) GetFilledPeriod() int { // it is unrelated with mfSize
+	return t.aotSize
 }
