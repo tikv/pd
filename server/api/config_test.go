@@ -277,7 +277,7 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 }
 
 func (s *testConfigSuite) TestConfigTTL(c *C) {
-	addr := fmt.Sprintf("%s/config/ttl?ttlSecond=3", s.urlPrefix)
+	addr := fmt.Sprintf("%s/config?ttlSecond=3", s.urlPrefix)
 	r := map[string]interface{}{
 		"schedule.max-snapshot-count":             999,
 		"schedule.enable-location-replacement":    false,

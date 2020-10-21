@@ -47,30 +47,6 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 }
 
 // @Tags config
-// @Summary Update temporary configuration.
-// @Description Note that this is a temporary api and only support for lightning and BR. Don't call this API yet.
-// @Produce json
-// @Success 200 {string} string "The config is updated."
-// @Router /config/ttl [post]
-func (h *confHandler) SetTTLConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
-		return
-	}
-	var ttls int
-	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
-		var err error
-		ttls, err = strconv.Atoi(ttlSec)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	h.svr.SaveTTLConfig(input, time.Duration(ttls)*time.Second)
-	h.rd.JSON(w, http.StatusOK, "The config is updated.")
-}
-
-// @Tags config
 // @Summary Get full config.
 // @Produce json
 // @Success 200 {object} config.Config
@@ -99,6 +75,7 @@ func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
 // @Tags config
 // @Summary Update a config item.
 // @Accept json
+// @Param ttlSecond query integer false "ttl". ttl param is only for BR and lightning now. Don't use it.
 // @Param body body object false "json params"
 // @Produce json
 // @Success 200 {string} string "The config is updated."
@@ -117,6 +94,23 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 	conf := make(map[string]interface{})
 	if err := json.Unmarshal(data, &conf); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var ttls int
+	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
+		var err error
+		ttls, err = strconv.Atoi(ttlSec)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	// if ttlSecond defined, we will apply if to temp configuration.
+	if ttls > 0 {
+		h.svr.SaveTTLConfig(conf, time.Duration(ttls)*time.Second)
+		h.rd.JSON(w, http.StatusOK, "The config is updated.")
 		return
 	}
 

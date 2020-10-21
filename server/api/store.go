@@ -343,6 +343,7 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 // FIXME: details of input json body params
 // @Tags store
 // @Summary Set the store's limit.
+// @Param ttlSecond query integer false "ttl". ttl param is only for BR and lightning now. Don't use it.
 // @Param id path integer true "Store Id"
 // @Param body body object true "json params"
 // @Produce json
@@ -445,6 +446,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 // @Tags store
 // @Summary Set limit of all stores in the cluster.
 // @Accept json
+// @Param ttlSecond query integer false "ttl". ttl param is only for BR and lightning now. Don't use it.
 // @Param body body object true "json params"
 // @Produce json
 // @Success 200 {string} string "Set store limit successfully."
