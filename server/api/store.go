@@ -409,12 +409,7 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-<<<<<<< HEAD
-
 	h.rd.JSON(w, http.StatusOK, nil)
-=======
-	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
->>>>>>> 47e83f78... api: support temporary configuration (#3082)
 }
 
 type storesHandler struct {
@@ -480,11 +475,6 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-<<<<<<< HEAD
-	for _, typ := range typeValues {
-		if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-=======
 	var ttl int
 	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
 		var err error
@@ -521,7 +511,6 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 
 		if err := config.ValidateLabels(labels); err != nil {
 			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
->>>>>>> 47e83f78... api: support temporary configuration (#3082)
 			return
 		}
 	}

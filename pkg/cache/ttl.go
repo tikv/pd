@@ -246,3 +246,8 @@ func (c *TTLString) Pop() (string, interface{}, bool) {
 	}
 	return key, v, true
 }
+
+// Get return the value by key id
+func (c *TTLString) Get(id string) (interface{}, bool) {
+	return c.ttlCache.get(id)
+}

@@ -1767,8 +1767,6 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 	c.opt.SetAllStoresLimit(typ, ratePerMin)
 }
 
-<<<<<<< HEAD
-=======
 // SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
 func (c *RaftCluster) SetAllStoresLimitTTL(typ storelimit.Type, ratePerMin float64, ttl time.Duration) {
 	c.opt.SetAllStoresLimitTTL(c.ctx, typ, ratePerMin, ttl)
@@ -1784,7 +1782,6 @@ func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 	return c.etcdClient
 }
 
->>>>>>> 47e83f78... api: support temporary configuration (#3082)
 var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.

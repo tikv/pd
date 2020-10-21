@@ -15,10 +15,7 @@ package config
 
 import (
 	"context"
-<<<<<<< HEAD
-=======
 	"fmt"
->>>>>>> 47e83f78... api: support temporary configuration (#3082)
 	"reflect"
 	"sync/atomic"
 	"time"

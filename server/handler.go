@@ -419,8 +419,6 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	return nil
 }
 
-<<<<<<< HEAD
-=======
 // SetAllStoresLimitTTL is used to set limit of all stores with ttl
 func (h *Handler) SetAllStoresLimitTTL(ratePerMin float64, limitType storelimit.Type, ttl time.Duration) error {
 	c, err := h.GetRaftCluster()
@@ -449,7 +447,6 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 	return nil
 }
 
->>>>>>> 47e83f78... api: support temporary configuration (#3082)
 // GetAllStoresLimit is used to get limit of all stores.
 func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]config.StoreLimitConfig, error) {
 	c, err := h.GetRaftCluster()
