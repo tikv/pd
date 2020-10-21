@@ -85,7 +85,7 @@ default: build
 
 all: dev
 
-dev: build tools check test
+dev: build check tools test
 
 ci: build check basic-test
 
@@ -119,6 +119,7 @@ swagger-spec: install-go-tools
 	go mod vendor
 	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
 	go mod tidy
+	rm -rf vendor
 
 dashboard-ui: export GO111MODULE=on
 dashboard-ui:
