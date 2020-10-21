@@ -277,24 +277,24 @@ func (f *StoreStateFilter) isBusy(opt *config.PersistOptions, store *core.StoreI
 }
 
 func (f *StoreStateFilter) exceedRemoveLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "remove-limit"
+	f.Reason = "exceed-remove-limit"
 	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer)
 }
 
 func (f *StoreStateFilter) exceedAddLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "add-limit"
+	f.Reason = "exceed-add-limit"
 	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer)
 }
 
 func (f *StoreStateFilter) tooManySnapshots(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "snapshot"
+	f.Reason = "too-many-snapshot"
 	return !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount())
 }
 
 func (f *StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "pending-peer"
+	f.Reason = "too-many-pending-peer"
 	return !f.AllowTemporaryStates &&
 		opt.GetMaxPendingPeerCount() > 0 &&
 		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount())
