@@ -314,6 +314,7 @@ func (c *baseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Memb
 		c.connMu.Lock()
 		c.connMu.allocatorLeader[dcLocation] = addr
 		c.connMu.Unlock()
+
 	}
 	c.connMu.Lock()
 	defer c.connMu.Unlock()

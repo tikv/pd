@@ -159,7 +159,10 @@ type client struct {
 	*baseClient
 	tsoRequests chan *tsoRequest
 	// dc-location -> deadline
-	tsDeadlineCh map[string]chan deadline
+	tsDeadline struct {
+		sync.RWMutex
+		ch map[string]chan deadline
+	}
 	// dc-location -> int64
 	lastTSO struct {
 		sync.Mutex
@@ -181,13 +184,10 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		return nil, err
 	}
 	c := &client{
-		baseClient:   base,
-		tsoRequests:  make(chan *tsoRequest, maxMergeTSORequests),
-		tsDeadlineCh: make(map[string]chan deadline),
+		baseClient:  base,
+		tsoRequests: make(chan *tsoRequest, maxMergeTSORequests),
 	}
-	for _, dcLocation := range c.getDCLocations() {
-		c.tsDeadlineCh[dcLocation] = make(chan deadline, 1)
-	}
+	c.tsDeadline.ch = make(map[string]chan deadline)
 	c.lastTSO.physical = make(map[string]int64)
 	c.lastTSO.logical = make(map[string]int64)
 
@@ -210,27 +210,38 @@ func (c *client) tsCancelLoop() {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 
-	// Watch every dc-location's tsDeadlineCh
-	for dcLocation, deadlineCh := range c.tsDeadlineCh {
-		go func(dc string, tsDeadlineCh <-chan deadline) {
-			for {
-				select {
-				case d := <-tsDeadlineCh:
-					select {
-					case <-d.timer:
-						log.Error("tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
-						d.cancel()
-					case <-d.done:
-					case <-ctx.Done():
-						return
-					}
-				case <-ctx.Done():
-					return
-				}
+	for {
+		// Watch every dc-location's tsDeadlineCh
+		for _, dcLocation := range c.getDCLocations() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
 			}
-		}(dcLocation, deadlineCh)
+			c.tsDeadline.Lock()
+			if _, exist := c.tsDeadline.ch[dcLocation]; !exist {
+				c.tsDeadline.ch[dcLocation] = make(chan deadline, 1)
+				go func(dc string, tsDeadlineCh <-chan deadline) {
+					for {
+						select {
+						case d := <-tsDeadlineCh:
+							select {
+							case <-d.timer:
+								log.Error("tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
+								d.cancel()
+							case <-d.done:
+							case <-ctx.Done():
+								return
+							}
+						case <-ctx.Done():
+							return
+						}
+					}
+				}(dcLocation, c.tsDeadline.ch[dcLocation])
+			}
+			c.tsDeadline.Unlock()
+		}
 	}
-	<-ctx.Done()
 }
 
 func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.CancelFunc, createdCh chan struct{}) {
@@ -320,8 +331,11 @@ func (c *client) tsLoop() {
 						done:   done,
 						cancel: cancel,
 					}
+					c.tsDeadline.RLock()
+					tsDeadlineCh := c.tsDeadline.ch[dc]
+					c.tsDeadline.RUnlock()
 					select {
-					case c.tsDeadlineCh[dc] <- dl:
+					case tsDeadlineCh <- dl:
 					case <-loopCtx.Done():
 						cancel()
 						return
