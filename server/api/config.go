@@ -20,7 +20,9 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
@@ -73,6 +75,7 @@ func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
 // @Tags config
 // @Summary Update a config item.
 // @Accept json
+// @Param ttlSecond query integer false "ttl". ttl param is only for BR and lightning now. Don't use it.
 // @Param body body object false "json params"
 // @Produce json
 // @Success 200 {string} string "The config is updated."
@@ -91,6 +94,23 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 	conf := make(map[string]interface{})
 	if err := json.Unmarshal(data, &conf); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var ttls int
+	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
+		var err error
+		ttls, err = strconv.Atoi(ttlSec)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	// if ttlSecond defined, we will apply if to temp configuration.
+	if ttls > 0 {
+		h.svr.SaveTTLConfig(conf, time.Duration(ttls)*time.Second)
+		h.rd.JSON(w, http.StatusOK, "The config is updated.")
 		return
 	}
 
