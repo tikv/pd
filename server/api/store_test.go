@@ -395,3 +395,54 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 		}
 	}
 }
+
+func (s *testStoreSuite) TestStoreLimitTTL(c *C) {
+	// add peer
+	url := fmt.Sprintf("%s/store/1/limit?ttlSecond=%v", s.urlPrefix, 5)
+	data := map[string]interface{}{
+		"type": "add-peer",
+		"rate": 999,
+	}
+	postData, err := json.Marshal(data)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, url, postData)
+	c.Assert(err, IsNil)
+	// remove peer
+	data = map[string]interface{}{
+		"type": "remove-peer",
+		"rate": 998,
+	}
+	postData, err = json.Marshal(data)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, url, postData)
+	c.Assert(err, IsNil)
+	// all store limit add peer
+	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", s.urlPrefix, 3)
+	data = map[string]interface{}{
+		"type": "add-peer",
+		"rate": 997,
+	}
+	postData, err = json.Marshal(data)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, url, postData)
+	c.Assert(err, IsNil)
+	// all store limit remove peer
+	data = map[string]interface{}{
+		"type": "remove-peer",
+		"rate": 996,
+	}
+	postData, err = json.Marshal(data)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, url, postData)
+	c.Assert(err, IsNil)
+
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer, Equals, float64(999))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer, Equals, float64(998))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer, Equals, float64(997))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer, Equals, float64(996))
+	time.Sleep(5 * time.Second)
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer, Not(Equals), float64(999))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer, Not(Equals), float64(998))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer, Not(Equals), float64(997))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer, Not(Equals), float64(996))
+}
