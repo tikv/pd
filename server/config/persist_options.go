@@ -15,6 +15,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
@@ -33,12 +35,9 @@ import (
 // PersistOptions wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistOptions struct {
-<<<<<<< HEAD
-=======
 	// configuration -> ttl value
 	ttl             map[string]*cache.TTLString
 	ttlCancel       map[string]context.CancelFunc
->>>>>>> 60775507... config: fix goroutine leak risk (#3091)
 	schedule        atomic.Value
 	replication     atomic.Value
 	pdServerConfig  atomic.Value
@@ -56,11 +55,8 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
-<<<<<<< HEAD
-=======
 	o.ttl = make(map[string]*cache.TTLString, 6)
 	o.ttlCancel = make(map[string]context.CancelFunc, 6)
->>>>>>> 60775507... config: fix goroutine leak risk (#3091)
 	return o
 }
 
@@ -165,6 +161,12 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
 func (o *PersistOptions) GetMaxSnapshotCount() uint64 {
+	if v, ok := o.getTTLData("schedule.max-snapshot-count"); ok {
+		r, ok := v.(float64)
+		if ok {
+			return uint64(r)
+		}
+	}
 	return o.GetScheduleConfig().MaxSnapshotCount
 }
 
@@ -175,11 +177,23 @@ func (o *PersistOptions) GetMaxPendingPeerCount() uint64 {
 
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
+	if v, ok := o.getTTLData("schedule.max-merge-region-size"); ok {
+		r, ok := v.(float64)
+		if ok {
+			return uint64(r)
+		}
+	}
 	return o.GetScheduleConfig().MaxMergeRegionSize
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
+	if v, ok := o.getTTLData("schedule.max-merge-region-keys"); ok {
+		r, ok := v.(float64)
+		if ok {
+			return uint64(r)
+		}
+	}
 	return o.GetScheduleConfig().MaxMergeRegionKeys
 }
 
@@ -287,14 +301,41 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 }
 
 // GetStoreLimit returns the limit of a store.
-func (o *PersistOptions) GetStoreLimit(storeID uint64) StoreLimitConfig {
+func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfig) {
+	defer func() {
+		if v, ok := o.getTTLData(fmt.Sprintf("remove-peer-%v", storeID)); ok {
+			r, ok := v.(float64)
+			if ok {
+				returnSC.RemovePeer = r
+			}
+		}
+		if v, ok := o.getTTLData(fmt.Sprintf("add-peer-%v", storeID)); ok {
+			r, ok := v.(float64)
+			if ok {
+				returnSC.AddPeer = r
+			}
+		}
+	}()
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
+	v1, ok1 := o.getTTLData("default-add-peer")
+	v2, ok2 := o.getTTLData("default-remove-peer")
 	cfg := o.GetScheduleConfig().Clone()
 	sc := StoreLimitConfig{
 		AddPeer:    DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	}
+	if ok1 || ok2 {
+		r, ok := v1.(float64)
+		if ok {
+			returnSC.AddPeer = r
+		}
+		r, ok = v2.(float64)
+		if ok {
+			returnSC.RemovePeer = r
+		}
+		return returnSC
 	}
 	cfg.StoreLimit[storeID] = sc
 	o.SetScheduleConfig(cfg)
@@ -302,7 +343,24 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) StoreLimitConfig {
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
-func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
+	defer func() {
+		if typ == storelimit.RemovePeer {
+			if v, ok := o.getTTLData(fmt.Sprintf("remove-peer-%v", storeID)); ok {
+				r, ok := v.(float64)
+				if ok {
+					returned = r
+				}
+			}
+		} else if typ == storelimit.AddPeer {
+			if v, ok := o.getTTLData(fmt.Sprintf("add-peer-%v", storeID)); ok {
+				r, ok := v.(float64)
+				if ok {
+					returned = r
+				}
+			}
+		}
+	}()
 	limit := o.GetStoreLimit(storeID)
 	switch typ {
 	case storelimit.AddPeer:
@@ -341,6 +399,12 @@ func (o *PersistOptions) GetHighSpaceRatio() float64 {
 
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
 func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
+	if v, ok := o.getTTLData("schedule.scheduler-max-waiting-operator"); ok {
+		r, ok := v.(float64)
+		if ok {
+			return uint64(r)
+		}
+	}
 	return o.GetScheduleConfig().SchedulerMaxWaitingOperator
 }
 
@@ -391,6 +455,12 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
+	if v, ok := o.getTTLData("schedule.enable-location-replacement"); ok {
+		r, ok := v.(bool)
+		if ok {
+			return r
+		}
+	}
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
 
@@ -543,8 +613,6 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 	}
 	return false
 }
-<<<<<<< HEAD
-=======
 
 // SetTTLData set temporary configuration
 func (o *PersistOptions) SetTTLData(parCtx context.Context, key string, value interface{}, ttl time.Duration) {
@@ -574,4 +642,3 @@ func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, typ storelimi
 		o.SetTTLData(ctx, "default-remove-peer", ratePerMin, ttl)
 	}
 }
->>>>>>> 60775507... config: fix goroutine leak risk (#3091)
