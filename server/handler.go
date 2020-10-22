@@ -207,9 +207,9 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	if err = c.AddScheduler(s, args...); err != nil {
-		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
+		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 	} else if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", errs.ZapError(err))
 	}
@@ -416,6 +416,34 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 		return err
 	}
 	c.SetAllStoresLimit(limitType, ratePerMin)
+	return nil
+}
+
+// SetAllStoresLimitTTL is used to set limit of all stores with ttl
+func (h *Handler) SetAllStoresLimitTTL(ratePerMin float64, limitType storelimit.Type, ttl time.Duration) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	c.SetAllStoresLimitTTL(limitType, ratePerMin, ttl)
+	return nil
+}
+
+// SetLabelStoresLimit is used to set limit of label stores.
+func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.Type, labels []*metapb.StoreLabel) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	for _, store := range c.GetStores() {
+		for _, label := range labels {
+			for _, sl := range store.GetLabels() {
+				if label.Key == sl.Key && label.Value == sl.Value {
+					c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -873,4 +901,11 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 // GetAddr returns the server urls for clients.
 func (h *Handler) GetAddr() string {
 	return h.s.GetAddr()
+}
+
+// SetStoreLimitTTL set storeLimit with ttl
+func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) {
+	h.s.SaveTTLConfig(map[string]interface{}{
+		data: value,
+	}, ttl)
 }

@@ -632,3 +632,12 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	newStore := store.Clone(core.SetStoreLabels(newLabels))
 	mc.PutStore(newStore)
 }
+
+// SetStoreLastHeartbeatInterval set the last heartbeat to the target store
+func (mc *Cluster) SetStoreLastHeartbeatInterval(storeID uint64, interval time.Duration) {
+	store := mc.GetStore(storeID)
+	newStore := store.Clone(
+		core.SetStoreState(metapb.StoreState_Up),
+		core.SetLastHeartbeatTS(time.Now().Add(-interval)))
+	mc.PutStore(newStore)
+}
