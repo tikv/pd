@@ -33,6 +33,12 @@ import (
 // PersistOptions wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistOptions struct {
+<<<<<<< HEAD
+=======
+	// configuration -> ttl value
+	ttl             map[string]*cache.TTLString
+	ttlCancel       map[string]context.CancelFunc
+>>>>>>> 60775507... config: fix goroutine leak risk (#3091)
 	schedule        atomic.Value
 	replication     atomic.Value
 	pdServerConfig  atomic.Value
@@ -50,6 +56,11 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
+<<<<<<< HEAD
+=======
+	o.ttl = make(map[string]*cache.TTLString, 6)
+	o.ttlCancel = make(map[string]context.CancelFunc, 6)
+>>>>>>> 60775507... config: fix goroutine leak risk (#3091)
 	return o
 }
 
@@ -532,3 +543,35 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 	}
 	return false
 }
+<<<<<<< HEAD
+=======
+
+// SetTTLData set temporary configuration
+func (o *PersistOptions) SetTTLData(parCtx context.Context, key string, value interface{}, ttl time.Duration) {
+	if data, ok := o.ttl[key]; ok {
+		data.Clear()
+		o.ttlCancel[key]()
+	}
+	ctx, cancel := context.WithCancel(parCtx)
+	o.ttl[key] = cache.NewStringTTL(ctx, 5*time.Second, ttl)
+	o.ttl[key].Put(key, value)
+	o.ttlCancel[key] = cancel
+}
+
+func (o *PersistOptions) getTTLData(key string) (interface{}, bool) {
+	if data, ok := o.ttl[key]; ok {
+		return data.Get(key)
+	}
+	return nil, false
+}
+
+// SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
+func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, typ storelimit.Type, ratePerMin float64, ttl time.Duration) {
+	switch typ {
+	case storelimit.AddPeer:
+		o.SetTTLData(ctx, "default-add-peer", ratePerMin, ttl)
+	case storelimit.RemovePeer:
+		o.SetTTLData(ctx, "default-remove-peer", ratePerMin, ttl)
+	}
+}
+>>>>>>> 60775507... config: fix goroutine leak risk (#3091)
