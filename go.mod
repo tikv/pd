@@ -26,9 +26,15 @@ require (
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
+<<<<<<< HEAD
 	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200921100341-0e148dfc0029
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
+=======
+	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20201022065613-94d8dc38a204
+	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
+	github.com/pingcap/errcode v0.3.0
+>>>>>>> d0430729... Update TiDB Dashboard to v2020.10.21.1 (#3095)
 	github.com/pingcap/errors v0.11.5-0.20200917111840-a15ef68f753d
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
 	github.com/pingcap/kvproto v0.0.0-20200907074027-32a3a0accf7d
