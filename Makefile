@@ -85,7 +85,7 @@ default: build
 
 all: dev
 
-dev: build tools check test
+dev: build check tools test
 
 ci: build check basic-test
 
@@ -119,6 +119,7 @@ swagger-spec: install-go-tools
 	go mod vendor
 	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
 	go mod tidy
+	rm -rf vendor
 
 dashboard-ui: export GO111MODULE=on
 dashboard-ui:
@@ -154,7 +155,7 @@ basic-test:
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-check: install-go-tools check-all check-plugin
+check: install-go-tools check-all check-plugin errdoc
 
 check-all: static lint tidy
 	@echo "checking"
@@ -177,6 +178,10 @@ tidy:
 	@echo "go mod tidy"
 	GO111MODULE=on go mod tidy
 	git diff --quiet go.mod go.sum
+
+errdoc: install-go-tools
+	@echo "generator errors.toml"
+	./scripts/check-errdoc.sh
 
 travis_coverage: export GO111MODULE=on
 travis_coverage:
