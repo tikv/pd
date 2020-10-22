@@ -419,6 +419,34 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	return nil
 }
 
+// SetAllStoresLimitTTL is used to set limit of all stores with ttl
+func (h *Handler) SetAllStoresLimitTTL(ratePerMin float64, limitType storelimit.Type, ttl time.Duration) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	c.SetAllStoresLimitTTL(limitType, ratePerMin, ttl)
+	return nil
+}
+
+// SetLabelStoresLimit is used to set limit of label stores.
+func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.Type, labels []*metapb.StoreLabel) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	for _, store := range c.GetStores() {
+		for _, label := range labels {
+			for _, sl := range store.GetLabels() {
+				if label.Key == sl.Key && label.Value == sl.Value {
+					c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // GetAllStoresLimit is used to get limit of all stores.
 func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]config.StoreLimitConfig, error) {
 	c, err := h.GetRaftCluster()
@@ -873,4 +901,11 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 // GetAddr returns the server urls for clients.
 func (h *Handler) GetAddr() string {
 	return h.s.GetAddr()
+}
+
+// SetStoreLimitTTL set storeLimit with ttl
+func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) {
+	h.s.SaveTTLConfig(map[string]interface{}{
+		data: value,
+	}, ttl)
 }

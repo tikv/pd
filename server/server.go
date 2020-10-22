@@ -1251,3 +1251,10 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 func (s *Server) PersistFile(name string, data []byte) error {
 	return ioutil.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
 }
+
+// SaveTTLConfig save ttl config
+func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) {
+	for k, v := range data {
+		s.persistOptions.SetTTLData(s.ctx, k, v, ttl)
+	}
+}
