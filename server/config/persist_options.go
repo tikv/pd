@@ -37,6 +37,7 @@ import (
 type PersistOptions struct {
 	// configuration -> ttl value
 	ttl             map[string]*cache.TTLString
+	ttlCancel       map[string]context.CancelFunc
 	schedule        atomic.Value
 	replication     atomic.Value
 	pdServerConfig  atomic.Value
@@ -55,6 +56,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.ttl = make(map[string]*cache.TTLString, 6)
+	o.ttlCancel = make(map[string]context.CancelFunc, 6)
 	return o
 }
 
@@ -613,12 +615,15 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 }
 
 // SetTTLData set temporary configuration
-func (o *PersistOptions) SetTTLData(ctx context.Context, key string, value interface{}, ttl time.Duration) {
+func (o *PersistOptions) SetTTLData(parCtx context.Context, key string, value interface{}, ttl time.Duration) {
 	if data, ok := o.ttl[key]; ok {
 		data.Clear()
+		o.ttlCancel[key]()
 	}
+	ctx, cancel := context.WithCancel(parCtx)
 	o.ttl[key] = cache.NewStringTTL(ctx, 5*time.Second, ttl)
 	o.ttl[key].Put(key, value)
+	o.ttlCancel[key] = cancel
 }
 
 func (o *PersistOptions) getTTLData(key string) (interface{}, bool) {
