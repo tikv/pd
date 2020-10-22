@@ -348,18 +348,17 @@ func (s *testScheduleSuite) TestDisable(c *C) {
 	u := fmt.Sprintf("%s%s/api/v1/config/schedule", s.svr.GetAddr(), apiPrefix)
 	var scheduleConfig config.ScheduleConfig
 	err = readJSON(testDialClient, u, &scheduleConfig)
+	c.Assert(err, IsNil)
 
-	tmp := *(&scheduleConfig)
-	tmp.Schedulers = config.SchedulerConfigs{
-		{Type: "shuffle-leader", Disable: true},
-	}
-	body, err = json.Marshal(tmp)
+	originSchedulers := scheduleConfig.Schedulers
+	scheduleConfig.Schedulers = config.SchedulerConfigs{config.SchedulerConfig{Type: "shuffle-leader", Disable: true}}
+	body, err = json.Marshal(scheduleConfig)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, u, body)
 	c.Assert(err, IsNil)
 
 	var schedulers []string
-	err = readJSON(testDialClient, fmt.Sprintf("%s", s.urlPrefix), &schedulers)
+	err = readJSON(testDialClient, s.urlPrefix, &schedulers)
 	c.Assert(err, IsNil)
 	c.Assert(schedulers, HasLen, 1)
 	c.Assert(schedulers[0], Equals, name)
@@ -370,6 +369,7 @@ func (s *testScheduleSuite) TestDisable(c *C) {
 	c.Assert(schedulers[0], Equals, name)
 
 	// reset schedule config
+	scheduleConfig.Schedulers = originSchedulers
 	body, err = json.Marshal(scheduleConfig)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, u, body)
