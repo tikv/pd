@@ -32,7 +32,7 @@ import (
 // SplitRegionsHandler used to handle region splitting
 type SplitRegionsHandler interface {
 	SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error
-	WatchRegionsByKeyRange(startKey, endKey []byte, expectRegionsCount int, timeout, watchInterval time.Duration) []uint64
+	WatchRegionsByKeyRange(startKey, endKey []byte, expectRegionsCount int, timeout, watchInterval time.Duration) map[uint64]struct{}
 }
 
 // NewSplitRegionsHandler return SplitRegionsHandler
@@ -101,8 +101,8 @@ func (r *RegionSplitter) splitRegionsByKeys(splitKeys [][]byte, newRegions map[u
 		// TODO: support configure timeout and interval
 		splittedRegionsID := r.handler.WatchRegionsByKeyRange(region.GetStartKey(), region.GetEndKey(),
 			len(keys)+1, time.Minute, 100*time.Millisecond)
-		for _, id := range splittedRegionsID {
-			newRegions[id] = struct{}{}
+		for key := range splittedRegionsID {
+			newRegions[key] = struct{}{}
 		}
 	}
 	return unProcessedKeys
@@ -165,20 +165,20 @@ func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKe
 	return nil
 }
 
-func (h *splitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, expectRegionsCount int, timeout, watchInterval time.Duration) []uint64 {
+func (h *splitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, expectRegionsCount int, timeout, watchInterval time.Duration) map[uint64]struct{} {
 	after := time.After(timeout)
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
-	var regionsID []uint64
+	var regionsID map[uint64]struct{}
 	for {
 		select {
 		case <-ticker.C:
 			regions := h.cluster.ScanRegions(startKey, endKey, expectRegionsCount)
-			regionsID = make([]uint64, 0, expectRegionsCount)
+			regionsID = make(map[uint64]struct{}, expectRegionsCount)
 			for _, region := range regions {
-				regionsID = append(regionsID, region.GetID())
+				regionsID[region.GetID()] = struct{}{}
 			}
-			if len(regions) < expectRegionsCount {
+			if len(regionsID) < expectRegionsCount {
 				continue
 			}
 			return regionsID
