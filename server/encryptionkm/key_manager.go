@@ -123,7 +123,8 @@ func saveKeys(
 	return nil
 }
 
-func loadKeysFromKV(kv *mvccpb.KeyValue) (*encryptionpb.KeyDictionary, error) {
+// extractKeysFromKV unpack encrypted keys from etcd KV.
+func extractKeysFromKV(kv *mvccpb.KeyValue) (*encryptionpb.KeyDictionary, error) {
 	content := &encryptionpb.EncryptedContent{}
 	err := content.Unmarshal(kv.Value)
 	if err != nil {
@@ -225,29 +226,14 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 					log.Warn("encryption keys is deleted unexpectedly")
 					continue
 				}
-				m.mu.Lock()
 				_, err := m.loadKeysFromKV(event.Kv)
-				m.mu.Unlock()
 				if err != nil {
 					log.Warn("fail to get encryption keys from watcher result", zap.Error(err))
 				}
 			}
 			m.helper.eventAfterReloadByWatcher()
-			// Check data key rotation in case we are the PD leader.
 		case <-m.helper.tick(ticker):
-			m.mu.Lock()
-			err := m.rotateKeyIfNeeded(false /*forceUpdate*/)
-			if err != nil {
-				log.Warn("fail to rotate data encryption key", zap.Error(err))
-			}
-			// Fallback mechanism to reload keys if watcher failed.
-			if !watcherEnabled {
-				_, err = m.loadKeys()
-				if err != nil {
-					log.Warn("fail to reload keys after watcher failed", zap.Error(err))
-				}
-			}
-			m.mu.Unlock()
+			m.checkOnTick(watcherEnabled)
 			m.helper.eventAfterTicker()
 			// Server shutdown.
 		case <-ctx.Done():
@@ -257,9 +243,27 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
 	}
 }
 
-// loadKeysFromKV reload keys from etcd result.
+// checkOnTick perform key rotation and key reload on timer tick, if necessary.
+func (m *KeyManager) checkOnTick(watcherEnabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Check data key rotation in case we are the PD leader.
+	err := m.rotateKeyIfNeeded(false /*forceUpdate*/)
+	if err != nil {
+		log.Warn("fail to rotate data encryption key", zap.Error(err))
+	}
+	// Fallback mechanism to reload keys if watcher failed.
+	if !watcherEnabled {
+		_, err = m.loadKeysImpl()
+		if err != nil {
+			log.Warn("fail to reload keys after watcher failed", zap.Error(err))
+		}
+	}
+}
+
+// loadKeysFromKVImpl reload keys from etcd result.
 // Require mu lock to be held.
-func (m *KeyManager) loadKeysFromKV(
+func (m *KeyManager) loadKeysFromKVImpl(
 	kv *mvccpb.KeyValue,
 ) (*encryptionpb.KeyDictionary, error) {
 	// Sanity check if keys revision is in order.
@@ -268,7 +272,7 @@ func (m *KeyManager) loadKeysFromKV(
 	if kv.ModRevision <= m.mu.keysRevision {
 		return m.getKeys(), nil
 	}
-	keys, err := loadKeysFromKV(kv)
+	keys, err := extractKeysFromKV(kv)
 	if err != nil {
 		return nil, err
 	}
@@ -278,9 +282,18 @@ func (m *KeyManager) loadKeysFromKV(
 	return keys, nil
 }
 
-// loadKeys reload keys from etcd storage.
+// loadKeysFromKV reload keys from etcd result.
+func (m *KeyManager) loadKeysFromKV(
+	kv *mvccpb.KeyValue,
+) (*encryptionpb.KeyDictionary, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.loadKeysFromKVImpl(kv)
+}
+
+// loadKeysImpl reload keys from etcd storage.
 // Require mu lock to be held.
-func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, err error) {
+func (m *KeyManager) loadKeysImpl() (keys *encryptionpb.KeyDictionary, err error) {
 	resp, err := etcdutil.EtcdKVGet(m.etcdClient, EncryptionKeysPath)
 	if err != nil {
 		return nil, err
@@ -288,11 +301,18 @@ func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, err error) {
 	if resp == nil || len(resp.Kvs) == 0 {
 		return nil, nil
 	}
-	keys, err = m.loadKeysFromKV(resp.Kvs[0])
+	keys, err = m.loadKeysFromKVImpl(resp.Kvs[0])
 	if err != nil {
 		return nil, err
 	}
 	return keys, nil
+}
+
+// loadKeys reload keys from etcd storage.
+func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.loadKeysImpl()
 }
 
 // rotateKeyIfNeeded rotate key if one of the following condition is meet.
@@ -309,7 +329,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 	}
 	m.helper.eventAfterLeaderCheckSuccess()
 	// Reload encryption keys in case we are not up-to-date.
-	keys, err := m.loadKeys()
+	keys, err := m.loadKeysImpl()
 	if err != nil {
 		return err
 	}
@@ -379,7 +399,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 		return err
 	}
 	// Reload keys.
-	_, err = m.loadKeys()
+	_, err = m.loadKeysImpl()
 	return err
 }
 
@@ -436,7 +456,7 @@ func (m *KeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
 		return key, nil
 	}
 	// Reload keys from storage.
-	keys, err := m.loadKeys()
+	keys, err := m.loadKeysImpl()
 	if err != nil {
 		return nil, err
 	}
