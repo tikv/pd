@@ -360,7 +360,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
 		return err
 	}
-	encryptionKeyManager, err := encryptionkm.NewKeyManager(ctx, s.client, &s.cfg.Security.Encryption)
+	encryptionKeyManager, err := encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
@@ -493,6 +493,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.tsoAllocatorLoop()
+	go s.encryptionKeyManagerLoop()
 }
 
 func (s *Server) stopServerLoop() {
@@ -526,6 +527,17 @@ func (s *Server) tsoAllocatorLoop() {
 	defer cancel()
 	s.tsoAllocatorManager.AllocatorDaemon(ctx)
 	log.Info("server is closed, exit allocator loop")
+}
+
+// encryptionKeyManagerLoop is used to start monitor encryption key changes.
+func (s *Server) encryptionKeyManagerLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	s.encryptionKeyManager.StartBackgroundLoop(ctx)
+	log.Info("server is closed, exist encryption key manager loop")
 }
 
 func (s *Server) collectEtcdStateMetrics() {

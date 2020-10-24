@@ -123,18 +123,14 @@ func checkMasterKeyMeta(c *C, value []byte, meta *encryptionpb.MasterKey) {
 
 func (s *testKeyManagerSuite) TestNewKeyManagerBasic(c *C) {
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	client, cleanupEtcd := newTestEtcd(c)
 	defer cleanupEtcd()
-	// Cancel background loop.
-	cancel()
 	// Use default config.
 	config := &encryption.Config{}
 	err := config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := NewKeyManager(client, config)
 	c.Assert(err, IsNil)
 	// Check config.
 	c.Assert(m.method, Equals, encryptionpb.EncryptionMethod_PLAINTEXT)
@@ -149,14 +145,10 @@ func (s *testKeyManagerSuite) TestNewKeyManagerBasic(c *C) {
 
 func (s *testKeyManagerSuite) TestNewKeyManagerWithCustomConfig(c *C) {
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	client, cleanupEtcd := newTestEtcd(c)
 	defer cleanupEtcd()
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
-	// Cancel background loop.
-	cancel()
 	// Custom config
 	rotatePeriod, err := time.ParseDuration("100h")
 	c.Assert(err, IsNil)
@@ -173,7 +165,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerWithCustomConfig(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := NewKeyManager(client, config)
 	c.Assert(err, IsNil)
 	// Check config.
 	c.Assert(m.method, Equals, encryptionpb.EncryptionMethod_AES128_CTR)
@@ -192,15 +184,11 @@ func (s *testKeyManagerSuite) TestNewKeyManagerWithCustomConfig(c *C) {
 
 func (s *testKeyManagerSuite) TestNewKeyManagerLoadKeys(c *C) {
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	client, cleanupEtcd := newTestEtcd(c)
 	defer cleanupEtcd()
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
-	// Cancel background loop.
-	cancel()
 	// Use default config.
 	config := &encryption.Config{}
 	err := config.Adjust()
@@ -227,7 +215,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerLoadKeys(c *C) {
 	err = saveKeys(leadership, masterKeyMeta, keys)
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := NewKeyManager(client, config)
 	c.Assert(err, IsNil)
 	// Check config.
 	c.Assert(m.method, Equals, encryptionpb.EncryptionMethod_PLAINTEXT)
@@ -244,18 +232,14 @@ func (s *testKeyManagerSuite) TestNewKeyManagerLoadKeys(c *C) {
 
 func (s *testKeyManagerSuite) TestGetCurrentKey(c *C) {
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	client, cleanupEtcd := newTestEtcd(c)
 	defer cleanupEtcd()
-	// Cancel background loop.
-	cancel()
 	// Use default config.
 	config := &encryption.Config{}
 	err := config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := NewKeyManager(client, config)
 	c.Assert(err, IsNil)
 	// Test encryption disabled.
 	currentKeyID, currentKey, err := m.GetCurrentKey()
@@ -291,15 +275,11 @@ func (s *testKeyManagerSuite) TestGetCurrentKey(c *C) {
 
 func (s *testKeyManagerSuite) TestGetKey(c *C) {
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	client, cleanupEtcd := newTestEtcd(c)
 	defer cleanupEtcd()
 	keyFile, cleanupKeyFile := newTestKeyFile(c)
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
-	// Cancel background loop.
-	cancel()
 	// Store initial keys in etcd.
 	masterKeyMeta := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -332,7 +312,7 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := NewKeyManager(client, config)
 	c.Assert(err, IsNil)
 	// Get existing key.
 	key, err := m.GetKey(uint64(123))
@@ -376,8 +356,9 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	err := config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManagerImpl(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(client, config, helper)
 	c.Assert(err, IsNil)
+	go m.StartBackgroundLoop(ctx)
 	_, err = m.GetKey(123)
 	c.Assert(err, NotNil)
 	_, err = m.GetKey(456)
@@ -440,18 +421,14 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 
 func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionOff(c *C) {
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	client, cleanupEtcd := newTestEtcd(c)
 	defer cleanupEtcd()
-	// Cancel background loop.
-	cancel()
 	// Use default config.
 	config := &encryption.Config{}
 	err := config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := NewKeyManager(ctx, client, config)
+	m, err := NewKeyManager(client, config)
 	c.Assert(err, IsNil)
 	c.Assert(m.keys.Load(), IsNil)
 	// Set leadership
@@ -495,9 +472,10 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	err := config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManagerImpl(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(m.keys.Load(), IsNil)
+	go m.StartBackgroundLoop(ctx)
 	// Set leadership
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
@@ -571,9 +549,10 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManagerImpl(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	go m.StartBackgroundLoop(ctx)
 	// Set leadership
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
@@ -647,9 +626,10 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManagerImpl(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	go m.StartBackgroundLoop(ctx)
 	// Set leadership
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
@@ -727,9 +707,10 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManagerImpl(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	go m.StartBackgroundLoop(ctx)
 	// Set leadership
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
@@ -807,9 +788,10 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManagerImpl(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	go m.StartBackgroundLoop(ctx)
 	// Set leadership
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
@@ -869,9 +851,10 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManagerImpl(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	go m.StartBackgroundLoop(ctx)
 	// Set leadership
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
@@ -953,9 +936,10 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManagerImpl(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	go m.StartBackgroundLoop(ctx)
 	// Set leadership
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)
@@ -1065,9 +1049,10 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	err = config.Adjust()
 	c.Assert(err, IsNil)
 	// Create the key manager.
-	m, err := newKeyManagerImpl(ctx, client, config, helper)
+	m, err := newKeyManagerImpl(client, config, helper)
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
+	go m.StartBackgroundLoop(ctx)
 	// Set leadership
 	err = m.SetLeadership(leadership)
 	c.Assert(err, IsNil)

@@ -155,16 +155,14 @@ func extractKeysFromKV(kv *mvccpb.KeyValue) (*encryptionpb.KeyDictionary, error)
 
 // NewKeyManager creates a new key manager.
 func NewKeyManager(
-	ctx context.Context,
 	etcdClient *clientv3.Client,
 	config *encryption.Config,
 ) (*KeyManager, error) {
-	return newKeyManagerImpl(ctx, etcdClient, config, defaultKeyManagerHelper())
+	return newKeyManagerImpl(etcdClient, config, defaultKeyManagerHelper())
 }
 
 // newKeyManager creates a new key manager, and allow tests to set a mocked keyManagerHelper.
 func newKeyManagerImpl(
-	ctx context.Context,
 	etcdClient *clientv3.Client,
 	config *encryption.Config,
 	helper keyManagerHelper,
@@ -189,18 +187,19 @@ func newKeyManagerImpl(
 	if err != nil {
 		return nil, err
 	}
-	// Start periodic check for keys change and rotation key if needed.
-	go m.startBackgroundLoop(ctx, m.mu.keysRevision)
 	return m, nil
 }
 
-func (m *KeyManager) startBackgroundLoop(ctx context.Context, revision int64) {
-	// Create new context for the loop.
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+func (m *KeyManager) keysRevision() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.mu.keysRevision
+}
+
+func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 	// Setup key dictionary watcher
 	watcher := clientv3.NewWatcher(m.etcdClient)
-	watchChan := watcher.Watch(ctx, EncryptionKeysPath, clientv3.WithRev(revision))
+	watchChan := watcher.Watch(ctx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision()))
 	watcherEnabled := true
 	defer watcher.Close()
 	// Check data key rotation every min(dataKeyRotationPeriod, keyRotationCheckPeriod).
