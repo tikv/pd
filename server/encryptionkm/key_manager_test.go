@@ -334,6 +334,48 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 	c.Assert(err, NotNil)
 }
 
+func (s *testKeyManagerSuite) TestLoadKeyEmpty(c *C) {
+	// Initialize.
+	client, cleanupEtcd := newTestEtcd(c)
+	defer cleanupEtcd()
+	keyFile, cleanupKeyFile := newTestKeyFile(c)
+	defer cleanupKeyFile()
+	leadership := newTestLeader(c, client)
+	// Store initial keys in etcd.
+	masterKeyMeta := &encryptionpb.MasterKey{
+		Backend: &encryptionpb.MasterKey_File{
+			File: &encryptionpb.MasterKeyFile{
+				Path: keyFile,
+			},
+		},
+	}
+	keys := &encryptionpb.KeyDictionary{
+		CurrentKeyId: 123,
+		Keys: map[uint64]*encryptionpb.DataKey{
+			123: {
+				Key:          getTestDataKey(),
+				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
+				CreationTime: uint64(1601679533),
+				WasExposed:   true,
+			},
+		},
+	}
+	err := saveKeys(leadership, masterKeyMeta, keys)
+	c.Assert(err, IsNil)
+	// Use default config.
+	config := &encryption.Config{}
+	err = config.Adjust()
+	c.Assert(err, IsNil)
+	// Create the key manager.
+	m, err := NewKeyManager(client, config)
+	c.Assert(err, IsNil)
+	// Simulate keys get deleted.
+	_, err = client.Delete(context.Background(), EncryptionKeysPath)
+	c.Assert(err, IsNil)
+	_, err = m.loadKeys()
+	c.Assert(err, NotNil)
+}
+
 func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
