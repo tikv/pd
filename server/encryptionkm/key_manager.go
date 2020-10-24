@@ -298,6 +298,10 @@ func (m *KeyManager) loadKeysImpl() (keys *encryptionpb.KeyDictionary, err error
 		return nil, err
 	}
 	if resp == nil || len(resp.Kvs) == 0 {
+		if m.getKeys() != nil {
+			return nil, errs.ErrEncryptionLoadKeys.GenWithStack(
+				"encryption keys is deleted unexpectedly")
+		}
 		return nil, nil
 	}
 	keys, err = m.loadKeysFromKVImpl(resp.Kvs[0])
