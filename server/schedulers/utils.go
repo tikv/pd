@@ -359,6 +359,48 @@ func calcCV(data []float64) float64 {
 	return math.Sqrt(stdVar) / mean
 }
 
+type stableAnalysis struct {
+	capacity  int
+	threshold float64
+	datas     []float64
+}
+
+func newStableAnalysis(capacity int, threshold float64) *stableAnalysis {
+	return &stableAnalysis{
+		capacity:  capacity,
+		threshold: threshold,
+	}
+}
+
+func (d *stableAnalysis) add(data float64) {
+	d.datas = append(d.datas, data)
+	if len(d.datas) > d.capacity {
+		d.datas = d.datas[1:]
+	}
+}
+
+func (d *stableAnalysis) isStable() bool {
+	if len(d.datas) == d.capacity && calcCV(d.datas) <= d.threshold {
+		return true
+	}
+	return false
+}
+
+func (d *stableAnalysis) last() float64 {
+	if len(d.datas) == 0 {
+		return 0
+	}
+	return d.datas[len(d.datas)-1]
+}
+
+func (d *stableAnalysis) reset() {
+	d.datas = nil
+}
+
+func (d *stableAnalysis) toString() string {
+	return fmt.Sprintf("stableAnalysis, len %d, cur_val %lf, cv %lf", len(d.datas), d.last(), calcCV(d.datas))
+}
+
 // DimensionCount defines the number of dimensions
 const DimensionCount = 2
 

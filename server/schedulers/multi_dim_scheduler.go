@@ -119,8 +119,9 @@ type multiDimensionScheduler struct {
 	candidateRegions  *regionContainer
 	regionOpRecord    map[uint64]*opRecord
 
-	storeFlowRateHistroy []float64
-	storeQPSHistroy      []float64
+	storeFlowRateHistroy     *stableAnalysis
+	storeQPSHistroy          *stableAnalysis
+	hotRegionLoadRateHistory []*stableAnalysis
 }
 
 func newMultiDimensionScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *multiDimensionScheduler {
@@ -135,6 +136,10 @@ func newMultiDimensionScheduler(opController *schedule.OperatorController, conf 
 		conf:          conf,
 		hotSched:      newHotScheduler(opController, conf),
 		schStatus:     scheduleInit,
+
+		storeFlowRateHistroy:     newStableAnalysis(5, 0.15),
+		storeQPSHistroy:          newStableAnalysis(5, 0.15),
+		hotRegionLoadRateHistory: []*stableAnalysis{newStableAnalysis(5, 0.15), newStableAnalysis(5, 0.15)},
 	}
 	return ret
 }
@@ -186,7 +191,7 @@ func (h *multiDimensionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 	for {
 		switch h.schStatus {
 		case scheduleInit:
-			if h.checkStoreLoad(bs) && h.initLoadInfo(bs) {
+			if h.checkStoreLoad(bs) {
 				h.schStatus++
 			} else {
 				return nil
@@ -215,6 +220,10 @@ func (h *multiDimensionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 			if time.Since(h.opCompleteTime) > 60*time.Second {
 				h.schStatus = scheduleInit
 				h.lastCheckLoadTime = time.Now()
+				h.storeFlowRateHistroy.reset()
+				h.storeQPSHistroy.reset()
+				h.hotRegionLoadRateHistory[0].reset()
+				h.hotRegionLoadRateHistory[1].reset()
 			} else {
 				return nil
 			}
@@ -259,25 +268,32 @@ func (h *multiDimensionScheduler) checkStoreLoad(bs *balanceSolver) bool {
 
 		if h.isLoadBalanced(bs) {
 			log.Info("System has reached load balance")
-			h.storeFlowRateHistroy = nil
-			h.storeQPSHistroy = nil
+			h.storeFlowRateHistroy.reset()
+			h.storeQPSHistroy.reset()
+			h.hotRegionLoadRateHistory[0].reset()
+			h.hotRegionLoadRateHistory[1].reset()
 			return false
 		}
 
-		h.storeFlowRateHistroy = append(h.storeFlowRateHistroy, expByteRate)
-		h.storeQPSHistroy = append(h.storeQPSHistroy, expKeyRate)
-		if len(h.storeFlowRateHistroy) > 5 {
-			h.storeFlowRateHistroy = h.storeFlowRateHistroy[1:]
-			h.storeQPSHistroy = h.storeQPSHistroy[1:]
-		}
+		h.storeFlowRateHistroy.add(expByteRate)
+		h.storeQPSHistroy.add(expKeyRate)
+
+		h.initLoadInfo(bs)
+
 		// unstable store flow
-		if len(h.storeFlowRateHistroy) < 5 || calcCV(h.storeFlowRateHistroy) > 0.15 || calcCV(h.storeQPSHistroy) > 0.15 {
-			log.Info("unstable store flow",
-				zap.Int("recordHistoryLen", len(h.storeFlowRateHistroy)),
-				zap.Float64("FlowRateCV", calcCV(h.storeFlowRateHistroy)),
-				zap.Float64("QPSCV", calcCV(h.storeQPSHistroy)),
-				zap.Float64("curExpFlow(K)", h.storeFlowRateHistroy[len(h.storeFlowRateHistroy)-1]/1024.0),
-				zap.Float64("curExpQPS(K)", h.storeQPSHistroy[len(h.storeQPSHistroy)-1]/1024.0),
+		if !h.storeFlowRateHistroy.isStable() || !h.storeQPSHistroy.isStable() {
+			log.Info("loads of stores are not stable",
+				zap.String("FlowRateHistroy", h.storeFlowRateHistroy.toString()),
+				zap.String("QPSHistroy", h.storeQPSHistroy.toString()),
+			)
+			return false
+		}
+		// unstable region flow
+		if !h.hotRegionLoadRateHistory[0].isStable() || !h.hotRegionLoadRateHistory[1].isStable() ||
+			h.hotRegionLoadRateHistory[0].last() > 1.2 || h.hotRegionLoadRateHistory[1].last() > 1.2 {
+			log.Info("loads of hot regions are not stable",
+				zap.String("FlowRateHistroy", h.hotRegionLoadRateHistory[0].toString()),
+				zap.String("QPSHistroy", h.hotRegionLoadRateHistory[1].toString()),
 			)
 			return false
 		}
@@ -287,7 +303,7 @@ func (h *multiDimensionScheduler) checkStoreLoad(bs *balanceSolver) bool {
 	return false
 }
 
-func (h *multiDimensionScheduler) initLoadInfo(bs *balanceSolver) bool {
+func (h *multiDimensionScheduler) initLoadInfo(bs *balanceSolver) {
 	var totalHotRegionFlowRate, totalHotRegionQPS float64
 
 	h.storeInfos = make([]*storeInfo, 0)
@@ -310,17 +326,8 @@ func (h *multiDimensionScheduler) initLoadInfo(bs *balanceSolver) bool {
 		h.storeInfos = append(h.storeInfos, si)
 	}
 
-	loadRatios := []float64{totalHotRegionFlowRate / h.storeFlowRateHistroy[4] / float64(len(bs.stLoadDetail)),
-		totalHotRegionQPS / h.storeQPSHistroy[4] / float64(len(bs.stLoadDetail)),
-	}
-	if loadRatios[0] < 0.8 || loadRatios[0] > 1.2 || loadRatios[1] < 0.8 || loadRatios[1] > 1.2 {
-		log.Info("There are not enough hot regions, or loads of hot regions are not stable",
-			zap.Float64("loadRatio0", loadRatios[0]),
-			zap.Float64("loadRatio1", loadRatios[1]),
-		)
-		return false
-	}
-	return true
+	h.hotRegionLoadRateHistory[0].add(totalHotRegionFlowRate / h.storeFlowRateHistroy.last() / float64(len(bs.stLoadDetail)))
+	h.hotRegionLoadRateHistory[1].add(totalHotRegionQPS / h.storeQPSHistroy.last() / float64(len(bs.stLoadDetail)))
 }
 
 func (h *multiDimensionScheduler) greedyTwoDimension(bs *balanceSolver) {

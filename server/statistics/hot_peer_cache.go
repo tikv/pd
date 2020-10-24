@@ -36,8 +36,8 @@ const (
 var (
 	minHotThresholds = [2][dimLen]float64{
 		WriteFlow: {
-			byteDim: 1 * 1024,
-			keyDim:  32,
+			byteDim: 256,
+			keyDim:  16,
 		},
 		ReadFlow: {
 			byteDim: 256,
