@@ -346,7 +346,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
-	reloadEvent := make(chan struct{}, 1)
+	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
@@ -454,7 +454,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
-	reloadEvent := make(chan struct{}, 1)
+	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
@@ -510,7 +510,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	// Mock time
 	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// Listen on watcher event
-	reloadEvent := make(chan struct{}, 1)
+	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
@@ -587,7 +587,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	// Mock time
 	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// Listen on watcher event
-	reloadEvent := make(chan struct{}, 1)
+	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
@@ -665,7 +665,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	// Mock time
 	helper.now = func() time.Time { return time.Unix(int64(1601679533+101), 0) }
 	// Listen on watcher event
-	reloadEvent := make(chan struct{}, 1)
+	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
@@ -749,7 +749,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	// Mock time
 	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// Listen on watcher event
-	reloadEvent := make(chan struct{}, 1)
+	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
@@ -820,7 +820,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
-	reloadEvent := make(chan struct{}, 1)
+	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
@@ -888,13 +888,13 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	mockTick := make(chan time.Time)
 	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on watcher event
-	reloadEvent := make(chan struct{}, 1)
+	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		var e struct{}
 		reloadEvent <- e
 	}
 	// Listen on ticker event
-	tickerEvent := make(chan struct{}, 1)
+	tickerEvent := make(chan struct{}, 10)
 	helper.eventAfterTicker = func() {
 		var e struct{}
 		tickerEvent <- e
@@ -988,10 +988,10 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	// Mock time
 	mockNow := int64(1601679533)
 	helper.now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
-	mockTick := make(chan time.Time, 1)
+	mockTick := make(chan time.Time, 10)
 	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on ticker event
-	tickerEvent := make(chan struct{}, 1)
+	tickerEvent := make(chan struct{}, 10)
 	helper.eventAfterTicker = func() {
 		var e struct{}
 		tickerEvent <- e
@@ -1005,7 +1005,7 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	}
 	// Listen on save key failure event
 	shouldListenSaveKeysFailure := int32(0)
-	saveKeysFailureEvent := make(chan struct{}, 1)
+	saveKeysFailureEvent := make(chan struct{}, 10)
 	helper.eventSaveKeysFailure = func() {
 		if atomic.LoadInt32(&shouldListenSaveKeysFailure) != 0 {
 			var e struct{}
