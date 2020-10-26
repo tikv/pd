@@ -241,6 +241,8 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot transfer leader to %d: not found", storeID)
 	} else if core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot transfer leader to %d: not voter", storeID)
+	} else if _, ok := b.unhealthyPeers[storeID]; ok {
+		b.err = errors.Errorf("cannot transfer leader to %d: unhealthy", storeID)
 	} else {
 		b.targetLeaderStoreID = storeID
 	}
