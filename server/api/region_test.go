@@ -319,7 +319,7 @@ func (s *testRegionSuite) TestSplitRegions(c *C) {
 		c.Assert(s.ProcessedPercentage, Equals, 100)
 		c.Assert(s.NewRegionsID, DeepEquals, []uint64{newRegionID})
 	}
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/splitResponses", fmt.Sprintf("return(%v", newRegionID)), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/splitResponses", fmt.Sprintf("return(%v)", newRegionID)), IsNil)
 	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/split", s.urlPrefix), []byte(body), checkOpt)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/splitResponses"), IsNil)
 	c.Assert(err, IsNil)
