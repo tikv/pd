@@ -557,6 +557,9 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.
 func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
+	if len(dcLocation) == 0 {
+		dcLocation = config.GlobalDCLocation
+	}
 	allocatorGroup, exist := am.getAllocatorGroup(dcLocation)
 	if !exist {
 		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
@@ -592,9 +595,6 @@ func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) 
 func (am *AllocatorManager) getAllocatorGroup(dcLocation string) (*allocatorGroup, bool) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	if len(dcLocation) == 0 {
-		dcLocation = config.GlobalDCLocation
-	}
 	allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]
 	return allocatorGroup, exist
 }
