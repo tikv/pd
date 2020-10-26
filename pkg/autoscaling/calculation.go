@@ -288,12 +288,13 @@ func getCPUByResourceType(strategy *Strategy, resourceType string) uint64 {
 }
 
 func getCountByResourceType(strategy *Strategy, resourceType string) *uint64 {
+	var zero uint64 = 0
 	for _, res := range strategy.Resources {
 		if res.ResourceType == resourceType {
 			return res.Count
 		}
 	}
-	return nil
+	return &zero
 }
 
 func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType, healthyInstances []instance) ([]*Plan, error) {
