@@ -16,3 +16,4 @@ default*
 /.tools/bin
 docs/swagger/*
 !docs/swagger/placeholder.go
+*.before
