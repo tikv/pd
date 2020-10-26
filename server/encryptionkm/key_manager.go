@@ -196,6 +196,8 @@ func (m *KeyManager) keysRevision() int64 {
 	return m.mu.keysRevision
 }
 
+// StartBackgroundLoop start the loop to watch encryption keys changes and perform key rotation
+// if needed.
 func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 	// Setup key dictionary watcher
 	watcher := clientv3.NewWatcher(m.etcdClient)
