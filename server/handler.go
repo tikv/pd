@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
@@ -415,6 +416,16 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	return nil
 }
 
+// SetAllStoresLimitTTL is used to set limit of all stores with ttl
+func (h *Handler) SetAllStoresLimitTTL(ratePerMin float64, limitType storelimit.Type, ttl time.Duration) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	c.SetAllStoresLimitTTL(limitType, ratePerMin, ttl)
+	return nil
+}
+
 // SetLabelStoresLimit is used to set limit of label stores.
 func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.Type, labels []*metapb.StoreLabel) error {
 	c, err := h.GetRaftCluster()
@@ -481,15 +492,10 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 }
 
 // AddTransferRegionOperator adds an operator to transfer region to the stores.
-func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]struct{}) error {
+func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]placement.PeerRoleType) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
-	}
-
-	if c.GetOpts().IsPlacementRulesEnabled() {
-		// Cannot determine role when placement rules enabled. Not supported now.
-		return errors.New("transfer region is not supported when placement rules enabled")
 	}
 
 	region := c.GetRegion(regionID)
@@ -497,8 +503,13 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return ErrRegionNotFound(regionID)
 	}
 
-	if len(storeIDs) > c.GetOpts().GetMaxReplicas() {
-		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDs))
+	if c.GetOpts().IsPlacementRulesEnabled() {
+		// Cannot determine role without peer role when placement rules enabled. Not supported now.
+		for _, role := range storeIDs {
+			if len(role) == 0 {
+				return errors.New("transfer region without peer role is not supported when placement rules enabled")
+			}
+		}
 	}
 
 	var store *core.StoreInfo
@@ -512,12 +523,11 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		}
 	}
 
-	peers := make(map[uint64]*metapb.Peer)
-	for id := range storeIDs {
-		peers[id] = &metapb.Peer{StoreId: id}
+	roles := make(map[uint64]placement.PeerRoleType)
+	for id, peerRole := range storeIDs {
+		roles[id] = peerRole
 	}
-
-	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, peers)
+	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, roles)
 	if err != nil {
 		log.Debug("fail to create move region operator", errs.ZapError(err))
 		return err
@@ -886,4 +896,11 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 // GetAddr returns the server urls for clients.
 func (h *Handler) GetAddr() string {
 	return h.s.GetAddr()
+}
+
+// SetStoreLimitTTL set storeLimit with ttl
+func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) {
+	h.s.SaveTTLConfig(map[string]interface{}{
+		data: value,
+	}, ttl)
 }

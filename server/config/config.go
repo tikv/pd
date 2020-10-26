@@ -221,6 +221,7 @@ const (
 	defaultKeyType          = "table"
 
 	defaultStrictlyMatchLabel  = false
+	defaultEnablePlacmentRules = true
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 
@@ -1044,6 +1045,9 @@ func (c *ReplicationConfig) Validate() error {
 
 func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
+	if !meta.IsDefined("enable-placement-rules") {
+		c.EnablePlacementRules = defaultEnablePlacmentRules
+	}
 	if !meta.IsDefined("strictly-match-label") {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
 	}

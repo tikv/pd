@@ -42,6 +42,7 @@ type Builder struct {
 	regionID    uint64
 	regionEpoch *metapb.RegionEpoch
 	rules       []*placement.Rule
+	roles       map[uint64]placement.PeerRoleType
 
 	// operation record
 	originPeers         peersMap
@@ -77,6 +78,13 @@ type BuilderOption func(*Builder)
 // SkipOriginJointStateCheck lets the builder skip the joint state check for origin peers.
 func SkipOriginJointStateCheck(b *Builder) {
 	b.skipOriginJointStateCheck = true
+}
+
+// SetPeerRole set peer role info into builder
+func SetPeerRole(roles map[uint64]placement.PeerRoleType) BuilderOption {
+	return func(builder *Builder) {
+		builder.roles = roles
+	}
 }
 
 // NewBuilder creates a Builder.
@@ -233,6 +241,8 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot transfer leader to %d: not found", storeID)
 	} else if core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot transfer leader to %d: not voter", storeID)
+	} else if _, ok := b.unhealthyPeers[storeID]; ok {
+		b.err = errors.Errorf("cannot transfer leader to %d: unhealthy", storeID)
 	} else {
 		b.targetLeaderStoreID = storeID
 	}
@@ -381,7 +391,11 @@ func (b *Builder) prepareBuild() (string, error) {
 
 	// If no target leader is specified, try not to change the leader as much as possible.
 	if b.targetLeaderStoreID == 0 {
-		if peer, ok := b.targetPeers[b.originLeaderStoreID]; ok && !core.IsLearner(peer) {
+		originLeaderStepDown := false
+		if role, ok := b.roles[b.originLeaderStoreID]; ok && role == placement.Follower {
+			originLeaderStepDown = true
+		}
+		if peer, ok := b.targetPeers[b.originLeaderStoreID]; ok && !core.IsLearner(peer) && !originLeaderStepDown {
 			b.targetLeaderStoreID = b.originLeaderStoreID
 		}
 	}
@@ -447,7 +461,6 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 			b.execAddPeer(peer)
 		}
 	}
-
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
 		return kind, errors.New("no valid leader")
@@ -508,6 +521,10 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[targetLeaderStoreID]
 		if !b.allowLeader(peer, false) {
+			continue
+		}
+		// if role info is given, store having role follower should not be target leader.
+		if role, ok := b.roles[targetLeaderStoreID]; ok && role == placement.Follower {
 			continue
 		}
 		if b.targetLeaderStoreID == 0 {
@@ -655,7 +672,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	b.steps = append(b.steps, ChangePeerV2Leave(step))
 }
 
-var stateFilter = filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
+var stateFilter = &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 
 // check if the peer is allowed to become the leader.
 func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {

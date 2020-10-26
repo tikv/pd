@@ -96,6 +96,7 @@ func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
 
 func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
 	testCluster := mockcluster.NewCluster(opt)
 	testCluster.SetLocationLabels([]string{"zone"})
 	testCluster.SetEnablePlacementRules(true)
@@ -132,10 +133,10 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 
 func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
 	filters := []Filter{
-		StoreStateFilter{TransferLeader: true},
-		StoreStateFilter{MoveRegion: true},
-		StoreStateFilter{TransferLeader: true, MoveRegion: true},
-		StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+		&StoreStateFilter{TransferLeader: true},
+		&StoreStateFilter{MoveRegion: true},
+		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
+		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
 	}
 	opt := config.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
@@ -250,6 +251,7 @@ func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 
 func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
 	testCluster := mockcluster.NewCluster(opt)
 	testCluster.SetLocationLabels([]string{"zone"})
 	testCluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})

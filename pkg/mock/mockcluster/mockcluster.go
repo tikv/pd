@@ -47,7 +47,7 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(opts *config.PersistOptions) *Cluster {
-	return &Cluster{
+	clus := &Cluster{
 		BasicCluster:     core.NewBasicCluster(),
 		IDAllocator:      mockid.NewIDAllocator(),
 		HotCache:         statistics.NewHotCache(),
@@ -56,6 +56,10 @@ func NewCluster(opts *config.PersistOptions) *Cluster {
 		suspectRegions:   map[uint64]struct{}{},
 		disabledFeatures: make(map[versioninfo.Feature]struct{}),
 	}
+	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
+		clus.initRuleManager()
+	}
+	return clus
 }
 
 // GetOpts returns the cluster configuration.
@@ -318,9 +322,12 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
-	items := mc.HotCache.CheckRead(r, mc.StoresStats)
-	for _, item := range items {
-		mc.HotCache.Update(item)
+	num := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
+	for i := 0; i < num; i++ {
+		items := mc.HotCache.CheckRead(r)
+		for _, item := range items {
+			mc.HotCache.Update(item)
+		}
 	}
 	mc.PutRegion(r)
 }
@@ -335,9 +342,12 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	r = r.Clone(core.SetWrittenKeys(writtenKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
-	items := mc.HotCache.CheckWrite(r, mc.StoresStats)
-	for _, item := range items {
-		mc.HotCache.Update(item)
+	num := mc.HotCache.GetFilledPeriod(statistics.WriteFlow)
+	for i := 0; i < num; i++ {
+		items := mc.HotCache.CheckWrite(r)
+		for _, item := range items {
+			mc.HotCache.Update(item)
+		}
 	}
 	mc.PutRegion(r)
 }
@@ -641,6 +651,11 @@ func (mc *Cluster) CheckRegionUnderSuspect(id uint64) bool {
 // ResetSuspectRegions only used for unit test
 func (mc *Cluster) ResetSuspectRegions() {
 	mc.suspectRegions = map[uint64]struct{}{}
+}
+
+// GetRegionByKey get region by key
+func (mc *Cluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
+	return mc.SearchRegion(regionKey)
 }
 
 // SetStoreLastHeartbeatInterval set the last heartbeat to the target store

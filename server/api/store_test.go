@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -83,7 +84,8 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 			Version: "2.0.0",
 		},
 	}
-	s.svr, s.cleanup = mustNewServer(c)
+	// TODO: enable placmentrules
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.Replication.EnablePlacementRules = false })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -179,6 +181,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
+	// TODO: supports strictly match check in placement rules
 	err = postJSON(testDialClient, url+"/label", b)
 	c.Assert(strings.Contains(err.Error(), "key matching the label was not found"), IsTrue)
 	locationLabels := map[string]string{"location-labels": "zone,host"}
@@ -394,4 +397,55 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 			c.Assert(ok, Equals, true)
 		}
 	}
+}
+
+func (s *testStoreSuite) TestStoreLimitTTL(c *C) {
+	// add peer
+	url := fmt.Sprintf("%s/store/1/limit?ttlSecond=%v", s.urlPrefix, 5)
+	data := map[string]interface{}{
+		"type": "add-peer",
+		"rate": 999,
+	}
+	postData, err := json.Marshal(data)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, url, postData)
+	c.Assert(err, IsNil)
+	// remove peer
+	data = map[string]interface{}{
+		"type": "remove-peer",
+		"rate": 998,
+	}
+	postData, err = json.Marshal(data)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, url, postData)
+	c.Assert(err, IsNil)
+	// all store limit add peer
+	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", s.urlPrefix, 3)
+	data = map[string]interface{}{
+		"type": "add-peer",
+		"rate": 997,
+	}
+	postData, err = json.Marshal(data)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, url, postData)
+	c.Assert(err, IsNil)
+	// all store limit remove peer
+	data = map[string]interface{}{
+		"type": "remove-peer",
+		"rate": 996,
+	}
+	postData, err = json.Marshal(data)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, url, postData)
+	c.Assert(err, IsNil)
+
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer, Equals, float64(999))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer, Equals, float64(998))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer, Equals, float64(997))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer, Equals, float64(996))
+	time.Sleep(5 * time.Second)
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer, Not(Equals), float64(999))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer, Not(Equals), float64(998))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer, Not(Equals), float64(997))
+	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer, Not(Equals), float64(996))
 }

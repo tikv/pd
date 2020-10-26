@@ -1435,12 +1435,12 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
 func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotSpotCache.CheckWrite(region, c.storesStats)
+	return c.hotSpotCache.CheckWrite(region)
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
 func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotSpotCache.CheckRead(region, c.storesStats)
+	return c.hotSpotCache.CheckRead(region)
 }
 
 // TODO: remove me.
@@ -1623,6 +1623,11 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
 	c.opt.SetAllStoresLimit(typ, ratePerMin)
+}
+
+// SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
+func (c *RaftCluster) SetAllStoresLimitTTL(typ storelimit.Type, ratePerMin float64, ttl time.Duration) {
+	c.opt.SetAllStoresLimitTTL(c.ctx, typ, ratePerMin, ttl)
 }
 
 // GetClusterVersion returns the current cluster version.

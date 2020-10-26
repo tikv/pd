@@ -558,7 +558,8 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 }
 
 func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
-	tc, err := tests.NewTestCluster(s.ctx, 1)
+	// TODO: enable placementrules
+	tc, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config, svr string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
@@ -723,7 +724,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 }
 
 func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
-	tc, err := tests.NewTestCluster(s.ctx, 1)
+	tc, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config, name string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 	err = tc.RunInitialServers()
