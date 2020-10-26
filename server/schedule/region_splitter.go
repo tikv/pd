@@ -32,7 +32,7 @@ import (
 // SplitRegionsHandler used to handle region splitting
 type SplitRegionsHandler interface {
 	SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error
-	WatchRegionsByKeyRange(startKey, endKey []byte, expectRegionsCount int, timeout, watchInterval time.Duration) map[uint64]struct{}
+	WatchRegionsByKeyRange(startKey, endKey []byte, splitKeys [][]byte, timeout, watchInterval time.Duration) map[uint64]struct{}
 }
 
 // NewSplitRegionsHandler return SplitRegionsHandler
@@ -100,7 +100,7 @@ func (r *RegionSplitter) splitRegionsByKeys(splitKeys [][]byte, newRegions map[u
 		// TODO: use goroutine to run watchRegionsByKeyRange asynchronously
 		// TODO: support configure timeout and interval
 		splittedRegionsID := r.handler.WatchRegionsByKeyRange(region.GetStartKey(), region.GetEndKey(),
-			len(keys)+1, time.Minute, 100*time.Millisecond)
+			keys, time.Minute, 100*time.Millisecond)
 		for key := range splittedRegionsID {
 			newRegions[key] = struct{}{}
 		}
@@ -165,20 +165,23 @@ func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKe
 	return nil
 }
 
-func (h *splitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, expectRegionsCount int, timeout, watchInterval time.Duration) map[uint64]struct{} {
+func (h *splitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, splitKeys [][]byte, timeout, watchInterval time.Duration) map[uint64]struct{} {
 	after := time.After(timeout)
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
-	var regionsID map[uint64]struct{}
+	regionsID := make(map[uint64]struct{}, len(splitKeys))
 	for {
 		select {
 		case <-ticker.C:
-			regions := h.cluster.ScanRegions(startKey, endKey, expectRegionsCount)
-			regionsID = make(map[uint64]struct{}, expectRegionsCount)
+			regions := h.cluster.ScanRegions(startKey, endKey, -1)
 			for _, region := range regions {
-				regionsID[region.GetID()] = struct{}{}
+				for _, key := range splitKeys {
+					if bytes.Equal(key, region.GetStartKey()) {
+						regionsID[region.GetID()] = struct{}{}
+					}
+				}
 			}
-			if len(regionsID) < expectRegionsCount {
+			if len(regionsID) < len(splitKeys) {
 				continue
 			}
 			return regionsID

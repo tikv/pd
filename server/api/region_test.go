@@ -304,6 +304,7 @@ func (s *testRegionSuite) TestSplitRegions(c *C) {
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 13}, &metapb.Peer{Id: 6, StoreId: 13})
 	mustRegionHeartbeat(c, s.svr, r1)
 	mustPutStore(c, s.svr, 13, metapb.StoreState_Up, []*metapb.StoreLabel{})
+	newRegionID := uint64(11)
 	body := fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`, 0,
 		hex.EncodeToString([]byte("bbb")),
 		hex.EncodeToString([]byte("ccc")),
@@ -316,9 +317,9 @@ func (s *testRegionSuite) TestSplitRegions(c *C) {
 		err := json.Unmarshal(res, s)
 		c.Assert(err, IsNil)
 		c.Assert(s.ProcessedPercentage, Equals, 100)
-		c.Assert(s.NewRegionsID, DeepEquals, []uint64{99, 100, 101})
+		c.Assert(s.NewRegionsID, DeepEquals, []uint64{newRegionID})
 	}
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/splitResponses", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/splitResponses", fmt.Sprintf("return(%v", newRegionID)), IsNil)
 	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/split", s.urlPrefix), []byte(body), checkOpt)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/splitResponses"), IsNil)
 	c.Assert(err, IsNil)

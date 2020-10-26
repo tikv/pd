@@ -44,13 +44,12 @@ func (m *mockSplitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, spl
 }
 
 // WatchRegionsByKeyRange mock SplitRegionsHandler
-func (m *mockSplitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, expectRegionsCount int,
-	timeout, watchInterval time.Duration) map[uint64]struct{} {
+func (m *mockSplitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte,
+	splitKeys [][]byte, timeout, watchInterval time.Duration) map[uint64]struct{} {
 	for regionID, keyRange := range m.regions {
 		if bytes.Equal(startKey, keyRange[0]) && bytes.Equal(endKey, keyRange[1]) {
 			returned := map[uint64]struct{}{}
-			returned[regionID] = struct{}{}
-			for i := 0; i < expectRegionsCount-1; i++ {
+			for i := 0; i < len(splitKeys); i++ {
 				returned[regionID+uint64(i)+1000] = struct{}{}
 			}
 			return returned
@@ -74,11 +73,11 @@ func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 	// assert success
 	failureKeys := splitter.splitRegionsByKeys([][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
 	c.Assert(len(failureKeys), Equals, 0)
-	c.Assert(len(newRegions), Equals, 3)
+	c.Assert(len(newRegions), Equals, 2)
 
 	percentage, newRegionsID := splitter.SplitRegions([][]byte{[]byte("fff"), []byte("ggg")}, 1)
 	c.Assert(percentage, Equals, 100)
-	c.Assert(len(newRegionsID), Equals, 3)
+	c.Assert(len(newRegionsID), Equals, 2)
 	// assert out of range
 	newRegions = map[uint64]struct{}{}
 	failureKeys = splitter.splitRegionsByKeys([][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
