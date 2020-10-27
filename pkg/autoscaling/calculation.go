@@ -237,7 +237,7 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 
 	// A new group created
 	if len(groups) == 0 {
-		if group.Count+scaleOutCount <= resCount {
+		if resCount == nil || group.Count+scaleOutCount <= *resCount {
 			group.Count += scaleOutCount
 			return []*Plan{&group}
 		}
@@ -246,7 +246,7 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 
 	// update the existed group
 	for i, g := range groups {
-		if g.ResourceType == group.ResourceType && group.Count+scaleOutCount <= resCount {
+		if g.ResourceType == group.ResourceType && (resCount == nil || group.Count+scaleOutCount <= *resCount) {
 			group.Count += scaleOutCount
 			groups[i] = &group
 		}
@@ -287,13 +287,14 @@ func getCPUByResourceType(strategy *Strategy, resourceType string) uint64 {
 	return 0
 }
 
-func getCountByResourceType(strategy *Strategy, resourceType string) uint64 {
+func getCountByResourceType(strategy *Strategy, resourceType string) *uint64 {
+	var zero uint64 = 0
 	for _, res := range strategy.Resources {
 		if res.ResourceType == resourceType {
 			return res.Count
 		}
 	}
-	return 0
+	return &zero
 }
 
 func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType, healthyInstances []instance) ([]*Plan, error) {
