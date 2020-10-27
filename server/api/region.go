@@ -15,6 +15,7 @@ package api
 
 import (
 	"container/heap"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
@@ -714,6 +716,59 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	}{
 		ProcessedPercentage: percentage,
 	}
+	h.rd.JSON(w, http.StatusOK, &s)
+}
+
+// @Tags region
+// @Summary Split regions with given split keys
+// @Accept json
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "Split regions with given split keys"
+// @Failure 400 {string} string "The input is invalid."
+// @Router /regions/split [post]
+func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	rawSplitKeys, ok := input["split_keys"].([]interface{})
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "split_keys should be provided.")
+		return
+	}
+	if len(rawSplitKeys) < 1 {
+		h.rd.JSON(w, http.StatusBadRequest, "empty split keys.")
+		return
+	}
+	retryLimit, ok := input["retry_limit"].(int)
+	if !ok {
+		retryLimit = 5
+	}
+	splitKeys := make([][]byte, 0, len(rawSplitKeys))
+	for _, rawKey := range rawSplitKeys {
+		key, err := hex.DecodeString(rawKey.(string))
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		splitKeys = append(splitKeys, key)
+	}
+	s := struct {
+		ProcessedPercentage int      `json:"processed-percentage"`
+		NewRegionsID        []uint64 `json:"regions-id"`
+	}{}
+	percentage, newRegionsID := rc.GetRegionSplitter().SplitRegions(splitKeys, retryLimit)
+	s.ProcessedPercentage = percentage
+	s.NewRegionsID = newRegionsID
+	failpoint.Inject("splitResponses", func(val failpoint.Value) {
+		rawID, ok := val.(int)
+		if ok {
+			s.ProcessedPercentage = 100
+			s.NewRegionsID = []uint64{uint64(rawID)}
+		}
+	})
 	h.rd.JSON(w, http.StatusOK, &s)
 }
 
