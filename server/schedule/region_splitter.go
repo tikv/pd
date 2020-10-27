@@ -117,7 +117,7 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64][][]byte, 
 	for _, key := range keys {
 		region := r.cluster.GetRegionByKey(key)
 		if region == nil {
-			log.Info("region hollow", logutil.ZapRedactByteString("key", key))
+			log.Error("region hollow", logutil.ZapRedactByteString("key", key))
 			unProcessedKeys = append(unProcessedKeys, key)
 			continue
 		}
@@ -159,7 +159,7 @@ type splitRegionsHandler struct {
 func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error {
 	op := operator.CreateSplitRegionOperator("region-splitter", region, 0, pdpb.CheckPolicy_USEKEY, splitKeys)
 	if ok := h.oc.AddOperator(op); !ok {
-		log.Info("add region split operator failed", zap.Uint64("regionID", region.GetID()))
+		log.Warn("add region split operator failed", zap.Uint64("region-id", region.GetID()))
 		return errors.New("add region split operator failed")
 	}
 	return nil
