@@ -28,7 +28,7 @@ const (
 	OpLeader OpKind = 1 << iota
 	// Include peer addition or removal. This means that this operator may take a long time.
 	OpRegion
-	// Include region split. Initiated by rule checker if `kind & OpAdmin == 0`
+	// Include region split. Initiated by rule checker if `kind & OpAdmin == 0`.
 	OpSplit
 	// Initiated by admin.
 	OpAdmin
