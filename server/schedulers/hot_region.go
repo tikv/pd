@@ -1040,11 +1040,11 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		return nil, nil
 	}
 	var (
-		op       *operator.Operator
-		counters []prometheus.Counter
-		err      error
+		op              *operator.Operator
+		counters        []prometheus.Counter
+		err             error
+		additionalInfos map[string]string
 	)
-	additionalInfos := make(map[string]string)
 	switch bs.opTy {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
@@ -1057,15 +1057,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 			operator.OpHotRegion,
 			bs.cur.srcStoreID,
 			dstPeer)
-		srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
-		dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
-		peer := bs.cur.srcPeerStat
-		additionalInfos["srcByteRate"] = strconv.FormatFloat(srcLd.ByteRate, 'f', 2, 64)
-		additionalInfos["srcKeyRate"] = strconv.FormatFloat(srcLd.KeyRate, 'f', 2, 64)
-		additionalInfos["dstByteRate"] = strconv.FormatFloat(dstLd.ByteRate, 'f', 2, 64)
-		additionalInfos["dstKeyRate"] = strconv.FormatFloat(dstLd.KeyRate, 'f', 2, 64)
-		additionalInfos["peerByteRate"] = strconv.FormatFloat(peer.ByteRate, 'f', 2, 64)
-		additionalInfos["peerKeyRate"] = strconv.FormatFloat(peer.KeyRate, 'f', 2, 64)
+		additionalInfos = bs.generateAdditionalInfos()
 		counters = append(counters,
 			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
 			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
@@ -1081,15 +1073,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 			bs.cur.srcStoreID,
 			bs.cur.dstStoreID,
 			operator.OpHotRegion)
-		srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
-		dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
-		peer := bs.cur.srcPeerStat
-		additionalInfos["srcByteRate"] = strconv.FormatFloat(srcLd.ByteRate, 'f', 2, 64)
-		additionalInfos["srcKeyRate"] = strconv.FormatFloat(srcLd.KeyRate, 'f', 2, 64)
-		additionalInfos["dstByteRate"] = strconv.FormatFloat(dstLd.ByteRate, 'f', 2, 64)
-		additionalInfos["dstKeyRate"] = strconv.FormatFloat(dstLd.KeyRate, 'f', 2, 64)
-		additionalInfos["peerByteRate"] = strconv.FormatFloat(peer.ByteRate, 'f', 2, 64)
-		additionalInfos["peerKeyRate"] = strconv.FormatFloat(peer.KeyRate, 'f', 2, 64)
+		additionalInfos = bs.generateAdditionalInfos()
 		counters = append(counters,
 			hotDirectionCounter.WithLabelValues("transfer-leader", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
 			hotDirectionCounter.WithLabelValues("transfer-leader", bs.rwTy.String(), strconv.FormatUint(bs.cur.dstStoreID, 10), "in"))
@@ -1114,6 +1098,20 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	}
 
 	return []*operator.Operator{op}, []Influence{infl}
+}
+
+func (bs *balanceSolver) generateAdditionalInfos() (additionalInfos map[string]string) {
+	additionalInfos = make(map[string]string, 6)
+	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
+	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
+	peer := bs.cur.srcPeerStat
+	additionalInfos["srcByteRate"] = strconv.FormatFloat(srcLd.ByteRate, 'f', 2, 64)
+	additionalInfos["srcKeyRate"] = strconv.FormatFloat(srcLd.KeyRate, 'f', 2, 64)
+	additionalInfos["dstByteRate"] = strconv.FormatFloat(dstLd.ByteRate, 'f', 2, 64)
+	additionalInfos["dstKeyRate"] = strconv.FormatFloat(dstLd.KeyRate, 'f', 2, 64)
+	additionalInfos["peerByteRate"] = strconv.FormatFloat(peer.ByteRate, 'f', 2, 64)
+	additionalInfos["peerKeyRate"] = strconv.FormatFloat(peer.KeyRate, 'f', 2, 64)
+	return additionalInfos
 }
 
 func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
