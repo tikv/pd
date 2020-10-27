@@ -25,14 +25,14 @@ require (
 	github.com/montanaflynn/stats v0.5.0
 	github.com/opentracing/opentracing-go v1.1.0
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
-	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200921100341-0e148dfc0029
+	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20201022065613-94d8dc38a204
 	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20200917111840-a15ef68f753d
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
 	github.com/pingcap/kvproto v0.0.0-20200927025644-73dc27044686
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
-	github.com/pingcap/sysutil v0.0.0-20200715082929-4c47bcac246a
+	github.com/pingcap/sysutil v0.0.0-20201021075216-f93ced2829e2
 	github.com/pingcap/tiup v1.2.2
 	github.com/prometheus/client_golang v1.2.1
 	github.com/prometheus/common v0.9.1

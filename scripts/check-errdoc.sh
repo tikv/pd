@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2020 PingCAP, Inc.
+# Copyright 2020 TiKV Project Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ set -euo pipefail
 
 cd -P .
 
-cp errors.toml /tmp/errors.toml.before
+cp errors.toml errors.toml.before
 errdoc-gen --source . --module github.com/tikv/pd --output errors.toml
-diff -q errors.toml /tmp/errors.toml.before
+diff -q errors.toml errors.toml.before
+rm errors.toml.before
