@@ -216,7 +216,7 @@ func (c *baseClient) updateLeader() error {
 			log.Warn("[pd] cannot update leader", zap.String("address", u), errs.ZapError(err))
 		}
 		cancel()
-		if err := c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeader()); err != nil {
+		if err := c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders()); err != nil {
 			return err
 		}
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {

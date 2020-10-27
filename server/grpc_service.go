@@ -68,17 +68,17 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 	}
 
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	tsoAllocatorLeader, err := tsoAllocatorManager.GetLocalAllocatorLeadersMember()
+	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeadersMember()
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
 	return &pdpb.GetMembersResponse{
-		Header:             s.header(),
-		Members:            members,
-		Leader:             s.member.GetLeader(),
-		EtcdLeader:         etcdLeader,
-		TsoAllocatorLeader: tsoAllocatorLeader,
+		Header:              s.header(),
+		Members:             members,
+		Leader:              s.member.GetLeader(),
+		EtcdLeader:          etcdLeader,
+		TsoAllocatorLeaders: tsoAllocatorLeaders,
 	}, nil
 }
 
