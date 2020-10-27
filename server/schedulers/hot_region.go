@@ -797,7 +797,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	switch bs.opTy {
 	case movePeer:
 		filters = []filter.Filter{
-			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
+			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIds(), bs.cur.region.GetStoreIds()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
@@ -807,7 +807,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 	case transferLeader:
 		filters = []filter.Filter{
-			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
+			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
 		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore); leaderFilter != nil {
