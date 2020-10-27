@@ -184,6 +184,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 			}
 			wg.Add(1)
 			go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *pdpb.SyncMaxTSResponse, errCh chan<- error) {
+				defer wg.Done()
 				request := &pdpb.SyncMaxTSRequest{
 					Header: &pdpb.RequestHeader{
 						SenderId: gta.allocatorManager.member.ID(),
@@ -203,7 +204,6 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 				if resp == nil {
 					log.Error("sync max ts rpc failed, got a nil response", zap.String("local-allocator-leader-url", leaderConn.Target()))
 				}
-				wg.Done()
 			}(ctx, leaderConn, respCh, errCh)
 		}
 		wg.Wait()

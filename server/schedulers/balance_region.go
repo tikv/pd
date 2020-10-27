@@ -90,7 +90,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 		setOption(scheduler)
 	}
 	scheduler.filters = []filter.Filter{
-		filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true},
+		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true},
 		filter.NewSpecialUseFilter(scheduler.GetName()),
 	}
 	return scheduler
@@ -204,7 +204,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds()),
 		filter.NewPlacementSafeguard(s.GetName(), cluster, region, source),
 		filter.NewSpecialUseFilter(s.GetName()),
-		filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
+		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
 
 	candidates := filter.NewCandidates(cluster.GetStores()).

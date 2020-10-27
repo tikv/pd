@@ -65,16 +65,18 @@ type allocatorGroup struct {
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
 type AllocatorManager struct {
-	sync.RWMutex
+	mu struct {
+		sync.RWMutex
+		// There are two kinds of TSO Allocators:
+		//   1. Global TSO Allocator, as a global single point to allocate
+		//      TSO for global transactions, such as cross-region cases.
+		//   2. Local TSO Allocator, servers for DC-level transactions.
+		// dc-location/global (string) -> TSO Allocator
+		allocatorGroups map[string]*allocatorGroup
+		// dc-location/global (string) -> Member ID
+		clusterDCLocations map[string][]uint64
+	}
 	wg sync.WaitGroup
-	// There are two kinds of TSO Allocators:
-	//   1. Global TSO Allocator, as a global single point to allocate
-	//      TSO for global transactions, such as cross-region cases.
-	//   2. Local TSO Allocator, servers for DC-level transactions.
-	// dc-location/global (string) -> TSO Allocator
-	allocatorGroups map[string]*allocatorGroup
-	// dc-location/global (string) -> Member ID
-	clusterDCLocations map[string][]uint64
 	// for election use
 	member *member.Member
 	// TSO config
@@ -95,7 +97,6 @@ func NewAllocatorManager(
 	sc *grpcutil.TLSConfig,
 ) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
-		allocatorGroups:        make(map[string]*allocatorGroup),
 		member:                 m,
 		rootPath:               rootPath,
 		saveInterval:           saveInterval,
@@ -103,6 +104,7 @@ func NewAllocatorManager(
 		maxResetTSGap:          maxResetTSGap,
 		securityConfig:         sc,
 	}
+	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	return allocatorManager
 }
 
@@ -144,10 +146,10 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 // GetClusterDCLocations returns all dc-locations of a cluster with a map
 // which satisfies dcLocation -> []serverID.
 func (am *AllocatorManager) GetClusterDCLocations() map[string][]uint64 {
-	am.RLock()
-	defer am.RUnlock()
+	am.mu.RLock()
+	defer am.mu.RUnlock()
 	dcLocationMap := make(map[string][]uint64)
-	for dcLocation, members := range am.clusterDCLocations {
+	for dcLocation, members := range am.mu.clusterDCLocations {
 		dcLocationMap[dcLocation] = make([]uint64, len(members))
 		copy(dcLocationMap[dcLocation], members)
 	}
@@ -160,8 +162,8 @@ func (am *AllocatorManager) getLocalTSOConfigPath() string {
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) error {
-	am.Lock()
-	defer am.Unlock()
+	am.mu.Lock()
+	defer am.mu.Unlock()
 
 	if am.updatePhysicalInterval != config.DefaultTSOUpdatePhysicalInterval {
 		log.Warn("tso update physical interval is non-default",
@@ -175,7 +177,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 		allocator = NewLocalTSOAllocator(am.member, leadership, dcLocation, am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
 	}
 	// Update or create a new allocatorGroup
-	am.allocatorGroups[dcLocation] = &allocatorGroup{
+	am.mu.allocatorGroups[dcLocation] = &allocatorGroup{
 		dcLocation: dcLocation,
 		parentCtx:  parentCtx,
 		leadership: leadership,
@@ -187,7 +189,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 	case config.GlobalDCLocation:
 		// Because Global TSO Allocator only depends on PD leader's leadership,
 		// so we can directly initialize it here.
-		if err := am.allocatorGroups[dcLocation].allocator.Initialize(); err != nil {
+		if err := am.mu.allocatorGroups[dcLocation].allocator.Initialize(); err != nil {
 			return err
 		}
 	// For Local TSO Allocator
@@ -409,9 +411,9 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 		log.Error("get cluster dc-locations failed", errs.ZapError(err))
 		return
 	}
-	am.Lock()
-	defer am.Unlock()
-	am.clusterDCLocations = make(map[string][]uint64)
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	am.mu.clusterDCLocations = make(map[string][]uint64)
 	for _, kv := range resp.Kvs {
 		// The key will contain the member ID and the value is its dcLocation
 		serverPath := strings.Split(string(kv.Key), "/")
@@ -425,7 +427,7 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 				errs.ZapError(err))
 			continue
 		}
-		am.clusterDCLocations[dcLocation] = append(am.clusterDCLocations[dcLocation], serverID)
+		am.mu.clusterDCLocations[dcLocation] = append(am.mu.clusterDCLocations[dcLocation], serverID)
 	}
 }
 
@@ -515,9 +517,9 @@ func (am *AllocatorManager) PriorityChecker() {
 }
 
 func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error) {
-	am.RLock()
-	defer am.RUnlock()
-	for dcLocation, serverIDs := range am.clusterDCLocations {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	for dcLocation, serverIDs := range am.mu.clusterDCLocations {
 		if slice.AnyOf(serverIDs, func(i int) bool { return serverIDs[i] == serverID }) {
 			return dcLocation, nil
 		}
@@ -552,23 +554,21 @@ func (am *AllocatorManager) deleteNextLeaderID(dcLocation string) error {
 }
 
 func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
-	am.Lock()
-	defer am.Unlock()
-	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
 		allocatorGroup.leadership.Reset()
 	}
-	delete(am.allocatorGroups, dcLocation)
+	delete(am.mu.allocatorGroups, dcLocation)
 }
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.
 func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
-	am.RLock()
 	if len(dcLocation) == 0 {
 		dcLocation = config.GlobalDCLocation
 	}
-	allocatorGroup, exist := am.allocatorGroups[dcLocation]
-	am.RUnlock()
+	allocatorGroup, exist := am.getAllocatorGroup(dcLocation)
 	if !exist {
 		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
 		return pdpb.Timestamp{}, err
@@ -577,19 +577,19 @@ func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (p
 }
 
 func (am *AllocatorManager) resetAllocatorGroup(dcLocation string) {
-	am.Lock()
-	defer am.Unlock()
-	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
 		allocatorGroup.leadership.Reset()
 	}
 }
 
 func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) []*allocatorGroup {
-	am.RLock()
-	defer am.RUnlock()
+	am.mu.RLock()
+	defer am.mu.RUnlock()
 	allocatorGroups := make([]*allocatorGroup, 0)
-	for _, ag := range am.allocatorGroups {
+	for _, ag := range am.mu.allocatorGroups {
 		if ag == nil {
 			continue
 		}
@@ -600,11 +600,18 @@ func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) 
 	return allocatorGroups
 }
 
+func (am *AllocatorManager) getAllocatorGroup(dcLocation string) (*allocatorGroup, bool) {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]
+	return allocatorGroup, exist
+}
+
 // GetAllocator get the allocator by dc-location.
 func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
-	am.RLock()
-	defer am.RUnlock()
-	allocatorGroup, exist := am.allocatorGroups[dcLocation]
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]
 	if !exist {
 		return nil, errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found", dcLocation))
 	}

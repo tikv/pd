@@ -241,6 +241,8 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot transfer leader to %d: not found", storeID)
 	} else if core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot transfer leader to %d: not voter", storeID)
+	} else if _, ok := b.unhealthyPeers[storeID]; ok {
+		b.err = errors.Errorf("cannot transfer leader to %d: unhealthy", storeID)
 	} else {
 		b.targetLeaderStoreID = storeID
 	}
@@ -670,7 +672,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	b.steps = append(b.steps, ChangePeerV2Leave(step))
 }
 
-var stateFilter = filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
+var stateFilter = &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 
 // check if the peer is allowed to become the leader.
 func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
