@@ -220,10 +220,10 @@ const (
 	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultKeyType          = "table"
 
-	defaultStrictlyMatchLabel  = false
-	defaultEnablePlacmentRules = true
-	defaultEnableGRPCGateway   = true
-	defaultDisableErrorVerbose = true
+	defaultStrictlyMatchLabel   = false
+	defaultEnablePlacementRules = true
+	defaultEnableGRPCGateway    = true
+	defaultDisableErrorVerbose  = true
 
 	defaultDashboardAddress = "auto"
 
@@ -1046,7 +1046,7 @@ func (c *ReplicationConfig) Validate() error {
 func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	if !meta.IsDefined("enable-placement-rules") {
-		c.EnablePlacementRules = defaultEnablePlacmentRules
+		c.EnablePlacementRules = defaultEnablePlacementRules
 	}
 	if !meta.IsDefined("strictly-match-label") {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
