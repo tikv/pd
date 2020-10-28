@@ -453,9 +453,16 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
+	// To speed up the test, we force to do the check
+	for _, server := range cluster.GetServers() {
+		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
+	}
 	for _, dcLocation := range dcLocationConfig {
-		pdName := cluster.WaitAllocatorLeader(dcLocation)
-		c.Assert(len(pdName), Greater, 0)
+		var pdName string
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdName = cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdName) > 0
+		})
 		s.dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
 	}
 	cluster.WaitLeader()

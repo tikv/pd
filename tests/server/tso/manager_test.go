@@ -18,6 +18,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -70,11 +71,13 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	serverNameMap := make(map[uint64]string)
 	for _, server := range cluster.GetServers() {
 		serverNameMap[server.GetServerID()] = server.GetServer().Name()
+		// To speed up the test, we force to do the check
+		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
 	}
 	// Start to check every server's GetClusterDCLocations() result
 	for _, server := range cluster.GetServers() {
 		obtainedServerNumber := 0
-		dcLocationMap, err := server.GetTSOAllocatorManager().GetClusterDCLocations()
+		dcLocationMap := server.GetTSOAllocatorManager().GetClusterDCLocations()
 		c.Assert(err, IsNil)
 		c.Assert(len(dcLocationMap), Equals, testCase.dcLocationNumber)
 		for obtainedDCLocation, serverIDs := range dcLocationMap {
@@ -89,7 +92,7 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	}
 }
 
-const waitAllocatorPriorityCheckInterval = 3 * time.Minute
+const waitAllocatorPriorityCheckInterval = 2 * time.Minute
 
 var _ = Suite(&testPrioritySuite{})
 
@@ -133,8 +136,23 @@ func (s *testPrioritySuite) TestAllocatorPriority(c *C) {
 	// pd2: dc-2 allocator leader
 	// pd3: dc-3 allocator leader
 
-	// Because the default priority checking period is 1 minute,
-	// so we sleep longer here.
+	// To speed up the test, we force to do the check
+	for _, server := range cluster.GetServers() {
+		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
+	}
+	// Wait for each DC's Local TSO Allocator leader
+	for _, dcLocation := range dcLocationConfig {
+		testutil.WaitUntil(c, func(c *C) bool {
+			leaderName := cluster.WaitAllocatorLeader(dcLocation)
+			return len(leaderName) > 0
+		})
+	}
+	// Same as above
+	for _, server := range cluster.GetServers() {
+		server.GetTSOAllocatorManager().PriorityChecker()
+	}
+	// Because the leader changing may take quite a long period,
+	// so we sleep longer here to wait.
 	time.Sleep(waitAllocatorPriorityCheckInterval)
 
 	for serverName, dcLocation := range dcLocationConfig {
