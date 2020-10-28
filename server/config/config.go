@@ -712,11 +712,13 @@ type ScheduleConfig struct {
 
 // Clone returns a cloned scheduling configuration.
 func (c *ScheduleConfig) Clone() *ScheduleConfig {
-	schedulers := make(SchedulerConfigs, len(c.Schedulers))
-	copy(schedulers, c.Schedulers)
-	storeLimit := make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
-	for k, v := range c.StoreLimit {
-		storeLimit[k] = v
+	schedulers := append(c.Schedulers[:0:0], c.Schedulers...)
+	var storeLimit map[uint64]StoreLimitConfig
+	if c.StoreLimit != nil {
+		storeLimit := make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
+		for k, v := range c.StoreLimit {
+			storeLimit[k] = v
+		}
 	}
 	cfg := *c
 	cfg.StoreLimit = storeLimit
@@ -979,8 +981,7 @@ type ReplicationConfig struct {
 
 // Clone makes a deep copy of the config.
 func (c *ReplicationConfig) Clone() *ReplicationConfig {
-	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
-	copy(locationLabels, c.LocationLabels)
+	locationLabels := append(c.LocationLabels[:0:0], c.LocationLabels...)
 	cfg := *c
 	cfg.LocationLabels = locationLabels
 	return &cfg
@@ -1061,8 +1062,7 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 
 // Clone returns a cloned PD server config.
 func (c *PDServerConfig) Clone() *PDServerConfig {
-	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
-	copy(runtimeServices, c.RuntimeServices)
+	runtimeServices := append(c.RuntimeServices[:0:0], c.RuntimeServices...)
 	cfg := *c
 	cfg.RuntimeServices = runtimeServices
 	return &cfg
