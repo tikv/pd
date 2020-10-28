@@ -134,7 +134,7 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64]regionGrou
 	for _, key := range keys {
 		region := r.cluster.GetRegionByKey(key)
 		if region == nil {
-			log.Info("region hollow", logutil.ZapRedactByteString("key", key))
+			log.Error("region hollow", logutil.ZapRedactByteString("key", key))
 			unProcessedKeys = append(unProcessedKeys, key)
 			continue
 		}
@@ -155,7 +155,7 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64]regionGrou
 			}
 		}
 		log.Info("found region",
-			zap.Uint64("regionID", region.GetID()),
+			zap.Uint64("region-id", region.GetID()),
 			logutil.ZapRedactByteString("key", key))
 		appendKeys := append(groups[region.GetID()].keys, key)
 		groups[region.GetID()] = regionGroupKeys{
