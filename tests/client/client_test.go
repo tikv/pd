@@ -218,8 +218,11 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	}
 	var allocatorLeaderMap = make(map[string]string)
 	for _, dcLocation := range dcLocationConfig {
-		pdName := cluster.WaitAllocatorLeader(dcLocation)
-		c.Assert(len(pdName), Greater, 0)
+		var pdName string
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdName = cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdName) > 0
+		})
 		allocatorLeaderMap[dcLocation] = pdName
 	}
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
@@ -263,7 +266,10 @@ func (s *clientTestSuite) TestLocalTSO(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	for _, dcLocation := range dcLocationConfig {
-		cluster.WaitAllocatorLeader(dcLocation)
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdLeader) > 0
+		})
 	}
 
 	var endpoints []string

@@ -35,8 +35,11 @@ type baseClient struct {
 	clusterID uint64
 	connMu    struct {
 		sync.RWMutex
-		clientConns     map[string]*grpc.ClientConn
-		leader          string
+		// dc-location -> TSO allocator leader gRPC connection
+		clientConns map[string]*grpc.ClientConn
+		// PD leader URL
+		leader string
+		// dc-location -> TSO allocator leader URL
 		allocatorLeader map[string]string
 	}
 
