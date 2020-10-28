@@ -300,4 +300,5 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	cfg.Schedulers = origin
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	c.Assert(err, IsNil)
+	checkSchedulerWithStatusCommand(nil, "disabled", nil)
 }
