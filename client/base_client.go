@@ -194,6 +194,34 @@ func (c *baseClient) getDCLocations() []string {
 	return dcLocations
 }
 
+func (c *baseClient) getAllocatorLeaderAddrByDCLocation(dcLocation string) (string, bool) {
+	c.connMu.RLock()
+	defer c.connMu.RUnlock()
+	url, exist := c.connMu.allocatorLeader[dcLocation]
+	return url, exist
+}
+
+func (c *baseClient) setAllocatorLeaderAddrByDCLocation(dcLocation string, addr string) {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	c.connMu.allocatorLeader[dcLocation] = addr
+}
+
+func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	// Clean up the old TSO allocators
+	for dcLocation := range c.connMu.allocatorLeader {
+		// Skip the Global TSO Allocator
+		if dcLocation == globalDCLocation {
+			continue
+		}
+		if _, exist := curAllocatorMap[dcLocation]; !exist {
+			delete(c.connMu.allocatorLeader, dcLocation)
+		}
+	}
+}
+
 func (c *baseClient) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
@@ -283,7 +311,7 @@ func (c *baseClient) switchLeader(addrs []string) error {
 	if _, err := c.getOrCreateGRPCConn(addr); err != nil {
 		return err
 	}
-
+	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 	c.connMu.leader = addr
@@ -301,9 +329,7 @@ func (c *baseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Memb
 			continue
 		}
 		addr := member.GetClientUrls()[0]
-		c.connMu.RLock()
-		oldAddr, exist := c.connMu.allocatorLeader[dcLocation]
-		c.connMu.RUnlock()
+		oldAddr, exist := c.getAllocatorLeaderAddrByDCLocation(dcLocation)
 		if exist && addr == oldAddr {
 			continue
 		}
@@ -314,22 +340,10 @@ func (c *baseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Memb
 		if _, err := c.getOrCreateGRPCConn(addr); err != nil {
 			return err
 		}
-		c.connMu.Lock()
-		c.connMu.allocatorLeader[dcLocation] = addr
-		c.connMu.Unlock()
+		c.setAllocatorLeaderAddrByDCLocation(dcLocation, addr)
 	}
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
-	// Clean up the old one
-	for dcLocation := range c.connMu.allocatorLeader {
-		if dcLocation == globalDCLocation {
-			continue
-		}
-		_, exist := allocatorMap[dcLocation]
-		if !exist {
-			delete(c.connMu.allocatorLeader, dcLocation)
-		}
-	}
+	// Garbage collection of the old TSO allocator leaders
+	c.gcAllocatorLeaderAddr(allocatorMap)
 	return nil
 }
 

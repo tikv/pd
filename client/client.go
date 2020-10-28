@@ -207,50 +207,54 @@ type deadline struct {
 func (c *client) tsCancelLoop() {
 	defer c.wg.Done()
 
-	ctx, cancel := context.WithCancel(c.ctx)
-	defer cancel()
+	tsCancelLoopCtx, tsCancelLoopCancel := context.WithCancel(c.ctx)
+	defer tsCancelLoopCancel()
 
 	for {
+		select {
+		case <-tsCancelLoopCtx.Done():
+			return
+		default:
+		}
 		// Watch every dc-location's tsDeadlineCh
 		for _, dcLocation := range c.getDCLocations() {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			c.tsDeadline.Lock()
-			if _, exist := c.tsDeadline.ch[dcLocation]; !exist {
-				c.tsDeadline.ch[dcLocation] = make(chan deadline, 1)
-				go func(dc string, tsDeadlineCh <-chan deadline) {
-					for {
-						select {
-						case d := <-tsDeadlineCh:
-							select {
-							case <-d.timer:
-								log.Error("tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
-								d.cancel()
-							case <-d.done:
-							case <-ctx.Done():
-								return
-							}
-						case <-ctx.Done():
-							return
-						}
-					}
-				}(dcLocation, c.tsDeadline.ch[dcLocation])
-			}
-			c.tsDeadline.Unlock()
+			c.watchTSDeadline(tsCancelLoopCtx, dcLocation)
 		}
 	}
 }
 
-func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.CancelFunc, createdCh chan struct{}) {
+func (c *client) watchTSDeadline(ctx context.Context, dcLocation string) {
+	c.tsDeadline.Lock()
+	defer c.tsDeadline.Unlock()
+	if _, exist := c.tsDeadline.ch[dcLocation]; !exist {
+		c.tsDeadline.ch[dcLocation] = make(chan deadline, 1)
+		go func(dc string, tsDeadlineCh <-chan deadline) {
+			for {
+				select {
+				case d := <-tsDeadlineCh:
+					select {
+					case <-d.timer:
+						log.Error("tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
+						d.cancel()
+					case <-d.done:
+					case <-ctx.Done():
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(dcLocation, c.tsDeadline.ch[dcLocation])
+	}
+}
+
+func (c *client) checkStreamTimeout(streamCtx context.Context, cancel context.CancelFunc, createdCh chan struct{}) {
 	select {
 	case <-time.After(c.timeout):
 		cancel()
 	case <-createdCh:
 		return
-	case <-loopCtx.Done():
+	case <-streamCtx.Done():
 		return
 	}
 }
@@ -279,14 +283,11 @@ func (c *client) tsLoop() {
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
 	defer loopCancel()
 
-	var ctx context.Context
-	var cancel context.CancelFunc
 	streams := make(map[string]pdpb.PD_TsoClient)
-
 	for {
+		ctx, cancel := context.WithCancel(loopCtx)
 		if !c.checkTSOStreams(streams) {
-			ctx, cancel = context.WithCancel(loopCtx)
-			if err := c.createTSOStreams(ctx, cancel, streams); err != nil {
+			if err := c.createTSOStreams(ctx, streams); err != nil {
 				select {
 				case <-loopCtx.Done():
 					cancel()
@@ -297,10 +298,11 @@ func (c *client) tsLoop() {
 				cancel()
 				c.revokeTSORequest(errors.WithStack(err))
 				select {
-				case <-time.After(time.Second):
 				case <-loopCtx.Done():
 					return
+				case <-time.After(time.Second):
 				}
+				continue
 			}
 		}
 		var err atomic.Value // stored as error
@@ -381,14 +383,15 @@ func (c *client) checkTSOStreams(streams map[string]pdpb.PD_TsoClient) bool {
 	return true
 }
 
-func (c *client) createTSOStreams(ctx context.Context, ctxCancel context.CancelFunc, streams map[string]pdpb.PD_TsoClient) error {
+func (c *client) createTSOStreams(ctx context.Context, streams map[string]pdpb.PD_TsoClient) error {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
 	for dcLocation, pdAddr := range c.connMu.allocatorLeader {
 		var err error
 		createdCh := make(chan struct{})
-		go c.checkStreamTimeout(ctx, ctxCancel, createdCh)
-		streams[dcLocation], err = pdpb.NewPDClient(c.connMu.clientConns[pdAddr]).Tso(ctx)
+		tsoStreamCtx, tsoStreamCtxCancel := context.WithCancel(ctx)
+		go c.checkStreamTimeout(tsoStreamCtx, tsoStreamCtxCancel, createdCh)
+		streams[dcLocation], err = pdpb.NewPDClient(c.connMu.clientConns[pdAddr]).Tso(tsoStreamCtx)
 		if streams[dcLocation] != nil {
 			createdCh <- struct{}{}
 		}
