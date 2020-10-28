@@ -525,6 +525,9 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 
 	roles := make(map[uint64]placement.PeerRoleType)
 	for id, peerRole := range storeIDs {
+		if peerRole == "" {
+			peerRole = placement.Voter
+		}
 		roles[id] = peerRole
 	}
 	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, roles)

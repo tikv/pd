@@ -80,13 +80,6 @@ func SkipOriginJointStateCheck(b *Builder) {
 	b.skipOriginJointStateCheck = true
 }
 
-// SetPeerRole set peer role info into builder
-func SetPeerRole(roles map[uint64]placement.PeerRoleType) BuilderOption {
-	return func(builder *Builder) {
-		builder.roles = roles
-	}
-}
-
 // NewBuilder creates a Builder.
 func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
@@ -273,6 +266,38 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 	return b
 }
 
+// SetPeerRoles records expected roles of target peers.
+// It may update `targetLeaderStoreID` if there is a peer has role `leader` or `follower`.
+func (b *Builder) SetPeerRoles(roles map[uint64]placement.PeerRoleType) *Builder {
+	if b.err != nil {
+		return b
+	}
+	var leaderCount, voterCount int
+	for id, role := range roles {
+		switch role {
+		case placement.Leader:
+			if leaderCount > 0 {
+				b.err = errors.Errorf("region cannot have multiple leaders")
+				return b
+			}
+			b.targetLeaderStoreID = id
+			leaderCount++
+		case placement.Voter:
+			voterCount++
+		case placement.Follower, placement.Learner:
+			if b.targetLeaderStoreID == id {
+				b.targetLeaderStoreID = 0
+			}
+		}
+	}
+	if leaderCount+voterCount == 0 {
+		b.err = errors.Errorf("region need at least 1 voter or leader")
+		return b
+	}
+	b.roles = roles
+	return b
+}
+
 // EnableLightWeight marks the region as light weight. It is used for scatter regions.
 func (b *Builder) EnableLightWeight() *Builder {
 	b.lightWeight = true
@@ -389,16 +414,16 @@ func (b *Builder) prepareBuild() (string, error) {
 		b.targetLeaderStoreID = 0
 	}
 
-	// If no target leader is specified, try not to change the leader as much as possible.
-	if b.targetLeaderStoreID == 0 {
-		originLeaderStepDown := false
-		if role, ok := b.roles[b.originLeaderStoreID]; ok && role == placement.Follower {
-			originLeaderStepDown = true
-		}
-		if peer, ok := b.targetPeers[b.originLeaderStoreID]; ok && !core.IsLearner(peer) && !originLeaderStepDown {
-			b.targetLeaderStoreID = b.originLeaderStoreID
-		}
-	}
+	// // If no target leader is specified, try not to change the leader as much as possible.
+	// if b.targetLeaderStoreID == 0 {
+	// 	originLeaderStepDown := false
+	// 	if role, ok := b.roles[b.originLeaderStoreID]; ok && role == placement.Follower {
+	// 		originLeaderStepDown = true
+	// 	}
+	// 	if peer, ok := b.targetPeers[b.originLeaderStoreID]; ok && !core.IsLearner(peer) && !originLeaderStepDown {
+	// 		b.targetLeaderStoreID = b.originLeaderStoreID
+	// 	}
+	// }
 
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.Copy(), b.originLeaderStoreID
 
@@ -513,11 +538,12 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 	}
 
 	leaderPreferFuncs := []func(uint64) int{
+		b.preferLeaderRoleAsLeader,
 		b.preferUpStoreAsLeader,
+		b.preferCurrentLeader,
 		b.preferKeepVoterAsLeader,
 		b.preferOldPeerAsLeader,
 	}
-
 	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[targetLeaderStoreID]
 		if !b.allowLeader(peer, false) {
@@ -542,9 +568,18 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 	}
 }
 
+func (b *Builder) preferLeaderRoleAsLeader(targetLeaderStoreID uint64) int {
+	role, ok := b.roles[targetLeaderStoreID]
+	return typeutil.BoolToInt(ok && role == placement.Leader)
+}
+
 func (b *Builder) preferUpStoreAsLeader(targetLeaderStoreID uint64) int {
 	store := b.cluster.GetStore(targetLeaderStoreID)
 	return typeutil.BoolToInt(store != nil && store.IsUp())
+}
+
+func (b *Builder) preferCurrentLeader(targetLeaderStoreID uint64) int {
+	return typeutil.BoolToInt(targetLeaderStoreID == b.currentLeaderStoreID)
 }
 
 func (b *Builder) preferKeepVoterAsLeader(targetLeaderStoreID uint64) int {
@@ -588,6 +623,8 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			kind |= OpRegion
 		}
 	}
+
+	b.setTargetLeaderIfNotExist()
 
 	if b.targetLeaderStoreID != 0 &&
 		b.currentLeaderStoreID != b.targetLeaderStoreID &&
