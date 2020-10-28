@@ -940,6 +940,10 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		return nil, err
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	// There is no dc-location found in this server, return err.
+	if len(tsoAllocatorManager.GetClusterDCLocations()) == 0 {
+		return nil, fmt.Errorf("empty cluster dc-Location found, checker may not work properly")
+	}
 	// Get all Local TSO Allocator leaders
 	allocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
 	if err != nil {
