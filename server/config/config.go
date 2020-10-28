@@ -578,9 +578,8 @@ func (c *Config) adjustLog(meta *configMetaData) {
 
 // Clone returns a cloned configuration.
 func (c *Config) Clone() *Config {
-	cfg := &Config{}
-	*cfg = *c
-	return cfg
+	cfg := *c
+	return &cfg
 }
 
 func (c *Config) String() string {
@@ -719,44 +718,11 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	for k, v := range c.StoreLimit {
 		storeLimit[k] = v
 	}
-	return &ScheduleConfig{
-		MaxSnapshotCount:             c.MaxSnapshotCount,
-		MaxPendingPeerCount:          c.MaxPendingPeerCount,
-		MaxMergeRegionSize:           c.MaxMergeRegionSize,
-		MaxMergeRegionKeys:           c.MaxMergeRegionKeys,
-		SplitMergeInterval:           c.SplitMergeInterval,
-		PatrolRegionInterval:         c.PatrolRegionInterval,
-		MaxStoreDownTime:             c.MaxStoreDownTime,
-		LeaderScheduleLimit:          c.LeaderScheduleLimit,
-		LeaderSchedulePolicy:         c.LeaderSchedulePolicy,
-		RegionScheduleLimit:          c.RegionScheduleLimit,
-		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
-		MergeScheduleLimit:           c.MergeScheduleLimit,
-		EnableOneWayMerge:            c.EnableOneWayMerge,
-		EnableCrossTableMerge:        c.EnableCrossTableMerge,
-		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
-		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
-		StoreLimit:                   storeLimit,
-		TolerantSizeRatio:            c.TolerantSizeRatio,
-		LowSpaceRatio:                c.LowSpaceRatio,
-		HighSpaceRatio:               c.HighSpaceRatio,
-		SchedulerMaxWaitingOperator:  c.SchedulerMaxWaitingOperator,
-		DisableLearner:               c.DisableLearner,
-		DisableRemoveDownReplica:     c.DisableRemoveDownReplica,
-		DisableReplaceOfflineReplica: c.DisableReplaceOfflineReplica,
-		DisableMakeUpReplica:         c.DisableMakeUpReplica,
-		DisableRemoveExtraReplica:    c.DisableRemoveExtraReplica,
-		DisableLocationReplacement:   c.DisableLocationReplacement,
-		EnableRemoveDownReplica:      c.EnableRemoveDownReplica,
-		EnableReplaceOfflineReplica:  c.EnableReplaceOfflineReplica,
-		EnableMakeUpReplica:          c.EnableMakeUpReplica,
-		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
-		EnableLocationReplacement:    c.EnableLocationReplacement,
-		EnableDebugMetrics:           c.EnableDebugMetrics,
-		EnableJointConsensus:         c.EnableJointConsensus,
-		StoreLimitMode:               c.StoreLimitMode,
-		Schedulers:                   schedulers,
-	}
+	cfg := *c
+	cfg.StoreLimit = storeLimit
+	cfg.Schedulers = schedulers
+	cfg.SchedulersPayload = nil
+	return &cfg
 }
 
 const (
@@ -1015,13 +981,9 @@ type ReplicationConfig struct {
 func (c *ReplicationConfig) Clone() *ReplicationConfig {
 	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
-	return &ReplicationConfig{
-		MaxReplicas:          c.MaxReplicas,
-		LocationLabels:       locationLabels,
-		StrictlyMatchLabel:   c.StrictlyMatchLabel,
-		EnablePlacementRules: c.EnablePlacementRules,
-		IsolationLevel:       c.IsolationLevel,
-	}
+	cfg := *c
+	cfg.LocationLabels = locationLabels
+	return &cfg
 }
 
 // Validate is used to validate if some replication configurations are right.
@@ -1101,14 +1063,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 func (c *PDServerConfig) Clone() *PDServerConfig {
 	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
 	copy(runtimeServices, c.RuntimeServices)
-	return &PDServerConfig{
-		UseRegionStorage: c.UseRegionStorage,
-		MaxResetTSGap:    c.MaxResetTSGap,
-		KeyType:          c.KeyType,
-		MetricStorage:    c.MetricStorage,
-		DashboardAddress: c.DashboardAddress,
-		RuntimeServices:  runtimeServices,
-	}
+	cfg := *c
+	cfg.RuntimeServices = runtimeServices
+	return &cfg
 }
 
 // Validate is used to validate if some pd-server configurations are right.
