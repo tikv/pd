@@ -207,6 +207,8 @@ func (c *baseClient) setAllocatorLeaderAddrByDCLocation(dcLocation string, addr 
 	c.connMu.allocatorLeader[dcLocation] = addr
 }
 
+const globalDCLocation = "global"
+
 func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
@@ -292,8 +294,6 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 	log.Info("[pd] update member urls", zap.Strings("old-urls", c.urls), zap.Strings("new-urls", urls))
 	c.urls = urls
 }
-
-const globalDCLocation = "global"
 
 func (c *baseClient) switchLeader(addrs []string) error {
 	// FIXME: How to safely compare leader urls? For now, only allows one client url.
