@@ -235,7 +235,7 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 	brief := b.brief()
 
 	// buildStepsWithJointConsensus
-	kind := OpRegion
+	var kind OpKind
 
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {

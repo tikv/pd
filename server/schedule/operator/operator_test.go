@@ -111,7 +111,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	op.Start()
 	c.Assert(op.Check(region), IsNil)
 	c.Assert(op.Status(), Equals, SUCCESS)
-	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-RegionOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsFalse)
 
 	// addPeer1, transferLeader1, removePeer2
@@ -126,9 +126,9 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
 	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
 	c.Assert(op.CheckTimeout(), IsFalse)
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-LeaderOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsFalse)
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-RegionOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-SlowOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsTrue)
 	res, err := json.Marshal(op)
 	c.Assert(err, IsNil)
@@ -139,7 +139,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	op = s.newTestOperator(1, OpLeader, steps...)
 	op.Start()
 	c.Assert(op.CheckTimeout(), IsFalse)
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-LeaderOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsTrue)
 }
 
@@ -292,7 +292,7 @@ func (s *testOperatorSuite) TestCheckTimeout(c *C) {
 		c.Assert(op.Status(), Equals, CREATED)
 		c.Assert(op.Start(), IsTrue)
 		op.currentStep = int32(len(op.steps))
-		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-RegionOperatorWaitTime))
+		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowOperatorWaitTime))
 		c.Assert(op.CheckTimeout(), IsFalse)
 		c.Assert(op.Status(), Equals, SUCCESS)
 	}
@@ -353,7 +353,7 @@ func (s *testOperatorSuite) TestCheck(c *C) {
 		c.Assert(op.Start(), IsTrue)
 		c.Assert(op.Check(region), NotNil)
 		c.Assert(op.Status(), Equals, STARTED)
-		op.status.setTime(STARTED, time.Now().Add(-RegionOperatorWaitTime))
+		op.status.setTime(STARTED, time.Now().Add(-SlowOperatorWaitTime))
 		c.Assert(op.Check(region), NotNil)
 		c.Assert(op.Status(), Equals, TIMEOUT)
 	}
@@ -368,7 +368,7 @@ func (s *testOperatorSuite) TestCheck(c *C) {
 		c.Assert(op.Start(), IsTrue)
 		c.Assert(op.Check(region), NotNil)
 		c.Assert(op.Status(), Equals, STARTED)
-		op.status.setTime(STARTED, time.Now().Add(-RegionOperatorWaitTime))
+		op.status.setTime(STARTED, time.Now().Add(-SlowOperatorWaitTime))
 		region = s.newTestRegion(1, 1, [2]uint64{1, 1})
 		c.Assert(op.Check(region), IsNil)
 		c.Assert(op.Status(), Equals, SUCCESS)
