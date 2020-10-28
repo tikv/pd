@@ -605,11 +605,14 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache = true
 		}
 
-		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
+		if region.GetBytesWritten() != origin.GetBytesWritten() ||
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
-			region.GetKeysRead() != origin.GetKeysRead()) {
-			saveCache, needSync = true, true
+			region.GetKeysRead() != origin.GetKeysRead() {
+			saveCache = true
+			if c.traceRegionFlow {
+				needSync = true
+			}
 		}
 
 		if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
