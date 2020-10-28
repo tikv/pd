@@ -414,17 +414,6 @@ func (b *Builder) prepareBuild() (string, error) {
 		b.targetLeaderStoreID = 0
 	}
 
-	// // If no target leader is specified, try not to change the leader as much as possible.
-	// if b.targetLeaderStoreID == 0 {
-	// 	originLeaderStepDown := false
-	// 	if role, ok := b.roles[b.originLeaderStoreID]; ok && role == placement.Follower {
-	// 		originLeaderStepDown = true
-	// 	}
-	// 	if peer, ok := b.targetPeers[b.originLeaderStoreID]; ok && !core.IsLearner(peer) && !originLeaderStepDown {
-	// 		b.targetLeaderStoreID = b.originLeaderStoreID
-	// 	}
-	// }
-
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.Copy(), b.originLeaderStoreID
 
 	if b.targetLeaderStoreID != 0 {
@@ -544,6 +533,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 		b.preferKeepVoterAsLeader,
 		b.preferOldPeerAsLeader,
 	}
+
 	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[targetLeaderStoreID]
 		if !b.allowLeader(peer, false) {
