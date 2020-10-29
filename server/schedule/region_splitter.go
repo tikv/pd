@@ -200,9 +200,8 @@ func (h *splitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, sp
 	timeout, watchInterval time.Duration, response *splitKeyResponse, wg *sync.WaitGroup) {
 	after := time.After(timeout)
 	ticker := time.NewTicker(watchInterval)
-	defer ticker.Stop()
-	// add regionsID into response at last
 	defer func() {
+		ticker.Stop()
 		wg.Done()
 	}()
 	for {
