@@ -40,7 +40,7 @@ type baseClient struct {
 		// PD leader URL
 		leader string
 		// dc-location -> TSO allocator leader URL
-		allocatorLeader map[string]string
+		allocators map[string]string
 	}
 
 	checkLeaderCh chan struct{}
@@ -91,7 +91,7 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption, 
 		timeout:       defaultPDTimeout,
 	}
 	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
-	c.connMu.allocatorLeader = make(map[string]string)
+	c.connMu.allocators = make(map[string]string)
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -178,7 +178,7 @@ func (c *baseClient) GetAllocatorLeaderURLs() map[string]string {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
 	allocatorLeader := make(map[string]string)
-	for dcLocation, url := range c.connMu.allocatorLeader {
+	for dcLocation, url := range c.connMu.allocators {
 		allocatorLeader[dcLocation] = url
 	}
 	return allocatorLeader
@@ -187,8 +187,8 @@ func (c *baseClient) GetAllocatorLeaderURLs() map[string]string {
 func (c *baseClient) getDCLocations() []string {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
-	dcLocations := make([]string, 0, len(c.connMu.allocatorLeader))
-	for dcLocation := range c.connMu.allocatorLeader {
+	dcLocations := make([]string, 0, len(c.connMu.allocators))
+	for dcLocation := range c.connMu.allocators {
 		dcLocations = append(dcLocations, dcLocation)
 	}
 	return dcLocations
@@ -197,14 +197,14 @@ func (c *baseClient) getDCLocations() []string {
 func (c *baseClient) getAllocatorLeaderAddrByDCLocation(dcLocation string) (string, bool) {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
-	url, exist := c.connMu.allocatorLeader[dcLocation]
+	url, exist := c.connMu.allocators[dcLocation]
 	return url, exist
 }
 
 func (c *baseClient) setAllocatorLeaderAddrByDCLocation(dcLocation string, addr string) {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
-	c.connMu.allocatorLeader[dcLocation] = addr
+	c.connMu.allocators[dcLocation] = addr
 }
 
 const globalDCLocation = "global"
@@ -213,13 +213,13 @@ func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Memb
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 	// Clean up the old TSO allocators
-	for dcLocation := range c.connMu.allocatorLeader {
+	for dcLocation := range c.connMu.allocators {
 		// Skip the Global TSO Allocator
 		if dcLocation == globalDCLocation {
 			continue
 		}
 		if _, exist := curAllocatorMap[dcLocation]; !exist {
-			delete(c.connMu.allocatorLeader, dcLocation)
+			delete(c.connMu.allocators, dcLocation)
 		}
 	}
 }
@@ -315,7 +315,7 @@ func (c *baseClient) switchLeader(addrs []string) error {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 	c.connMu.leader = addr
-	c.connMu.allocatorLeader[globalDCLocation] = addr
+	c.connMu.allocators[globalDCLocation] = addr
 	return nil
 }
 

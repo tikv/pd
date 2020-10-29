@@ -386,11 +386,15 @@ func (c *client) checkTSOStreams(streams map[string]pdpb.PD_TsoClient) bool {
 func (c *client) createTSOStreams(ctx context.Context, streams map[string]pdpb.PD_TsoClient) error {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
-	for dcLocation, pdAddr := range c.connMu.allocatorLeader {
+	for dcLocation, pdAddr := range c.connMu.allocators {
 		var err error
 		createdCh := make(chan struct{})
 		tsoStreamCtx, tsoStreamCtxCancel := context.WithCancel(ctx)
 		go c.checkStreamTimeout(tsoStreamCtx, tsoStreamCtxCancel, createdCh)
+		if oldStream, exist := streams[dcLocation]; exist {
+			oldStream.CloseSend()
+			oldStream = nil
+		}
 		streams[dcLocation], err = pdpb.NewPDClient(c.connMu.clientConns[pdAddr]).Tso(tsoStreamCtx)
 		if streams[dcLocation] != nil {
 			createdCh <- struct{}{}
@@ -449,7 +453,14 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 	physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
 	// Server returns the highest ts.
 	logical -= int64(resp.GetCount() - 1)
+	c.compareAndSwapTS(dcLocation, physical, logical, int64(len(requests)))
+	c.finishTSORequest(requests, physical, logical, nil)
+	return nil
+}
+
+func (c *client) compareAndSwapTS(dcLocation string, physical, logical, n int64) {
 	c.lastTSO.Lock()
+	defer c.lastTSO.Unlock()
 	lastPhysical := c.lastTSO.physical[dcLocation]
 	lastLogical := c.lastTSO.logical[dcLocation]
 	if tsLessEqual(physical, logical, lastPhysical, lastLogical) {
@@ -457,11 +468,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 			dcLocation, physical, logical, lastPhysical, lastLogical))
 	}
 	c.lastTSO.physical[dcLocation] = physical
-	c.lastTSO.logical[dcLocation] = logical + int64(len(requests)) - 1
-	c.lastTSO.Unlock()
-
-	c.finishTSORequest(requests, physical, logical, nil)
-	return nil
+	c.lastTSO.logical[dcLocation] = logical + n - 1
 }
 
 func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
