@@ -15,6 +15,7 @@ package schedule
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"math"
 	"sync"
@@ -115,6 +116,7 @@ func (r *RegionSplitter) splitRegionsByKeys(splitKeys [][]byte, newRegions map[u
 	response := newSplitKeyResponse()
 	for _, groupKeys := range checkRegionGroupKeys {
 		wg.Add(1)
+		// TODO use recovery to handle error/panic
 		go r.handler.WatchRegionsByKeyRange(groupKeys.region.GetStartKey(), groupKeys.region.GetEndKey(),
 			groupKeys.keys, time.Minute, 100*time.Millisecond, response, wg)
 	}
@@ -199,10 +201,8 @@ func (h *splitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, sp
 	after := time.After(timeout)
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
-	var regionsID map[uint64]struct{}
 	// add regionsID into response at last
 	defer func() {
-		response.addRegionsID(regionsID)
 		wg.Done()
 	}()
 	for {
@@ -212,11 +212,14 @@ func (h *splitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, sp
 			for _, region := range regions {
 				for _, key := range splitKeys {
 					if bytes.Equal(key, region.GetStartKey()) {
-						regionsID[region.GetID()] = struct{}{}
+						log.Info("found split region",
+							zap.Uint64("region-id", region.GetID()),
+							logutil.ZapRedactString("split-key", hex.EncodeToString(key)))
+						response.addRegionsID(region)
 					}
 				}
 			}
-			if len(regionsID) < len(splitKeys) {
+			if len(response.getRegionsID()) < len(splitKeys) {
 				continue
 			}
 			return
@@ -267,11 +270,11 @@ func newSplitKeyResponse() *splitKeyResponse {
 	return s
 }
 
-func (r *splitKeyResponse) addRegionsID(regionsID map[uint64]struct{}) {
+func (r *splitKeyResponse) addRegionsID(regions ...*core.RegionInfo) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for id := range regionsID {
-		r.mu.newRegions[id] = struct{}{}
+	for _, region := range regions {
+		r.mu.newRegions[region.GetID()] = struct{}{}
 	}
 }
 
