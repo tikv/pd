@@ -714,9 +714,9 @@ func (s *Server) StartTimestamp() int64 {
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
-	cfg.Schedule = *s.persistOptions.GetScheduleConfig()
-	cfg.Replication = *s.persistOptions.GetReplicationConfig()
-	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig()
+	cfg.Schedule = *s.persistOptions.GetScheduleConfig().Clone()
+	cfg.Replication = *s.persistOptions.GetReplicationConfig().Clone()
+	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()

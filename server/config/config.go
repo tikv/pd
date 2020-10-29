@@ -547,9 +547,8 @@ func (c *Config) adjustLog(meta *configMetaData) {
 
 // Clone returns a cloned configuration.
 func (c *Config) Clone() *Config {
-	cfg := &Config{}
-	*cfg = *c
-	return cfg
+	cfg := *c
+	return &cfg
 }
 
 func (c *Config) String() string {
@@ -680,6 +679,7 @@ type ScheduleConfig struct {
 
 // Clone returns a cloned scheduling configuration.
 func (c *ScheduleConfig) Clone() *ScheduleConfig {
+<<<<<<< HEAD
 	schedulers := make(SchedulerConfigs, len(c.Schedulers))
 	copy(schedulers, c.Schedulers)
 	storeLimit := make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
@@ -722,7 +722,21 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableDebugMetrics:           c.EnableDebugMetrics,
 		StoreLimitMode:               c.StoreLimitMode,
 		Schedulers:                   schedulers,
+=======
+	schedulers := append(c.Schedulers[:0:0], c.Schedulers...)
+	var storeLimit map[uint64]StoreLimitConfig
+	if c.StoreLimit != nil {
+		storeLimit = make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
+		for k, v := range c.StoreLimit {
+			storeLimit[k] = v
+		}
+>>>>>>> 90a24a90... config: refine config clone (#3116)
 	}
+	cfg := *c
+	cfg.StoreLimit = storeLimit
+	cfg.Schedulers = schedulers
+	cfg.SchedulersPayload = nil
+	return &cfg
 }
 
 const (
@@ -812,6 +826,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if c.StoreBalanceRate != 0 {
 		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 		c.StoreBalanceRate = 0
+	}
+
+	if c.StoreLimit == nil {
+		c.StoreLimit = make(map[uint64]StoreLimitConfig)
 	}
 
 	return c.Validate()
@@ -963,6 +981,7 @@ type ReplicationConfig struct {
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 }
 
+<<<<<<< HEAD
 func (c *ReplicationConfig) clone() *ReplicationConfig {
 	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
@@ -972,6 +991,14 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 		StrictlyMatchLabel:   c.StrictlyMatchLabel,
 		EnablePlacementRules: c.EnablePlacementRules,
 	}
+=======
+// Clone makes a deep copy of the config.
+func (c *ReplicationConfig) Clone() *ReplicationConfig {
+	locationLabels := append(c.LocationLabels[:0:0], c.LocationLabels...)
+	cfg := *c
+	cfg.LocationLabels = locationLabels
+	return &cfg
+>>>>>>> 90a24a90... config: refine config clone (#3116)
 }
 
 // Validate is used to validate if some replication configurations are right.
@@ -1038,16 +1065,10 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 
 // Clone returns a cloned PD server config.
 func (c *PDServerConfig) Clone() *PDServerConfig {
-	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
-	copy(runtimeServices, c.RuntimeServices)
-	return &PDServerConfig{
-		UseRegionStorage: c.UseRegionStorage,
-		MaxResetTSGap:    c.MaxResetTSGap,
-		KeyType:          c.KeyType,
-		MetricStorage:    c.MetricStorage,
-		DashboardAddress: c.DashboardAddress,
-		RuntimeServices:  runtimeServices,
-	}
+	runtimeServices := append(c.RuntimeServices[:0:0], c.RuntimeServices...)
+	cfg := *c
+	cfg.RuntimeServices = runtimeServices
+	return &cfg
 }
 
 // Validate is used to validate if some pd-server configurations are right.
