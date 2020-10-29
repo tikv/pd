@@ -679,50 +679,6 @@ type ScheduleConfig struct {
 
 // Clone returns a cloned scheduling configuration.
 func (c *ScheduleConfig) Clone() *ScheduleConfig {
-<<<<<<< HEAD
-	schedulers := make(SchedulerConfigs, len(c.Schedulers))
-	copy(schedulers, c.Schedulers)
-	storeLimit := make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
-	for k, v := range c.StoreLimit {
-		storeLimit[k] = v
-	}
-	return &ScheduleConfig{
-		MaxSnapshotCount:             c.MaxSnapshotCount,
-		MaxPendingPeerCount:          c.MaxPendingPeerCount,
-		MaxMergeRegionSize:           c.MaxMergeRegionSize,
-		MaxMergeRegionKeys:           c.MaxMergeRegionKeys,
-		SplitMergeInterval:           c.SplitMergeInterval,
-		PatrolRegionInterval:         c.PatrolRegionInterval,
-		MaxStoreDownTime:             c.MaxStoreDownTime,
-		LeaderScheduleLimit:          c.LeaderScheduleLimit,
-		LeaderSchedulePolicy:         c.LeaderSchedulePolicy,
-		RegionScheduleLimit:          c.RegionScheduleLimit,
-		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
-		MergeScheduleLimit:           c.MergeScheduleLimit,
-		EnableOneWayMerge:            c.EnableOneWayMerge,
-		EnableCrossTableMerge:        c.EnableCrossTableMerge,
-		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
-		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
-		StoreLimit:                   storeLimit,
-		TolerantSizeRatio:            c.TolerantSizeRatio,
-		LowSpaceRatio:                c.LowSpaceRatio,
-		HighSpaceRatio:               c.HighSpaceRatio,
-		SchedulerMaxWaitingOperator:  c.SchedulerMaxWaitingOperator,
-		DisableLearner:               c.DisableLearner,
-		DisableRemoveDownReplica:     c.DisableRemoveDownReplica,
-		DisableReplaceOfflineReplica: c.DisableReplaceOfflineReplica,
-		DisableMakeUpReplica:         c.DisableMakeUpReplica,
-		DisableRemoveExtraReplica:    c.DisableRemoveExtraReplica,
-		DisableLocationReplacement:   c.DisableLocationReplacement,
-		EnableRemoveDownReplica:      c.EnableRemoveDownReplica,
-		EnableReplaceOfflineReplica:  c.EnableReplaceOfflineReplica,
-		EnableMakeUpReplica:          c.EnableMakeUpReplica,
-		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
-		EnableLocationReplacement:    c.EnableLocationReplacement,
-		EnableDebugMetrics:           c.EnableDebugMetrics,
-		StoreLimitMode:               c.StoreLimitMode,
-		Schedulers:                   schedulers,
-=======
 	schedulers := append(c.Schedulers[:0:0], c.Schedulers...)
 	var storeLimit map[uint64]StoreLimitConfig
 	if c.StoreLimit != nil {
@@ -730,7 +686,6 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		for k, v := range c.StoreLimit {
 			storeLimit[k] = v
 		}
->>>>>>> 90a24a90... config: refine config clone (#3116)
 	}
 	cfg := *c
 	cfg.StoreLimit = storeLimit
@@ -981,24 +936,11 @@ type ReplicationConfig struct {
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 }
 
-<<<<<<< HEAD
-func (c *ReplicationConfig) clone() *ReplicationConfig {
-	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
-	copy(locationLabels, c.LocationLabels)
-	return &ReplicationConfig{
-		MaxReplicas:          c.MaxReplicas,
-		LocationLabels:       locationLabels,
-		StrictlyMatchLabel:   c.StrictlyMatchLabel,
-		EnablePlacementRules: c.EnablePlacementRules,
-	}
-=======
-// Clone makes a deep copy of the config.
 func (c *ReplicationConfig) Clone() *ReplicationConfig {
 	locationLabels := append(c.LocationLabels[:0:0], c.LocationLabels...)
 	cfg := *c
 	cfg.LocationLabels = locationLabels
 	return &cfg
->>>>>>> 90a24a90... config: refine config clone (#3116)
 }
 
 // Validate is used to validate if some replication configurations are right.
