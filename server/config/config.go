@@ -715,7 +715,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	schedulers := append(c.Schedulers[:0:0], c.Schedulers...)
 	var storeLimit map[uint64]StoreLimitConfig
 	if c.StoreLimit != nil {
-		storeLimit := make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
+		storeLimit = make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
 		for k, v := range c.StoreLimit {
 			storeLimit[k] = v
 		}
@@ -818,6 +818,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if c.StoreBalanceRate != 0 {
 		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 		c.StoreBalanceRate = 0
+	}
+
+	if c.StoreLimit == nil {
+		c.StoreLimit = make(map[uint64]StoreLimitConfig)
 	}
 
 	return c.Validate()
