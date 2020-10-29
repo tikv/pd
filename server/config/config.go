@@ -936,6 +936,7 @@ type ReplicationConfig struct {
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 }
 
+// Clone makes a deep copy of the config.
 func (c *ReplicationConfig) Clone() *ReplicationConfig {
 	locationLabels := append(c.LocationLabels[:0:0], c.LocationLabels...)
 	cfg := *c
