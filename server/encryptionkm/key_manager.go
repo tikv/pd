@@ -236,9 +236,8 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 		case <-m.helper.tick(ticker):
 			m.checkOnTick(watcherEnabled)
 			m.helper.eventAfterTicker()
-			// Server shutdown.
 		case <-ctx.Done():
-			log.Info("encryption key manager is closed")
+			// Server shutdown.
 			return
 		}
 	}
