@@ -516,6 +516,11 @@ func summaryStoresLoad(
 ) map[uint64]*storeLoadDetail {
 	// loadDetail stores the storeID -> hotPeers stat and its current and future stat(key/byte rate,count)
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
+	allByteSum := 0.0
+	allKeySum := 0.0
+	allCount := 0.0
+	allQPS := 0.0
+
 	// Stores without byte rate statistics is not available to schedule.
 	for id, byteRate := range storeByteRate {
 		keyRate := storeKeyRate[id]
@@ -554,6 +559,11 @@ func summaryStoresLoad(
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(QPSSum)
 			}
 		}
+		allByteSum += byteRate
+		allKeySum += keyRate
+		allCount += float64(len(hotPeers))
+		allQPS += QPS
+
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
 			ByteRate: byteRate,
@@ -566,6 +576,36 @@ func summaryStoresLoad(
 		loadDetail[id] = &storeLoadDetail{
 			LoadPred: stLoadPred,
 			HotPeers: hotPeers,
+		}
+	}
+	storeLen := float64(len(storeByteRate))
+
+	// store expectation byte/key rate and count for each store-load detail.
+	for id, detail := range loadDetail {
+		byteExp := allByteSum / storeLen
+		keyExp := allKeySum / storeLen
+		countExp := allCount / storeLen
+		qpsExp := allQPS / storeLen
+		detail.LoadPred.Future.ExpByteRate = byteExp
+		detail.LoadPred.Future.ExpKeyRate = keyExp
+		detail.LoadPred.Future.ExpCount = countExp
+		detail.LoadPred.Future.ExpQPS = qpsExp
+		// Debug
+		{
+			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(byteExp)
+		}
+		{
+			ty := "exp-key-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keyExp)
+		}
+		{
+			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(countExp)
+		}
+		{
+			ty := "exp-qps-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(qpsExp)
 		}
 	}
 	return loadDetail
@@ -832,7 +872,13 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		ret[id] = detail
+		if detail.LoadPred.min().ByteRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpByteRate &&
+			detail.LoadPred.min().KeyRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpKeyRate &&
+			detail.LoadPred.min().QPS > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpQPS {
+			ret[id] = detail
+			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+		}
+		hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 	}
 	return ret
 }
@@ -1008,9 +1054,17 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*core.StoreInfo) map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
+	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	for _, store := range candidates {
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
-			ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
+			detail := bs.stLoadDetail[store.GetID()]
+			if detail.LoadPred.max().ByteRate*dstToleranceRatio < detail.LoadPred.Future.ExpByteRate &&
+				detail.LoadPred.max().KeyRate*dstToleranceRatio < detail.LoadPred.Future.ExpKeyRate &&
+				detail.LoadPred.max().QPS*dstToleranceRatio < detail.LoadPred.Future.ExpQPS {
+				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
+				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
+			}
+			hotSchedulerResultCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
 		}
 	}
 	return ret
