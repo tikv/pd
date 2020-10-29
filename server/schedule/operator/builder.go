@@ -445,8 +445,6 @@ func (b *Builder) brief() string {
 
 // Using Joint Consensus can ensure the replica safety and reduce the number of steps.
 func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
-	kind |= OpRegion
-
 	// Add all the peers as Learner first. Split `Add Voter` to `Add Learner + Promote`
 	for _, add := range b.toAdd.IDs() {
 		peer := b.toAdd[add]
@@ -460,7 +458,9 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 		} else {
 			b.execAddPeer(peer)
 		}
+		kind |= OpRegion
 	}
+
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
 		return kind, errors.New("no valid leader")
@@ -502,6 +502,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	// Finally, remove all the peers as Learner
 	for _, remove := range b.toRemove.IDs() {
 		b.execRemovePeer(b.toRemove[remove])
+		kind |= OpRegion
 	}
 
 	return kind, nil
