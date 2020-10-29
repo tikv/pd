@@ -157,17 +157,17 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 	maxRetryCount := 1
 	for i := 0; i < maxRetryCount; i++ {
 		// Collect all allocator leaders' client URLs
-		allocatorLeaders, err := gta.allocatorManager.GetLocalAllocatorLeaders()
+		allocatorLeaders, err := gta.allocatorManager.GetLocalAllocatorLeadersMember()
 		if err != nil {
 			return err
 		}
 		leaderURLs := make([]string, 0, len(allocatorLeaders))
 		for _, allocator := range allocatorLeaders {
 			// Check if its client URLs are empty
-			if len(allocator.GetMember().GetClientUrls()) < 1 {
+			if len(allocator.GetClientUrls()) < 1 {
 				continue
 			}
-			leaderURL := allocator.GetMember().GetClientUrls()[0]
+			leaderURL := allocator.GetClientUrls()[0]
 			if slice.NoneOf(leaderURLs, func(i int) bool { return leaderURLs[i] == leaderURL }) {
 				leaderURLs = append(leaderURLs, leaderURL)
 			}
