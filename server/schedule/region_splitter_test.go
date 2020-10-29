@@ -15,6 +15,7 @@ package schedule
 
 import (
 	"bytes"
+	"context"
 	"sync"
 	"time"
 
@@ -46,7 +47,7 @@ func (m *mockSplitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, spl
 }
 
 // WatchRegionsByKeyRange mock SplitRegionsHandler
-func (m *mockSplitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, splitKeys [][]byte,
+func (m *mockSplitRegionsHandler) WatchRegionsByKeyRange(ctx context.Context, startKey, endKey []byte, splitKeys [][]byte,
 	timeout, watchInterval time.Duration, response *splitKeyResponse, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for regionID, keyRange := range m.regions {
@@ -65,6 +66,7 @@ var _ = Suite(&testRegionSplitterSuite{})
 type testRegionSplitterSuite struct{}
 
 func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
+	ctx := context.Background()
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
@@ -73,20 +75,20 @@ func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 	splitter := NewRegionSplitter(tc, handler)
 	newRegions := map[uint64]struct{}{}
 	// assert success
-	failureKeys := splitter.splitRegionsByKeys([][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
+	failureKeys := splitter.splitRegionsByKeys(ctx, [][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
 	c.Assert(len(failureKeys), Equals, 0)
 	c.Assert(len(newRegions), Equals, 2)
 
-	percentage, newRegionsID := splitter.SplitRegions([][]byte{[]byte("fff"), []byte("ggg")}, 1)
+	percentage, newRegionsID := splitter.SplitRegions(ctx, [][]byte{[]byte("fff"), []byte("ggg")}, 1)
 	c.Assert(percentage, Equals, 100)
 	c.Assert(len(newRegionsID), Equals, 2)
 	// assert out of range
 	newRegions = map[uint64]struct{}{}
-	failureKeys = splitter.splitRegionsByKeys([][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
+	failureKeys = splitter.splitRegionsByKeys(ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
 	c.Assert(len(failureKeys), Equals, 2)
 	c.Assert(len(newRegions), Equals, 0)
 
-	percentage, newRegionsID = splitter.SplitRegions([][]byte{[]byte("aaa"), []byte("bbb")}, 1)
+	percentage, newRegionsID = splitter.SplitRegions(ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, 1)
 	c.Assert(percentage, Equals, 0)
 	c.Assert(len(newRegionsID), Equals, 0)
 }

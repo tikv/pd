@@ -15,6 +15,7 @@ package schedule
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"math"
@@ -38,7 +39,7 @@ const (
 // SplitRegionsHandler used to handle region splitting
 type SplitRegionsHandler interface {
 	SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error
-	WatchRegionsByKeyRange(startKey, endKey []byte, splitKeys [][]byte,
+	WatchRegionsByKeyRange(ctx context.Context, startKey, endKey []byte, splitKeys [][]byte,
 		timeout, watchInterval time.Duration, response *splitKeyResponse, wg *sync.WaitGroup)
 }
 
@@ -65,14 +66,14 @@ func NewRegionSplitter(cluster opt.Cluster, handler SplitRegionsHandler) *Region
 }
 
 // SplitRegions support splitRegions by given split keys.
-func (r *RegionSplitter) SplitRegions(splitKeys [][]byte, retryLimit int) (int, []uint64) {
+func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, retryLimit int) (int, []uint64) {
 	if len(splitKeys) < 1 {
 		return 0, nil
 	}
 	unprocessedKeys := splitKeys
 	newRegions := make(map[uint64]struct{}, len(splitKeys))
 	for i := 0; i <= retryLimit; i++ {
-		unprocessedKeys = r.splitRegionsByKeys(unprocessedKeys, newRegions)
+		unprocessedKeys = r.splitRegionsByKeys(ctx, unprocessedKeys, newRegions)
 		if len(unprocessedKeys) < 1 {
 			break
 		}
@@ -86,7 +87,7 @@ func (r *RegionSplitter) SplitRegions(splitKeys [][]byte, retryLimit int) (int, 
 	return 100 - len(unprocessedKeys)*100/len(splitKeys), returned
 }
 
-func (r *RegionSplitter) splitRegionsByKeys(splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
+func (r *RegionSplitter) splitRegionsByKeys(ctx context.Context, splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
 	validGroups, unProcessedKeys := r.groupKeysByRegion(splitKeys)
 	// batch limit
 	var batches []batch
@@ -117,7 +118,7 @@ func (r *RegionSplitter) splitRegionsByKeys(splitKeys [][]byte, newRegions map[u
 	for _, groupKeys := range checkRegionGroupKeys {
 		wg.Add(1)
 		// TODO use recovery to handle error/panic
-		go r.handler.WatchRegionsByKeyRange(groupKeys.region.GetStartKey(), groupKeys.region.GetEndKey(),
+		go r.handler.WatchRegionsByKeyRange(ctx, groupKeys.region.GetStartKey(), groupKeys.region.GetEndKey(),
 			groupKeys.keys, time.Minute, 100*time.Millisecond, response, wg)
 	}
 	wg.Wait()
@@ -196,7 +197,7 @@ func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKe
 	return nil
 }
 
-func (h *splitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, splitKeys [][]byte,
+func (h *splitRegionsHandler) WatchRegionsByKeyRange(ctx context.Context, startKey, endKey []byte, splitKeys [][]byte,
 	timeout, watchInterval time.Duration, response *splitKeyResponse, wg *sync.WaitGroup) {
 	after := time.After(timeout)
 	ticker := time.NewTicker(watchInterval)
@@ -223,6 +224,8 @@ func (h *splitRegionsHandler) WatchRegionsByKeyRange(startKey, endKey []byte, sp
 			}
 			return
 		case <-after:
+			return
+		case <-ctx.Done():
 			return
 		}
 	}
