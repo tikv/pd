@@ -710,8 +710,24 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
 
-	if rc.IsRegionHot(region) {
-		return nil, errors.Errorf("region %d is a hot region", region.GetID())
+	if len(request.GetRegionsId()) > 0 {
+		ops, failures, err := rc.GetRegionScatter().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
+		if err != nil {
+			return nil, err
+		}
+		for _, op := range ops {
+			if ok := rc.GetOperatorController().AddOperator(op); !ok {
+				failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
+			}
+		}
+		percentage := 100
+		if len(failures) > 0 {
+			percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+		}
+		return &pdpb.ScatterRegionResponse{
+			Header:             s.header(),
+			FinishedPercentage: uint64(percentage),
+		}, nil
 	}
 
 	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())
@@ -723,7 +739,8 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 	}
 
 	return &pdpb.ScatterRegionResponse{
-		Header: s.header(),
+		Header:             s.header(),
+		FinishedPercentage: 100,
 	}, nil
 }
 
@@ -987,6 +1004,19 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	return &pdpb.SyncMaxTSResponse{
 		Header: s.header(),
 		Dcs:    processedDCs,
+	}, nil
+}
+
+func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
+	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+	// TODO: add split region context
+	finishedPercentage, newRegionIDs := s.cluster.GetRegionSplitter().SplitRegions(request.GetSplitKeys(), int(request.GetRetryLimit()))
+	return &pdpb.SplitRegionsResponse{
+		Header:             s.header(),
+		RegionsId:          newRegionIDs,
+		FinishedPercentage: uint64(finishedPercentage),
 	}, nil
 }
 
