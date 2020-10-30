@@ -16,6 +16,7 @@ package command
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path"
@@ -83,6 +84,7 @@ func NewShowSchedulerCommand() *cobra.Command {
 		Short: "show schedulers",
 		Run:   showSchedulerCommandFunc,
 	}
+	c.Flags().String("status", "", "the scheduler status")
 	return c
 }
 
@@ -102,7 +104,11 @@ func showSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	r, err := doRequest(cmd, schedulersPrefix, http.MethodGet)
+	url := schedulersPrefix
+	if flag := cmd.Flag("status"); flag != nil && flag.Value.String() != "" {
+		url = fmt.Sprintf("%s?status=%s", url, flag.Value.String())
+	}
+	r, err := doRequest(cmd, url, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
 		return

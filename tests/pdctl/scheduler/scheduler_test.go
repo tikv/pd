@@ -23,6 +23,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 )
@@ -270,4 +271,34 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	var conf1 map[string]interface{}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
+
+	// test show scheduler with paused and disabled status.
+	checkSchedulerWithStatusCommand := func(args []string, status string, expected []string) {
+		if args != nil {
+			mustExec(args, nil)
+		}
+		var schedulers []string
+		mustExec([]string{"-u", pdAddr, "scheduler", "show", "--status", status}, &schedulers)
+		c.Assert(schedulers, DeepEquals, expected)
+	}
+
+	mustExec([]string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
+	checkSchedulerWithStatusCommand(nil, "paused", []string{
+		"balance-leader-scheduler",
+	})
+	mustExec([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
+	checkSchedulerWithStatusCommand(nil, "paused", nil)
+
+	// set label scheduler to disabled manually.
+	cfg := leaderServer.GetServer().GetScheduleConfig()
+	origin := cfg.Schedulers
+	cfg.Schedulers = config.SchedulerConfigs{{Type: "label", Disable: true}}
+	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
+	c.Assert(err, IsNil)
+	checkSchedulerWithStatusCommand(nil, "disabled", []string{"label-scheduler"})
+	// reset Schedulers in ScheduleConfig
+	cfg.Schedulers = origin
+	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
+	c.Assert(err, IsNil)
+	checkSchedulerWithStatusCommand(nil, "disabled", nil)
 }
