@@ -89,33 +89,18 @@ func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, r
 
 func (r *RegionSplitter) splitRegionsByKeys(ctx context.Context, splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
 	validGroups, unProcessedKeys := r.groupKeysByRegion(splitKeys)
-	// batch limit
-	var batches []batch
-	for _, groupKeys := range validGroups {
-		batches = appendKeyBatches(batches, groupKeys.region, groupKeys.keys, splitBatchRegionLimit)
-	}
-	checkRegionGroupKeys := make(map[uint64]regionGroupKeys, len(validGroups))
-	for _, batch := range batches {
-		err := r.handler.SplitRegionByKeys(batch.region, batch.keys)
+	checkGroups := make(map[uint64]regionGroupKeys, len(validGroups))
+	for key, group := range validGroups {
+		err := r.handler.SplitRegionByKeys(group.region, group.keys)
 		if err != nil {
-			unProcessedKeys = append(unProcessedKeys, batch.keys...)
+			unProcessedKeys = append(unProcessedKeys, group.keys...)
 			continue
 		}
-		_, ok := checkRegionGroupKeys[batch.regionID]
-		if !ok {
-			checkRegionGroupKeys[batch.regionID] = regionGroupKeys{
-				region: batch.region,
-				keys:   [][]byte{},
-			}
-		}
-		checkRegionGroupKeys[batch.regionID] = regionGroupKeys{
-			region: checkRegionGroupKeys[batch.regionID].region,
-			keys:   append(checkRegionGroupKeys[batch.regionID].keys, batch.keys...),
-		}
+		checkGroups[key] = group
 	}
 	wg := &sync.WaitGroup{}
 	response := newSplitKeyResponse()
-	for _, groupKeys := range checkRegionGroupKeys {
+	for _, groupKeys := range checkGroups {
 		wg.Add(1)
 		// TODO use recovery to handle error/panic
 		go r.handler.WatchRegionsByKeyRange(ctx, groupKeys.region.GetStartKey(), groupKeys.region.GetEndKey(),
@@ -197,11 +182,15 @@ func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKe
 	return nil
 }
 
-func (h *splitRegionsHandler) WatchRegionsByKeyRange(ctx context.Context, startKey, endKey []byte, splitKeys [][]byte,
+func (h *splitRegionsHandler) WatchRegionsByKeyRange(parCtx context.Context, startKey, endKey []byte, splitKeys [][]byte,
 	timeout, watchInterval time.Duration, response *splitKeyResponse, wg *sync.WaitGroup) {
 	after := time.After(timeout)
 	ticker := time.NewTicker(watchInterval)
+	ctx, cancel := context.WithCancel(parCtx)
+	createdRegions := make(map[uint64]struct{}, len(splitKeys))
 	defer func() {
+		response.addRegionsID(createdRegions)
+		cancel()
 		ticker.Stop()
 		wg.Done()
 	}()
@@ -215,11 +204,11 @@ func (h *splitRegionsHandler) WatchRegionsByKeyRange(ctx context.Context, startK
 						log.Info("found split region",
 							zap.Uint64("region-id", region.GetID()),
 							logutil.ZapRedactString("split-key", hex.EncodeToString(key)))
-						response.addRegionsID(region)
+						createdRegions[region.GetID()] = struct{}{}
 					}
 				}
 			}
-			if len(response.getRegionsID()) < len(splitKeys) {
+			if len(createdRegions) < len(splitKeys) {
 				continue
 			}
 			return
@@ -229,29 +218,6 @@ func (h *splitRegionsHandler) WatchRegionsByKeyRange(ctx context.Context, startK
 			return
 		}
 	}
-}
-
-type batch struct {
-	regionID uint64
-	keys     [][]byte
-	region   *core.RegionInfo
-}
-
-func appendKeyBatches(batches []batch, region *core.RegionInfo, groupKeys [][]byte, limit int) []batch {
-	var keys [][]byte
-	for start, count := 0, 0; start < len(groupKeys); start++ {
-		if count > limit {
-			batches = append(batches, batch{regionID: region.GetID(), keys: keys})
-			keys = make([][]byte, 0, limit)
-			count = 0
-		}
-		keys = append(keys, groupKeys[start])
-		count++
-	}
-	if len(keys) != 0 {
-		batches = append(batches, batch{regionID: region.GetID(), keys: keys, region: region})
-	}
-	return batches
 }
 
 type regionGroupKeys struct {
@@ -272,11 +238,11 @@ func newSplitKeyResponse() *splitKeyResponse {
 	return s
 }
 
-func (r *splitKeyResponse) addRegionsID(regions ...*core.RegionInfo) {
+func (r *splitKeyResponse) addRegionsID(regionsID map[uint64]struct{}) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, region := range regions {
-		r.mu.newRegions[region.GetID()] = struct{}{}
+	for id := range regionsID {
+		r.mu.newRegions[id] = struct{}{}
 	}
 }
 

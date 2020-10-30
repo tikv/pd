@@ -20,7 +20,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -52,11 +51,11 @@ func (m *mockSplitRegionsHandler) WatchRegionsByKeyRange(ctx context.Context, st
 	defer wg.Done()
 	for regionID, keyRange := range m.regions {
 		if bytes.Equal(startKey, keyRange[0]) && bytes.Equal(endKey, keyRange[1]) {
-			regions := make([]*core.RegionInfo, 0)
+			regions := make(map[uint64]struct{}, 0)
 			for i := 0; i < len(splitKeys); i++ {
-				regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: regionID + uint64(i) + 1000}, nil))
+				regions[regionID+uint64(i)+1000] = struct{}{}
 			}
-			response.addRegionsID(regions...)
+			response.addRegionsID(regions)
 		}
 	}
 }
