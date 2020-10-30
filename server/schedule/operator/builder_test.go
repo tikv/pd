@@ -163,37 +163,43 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 		useJointConsensus bool
 		originPeers       []*metapb.Peer // first is leader
 		targetPeers       []*metapb.Peer // first is leader
-		steps             []OpStep
+		kind              OpKind
+		steps             []OpStep // empty means error
 	}
 	cases := []testCase{
 		{ // empty step
 			false, false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			0,
 			[]OpStep{},
 		},
 		{ // empty step
 			true, true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			0,
 			[]OpStep{},
 		},
 		{ // no valid leader
 			false, false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{Id: 10, StoreId: 10}},
+			0,
 			[]OpStep{},
 		},
 		{ // no valid leader
 			true, true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{Id: 10, StoreId: 10}},
+			0,
 			[]OpStep{},
 		},
 		{ // promote learner
 			false, false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
+			OpLeader,
 			[]OpStep{
 				PromoteLearner{ToStore: 2},
 				TransferLeader{FromStore: 1, ToStore: 2},
@@ -203,6 +209,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			true, true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
+			OpLeader,
 			[]OpStep{
 				PromoteLearner{ToStore: 2},
 				TransferLeader{FromStore: 1, ToStore: 2},
@@ -212,6 +219,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			false, false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
+			OpLeader | OpRegion,
 			[]OpStep{
 				AddLearner{ToStore: 4},
 				PromoteLearner{ToStore: 4},
@@ -226,6 +234,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			true, true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
+			OpLeader | OpRegion,
 			[]OpStep{
 				AddLearner{ToStore: 4},
 				AddLearner{ToStore: 5},
@@ -247,6 +256,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			false, false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{StoreId: 2}},
+			OpLeader | OpRegion,
 			[]OpStep{
 				AddLearner{ToStore: 2},
 				PromoteLearner{ToStore: 2},
@@ -258,6 +268,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			true, true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{StoreId: 2}},
+			OpLeader | OpRegion,
 			[]OpStep{
 				AddLearner{ToStore: 2},
 				ChangePeerV2Enter{
@@ -276,6 +287,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			false, false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			OpRegion,
 			[]OpStep{
 				RemovePeer{FromStore: 2},
 				AddLearner{ToStore: 2},
@@ -285,6 +297,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			true, true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
+			0, // Note that there is no OpRegion here
 			[]OpStep{
 				DemoteFollower{ToStore: 2},
 			},
@@ -296,6 +309,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			//             z1,h1                z1,h2                 z2,h1
 			[]*metapb.Peer{{StoreId: 9}, {StoreId: 7}, {StoreId: 10}},
 			//             z2,h2         z1,h1         z3,h1
+			OpLeader | OpRegion,
 			[]OpStep{
 				// 6->7
 				AddLearner{ToStore: 7},
@@ -318,6 +332,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			true, false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			OpLeader | OpRegion,
 			[]OpStep{
 				PromoteLearner{ToStore: 2},
 				TransferLeader{FromStore: 1, ToStore: 2},
@@ -329,6 +344,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			false, false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			OpLeader | OpRegion,
 			[]OpStep{
 				AddLearner{ToStore: 3},
 				PromoteLearner{ToStore: 2},
@@ -340,6 +356,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			true, false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter}, {Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}},
+			OpLeader | OpRegion,
 			[]OpStep{
 				AddLearner{ToStore: 3},
 				PromoteLearner{ToStore: 3},
@@ -353,6 +370,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			true, true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}},
+			OpLeader | OpRegion,
 			[]OpStep{
 				TransferLeader{FromStore: 1, ToStore: 2},
 				ChangePeerV2Enter{
@@ -370,6 +388,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			true, true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 3, StoreId: 3}, {Id: 1, StoreId: 1}},
+			OpLeader | OpRegion,
 			[]OpStep{
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{{ToStore: 3}},
@@ -401,6 +420,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			continue
 		}
 		c.Assert(err, IsNil)
+		c.Assert(op.Kind(), Equals, tc.kind)
 		c.Assert(op.Len(), Equals, len(tc.steps))
 		for i := 0; i < op.Len(); i++ {
 			switch step := op.Step(i).(type) {
@@ -444,8 +464,8 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 	}
 }
 
-// Test for issue 3039
-func (s *testBuilderSuite) TestPromoteUnhealthyPeer(c *C) {
+// Test for not set unhealthy peer as target for promote learner and transfer leader
+func (s *testBuilderSuite) TestTargetUnhealthyPeer(c *C) {
 	p := &metapb.Peer{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}
 	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithPendingPeers([]*metapb.Peer{p}))
@@ -456,5 +476,17 @@ func (s *testBuilderSuite) TestPromoteUnhealthyPeer(c *C) {
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
 	builder = NewBuilder("test", s.cluster, region)
 	builder.PromoteLearner(2)
+	c.Assert(builder.err, NotNil)
+
+	p = &metapb.Peer{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}
+	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
+		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithPendingPeers([]*metapb.Peer{p}))
+	builder = NewBuilder("test", s.cluster, region)
+	builder.SetLeader(2)
+	c.Assert(builder.err, NotNil)
+	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
+		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
+	builder = NewBuilder("test", s.cluster, region)
+	builder.SetLeader(2)
 	c.Assert(builder.err, NotNil)
 }

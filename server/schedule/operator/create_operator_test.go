@@ -55,7 +55,8 @@ func (s *testCreateOperatorSuite) SetUpTest(c *C) {
 func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 	type testCase struct {
 		originPeers []*metapb.Peer // first is leader
-		steps       []OpStep
+		kind        OpKind
+		steps       []OpStep // empty means error
 	}
 	cases := []testCase{
 		{
@@ -65,6 +66,7 @@ func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 				{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
 				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
 			},
+			kind: 0,
 			steps: []OpStep{
 				ChangePeerV2Leave{
 					PromoteLearners: []PromoteLearner{{ToStore: 4}},
@@ -79,6 +81,7 @@ func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 				{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
 				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
 			},
+			kind: 0,
 			steps: []OpStep{
 				ChangePeerV2Leave{
 					PromoteLearners: []PromoteLearner{{ToStore: 1}, {ToStore: 4}},
@@ -93,6 +96,7 @@ func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 				{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
 				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
 			},
+			kind: OpLeader,
 			steps: []OpStep{
 				TransferLeader{FromStore: 1, ToStore: 2},
 				ChangePeerV2Leave{
@@ -108,6 +112,7 @@ func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 				{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
 				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
 			},
+			kind: OpLeader,
 			steps: []OpStep{
 				TransferLeader{FromStore: 1, ToStore: 4},
 				ChangePeerV2Leave{
@@ -126,6 +131,7 @@ func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 			continue
 		}
 		c.Assert(err, IsNil)
+		c.Assert(op.Kind(), Equals, tc.kind)
 		c.Assert(len(op.steps), Equals, len(tc.steps))
 		for i := 0; i < op.Len(); i++ {
 			switch step := op.Step(i).(type) {

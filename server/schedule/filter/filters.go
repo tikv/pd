@@ -228,67 +228,80 @@ type StoreStateFilter struct {
 	MoveRegion bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
+	// Reason is used to distinguish the reason of store state filter
+	Reason string
 }
 
 // Scope returns the scheduler or the checker which the filter acts on.
-func (f StoreStateFilter) Scope() string {
+func (f *StoreStateFilter) Scope() string {
 	return f.ActionScope
 }
 
 // Type returns the type of the Filter.
-func (f StoreStateFilter) Type() string {
-	return "store-state-filter"
+func (f *StoreStateFilter) Type() string {
+	return fmt.Sprintf("store-state-%s-filter", f.Reason)
 }
 
 // conditionFunc defines condition to determine a store should be selected.
 // It should consider if the filter allows temporary states.
 type conditionFunc func(*config.PersistOptions, *core.StoreInfo) bool
 
-func (f StoreStateFilter) isTombstone(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) isTombstone(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "tombstone"
 	return store.IsTombstone()
 }
 
-func (f StoreStateFilter) isDown(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) isDown(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "down"
 	return store.DownTime() > opt.GetMaxStoreDownTime()
 }
 
-func (f StoreStateFilter) isOffline(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) isOffline(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "offline"
 	return store.IsOffline()
 }
 
-func (f StoreStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "pause-leader"
 	return !store.AllowLeaderTransfer()
 }
 
-func (f StoreStateFilter) isDisconnected(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) isDisconnected(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "disconnected"
 	return !f.AllowTemporaryStates && store.IsDisconnected()
 }
 
-func (f StoreStateFilter) isBusy(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) isBusy(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "busy"
 	return !f.AllowTemporaryStates && store.IsBusy()
 }
 
-func (f StoreStateFilter) exceedRemoveLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) exceedRemoveLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "exceed-remove-limit"
 	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer)
 }
 
-func (f StoreStateFilter) exceedAddLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) exceedAddLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "exceed-add-limit"
 	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer)
 }
 
-func (f StoreStateFilter) tooManySnapshots(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) tooManySnapshots(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "too-many-snapshot"
 	return !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount())
 }
 
-func (f StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "too-many-pending-peer"
 	return !f.AllowTemporaryStates &&
 		opt.GetMaxPendingPeerCount() > 0 &&
 		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount())
 }
 
-func (f StoreStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "reject-leader"
 	return opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())
 }
 
@@ -312,7 +325,7 @@ const (
 	regionTarget
 )
 
-func (f StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions, store *core.StoreInfo) bool {
 	var funcs []conditionFunc
 	switch typ {
 	case leaderSource:
@@ -336,7 +349,7 @@ func (f StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions,
 
 // Source returns true when the store can be selected as the schedule
 // source.
-func (f StoreStateFilter) Source(opts *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) Source(opts *config.PersistOptions, store *core.StoreInfo) bool {
 	if f.TransferLeader && f.anyConditionMatch(leaderSource, opts, store) {
 		return false
 	}
@@ -348,7 +361,7 @@ func (f StoreStateFilter) Source(opts *config.PersistOptions, store *core.StoreI
 
 // Target returns true when the store can be selected as the schedule
 // target.
-func (f StoreStateFilter) Target(opts *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) Target(opts *config.PersistOptions, store *core.StoreInfo) bool {
 	if f.TransferLeader && f.anyConditionMatch(leaderTarget, opts, store) {
 		return false
 	}

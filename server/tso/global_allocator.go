@@ -114,11 +114,7 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 // Make sure you have initialized the TSO allocator before calling.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
 	// To check if we have any dc-location configured in the cluster
-	dcLocationMap, err := gta.allocatorManager.GetClusterDCLocations()
-	if err != nil {
-		log.Error("get cluster dc-locations info failed", errs.ZapError(err))
-		return pdpb.Timestamp{}, err
-	}
+	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
 	// No dc-locations configured in the cluster
 	if len(dcLocationMap) == 0 {
 		return gta.timestampOracle.getTS(gta.leadership, count)
@@ -128,7 +124,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	defer cancel()
 	maxTSO := &pdpb.Timestamp{}
 	// Collect the MaxTS with all Local TSO Allocator leaders first
-	if err = gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
+	if err := gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
 	maxTSO.Logical += int64(count)
@@ -136,7 +132,10 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	if err := gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
-	var currentGlobalTSO pdpb.Timestamp
+	var (
+		currentGlobalTSO pdpb.Timestamp
+		err              error
+	)
 	if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
 		return pdpb.Timestamp{}, err
 	}
@@ -165,10 +164,10 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 		leaderURLs := make([]string, 0, len(allocatorLeaders))
 		for _, allocator := range allocatorLeaders {
 			// Check if its client URLs are empty
-			if len(allocator.GetMember().GetClientUrls()) < 1 {
+			if len(allocator.GetClientUrls()) < 1 {
 				continue
 			}
-			leaderURL := allocator.GetMember().GetClientUrls()[0]
+			leaderURL := allocator.GetClientUrls()[0]
 			if slice.NoneOf(leaderURLs, func(i int) bool { return leaderURLs[i] == leaderURL }) {
 				leaderURLs = append(leaderURLs, leaderURL)
 			}
@@ -185,6 +184,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 			}
 			wg.Add(1)
 			go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *pdpb.SyncMaxTSResponse, errCh chan<- error) {
+				defer wg.Done()
 				request := &pdpb.SyncMaxTSRequest{
 					Header: &pdpb.RequestHeader{
 						SenderId: gta.allocatorManager.member.ID(),
@@ -204,7 +204,6 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 				if resp == nil {
 					log.Error("sync max ts rpc failed, got a nil response", zap.String("local-allocator-leader-url", leaderConn.Target()))
 				}
-				wg.Done()
 			}(ctx, leaderConn, respCh, errCh)
 		}
 		wg.Wait()
@@ -235,6 +234,8 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 			if maxRetryCount == 1 {
 				log.Warn("unsynced dc-locations found, will retry", zap.Strings("syncedDCs", syncedDCs))
 				maxRetryCount++
+				// To make sure we have the newest dc-location info
+				gta.allocatorManager.ClusterDCLocationChecker()
 				continue
 			}
 			return errs.ErrSyncMaxTS.FastGenWithCause(fmt.Sprintf("unsynced dc-locations found, synced dc-locations: %+v", syncedDCs))

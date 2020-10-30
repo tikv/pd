@@ -241,6 +241,8 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot transfer leader to %d: not found", storeID)
 	} else if core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot transfer leader to %d: not voter", storeID)
+	} else if _, ok := b.unhealthyPeers[storeID]; ok {
+		b.err = errors.Errorf("cannot transfer leader to %d: unhealthy", storeID)
 	} else {
 		b.targetLeaderStoreID = storeID
 	}
@@ -443,8 +445,6 @@ func (b *Builder) brief() string {
 
 // Using Joint Consensus can ensure the replica safety and reduce the number of steps.
 func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
-	kind |= OpRegion
-
 	// Add all the peers as Learner first. Split `Add Voter` to `Add Learner + Promote`
 	for _, add := range b.toAdd.IDs() {
 		peer := b.toAdd[add]
@@ -458,7 +458,9 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 		} else {
 			b.execAddPeer(peer)
 		}
+		kind |= OpRegion
 	}
+
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
 		return kind, errors.New("no valid leader")
@@ -500,6 +502,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	// Finally, remove all the peers as Learner
 	for _, remove := range b.toRemove.IDs() {
 		b.execRemovePeer(b.toRemove[remove])
+		kind |= OpRegion
 	}
 
 	return kind, nil
@@ -670,7 +673,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	b.steps = append(b.steps, ChangePeerV2Leave(step))
 }
 
-var stateFilter = filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
+var stateFilter = &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 
 // check if the peer is allowed to become the leader.
 func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {

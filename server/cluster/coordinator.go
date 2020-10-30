@@ -61,6 +61,7 @@ type coordinator struct {
 	cluster         *RaftCluster
 	checkers        *schedule.CheckerController
 	regionScatterer *schedule.RegionScatterer
+	regionSplitter  *schedule.RegionSplitter
 	schedulers      map[string]*scheduleController
 	opController    *schedule.OperatorController
 	hbStreams       *hbstream.HeartbeatStreams
@@ -77,6 +78,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		cluster:         cluster,
 		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
+		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
 		hbStreams:       hbStreams,

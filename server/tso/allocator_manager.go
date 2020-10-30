@@ -37,8 +37,8 @@ import (
 )
 
 const (
-	checkPriorityStep           = 1 * time.Minute
-	checkAllocatorStep          = 1 * time.Second
+	checkStep                   = 1 * time.Minute
+	patrolStep                  = 1 * time.Second
 	dcLocationConfigEtcdPrefix  = "dc-location"
 	defaultAllocatorLeaderLease = 3
 	leaderTickInterval          = 50 * time.Millisecond
@@ -65,14 +65,18 @@ type allocatorGroup struct {
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
 type AllocatorManager struct {
-	sync.RWMutex
+	mu struct {
+		sync.RWMutex
+		// There are two kinds of TSO Allocators:
+		//   1. Global TSO Allocator, as a global single point to allocate
+		//      TSO for global transactions, such as cross-region cases.
+		//   2. Local TSO Allocator, servers for DC-level transactions.
+		// dc-location/global (string) -> TSO Allocator
+		allocatorGroups map[string]*allocatorGroup
+		// dc-location/global (string) -> Member ID
+		clusterDCLocations map[string][]uint64
+	}
 	wg sync.WaitGroup
-	// There are two kinds of TSO Allocators:
-	//   1. Global TSO Allocator, as a global single point to allocate
-	//      TSO for global transactions, such as cross-region cases.
-	//   2. Local TSO Allocator, servers for DC-level transactions.
-	// dc-location/global (string) -> TSO Allocator
-	allocatorGroups map[string]*allocatorGroup
 	// for election use
 	member *member.Member
 	// TSO config
@@ -93,7 +97,6 @@ func NewAllocatorManager(
 	sc *grpcutil.TLSConfig,
 ) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
-		allocatorGroups:        make(map[string]*allocatorGroup),
 		member:                 m,
 		rootPath:               rootPath,
 		saveInterval:           saveInterval,
@@ -101,6 +104,7 @@ func NewAllocatorManager(
 		maxResetTSGap:          maxResetTSGap,
 		securityConfig:         sc,
 	}
+	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	return allocatorManager
 }
 
@@ -135,38 +139,21 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 			zap.String("server-id", serverID))
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
+	am.ClusterDCLocationChecker()
 	return nil
 }
 
-// GetClusterDCLocations returns all dc-locations of a cluster and transform it into a map
+// GetClusterDCLocations returns all dc-locations of a cluster with a map
 // which satisfies dcLocation -> []serverID.
-func (am *AllocatorManager) GetClusterDCLocations() (map[string][]uint64, error) {
-	resp, err := etcdutil.EtcdKVGet(
-		am.member.Client(),
-		am.getLocalTSOConfigPath(),
-		clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
-	if err != nil {
-		log.Error("get cluster dc-locations failed", errs.ZapError(err))
-		return nil, err
-	}
+func (am *AllocatorManager) GetClusterDCLocations() map[string][]uint64 {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
 	dcLocationMap := make(map[string][]uint64)
-	for _, kv := range resp.Kvs {
-		// The key will contain the member ID and the value is its dcLocation
-		serverPath := strings.Split(string(kv.Key), "/")
-		dcLocation := string(kv.Value)
-		// Get serverID from serverPath, e.g, /pd/dc-location/1232143243253 -> 1232143243253
-		serverID, err := strconv.ParseUint(serverPath[len(serverPath)-1], 10, 64)
-		if err != nil {
-			log.Warn("get server id and dcLocation from etcd failed, invalid server id",
-				zap.Any("splitted-serverPath", serverPath),
-				zap.String("dc-location", dcLocation),
-				errs.ZapError(err))
-			continue
-		}
-		dcLocationMap[dcLocation] = append(dcLocationMap[dcLocation], serverID)
+	for dcLocation, members := range am.mu.clusterDCLocations {
+		dcLocationMap[dcLocation] = make([]uint64, len(members))
+		copy(dcLocationMap[dcLocation], members)
 	}
-	return dcLocationMap, nil
+	return dcLocationMap
 }
 
 func (am *AllocatorManager) getLocalTSOConfigPath() string {
@@ -175,8 +162,8 @@ func (am *AllocatorManager) getLocalTSOConfigPath() string {
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) error {
-	am.Lock()
-	defer am.Unlock()
+	am.mu.Lock()
+	defer am.mu.Unlock()
 
 	if am.updatePhysicalInterval != config.DefaultTSOUpdatePhysicalInterval {
 		log.Warn("tso update physical interval is non-default",
@@ -190,7 +177,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 		allocator = NewLocalTSOAllocator(am.member, leadership, dcLocation, am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
 	}
 	// Update or create a new allocatorGroup
-	am.allocatorGroups[dcLocation] = &allocatorGroup{
+	am.mu.allocatorGroups[dcLocation] = &allocatorGroup{
 		dcLocation: dcLocation,
 		parentCtx:  parentCtx,
 		leadership: leadership,
@@ -202,7 +189,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 	case config.GlobalDCLocation:
 		// Because Global TSO Allocator only depends on PD leader's leadership,
 		// so we can directly initialize it here.
-		if err := am.allocatorGroups[dcLocation].allocator.Initialize(); err != nil {
+		if err := am.mu.allocatorGroups[dcLocation].allocator.Initialize(); err != nil {
 			return err
 		}
 	// For Local TSO Allocator
@@ -328,19 +315,20 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	tsTicker := time.NewTicker(am.updatePhysicalInterval)
 	defer tsTicker.Stop()
-	checkerTicker := time.NewTicker(checkAllocatorStep)
+	patrolTicker := time.NewTicker(patrolStep)
+	defer patrolTicker.Stop()
+	checkerTicker := time.NewTicker(checkStep)
 	defer checkerTicker.Stop()
-	priorityTicker := time.NewTicker(checkPriorityStep)
-	defer priorityTicker.Stop()
 
 	for {
 		select {
 		case <-tsTicker.C:
 			am.allocatorUpdater()
-		case <-checkerTicker.C:
+		case <-patrolTicker.C:
 			am.allocatorPatroller(serverCtx)
-		case <-priorityTicker.C:
-			am.priorityChecker()
+		case <-checkerTicker.C:
+			am.ClusterDCLocationChecker()
+			am.PriorityChecker()
 		case <-serverCtx.Done():
 			return
 		}
@@ -384,19 +372,12 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 // Check if we have any new dc-location configured, if yes,
 // then set up the corresponding local allocator.
 func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
-	clusterDCLocations, err := am.GetClusterDCLocations()
-	if err != nil {
-		log.Error("check new allocators failed, can't get cluster dc-locations", errs.ZapError(err))
-	}
 	// Collect all dc-locations
-	dcLocations := make([]string, 0, len(clusterDCLocations))
-	for dcLocation := range clusterDCLocations {
-		dcLocations = append(dcLocations, dcLocation)
-	}
+	dcLocations := am.GetClusterDCLocations()
 	// Get all Local TSO Allocators
 	allocatorGroups := am.getAllocatorGroups(FilterDCLocation(config.GlobalDCLocation))
 	// Set up the new one
-	for _, dcLocation := range dcLocations {
+	for dcLocation := range dcLocations {
 		if slice.NoneOf(allocatorGroups, func(i int) bool {
 			return allocatorGroups[i].dcLocation == dcLocation
 		}) {
@@ -412,22 +393,52 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 	}
 	// Clean up the unused one
 	for _, ag := range allocatorGroups {
-		if slice.NoneOf(dcLocations, func(i int) bool {
-			return dcLocations[i] == ag.dcLocation
-		}) {
+		if _, exist := dcLocations[ag.dcLocation]; !exist {
 			am.deleteAllocatorGroup(ag.dcLocation)
 		}
 	}
 }
 
-// priorityChecker is used to check the election priority of a Local TSO Allocator.
+// ClusterDCLocationChecker collect all dc-locations of a cluster and transform it into a map
+// which satisfies dcLocation -> []serverID.
+func (am *AllocatorManager) ClusterDCLocationChecker() {
+	resp, err := etcdutil.EtcdKVGet(
+		am.member.Client(),
+		am.getLocalTSOConfigPath(),
+		clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	if err != nil {
+		log.Error("get cluster dc-locations failed", errs.ZapError(err))
+		return
+	}
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	am.mu.clusterDCLocations = make(map[string][]uint64)
+	for _, kv := range resp.Kvs {
+		// The key will contain the member ID and the value is its dcLocation
+		serverPath := strings.Split(string(kv.Key), "/")
+		dcLocation := string(kv.Value)
+		// Get serverID from serverPath, e.g, /pd/dc-location/1232143243253 -> 1232143243253
+		serverID, err := strconv.ParseUint(serverPath[len(serverPath)-1], 10, 64)
+		if err != nil {
+			log.Warn("get server id and dcLocation from etcd failed, invalid server id",
+				zap.Any("splitted-serverPath", serverPath),
+				zap.String("dc-location", dcLocation),
+				errs.ZapError(err))
+			continue
+		}
+		am.mu.clusterDCLocations[dcLocation] = append(am.mu.clusterDCLocations[dcLocation], serverID)
+	}
+}
+
+// PriorityChecker is used to check the election priority of a Local TSO Allocator.
 // In the normal case, if we want to elect a Local TSO Allocator for a certain DC,
 // such as dc-1, we need to make sure the follow priority rules:
 // 1. The PD server with dc-location="dc-1" needs to be elected as the allocator
 // leader with the highest priority.
 // 2. If all PD servers with dc-location="dc-1" are down, then the other PD servers
 // of DC could be elected.
-func (am *AllocatorManager) priorityChecker() {
+func (am *AllocatorManager) PriorityChecker() {
 	serverID := am.member.ID()
 	myServerDCLocation, err := am.getServerDCLocation(serverID)
 	if err != nil {
@@ -462,10 +473,10 @@ func (am *AllocatorManager) priorityChecker() {
 				zap.Uint64("next-leader-id", serverID),
 				zap.String("next-dc-location", myServerDCLocation))
 			nextLeaderKey := path.Join(am.rootPath, allocatorGroup.dcLocation, "next-leader")
-			// Grant a etcd lease with checkPriorityStep * 1.5
+			// Grant a etcd lease with checkStep * 1.5
 			nextLeaderLease := clientv3.NewLease(am.member.Client())
 			ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)
-			leaseResp, err := nextLeaderLease.Grant(ctx, int64(checkPriorityStep.Seconds()*1.5))
+			leaseResp, err := nextLeaderLease.Grant(ctx, int64(checkStep.Seconds()*1.5))
 			cancel()
 			if err != nil {
 				err = errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
@@ -499,17 +510,16 @@ func (am *AllocatorManager) priorityChecker() {
 		}
 		// nextLeader is not empty and isn't same with the server ID, resign the leader
 		if nextLeader != 0 && nextLeader != serverID {
+			log.Info("next leader key found, resign current leader", zap.Uint64("nextLeaderID", nextLeader))
 			am.resetAllocatorGroup(allocatorGroup.dcLocation)
 		}
 	}
 }
 
 func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error) {
-	dcLocationMap, err := am.GetClusterDCLocations()
-	if err != nil {
-		return "", err
-	}
-	for dcLocation, serverIDs := range dcLocationMap {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	for dcLocation, serverIDs := range am.mu.clusterDCLocations {
 		if slice.AnyOf(serverIDs, func(i int) bool { return serverIDs[i] == serverID }) {
 			return dcLocation, nil
 		}
@@ -544,23 +554,21 @@ func (am *AllocatorManager) deleteNextLeaderID(dcLocation string) error {
 }
 
 func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
-	am.Lock()
-	defer am.Unlock()
-	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
 		allocatorGroup.leadership.Reset()
 	}
-	delete(am.allocatorGroups, dcLocation)
+	delete(am.mu.allocatorGroups, dcLocation)
 }
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.
 func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
-	am.RLock()
 	if len(dcLocation) == 0 {
 		dcLocation = config.GlobalDCLocation
 	}
-	allocatorGroup, exist := am.allocatorGroups[dcLocation]
-	am.RUnlock()
+	allocatorGroup, exist := am.getAllocatorGroup(dcLocation)
 	if !exist {
 		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
 		return pdpb.Timestamp{}, err
@@ -569,19 +577,19 @@ func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (p
 }
 
 func (am *AllocatorManager) resetAllocatorGroup(dcLocation string) {
-	am.Lock()
-	defer am.Unlock()
-	if allocatorGroup, exist := am.allocatorGroups[dcLocation]; exist {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
 		allocatorGroup.leadership.Reset()
 	}
 }
 
 func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) []*allocatorGroup {
-	am.RLock()
-	defer am.RUnlock()
+	am.mu.RLock()
+	defer am.mu.RUnlock()
 	allocatorGroups := make([]*allocatorGroup, 0)
-	for _, ag := range am.allocatorGroups {
+	for _, ag := range am.mu.allocatorGroups {
 		if ag == nil {
 			continue
 		}
@@ -592,11 +600,18 @@ func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) 
 	return allocatorGroups
 }
 
+func (am *AllocatorManager) getAllocatorGroup(dcLocation string) (*allocatorGroup, bool) {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]
+	return allocatorGroup, exist
+}
+
 // GetAllocator get the allocator by dc-location.
 func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
-	am.RLock()
-	defer am.RUnlock()
-	allocatorGroup, exist := am.allocatorGroups[dcLocation]
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]
 	if !exist {
 		return nil, errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found", dcLocation))
 	}
@@ -612,8 +627,8 @@ func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []All
 	return allocators
 }
 
-// GetLocalAllocatorLeaders returns all Local TSO Allocator leaders this server holds.
-func (am *AllocatorManager) GetLocalAllocatorLeaders() ([]*LocalTSOAllocator, error) {
+// GetHoldingLocalAllocatorLeaders returns all Local TSO Allocator leaders this server holds.
+func (am *AllocatorManager) GetHoldingLocalAllocatorLeaders() ([]*LocalTSOAllocator, error) {
 	localAllocators := am.GetAllocators(
 		FilterDCLocation(config.GlobalDCLocation),
 		FilterUnavailableLeadership())
@@ -626,4 +641,18 @@ func (am *AllocatorManager) GetLocalAllocatorLeaders() ([]*LocalTSOAllocator, er
 		localAllocatorLeaders = append(localAllocatorLeaders, localAllocatorLeader)
 	}
 	return localAllocatorLeaders, nil
+}
+
+// GetLocalAllocatorLeaders returns all Local TSO Allocator leaders' member info.
+func (am *AllocatorManager) GetLocalAllocatorLeaders() (map[string]*pdpb.Member, error) {
+	localAllocators := am.GetAllocators(FilterDCLocation(config.GlobalDCLocation))
+	localAllocatorLeaderMember := make(map[string]*pdpb.Member)
+	for _, allocator := range localAllocators {
+		localAllocator, ok := allocator.(*LocalTSOAllocator)
+		if !ok {
+			return nil, errs.ErrGetLocalAllocator.FastGenByArgs("invalid local tso allocator found")
+		}
+		localAllocatorLeaderMember[localAllocator.GetDCLocation()] = localAllocator.GetAllocatorLeader()
+	}
+	return localAllocatorLeaderMember, nil
 }

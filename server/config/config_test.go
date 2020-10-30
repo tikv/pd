@@ -434,3 +434,27 @@ wait-store-timeout = "120s"
 	c.Assert(err, IsNil)
 	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
 }
+
+func (s *testConfigSuite) TestConfigClone(c *C) {
+	cfg := &Config{}
+	cfg.Adjust(nil)
+	c.Assert(cfg.Clone(), DeepEquals, cfg)
+
+	emptyConfigMetaData := newConfigMetadata(nil)
+
+	schedule := &ScheduleConfig{}
+	schedule.adjust(emptyConfigMetaData)
+	c.Assert(schedule.Clone(), DeepEquals, schedule)
+
+	replication := &ReplicationConfig{}
+	replication.adjust(emptyConfigMetaData)
+	c.Assert(replication.Clone(), DeepEquals, replication)
+
+	pdServer := &PDServerConfig{}
+	pdServer.adjust(emptyConfigMetaData)
+	c.Assert(pdServer.Clone(), DeepEquals, pdServer)
+
+	replicationMode := &ReplicationModeConfig{}
+	replicationMode.adjust(emptyConfigMetaData)
+	c.Assert(replicationMode.Clone(), DeepEquals, replicationMode)
+}
