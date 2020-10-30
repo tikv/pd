@@ -32,10 +32,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	splitBatchRegionLimit = 16
-)
-
 // SplitRegionsHandler used to handle region splitting
 type SplitRegionsHandler interface {
 	SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error
