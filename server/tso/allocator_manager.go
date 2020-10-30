@@ -642,3 +642,17 @@ func (am *AllocatorManager) GetLocalAllocatorLeaders() ([]*LocalTSOAllocator, er
 	}
 	return localAllocatorLeaders, nil
 }
+
+// GetLocalAllocatorLeadersMember returns all Local TSO Allocator's leader member info.
+func (am *AllocatorManager) GetLocalAllocatorLeadersMember() (map[string]*pdpb.Member, error) {
+	localAllocators := am.GetAllocators(FilterDCLocation(config.GlobalDCLocation))
+	localAllocatorLeaderMember := make(map[string]*pdpb.Member)
+	for _, allocator := range localAllocators {
+		localAllocator, ok := allocator.(*LocalTSOAllocator)
+		if !ok {
+			return nil, errs.ErrGetLocalAllocator.FastGenByArgs("invalid local tso allocator found")
+		}
+		localAllocatorLeaderMember[localAllocator.GetDCLocation()] = localAllocator.GetAllocatorLeader()
+	}
+	return localAllocatorLeaderMember, nil
+}

@@ -3,6 +3,11 @@ Thank you for working on PD! Please read PD's [CONTRIBUTING](https://github.com/
 PR Title Format:
 1. pkg [, pkg2, pkg3]: what's changed
 2. *: what's changed
+
+
+If you want to open the **Challenge Program** pull request, please use the following template:
+https://raw.githubusercontent.com/tikv/.github/master/.github/PULL_REQUEST_TEMPLATE/challenge-program.md
+You can use it with query parameters: https://github.com/tikv/pd/compare/master...${you branch}?template=challenge-program.md
 -->
 
 ### What problem does this PR solve?
