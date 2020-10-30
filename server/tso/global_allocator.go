@@ -157,7 +157,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 	maxRetryCount := 1
 	for i := 0; i < maxRetryCount; i++ {
 		// Collect all allocator leaders' client URLs
-		allocatorLeaders, err := gta.allocatorManager.GetLocalAllocatorLeadersMember()
+		allocatorLeaders, err := gta.allocatorManager.GetLocalAllocatorLeaders()
 		if err != nil {
 			return err
 		}

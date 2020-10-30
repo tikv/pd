@@ -68,7 +68,7 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 	}
 
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeadersMember()
+	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
@@ -945,7 +945,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		return nil, fmt.Errorf("empty cluster dc-Location found, checker may not work properly")
 	}
 	// Get all Local TSO Allocator leaders
-	allocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
 	if err != nil {
 		return nil, err
 	}

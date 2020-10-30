@@ -627,8 +627,8 @@ func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []All
 	return allocators
 }
 
-// GetLocalAllocatorLeaders returns all Local TSO Allocator leaders this server holds.
-func (am *AllocatorManager) GetLocalAllocatorLeaders() ([]*LocalTSOAllocator, error) {
+// GetHoldingLocalAllocatorLeaders returns all Local TSO Allocator leaders this server holds.
+func (am *AllocatorManager) GetHoldingLocalAllocatorLeaders() ([]*LocalTSOAllocator, error) {
 	localAllocators := am.GetAllocators(
 		FilterDCLocation(config.GlobalDCLocation),
 		FilterUnavailableLeadership())
@@ -643,8 +643,8 @@ func (am *AllocatorManager) GetLocalAllocatorLeaders() ([]*LocalTSOAllocator, er
 	return localAllocatorLeaders, nil
 }
 
-// GetLocalAllocatorLeadersMember returns all Local TSO Allocator's leader member info.
-func (am *AllocatorManager) GetLocalAllocatorLeadersMember() (map[string]*pdpb.Member, error) {
+// GetLocalAllocatorLeaders returns all Local TSO Allocator leaders' member info.
+func (am *AllocatorManager) GetLocalAllocatorLeaders() (map[string]*pdpb.Member, error) {
 	localAllocators := am.GetAllocators(FilterDCLocation(config.GlobalDCLocation))
 	localAllocatorLeaderMember := make(map[string]*pdpb.Member)
 	for _, allocator := range localAllocators {
