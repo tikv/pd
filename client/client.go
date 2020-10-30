@@ -139,11 +139,6 @@ func WithRetry(retry int) RegionOption {
 	return func(op *RegionOp) { op.retryLimit = retry }
 }
 
-// SplitRegionsOp represents available options when split regions
-type SplitRegionsOp struct {
-	retryLimit int
-}
-
 type tsoRequest struct {
 	start      time.Time
 	ctx        context.Context
