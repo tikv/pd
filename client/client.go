@@ -97,6 +97,8 @@ type Client interface {
 	// ScatterRegionWithOption scatters the specified region with the given options, should use it
 	// for a batch of regions.
 	ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...RegionOption) error
+    // SplitRegions split regions by given split keys
+	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionOption) (*pdpb.SplitRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 	// Close closes the client.
@@ -126,15 +128,17 @@ type RegionOp struct {
 // RegionOption configures RegionOp
 type RegionOption func(op *RegionOp)
 
-// WithGroup specify the group during ScatterRegion
+// WithGroup specify the group during Scatter/Split Regions
 func WithGroup(group string) RegionOption {
 	return func(op *RegionOp) { op.group = group }
 }
 
+// WithRegions specify the regionsID during Scatter/Split Regions
 func WithRegions(regionsID []uint64) RegionOption {
 	return func(op *RegionOp) { op.regionsID = regionsID }
 }
 
+// WithRetry specify the retry limit during Scatter/Split Regions
 func WithRetry(retry int) RegionOption {
 	return func(op *RegionOp) { op.retryLimit = retry }
 }
@@ -932,6 +936,7 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 	})
 }
 
+// SplitRegions split regions by given split keys
 func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionOption) (*pdpb.SplitRegionsResponse, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetOperator", opentracing.ChildOf(span.Context()))
