@@ -100,7 +100,7 @@ func (gta *GlobalTSOAllocator) UpdateTSO() error {
 
 // SetTSO sets the physical part with given TSO.
 func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
-	return gta.timestampOracle.ResetUserTimestamp(gta.leadership, tso)
+	return gta.timestampOracle.resetUserTimestamp(gta.leadership, tso, false)
 }
 
 // GenerateTSO is used to generate a given number of TSOs.
@@ -134,7 +134,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	}
 	if tsoutil.CompareTimestamp(&currentGlobalTSO, maxTSO) < 0 {
 		// Update the global TSO in memory
-		if err := gta.SetTSO(tsoutil.GenerateTS(maxTSO)); err != nil {
+		if err := gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(maxTSO), true); err != nil {
 			log.Warn("update the global tso in memory failed", errs.ZapError(err))
 		}
 	}
@@ -209,17 +209,41 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 		if len(errList) > 0 {
 			return errs.ErrSyncMaxTS.FastGenWithCause(errList)
 		}
-		var syncedDCs []string
+		var (
+			respCount         int
+			syncedDCs         []string
+			inCollectingPhase bool
+		)
 		for resp := range respCh {
+			respCount++
 			if resp == nil {
 				return errs.ErrSyncMaxTS.FastGenWithCause("got nil response")
 			}
-			syncedDCs = append(syncedDCs, resp.GetDcs()...)
-			// Compare and get the max one
-			if resp.GetMaxLocalTs() != nil && resp.GetMaxLocalTs().GetPhysical() != 0 {
+			// Once we get a non-nil and non-zero MaxLocalTs first, we will think it's in the first phase
+			// of the Global TSO synchronization. So that we can have more detailed processing logic
+			// for each phase. For example, if we think we're in the first phase of the Global TSO
+			// synchronization, the inCollectingPhase will be set to true, and during this phase,
+			// any response with nil or empty MaxLocalTs will be regarded as an invalid response.
+			// Then the whole synchronization will fail.
+			if respCount == 1 && resp.GetMaxLocalTs() != nil && resp.GetMaxLocalTs().GetPhysical() != 0 {
+				inCollectingPhase = true
+			}
+			if inCollectingPhase {
+				// Handle the response of the first phase: collect all the Local TSOs
+				if resp.GetMaxLocalTs() == nil || resp.GetMaxLocalTs().GetPhysical() == 0 {
+					return errs.ErrSyncMaxTS.FastGenWithCause("got nil or zero max local ts in the first sync phase")
+				}
+				// Compare and get the max one
 				if tsoutil.CompareTimestamp(resp.GetMaxLocalTs(), maxTSO) > 0 {
 					*maxTSO = *(resp.GetMaxLocalTs())
 				}
+				syncedDCs = append(syncedDCs, resp.GetDcs()...)
+			} else {
+				// Handle the response of the second phase: set all the Local TSOs to the maxTSO
+				if resp.GetMaxLocalTs() != nil {
+					return errs.ErrSyncMaxTS.FastGenWithCause("got non-nil max local ts in the second sync phase")
+				}
+				syncedDCs = append(syncedDCs, resp.GetDcs()...)
 			}
 		}
 		if !gta.checkSyncedDCs(dcLocationMap, syncedDCs) {
