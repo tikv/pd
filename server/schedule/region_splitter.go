@@ -184,9 +184,8 @@ func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKe
 
 func (h *splitRegionsHandler) WatchRegionsByKeyRange(parCtx context.Context, startKey, endKey []byte, splitKeys [][]byte,
 	timeout, watchInterval time.Duration, response *splitKeyResponse, wg *sync.WaitGroup) {
-	after := time.After(timeout)
 	ticker := time.NewTicker(watchInterval)
-	ctx, cancel := context.WithCancel(parCtx)
+	ctx, cancel := context.WithTimeout(parCtx, timeout)
 	createdRegions := make(map[uint64]struct{}, len(splitKeys))
 	defer func() {
 		response.addRegionsID(createdRegions)
@@ -211,8 +210,6 @@ func (h *splitRegionsHandler) WatchRegionsByKeyRange(parCtx context.Context, sta
 			if len(createdRegions) < len(splitKeys) {
 				continue
 			}
-			return
-		case <-after:
 			return
 		case <-ctx.Done():
 			return
