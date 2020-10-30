@@ -51,7 +51,7 @@ func (m *mockSplitRegionsHandler) WatchRegionsByKeyRange(ctx context.Context, st
 	defer wg.Done()
 	for regionID, keyRange := range m.regions {
 		if bytes.Equal(startKey, keyRange[0]) && bytes.Equal(endKey, keyRange[1]) {
-			regions := make(map[uint64]struct{}, 0)
+			regions := make(map[uint64]struct{})
 			for i := 0; i < len(splitKeys); i++ {
 				regions[regionID+uint64(i)+1000] = struct{}{}
 			}
