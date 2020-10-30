@@ -142,7 +142,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	if tsoutil.CompareTimestamp(&currentGlobalTSO, maxTSO) < 0 {
 		// Update the global TSO in memory
 		if err := gta.SetTSO(tsoutil.GenerateTS(maxTSO)); err != nil {
-			return pdpb.Timestamp{}, err
+			log.Warn("update the global tso in memory failed", errs.ZapError(err))
 		}
 	}
 	return *maxTSO, nil
