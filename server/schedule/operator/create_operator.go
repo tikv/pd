@@ -73,18 +73,7 @@ func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.Reg
 			Role:    role.MetaPeerRole(),
 		}
 	}
-	builder := NewBuilder(desc, cluster, region, SetPeerRole(roles)).SetPeers(peers)
-	for storeID, role := range roles {
-		switch role {
-		case placement.Leader:
-			builder.SetLeader(storeID)
-		case placement.Follower:
-			// if all roles are follower, the originLeaderStoreID may be selected in prepare build phase.
-		case placement.Voter, placement.Learner:
-			// peer's role is already assigned at the begin of the function
-			// no need to process Learner again.
-		}
-	}
+	builder := NewBuilder(desc, cluster, region).SetPeers(peers).SetExpectedRoles(roles)
 	return builder.Build(kind)
 }
 
