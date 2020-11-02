@@ -53,6 +53,10 @@ github.com/VividCortex/mysqlerr v0.0.0-20200629151747-c28746d985dd h1:59Whn6shj5
 github.com/VividCortex/mysqlerr v0.0.0-20200629151747-c28746d985dd/go.mod h1:f3HiCrHjHBdcm6E83vGaXh1KomZMA2P6aeo3hKx/wg0=
 github.com/VoltDB/voltdb-client-go v1.0.1/go.mod h1:FSuyUyPbMimaMJ9DItBzhVzjFj5S4XHcEISlKEnFZ5Q=
 github.com/XiaoMi/pegasus-go-client v0.0.0-20181029071519-9400942c5d1c/go.mod h1:KcL6D/4RZ8RAYzQ5gKI0odcdWUmCVlbQTOlWrhP71CY=
+github.com/Yisaer/kvproto v0.0.0-20201102060001-4f78b5b9dc8c h1:UfLV1/V7HmuT4mIriXOY+iZlCZpqZ6RlAPwhJxBEk5U=
+github.com/Yisaer/kvproto v0.0.0-20201102060001-4f78b5b9dc8c/go.mod h1:IOdRDPLyda8GX2hE/jO7gqaCV/PNFh8BZQCQZXfIOqI=
+github.com/Yisaer/kvproto v0.0.0-20201102071311-c664be078e8e h1:0uuKHxg8bYBDBxyvcK/eszjzW/flSJXSvmTRbOrtpZs=
+github.com/Yisaer/kvproto v0.0.0-20201102071311-c664be078e8e/go.mod h1:IOdRDPLyda8GX2hE/jO7gqaCV/PNFh8BZQCQZXfIOqI=
 github.com/aerospike/aerospike-client-go v1.35.2/go.mod h1:zj8LBEnWBDOVEIJt8LvaRvDG5ARAoa5dBeHaB472NRc=
 github.com/ajstarks/svgo v0.0.0-20180226025133-644b8db467af/go.mod h1:K08gAheRH3/J6wwsYMMT4xOr94bZjxIelGM0+d/wbFw=
 github.com/akavel/rsrc v0.8.0/go.mod h1:uLoCtb9J+EyAqh+26kdrTgmzRBFPGOolLWKpdxkKq+c=

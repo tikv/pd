@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -59,11 +58,6 @@ type GlobalTSOAllocator struct {
 	timestampOracle *timestampOracle
 	// for global TSO synchronization
 	allocatorManager *AllocatorManager
-	// for gRPC use
-	localAllocatorConn struct {
-		sync.RWMutex
-		clientConns map[string]*grpc.ClientConn
-	}
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
@@ -86,7 +80,6 @@ func NewGlobalTSOAllocator(
 		},
 		allocatorManager: am,
 	}
-	gta.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
 	return gta
 }
 
@@ -178,7 +171,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 		var errList []error
 		wg := sync.WaitGroup{}
 		for _, leaderURL := range leaderURLs {
-			leaderConn, err := gta.getOrCreateGRPCConn(ctx, leaderURL)
+			leaderConn, err := gta.allocatorManager.GetOrCreateGRPCConn(ctx, leaderURL)
 			if err != nil {
 				return err
 			}
@@ -255,34 +248,6 @@ func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string][]uint64,
 	return len(unsyncedDCs) == 0
 }
 
-func (gta *GlobalTSOAllocator) getOrCreateGRPCConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
-	gta.localAllocatorConn.RLock()
-	conn, ok := gta.localAllocatorConn.clientConns[addr]
-	gta.localAllocatorConn.RUnlock()
-	if ok {
-		return conn, nil
-	}
-	tlsCfg, err := gta.allocatorManager.securityConfig.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, dialTimeout)
-	defer cancel()
-	cc, err := grpcutil.GetClientConn(ctxWithTimeout, addr, tlsCfg)
-	if err != nil {
-		return nil, err
-	}
-	gta.localAllocatorConn.Lock()
-	defer gta.localAllocatorConn.Unlock()
-	if old, ok := gta.localAllocatorConn.clientConns[addr]; ok {
-		cc.Close()
-		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
-		return old, nil
-	}
-	gta.localAllocatorConn.clientConns[addr] = cc
-	return cc, nil
-}
-
 func (gta *GlobalTSOAllocator) getCurrentTSO() (pdpb.Timestamp, error) {
 	currentPhysical, currentLogical := gta.timestampOracle.getTSO()
 	if currentPhysical == typeutil.ZeroTime {
@@ -294,4 +259,13 @@ func (gta *GlobalTSOAllocator) getCurrentTSO() (pdpb.Timestamp, error) {
 // Reset is used to reset the TSO allocator.
 func (gta *GlobalTSOAllocator) Reset() {
 	gta.timestampOracle.ResetTimestamp()
+}
+
+func (gta *GlobalTSOAllocator) GetDcLocations() []string {
+	dcLocationsMap := gta.allocatorManager.GetClusterDCLocations()
+	dcLocations := make([]string, len(dcLocationsMap))
+	for dc := range dcLocationsMap {
+		dcLocations = append(dcLocations, dc)
+	}
+	return dcLocations
 }
