@@ -37,12 +37,12 @@ import (
 // according to various constraints.
 type Builder struct {
 	// basic info
-	desc        string
-	cluster     opt.Cluster
-	regionID    uint64
-	regionEpoch *metapb.RegionEpoch
-	rules       []*placement.Rule
-	roles       map[uint64]placement.PeerRoleType
+	desc          string
+	cluster       opt.Cluster
+	regionID      uint64
+	regionEpoch   *metapb.RegionEpoch
+	rules         []*placement.Rule
+	expectedRoles map[uint64]placement.PeerRoleType
 
 	// operation record
 	originPeers         peersMap
@@ -266,9 +266,9 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 	return b
 }
 
-// SetPeerRoles records expected roles of target peers.
+// SetExpectedRoles records expected roles of target peers.
 // It may update `targetLeaderStoreID` if there is a peer has role `leader` or `follower`.
-func (b *Builder) SetPeerRoles(roles map[uint64]placement.PeerRoleType) *Builder {
+func (b *Builder) SetExpectedRoles(roles map[uint64]placement.PeerRoleType) *Builder {
 	if b.err != nil {
 		return b
 	}
@@ -294,7 +294,7 @@ func (b *Builder) SetPeerRoles(roles map[uint64]placement.PeerRoleType) *Builder
 		b.err = errors.Errorf("region need at least 1 voter or leader")
 		return b
 	}
-	b.roles = roles
+	b.expectedRoles = roles
 	return b
 }
 
@@ -541,7 +541,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 			continue
 		}
 		// if role info is given, store having role follower should not be target leader.
-		if role, ok := b.roles[targetLeaderStoreID]; ok && role == placement.Follower {
+		if role, ok := b.expectedRoles[targetLeaderStoreID]; ok && role == placement.Follower {
 			continue
 		}
 		if b.targetLeaderStoreID == 0 {
@@ -560,7 +560,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 }
 
 func (b *Builder) preferLeaderRoleAsLeader(targetLeaderStoreID uint64) int {
-	role, ok := b.roles[targetLeaderStoreID]
+	role, ok := b.expectedRoles[targetLeaderStoreID]
 	return typeutil.BoolToInt(ok && role == placement.Leader)
 }
 

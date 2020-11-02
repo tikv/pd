@@ -73,7 +73,7 @@ func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.Reg
 			Role:    role.MetaPeerRole(),
 		}
 	}
-	builder := NewBuilder(desc, cluster, region).SetPeers(peers).SetPeerRoles(roles)
+	builder := NewBuilder(desc, cluster, region).SetPeers(peers).SetExpectedRoles(roles)
 	return builder.Build(kind)
 }
 
