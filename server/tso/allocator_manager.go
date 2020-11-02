@@ -755,7 +755,6 @@ func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) {
 	if _, ok := am.localAllocatorConn.clientConns[addr]; ok {
 		newConn.Close()
 		log.Debug("use old connection", zap.String("target", newConn.Target()), zap.String("state", newConn.GetState().String()))
-		return
 	}
 	am.localAllocatorConn.clientConns[addr] = newConn
 }
