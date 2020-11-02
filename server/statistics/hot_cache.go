@@ -38,13 +38,13 @@ func NewHotCache() *HotCache {
 }
 
 // CheckWrite checks the write status, returns update items.
-func (w *HotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
-	return w.writeFlow.CheckRegionFlow(region, stats)
+func (w *HotCache) CheckWrite(region *core.RegionInfo) []*HotPeerStat {
+	return w.writeFlow.CheckRegionFlow(region)
 }
 
 // CheckRead checks the read status, returns update items.
-func (w *HotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
-	return w.readFlow.CheckRegionFlow(region, stats)
+func (w *HotCache) CheckRead(region *core.RegionInfo) []*HotPeerStat {
+	return w.readFlow.CheckRegionFlow(region)
 }
 
 // Update updates the cache.
@@ -113,4 +113,9 @@ func (w *HotCache) incMetrics(name string, storeID uint64, kind FlowKind) {
 	case ReadFlow:
 		hotCacheStatusGauge.WithLabelValues(name, store, "read").Inc()
 	}
+}
+
+// GetFilledPeriod returns filled period.
+func (w *HotCache) GetFilledPeriod(kind FlowKind) int {
+	return w.readFlow.getDefaultTimeMedian().GetFilledPeriod()
 }

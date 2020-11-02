@@ -15,6 +15,7 @@ package schedule
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -168,7 +169,7 @@ type engineContext struct {
 }
 
 func newEngineContext(ctx context.Context, filters ...filter.Filter) engineContext {
-	filters = append(filters, filter.StoreStateFilter{ActionScope: regionScatterName})
+	filters = append(filters, &filter.StoreStateFilter{ActionScope: regionScatterName})
 	return engineContext{
 		filters:        filters,
 		selectedPeer:   newSelectedStores(ctx, true),
@@ -180,13 +181,62 @@ const maxSleepDuration = 1 * time.Minute
 const initialSleepDuration = 100 * time.Millisecond
 const maxRetryLimit = 30
 
+// ScatterRegionsByRange directly scatter regions by ScatterRegions
+func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group string, retryLimit int) ([]*operator.Operator, map[uint64]error, error) {
+	regions := r.cluster.ScanRegions(startKey, endKey, -1)
+	if len(regions) < 1 {
+		return nil, nil, errors.New("empty region")
+	}
+	failures := make(map[uint64]error, len(regions))
+	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
+	for _, region := range regions {
+		regionMap[region.GetID()] = region
+	}
+	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
+	ops, err := r.ScatterRegions(regionMap, failures, group, retryLimit)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ops, failures, nil
+}
+
+// ScatterRegionsByID directly scatter regions by ScatterRegions
+func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int) ([]*operator.Operator, map[uint64]error, error) {
+	if len(regionsID) < 1 {
+		return nil, nil, errors.New("empty region")
+	}
+	failures := make(map[uint64]error, len(regionsID))
+	var regions []*core.RegionInfo
+	for _, id := range regionsID {
+		region := r.cluster.GetRegion(id)
+		if region == nil {
+			failures[id] = errors.New(fmt.Sprintf("failed to find region %v", id))
+			continue
+		}
+		regions = append(regions, region)
+	}
+	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
+	for _, region := range regions {
+		regionMap[region.GetID()] = region
+	}
+	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
+	ops, err := r.ScatterRegions(regionMap, failures, group, retryLimit)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ops, failures, nil
+}
+
 // ScatterRegions relocates the regions. If the group is defined, the regions' leader with the same group would be scattered
 // in a group level instead of cluster level.
 // RetryTimes indicates the retry times if any of the regions failed to relocate during scattering. There will be
 // time.Sleep between each retry.
 // Failures indicates the regions which are failed to be relocated, the key of the failures indicates the regionID
 // and the value of the failures indicates the failure error.
-func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) []*operator.Operator {
+func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) ([]*operator.Operator, error) {
+	if len(regions) < 1 {
+		return nil, errors.New("empty region")
+	}
 	if retryLimit > maxRetryLimit {
 		retryLimit = maxRetryLimit
 	}
@@ -214,7 +264,7 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 		// Wait for a while if there are some regions failed to be relocated
 		time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(currentRetry)))*initialSleepDuration))
 	}
-	return ops
+	return ops, nil
 }
 
 // Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
@@ -349,7 +399,7 @@ func (r *RegionScatterer) selectPeerToReplace(group string, stores map[uint64]*c
 func (r *RegionScatterer) collectAvailableStores(group string, region *core.RegionInfo, context engineContext) map[uint64]*core.StoreInfo {
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
-		filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
+		&filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
 	}
 	filters = append(filters, context.filters...)
 	filters = append(filters, context.selectedPeer.newFilters(r.name, group)...)

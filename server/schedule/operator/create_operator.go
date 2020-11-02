@@ -21,8 +21,10 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
@@ -62,10 +64,17 @@ func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region 
 }
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
-func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, peers map[uint64]*metapb.Peer) (*Operator, error) {
-	return NewBuilder(desc, cluster, region).
-		SetPeers(peers).
-		Build(kind)
+func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, roles map[uint64]placement.PeerRoleType) (*Operator, error) {
+	// construct the peers from roles
+	peers := make(map[uint64]*metapb.Peer)
+	for storeID, role := range roles {
+		peers[storeID] = &metapb.Peer{
+			StoreId: storeID,
+			Role:    role.MetaPeerRole(),
+		}
+	}
+	builder := NewBuilder(desc, cluster, region).SetPeers(peers).SetExpectedRoles(roles)
+	return builder.Build(kind)
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
@@ -215,7 +224,7 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 	brief := b.brief()
 
 	// buildStepsWithJointConsensus
-	kind := OpRegion
+	var kind OpKind
 
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {

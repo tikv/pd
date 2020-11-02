@@ -18,7 +18,6 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/tikv/pd/pkg/errs"
 )
@@ -54,12 +53,12 @@ func NewMasterKey(config *encryptionpb.MasterKey, ciphertextKey []byte) (*Master
 	if kms := config.GetKms(); kms != nil {
 		return newMasterKeyFromKMS(kms, ciphertextKey)
 	}
-	return nil, errors.New("unrecognized master key type")
+	return nil, errs.ErrEncryptionNewMasterKey.GenWithStack("unrecognized master key type")
 }
 
 // NewCustomMasterKey construct a master key instance from raw key and ciphertext key bytes.
 // Used for test only.
-func NewCustomMasterKey(key []byte, ciphertextKey []byte) *MasterKey {
+func NewCustomMasterKeyForTest(key []byte, ciphertextKey []byte) *MasterKey {
 	return &MasterKey{
 		key:           key,
 		ciphertextKey: ciphertextKey,
@@ -111,12 +110,12 @@ func newMasterKeyFromFile(config *encryptionpb.MasterKeyFile) (*MasterKey, error
 	}
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack(
-			"fail to get encryption key from file %s", path)
+		return nil, errs.ErrEncryptionNewMasterKey.Wrap(err).GenWithStack(
+			"fail to get encryption key from file %s", path, err.Error())
 	}
 	key, err := hex.DecodeString(strings.TrimSpace(string(data)))
 	if err != nil {
-		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack(
+		return nil, errs.ErrEncryptionNewMasterKey.Wrap(err).GenWithStack(
 			"failed to decode encryption key from file, the key must be in hex form")
 	}
 	if len(key) != masterKeyLength {

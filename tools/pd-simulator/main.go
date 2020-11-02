@@ -75,12 +75,14 @@ func main() {
 
 func run(simCase string) {
 	simConfig := simulator.NewSimConfig(*serverLogLevel)
+	var meta toml.MetaData
+	var err error
 	if *configFile != "" {
-		if _, err := toml.DecodeFile(*configFile, simConfig); err != nil {
+		if meta, err = toml.DecodeFile(*configFile, simConfig); err != nil {
 			simutil.Logger.Fatal("failed to decode file ", zap.Error(err))
 		}
 	}
-	if err := simConfig.Adjust(); err != nil {
+	if err = simConfig.Adjust(&meta); err != nil {
 		simutil.Logger.Fatal("failed to adjust simulator configuration", zap.Error(err))
 	}
 
@@ -88,7 +90,7 @@ func run(simCase string) {
 		simStart(*pdAddr, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
-		err := local.Run()
+		err = local.Run()
 		if err != nil {
 			simutil.Logger.Fatal("run server error", zap.Error(err))
 		}

@@ -43,17 +43,6 @@ const (
 	keyRotationRetryLimit = 10
 )
 
-// Test helpers
-var (
-	now                   = func() time.Time { return time.Now() }
-	tick                  = func(ticker *time.Ticker) <-chan time.Time { return ticker.C }
-	newMasterKey          = encryption.NewMasterKey
-	eventAfterReload      = func() {}
-	eventAfterTicker      = func() {}
-	eventAfterLeaderCheck = func() {}
-	eventSaveKeysFailure  = func() {}
-)
-
 // KeyManager maintains the list to encryption keys. It handles encryption key generation and
 // rotation, persisting and loading encryption keys.
 type KeyManager struct {
@@ -65,28 +54,37 @@ type KeyManager struct {
 	dataKeyRotationPeriod time.Duration
 	// Metadata defines the master key to use.
 	masterKeyMeta *encryptionpb.MasterKey
+	// Helper methods. Tests can mock the helper to inject dependencies.
+	helper keyManagerHelper
 	// Mutex for updating keys. Used for both of LoadKeys() and rotateKeyIfNeeded().
-	muUpdate sync.Mutex
-	// PD leadership of the current PD node. Only the PD leader will rotate data keys,
-	// or change current encryption method.
-	// Guarded by muUpdate.
-	leadership *election.Leadership
-	// Revision of keys loaded from etcd. Guarded by muUpdate.
-	keysRevision int64
+	mu struct {
+		sync.Mutex
+		// PD leadership of the current PD node. Only the PD leader will rotate data keys,
+		// or change current encryption method.
+		// Guarded by mu.
+		leadership *election.Leadership
+		// Revision of keys loaded from etcd. Guarded by mu.
+		keysRevision int64
+	}
 	// List of all encryption keys and current encryption key id,
-	// with type *encryptionpb.KeyDictionary
+	// with type *encryptionpb.KeyDictionary. The content is read-only.
 	keys atomic.Value
 }
 
 // saveKeys saves encryption keys in etcd. Fail if given leadership is not current.
 func saveKeys(
-	etcdClient *clientv3.Client,
 	leadership *election.Leadership,
 	masterKeyMeta *encryptionpb.MasterKey,
 	keys *encryptionpb.KeyDictionary,
-) error {
+	helper ...keyManagerHelper,
+) (err error) {
 	// Get master key.
-	masterKey, err := newMasterKey(masterKeyMeta, nil)
+	var masterKey *encryption.MasterKey
+	if len(helper) > 0 {
+		masterKey, err = helper[0].newMasterKey(masterKeyMeta, nil)
+	} else {
+		masterKey, err = encryption.NewMasterKey(masterKeyMeta, nil)
+	}
 	if err != nil {
 		return err
 	}
@@ -120,16 +118,23 @@ func saveKeys(
 		Then(clientv3.OpPut(EncryptionKeysPath, string(value))).
 		Commit()
 	if err != nil {
+		log.Warn("fail to save encryption keys.", zap.Error(err))
 		return errs.ErrEtcdTxn.Wrap(err).GenWithStack("fail to save encryption keys")
 	}
 	if !resp.Succeeded {
+		log.Warn("fail to save encryption keys. leader expired.")
 		return errs.ErrEncryptionSaveDataKeys.GenWithStack("leader expired")
 	}
 	// Leave for the watcher to load the updated keys.
+	log.Info("saved encryption keys")
 	return nil
 }
 
-func loadKeysFromKV(kv *mvccpb.KeyValue) (*encryptionpb.KeyDictionary, error) {
+// extractKeysFromKV unpack encrypted keys from etcd KV.
+func extractKeysFromKV(
+	kv *mvccpb.KeyValue,
+	helper ...keyManagerHelper,
+) (*encryptionpb.KeyDictionary, error) {
 	content := &encryptionpb.EncryptedContent{}
 	err := content.Unmarshal(kv.Value)
 	if err != nil {
@@ -141,7 +146,12 @@ func loadKeysFromKV(kv *mvccpb.KeyValue) (*encryptionpb.KeyDictionary, error) {
 		return nil, errs.ErrEncryptionLoadKeys.GenWithStack(
 			"no master key config found with encryption keys")
 	}
-	masterKey, err := newMasterKey(masterKeyConfig, content.CiphertextKey)
+	var masterKey *encryption.MasterKey
+	if len(helper) > 0 {
+		masterKey, err = helper[0].newMasterKey(masterKeyConfig, content.CiphertextKey)
+	} else {
+		masterKey, err = encryption.NewMasterKey(masterKeyConfig, content.CiphertextKey)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -160,9 +170,17 @@ func loadKeysFromKV(kv *mvccpb.KeyValue) (*encryptionpb.KeyDictionary, error) {
 
 // NewKeyManager creates a new key manager.
 func NewKeyManager(
-	ctx context.Context,
 	etcdClient *clientv3.Client,
 	config *encryption.Config,
+) (*KeyManager, error) {
+	return newKeyManagerImpl(etcdClient, config, defaultKeyManagerHelper())
+}
+
+// newKeyManager creates a new key manager, and allow tests to set a mocked keyManagerHelper.
+func newKeyManagerImpl(
+	etcdClient *clientv3.Client,
+	config *encryption.Config,
+	helper keyManagerHelper,
 ) (*KeyManager, error) {
 	method, err := config.GetMethod()
 	if err != nil {
@@ -177,26 +195,30 @@ func NewKeyManager(
 		method:                method,
 		dataKeyRotationPeriod: config.DataKeyRotationPeriod.Duration,
 		masterKeyMeta:         masterKeyMeta,
+		helper:                helper,
 	}
 	// Load encryption keys from storage.
 	_, err = m.loadKeys()
 	if err != nil {
 		return nil, err
 	}
-	// Start periodic check for keys change and rotation key if needed.
-	go m.startBackgroundLoop(ctx)
 	return m, nil
 }
 
-func (m *KeyManager) startBackgroundLoop(ctx context.Context) {
-	// Create new context for the loop.
-	loopCtx, _ := context.WithCancel(ctx)
+func (m *KeyManager) keysRevision() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.mu.keysRevision
+}
+
+// StartBackgroundLoop start the loop to watch encryption keys changes and perform key rotation
+// if needed.
+func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 	// Setup key dictionary watcher
 	watcher := clientv3.NewWatcher(m.etcdClient)
+	watchChan := watcher.Watch(ctx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision()))
+	watcherEnabled := true
 	defer watcher.Close()
-	watcherCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	watchChan := watcher.Watch(watcherCtx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision))
 	// Check data key rotation every min(dataKeyRotationPeriod, keyRotationCheckPeriod).
 	checkPeriod := m.dataKeyRotationPeriod
 	if keyRotationCheckPeriod < checkPeriod {
@@ -210,82 +232,123 @@ func (m *KeyManager) startBackgroundLoop(ctx context.Context) {
 		// Reload encryption keys updated by PD leader (could be ourselves).
 		case resp := <-watchChan:
 			if resp.Canceled {
-				// If the watcher failed, we rely solely on rotateKeyIfNeeded() to reload encryption keys.
+				// If the watcher failed, we fallback to reload every 10 minutes.
 				log.Warn("encryption key watcher canceled")
+				watcherEnabled = false
 				continue
 			}
 			for _, event := range resp.Events {
 				if event.Type != mvccpb.PUT {
-					log.Warn("encryption keys is deleted unexpectely")
+					log.Warn("encryption keys is deleted unexpectedly")
 					continue
 				}
-				{
-					m.muUpdate.Lock()
-					m.loadKeysFromKV(event.Kv)
-					m.muUpdate.Unlock()
+				_, err := m.loadKeysFromKV(event.Kv)
+				if err != nil {
+					log.Warn("fail to get encryption keys from watcher result", zap.Error(err))
 				}
 			}
-			eventAfterReload()
-			// Check data key rotation in case we are the PD leader.
-		case <-tick(ticker):
-			m.muUpdate.Lock()
-			err := m.rotateKeyIfNeeded(false /*forceUpdate*/)
-			if err != nil {
-				log.Warn("fail to rotate data encryption key", zap.Error(err))
-			}
-			m.muUpdate.Unlock()
-			eventAfterTicker()
+			m.helper.eventAfterReloadByWatcher()
+		case <-m.helper.tick(ticker):
+			m.checkOnTick(watcherEnabled)
+			m.helper.eventAfterTicker()
+		case <-ctx.Done():
 			// Server shutdown.
-		case <-loopCtx.Done():
-			log.Info("encryption key manager is closed")
 			return
 		}
 	}
 }
 
-func (m *KeyManager) loadKeysFromKV(
+// checkOnTick perform key rotation and key reload on timer tick, if necessary.
+func (m *KeyManager) checkOnTick(watcherEnabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Check data key rotation in case we are the PD leader.
+	err := m.rotateKeyIfNeeded(false /*forceUpdate*/)
+	if err != nil {
+		log.Warn("fail to rotate data encryption key", zap.Error(err))
+	}
+	// Fallback mechanism to reload keys if watcher failed.
+	if !watcherEnabled {
+		_, err = m.loadKeysImpl()
+		if err != nil {
+			log.Warn("fail to reload keys after watcher failed", zap.Error(err))
+		}
+	}
+}
+
+// loadKeysFromKVImpl reload keys from etcd result.
+// Require mu lock to be held.
+func (m *KeyManager) loadKeysFromKVImpl(
 	kv *mvccpb.KeyValue,
 ) (*encryptionpb.KeyDictionary, error) {
 	// Sanity check if keys revision is in order.
 	// etcd docs indicates watcher event can be out of order:
 	// https://etcd.io/docs/v3.4.0/learning/api_guarantees/#isolation-level-and-consistency-of-replicas
-	if kv.ModRevision <= m.keysRevision {
+	if kv.ModRevision <= m.mu.keysRevision {
 		return m.getKeys(), nil
 	}
-	keys, err := loadKeysFromKV(kv)
+	keys, err := extractKeysFromKV(kv, m.helper)
 	if err != nil {
 		return nil, err
 	}
-	m.keysRevision = kv.ModRevision
+	m.mu.keysRevision = kv.ModRevision
 	m.keys.Store(keys)
 	log.Info("reloaded encryption keys", zap.Int64("revision", kv.ModRevision))
 	return keys, nil
 }
 
-func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, err error) {
+// loadKeysFromKV reload keys from etcd result.
+func (m *KeyManager) loadKeysFromKV(
+	kv *mvccpb.KeyValue,
+) (*encryptionpb.KeyDictionary, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.loadKeysFromKVImpl(kv)
+}
+
+// loadKeysImpl reload keys from etcd storage.
+// Require mu lock to be held.
+func (m *KeyManager) loadKeysImpl() (keys *encryptionpb.KeyDictionary, err error) {
 	resp, err := etcdutil.EtcdKVGet(m.etcdClient, EncryptionKeysPath)
 	if err != nil {
 		return nil, err
 	}
 	if resp == nil || len(resp.Kvs) == 0 {
+		if m.mu.keysRevision > 0 {
+			return nil, errs.ErrEncryptionLoadKeys.GenWithStack(
+				"encryption keys is deleted unexpectedly")
+		}
 		return nil, nil
 	}
-	keys, err = m.loadKeysFromKV(resp.Kvs[0])
+	keys, err = m.loadKeysFromKVImpl(resp.Kvs[0])
 	if err != nil {
 		return nil, err
 	}
-	return keys, err
+	return keys, nil
 }
 
+// loadKeys reload keys from etcd storage.
+func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.loadKeysImpl()
+}
+
+// rotateKeyIfNeeded rotate key if one of the following condition is meet.
+//   * Encryption method is changed.
+//   * Current key is exposed.
+//   * Current key expired.
+// Otherwise re-save all keys to finish master key rotation if forceUpdate = true.
+// Require mu lock to be held.
 func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
-	if m.leadership == nil || !m.leadership.Check() {
+	if m.mu.leadership == nil || !m.mu.leadership.Check() {
 		// We are not leader.
-		m.leadership = nil
+		m.mu.leadership = nil
 		return nil
 	}
-	eventAfterLeaderCheck()
+	m.helper.eventAfterLeaderCheckSuccess()
 	// Reload encryption keys in case we are not up-to-date.
-	keys, err := m.loadKeys()
+	keys, err := m.loadKeysImpl()
 	if err != nil {
 		return err
 	}
@@ -315,20 +378,16 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 			if currentKey == nil {
 				return errs.ErrEncryptionCurrentKeyNotFound.GenWithStack("keyId = %d", keys.CurrentKeyId)
 			}
-			// Rotate key in case of:
-			// * Encryption method is changed.
-			// * Currnet key is exposed.
-			// * Current key expired.
 			if currentKey.Method != m.method || currentKey.WasExposed ||
 				time.Unix(int64(currentKey.CreationTime), 0).
-					Add(m.dataKeyRotationPeriod).Before(now()) {
+					Add(m.dataKeyRotationPeriod).Before(m.helper.now()) {
 				needRotate = true
 			}
 		}
 		if needRotate {
 			rotated := false
 			for attempt := 0; attempt < keyRotationRetryLimit; attempt += 1 {
-				keyID, key, err := encryption.NewDataKey(m.method, uint64(now().Unix()))
+				keyID, key, err := encryption.NewDataKey(m.method, uint64(m.helper.now().Unix()))
 				if err != nil {
 					return nil
 				}
@@ -336,11 +395,13 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 					keys.Keys[keyID] = key
 					keys.CurrentKeyId = keyID
 					rotated = true
+					log.Info("ready to create or rotate data encryption key", zap.Uint64("keyID", keyID))
 					break
 				}
 				// Duplicated key id. retry.
 			}
 			if !rotated {
+				log.Warn("failed to rotate keys. maximum attempts reached")
 				return errs.ErrEncryptionRotateDataKey.GenWithStack("maximum attempts reached")
 			}
 			needUpdate = true
@@ -350,13 +411,14 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 		return nil
 	}
 	// Store updated keys in etcd.
-	err = saveKeys(m.etcdClient, m.leadership, m.masterKeyMeta, keys)
+	err = saveKeys(m.mu.leadership, m.masterKeyMeta, keys, m.helper)
 	if err != nil {
-		eventSaveKeysFailure()
+		m.helper.eventSaveKeysFailure()
+		log.Error("failed to save keys", zap.Error(err))
 		return err
 	}
 	// Reload keys.
-	_, err = m.loadKeys()
+	_, err = m.loadKeysImpl()
 	return err
 }
 
@@ -388,30 +450,32 @@ func (m *KeyManager) GetCurrentKey() (keyID uint64, key *encryptionpb.DataKey, e
 	return keyID, key, nil
 }
 
-// GetKey get the encryption key with the specific key id.
-func (m *KeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
-	localGetKey := func(keyId uint64) *encryptionpb.DataKey {
-		keys := m.getKeys()
-		if keys == nil || keys.Keys == nil {
-			return nil
-		}
-		return keys.Keys[keyId]
+// getKeyLocal gets specific encryption key by key id, from local cache.
+func (m *KeyManager) getKeyLocal(keyID uint64) *encryptionpb.DataKey {
+	keys := m.getKeys()
+	if keys == nil || keys.Keys == nil {
+		return nil
 	}
-	key := localGetKey(keyID)
+	return keys.Keys[keyID]
+}
+
+// GetKey gets specific encryption key by key id.
+func (m *KeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
+	key := m.getKeyLocal(keyID)
 	if key != nil {
 		return key, nil
 	}
 	// Key not found in memory.
 	// The key could be generated by another PD node, which shouldn't happen normally.
-	m.muUpdate.Lock()
-	defer m.muUpdate.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// Double check, in case keys is updated by watcher or another GetKey call.
-	key = localGetKey(keyID)
+	key = m.getKeyLocal(keyID)
 	if key != nil {
 		return key, nil
 	}
 	// Reload keys from storage.
-	keys, err := m.loadKeys()
+	keys, err := m.loadKeysImpl()
 	if err != nil {
 		return nil, err
 	}
@@ -429,8 +493,31 @@ func (m *KeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
 // SetLeadership sets the PD leadership of the current node. PD leader is responsible to update
 // encryption keys, e.g. key rotation.
 func (m *KeyManager) SetLeadership(leadership *election.Leadership) error {
-	m.muUpdate.Lock()
-	defer m.muUpdate.Unlock()
-	m.leadership = leadership
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mu.leadership = leadership
 	return m.rotateKeyIfNeeded(true /*forceUpdate*/)
+}
+
+// keyManagerHelper provides interfaces for dependencies and event callbacks where tests can mock.
+type keyManagerHelper struct {
+	now                          func() time.Time
+	tick                         func(ticker *time.Ticker) <-chan time.Time
+	newMasterKey                 func(*encryptionpb.MasterKey, []byte) (*encryption.MasterKey, error)
+	eventAfterReloadByWatcher    func()
+	eventAfterTicker             func()
+	eventAfterLeaderCheckSuccess func()
+	eventSaveKeysFailure         func()
+}
+
+func defaultKeyManagerHelper() keyManagerHelper {
+	return keyManagerHelper{
+		now:                          func() time.Time { return time.Now() },
+		tick:                         func(ticker *time.Ticker) <-chan time.Time { return ticker.C },
+		newMasterKey:                 encryption.NewMasterKey,
+		eventAfterReloadByWatcher:    func() {},
+		eventAfterTicker:             func() {},
+		eventAfterLeaderCheckSuccess: func() {},
+		eventSaveKeysFailure:         func() {},
+	}
 }

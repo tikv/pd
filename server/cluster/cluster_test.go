@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -374,7 +375,6 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	newRegion = cluster.GetRegion(region.GetID())
 	c.Assert(region.GetBytesRead(), Equals, uint64(0))
 	c.Assert(newRegion.GetBytesRead(), Not(Equals), uint64(0))
-
 }
 
 func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
@@ -730,7 +730,16 @@ func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, er
 }
 
 func newTestCluster(opt *config.PersistOptions) *testCluster {
-	rc := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	storage := core.NewStorage(kv.NewMemoryKV())
+	rc := newTestRaftCluster(mockid.NewIDAllocator(), opt, storage, core.NewBasicCluster())
+	rc.ruleManager = placement.NewRuleManager(storage)
+	if opt.IsPlacementRulesEnabled() {
+		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	return &testCluster{RaftCluster: rc}
 }
 

@@ -15,6 +15,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"strings"
@@ -23,13 +24,18 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	pdoperator "github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
 var _ = Suite(&testOperatorSuite{})
+
+var _ = Suite(&testTransferRegionOperatorSuite{})
 
 type testOperatorSuite struct {
 	svr       *server.Server
@@ -133,6 +139,240 @@ func (s *testOperatorSuite) TestMergeRegionOperator(c *C) {
 
 	c.Assert(strings.Contains(err.Error(), "not adjacent"), IsTrue)
 	c.Assert(err, NotNil)
+}
+
+type testTransferRegionOperatorSuite struct {
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
+}
+
+func (s *testTransferRegionOperatorSuite) SetUpSuite(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 3 })
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+
+	mustBootstrapCluster(c, s.svr)
+}
+
+func (s *testTransferRegionOperatorSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
+func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c *C) {
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, []*metapb.StoreLabel{{Key: "key", Value: "1"}})
+	mustPutStore(c, s.svr, 2, metapb.StoreState_Up, []*metapb.StoreLabel{{Key: "key", Value: "2"}})
+	mustPutStore(c, s.svr, 3, metapb.StoreState_Up, []*metapb.StoreLabel{{Key: "key", Value: "3"}})
+
+	hbStream := mockhbstream.NewHeartbeatStream()
+	s.svr.GetHBStreams().BindStream(1, hbStream)
+	s.svr.GetHBStreams().BindStream(2, hbStream)
+	s.svr.GetHBStreams().BindStream(3, hbStream)
+
+	peer1 := &metapb.Peer{Id: 1, StoreId: 1}
+	peer2 := &metapb.Peer{Id: 2, StoreId: 2}
+
+	region := &metapb.Region{
+		Id:    1,
+		Peers: []*metapb.Peer{peer1, peer2},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+	}
+	mustRegionHeartbeat(c, s.svr, core.NewRegionInfo(region, peer1))
+
+	regionURL := fmt.Sprintf("%s/operators/%d", s.urlPrefix, region.GetId())
+	operator := mustReadURL(c, regionURL)
+	c.Assert(strings.Contains(operator, "operator not found"), IsTrue)
+
+	tt := []struct {
+		name                string
+		placementRuleEnable bool
+		rules               []*placement.Rule
+		input               []byte
+		expectedError       error
+		expectSteps         string
+	}{
+		{
+			name:                "placement rule disable without peer role",
+			placementRuleEnable: false,
+			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`),
+			expectedError:       nil,
+			expectSteps: strings.Join([]string{
+				pdoperator.AddLearner{ToStore: 3, PeerID: 1}.String(),
+				pdoperator.PromoteLearner{ToStore: 3, PeerID: 1}.String(),
+				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+			}, ", "),
+		},
+		{
+			name:                "placement rule disable with peer role",
+			placementRuleEnable: false,
+			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
+			expectedError:       nil,
+			expectSteps: strings.Join([]string{
+				pdoperator.AddLearner{ToStore: 3, PeerID: 2}.String(),
+				pdoperator.PromoteLearner{ToStore: 3, PeerID: 2}.String(),
+				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				pdoperator.RemovePeer{FromStore: 1, PeerID: 2}.String(),
+				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
+			}, ", "),
+		},
+		{
+			name:                "default placement rule without peer role",
+			placementRuleEnable: true,
+			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`),
+			expectedError:       errors.New("transfer region without peer role is not supported when placement rules enabled"),
+			expectSteps:         "",
+		},
+		{
+			name:                "default placement rule with peer role",
+			placementRuleEnable: true,
+			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
+			expectSteps: strings.Join([]string{
+				pdoperator.AddLearner{ToStore: 3, PeerID: 3}.String(),
+				pdoperator.PromoteLearner{ToStore: 3, PeerID: 3}.String(),
+				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
+			}, ", "),
+		},
+		{
+			name:                "default placement rule with invalid input",
+			placementRuleEnable: true,
+			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["leader"]}`),
+			expectedError:       errors.New("transfer region without peer role is not supported when placement rules enabled"),
+			expectSteps:         "",
+		},
+		{
+			name:                "customized placement rule with invalid peer role",
+			placementRuleEnable: true,
+			rules: []*placement.Rule{
+				{
+					GroupID:  "pd1",
+					ID:       "test1",
+					Index:    1,
+					Override: true,
+					Role:     placement.Leader,
+					Count:    1,
+					LabelConstraints: []placement.LabelConstraint{
+						{
+							Key:    "key",
+							Op:     placement.In,
+							Values: []string{"3"},
+						},
+					},
+				},
+			},
+			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["leader", "follower"]}`),
+			expectedError: errors.New("cannot create operator"),
+			expectSteps:   "",
+		},
+		{
+			name:                "customized placement rule with valid peer role1",
+			placementRuleEnable: true,
+			rules: []*placement.Rule{
+				{
+					GroupID:  "pd1",
+					ID:       "test1",
+					Index:    1,
+					Override: true,
+					Role:     placement.Leader,
+					Count:    1,
+					LabelConstraints: []placement.LabelConstraint{
+						{
+							Key:    "key",
+							Op:     placement.In,
+							Values: []string{"3"},
+						},
+					},
+				},
+			},
+			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
+			expectedError: nil,
+			expectSteps: strings.Join([]string{
+				pdoperator.AddLearner{ToStore: 3, PeerID: 5}.String(),
+				pdoperator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
+				pdoperator.TransferLeader{FromStore: 1, ToStore: 3}.String(),
+				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+			}, ", "),
+		},
+		{
+			name:                "customized placement rule with valid peer role2",
+			placementRuleEnable: true,
+			rules: []*placement.Rule{
+				{
+					GroupID: "pd1",
+					ID:      "test1",
+					Role:    placement.Voter,
+					Count:   1,
+					LabelConstraints: []placement.LabelConstraint{
+						{
+							Key:    "key",
+							Op:     placement.In,
+							Values: []string{"1", "2"},
+						},
+					},
+				},
+				{
+					GroupID: "pd1",
+					ID:      "test2",
+					Role:    placement.Follower,
+					Count:   1,
+					LabelConstraints: []placement.LabelConstraint{
+						{
+							Key:    "key",
+							Op:     placement.In,
+							Values: []string{"3"},
+						},
+					},
+				},
+			},
+			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["leader", "follower"]}`),
+			expectedError: nil,
+			expectSteps: strings.Join([]string{
+				pdoperator.AddLearner{ToStore: 3, PeerID: 6}.String(),
+				pdoperator.PromoteLearner{ToStore: 3, PeerID: 6}.String(),
+				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+			}, ", "),
+		},
+	}
+
+	for _, tc := range tt {
+		c.Log(tc.name)
+		s.svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(tc.placementRuleEnable)
+		if tc.placementRuleEnable {
+			err := s.svr.GetRaftCluster().GetRuleManager().Initialize(
+				s.svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
+				s.svr.GetRaftCluster().GetOpts().GetLocationLabels())
+			c.Assert(err, IsNil)
+		}
+		if len(tc.rules) > 0 {
+			// add customized rule first and then remove default rule
+			err := s.svr.GetRaftCluster().GetRuleManager().SetRules(tc.rules)
+			c.Assert(err, IsNil)
+			err = s.svr.GetRaftCluster().GetRuleManager().DeleteRule("pd", "default")
+			c.Assert(err, IsNil)
+		}
+		err := postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), tc.input)
+		if tc.expectedError == nil {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(err, NotNil)
+			c.Assert(strings.Contains(err.Error(), tc.expectedError.Error()), IsTrue)
+		}
+		if len(tc.expectSteps) > 0 {
+			operator = mustReadURL(c, regionURL)
+			c.Assert(strings.Contains(operator, tc.expectSteps), IsTrue)
+		}
+		_, err = doDelete(testDialClient, regionURL)
+		c.Assert(err, IsNil)
+	}
 }
 
 func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {

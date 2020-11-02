@@ -61,6 +61,7 @@ type coordinator struct {
 	cluster         *RaftCluster
 	checkers        *schedule.CheckerController
 	regionScatterer *schedule.RegionScatterer
+	regionSplitter  *schedule.RegionSplitter
 	schedulers      map[string]*scheduleController
 	opController    *schedule.OperatorController
 	hbStreams       *hbstream.HeartbeatStreams
@@ -77,6 +78,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		cluster:         cluster,
 		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
+		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
 		hbStreams:       hbStreams,
@@ -648,6 +650,26 @@ func (c *coordinator) isSchedulerPaused(name string) (bool, error) {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return s.IsPaused(), nil
+}
+
+func (c *coordinator) isSchedulerDisabled(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return false, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	t := s.GetType()
+	scheduleConfig := c.cluster.GetOpts().GetScheduleConfig()
+	for _, s := range scheduleConfig.Schedulers {
+		if t == s.Type {
+			return s.Disable, nil
+		}
+	}
+	return false, nil
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {

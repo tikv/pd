@@ -385,6 +385,13 @@ func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
 	return c.coordinator.regionScatterer
 }
 
+// GetRegionSplitter returns the region splitter
+func (c *RaftCluster) GetRegionSplitter() *schedule.RegionSplitter {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.regionSplitter
+}
+
 // GetHeartbeatStreams returns the heartbeat streams.
 func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 	c.RLock()
@@ -1435,12 +1442,12 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
 func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotSpotCache.CheckWrite(region, c.storesStats)
+	return c.hotSpotCache.CheckWrite(region)
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
 func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotSpotCache.CheckRead(region, c.storesStats)
+	return c.hotSpotCache.CheckRead(region)
 }
 
 // TODO: remove me.
@@ -1572,6 +1579,13 @@ func (c *RaftCluster) IsSchedulerPaused(name string) (bool, error) {
 	return c.coordinator.isSchedulerPaused(name)
 }
 
+// IsSchedulerDisabled checks if a scheduler is disabled.
+func (c *RaftCluster) IsSchedulerDisabled(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.isSchedulerDisabled(name)
+}
+
 // GetStoreLimiter returns the dynamic adjusting limiter
 func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 	return c.limiter
@@ -1623,6 +1637,11 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
 	c.opt.SetAllStoresLimit(typ, ratePerMin)
+}
+
+// SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
+func (c *RaftCluster) SetAllStoresLimitTTL(typ storelimit.Type, ratePerMin float64, ttl time.Duration) {
+	c.opt.SetAllStoresLimitTTL(c.ctx, typ, ratePerMin, ttl)
 }
 
 // GetClusterVersion returns the current cluster version.

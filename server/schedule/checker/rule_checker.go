@@ -159,7 +159,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	if s == nil {
 		return false
 	}
-	stateFilter := filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
+	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
 	if !stateFilter.Target(c.cluster.GetOpts(), s) {
 		return false
 	}

@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
@@ -108,6 +109,15 @@ func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
 		return false, err
 	}
 	return rc.IsSchedulerPaused(name)
+}
+
+// IsSchedulerDisabled returns whether scheduler is disabled.
+func (h *Handler) IsSchedulerDisabled(name string) (bool, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return false, err
+	}
+	return rc.IsSchedulerDisabled(name)
 }
 
 // GetScheduleConfig returns ScheduleConfig.
@@ -272,11 +282,6 @@ func (h *Handler) AddScatterRangeScheduler(args ...string) error {
 	return h.AddScheduler(schedulers.ScatterRangeType, args...)
 }
 
-// AddAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
-func (h *Handler) AddAdjacentRegionScheduler(args ...string) error {
-	return h.AddScheduler(schedulers.AdjacentRegionType, args...)
-}
-
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 	return h.AddScheduler(schedulers.GrantLeaderType, strconv.FormatUint(storeID, 10))
@@ -420,6 +425,16 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	return nil
 }
 
+// SetAllStoresLimitTTL is used to set limit of all stores with ttl
+func (h *Handler) SetAllStoresLimitTTL(ratePerMin float64, limitType storelimit.Type, ttl time.Duration) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	c.SetAllStoresLimitTTL(limitType, ratePerMin, ttl)
+	return nil
+}
+
 // SetLabelStoresLimit is used to set limit of label stores.
 func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.Type, labels []*metapb.StoreLabel) error {
 	c, err := h.GetRaftCluster()
@@ -486,15 +501,10 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 }
 
 // AddTransferRegionOperator adds an operator to transfer region to the stores.
-func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]struct{}) error {
+func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]placement.PeerRoleType) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
-	}
-
-	if c.GetOpts().IsPlacementRulesEnabled() {
-		// Cannot determine role when placement rules enabled. Not supported now.
-		return errors.New("transfer region is not supported when placement rules enabled")
 	}
 
 	region := c.GetRegion(regionID)
@@ -502,8 +512,13 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return ErrRegionNotFound(regionID)
 	}
 
-	if len(storeIDs) > c.GetOpts().GetMaxReplicas() {
-		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDs))
+	if c.GetOpts().IsPlacementRulesEnabled() {
+		// Cannot determine role without peer role when placement rules enabled. Not supported now.
+		for _, role := range storeIDs {
+			if len(role) == 0 {
+				return errors.New("transfer region without peer role is not supported when placement rules enabled")
+			}
+		}
 	}
 
 	var store *core.StoreInfo
@@ -517,12 +532,14 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		}
 	}
 
-	peers := make(map[uint64]*metapb.Peer)
-	for id := range storeIDs {
-		peers[id] = &metapb.Peer{StoreId: id}
+	roles := make(map[uint64]placement.PeerRoleType)
+	for id, peerRole := range storeIDs {
+		if peerRole == "" {
+			peerRole = placement.Voter
+		}
+		roles[id] = peerRole
 	}
-
-	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, peers)
+	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, roles)
 	if err != nil {
 		log.Debug("fail to create move region operator", errs.ZapError(err))
 		return err
@@ -779,8 +796,8 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 	if err != nil {
 		return 0, err
 	}
-	var failureRegionID []string
-	var regions []*core.RegionInfo
+	var ops []*operator.Operator
+	var failures map[uint64]error
 	// If startKey and endKey are both defined, use them first.
 	if len(startRawKey) > 0 && len(endRawKey) > 0 {
 		startKey, err := hex.DecodeString(startRawKey)
@@ -791,40 +808,27 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 		if err != nil {
 			return 0, err
 		}
-		regions = c.ScanRegions(startKey, endKey, -1)
+		ops, failures, err = c.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
+		if err != nil {
+			return 0, err
+		}
 	} else {
-		for _, id := range regionIDs {
-			region := c.GetRegion(id)
-			if region == nil {
-				failureRegionID = append(failureRegionID, fmt.Sprintf("%v", id))
-				continue
-			}
-			regions = append(regions, region)
+		ops, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit)
+		if err != nil {
+			return 0, err
 		}
-	}
-	// check region hot status
-	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
-	for _, region := range regions {
-		// If region is Hot, add it into unProcessedRegions
-		if c.IsRegionHot(region) {
-			failureRegionID = append(failureRegionID, fmt.Sprintf("%v", region.GetID()))
-			continue
-		}
-		regionMap[region.GetID()] = region
-	}
-	failures := make(map[uint64]error, len(regionMap))
-	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-	ops := c.GetRegionScatter().ScatterRegions(regionMap, failures, group, retryLimit)
-	for regionID := range failures {
-		failureRegionID = append(failureRegionID, fmt.Sprintf("%v", regionID))
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
 		if ok := c.GetOperatorController().AddOperator(op); !ok {
-			failureRegionID = append(failureRegionID, fmt.Sprintf("%v", op.RegionID()))
+			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}
 	}
-	return 100 - (len(failureRegionID) * 100 / len(regions)), errors.New("unprocessed regions:[" + strings.Join(failureRegionID, ",") + "]")
+	percentage := 100
+	if len(failures) > 0 {
+		percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+	}
+	return percentage, nil
 }
 
 // GetRegionsByType gets the region with specified type.
@@ -904,4 +908,11 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 // GetAddr returns the server urls for clients.
 func (h *Handler) GetAddr() string {
 	return h.s.GetAddr()
+}
+
+// SetStoreLimitTTL set storeLimit with ttl
+func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) {
+	h.s.SaveTTLConfig(map[string]interface{}{
+		data: value,
+	}, ttl)
 }

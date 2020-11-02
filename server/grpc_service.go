@@ -67,11 +67,18 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 		}
 	}
 
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	if err != nil {
+		return nil, status.Errorf(codes.Unknown, err.Error())
+	}
+
 	return &pdpb.GetMembersResponse{
-		Header:     s.header(),
-		Members:    members,
-		Leader:     s.member.GetLeader(),
-		EtcdLeader: etcdLeader,
+		Header:              s.header(),
+		Members:             members,
+		Leader:              s.member.GetLeader(),
+		EtcdLeader:          etcdLeader,
+		TsoAllocatorLeaders: tsoAllocatorLeaders,
 	}, nil
 }
 
@@ -933,13 +940,17 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		return nil, err
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	// There is no dc-location found in this server, return err.
+	if len(tsoAllocatorManager.GetClusterDCLocations()) == 0 {
+		return nil, fmt.Errorf("empty cluster dc-Location found, checker may not work properly")
+	}
 	// Get all Local TSO Allocator leaders
-	allocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
 	if err != nil {
 		return nil, err
 	}
 	var processedDCs []string
-	if request.GetMaxTs() == nil || request.GetMaxTs().Physical == 0 {
+	if request.GetMaxTs() == nil || request.GetMaxTs().GetPhysical() == 0 {
 		// The first phase of synchronization: collect the max local ts
 		var maxLocalTS pdpb.Timestamp
 		for _, allocator := range allocatorLeaders {
@@ -952,8 +963,8 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			if err != nil {
 				return nil, err
 			}
-			if currentLocalTSO.Physical > maxLocalTS.Physical {
-				maxLocalTS.Physical = currentLocalTSO.Physical
+			if tsoutil.CompareTimestamp(&currentLocalTSO, &maxLocalTS) > 0 {
+				maxLocalTS = currentLocalTSO
 			}
 			processedDCs = append(processedDCs, allocator.GetDCLocation())
 		}

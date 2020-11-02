@@ -37,14 +37,16 @@ import (
 // according to various constraints.
 type Builder struct {
 	// basic info
-	desc        string
-	cluster     opt.Cluster
-	regionID    uint64
-	regionEpoch *metapb.RegionEpoch
-	rules       []*placement.Rule
+	desc          string
+	cluster       opt.Cluster
+	regionID      uint64
+	regionEpoch   *metapb.RegionEpoch
+	rules         []*placement.Rule
+	expectedRoles map[uint64]placement.PeerRoleType
 
 	// operation record
 	originPeers         peersMap
+	unhealthyPeers      peersMap
 	originLeaderStoreID uint64
 	targetPeers         peersMap
 	targetLeaderStoreID uint64
@@ -95,6 +97,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	// origin peers
 	err := b.err
 	originPeers := newPeersMap()
+	unhealthyPeers := newPeersMap()
 
 	for _, p := range region.GetPeers() {
 		if p == nil || p.GetStoreId() == 0 {
@@ -102,6 +105,14 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 			break
 		}
 		originPeers.Set(p)
+	}
+
+	for _, p := range region.GetPendingPeers() {
+		unhealthyPeers.Set(p)
+	}
+
+	for _, p := range region.GetDownPeers() {
+		unhealthyPeers.Set(p.Peer)
 	}
 
 	// origin leader
@@ -132,6 +143,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 
 	b.rules = rules
 	b.originPeers = originPeers
+	b.unhealthyPeers = unhealthyPeers
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
 	b.allowDemote = supportJointConsensus
@@ -182,6 +194,8 @@ func (b *Builder) PromoteLearner(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot promote peer %d: not found", storeID)
 	} else if !core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot promote peer %d: is not learner", storeID)
+	} else if _, ok := b.unhealthyPeers[storeID]; ok {
+		b.err = errors.Errorf("cannot promote peer %d: unhealthy", storeID)
 	} else {
 		b.targetPeers.Set(&metapb.Peer{
 			Id:      peer.GetId(),
@@ -220,6 +234,8 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot transfer leader to %d: not found", storeID)
 	} else if core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot transfer leader to %d: not voter", storeID)
+	} else if _, ok := b.unhealthyPeers[storeID]; ok {
+		b.err = errors.Errorf("cannot transfer leader to %d: unhealthy", storeID)
 	} else {
 		b.targetLeaderStoreID = storeID
 	}
@@ -247,6 +263,38 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 	}
 
 	b.targetPeers = peersMap(peers).Copy()
+	return b
+}
+
+// SetExpectedRoles records expected roles of target peers.
+// It may update `targetLeaderStoreID` if there is a peer has role `leader` or `follower`.
+func (b *Builder) SetExpectedRoles(roles map[uint64]placement.PeerRoleType) *Builder {
+	if b.err != nil {
+		return b
+	}
+	var leaderCount, voterCount int
+	for id, role := range roles {
+		switch role {
+		case placement.Leader:
+			if leaderCount > 0 {
+				b.err = errors.Errorf("region cannot have multiple leaders")
+				return b
+			}
+			b.targetLeaderStoreID = id
+			leaderCount++
+		case placement.Voter:
+			voterCount++
+		case placement.Follower, placement.Learner:
+			if b.targetLeaderStoreID == id {
+				b.targetLeaderStoreID = 0
+			}
+		}
+	}
+	if leaderCount+voterCount == 0 {
+		b.err = errors.Errorf("region need at least 1 voter or leader")
+		return b
+	}
+	b.expectedRoles = roles
 	return b
 }
 
@@ -366,13 +414,6 @@ func (b *Builder) prepareBuild() (string, error) {
 		b.targetLeaderStoreID = 0
 	}
 
-	// If no target leader is specified, try not to change the leader as much as possible.
-	if b.targetLeaderStoreID == 0 {
-		if peer, ok := b.targetPeers[b.originLeaderStoreID]; ok && !core.IsLearner(peer) {
-			b.targetLeaderStoreID = b.originLeaderStoreID
-		}
-	}
-
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.Copy(), b.originLeaderStoreID
 
 	if b.targetLeaderStoreID != 0 {
@@ -418,8 +459,6 @@ func (b *Builder) brief() string {
 
 // Using Joint Consensus can ensure the replica safety and reduce the number of steps.
 func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
-	kind |= OpRegion
-
 	// Add all the peers as Learner first. Split `Add Voter` to `Add Learner + Promote`
 	for _, add := range b.toAdd.IDs() {
 		peer := b.toAdd[add]
@@ -433,6 +472,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 		} else {
 			b.execAddPeer(peer)
 		}
+		kind |= OpRegion
 	}
 
 	b.setTargetLeaderIfNotExist()
@@ -476,6 +516,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	// Finally, remove all the peers as Learner
 	for _, remove := range b.toRemove.IDs() {
 		b.execRemovePeer(b.toRemove[remove])
+		kind |= OpRegion
 	}
 
 	return kind, nil
@@ -487,7 +528,9 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 	}
 
 	leaderPreferFuncs := []func(uint64) int{
+		b.preferLeaderRoleAsLeader,
 		b.preferUpStoreAsLeader,
+		b.preferCurrentLeader,
 		b.preferKeepVoterAsLeader,
 		b.preferOldPeerAsLeader,
 	}
@@ -495,6 +538,10 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[targetLeaderStoreID]
 		if !b.allowLeader(peer, false) {
+			continue
+		}
+		// if role info is given, store having role follower should not be target leader.
+		if role, ok := b.expectedRoles[targetLeaderStoreID]; ok && role == placement.Follower {
 			continue
 		}
 		if b.targetLeaderStoreID == 0 {
@@ -512,9 +559,18 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 	}
 }
 
+func (b *Builder) preferLeaderRoleAsLeader(targetLeaderStoreID uint64) int {
+	role, ok := b.expectedRoles[targetLeaderStoreID]
+	return typeutil.BoolToInt(ok && role == placement.Leader)
+}
+
 func (b *Builder) preferUpStoreAsLeader(targetLeaderStoreID uint64) int {
 	store := b.cluster.GetStore(targetLeaderStoreID)
 	return typeutil.BoolToInt(store != nil && store.IsUp())
+}
+
+func (b *Builder) preferCurrentLeader(targetLeaderStoreID uint64) int {
+	return typeutil.BoolToInt(targetLeaderStoreID == b.currentLeaderStoreID)
 }
 
 func (b *Builder) preferKeepVoterAsLeader(targetLeaderStoreID uint64) int {
@@ -558,6 +614,8 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			kind |= OpRegion
 		}
 	}
+
+	b.setTargetLeaderIfNotExist()
 
 	if b.targetLeaderStoreID != 0 &&
 		b.currentLeaderStoreID != b.targetLeaderStoreID &&
@@ -642,7 +700,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	b.steps = append(b.steps, ChangePeerV2Leave(step))
 }
 
-var stateFilter = filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
+var stateFilter = &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 
 // check if the peer is allowed to become the leader.
 func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {

@@ -356,11 +356,11 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
 		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
-	)
+		s.GetTLSConfig())
 	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
 		return err
 	}
-	encryptionKeyManager, err := encryptionkm.NewKeyManager(ctx, s.client, &s.cfg.Security.Encryption)
+	encryptionKeyManager, err := encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
@@ -488,11 +488,12 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(5)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.tsoAllocatorLoop()
+	go s.encryptionKeyManagerLoop()
 }
 
 func (s *Server) stopServerLoop() {
@@ -526,6 +527,17 @@ func (s *Server) tsoAllocatorLoop() {
 	defer cancel()
 	s.tsoAllocatorManager.AllocatorDaemon(ctx)
 	log.Info("server is closed, exit allocator loop")
+}
+
+// encryptionKeyManagerLoop is used to start monitor encryption key changes.
+func (s *Server) encryptionKeyManagerLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	s.encryptionKeyManager.StartBackgroundLoop(ctx)
+	log.Info("server is closed, exist encryption key manager loop")
 }
 
 func (s *Server) collectEtcdStateMetrics() {
@@ -729,9 +741,9 @@ func (s *Server) StartTimestamp() int64 {
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
-	cfg.Schedule = *s.persistOptions.GetScheduleConfig()
-	cfg.Replication = *s.persistOptions.GetReplicationConfig()
-	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig()
+	cfg.Schedule = *s.persistOptions.GetScheduleConfig().Clone()
+	cfg.Replication = *s.persistOptions.GetReplicationConfig().Clone()
+	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
@@ -1170,7 +1182,10 @@ func (s *Server) campaignLeader() {
 		return
 	}
 
-	s.encryptionKeyManager.SetLeadership(s.member.GetLeadership())
+	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
+		log.Error("failed to initialize encryption", errs.ZapError(err))
+		return
+	}
 
 	// Try to create raft cluster.
 	if err := s.createRaftCluster(); err != nil {
@@ -1271,4 +1286,11 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
 	return ioutil.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
+}
+
+// SaveTTLConfig save ttl config
+func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) {
+	for k, v := range data {
+		s.persistOptions.SetTTLData(s.ctx, k, v, ttl)
+	}
 }

@@ -41,7 +41,7 @@ func (s *testConfigSuite) SetUpSuite(c *C) {
 		RegisterScheduler(d.Type)
 	}
 	RegisterScheduler("random-merge")
-	RegisterScheduler("adjacent-region")
+	RegisterScheduler("shuffle-leader")
 }
 
 func (s *testConfigSuite) TestSecurity(c *C) {
@@ -72,8 +72,8 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	opt.GetPDServerConfig().UseRegionStorage = true
 	c.Assert(opt.Persist(storage), IsNil)
 
-	// Add a new default enable scheduler "adjacent-region"
-	DefaultSchedulers = append(DefaultSchedulers, SchedulerConfig{Type: "adjacent-region"})
+	// Add a new default enable scheduler "shuffle-leader"
+	DefaultSchedulers = append(DefaultSchedulers, SchedulerConfig{Type: "shuffle-leader"})
 	defer func() {
 		DefaultSchedulers = DefaultSchedulers[:len(DefaultSchedulers)-1]
 	}()
@@ -433,4 +433,28 @@ wait-store-timeout = "120s"
 	err = cfg.Adjust(&meta)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
+}
+
+func (s *testConfigSuite) TestConfigClone(c *C) {
+	cfg := &Config{}
+	cfg.Adjust(nil)
+	c.Assert(cfg.Clone(), DeepEquals, cfg)
+
+	emptyConfigMetaData := newConfigMetadata(nil)
+
+	schedule := &ScheduleConfig{}
+	schedule.adjust(emptyConfigMetaData)
+	c.Assert(schedule.Clone(), DeepEquals, schedule)
+
+	replication := &ReplicationConfig{}
+	replication.adjust(emptyConfigMetaData)
+	c.Assert(replication.Clone(), DeepEquals, replication)
+
+	pdServer := &PDServerConfig{}
+	pdServer.adjust(emptyConfigMetaData)
+	c.Assert(pdServer.Clone(), DeepEquals, pdServer)
+
+	replicationMode := &ReplicationModeConfig{}
+	replicationMode.adjust(emptyConfigMetaData)
+	c.Assert(replicationMode.Clone(), DeepEquals, replicationMode)
 }

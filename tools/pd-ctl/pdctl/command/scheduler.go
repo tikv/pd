@@ -16,6 +16,7 @@ package command
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path"
@@ -83,6 +84,7 @@ func NewShowSchedulerCommand() *cobra.Command {
 		Short: "show schedulers",
 		Run:   showSchedulerCommandFunc,
 	}
+	c.Flags().String("status", "", "the scheduler status")
 	return c
 }
 
@@ -102,7 +104,11 @@ func showSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	r, err := doRequest(cmd, schedulersPrefix, http.MethodGet)
+	url := schedulersPrefix
+	if flag := cmd.Flag("status"); flag != nil && flag.Value.String() != "" {
+		url = fmt.Sprintf("%s?status=%s", url, flag.Value.String())
+	}
+	r, err := doRequest(cmd, url, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -126,7 +132,6 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewBalanceRegionSchedulerCommand())
 	c.AddCommand(NewBalanceHotRegionSchedulerCommand())
 	c.AddCommand(NewRandomMergeSchedulerCommand())
-	c.AddCommand(NewBalanceAdjacentRegionSchedulerCommand())
 	c.AddCommand(NewLabelSchedulerCommand())
 	return c
 }
@@ -343,33 +348,6 @@ func addSchedulerForScatterRangeCommandFunc(cmd *cobra.Command, args []string) {
 	input["start_key"] = url.QueryEscape(startKey)
 	input["end_key"] = url.QueryEscape(endKey)
 	input["range_name"] = args[2]
-	postJSON(cmd, schedulersPrefix, input)
-}
-
-// NewBalanceAdjacentRegionSchedulerCommand returns a command to add a balance-adjacent-region-scheduler.
-func NewBalanceAdjacentRegionSchedulerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "balance-adjacent-region-scheduler [leader_limit] [peer_limit]",
-		Short: "add a scheduler to disperse adjacent regions on each store",
-		Run:   addSchedulerForBalanceAdjacentRegionCommandFunc,
-	}
-	return c
-}
-
-func addSchedulerForBalanceAdjacentRegionCommandFunc(cmd *cobra.Command, args []string) {
-	l := len(args)
-	input := make(map[string]interface{})
-	if l > 2 {
-		cmd.Println(cmd.UsageString())
-		return
-	} else if l == 1 {
-		input["leader_limit"] = url.QueryEscape(args[0])
-	} else if l == 2 {
-		input["leader_limit"] = url.QueryEscape(args[0])
-		input["peer_limit"] = url.QueryEscape(args[1])
-	}
-	input["name"] = cmd.Name()
-
 	postJSON(cmd, schedulersPrefix, input)
 }
 

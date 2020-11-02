@@ -316,10 +316,10 @@ const (
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate:          NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
-		bytesReadRate:           NewTimeMedian(DefaultAotSize, DefaultReadMfSize),
-		keysWriteRate:           NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
-		keysReadRate:            NewTimeMedian(DefaultAotSize, DefaultReadMfSize),
+		bytesWriteRate:          NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
+		bytesReadRate:           NewTimeMedian(DefaultAotSize, DefaultReadMfSize, StoreHeartBeatReportInterval),
+		keysWriteRate:           NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
+		keysReadRate:            NewTimeMedian(DefaultAotSize, DefaultReadMfSize, StoreHeartBeatReportInterval),
 		totalCPUUsage:           NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskReadRate:  NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskWriteRate: NewMedianFilter(storeStatsRollingWindows),

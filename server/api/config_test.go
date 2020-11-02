@@ -35,7 +35,9 @@ type testConfigSuite struct {
 }
 
 func (s *testConfigSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
+		cfg.Replication.EnablePlacementRules = false
+	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -274,4 +276,30 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	c.Assert(defaultCfg.Replication.LocationLabels, DeepEquals, typeutil.StringSlice([]string{}))
 	c.Assert(defaultCfg.Schedule.RegionScheduleLimit, Equals, uint64(2048))
 	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
+}
+
+func (s *testConfigSuite) TestConfigTTL(c *C) {
+	addr := fmt.Sprintf("%s/config?ttlSecond=3", s.urlPrefix)
+	r := map[string]interface{}{
+		"schedule.max-snapshot-count":             999,
+		"schedule.enable-location-replacement":    false,
+		"schedule.max-merge-region-size":          999,
+		"schedule.max-merge-region-keys":          999,
+		"schedule.scheduler-max-waiting-operator": 999,
+	}
+	postData, err := json.Marshal(r)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.GetPersistOptions().GetMaxSnapshotCount(), Equals, uint64(999))
+	c.Assert(s.svr.GetPersistOptions().IsLocationReplacementEnabled(), Equals, false)
+	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionSize(), Equals, uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionKeys(), Equals, uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetSchedulerMaxWaitingOperator(), Equals, uint64(999))
+	time.Sleep(5 * time.Second)
+	c.Assert(s.svr.GetPersistOptions().GetMaxSnapshotCount(), Not(Equals), uint64(999))
+	c.Assert(s.svr.GetPersistOptions().IsLocationReplacementEnabled(), Equals, true)
+	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionSize(), Not(Equals), uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionKeys(), Not(Equals), uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetSchedulerMaxWaitingOperator(), Not(Equals), uint64(999))
 }
