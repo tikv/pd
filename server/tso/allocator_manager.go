@@ -696,7 +696,8 @@ func (am *AllocatorManager) getOrCreateGRPCConn(ctx context.Context, addr string
 		return nil, err
 	}
 	am.setGRPCConn(cc, addr)
-	return cc, nil
+	conn, _ = am.getGRPCConn(addr)
+	return conn, nil
 }
 
 func (am *AllocatorManager) isLeaderAwareOfDCLocation(ctx context.Context, dcLocation string) (bool, error) {
@@ -755,6 +756,7 @@ func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) {
 	if _, ok := am.localAllocatorConn.clientConns[addr]; ok {
 		newConn.Close()
 		log.Debug("use old connection", zap.String("target", newConn.Target()), zap.String("state", newConn.GetState().String()))
+		return
 	}
 	am.localAllocatorConn.clientConns[addr] = newConn
 }
