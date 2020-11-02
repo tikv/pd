@@ -264,7 +264,7 @@ func (gta *GlobalTSOAllocator) Reset() {
 // GetDcLocations return all the dcLocations the GlobalTSOAllocator will check
 func (gta *GlobalTSOAllocator) GetDcLocations() []string {
 	dcLocationsMap := gta.allocatorManager.GetClusterDCLocations()
-	dcLocations := make([]string, len(dcLocationsMap))
+	dcLocations := make([]string, 0, len(dcLocationsMap))
 	for dc := range dcLocationsMap {
 		dcLocations = append(dcLocations, dc)
 	}
