@@ -1,5 +1,5 @@
 # 'true' will fix files
-autofix: true
+autofix: false
 
 # list of paths to ignore, uses gitignore syntaxes (executes before any rule)
 ignore:
