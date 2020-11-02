@@ -4,6 +4,10 @@ autofix: false
 # list of paths to ignore, uses gitignore syntaxes (executes before any rule)
 ignore:
   - .git/
+  - CHANGELOG.md
+  - "*.md"
+  - "*.json"
+  - "*.gitignore"
 
 rules:
   # checks if file ends in a newline character
