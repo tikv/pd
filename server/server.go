@@ -360,12 +360,12 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
 		return err
 	}
-	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
-	encryptionKeyManager, err := encryptionkm.NewKeyManager(kvBase, &s.cfg.Security.Encryption)
+	encryptionKeyManager, err := encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
 	s.encryptionKeyManager = encryptionKeyManager
+	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
 	regionStorage, err := core.NewRegionStorage(ctx, path, encryptionKeyManager)
 	if err != nil {
@@ -488,11 +488,12 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(5)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.tsoAllocatorLoop()
+	go s.encryptionKeyManagerLoop()
 }
 
 func (s *Server) stopServerLoop() {
@@ -526,6 +527,17 @@ func (s *Server) tsoAllocatorLoop() {
 	defer cancel()
 	s.tsoAllocatorManager.AllocatorDaemon(ctx)
 	log.Info("server is closed, exit allocator loop")
+}
+
+// encryptionKeyManagerLoop is used to start monitor encryption key changes.
+func (s *Server) encryptionKeyManagerLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	s.encryptionKeyManager.StartBackgroundLoop(ctx)
+	log.Info("server is closed, exist encryption key manager loop")
 }
 
 func (s *Server) collectEtcdStateMetrics() {
@@ -1170,7 +1182,10 @@ func (s *Server) campaignLeader() {
 		return
 	}
 
-	s.encryptionKeyManager.SetLeadership(s.member.GetLeadership())
+	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
+		log.Error("failed to initialize encryption", errs.ZapError(err))
+		return
+	}
 
 	// Try to create raft cluster.
 	if err := s.createRaftCluster(); err != nil {
