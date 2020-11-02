@@ -49,11 +49,11 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	case2 := mockcluster.NewCluster(config.NewTestOptions())
 	case2.AddLabelsStore(1, 1, map[string]string{})
 	case2.AddLabelsStore(2, 1, map[string]string{
-		groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+		groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
 		resourceTypeLabelKey: "a",
 	})
 	case2.AddLabelsStore(3, 1, map[string]string{
-		groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+		groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
 		resourceTypeLabelKey: "a",
 	})
 
@@ -117,7 +117,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 					Count:        2,
 					ResourceType: "a",
 					Labels: map[string]string{
-						groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
 						resourceTypeLabelKey: "a",
 					},
 				},
@@ -163,7 +163,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 					Count:        1,
 					ResourceType: "a",
 					Labels: map[string]string{
-						groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
 						resourceTypeLabelKey: "a",
 					},
 				},
@@ -296,4 +296,69 @@ func (s *calculationTestSuite) TestScaleOutGroupLabel(c *C) {
 	c.Assert(plan.Labels["specialUse"], Equals, "hotRegion")
 	plan = findBestGroupToScaleOut(strategy, 0, nil, TiDB)
 	c.Assert(plan.Labels["specialUse"], Equals, "")
+}
+
+func (s *calculationTestSuite) TestStrategyChangeCount(c *C) {
+	var count uint64 = 2
+	strategy := &Strategy{
+		Rules: []*Rule{
+			{
+				Component: "tikv",
+				CPURule: &CPURule{
+					MaxThreshold:  0.8,
+					MinThreshold:  0.2,
+					ResourceTypes: []string{"resource_a"},
+				},
+			},
+		},
+		Resources: []*Resource{
+			{
+				ResourceType: "resource_a",
+				CPU:          1,
+				Memory:       8,
+				Storage:      1000,
+				Count:        &count,
+			},
+		},
+	}
+
+	// tikv cluster with 1 auto-scaling group existed
+	cluster := mockcluster.NewCluster(config.NewTestOptions())
+	cluster.AddLabelsStore(1, 1, map[string]string{})
+	cluster.AddLabelsStore(2, 1, map[string]string{
+		groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
+		resourceTypeLabelKey: "resource_a",
+	})
+	cluster.AddLabelsStore(3, 1, map[string]string{
+		groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
+		resourceTypeLabelKey: "resource_a",
+	})
+
+	instances := []instance{{id: 1, address: "1"}, {id: 2, address: "2"}, {id: 3, address: "3"}}
+
+	// under high load
+	maxThreshold, _ := getCPUThresholdByComponent(strategy, TiKV)
+	totalCPUUseTime := 90.0
+	totalCPUTime := 100.0
+	scaleOutQuota := (totalCPUUseTime - totalCPUTime*maxThreshold) / 5
+
+	// exist two scaled TiKVs and plan does not change due to the limit of resource count
+	groups, err := getScaledTiKVGroups(cluster, instances)
+	c.Assert(err, IsNil)
+	plans := calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, instances, groups)
+	c.Assert(plans[0].Count, Equals, uint64(2))
+
+	// change the resource count to 3 and plan increates one more tikv
+	groups, err = getScaledTiKVGroups(cluster, instances)
+	c.Assert(err, IsNil)
+	*strategy.Resources[0].Count = 3
+	plans = calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, instances, groups)
+	c.Assert(plans[0].Count, Equals, uint64(3))
+
+	// change the resource count to 1 and plan decreases to 1 tikv due to the limit of resource count
+	groups, err = getScaledTiKVGroups(cluster, instances)
+	c.Assert(err, IsNil)
+	*strategy.Resources[0].Count = 1
+	plans = calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, instances, groups)
+	c.Assert(plans[0].Count, Equals, uint64(1))
 }

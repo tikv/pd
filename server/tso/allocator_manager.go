@@ -627,8 +627,8 @@ func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []All
 	return allocators
 }
 
-// GetLocalAllocatorLeaders returns all Local TSO Allocator leaders this server holds.
-func (am *AllocatorManager) GetLocalAllocatorLeaders() ([]*LocalTSOAllocator, error) {
+// GetHoldingLocalAllocatorLeaders returns all Local TSO Allocator leaders this server holds.
+func (am *AllocatorManager) GetHoldingLocalAllocatorLeaders() ([]*LocalTSOAllocator, error) {
 	localAllocators := am.GetAllocators(
 		FilterDCLocation(config.GlobalDCLocation),
 		FilterUnavailableLeadership())
@@ -641,4 +641,18 @@ func (am *AllocatorManager) GetLocalAllocatorLeaders() ([]*LocalTSOAllocator, er
 		localAllocatorLeaders = append(localAllocatorLeaders, localAllocatorLeader)
 	}
 	return localAllocatorLeaders, nil
+}
+
+// GetLocalAllocatorLeaders returns all Local TSO Allocator leaders' member info.
+func (am *AllocatorManager) GetLocalAllocatorLeaders() (map[string]*pdpb.Member, error) {
+	localAllocators := am.GetAllocators(FilterDCLocation(config.GlobalDCLocation))
+	localAllocatorLeaderMember := make(map[string]*pdpb.Member)
+	for _, allocator := range localAllocators {
+		localAllocator, ok := allocator.(*LocalTSOAllocator)
+		if !ok {
+			return nil, errs.ErrGetLocalAllocator.FastGenByArgs("invalid local tso allocator found")
+		}
+		localAllocatorLeaderMember[localAllocator.GetDCLocation()] = localAllocator.GetAllocatorLeader()
+	}
+	return localAllocatorLeaderMember, nil
 }
