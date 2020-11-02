@@ -16,13 +16,11 @@ package schedule
 import (
 	"bytes"
 	"context"
-	"sync"
-	"time"
-
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"sync"
 )
 
 type mockSplitRegionsHandler struct {
@@ -47,13 +45,13 @@ func (m *mockSplitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, spl
 
 // WatchRegionsByKeyRange mock SplitRegionsHandler
 func (m *mockSplitRegionsHandler) WatchRegionsByKeyRange(ctx context.Context, startKey, endKey []byte, splitKeys [][]byte,
-	timeout, watchInterval time.Duration, response *splitKeyResponse, wg *sync.WaitGroup) {
+	response *splitKeyResults, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for regionID, keyRange := range m.regions {
 		if bytes.Equal(startKey, keyRange[0]) && bytes.Equal(endKey, keyRange[1]) {
-			regions := make(map[uint64]struct{})
+			regions := make(map[uint64][]byte)
 			for i := 0; i < len(splitKeys); i++ {
-				regions[regionID+uint64(i)+1000] = struct{}{}
+				regions[regionID+uint64(i)+1000] = splitKeys[i]
 			}
 			response.addRegionsID(regions)
 		}
@@ -101,14 +99,13 @@ func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
 	tc.AddLeaderRegionWithRange(2, "ccc", "eee", 2, 3, 4)
 	tc.AddLeaderRegionWithRange(3, "fff", "ggg", 2, 3, 4)
 	splitter := NewRegionSplitter(tc, handler)
-	groupKeys, unprocessKeys := splitter.groupKeysByRegion([][]byte{
+	groupKeys := splitter.groupKeysByRegion([][]byte{
 		[]byte("bbb"),
 		[]byte("ddd"),
 		[]byte("fff"),
 		[]byte("zzz"),
 	})
-	c.Assert(len(groupKeys), Equals, 2)
-	c.Assert(len(unprocessKeys), Equals, 1)
+	c.Assert(len(groupKeys), Equals, 3)
 	for k, v := range groupKeys {
 		switch k {
 		case uint64(1):
@@ -117,8 +114,9 @@ func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
 		case uint64(2):
 			c.Assert(len(v.keys), Equals, 1)
 			c.Assert(v.keys[0], DeepEquals, []byte("ddd"))
+		case uint64(3):
+			c.Assert(len(v.keys), Equals, 1)
+			c.Assert(v.keys[0], DeepEquals, []byte("fff"))
 		}
 	}
-	c.Assert(len(unprocessKeys), Equals, 1)
-	c.Assert(unprocessKeys[0], DeepEquals, []byte("zzz"))
 }
