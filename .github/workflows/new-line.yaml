@@ -1,0 +1,13 @@
+on: [push]
+name: New Line Lint
+
+jobs:
+  linelint:
+    runs-on: ubuntu-latest
+    name: Check if all files end in newline
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Linelint
+        uses: actions/linelint@master
+        id: linelint
