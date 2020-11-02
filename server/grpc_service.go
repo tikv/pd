@@ -1002,7 +1002,7 @@ func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocation
 		return nil, err
 	}
 	if !s.member.IsLeader() {
-		return nil, fmt.Errorf("receving pd member[%v] is not pd leader", s.member.ID())
+		return nil, fmt.Errorf("receiving pd member[%v] is not pd leader", s.member.ID())
 	}
 	allocator, err := s.GetTSOAllocatorManager().GetAllocator(config.GlobalDCLocation)
 	if err != nil {
