@@ -680,7 +680,7 @@ func (am *AllocatorManager) GetLocalAllocatorLeaders() (map[string]*pdpb.Member,
 	return localAllocatorLeaderMember, nil
 }
 
-func (am *AllocatorManager) GetOrCreateGRPCConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
+func (am *AllocatorManager) getOrCreateGRPCConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	conn, ok := am.getGRPCConn(addr)
 	if ok {
 		return conn, nil
@@ -725,7 +725,7 @@ func (am *AllocatorManager) getLeaderDCLocations(ctx context.Context) ([]string,
 	if len(leaderAddrs) < 1 {
 		return nil, fmt.Errorf("failed to get leader client url")
 	}
-	conn, err := am.GetOrCreateGRPCConn(ctx, leaderAddrs[0])
+	conn, err := am.getOrCreateGRPCConn(ctx, leaderAddrs[0])
 	if err != nil {
 		return nil, err
 	}

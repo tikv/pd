@@ -171,7 +171,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 		var errList []error
 		wg := sync.WaitGroup{}
 		for _, leaderURL := range leaderURLs {
-			leaderConn, err := gta.allocatorManager.GetOrCreateGRPCConn(ctx, leaderURL)
+			leaderConn, err := gta.allocatorManager.getOrCreateGRPCConn(ctx, leaderURL)
 			if err != nil {
 				return err
 			}
@@ -261,6 +261,7 @@ func (gta *GlobalTSOAllocator) Reset() {
 	gta.timestampOracle.ResetTimestamp()
 }
 
+// GetDcLocations return all the dcLocations the GlobalTSOAllocator will check
 func (gta *GlobalTSOAllocator) GetDcLocations() []string {
 	dcLocationsMap := gta.allocatorManager.GetClusterDCLocations()
 	dcLocations := make([]string, len(dcLocationsMap))
