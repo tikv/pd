@@ -991,6 +991,8 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	}, nil
 }
 
+// GetDCLocations will return the dcLocations which hold by the Global TSO Allocator.
+// If the receiving PD Member is not PD Leader, GetDCLocations will return error.
 func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocationsRequest) (*pdpb.GetDCLocationsResponse, error) {
 	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
 		return nil, err
