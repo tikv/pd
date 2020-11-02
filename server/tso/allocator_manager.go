@@ -733,7 +733,7 @@ func (am *AllocatorManager) getLeaderDCLocations(ctx context.Context) ([]string,
 	defer cancel()
 	resp, err := pdpb.NewPDClient(conn).GetDCLocations(getCtx, &pdpb.GetDCLocationsRequest{
 		Header: &pdpb.RequestHeader{
-			SenderId: am.member.ID(),
+			SenderId: am.member.GetLeader().GetMemberId(),
 		},
 	})
 	if err != nil {
