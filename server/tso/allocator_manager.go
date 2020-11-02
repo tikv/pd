@@ -721,8 +721,8 @@ func (am *AllocatorManager) getLeaderDCLocations(ctx context.Context) ([]string,
 		return dcLocations, nil
 	}
 
-	leaderAddrs := am.member.GetLeader().ClientUrls
-	if len(leaderAddrs) < 1 {
+	leaderAddrs := am.member.GetLeader().GetClientUrls()
+	if leaderAddrs == nil || len(leaderAddrs) < 1 {
 		return nil, fmt.Errorf("failed to get leader client url")
 	}
 	conn, err := am.getOrCreateGRPCConn(ctx, leaderAddrs[0])
