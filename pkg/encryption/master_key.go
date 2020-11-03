@@ -56,7 +56,7 @@ func NewMasterKey(config *encryptionpb.MasterKey, ciphertextKey []byte) (*Master
 	return nil, errs.ErrEncryptionNewMasterKey.GenWithStack("unrecognized master key type")
 }
 
-// NewCustomMasterKey construct a master key instance from raw key and ciphertext key bytes.
+// NewCustomMasterKeyForTest construct a master key instance from raw key and ciphertext key bytes.
 // Used for test only.
 func NewCustomMasterKeyForTest(key []byte, ciphertextKey []byte) *MasterKey {
 	return &MasterKey{

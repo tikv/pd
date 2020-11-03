@@ -40,7 +40,7 @@ const (
 func newMasterKeyFromKMS(
 	config *encryptionpb.MasterKeyKms,
 	ciphertextKey []byte,
-) (*MasterKey, error) {
+) (masterKey *MasterKey, err error) {
 	if config == nil {
 		return nil, errors.New("missing master key KMS config")
 	}
@@ -77,10 +77,10 @@ func newMasterKeyFromKMS(
 				"unexpected data key length generated from AWS KMS, expectd %d vs actual %d",
 				masterKeyLength, len(output.Plaintext))
 		}
-		return &MasterKey{
+		masterKey = &MasterKey{
 			key:           output.Plaintext,
 			ciphertextKey: output.CiphertextBlob,
-		}, nil
+		}
 	} else {
 		// Decrypt existing data key.
 		output, err := client.Decrypt(&kms.DecryptInput{
@@ -96,11 +96,12 @@ func newMasterKeyFromKMS(
 				"unexpected data key length decrypted from AWS KMS, expected %d vs actual %d",
 				masterKeyLength, len(output.Plaintext))
 		}
-		return &MasterKey{
+		masterKey = &MasterKey{
 			key:           output.Plaintext,
 			ciphertextKey: ciphertextKey,
-		}, nil
+		}
 	}
+	return
 }
 
 func newAwsCredentials() (*credentials.Credentials, error) {
