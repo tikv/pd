@@ -126,6 +126,11 @@ error = '''
 CTR encryption fail
 '''
 
+["PD:encryption:ErrEncryptionCurrentKeyNotFound"]
+error = '''
+current data key not found
+'''
+
 ["PD:encryption:ErrEncryptionDecryptRegion"]
 error = '''
 decrypt region fail
@@ -161,6 +166,21 @@ error = '''
 invalid encryption method
 '''
 
+["PD:encryption:ErrEncryptionKeyNotFound"]
+error = '''
+data key not found
+'''
+
+["PD:encryption:ErrEncryptionKeysWatcher"]
+error = '''
+data key watcher error
+'''
+
+["PD:encryption:ErrEncryptionLoadKeys"]
+error = '''
+load data keys error
+'''
+
 ["PD:encryption:ErrEncryptionNewDataKey"]
 error = '''
 fail to generate data key
@@ -169,6 +189,16 @@ fail to generate data key
 ["PD:encryption:ErrEncryptionNewMasterKey"]
 error = '''
 fail to get master key
+'''
+
+["PD:encryption:ErrEncryptionRotateDataKey"]
+error = '''
+failed to rotate data key
+'''
+
+["PD:encryption:ErrEncryptionSaveDataKeys"]
+error = '''
+failed to save data keys
 '''
 
 ["PD:etcd:ErrCloseEtcdClient"]

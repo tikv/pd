@@ -24,14 +24,22 @@ type OpKind uint32
 
 // Flags for operators.
 const (
-	OpLeader    OpKind = 1 << iota // Include leader transfer.
-	OpRegion                       // Include peer movement.
-	OpSplit                        // Include region split.
-	OpAdmin                        // Initiated by admin.
-	OpHotRegion                    // Initiated by hot region scheduler.
-	OpReplica                      // Initiated by replica checkers.
-	OpMerge                        // Initiated by merge checkers or merge schedulers.
-	OpRange                        // Initiated by range scheduler.
+	// Include leader transfer.
+	OpLeader OpKind = 1 << iota
+	// Include peer addition or removal. This means that this operator may take a long time.
+	OpRegion
+	// Include region split. Initiated by rule checker if `kind & OpAdmin == 0`.
+	OpSplit
+	// Initiated by admin.
+	OpAdmin
+	// Initiated by hot region scheduler.
+	OpHotRegion
+	// Initiated by replica checker.
+	OpReplica
+	// Initiated by merge checker or merge scheduler. Note that it may not include region merge.
+	OpMerge
+	// Initiated by range scheduler.
+	OpRange
 	opMax
 )
 
@@ -81,5 +89,4 @@ func ParseOperatorKind(str string) (OpKind, error) {
 		k |= flag
 	}
 	return k, nil
-
 }

@@ -1579,6 +1579,13 @@ func (c *RaftCluster) IsSchedulerPaused(name string) (bool, error) {
 	return c.coordinator.isSchedulerPaused(name)
 }
 
+// IsSchedulerDisabled checks if a scheduler is disabled.
+func (c *RaftCluster) IsSchedulerDisabled(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.isSchedulerDisabled(name)
+}
+
 // GetStoreLimiter returns the dynamic adjusting limiter
 func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 	return c.limiter

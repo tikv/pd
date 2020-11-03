@@ -19,7 +19,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"io"
-	"time"
 	"unsafe"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
@@ -100,6 +99,7 @@ func NewIvGCM() (IvGCM, error) {
 // NewDataKey randomly generate a new data key.
 func NewDataKey(
 	method encryptionpb.EncryptionMethod,
+	creationTime uint64,
 ) (keyID uint64, key *encryptionpb.DataKey, err error) {
 	err = CheckEncryptionMethodSupported(method)
 	if err != nil {
@@ -138,7 +138,7 @@ func NewDataKey(
 	key = &encryptionpb.DataKey{
 		Key:          keyBuf,
 		Method:       method,
-		CreationTime: uint64(time.Now().Unix()),
+		CreationTime: creationTime,
 		WasExposed:   false,
 	}
 	return

@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -67,11 +68,18 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 		}
 	}
 
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	if err != nil {
+		return nil, status.Errorf(codes.Unknown, err.Error())
+	}
+
 	return &pdpb.GetMembersResponse{
-		Header:     s.header(),
-		Members:    members,
-		Leader:     s.member.GetLeader(),
-		EtcdLeader: etcdLeader,
+		Header:              s.header(),
+		Members:             members,
+		Leader:              s.member.GetLeader(),
+		EtcdLeader:          etcdLeader,
+		TsoAllocatorLeaders: tsoAllocatorLeaders,
 	}, nil
 }
 
@@ -823,6 +831,9 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			ExpiredAt: now.Unix() + request.TTL,
 			SafePoint: request.SafePoint,
 		}
+		if request.TTL == math.MaxInt64 {
+			ssp.ExpiredAt = math.MaxInt64
+		}
 		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
 			return nil, err
 		}
@@ -933,8 +944,12 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		return nil, err
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	// There is no dc-location found in this server, return err.
+	if len(tsoAllocatorManager.GetClusterDCLocations()) == 0 {
+		return nil, fmt.Errorf("empty cluster dc-Location found, checker may not work properly")
+	}
 	// Get all Local TSO Allocator leaders
-	allocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
 	if err != nil {
 		return nil, err
 	}

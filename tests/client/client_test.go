@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 	"go.etcd.io/etcd/clientv3"
@@ -66,6 +67,7 @@ type client interface {
 	GetLeaderAddr() string
 	ScheduleCheckLeader()
 	GetURLs() []string
+	GetAllocatorLeaderURLs() map[string]string
 }
 
 func (s *clientTestSuite) TestClientLeaderChange(c *C) {
@@ -185,6 +187,125 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 		time.Sleep(time.Second)
 	}
 	close(quit)
+	wg.Wait()
+}
+
+func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	var (
+		endpoints    []string
+		endpointsMap = make(map[string]string)
+	)
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+		endpointsMap[s.GetServer().GetMemberInfo().GetName()] = s.GetConfig().AdvertiseClientUrls
+	}
+	var allocatorLeaderMap = make(map[string]string)
+	for _, dcLocation := range dcLocationConfig {
+		var pdName string
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdName = cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdName) > 0
+		})
+		allocatorLeaderMap[dcLocation] = pdName
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+
+	// Check allocator leaders URL map.
+	cli.Close()
+	for dcLocation, url := range cli.(client).GetAllocatorLeaderURLs() {
+		if dcLocation == config.GlobalDCLocation {
+			urls := cli.(client).GetURLs()
+			sort.Strings(urls)
+			sort.Strings(endpoints)
+			c.Assert(urls, DeepEquals, endpoints)
+			continue
+		}
+		pdName, exist := allocatorLeaderMap[dcLocation]
+		c.Assert(exist, IsTrue)
+		c.Assert(len(pdName), Greater, 0)
+		pdURL, exist := endpointsMap[pdName]
+		c.Assert(exist, IsTrue)
+		c.Assert(len(pdURL), Greater, 0)
+		c.Assert(url, Equals, pdURL)
+	}
+}
+
+func (s *clientTestSuite) TestLocalTSO(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	for _, dcLocation := range dcLocationConfig {
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdLeader) > 0
+		})
+	}
+
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+
+	wg := sync.WaitGroup{}
+	for _, dcLocation := range dcLocationConfig {
+		wg.Add(1)
+		go func(dc string) {
+			defer wg.Done()
+			var err error
+			var p1, l1 int64
+			testutil.WaitUntil(c, func(c *C) bool {
+				p1, l1, err = cli.GetLocalTS(context.TODO(), dc)
+				if err == nil {
+					return true
+				}
+				c.Log(err)
+				return false
+			})
+			time.Sleep(10 * time.Millisecond)
+			testutil.WaitUntil(c, func(c *C) bool {
+				p2, l2, err := cli.GetLocalTS(context.TODO(), dc)
+				if err != nil {
+					c.Log(err)
+					return false
+				}
+				c.Assert(p1<<18+l1, Less, p2<<18+l2)
+				return true
+			})
+		}(dcLocation)
+	}
 	wg.Wait()
 }
 
@@ -706,8 +827,17 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
-	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
 	c.Assert(minSsp.ExpiredAt, Less, oldMinSsp.ExpiredAt)
+
+	// TTL can be infinite
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", math.MaxInt64, 3)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(3))
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.ServiceID, Equals, "c")
+	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {
