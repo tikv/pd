@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -806,6 +807,9 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			ServiceID: string(request.ServiceId),
 			ExpiredAt: now.Unix() + request.TTL,
 			SafePoint: request.SafePoint,
+		}
+		if request.TTL == math.MaxInt64 {
+			ssp.ExpiredAt = math.MaxInt64
 		}
 		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
 			return nil, err

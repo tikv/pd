@@ -683,8 +683,17 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
-	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
 	c.Assert(minSsp.ExpiredAt, Less, oldMinSsp.ExpiredAt)
+
+	// TTL can be infinite
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", math.MaxInt64, 3)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(3))
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.ServiceID, Equals, "c")
+	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {
