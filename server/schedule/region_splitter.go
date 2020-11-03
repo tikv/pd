@@ -219,7 +219,7 @@ type splitKeyResults struct {
 
 func newSplitKeyResults() *splitKeyResults {
 	s := &splitKeyResults{}
-	s.mu.newRegions = make(map[uint64][]byte, 0)
+	s.mu.newRegions = make(map[uint64][]byte)
 	return s
 }
 
