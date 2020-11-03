@@ -893,7 +893,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipMasterKeyWithCiphertextKey(c *C) 
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
-			123: &encryptionpb.DataKey{
+			123: {
 				Key:          getTestDataKey(),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
