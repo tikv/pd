@@ -16,6 +16,7 @@ package schedule
 import (
 	"context"
 
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/checker"
@@ -23,6 +24,9 @@ import (
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
+
+// DefaultCacheSize is the default length of waiting list.
+const DefaultCacheSize = 1000
 
 // CheckerController is used to manage all checkers.
 type CheckerController struct {
@@ -34,6 +38,7 @@ type CheckerController struct {
 	ruleChecker       *checker.RuleChecker
 	mergeChecker      *checker.MergeChecker
 	jointStateChecker *checker.JointStateChecker
+	regionWaitingList cache.Cache
 }
 
 // NewCheckerController create a new CheckerController.
@@ -48,6 +53,7 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager 
 		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager),
 		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
 		jointStateChecker: checker.NewJointStateChecker(cluster),
+		regionWaitingList: cache.NewCache(DefaultCacheSize, cache.DefaultCacheType),
 	}
 }
 
@@ -68,6 +74,8 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			if op := c.ruleChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
 			}
+		} else {
+			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
@@ -78,6 +86,8 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			if op := c.replicaChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
 			}
+		} else {
+			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	}
 
@@ -87,6 +97,8 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			// It makes sure that two operators can be added successfully altogether.
 			return checkerIsBusy, ops
 		}
+	} else {
+		c.regionWaitingList.Put(region.GetID(), nil)
 	}
 	return checkerIsBusy, nil
 }
@@ -94,4 +106,14 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 // GetMergeChecker returns the merge checker.
 func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 	return c.mergeChecker
+}
+
+// GetWaitingRegions returns the regions in the waiting list.
+func (c *CheckerController) GetWaitingRegions() []*cache.Item {
+	return c.regionWaitingList.Elems()
+}
+
+// RemoveWaitingRegion removes the region from the waiting list.
+func (c *CheckerController) RemoveWaitingRegion(id uint64) {
+	c.regionWaitingList.Remove(id)
 }
