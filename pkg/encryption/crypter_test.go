@@ -64,13 +64,14 @@ func (s *testCrypterSuite) TestNewIv(c *C) {
 }
 
 func testNewDataKey(c *C, method encryptionpb.EncryptionMethod) {
-	_, key, err := NewDataKey(method)
+	_, key, err := NewDataKey(method, uint64(123))
 	c.Assert(err, IsNil)
 	length, err := KeyLength(method)
 	c.Assert(err, IsNil)
-	c.Assert(len(key.Key), Equals, length)
+	c.Assert(key.Key, HasLen, length)
 	c.Assert(key.Method, Equals, method)
 	c.Assert(key.WasExposed, IsFalse)
+	c.Assert(key.CreationTime, Equals, uint64(123))
 }
 
 func (s *testCrypterSuite) TestNewDataKey(c *C) {

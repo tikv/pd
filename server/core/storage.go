@@ -438,9 +438,6 @@ func (s *Storage) Close() error {
 			return err
 		}
 	}
-	if s.encryptionKeyManager != nil {
-		s.encryptionKeyManager.Close()
-	}
 	return nil
 }
 

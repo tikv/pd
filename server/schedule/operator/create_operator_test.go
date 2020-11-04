@@ -14,10 +14,10 @@
 package operator
 
 import (
-	"errors"
 	"strings"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 var _ = Suite(&testCreateOperatorSuite{})
@@ -419,7 +420,42 @@ func (s *testCreateOperatorSuite) TestCreateMoveRegionOperator(c *C) {
 				4: placement.Follower,
 			},
 			steps:         []OpStep{},
-			expectedError: errors.New("no valid leader"),
+			expectedError: errors.New("region need at least 1 voter or leader"),
+		},
+		{
+			name: "only leader transfer",
+			originPeers: []*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Voter},
+				{Id: 5, StoreId: 5, Role: metapb.PeerRole_Voter},
+			},
+			targetPeerRoles: map[uint64]placement.PeerRoleType{
+				3: placement.Follower,
+				4: placement.Voter,
+				5: placement.Follower,
+			},
+			steps: []OpStep{
+				TransferLeader{FromStore: 3, ToStore: 4},
+			},
+		},
+		{
+			name: "add peer and transfer leader",
+			originPeers: []*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Voter},
+				{Id: 5, StoreId: 5, Role: metapb.PeerRole_Voter},
+			},
+			targetPeerRoles: map[uint64]placement.PeerRoleType{
+				3: placement.Follower,
+				4: placement.Voter,
+				5: placement.Follower,
+				6: placement.Follower,
+			},
+			steps: []OpStep{
+				AddLearner{ToStore: 6},
+				PromoteLearner{ToStore: 6},
+				TransferLeader{FromStore: 3, ToStore: 4},
+			},
 		},
 	}
 	for _, tc := range tt {
@@ -462,6 +498,165 @@ func (s *testCreateOperatorSuite) TestCreateMoveRegionOperator(c *C) {
 				}
 			case AddLearner:
 				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLearner).ToStore)
+			case PromoteLearner:
+				c.Assert(step.ToStore, Equals, tc.steps[i].(PromoteLearner).ToStore)
+			case RemovePeer:
+				c.Assert(step.FromStore, Equals, tc.steps[i].(RemovePeer).FromStore)
+			default:
+				c.Errorf("unexpected type: %s", step.String())
+			}
+		}
+	}
+}
+
+func (s *testCreateOperatorSuite) TestMoveRegionWithoutJointConsensus(c *C) {
+	type testCase struct {
+		name            string
+		originPeers     []*metapb.Peer // first is leader
+		targetPeerRoles map[uint64]placement.PeerRoleType
+		steps           []OpStep
+		expectedError   error
+	}
+	tt := []testCase{
+		{
+			name: "move region partially with incoming voter, demote existed voter",
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			targetPeerRoles: map[uint64]placement.PeerRoleType{
+				2: placement.Leader,
+				3: placement.Learner,
+				4: placement.Voter,
+			},
+			steps: []OpStep{
+				AddLearner{ToStore: 4},
+				PromoteLearner{ToStore: 4},
+				TransferLeader{FromStore: 1, ToStore: 2},
+				RemovePeer{FromStore: 1},
+				RemovePeer{FromStore: 3},
+				AddLearner{ToStore: 3},
+			},
+		},
+		{
+			name: "move region partially with incoming leader",
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			targetPeerRoles: map[uint64]placement.PeerRoleType{
+				2: placement.Voter,
+				3: placement.Voter,
+				4: placement.Leader,
+			},
+			steps: []OpStep{
+				AddLearner{ToStore: 4},
+				PromoteLearner{ToStore: 4},
+				TransferLeader{FromStore: 1, ToStore: 2},
+				RemovePeer{FromStore: 1},
+				TransferLeader{FromStore: 2, ToStore: 4},
+			},
+		},
+		{
+			name: "move region partially with incoming learner, demote leader",
+			originPeers: []*metapb.Peer{
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			targetPeerRoles: map[uint64]placement.PeerRoleType{
+				2: placement.Learner,
+				3: placement.Voter,
+				4: placement.Learner,
+			},
+			steps: []OpStep{
+				RemovePeer{FromStore: 1},
+				TransferLeader{FromStore: 2, ToStore: 3},
+				RemovePeer{FromStore: 2},
+				AddLearner{ToStore: 2},
+				AddLearner{ToStore: 4},
+			},
+		},
+		{
+			name: "move region partially with all incoming follower, leader step down",
+			originPeers: []*metapb.Peer{
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 5, StoreId: 5, Role: metapb.PeerRole_Voter},
+			},
+			targetPeerRoles: map[uint64]placement.PeerRoleType{
+				1: placement.Follower,
+				2: placement.Follower,
+				4: placement.Follower,
+			},
+			steps:         []OpStep{},
+			expectedError: errors.New("region need at least 1 voter or leader"),
+		},
+		{
+			name: "only leader transfer",
+			originPeers: []*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Voter},
+				{Id: 5, StoreId: 5, Role: metapb.PeerRole_Voter},
+			},
+			targetPeerRoles: map[uint64]placement.PeerRoleType{
+				3: placement.Follower,
+				4: placement.Voter,
+				5: placement.Follower,
+			},
+			steps: []OpStep{
+				TransferLeader{FromStore: 3, ToStore: 4},
+			},
+		},
+		{
+			name: "add peer and transfer leader",
+			originPeers: []*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Voter},
+				{Id: 5, StoreId: 5, Role: metapb.PeerRole_Voter},
+			},
+			targetPeerRoles: map[uint64]placement.PeerRoleType{
+				3: placement.Follower,
+				4: placement.Voter,
+				5: placement.Follower,
+				6: placement.Follower,
+			},
+			steps: []OpStep{
+				AddLearner{ToStore: 6},
+				PromoteLearner{ToStore: 6},
+				TransferLeader{FromStore: 3, ToStore: 4},
+			},
+		},
+	}
+
+	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	for _, tc := range tt {
+		c.Log(tc.name)
+		region := core.NewRegionInfo(&metapb.Region{Id: 10, Peers: tc.originPeers}, tc.originPeers[0])
+		op, err := CreateMoveRegionOperator("test", s.cluster, region, OpAdmin, tc.targetPeerRoles)
+
+		if tc.expectedError == nil {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(err, NotNil)
+			c.Assert(strings.Contains(err.Error(), tc.expectedError.Error()), IsTrue)
+			continue
+		}
+		c.Log(op)
+		c.Assert(op, NotNil)
+		c.Assert(op.Len(), Equals, len(tc.steps))
+		// Since the peer id may be generated by allocator in runtime, we only check store id.
+		for i := 0; i < op.Len(); i++ {
+			switch step := op.Step(i).(type) {
+			case TransferLeader:
+				c.Assert(step.FromStore, Equals, tc.steps[i].(TransferLeader).FromStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(TransferLeader).ToStore)
+			case AddLearner:
+				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLearner).ToStore)
+			case PromoteLearner:
+				c.Assert(step.ToStore, Equals, tc.steps[i].(PromoteLearner).ToStore)
 			case RemovePeer:
 				c.Assert(step.FromStore, Equals, tc.steps[i].(RemovePeer).FromStore)
 			default:

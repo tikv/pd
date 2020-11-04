@@ -198,7 +198,7 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 		expectSteps         string
 	}{
 		{
-			name:                "placement rule disable with peer role",
+			name:                "placement rule disable without peer role",
 			placementRuleEnable: false,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`),
 			expectedError:       nil,
