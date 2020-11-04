@@ -12,7 +12,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: ti-community-rebase
+      - name: Automatic Rebase
         uses: tidb-community-bots/ti-community-rebase@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
