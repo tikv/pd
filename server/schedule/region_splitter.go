@@ -19,7 +19,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"math"
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -40,7 +39,7 @@ const (
 // SplitRegionsHandler used to handle region splitting
 type SplitRegionsHandler interface {
 	SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error
-	WatchRegionsByKeyRange(ctx context.Context, startKey, endKey []byte, splitKeys [][]byte, results *splitKeyResults, wg *sync.WaitGroup)
+	ScanRegionsByKeyRange(groupKeys *regionGroupKeys, results *splitKeyResults)
 }
 
 // NewSplitRegionsHandler return SplitRegionsHandler
@@ -87,7 +86,7 @@ func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, r
 	return 100 - len(unprocessedKeys)*100/len(splitKeys), returned
 }
 
-func (r *RegionSplitter) splitRegionsByKeys(ctx context.Context, splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
+func (r *RegionSplitter) splitRegionsByKeys(parCtx context.Context, splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
 	validGroups := r.groupKeysByRegion(splitKeys)
 	for key, group := range validGroups {
 		err := r.handler.SplitRegionByKeys(group.region, group.keys)
@@ -96,15 +95,35 @@ func (r *RegionSplitter) splitRegionsByKeys(ctx context.Context, splitKeys [][]b
 			continue
 		}
 	}
-	wg := &sync.WaitGroup{}
 	results := newSplitKeyResults()
-	for _, groupKeys := range validGroups {
-		wg.Add(1)
-		// TODO use recovery to handle error/panic
-		go r.handler.WatchRegionsByKeyRange(ctx, groupKeys.region.GetStartKey(), groupKeys.region.GetEndKey(),
-			groupKeys.keys, results, wg)
+	ticker := time.NewTicker(watchInterval)
+	ctx, cancel := context.WithTimeout(parCtx, timeout)
+	defer func() {
+		ticker.Stop()
+		cancel()
+	}()
+	for {
+		select {
+		case <-ticker.C:
+			for _, groupKeys := range validGroups {
+				if groupKeys.finished {
+					continue
+				}
+				r.handler.ScanRegionsByKeyRange(groupKeys, results)
+			}
+		case <-ctx.Done():
+			break
+		}
+		finished := true
+		for _, groupKeys := range validGroups {
+			if !groupKeys.finished {
+				finished = false
+			}
+		}
+		if finished {
+			break
+		}
 	}
-	wg.Wait()
 	for newID := range results.getSplitRegions() {
 		newRegions[newID] = struct{}{}
 	}
@@ -170,80 +189,62 @@ func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKe
 	return nil
 }
 
-func (h *splitRegionsHandler) WatchRegionsByKeyRange(parCtx context.Context, startKey, endKey []byte, splitKeys [][]byte,
-	results *splitKeyResults, wg *sync.WaitGroup) {
-	ticker := time.NewTicker(watchInterval)
-	ctx, cancel := context.WithTimeout(parCtx, timeout)
+func (h *splitRegionsHandler) ScanRegionsByKeyRange(groupKeys *regionGroupKeys, results *splitKeyResults) {
+	splitKeys := groupKeys.keys
+	startKey, endKey := groupKeys.region.GetStartKey(), groupKeys.region.GetEndKey()
 	createdRegions := make(map[uint64][]byte, len(splitKeys))
 	defer func() {
 		results.addRegionsID(createdRegions)
-		cancel()
-		ticker.Stop()
-		wg.Done()
 	}()
-	for {
-		select {
-		case <-ticker.C:
-			regions := h.cluster.ScanRegions(startKey, endKey, -1)
-			for _, region := range regions {
-				for _, splitKey := range splitKeys {
-					if bytes.Equal(splitKey, region.GetStartKey()) {
-						log.Info("found split region",
-							zap.Uint64("region-id", region.GetID()),
-							logutil.ZapRedactString("split-key", hex.EncodeToString(splitKey)))
-						createdRegions[region.GetID()] = splitKey
-					}
-				}
+	regions := h.cluster.ScanRegions(startKey, endKey, -1)
+	for _, region := range regions {
+		for _, splitKey := range splitKeys {
+			if bytes.Equal(splitKey, region.GetStartKey()) {
+				log.Info("found split region",
+					zap.Uint64("region-id", region.GetID()),
+					logutil.ZapRedactString("split-key", hex.EncodeToString(splitKey)))
+				createdRegions[region.GetID()] = splitKey
 			}
-			if len(createdRegions) < len(splitKeys) {
-				continue
-			}
-			return
-		case <-ctx.Done():
-			return
 		}
+	}
+	if len(createdRegions) >= len(splitKeys) {
+		groupKeys.finished = true
 	}
 }
 
 type regionGroupKeys struct {
-	region *core.RegionInfo
-	keys   [][]byte
+	// finished indicates all the split regions have been found in `region` according to the `keys`
+	finished bool
+	region   *core.RegionInfo
+	keys     [][]byte
 }
 
 type splitKeyResults struct {
-	mu struct {
-		sync.RWMutex
-		newRegions map[uint64][]byte
-	}
+	// newRegionID -> newRegionID's startKey
+	newRegions map[uint64][]byte
 }
 
 func newSplitKeyResults() *splitKeyResults {
 	s := &splitKeyResults{}
-	s.mu.newRegions = make(map[uint64][]byte)
+	s.newRegions = make(map[uint64][]byte)
 	return s
 }
 
 func (r *splitKeyResults) addRegionsID(regionsID map[uint64][]byte) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	for id, splitKey := range regionsID {
-		r.mu.newRegions[id] = splitKey
+		r.newRegions[id] = splitKey
 	}
 }
 
 func (r *splitKeyResults) getSplitRegions() map[uint64][]byte {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.mu.newRegions
+	return r.newRegions
 }
 
 func (r *splitKeyResults) getUnProcessedKeys(splitKeys [][]byte) [][]byte {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	unProcessedKeys := make([][]byte, 0)
 	for _, splitKey := range splitKeys {
 		processed := false
-		for _, regionStartKey := range r.mu.newRegions {
+		for _, regionStartKey := range r.newRegions {
 			if bytes.Equal(splitKey, regionStartKey) {
 				processed = true
 				break

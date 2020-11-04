@@ -16,8 +16,6 @@ package schedule
 import (
 	"bytes"
 	"context"
-	"sync"
-
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
@@ -45,18 +43,19 @@ func (m *mockSplitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, spl
 }
 
 // WatchRegionsByKeyRange mock SplitRegionsHandler
-func (m *mockSplitRegionsHandler) WatchRegionsByKeyRange(ctx context.Context, startKey, endKey []byte, splitKeys [][]byte,
-	response *splitKeyResults, wg *sync.WaitGroup) {
-	defer wg.Done()
+func (m *mockSplitRegionsHandler) ScanRegionsByKeyRange(groupKeys *regionGroupKeys, results *splitKeyResults) {
+	splitKeys := groupKeys.keys
+	startKey, endKey := groupKeys.region.GetStartKey(), groupKeys.region.GetEndKey()
 	for regionID, keyRange := range m.regions {
 		if bytes.Equal(startKey, keyRange[0]) && bytes.Equal(endKey, keyRange[1]) {
 			regions := make(map[uint64][]byte)
 			for i := 0; i < len(splitKeys); i++ {
 				regions[regionID+uint64(i)+1000] = splitKeys[i]
 			}
-			response.addRegionsID(regions)
+			results.addRegionsID(regions)
 		}
 	}
+	groupKeys.finished = true
 }
 
 var _ = Suite(&testRegionSplitterSuite{})
