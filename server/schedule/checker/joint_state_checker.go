@@ -15,10 +15,10 @@ package checker
 
 import (
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
-	"go.uber.org/zap"
 )
 
 // JointStateChecker ensures region is in joint state will leave.
@@ -42,7 +42,7 @@ func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
 	op, err := operator.CreateLeaveJointStateOperator("leave-joint-state", c.cluster, region)
 	if err != nil {
 		checkerCounter.WithLabelValues("joint_state_checker", "create-operator-fail").Inc()
-		log.Debug("fail to create leave joint state operator", zap.Error(err))
+		log.Debug("fail to create leave joint state operator", errs.ZapError(err))
 		return nil
 	} else if op != nil {
 		checkerCounter.WithLabelValues("joint_state_checker", "new-operator").Inc()

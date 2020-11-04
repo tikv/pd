@@ -81,6 +81,7 @@ func (c *RuleChecker) fixRange(region *core.RegionInfo) *operator.Operator {
 
 	op, err := operator.CreateSplitRegionOperator("rule-split-region", region, 0, pdpb.CheckPolicy_USEKEY, keys)
 	if err != nil {
+		log.Debug("create split region operator failed", errs.ZapError(err))
 		return nil
 	}
 
