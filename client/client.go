@@ -326,7 +326,7 @@ func (c *client) tsLoop() {
 				}
 				if _, exist := streams[dcLocation]; !exist {
 					err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
-					log.Error("[pd] dispath tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
+					log.Error("[pd] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
 					c.finishTSORequest(requests, 0, 0, err)
 					continue
 				}
