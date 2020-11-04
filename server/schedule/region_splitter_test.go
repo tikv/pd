@@ -16,11 +16,12 @@ package schedule
 import (
 	"bytes"
 	"context"
+	"sync"
+
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"sync"
 )
 
 type mockSplitRegionsHandler struct {
