@@ -119,6 +119,10 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
 func CreateMergeRegionOperator(desc string, cluster opt.Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OpKind) ([]*Operator, error) {
+	if core.IsInJointState(source.GetPeers()...) || core.IsInJointState(target.GetPeers()...) {
+		return nil, errors.Errorf("cannot merge regions which are in joint state")
+	}
+
 	var steps []OpStep
 	if !isRegionMatch(source, target) {
 		peers := make(map[uint64]*metapb.Peer)
