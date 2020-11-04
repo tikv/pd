@@ -13,6 +13,6 @@ jobs:
         with:
           fetch-depth: 0
       - name: ti-community-rebase
-        uses: tidb-community-bots/ti-community-rebase@v1.0.1
+        uses: tidb-community-bots/ti-community-rebase@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
