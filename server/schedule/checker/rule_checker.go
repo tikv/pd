@@ -78,7 +78,13 @@ func (c *RuleChecker) fixRange(region *core.RegionInfo) *operator.Operator {
 	if len(keys) == 0 {
 		return nil
 	}
-	return operator.CreateSplitRegionOperator("rule-split-region", region, 0, pdpb.CheckPolicy_USEKEY, keys)
+
+	op, err := operator.CreateSplitRegionOperator("rule-split-region", region, 0, pdpb.CheckPolicy_USEKEY, keys)
+	if err != nil {
+		return nil
+	}
+
+	return op
 }
 
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
