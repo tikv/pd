@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	zaplog "github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"reflect"
 	"strconv"
@@ -637,6 +638,25 @@ func (o *PersistOptions) getTTLData(key string) (string, bool) {
 		return result.(string), ok
 	}
 	return "", false
+}
+
+// LoadTTLFromEtcd loads temporary configuration which was persisted into etcd
+func (o *PersistOptions) LoadTTLFromEtcd(ctx context.Context, client *clientv3.Client) error {
+	resps, err := etcdutil.EtcdKVGet(client, ttlConfigPrefix, clientv3.WithPrefix())
+	if err != nil {
+		return err
+	}
+	if o.ttl == nil {
+		o.ttl = cache.NewStringTTL(ctx, time.Second*5, time.Minute*5)
+	}
+	for _, resp := range resps.Kvs {
+		key := string(resp.Key)
+		value := string(resp.Value)
+		leaseID := resp.Lease
+		resp, _ := client.TimeToLive(context.TODO(), clientv3.LeaseID(leaseID))
+		o.ttl.PutWithTTL(key, value, time.Duration(resp.TTL)*time.Second)
+	}
+	return nil
 }
 
 // SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
