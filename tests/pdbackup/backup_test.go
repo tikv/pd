@@ -64,7 +64,7 @@ func (s *backupTestSuite) TestBackup(c *C) {
 	c.Assert(err, IsNil)
 
 	var formatBuffer bytes.Buffer
-	err = json.Indent(&formatBuffer, []byte(backBytes), "", "    ")
+	err = json.Indent(&formatBuffer, backBytes, "", "    ")
 	c.Assert(err, IsNil)
 	newInfo := &pdbackup.BackupInfo{}
 	err = json.Unmarshal(formatBuffer.Bytes(), newInfo)
