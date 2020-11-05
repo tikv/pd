@@ -139,11 +139,13 @@ func newImportData() *Case {
 		for _, p := range regionProps {
 			dev += (p - 10) * (p - 10) / 100
 		}
-		if dev > 0.005 {
+		if dev > 0.02 {
 			simutil.Logger.Warn("Not balanced, change scheduler or store limit", zap.Float64("dev score", dev))
 		}
-		if checkCount > uint64(getRegionNum())/10 {
-			isEnd = dev < 0.002
+		if checkCount > uint64(getRegionNum())/5 {
+			isEnd = true
+		} else if checkCount > uint64(getRegionNum())/10 {
+			isEnd = dev < 0.01
 		}
 		if isEnd {
 			renderPlot("new_region.html", newRegionCount, int(checkCount), 0, getRegionNum()/10)
