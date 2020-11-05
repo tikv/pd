@@ -34,8 +34,7 @@ import (
 // allows to access them safely.
 type PersistOptions struct {
 	// configuration -> ttl value
-	ttl             map[string]*cache.TTLString
-	ttlCancel       map[string]context.CancelFunc
+	ttl             *cache.TTLString
 	schedule        atomic.Value
 	replication     atomic.Value
 	pdServerConfig  atomic.Value
@@ -53,8 +52,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
-	o.ttl = make(map[string]*cache.TTLString, 6)
-	o.ttlCancel = make(map[string]context.CancelFunc, 6)
+	o.ttl = nil
 	return o
 }
 
@@ -600,21 +598,17 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 
 // SetTTLData set temporary configuration
 func (o *PersistOptions) SetTTLData(parCtx context.Context, key string, value interface{}, ttl time.Duration) {
-	if data, ok := o.ttl[key]; ok {
-		data.Clear()
-		o.ttlCancel[key]()
+	if o.ttl == nil {
+		o.ttl = cache.NewStringTTL(parCtx, time.Second*5, time.Minute*5)
 	}
-	ctx, cancel := context.WithCancel(parCtx)
-	o.ttl[key] = cache.NewStringTTL(ctx, 5*time.Second, ttl)
-	o.ttl[key].Put(key, value)
-	o.ttlCancel[key] = cancel
+	o.ttl.PutWithTTL(key, value, ttl)
 }
 
 func (o *PersistOptions) getTTLData(key string) (interface{}, bool) {
-	if data, ok := o.ttl[key]; ok {
-		return data.Get(key)
+	if o.ttl == nil {
+		return nil, false
 	}
-	return nil, false
+	return o.ttl.Get(key)
 }
 
 // SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
