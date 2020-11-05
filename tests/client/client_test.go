@@ -791,7 +791,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	}
 
 	min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
-		core.GCWorkerServiceSafePointID, math.MaxInt64, 10)
+		"gc_worker", math.MaxInt64, 10)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(1))
 
@@ -859,12 +859,12 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 
 	// gc_worker cannot be deleted.
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		core.GCWorkerServiceSafePointID, -1, 10)
+		"gc_worker", -1, 10)
 	c.Assert(err, NotNil)
 
 	// Cannot set non-infinity TTL for gc_worker
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		core.GCWorkerServiceSafePointID, 10000000, 10)
+		"gc_worker", 10000000, 10)
 	c.Assert(err, NotNil)
 
 	// Service safepoint must have a non-empty ID

@@ -35,18 +35,17 @@ import (
 )
 
 const (
-	clusterPath              = "raft"
-	configPath               = "config"
-	schedulePath             = "schedule"
-	gcPath                   = "gc"
-	rulesPath                = "rules"
-	ruleGroupPath            = "rule_group"
-	replicationPath          = "replication_mode"
-	componentPath            = "component"
-	customScheduleConfigPath = "scheduler_config"
-	encryptionKeysPath       = "encryption_keys"
-	// GCWorkerServiceSafePointID is the ID of GCWorker's service GC safe point.
-	GCWorkerServiceSafePointID = "gc_worker"
+	clusterPath                = "raft"
+	configPath                 = "config"
+	schedulePath               = "schedule"
+	gcPath                     = "gc"
+	rulesPath                  = "rules"
+	ruleGroupPath              = "rule_group"
+	replicationPath            = "replication_mode"
+	componentPath              = "component"
+	customScheduleConfigPath   = "scheduler_config"
+	encryptionKeysPath         = "encryption_keys"
+	gcWorkerServiceSafePointID = "gc_worker"
 )
 
 const (
@@ -480,7 +479,7 @@ func (s *Storage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 		return errors.New("service id of service safepoint cannot be empty")
 	}
 
-	if ssp.ServiceID == GCWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
+	if ssp.ServiceID == gcWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
 		return errors.New("TTL of gc_worker's service safe point must be infinity")
 	}
 
@@ -495,7 +494,7 @@ func (s *Storage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 
 // RemoveServiceGCSafePoint removes a GC safepoint for the service
 func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
-	if serviceID == GCWorkerServiceSafePointID {
+	if serviceID == gcWorkerServiceSafePointID {
 		return errors.New("cannot remove service safe point of gc_worker")
 	}
 	key := path.Join(gcPath, "safe_point", "service", serviceID)
@@ -504,7 +503,7 @@ func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
 
 func (s *Storage) initServiceGCSafePointForGCWorker() (*ServiceSafePoint, error) {
 	ssp := &ServiceSafePoint{
-		ServiceID: GCWorkerServiceSafePointID,
+		ServiceID: gcWorkerServiceSafePointID,
 		SafePoint: 0,
 		ExpiredAt: math.MaxInt64,
 	}
