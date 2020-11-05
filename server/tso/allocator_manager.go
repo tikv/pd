@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/member"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -85,6 +86,11 @@ type AllocatorManager struct {
 	updatePhysicalInterval time.Duration
 	maxResetTSGap          func() time.Duration
 	securityConfig         *grpcutil.TLSConfig
+	// for gRPC use
+	localAllocatorConn struct {
+		sync.RWMutex
+		clientConns map[string]*grpc.ClientConn
+	}
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
@@ -105,6 +111,7 @@ func NewAllocatorManager(
 		securityConfig:         sc,
 	}
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
+	allocatorManager.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
 	return allocatorManager
 }
 
@@ -219,6 +226,22 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 				zap.String("local-tso-allocator-name", am.member.Member().Name))
 			return
 		default:
+		}
+
+		ok, err := am.isLeaderAwareOfDCLocation(ctx, allocator.dcLocation)
+		if err != nil {
+			log.Error("get dc-locations from pd leader failed",
+				zap.String("dc-location", allocator.dcLocation),
+				errs.ZapError(err))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		if !ok {
+			log.Error("pd leader is not aware of dc-location during allocatorLeaderLoop, wait next round",
+				zap.String("dc-location", allocator.dcLocation),
+				zap.String("wait-duration", checkStep.String()))
+			time.Sleep(checkStep)
+			continue
 		}
 
 		allocatorLeader, rev, checkAgain := allocator.CheckAllocatorLeader()
@@ -655,4 +678,85 @@ func (am *AllocatorManager) GetLocalAllocatorLeaders() (map[string]*pdpb.Member,
 		localAllocatorLeaderMember[localAllocator.GetDCLocation()] = localAllocator.GetAllocatorLeader()
 	}
 	return localAllocatorLeaderMember, nil
+}
+
+func (am *AllocatorManager) getOrCreateGRPCConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
+	conn, ok := am.getGRPCConn(addr)
+	if ok {
+		return conn, nil
+	}
+	tlsCfg, err := am.securityConfig.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
+	cc, err := grpcutil.GetClientConn(ctxWithTimeout, addr, tlsCfg)
+	if err != nil {
+		return nil, err
+	}
+	am.setGRPCConn(cc, addr)
+	conn, _ = am.getGRPCConn(addr)
+	return conn, nil
+}
+
+func (am *AllocatorManager) isLeaderAwareOfDCLocation(ctx context.Context, dcLocation string) (bool, error) {
+	dcLocations, err := am.getLeaderDCLocations(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, dc := range dcLocations {
+		if dcLocation == dc {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (am *AllocatorManager) getLeaderDCLocations(ctx context.Context) ([]string, error) {
+	dcLocations := make([]string, 0)
+	if am.member.IsLeader() {
+		for dcLocation := range am.GetClusterDCLocations() {
+			dcLocations = append(dcLocations, dcLocation)
+		}
+		return dcLocations, nil
+	}
+
+	leaderAddrs := am.member.GetLeader().GetClientUrls()
+	if leaderAddrs == nil || len(leaderAddrs) < 1 {
+		return nil, fmt.Errorf("failed to get leader client url")
+	}
+	conn, err := am.getOrCreateGRPCConn(ctx, leaderAddrs[0])
+	if err != nil {
+		return nil, err
+	}
+	getCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
+	defer cancel()
+	resp, err := pdpb.NewPDClient(conn).GetDCLocations(getCtx, &pdpb.GetDCLocationsRequest{
+		Header: &pdpb.RequestHeader{
+			SenderId: am.member.GetLeader().GetMemberId(),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetDcLocations(), nil
+}
+
+func (am *AllocatorManager) getGRPCConn(addr string) (*grpc.ClientConn, bool) {
+	am.localAllocatorConn.RLock()
+	defer am.localAllocatorConn.RUnlock()
+	conn, ok := am.localAllocatorConn.clientConns[addr]
+	return conn, ok
+}
+
+func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) {
+	am.localAllocatorConn.Lock()
+	defer am.localAllocatorConn.Unlock()
+	if _, ok := am.localAllocatorConn.clientConns[addr]; ok {
+		newConn.Close()
+		log.Debug("use old connection", zap.String("target", newConn.Target()), zap.String("state", newConn.GetState().String()))
+		return
+	}
+	am.localAllocatorConn.clientConns[addr] = newConn
 }
