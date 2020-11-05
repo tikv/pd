@@ -14,6 +14,7 @@
 package autoscaling
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -425,7 +426,7 @@ func findBestGroupToScaleOut(strategy *Strategy, scaleOutQuota float64, groups [
 		ResourceType: resources[0].ResourceType,
 		Labels: map[string]string{
 			// TODO: we need to make this label not duplicated when we implement the heterogeneous logic.
-			groupLabelKey:        autoScalingGroupLabelKeyPrefix + component.String(),
+			groupLabelKey:        fmt.Sprintf("%s-%s", autoScalingGroupLabelKeyPrefix, component.String()),
 			resourceTypeLabelKey: resources[0].ResourceType,
 		},
 	}
