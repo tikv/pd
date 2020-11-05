@@ -51,8 +51,8 @@ var (
 	patrolCheckRegionsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
-			Subsystem: "patrol",
-			Name:      "checks_regions",
+			Subsystem: "checker",
+			Name:      "patrol_regions_time",
 			Help:      "Time spent of patrol checks region.",
 		})
 
