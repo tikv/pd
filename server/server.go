@@ -1291,6 +1291,6 @@ func (s *Server) PersistFile(name string, data []byte) error {
 // SaveTTLConfig save ttl config
 func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) {
 	for k, v := range data {
-		s.persistOptions.SetTTLData(s.ctx, k, v, ttl)
+		s.persistOptions.SetTTLData(s.ctx, s.client, k, fmt.Sprint(v), ttl)
 	}
 }
