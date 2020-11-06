@@ -653,7 +653,7 @@ func (o *PersistOptions) LoadTTLFromEtcd(ctx context.Context, client *clientv3.C
 		key := string(resp.Key)
 		value := string(resp.Value)
 		leaseID := resp.Lease
-		resp, _ := client.TimeToLive(context.TODO(), clientv3.LeaseID(leaseID))
+		resp, _ := client.TimeToLive(ctx, clientv3.LeaseID(leaseID))
 		o.ttl.PutWithTTL(key, value, time.Duration(resp.TTL)*time.Second)
 	}
 	return nil
