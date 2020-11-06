@@ -546,7 +546,7 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 		_, output, err := pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "show", "replication-mode")
 		c.Assert(err, IsNil)
 		var conf2 config.ReplicationModeConfig
-		json.Unmarshal([]byte(output), &conf2)
+		json.Unmarshal(output, &conf2)
 		c.Assert(conf2, DeepEquals, conf)
 	}
 
