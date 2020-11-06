@@ -835,10 +835,11 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		}
 	}
 	if cfg.EnablePlacementRules {
-		// replication.MaxReplicas and replication.LocationLabels won't work when placement rule is enabled
-		if cfg.MaxReplicas != old.MaxReplicas {
+		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
+		if cfg.MaxReplicas != old.MaxReplicas && !s.isOnlyDefaultRule() {
 			return errors.New("cannot update MaxReplicas when placement rules feature is enabled, please update rule instead")
 		}
+		// replication.LocationLabels won't work when placement rule is enabled
 		if !reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels) {
 			return errors.New("cannot update LocationLabels when placement rules feature is enabled, please update rule instead")
 		}
@@ -855,6 +856,11 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	}
 	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
+}
+
+func (s *Server) isOnlyDefaultRule() bool {
+	rules := s.GetRaftCluster().GetRuleManager().GetAllRules()
+	return len(rules) == 1 && rules[0].GroupID == "pd" && rules[0].ID == "default"
 }
 
 // GetPDServerConfig gets the balance config information.
