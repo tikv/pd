@@ -166,10 +166,9 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
 func (o *PersistOptions) GetMaxSnapshotCount() uint64 {
-	if v, ok := o.getTTLData("schedule.max-snapshot-count"); ok {
-		result, err := strconv.ParseUint(v, 10, 64)
+	if v, ok, err := o.getTTLUint("schedule.max-snapshot-count"); ok {
 		if err == nil {
-			return result
+			return v
 		}
 		log.Warn("failed to parse schedule.max-snapshot-count from PersistOptions's ttl storage")
 	}
@@ -183,10 +182,9 @@ func (o *PersistOptions) GetMaxPendingPeerCount() uint64 {
 
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
-	if v, ok := o.getTTLData("schedule.max-merge-region-size"); ok {
-		result, err := strconv.ParseUint(v, 10, 64)
+	if v, ok, err := o.getTTLUint("schedule.max-merge-region-size"); ok {
 		if err == nil {
-			return result
+			return v
 		}
 		log.Warn("failed to parse schedule.max-merge-region-size from PersistOptions's ttl storage")
 	}
@@ -195,10 +193,9 @@ func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
 
 // GetMaxMergeRegionKeys returns the max number of keys.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
-	if v, ok := o.getTTLData("schedule.max-merge-region-keys"); ok {
-		result, err := strconv.ParseUint(v, 10, 64)
+	if v, ok, err := o.getTTLUint("schedule.max-merge-region-keys"); ok {
 		if err == nil {
-			return result
+			return v
 		}
 		log.Warn("failed to parse schedule.max-merge-region-keys from PersistOptions's ttl storage")
 	}
@@ -311,18 +308,16 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 // GetStoreLimit returns the limit of a store.
 func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfig) {
 	defer func() {
-		if v, ok := o.getTTLData(fmt.Sprintf("remove-peer-%v", storeID)); ok {
-			r, err := strconv.ParseFloat(v, 64)
+		if v, ok, err := o.getTTLFloat(fmt.Sprintf("remove-peer-%v", storeID)); ok {
 			if err == nil {
-				returnSC.RemovePeer = r
+				returnSC.RemovePeer = v
 			} else {
 				log.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
 			}
 		}
-		if v, ok := o.getTTLData(fmt.Sprintf("add-peer-%v", storeID)); ok {
-			r, err := strconv.ParseFloat(v, 64)
+		if v, ok, err := o.getTTLFloat(fmt.Sprintf("add-peer-%v", storeID)); ok {
 			if err == nil {
-				returnSC.AddPeer = r
+				returnSC.AddPeer = v
 			} else {
 				log.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
 			}
@@ -363,19 +358,17 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfi
 func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	defer func() {
 		if typ == storelimit.RemovePeer {
-			if v, ok := o.getTTLData(fmt.Sprintf("remove-peer-%v", storeID)); ok {
-				r, err := strconv.ParseFloat(v, 64)
+			if v, ok, err := o.getTTLFloat(fmt.Sprintf("remove-peer-%v", storeID)); ok {
 				if err == nil {
-					returned = r
+					returned = v
 				} else {
 					log.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
 				}
 			}
 		} else if typ == storelimit.AddPeer {
-			if v, ok := o.getTTLData(fmt.Sprintf("add-peer-%v", storeID)); ok {
-				r, err := strconv.ParseFloat(v, 64)
+			if v, ok, err := o.getTTLFloat(fmt.Sprintf("add-peer-%v", storeID)); ok {
 				if err == nil {
-					returned = r
+					returned = v
 				} else {
 					log.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
 				}
@@ -420,10 +413,9 @@ func (o *PersistOptions) GetHighSpaceRatio() float64 {
 
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
 func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
-	if v, ok := o.getTTLData("schedule.scheduler-max-waiting-operator"); ok {
-		result, err := strconv.ParseUint(v, 10, 64)
+	if v, ok, err := o.getTTLUint("schedule.scheduler-max-waiting-operator"); ok {
 		if err == nil {
-			return result
+			return v
 		}
 		log.Warn("failed to parse schedule.scheduler-max-waiting-operator from PersistOptions's ttl storage")
 	}
@@ -630,9 +622,30 @@ func (o *PersistOptions) SetTTLData(parCtx context.Context, client *clientv3.Cli
 	if err != nil {
 		return err
 	}
-	kv.Put(parCtx, ttlConfigPrefix+key, value, clientv3.WithLease(grantResp.ID))
+	_, err = kv.Put(parCtx, ttlConfigPrefix+key, value, clientv3.WithLease(grantResp.ID))
+	if err != nil {
+		return err
+	}
 	o.ttl.PutWithTTL(key, value, ttl)
 	return nil
+}
+
+func (o *PersistOptions) getTTLFloat(key string) (float64, bool, error) {
+	stringForm, ok := o.getTTLData(key)
+	if !ok {
+		return 0, false, nil
+	}
+	r, err := strconv.ParseFloat(stringForm, 64)
+	return r, true, err
+}
+
+func (o *PersistOptions) getTTLUint(key string) (uint64, bool, error) {
+	stringForm, ok := o.getTTLData(key)
+	if !ok {
+		return 0, false, nil
+	}
+	r, err := strconv.ParseUint(stringForm, 10, 64)
+	return r, true, err
 }
 
 func (o *PersistOptions) getTTLData(key string) (string, bool) {
