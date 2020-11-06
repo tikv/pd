@@ -617,12 +617,7 @@ func (o *PersistOptions) SetTTLData(parCtx context.Context, client *clientv3.Cli
 	if o.ttl == nil {
 		o.ttl = cache.NewStringTTL(parCtx, time.Second*5, time.Minute*5)
 	}
-	kv := clientv3.NewKV(client)
-	grantResp, err := client.Grant(parCtx, int64(ttl.Seconds()))
-	if err != nil {
-		return err
-	}
-	_, err = kv.Put(parCtx, ttlConfigPrefix+key, value, clientv3.WithLease(grantResp.ID))
+	_, err := etcdutil.EtcdKVPutWithTTL(parCtx, client, ttlConfigPrefix+key, value, int64(ttl.Seconds()))
 	if err != nil {
 		return err
 	}
@@ -671,7 +666,10 @@ func (o *PersistOptions) LoadTTLFromEtcd(ctx context.Context, client *clientv3.C
 		key := string(resp.Key)
 		value := string(resp.Value)
 		leaseID := resp.Lease
-		resp, _ := client.TimeToLive(ctx, clientv3.LeaseID(leaseID))
+		resp, err := client.TimeToLive(ctx, clientv3.LeaseID(leaseID))
+		if err != nil {
+			return err
+		}
 		o.ttl.PutWithTTL(key, value, time.Duration(resp.TTL)*time.Second)
 	}
 	return nil
