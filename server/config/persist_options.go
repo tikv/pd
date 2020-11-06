@@ -16,7 +16,7 @@ package config
 import (
 	"context"
 	"fmt"
-	zaplog "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"reflect"
@@ -171,7 +171,7 @@ func (o *PersistOptions) GetMaxSnapshotCount() uint64 {
 		if err == nil {
 			return result
 		}
-		zaplog.Warn("failed to parse schedule.max-snapshot-count from PersistOptions's ttl storage")
+		log.Warn("failed to parse schedule.max-snapshot-count from PersistOptions's ttl storage")
 	}
 	return o.GetScheduleConfig().MaxSnapshotCount
 }
@@ -188,7 +188,7 @@ func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
 		if err == nil {
 			return result
 		}
-		zaplog.Warn("failed to parse schedule.max-merge-region-size from PersistOptions's ttl storage")
+		log.Warn("failed to parse schedule.max-merge-region-size from PersistOptions's ttl storage")
 	}
 	return o.GetScheduleConfig().MaxMergeRegionSize
 }
@@ -200,7 +200,7 @@ func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
 		if err == nil {
 			return result
 		}
-		zaplog.Warn("failed to parse schedule.max-merge-region-keys from PersistOptions's ttl storage")
+		log.Warn("failed to parse schedule.max-merge-region-keys from PersistOptions's ttl storage")
 	}
 	return o.GetScheduleConfig().MaxMergeRegionKeys
 }
@@ -315,15 +315,16 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfi
 			r, err := strconv.ParseFloat(v, 64)
 			if err == nil {
 				returnSC.RemovePeer = r
+			} else {
+				log.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
 			}
-			zaplog.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
 		}
 		if v, ok := o.getTTLData(fmt.Sprintf("add-peer-%v", storeID)); ok {
 			r, err := strconv.ParseFloat(v, 64)
 			if err == nil {
 				returnSC.AddPeer = r
 			} else {
-				zaplog.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
+				log.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
 			}
 		}
 	}()
@@ -342,14 +343,14 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfi
 		if err == nil {
 			returnSC.AddPeer = r
 		} else {
-			zaplog.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
+			log.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
 		}
 
 		r, err = strconv.ParseFloat(v2, 64)
 		if err == nil {
 			returnSC.RemovePeer = r
 		} else {
-			zaplog.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
+			log.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
 		}
 		return returnSC
 	}
@@ -367,7 +368,7 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 				if err == nil {
 					returned = r
 				} else {
-					zaplog.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
+					log.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
 				}
 			}
 		} else if typ == storelimit.AddPeer {
@@ -376,7 +377,7 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 				if err == nil {
 					returned = r
 				} else {
-					zaplog.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
+					log.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
 				}
 			}
 		}
@@ -424,7 +425,7 @@ func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
 		if err == nil {
 			return result
 		}
-		zaplog.Warn("failed to parse schedule.scheduler-max-waiting-operator from PersistOptions's ttl storage")
+		log.Warn("failed to parse schedule.scheduler-max-waiting-operator from PersistOptions's ttl storage")
 	}
 	return o.GetScheduleConfig().SchedulerMaxWaitingOperator
 }
@@ -481,7 +482,7 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 		if err == nil {
 			return result
 		}
-		zaplog.Warn("failed to parse schedule.enable-location-replacement from PersistOptions's ttl storage")
+		log.Warn("failed to parse schedule.enable-location-replacement from PersistOptions's ttl storage")
 	}
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
@@ -620,14 +621,18 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 const ttlConfigPrefix = "/config/ttl/"
 
 // SetTTLData set temporary configuration
-func (o *PersistOptions) SetTTLData(parCtx context.Context, client *clientv3.Client, key string, value string, ttl time.Duration) {
+func (o *PersistOptions) SetTTLData(parCtx context.Context, client *clientv3.Client, key string, value string, ttl time.Duration) error {
 	if o.ttl == nil {
 		o.ttl = cache.NewStringTTL(parCtx, time.Second*5, time.Minute*5)
 	}
 	kv := clientv3.NewKV(client)
-	grantResp, _ := client.Grant(parCtx, int64(ttl.Seconds()))
+	grantResp, err := client.Grant(parCtx, int64(ttl.Seconds()))
+	if err != nil {
+		return err
+	}
 	kv.Put(parCtx, ttlConfigPrefix+key, value, clientv3.WithLease(grantResp.ID))
 	o.ttl.PutWithTTL(key, value, ttl)
+	return nil
 }
 
 func (o *PersistOptions) getTTLData(key string) (string, bool) {
@@ -660,11 +665,13 @@ func (o *PersistOptions) LoadTTLFromEtcd(ctx context.Context, client *clientv3.C
 }
 
 // SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
-func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clientv3.Client, typ storelimit.Type, ratePerMin float64, ttl time.Duration) {
+func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clientv3.Client, typ storelimit.Type, ratePerMin float64, ttl time.Duration) error {
+	var err error
 	switch typ {
 	case storelimit.AddPeer:
-		o.SetTTLData(ctx, client, "default-add-peer", fmt.Sprint(ratePerMin), ttl)
+		err = o.SetTTLData(ctx, client, "default-add-peer", fmt.Sprint(ratePerMin), ttl)
 	case storelimit.RemovePeer:
-		o.SetTTLData(ctx, client, "default-remove-peer", fmt.Sprint(ratePerMin), ttl)
+		err = o.SetTTLData(ctx, client, "default-remove-peer", fmt.Sprint(ratePerMin), ttl)
 	}
+	return err
 }

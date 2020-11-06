@@ -466,9 +466,6 @@ func (s *Server) Run() error {
 	if err := s.startEtcd(s.ctx); err != nil {
 		return err
 	}
-	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.GetClient()); err != nil {
-		return err
-	}
 	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}
@@ -1294,8 +1291,11 @@ func (s *Server) PersistFile(name string, data []byte) error {
 }
 
 // SaveTTLConfig save ttl config
-func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) {
+func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) error {
 	for k, v := range data {
-		s.persistOptions.SetTTLData(s.ctx, s.client, k, fmt.Sprint(v), ttl)
+		if err := s.persistOptions.SetTTLData(s.ctx, s.client, k, fmt.Sprint(v), ttl); err != nil {
+			return err
+		}
 	}
+	return nil
 }
