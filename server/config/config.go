@@ -751,6 +751,7 @@ const (
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
+	defaultEnableCrossTableMerge       = true
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -801,6 +802,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
+	}
+	if !meta.IsDefined("enable-cross-table-merge") {
+		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
