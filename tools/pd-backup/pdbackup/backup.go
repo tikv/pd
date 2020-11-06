@@ -100,7 +100,7 @@ func OutputToFile(backInfo *BackupInfo, f *os.File) error {
 		return err
 	}
 	var formatBuffer bytes.Buffer
-	err = json.Indent(&formatBuffer, []byte(backBytes), "", "    ")
+	err = json.Indent(&formatBuffer, backBytes, "", "    ")
 	if err != nil {
 		return err
 	}

@@ -913,7 +913,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 			},
 			StartKey: []byte{byte(i + 1)},
 			EndKey:   []byte{byte(i + 2)},
-			Peers:    []*metapb.Peer{{Id: i + 10, StoreId: uint64(i)}},
+			Peers:    []*metapb.Peer{{Id: i + 10, StoreId: i}},
 		}
 		region := core.NewRegionInfo(r, r.Peers[0], core.SetApproximateSize(10))
 
