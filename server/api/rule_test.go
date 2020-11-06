@@ -348,7 +348,7 @@ func (s *testRuleSuite) TestGetAllByRegion(c *C) {
 	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
 	c.Assert(err, IsNil)
 
-	r := newTestRegionInfo(4, 1, []byte([]byte{0x22, 0x22}), []byte{0x33, 0x33})
+	r := newTestRegionInfo(4, 1, []byte{0x22, 0x22}, []byte{0x33, 0x33})
 	mustRegionHeartbeat(c, s.svr, r)
 
 	testcases := []struct {

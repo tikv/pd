@@ -839,7 +839,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			return nil, err
 		}
 		log.Info("update service GC safe point",
-			zap.String("service-id", string(ssp.ServiceID)),
+			zap.String("service-id", ssp.ServiceID),
 			zap.Int64("expire-at", ssp.ExpiredAt),
 			zap.Uint64("safepoint", ssp.SafePoint))
 		// If the min safepoint is updated, load the next one
