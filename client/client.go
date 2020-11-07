@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -157,7 +156,12 @@ var (
 
 type client struct {
 	*baseClient
-	tsoRequests chan *tsoRequest
+	// tsoDispatcher is used to dispatch different TSO requests to
+	// the corresponding dc-location TSO channel.
+	tsoDispatcher struct {
+		sync.RWMutex
+		ch map[string]chan *tsoRequest
+	}
 	// dc-location -> deadline
 	tsDeadline struct {
 		sync.RWMutex
@@ -184,9 +188,9 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		return nil, err
 	}
 	c := &client{
-		baseClient:  base,
-		tsoRequests: make(chan *tsoRequest, maxMergeTSORequests),
+		baseClient: base,
 	}
+	c.tsoDispatcher.ch = make(map[string]chan *tsoRequest)
 	c.tsDeadline.ch = make(map[string]chan deadline)
 	c.lastTSO.physical = make(map[string]int64)
 	c.lastTSO.logical = make(map[string]int64)
@@ -283,138 +287,116 @@ func (c *client) tsLoop() {
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
 	defer loopCancel()
 
-	streams := make(map[string]pdpb.PD_TsoClient)
 	for {
-		ctx, cancel := context.WithCancel(loopCtx)
-		if !c.checkTSOStreams(streams) {
-			if err := c.createTSOStreams(ctx, streams); err != nil {
-				select {
-				case <-loopCtx.Done():
-					cancel()
-					return
-				default:
-				}
-				c.ScheduleCheckLeader()
-				cancel()
-				c.revokeTSORequest(errors.WithStack(err))
-				select {
-				case <-loopCtx.Done():
-					return
-				case <-time.After(time.Second):
-				}
-				continue
-			}
-		}
-		var err atomic.Value // stored as error
-		requestsDispatcher := make(map[string][]*tsoRequest)
-		// Initialize the requests dispatcher
-		for dcLocation := range streams {
-			requestsDispatcher[dcLocation] = make([]*tsoRequest, 0, maxMergeTSORequests+1)
-		}
-		// Dispatch different dc-locations requests to corresponding TSO stream
 		select {
-		case first := <-c.tsoRequests:
-			requestsDispatcher[first.dcLocation] = append(requestsDispatcher[first.dcLocation], first)
-			for i := 1; i <= len(c.tsoRequests); i++ {
-				req := <-c.tsoRequests
-				requestsDispatcher[req.dcLocation] = append(requestsDispatcher[req.dcLocation], req)
-			}
-			wg := sync.WaitGroup{}
-			for dcLocation, requests := range requestsDispatcher {
-				if len(requests) == 0 {
-					continue
-				}
-				if _, exist := streams[dcLocation]; !exist {
-					err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
-					log.Error("[pd] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
-					c.finishTSORequest(requests, 0, 0, err)
-					continue
-				}
-				wg.Add(1)
-				go func(dc string, reqs []*tsoRequest) {
-					defer wg.Done()
-					done := make(chan struct{})
-					dl := deadline{
-						timer:  time.After(c.timeout),
-						done:   done,
-						cancel: cancel,
-					}
-					c.tsDeadline.RLock()
-					tsDeadlineCh := c.tsDeadline.ch[dc]
-					c.tsDeadline.RUnlock()
-					select {
-					case tsDeadlineCh <- dl:
-					case <-loopCtx.Done():
-						cancel()
-						return
-					}
-					opts := extractSpanReference(reqs)
-					if processErr := c.processTSORequests(streams[dc], dc, reqs, opts); processErr != nil {
-						err.Store(processErr)
-					}
-					close(done)
-				}(dcLocation, requests)
-			}
-			wg.Wait()
 		case <-loopCtx.Done():
-			cancel()
 			return
+		default:
 		}
-		if err.Load() != nil {
-			select {
-			case <-loopCtx.Done():
-				cancel()
-				return
-			default:
+		for _, dcLocation := range c.getDCLocations() {
+			if !c.checkTSODispatcher(dcLocation) {
+				c.createTSODispatcher(dcLocation)
+				go func(dc string, tsoDispatcher chan *tsoRequest) {
+					var (
+						err       error
+						stream    pdpb.PD_TsoClient
+						opts      []opentracing.StartSpanOption
+						requests  = make([]*tsoRequest, maxMergeTSORequests+1)
+						createdCh = make(chan struct{})
+					)
+					for {
+						ctx, cancel := context.WithCancel(loopCtx)
+						if stream == nil {
+							go c.checkStreamTimeout(loopCtx, cancel, createdCh)
+							stream, err = pdpb.NewPDClient(c.connMu.clientConns[c.connMu.allocators[dc]]).Tso(ctx)
+							if stream != nil {
+								createdCh <- struct{}{}
+							}
+							if err != nil {
+								select {
+								case <-loopCtx.Done():
+									cancel()
+									return
+								default:
+								}
+								log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientCreateTSOStream, err))
+								c.ScheduleCheckLeader()
+								cancel()
+								c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
+								select {
+								case <-time.After(time.Second):
+								case <-loopCtx.Done():
+									cancel()
+									return
+								}
+								continue
+							}
+						}
+						select {
+						case first := <-tsoDispatcher:
+							pendingPlus1 := len(tsoDispatcher) + 1
+							requests[0] = first
+							for i := 1; i < pendingPlus1; i++ {
+								requests[i] = <-tsoDispatcher
+							}
+							done := make(chan struct{})
+							dl := deadline{
+								timer:  time.After(c.timeout),
+								done:   done,
+								cancel: cancel,
+							}
+							c.tsDeadline.RLock()
+							tsDeadlineCh := c.tsDeadline.ch[dc]
+							c.tsDeadline.RUnlock()
+							select {
+							case tsDeadlineCh <- dl:
+							case <-loopCtx.Done():
+								cancel()
+								return
+							}
+							opts = extractSpanReference(requests[:pendingPlus1], opts[:0])
+							err = c.processTSORequests(stream, dc, requests[:pendingPlus1], opts)
+							close(done)
+						case <-loopCtx.Done():
+							cancel()
+							return
+						}
+						if err != nil {
+							select {
+							case <-loopCtx.Done():
+								cancel()
+								return
+							default:
+							}
+							log.Error("[pd] getTS error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+							c.ScheduleCheckLeader()
+							cancel()
+							stream = nil
+						}
+					}
+				}(dcLocation, c.tsoDispatcher.ch[dcLocation])
 			}
-			log.Error("[pd] getTS error", errs.ZapError(errs.ErrClientGetTSO, err.Load().(error)))
-			c.ScheduleCheckLeader()
-			cancel()
-			streams, cancel = make(map[string]pdpb.PD_TsoClient), nil
 		}
 	}
 }
 
-func (c *client) checkTSOStreams(streams map[string]pdpb.PD_TsoClient) bool {
-	dcLocations := c.getDCLocations()
-	if len(streams) != len(dcLocations) {
+func (c *client) checkTSODispatcher(dcLocation string) bool {
+	c.tsoDispatcher.RLock()
+	defer c.tsoDispatcher.RUnlock()
+	tsoChan, exist := c.tsoDispatcher.ch[dcLocation]
+	if !exist || tsoChan == nil {
 		return false
-	}
-	for _, dcLocation := range dcLocations {
-		stream, exist := streams[dcLocation]
-		if !exist || stream == nil {
-			return false
-		}
 	}
 	return true
 }
 
-func (c *client) createTSOStreams(ctx context.Context, streams map[string]pdpb.PD_TsoClient) error {
-	c.connMu.RLock()
-	defer c.connMu.RUnlock()
-	for dcLocation, pdAddr := range c.connMu.allocators {
-		var err error
-		createdCh := make(chan struct{})
-		tsoStreamCtx, tsoStreamCtxCancel := context.WithCancel(ctx)
-		go c.checkStreamTimeout(tsoStreamCtx, tsoStreamCtxCancel, createdCh)
-		if oldStream, exist := streams[dcLocation]; exist {
-			oldStream.CloseSend()
-			oldStream = nil
-		}
-		streams[dcLocation], err = pdpb.NewPDClient(c.connMu.clientConns[pdAddr]).Tso(tsoStreamCtx)
-		if streams[dcLocation] != nil {
-			createdCh <- struct{}{}
-		}
-		if err != nil {
-			log.Error("[pd] create tso stream error", zap.String("dc-location", dcLocation), errs.ZapError(errs.ErrClientCreateTSOStream, err))
-			return err
-		}
-	}
-	return nil
+func (c *client) createTSODispatcher(dcLocation string) {
+	c.tsoDispatcher.Lock()
+	defer c.tsoDispatcher.Unlock()
+	c.tsoDispatcher.ch[dcLocation] = make(chan *tsoRequest, maxMergeTSORequests)
 }
 
-func extractSpanReference(requests []*tsoRequest) []opentracing.StartSpanOption {
-	var opts []opentracing.StartSpanOption
+func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
 	for _, req := range requests {
 		if span := opentracing.SpanFromContext(req.ctx); span != nil {
 			opts = append(opts, opentracing.ChildOf(span.Context()))
@@ -494,10 +476,9 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 	}
 }
 
-func (c *client) revokeTSORequest(err error) {
-	n := len(c.tsoRequests)
-	for i := 0; i < n; i++ {
-		req := <-c.tsoRequests
+func (c *client) revokeTSORequest(err error, tsoDispatcher chan *tsoRequest) {
+	for i := 0; i < len(tsoDispatcher); i++ {
+		req := <-tsoDispatcher
 		req.done <- err
 	}
 }
@@ -506,7 +487,11 @@ func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.revokeTSORequest(errors.WithStack(errClosing))
+	c.tsoDispatcher.RLock()
+	for _, tsoDispatcher := range c.tsoDispatcher.ch {
+		c.revokeTSORequest(errors.WithStack(errClosing), tsoDispatcher)
+	}
+	c.tsoDispatcher.RUnlock()
 
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
@@ -536,17 +521,7 @@ var tsoReqPool = sync.Pool{
 }
 
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("GetTSAsync", opentracing.ChildOf(span.Context()))
-		ctx = opentracing.ContextWithSpan(ctx, span)
-	}
-	req := tsoReqPool.Get().(*tsoRequest)
-	req.ctx = ctx
-	req.start = time.Now()
-	req.dcLocation = globalDCLocation
-	c.tsoRequests <- req
-
-	return req
+	return c.GetLocalTSAsync(ctx, globalDCLocation)
 }
 
 func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {
@@ -558,9 +533,37 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req.ctx = ctx
 	req.start = time.Now()
 	req.dcLocation = dcLocation
-	c.tsoRequests <- req
-
+	c.waitForDispatcher()
+	if !c.checkTSODispatcher(dcLocation) {
+		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
+		log.Error("[pd] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
+		req.done <- err
+		return req
+	}
+	c.dispatchRequest(dcLocation, req)
 	return req
+}
+
+func (c *client) waitForDispatcher() {
+	for {
+		if c.getDispatcherSize() != 0 {
+			break
+		}
+		log.Info("[pd] tso dispatcher is not ready, wait for a while")
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (c *client) getDispatcherSize() int {
+	c.tsoDispatcher.RLock()
+	defer c.tsoDispatcher.RUnlock()
+	return len(c.tsoDispatcher.ch)
+}
+
+func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) {
+	c.tsoDispatcher.RLock()
+	defer c.tsoDispatcher.RUnlock()
+	c.tsoDispatcher.ch[dcLocation] <- request
 }
 
 // TSFuture is a future which promises to return a TSO.
