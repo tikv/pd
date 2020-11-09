@@ -16,14 +16,15 @@ package config
 import (
 	"context"
 	"fmt"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/etcdutil"
-	"go.etcd.io/etcd/clientv3"
 	"reflect"
 	"strconv"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/etcdutil"
+	"go.etcd.io/etcd/clientv3"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
