@@ -236,6 +236,11 @@ func (s *testRuleCheckerSuite) TestFixRoleLeaderIssue3130(c *C) {
 	c.Assert(op.Desc(), Equals, "fix-leader-role")
 	c.Assert(op.Step(0).(operator.TransferLeader).ToStore, Equals, uint64(2))
 
+	s.cluster.SetStoreBusy(2, true)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+	s.cluster.SetStoreBusy(2, false)
+
 	s.cluster.AddLeaderRegion(1, 2, 1)
 	op = s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
