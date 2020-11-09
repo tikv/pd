@@ -22,7 +22,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kms"
 	"github.com/aws/aws-sdk-go/service/sts"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/tikv/pd/pkg/errs"
 )
@@ -42,7 +41,7 @@ func newMasterKeyFromKMS(
 	ciphertextKey []byte,
 ) (masterKey *MasterKey, err error) {
 	if config == nil {
-		return nil, errors.New("missing master key KMS config")
+		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack("missing master key file config")
 	}
 	if config.Vendor != kmsVendorAWS {
 		return nil, errs.ErrEncryptionKMS.GenWithStack("unsupported KMS vendor: %s", config.Vendor)
