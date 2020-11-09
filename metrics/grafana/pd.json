@@ -64,7 +64,7 @@
   "gnetId": null,
   "graphTooltip": 1,
   "id": 21,
-  "iteration": 1604654449484,
+  "iteration": 1604903857894,
   "links": [],
   "panels": [
     {
@@ -5732,7 +5732,7 @@
             "#d44a3a"
           ],
           "datasource": "${DS_TEST-CLUSTER}",
-          "format": "none",
+          "format": "s",
           "gauge": {
             "maxValue": 100,
             "minValue": 0,
@@ -5803,7 +5803,7 @@
               "value": "null"
             }
           ],
-          "valueName": "avg"
+          "valueName": "current"
         },
         {
           "aliasColors": {},
