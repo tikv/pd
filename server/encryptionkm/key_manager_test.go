@@ -1046,7 +1046,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Config with 100s rotation period.
 	rotationPeriod, err := time.ParseDuration("100s")
