@@ -27,12 +27,12 @@ require (
 	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20201022065613-94d8dc38a204
 	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
 	github.com/pingcap/errcode v0.3.0
-	github.com/pingcap/errors v0.11.5-0.20200917111840-a15ef68f753d
+	github.com/pingcap/errors v0.11.5-0.20201029093017-5a7df2af2ac7
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
 	github.com/pingcap/kvproto v0.0.0-20201104042953-62eb316d5182
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
 	github.com/pingcap/sysutil v0.0.0-20201021075216-f93ced2829e2
-	github.com/pingcap/tiup v1.2.2
+	github.com/pingcap/tiup v1.2.3
 	github.com/prometheus/client_golang v1.2.1
 	github.com/prometheus/common v0.9.1
 	github.com/sasha-s/go-deadlock v0.2.0
