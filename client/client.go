@@ -299,23 +299,21 @@ func (c *client) tsLoop() {
 				go func(dc string, tsoDispatcher chan *tsoRequest) {
 					var (
 						err       error
+						ctx       context.Context
+						cancel    context.CancelFunc
 						stream    pdpb.PD_TsoClient
 						opts      []opentracing.StartSpanOption
-						requests  = make([]*tsoRequest, maxMergeTSORequests+1)
 						createdCh = make(chan struct{})
+						requests  = make([]*tsoRequest, maxMergeTSORequests+1)
 					)
 					for {
-						ctx, cancel := context.WithCancel(loopCtx)
 						if stream == nil {
-							go c.checkStreamTimeout(loopCtx, cancel, createdCh)
+							ctx, cancel = context.WithCancel(loopCtx)
+							go c.checkStreamTimeout(ctx, cancel, createdCh)
 							stream, err = pdpb.NewPDClient(c.connMu.clientConns[c.connMu.allocators[dc]]).Tso(ctx)
-							if stream != nil {
-								createdCh <- struct{}{}
-							}
 							if err != nil {
 								select {
-								case <-loopCtx.Done():
-									cancel()
+								case <-ctx.Done():
 									return
 								default:
 								}
@@ -325,11 +323,13 @@ func (c *client) tsLoop() {
 								c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
 								select {
 								case <-time.After(time.Second):
-								case <-loopCtx.Done():
-									cancel()
+								case <-ctx.Done():
 									return
 								}
 								continue
+							}
+							if stream != nil {
+								createdCh <- struct{}{}
 							}
 						}
 						select {
@@ -350,21 +350,18 @@ func (c *client) tsLoop() {
 							c.tsDeadline.RUnlock()
 							select {
 							case tsDeadlineCh <- dl:
-							case <-loopCtx.Done():
-								cancel()
+							case <-ctx.Done():
 								return
 							}
 							opts = extractSpanReference(requests[:pendingPlus1], opts[:0])
 							err = c.processTSORequests(stream, dc, requests[:pendingPlus1], opts)
 							close(done)
-						case <-loopCtx.Done():
-							cancel()
+						case <-ctx.Done():
 							return
 						}
 						if err != nil {
 							select {
 							case <-loopCtx.Done():
-								cancel()
 								return
 							default:
 							}
