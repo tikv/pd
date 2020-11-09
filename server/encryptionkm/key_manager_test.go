@@ -215,7 +215,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerLoadKeys(c *C) {
 			},
 		},
 	}
-	err = saveKeys(leadership, masterKeyMeta, keys)
+	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Create the key manager.
 	m, err := NewKeyManager(client, config)
@@ -228,7 +228,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerLoadKeys(c *C) {
 	// Check etcd KV.
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err := extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
 }
@@ -308,7 +308,7 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Use default config.
 	config := &encryption.Config{}
@@ -363,7 +363,7 @@ func (s *testKeyManagerSuite) TestLoadKeyEmpty(c *C) {
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Use default config.
 	config := &encryption.Config{}
@@ -427,7 +427,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 			},
 		},
 	}
-	err = saveKeys(leadership, masterKeyMeta, keys)
+	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	<-reloadEvent
 	key, err := m.GetKey(123)
@@ -453,7 +453,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 			},
 		},
 	}
-	err = saveKeys(leadership, masterKeyMeta, keys)
+	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	<-reloadEvent
 	key, err = m.GetKey(123)
@@ -536,7 +536,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionEnabling(c *C) {
 	c.Assert(proto.Equal(loadedKeys.Keys[currentKeyID], currentKey), IsTrue)
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err := extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
 }
@@ -579,7 +579,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Config with different encrption method.
 	config := &encryption.Config{
@@ -613,7 +613,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionMethodChanged(c *C)
 	c.Assert(proto.Equal(loadedKeys.Keys[123], keys.Keys[123]), IsTrue)
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err := extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
 }
@@ -656,7 +656,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Config with different encrption method.
 	config := &encryption.Config{
@@ -691,7 +691,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 	c.Assert(proto.Equal(loadedKeys.Keys[123], keys.Keys[123]), IsTrue)
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err := extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
 }
@@ -734,7 +734,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Config with 100s rotation period.
 	rotationPeriod, err := time.ParseDuration("100s")
@@ -773,7 +773,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 	c.Assert(proto.Equal(loadedKeys.Keys[123], keys.Keys[123]), IsTrue)
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err := extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(loadedKeys, storedKeys), IsTrue)
 }
@@ -818,7 +818,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Config with a different master key.
 	config := &encryption.Config{
@@ -845,7 +845,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err := extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
 	meta, err := config.GetMasterKeyMeta()
@@ -901,7 +901,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipMasterKeyWithCiphertextKey(c *C) 
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Config with a different master key.
 	config := &encryption.Config{
@@ -927,7 +927,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipMasterKeyWithCiphertextKey(c *C) 
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err := extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
 	meta, err := config.GetMasterKeyMeta()
@@ -972,7 +972,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Use default config.
 	config := &encryption.Config{}
@@ -994,7 +994,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), expectedKeys), IsTrue)
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err := extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, expectedKeys), IsTrue)
 }
@@ -1046,7 +1046,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper)
 	c.Assert(err, IsNil)
 	// Config with 100s rotation period.
 	rotationPeriod, err := time.ParseDuration("100s")
@@ -1075,7 +1075,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err := extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
 	// Advance time and trigger ticker
@@ -1097,7 +1097,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 	c.Assert(proto.Equal(loadedKeys.Keys[currentKeyID], currentKey), IsTrue)
 	resp, err = etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err = extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err = extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, loadedKeys), IsTrue)
 }
@@ -1159,7 +1159,7 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys)
+	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	// Config with 100s rotation period.
 	rotationPeriod, err := time.ParseDuration("100s")
@@ -1188,7 +1188,7 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	c.Assert(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), keys), IsTrue)
 	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err := extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
 	// Invalidate leader after leader check.
@@ -1202,7 +1202,7 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	// Check keys is unchanged.
 	resp, err = etcdutil.EtcdKVGet(client, EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	storedKeys, err = extractKeysFromKV(resp.Kvs[0])
+	storedKeys, err = extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
 }

@@ -76,15 +76,10 @@ func saveKeys(
 	leadership *election.Leadership,
 	masterKeyMeta *encryptionpb.MasterKey,
 	keys *encryptionpb.KeyDictionary,
-	helper ...keyManagerHelper,
+	helper keyManagerHelper,
 ) (err error) {
 	// Get master key.
-	var masterKey *encryption.MasterKey
-	if len(helper) > 0 {
-		masterKey, err = helper[0].newMasterKey(masterKeyMeta, nil)
-	} else {
-		masterKey, err = encryption.NewMasterKey(masterKeyMeta, nil)
-	}
+	masterKey, err := helper.newMasterKey(masterKeyMeta, nil)
 	if err != nil {
 		return err
 	}
@@ -133,7 +128,7 @@ func saveKeys(
 // extractKeysFromKV unpack encrypted keys from etcd KV.
 func extractKeysFromKV(
 	kv *mvccpb.KeyValue,
-	helper ...keyManagerHelper,
+	helper keyManagerHelper,
 ) (*encryptionpb.KeyDictionary, error) {
 	content := &encryptionpb.EncryptedContent{}
 	err := content.Unmarshal(kv.Value)
@@ -146,12 +141,7 @@ func extractKeysFromKV(
 		return nil, errs.ErrEncryptionLoadKeys.GenWithStack(
 			"no master key config found with encryption keys")
 	}
-	var masterKey *encryption.MasterKey
-	if len(helper) > 0 {
-		masterKey, err = helper[0].newMasterKey(masterKeyConfig, content.CiphertextKey)
-	} else {
-		masterKey, err = encryption.NewMasterKey(masterKeyConfig, content.CiphertextKey)
-	}
+	masterKey, err := helper.newMasterKey(masterKeyConfig, content.CiphertextKey)
 	if err != nil {
 		return nil, err
 	}
