@@ -62,7 +62,7 @@ func (s *testMasterKeySuite) TestEncrypt(c *C) {
 	plaintext := "this-is-a-plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
 	c.Assert(err, IsNil)
-	c.Assert(len([]byte(iv)), Equals, ivLengthGCM)
+	c.Assert(len(iv), Equals, ivLengthGCM)
 	plaintext2, err := AesGcmDecrypt(key, ciphertext, iv)
 	c.Assert(err, IsNil)
 	c.Assert(string(plaintext2), Equals, plaintext)

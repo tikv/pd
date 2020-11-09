@@ -93,7 +93,7 @@ func (lta *LocalTSOAllocator) UpdateTSO() error {
 
 // SetTSO sets the physical part with given TSO.
 func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
-	return lta.timestampOracle.ResetUserTimestamp(lta.leadership, tso)
+	return lta.timestampOracle.resetUserTimestamp(lta.leadership, tso, false)
 }
 
 // GenerateTSO is used to generate a given number of TSOs.
@@ -151,7 +151,7 @@ func (lta *LocalTSOAllocator) WriteTSO(maxTS *pdpb.Timestamp) error {
 	if tsoutil.CompareTimestamp(&currentTSO, maxTS) >= 0 {
 		return nil
 	}
-	return lta.SetTSO(tsoutil.GenerateTS(maxTS))
+	return lta.timestampOracle.resetUserTimestamp(lta.leadership, tsoutil.GenerateTS(maxTS), true)
 }
 
 // EnableAllocatorLeader sets the Local TSO Allocator itself to a leader.

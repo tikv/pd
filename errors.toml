@@ -58,7 +58,7 @@ get member failed
 
 ["PD:client:ErrClientGetTSO"]
 error = '''
-get TSO failed
+get TSO failed, %v
 '''
 
 ["PD:client:ErrClientGetTSOTimeout"]
