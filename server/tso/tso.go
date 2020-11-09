@@ -73,23 +73,6 @@ func (t *timestampOracle) setTSOPhysical(next time.Time) {
 	}
 }
 
-// setTSO is only used to update the TSO in memory, please make sure you handle
-// the time window persisted in etcd well also while using this method.
-func (t *timestampOracle) setTSO(nextPhysical time.Time, nextLogical int64) {
-	t.tsoMux.Lock()
-	defer t.tsoMux.Unlock()
-	// make sure the ts won't fall back
-	if t.tsoMux.tso == nil {
-		t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: nextLogical}
-	}
-	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) > 0 {
-		t.tsoMux.tso = &tsoObject{physical: nextPhysical}
-	}
-	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) == 0 && nextLogical > t.tsoMux.tso.logical {
-		t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: nextLogical}
-	}
-}
-
 func (t *timestampOracle) getTSO() (time.Time, int64) {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
@@ -193,40 +176,57 @@ func (t *timestampOracle) isInitialized() bool {
 	return t.tsoMux.tso != nil
 }
 
-// ResetUserTimestamp update the TSO in memory with specified TSO.
-func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, tso uint64) error {
+// resetUserTimestamp update the TSO in memory with specified TSO by an atomicly way.
+func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, tso uint64, ignoreSmaller bool) error {
+	t.tsoMux.Lock()
+	defer t.tsoMux.Unlock()
 	if !leadership.Check() {
 		tsoCounter.WithLabelValues("err_lease_reset_ts").Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs("lease expired")
 	}
 	nextPhysical, nextLogical := tsoutil.ParseTS(tso)
 	nextPhysical = nextPhysical.Add(updateTimestampGuard)
-	prevPhysical, prevLogical := t.getTSO()
+	var err error
 	// do not update if next logical time is less/before than prev
-	if typeutil.SubTimeByWallClock(nextPhysical, prevPhysical) == 0 && int64(nextLogical) <= prevLogical {
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) == 0 && int64(nextLogical) <= t.tsoMux.tso.logical {
 		tsoCounter.WithLabelValues("err_reset_small_counter").Inc()
-		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified counter is smaller than now")
+		if !ignoreSmaller {
+			err = errs.ErrResetUserTimestamp.FastGenByArgs("the specified counter is smaller than now")
+		}
 	}
 	// do not update if next physical time is less/before than prev
-	if typeutil.SubTimeByWallClock(nextPhysical, prevPhysical) < 0 {
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) < 0 {
 		tsoCounter.WithLabelValues("err_reset_small_ts").Inc()
-		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is smaller than now")
+		if !ignoreSmaller {
+			err = errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is smaller than now")
+		}
 	}
 	// do not update if physical time is too greater than prev
-	if typeutil.SubTimeByWallClock(nextPhysical, prevPhysical) >= t.maxResetTSGap() {
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) >= t.maxResetTSGap() {
 		tsoCounter.WithLabelValues("err_reset_large_ts").Inc()
-		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
+		err = errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
+	}
+	if err != nil {
+		return err
 	}
 	// save into etcd only if the time difference is big enough
-	if typeutil.SubTimeByWallClock(nextPhysical, prevPhysical) > 3*updateTimestampGuard {
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) > 3*updateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
-		if err := t.saveTimestamp(leadership, save); err != nil {
+		if err = t.saveTimestamp(leadership, save); err != nil {
 			tsoCounter.WithLabelValues("err_save_reset_ts").Inc()
 			return err
 		}
 	}
-	// save into memory
-	t.setTSO(nextPhysical, int64(nextLogical))
+	// save into memory and make sure the ts won't fall back
+	if t.tsoMux.tso == nil {
+		t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: int64(nextLogical)}
+	}
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) > 0 {
+		t.tsoMux.tso = &tsoObject{physical: nextPhysical}
+	}
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) == 0 && int64(nextLogical) > t.tsoMux.tso.logical {
+		t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: int64(nextLogical)}
+	}
 	tsoCounter.WithLabelValues("reset_tso_ok").Inc()
 	return nil
 }

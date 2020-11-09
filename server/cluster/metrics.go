@@ -48,13 +48,12 @@ var (
 			Help:      "Status of the hotspot.",
 		}, []string{"address", "store", "type"})
 
-	patrolCheckRegionsHistogram = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
+	patrolCheckRegionsGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
 			Namespace: "pd",
-			Subsystem: "patrol",
-			Name:      "checks_regions",
-			Help:      "Bucketed histogram of time spend(s) of patrol checks region.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 15),
+			Subsystem: "checker",
+			Name:      "patrol_regions_time",
+			Help:      "Time spent of patrol checks region.",
 		})
 
 	clusterStateCPUGauge = prometheus.NewGauge(
@@ -78,7 +77,7 @@ func init() {
 	prometheus.MustRegister(healthStatusGauge)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(hotSpotStatusGauge)
-	prometheus.MustRegister(patrolCheckRegionsHistogram)
+	prometheus.MustRegister(patrolCheckRegionsGauge)
 	prometheus.MustRegister(clusterStateCPUGauge)
 	prometheus.MustRegister(clusterStateCurrent)
 }
