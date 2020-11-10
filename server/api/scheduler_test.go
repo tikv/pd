@@ -21,6 +21,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	_ "github.com/tikv/pd/server/schedulers"
 )
 
@@ -334,6 +335,47 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		s.deleteScheduler(createdName, c)
 	}
 
+}
+
+func (s *testScheduleSuite) TestDisable(c *C) {
+	name := "shuffle-leader-scheduler"
+	input := make(map[string]interface{})
+	input["name"] = name
+	body, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	s.addScheduler(name, name, body, nil, c)
+
+	u := fmt.Sprintf("%s%s/api/v1/config/schedule", s.svr.GetAddr(), apiPrefix)
+	var scheduleConfig config.ScheduleConfig
+	err = readJSON(testDialClient, u, &scheduleConfig)
+	c.Assert(err, IsNil)
+
+	originSchedulers := scheduleConfig.Schedulers
+	scheduleConfig.Schedulers = config.SchedulerConfigs{config.SchedulerConfig{Type: "shuffle-leader", Disable: true}}
+	body, err = json.Marshal(scheduleConfig)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, u, body)
+	c.Assert(err, IsNil)
+
+	var schedulers []string
+	err = readJSON(testDialClient, s.urlPrefix, &schedulers)
+	c.Assert(err, IsNil)
+	c.Assert(schedulers, HasLen, 1)
+	c.Assert(schedulers[0], Equals, name)
+
+	err = readJSON(testDialClient, fmt.Sprintf("%s?status=disabled", s.urlPrefix), &schedulers)
+	c.Assert(err, IsNil)
+	c.Assert(schedulers, HasLen, 1)
+	c.Assert(schedulers[0], Equals, name)
+
+	// reset schedule config
+	scheduleConfig.Schedulers = originSchedulers
+	body, err = json.Marshal(scheduleConfig)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, u, body)
+	c.Assert(err, IsNil)
+
+	s.deleteScheduler(name, c)
 }
 
 func (s *testScheduleSuite) addScheduler(name, createdName string, body []byte, extraTest func(string, *C), c *C) {

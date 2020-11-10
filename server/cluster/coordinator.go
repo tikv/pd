@@ -157,7 +157,7 @@ func (c *coordinator) patrolRegions() {
 		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
-			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
+			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
 		}
 	}
@@ -650,6 +650,26 @@ func (c *coordinator) isSchedulerPaused(name string) (bool, error) {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return s.IsPaused(), nil
+}
+
+func (c *coordinator) isSchedulerDisabled(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return false, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	t := s.GetType()
+	scheduleConfig := c.cluster.GetOpts().GetScheduleConfig()
+	for _, s := range scheduleConfig.Schedulers {
+		if t == s.Type {
+			return s.Disable, nil
+		}
+	}
+	return false, nil
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {

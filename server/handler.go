@@ -111,6 +111,15 @@ func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
 	return rc.IsSchedulerPaused(name)
 }
 
+// IsSchedulerDisabled returns whether scheduler is disabled.
+func (h *Handler) IsSchedulerDisabled(name string) (bool, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return false, err
+	}
+	return rc.IsSchedulerDisabled(name)
+}
+
 // GetScheduleConfig returns ScheduleConfig.
 func (h *Handler) GetScheduleConfig() *config.ScheduleConfig {
 	return h.s.GetScheduleConfig()
@@ -525,6 +534,9 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 
 	roles := make(map[uint64]placement.PeerRoleType)
 	for id, peerRole := range storeIDs {
+		if peerRole == "" {
+			peerRole = placement.Voter
+		}
 		roles[id] = peerRole
 	}
 	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, roles)

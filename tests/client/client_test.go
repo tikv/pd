@@ -309,6 +309,43 @@ func (s *clientTestSuite) TestLocalTSO(c *C) {
 	wg.Wait()
 }
 
+func (s *clientTestSuite) TestNonexistentLocalTSO(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	for _, dcLocation := range dcLocationConfig {
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdLeader) > 0
+		})
+	}
+
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+
+	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
+	c.Assert(p, Equals, int64(0))
+	c.Assert(l, Equals, int64(0))
+	c.Assert(err, NotNil)
+}
+
 func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	c.Assert(err, IsNil)
@@ -827,8 +864,17 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
-	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
 	c.Assert(minSsp.ExpiredAt, Less, oldMinSsp.ExpiredAt)
+
+	// TTL can be infinite
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", math.MaxInt64, 3)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(3))
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.ServiceID, Equals, "c")
+	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {

@@ -74,6 +74,20 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		h.r.JSON(w, http.StatusOK, pausedSchedulers)
 		return
+	case "disabled":
+		var disabledSchedulers []string
+		for _, scheduler := range schedulers {
+			disabled, err := h.IsSchedulerDisabled(scheduler)
+			if err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+
+			if disabled {
+				disabledSchedulers = append(disabledSchedulers, scheduler)
+			}
+		}
+		h.r.JSON(w, http.StatusOK, disabledSchedulers)
 	default:
 		h.r.JSON(w, http.StatusOK, schedulers)
 	}

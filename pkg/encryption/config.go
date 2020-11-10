@@ -70,7 +70,7 @@ func (c *Config) Adjust() error {
 	if len(c.MasterKey.Type) == 0 {
 		c.MasterKey.Type = masterKeyTypePlaintext
 	} else {
-		if _, err := c.GetMasterKey(); err != nil {
+		if _, err := c.GetMasterKeyMeta(); err != nil {
 			return err
 		}
 	}
@@ -94,8 +94,8 @@ func (c *Config) GetMethod() (encryptionpb.EncryptionMethod, error) {
 	}
 }
 
-// GetMasterKey gets the master key config.
-func (c *Config) GetMasterKey() (*encryptionpb.MasterKey, error) {
+// GetMasterKeyMeta gets metadata of master key.
+func (c *Config) GetMasterKeyMeta() (*encryptionpb.MasterKey, error) {
 	switch c.MasterKey.Type {
 	case masterKeyTypePlaintext:
 		return &encryptionpb.MasterKey{
