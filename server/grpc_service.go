@@ -1017,7 +1017,7 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 		return nil, err
 	}
 	// TODO: add split region context
-	finishedPercentage, newRegionIDs := s.cluster.GetRegionSplitter().SplitRegions(request.GetSplitKeys(), int(request.GetRetryLimit()))
+	finishedPercentage, newRegionIDs := s.cluster.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	return &pdpb.SplitRegionsResponse{
 		Header:             s.header(),
 		RegionsId:          newRegionIDs,
