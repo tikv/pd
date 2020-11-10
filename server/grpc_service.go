@@ -704,14 +704,6 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	region := rc.GetRegion(request.GetRegionId())
-	if region == nil {
-		if request.GetRegion() == nil {
-			return nil, errors.Errorf("region %d not found", request.GetRegionId())
-		}
-		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
-	}
-
 	if len(request.GetRegionsId()) > 0 {
 		ops, failures, err := rc.GetRegionScatter().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
 		if err != nil {
@@ -730,6 +722,14 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 			Header:             s.header(),
 			FinishedPercentage: uint64(percentage),
 		}, nil
+	}
+
+	region := rc.GetRegion(request.GetRegionId())
+	if region == nil {
+		if request.GetRegion() == nil {
+			return nil, errors.Errorf("region %d not found", request.GetRegionId())
+		}
+		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
 
 	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())

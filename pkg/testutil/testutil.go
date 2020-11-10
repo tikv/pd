@@ -44,6 +44,18 @@ func WaitUntil(c *check.C, f CheckFunc) {
 	c.Fatal("wait timeout")
 }
 
+// WaitUntilByInterval repeatedly evaluates f() for a given period of time, util it returns true.
+func WaitUntilByInterval(c *check.C, f CheckFunc, interval time.Duration) {
+	c.Log("wait start")
+	for i := 0; i < waitMaxRetry; i++ {
+		if f(c) {
+			return
+		}
+		time.Sleep(interval)
+	}
+	c.Fatal("wait timeout")
+}
+
 // NewRequestHeader creates a new request header.
 func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
