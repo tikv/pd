@@ -797,10 +797,10 @@ func BenchmarkDeleteAndRestore(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			dels := make([]Item, 0, tr.Len())
-			tr.Ascend(ItemIterator(func(b Item) bool {
+			tr.Ascend(func(b Item) bool {
 				dels = append(dels, b)
 				return true
-			}))
+			})
 			for _, del := range dels {
 				tr.Delete(del)
 			}
@@ -820,10 +820,10 @@ func BenchmarkDeleteAndRestore(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			dels := make([]Item, 0, tr.Len())
-			tr.Ascend(ItemIterator(func(b Item) bool {
+			tr.Ascend(func(b Item) bool {
 				dels = append(dels, b)
 				return true
-			}))
+			})
 			for _, del := range dels {
 				tr.Delete(del)
 			}
