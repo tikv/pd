@@ -93,11 +93,8 @@ type Client interface {
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
-	ScatterRegion(ctx context.Context, regionID uint64) error
-	// ScatterRegionWithOption scatters the specified region with the given options, should use it
-	// for a batch of regions.
-	ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...RegionOption) error
-    // SplitRegions split regions by given split keys
+	ScatterRegion(ctx context.Context, regionID uint64, opts ...RegionOption) error
+	// SplitRegions split regions by given split keys
 	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionOption) (*pdpb.SplitRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
@@ -906,17 +903,9 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	return resp.GetMinSafePoint(), nil
 }
 
-func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
+func (c *client) ScatterRegion(ctx context.Context, regionID uint64, opts ...RegionOption) error {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
-		defer span.Finish()
-	}
-	return c.scatterRegionsWithOptions(ctx, regionID, "", nil, 0)
-}
-
-func (c *client) ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...RegionOption) error {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ScatterRegionWithOption", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	options := &RegionOp{}
