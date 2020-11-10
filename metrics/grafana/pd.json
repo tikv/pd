@@ -64,7 +64,7 @@
   "gnetId": null,
   "graphTooltip": 1,
   "id": 21,
-  "iteration": 1598342251538,
+  "iteration": 1604903857894,
   "links": [],
   "panels": [
     {
@@ -4971,7 +4971,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 47
+            "y": 19
           },
           "id": 46,
           "legend": {
@@ -5065,7 +5065,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 55
+            "y": 27
           },
           "id": 87,
           "legend": {
@@ -5166,7 +5166,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 55
+            "y": 27
           },
           "hideTimeOverride": false,
           "id": 86,
@@ -5267,7 +5267,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 63
+            "y": 35
           },
           "id": 89,
           "legend": {
@@ -5358,7 +5358,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 63
+            "y": 35
           },
           "id": 88,
           "legend": {
@@ -5450,7 +5450,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 71
+            "y": 43
           },
           "id": 52,
           "legend": {
@@ -5545,7 +5545,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 71
+            "y": 43
           },
           "id": 53,
           "legend": {
@@ -5639,7 +5639,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 79
+            "y": 51
           },
           "id": 108,
           "legend": {
@@ -5723,96 +5723,87 @@
           }
         },
         {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
+          "cacheTimeout": null,
+          "colorBackground": false,
+          "colorValue": false,
+          "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+          ],
           "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The replica checker's status",
-          "fill": 0,
+          "format": "s",
+          "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+          },
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 87
+            "y": 59
           },
-          "id": 70,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 2,
+          "id": 1424,
+          "interval": null,
           "links": [],
-          "nullPointMode": "null",
-          "paceLength": 10,
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
+          "mappingType": 1,
+          "mappingTypes": [
             {
-              "expr": "sum(delta(pd_checker_event_count{instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{name}}",
-              "refId": "A",
-              "step": 10
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Replica checker",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
+              "name": "value to text",
+              "value": 1
             },
             {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
+              "name": "range to text",
+              "value": 2
             }
           ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
+          "maxDataPoints": 100,
+          "nullPointMode": "connected",
+          "nullText": null,
+          "pluginVersion": "6.1.6",
+          "postfix": "",
+          "postfixFontSize": "50%",
+          "prefix": "",
+          "prefixFontSize": "50%",
+          "rangeMaps": [
+            {
+              "from": "null",
+              "text": "N/A",
+              "to": "null"
+            }
+          ],
+          "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+          },
+          "tableColumn": "",
+          "targets": [
+            {
+              "expr": "pd_checker_patrol_regions_time{instance=\"$instance\"}",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "refId": "A"
+            }
+          ],
+          "thresholds": "",
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "Patrol Region time",
+          "type": "singlestat",
+          "valueFontSize": "80%",
+          "valueMaps": [
+            {
+              "op": "=",
+              "text": "N/A",
+              "value": "null"
+            }
+          ],
+          "valueName": "current"
         },
         {
           "aliasColors": {},
@@ -5826,7 +5817,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 87
+            "y": 59
           },
           "id": 141,
           "legend": {
@@ -5912,14 +5903,15 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "description": "The replica checker's status",
           "fill": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 95
+            "y": 67
           },
-          "id": 110,
+          "id": 70,
           "legend": {
             "alignAsTable": true,
             "avg": false,
@@ -5930,8 +5922,6 @@
             "min": false,
             "rightSide": true,
             "show": true,
-            "sort": "current",
-            "sortDesc": true,
             "total": false,
             "values": true
           },
@@ -5950,20 +5940,19 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_filter{store=~\"$store\", action=\"filter-target\"}[1m])) by (store, type, scope)",
+              "expr": "sum(delta(pd_checker_event_count{instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{scope}}-store-{{store}}-{{type}}",
-              "metric": "pd_scheduler_event_count",
+              "legendFormat": "{{name}}",
               "refId": "A",
-              "step": 4
+              "step": 10
             }
           ],
           "thresholds": [],
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Filter target",
+          "title": "Replica checker",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -5979,7 +5968,7 @@
           },
           "yaxes": [
             {
-              "format": "ops",
+              "format": "short",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -6012,7 +6001,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 95
+            "y": 67
           },
           "id": 71,
           "legend": {
@@ -6103,7 +6092,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 103
+            "y": 75
           },
           "id": 109,
           "legend": {
@@ -6150,6 +6139,100 @@
           "timeRegions": [],
           "timeShift": null,
           "title": "Filter source",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "ops",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fill": 0,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 75
+          },
+          "id": 110,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 2,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "sum(delta(pd_schedule_filter{store=~\"$store\", action=\"filter-target\"}[1m])) by (store, type, scope)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{scope}}-store-{{store}}-{{type}}",
+              "metric": "pd_scheduler_event_count",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Filter target",
           "tooltip": {
             "shared": true,
             "sort": 0,
