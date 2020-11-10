@@ -144,6 +144,8 @@ const (
 	updateLeaderTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
 	maxMergeTSORequests   = 10000       // should be higher if client is sending requests in burst
 	maxInitClusterRetries = 100
+	defaultTsoInterval = 1 * time.Millisecond
+	defaultPushSize = 150
 )
 
 var (
@@ -154,6 +156,27 @@ var (
 	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
 	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
 )
+
+type tsoController struct {
+	ticker *time.Ticker
+	interval time.Duration
+	tsoCh chan *tsoRequest
+}
+
+func newTsoController(tsoRequests chan *tsoRequest) *tsoController {
+	return &tsoController{ticker: time.NewTicker(defaultTsoInterval), interval:defaultTsoInterval,
+		tsoCh: tsoRequests}
+}
+
+func (c *tsoController) canPush() bool {
+	select {
+	case <-c.ticker.C:
+		return true
+	default:
+
+	}
+	return false
+}
 
 type client struct {
 	*baseClient
@@ -169,6 +192,7 @@ type client struct {
 		physical map[string]int64
 		logical  map[string]int64
 	}
+	controller *tsoController
 }
 
 // NewClient creates a PD client.
@@ -190,6 +214,7 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	c.tsDeadline.ch = make(map[string]chan deadline)
 	c.lastTSO.physical = make(map[string]int64)
 	c.lastTSO.logical = make(map[string]int64)
+	c.controller = newTsoController(c.tsoRequests)
 
 	c.wg.Add(2)
 	go c.tsLoop()
@@ -312,47 +337,49 @@ func (c *client) tsLoop() {
 			requestsDispatcher[dcLocation] = make([]*tsoRequest, 0, maxMergeTSORequests+1)
 		}
 		// Dispatch different dc-locations requests to corresponding TSO stream
-		select {
-		case first := <-c.tsoRequests:
-			requestsDispatcher[first.dcLocation] = append(requestsDispatcher[first.dcLocation], first)
-			for i := 1; i <= len(c.tsoRequests); i++ {
-				req := <-c.tsoRequests
-				requestsDispatcher[req.dcLocation] = append(requestsDispatcher[req.dcLocation], req)
-			}
-			wg := sync.WaitGroup{}
-			for dcLocation, requests := range requestsDispatcher {
-				if len(requests) == 0 {
-					continue
+		if c.controller.canPush() {
+			select {
+			case first := <-c.tsoRequests:
+				requestsDispatcher[first.dcLocation] = append(requestsDispatcher[first.dcLocation], first)
+				for i := 1; i <= len(c.tsoRequests); i++ {
+					req := <-c.tsoRequests
+					requestsDispatcher[req.dcLocation] = append(requestsDispatcher[req.dcLocation], req)
 				}
-				wg.Add(1)
-				go func(dc string, reqs []*tsoRequest) {
-					defer wg.Done()
-					done := make(chan struct{})
-					dl := deadline{
-						timer:  time.After(c.timeout),
-						done:   done,
-						cancel: cancel,
+				wg := sync.WaitGroup{}
+				for dcLocation, requests := range requestsDispatcher {
+					if len(requests) == 0 {
+						continue
 					}
-					c.tsDeadline.RLock()
-					tsDeadlineCh := c.tsDeadline.ch[dc]
-					c.tsDeadline.RUnlock()
-					select {
-					case tsDeadlineCh <- dl:
-					case <-loopCtx.Done():
-						cancel()
-						return
-					}
-					opts := extractSpanReference(reqs)
-					if processErr := c.processTSORequests(streams[dc], dc, reqs, opts); processErr != nil {
-						err.Store(processErr)
-					}
-					close(done)
-				}(dcLocation, requests)
+					wg.Add(1)
+					go func(dc string, reqs []*tsoRequest) {
+						defer wg.Done()
+						done := make(chan struct{})
+						dl := deadline{
+							timer:  time.After(c.timeout),
+							done:   done,
+							cancel: cancel,
+						}
+						c.tsDeadline.RLock()
+						tsDeadlineCh := c.tsDeadline.ch[dc]
+						c.tsDeadline.RUnlock()
+						select {
+						case tsDeadlineCh <- dl:
+						case <-loopCtx.Done():
+							cancel()
+							return
+						}
+						opts := extractSpanReference(reqs)
+						if processErr := c.processTSORequests(streams[dc], dc, reqs, opts); processErr != nil {
+							err.Store(processErr)
+						}
+						close(done)
+					}(dcLocation, requests)
+				}
+				wg.Wait()
+			case <-loopCtx.Done():
+				cancel()
+				return
 			}
-			wg.Wait()
-		case <-loopCtx.Done():
-			cancel()
-			return
 		}
 		if err.Load() != nil {
 			select {
