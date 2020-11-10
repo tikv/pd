@@ -253,7 +253,9 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 				failures[region.GetID()] = err
 				continue
 			}
-			ops = append(ops, op)
+			if op != nil {
+				ops = append(ops, op)
+			}
 			delete(regions, region.GetID())
 			delete(failures, region.GetID())
 		}
