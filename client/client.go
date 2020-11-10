@@ -118,7 +118,6 @@ func WithExcludeTombstone() GetStoreOption {
 // RegionsOp represents available options when operate regions
 type RegionsOp struct {
 	group      string
-	regionsID  []uint64
 	retryLimit int
 }
 
