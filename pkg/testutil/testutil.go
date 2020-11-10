@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	check "github.com/pingcap/check"
+	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"google.golang.org/grpc"
 )
