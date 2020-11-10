@@ -145,7 +145,7 @@ func extractInstancesFromResponse(resp promModel.Value, addresses []string) (Que
 
 		instanceName := buildInstanceIdentifier(string(podName), string(namespace))
 
-		if addr, ok := instancesSet[string(instanceName)]; ok {
+		if addr, ok := instancesSet[instanceName]; ok {
 			result[addr] = float64(sample.Value)
 		}
 	}

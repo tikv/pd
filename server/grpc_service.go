@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -838,7 +839,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			return nil, err
 		}
 		log.Info("update service GC safe point",
-			zap.String("service-id", string(ssp.ServiceID)),
+			zap.String("service-id", ssp.ServiceID),
 			zap.Int64("expire-at", ssp.ExpiredAt),
 			zap.Uint64("safepoint", ssp.SafePoint))
 		// If the min safepoint is updated, load the next one
@@ -991,6 +992,32 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	return &pdpb.SyncMaxTSResponse{
 		Header: s.header(),
 		Dcs:    processedDCs,
+	}, nil
+}
+
+// GetDCLocations will return the dcLocations which hold by the Global TSO Allocator.
+// If the receiving PD Member is not PD Leader, GetDCLocations will return error.
+func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocationsRequest) (*pdpb.GetDCLocationsResponse, error) {
+	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+	if !s.member.IsLeader() {
+		return nil, fmt.Errorf("receiving pd member[%v] is not pd leader", s.member.ID())
+	}
+	allocator, err := s.GetTSOAllocatorManager().GetAllocator(config.GlobalDCLocation)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tso allocator[%v]", config.GlobalDCLocation)
+	}
+	globalAllocator, ok := allocator.(*tso.GlobalTSOAllocator)
+	if !ok {
+		return nil, fmt.Errorf("tso allocator[%v] is not global tso allocator", config.GlobalDCLocation)
+	}
+	if !globalAllocator.IsInitialize() {
+		return nil, fmt.Errorf("global tso alloactor is not initialized")
+	}
+	return &pdpb.GetDCLocationsResponse{
+		Header:      s.header(),
+		DcLocations: globalAllocator.GetDcLocations(),
 	}, nil
 }
 
