@@ -252,15 +252,16 @@ func (c *client) watchTSDeadline(ctx context.Context, dcLocation string) {
 	}
 }
 
-func (c *client) checkStreamTimeout(streamCtx context.Context, cancel context.CancelFunc, createdCh chan struct{}) {
+func (c *client) checkStreamTimeout(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
 	select {
+	case <-done:
+		return
 	case <-time.After(c.timeout):
 		cancel()
-	case <-createdCh:
-		return
 	case <-streamCtx.Done():
 		return
 	}
+	<-done
 }
 
 func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
@@ -287,30 +288,28 @@ func (c *client) tsLoop() {
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
 	defer loopCancel()
 
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 	for {
-		select {
-		case <-loopCtx.Done():
-			return
-		default:
-		}
 		for _, dcLocation := range c.getDCLocations() {
 			if !c.checkTSODispatcher(dcLocation) {
 				c.createTSODispatcher(dcLocation)
 				go func(dc string, tsoDispatcher chan *tsoRequest) {
 					var (
-						err       error
-						ctx       context.Context
-						cancel    context.CancelFunc
-						stream    pdpb.PD_TsoClient
-						opts      []opentracing.StartSpanOption
-						createdCh = make(chan struct{})
-						requests  = make([]*tsoRequest, maxMergeTSORequests+1)
+						err      error
+						ctx      context.Context
+						cancel   context.CancelFunc
+						stream   pdpb.PD_TsoClient
+						opts     []opentracing.StartSpanOption
+						done     = make(chan struct{})
+						requests = make([]*tsoRequest, maxMergeTSORequests+1)
 					)
 					for {
 						if stream == nil {
 							ctx, cancel = context.WithCancel(loopCtx)
-							go c.checkStreamTimeout(ctx, cancel, createdCh)
+							go c.checkStreamTimeout(ctx, cancel, done)
 							stream, err = pdpb.NewPDClient(c.connMu.clientConns[c.connMu.allocators[dc]]).Tso(ctx)
+							done <- struct{}{}
 							if err != nil {
 								select {
 								case <-ctx.Done():
@@ -327,9 +326,6 @@ func (c *client) tsLoop() {
 									return
 								}
 								continue
-							}
-							if stream != nil {
-								createdCh <- struct{}{}
 							}
 						}
 						select {
@@ -373,6 +369,12 @@ func (c *client) tsLoop() {
 					}
 				}(dcLocation, c.tsoDispatcher.ch[dcLocation])
 			}
+		}
+		select {
+		case <-ticker.C:
+			continue
+		case <-loopCtx.Done():
+			return
 		}
 	}
 }
