@@ -118,7 +118,7 @@ func WithExcludeTombstone() GetStoreOption {
 // RegionsOp represents available options when operate regions
 type RegionsOp struct {
 	group      string
-	retryLimit int
+	retryLimit uint64
 }
 
 // RegionsOption configures RegionsOp
@@ -130,7 +130,7 @@ func WithGroup(group string) RegionsOption {
 }
 
 // WithRetry specify the retry limit during Scatter/Split Regions
-func WithRetry(retry int) RegionsOption {
+func WithRetry(retry uint64) RegionsOption {
 	return func(op *RegionsOp) { op.retryLimit = retry }
 }
 
@@ -953,7 +953,7 @@ func (c *client) requestHeader() *pdpb.RequestHeader {
 	}
 }
 
-func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint64, group string, retryLimit int) (*pdpb.ScatterRegionResponse, error) {
+func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint64, group string, retryLimit uint64) (*pdpb.ScatterRegionResponse, error) {
 	start := time.Now()
 	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
 
@@ -962,7 +962,7 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 		Header:     c.requestHeader(),
 		Group:      group,
 		RegionsId:  regionsID,
-		RetryLimit: uint64(retryLimit),
+		RetryLimit: retryLimit,
 	})
 	cancel()
 	if err != nil {
