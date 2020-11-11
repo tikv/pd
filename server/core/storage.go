@@ -33,14 +33,15 @@ import (
 )
 
 const (
-	clusterPath              = "raft"
-	configPath               = "config"
-	schedulePath             = "schedule"
-	gcPath                   = "gc"
-	rulesPath                = "rules"
-	replicationPath          = "replication_mode"
-	componentPath            = "component"
-	customScheduleConfigPath = "scheduler_config"
+	clusterPath                = "raft"
+	configPath                 = "config"
+	schedulePath               = "schedule"
+	gcPath                     = "gc"
+	rulesPath                  = "rules"
+	replicationPath            = "replication_mode"
+	componentPath              = "component"
+	customScheduleConfigPath   = "scheduler_config"
+	gcWorkerServiceSafePointID = "gc_worker"
 )
 
 const (
@@ -418,6 +419,14 @@ type ServiceSafePoint struct {
 
 // SaveServiceGCSafePoint saves a GC safepoint for the service
 func (s *Storage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
+	if ssp.ServiceID == "" {
+		return errors.New("service id of service safepoint cannot be empty")
+	}
+
+	if ssp.ServiceID == gcWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
+		return errors.New("TTL of gc_worker's service safe point must be infinity")
+	}
+
 	key := path.Join(gcPath, "safe_point", "service", ssp.ServiceID)
 	value, err := json.Marshal(ssp)
 	if err != nil {
@@ -429,8 +438,23 @@ func (s *Storage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 
 // RemoveServiceGCSafePoint removes a GC safepoint for the service
 func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
+	if serviceID == gcWorkerServiceSafePointID {
+		return errors.New("cannot remove service safe point of gc_worker")
+	}
 	key := path.Join(gcPath, "safe_point", "service", serviceID)
 	return s.Remove(key)
+}
+
+func (s *Storage) initServiceGCSafePointForGCWorker() (*ServiceSafePoint, error) {
+	ssp := &ServiceSafePoint{
+		ServiceID: gcWorkerServiceSafePointID,
+		SafePoint: 0,
+		ExpiredAt: math.MaxInt64,
+	}
+	if err := s.SaveServiceGCSafePoint(ssp); err != nil {
+		return nil, err
+	}
+	return ssp, nil
 }
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
@@ -443,7 +467,8 @@ func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, e
 		return nil, err
 	}
 	if len(keys) == 0 {
-		return &ServiceSafePoint{}, nil
+		// There's no service safepoint. Store an initial value for GC worker.
+		return s.initServiceGCSafePointForGCWorker()
 	}
 
 	min := &ServiceSafePoint{SafePoint: math.MaxUint64}

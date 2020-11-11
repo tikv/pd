@@ -825,10 +825,6 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 				return nil, err
 			}
 		}
-		// If ssp is the first safepoint, it is the min value now
-		if min.SafePoint == 0 {
-			min = ssp
-		}
 	}
 
 	return &pdpb.UpdateServiceGCSafePointResponse{

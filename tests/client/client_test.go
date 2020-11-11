@@ -634,17 +634,24 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		TTL       int64
 		SafePoint uint64
 	}{
-		{"a", 1000, 1},
 		{"b", 1000, 2},
+		{"a", 1000, 1},
 		{"c", 1000, 3},
 	}
 	for _, ssp := range serviceSafePoints {
 		min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
 			ssp.ServiceID, 1000, ssp.SafePoint)
 		c.Assert(err, IsNil)
-		c.Assert(min, Equals, uint64(1))
+		// An service safepoint of ID "gc_worker" is automatically initialized as 0
+		c.Assert(min, Equals, uint64(0))
 	}
+
 	min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", math.MaxInt64, 10)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(1))
+
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", 1000, 4)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(2))
@@ -685,7 +692,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(minSsp.ExpiredAt, Less, oldMinSsp.ExpiredAt)
 
-	// TTL can be infinite
+	// TTL can be infinite (represented by math.MaxInt64)
 	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", math.MaxInt64, 3)
 	c.Assert(err, IsNil)
@@ -694,6 +701,32 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
+
+	// Delete "a" and "c"
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", -1, 3)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(4))
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"a", -1, 4)
+	c.Assert(err, IsNil)
+	// Now gc_worker is the only remaining service safe point.
+	c.Assert(min, Equals, uint64(10))
+
+	// gc_worker cannot be deleted.
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", -1, 10)
+	c.Assert(err, NotNil)
+
+	// Cannot set non-infinity TTL for gc_worker
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", 10000000, 10)
+	c.Assert(err, NotNil)
+
+	// Service safepoint must have a non-empty ID
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"", 1000, 15)
+	c.Assert(err, NotNil)
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {
