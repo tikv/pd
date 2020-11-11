@@ -1012,6 +1012,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	}, nil
 }
 
+// SplitRegions split regions by the given split keys
 func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
 	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
 		return nil, err

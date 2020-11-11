@@ -121,7 +121,7 @@ type RegionsOp struct {
 	retryLimit int
 }
 
-// RegionOption configures RegionOp
+// RegionsOption configures RegionsOp
 type RegionsOption func(op *RegionsOp)
 
 // WithGroup specify the group during Scatter/Split Regions
