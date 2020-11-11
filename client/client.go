@@ -210,15 +210,15 @@ func (c *client) tsCancelLoop() {
 	}
 }
 
-func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.CancelFunc, createdCh chan struct{}) {
+func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
 	select {
+	case <-done:
+		return
 	case <-time.After(c.timeout):
 		cancel()
-	case <-createdCh:
-		return
 	case <-loopCtx.Done():
-		return
 	}
+	<-done
 }
 
 func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
@@ -249,7 +249,7 @@ func (c *client) tsLoop() {
 	var opts []opentracing.StartSpanOption
 	var stream pdpb.PD_TsoClient
 	var cancel context.CancelFunc
-	createdCh := make(chan struct{})
+	done := make(chan struct{})
 
 	for {
 		var err error
@@ -257,11 +257,9 @@ func (c *client) tsLoop() {
 		if stream == nil {
 			var ctx context.Context
 			ctx, cancel = context.WithCancel(loopCtx)
-			go c.checkStreamTimeout(loopCtx, cancel, createdCh)
+			go c.checkStreamTimeout(loopCtx, cancel, done)
 			stream, err = c.leaderClient().Tso(ctx)
-			if stream != nil {
-				createdCh <- struct{}{}
-			}
+			done <- struct{}{}
 			if err != nil {
 				select {
 				case <-loopCtx.Done():
