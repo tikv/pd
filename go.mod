@@ -29,7 +29,7 @@ require (
 	github.com/pingcap/errors v0.11.5-0.20201029093017-5a7df2af2ac7
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
 	github.com/pingcap/kvproto v0.0.0-20201104042953-62eb316d5182
-	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
+	github.com/pingcap/log v0.0.0-20201112100606-8f1e84a3abc8
 	github.com/pingcap/sysutil v0.0.0-20201021075216-f93ced2829e2
 	github.com/pingcap/tiup v1.2.3
 	github.com/prometheus/client_golang v1.2.1
@@ -52,7 +52,6 @@ require (
 )
 
 replace (
-	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad => github.com/JmPotato/log v0.0.0-20201112063346-bdda5b64c263
 	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 )
