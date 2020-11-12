@@ -286,6 +286,8 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 		"schedule.max-merge-region-size":          999,
 		"schedule.max-merge-region-keys":          999,
 		"schedule.scheduler-max-waiting-operator": 999,
+		"schedule.leader-schedule-limit":          999,
+		"schedule.region-schedule-limit":          999,
 	}
 	postData, err := json.Marshal(r)
 	c.Assert(err, IsNil)
@@ -296,10 +298,14 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionSize(), Equals, uint64(999))
 	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionKeys(), Equals, uint64(999))
 	c.Assert(s.svr.GetPersistOptions().GetSchedulerMaxWaitingOperator(), Equals, uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetLeaderScheduleLimit(), Equals, uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetRegionScheduleLimit(), Equals, uint64(999))
 	time.Sleep(5 * time.Second)
 	c.Assert(s.svr.GetPersistOptions().GetMaxSnapshotCount(), Not(Equals), uint64(999))
 	c.Assert(s.svr.GetPersistOptions().IsLocationReplacementEnabled(), Equals, true)
 	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionSize(), Not(Equals), uint64(999))
 	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionKeys(), Not(Equals), uint64(999))
 	c.Assert(s.svr.GetPersistOptions().GetSchedulerMaxWaitingOperator(), Not(Equals), uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetLeaderScheduleLimit(), Not(Equals), uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetRegionScheduleLimit(), Not(Equals), uint64(999))
 }
