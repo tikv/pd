@@ -943,7 +943,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 	return c.leaderClient().SplitRegions(ctx, &pdpb.SplitRegionsRequest{
 		Header:     c.requestHeader(),
 		SplitKeys:  splitKeys,
-		RetryLimit: 0,
+		RetryLimit: options.retryLimit,
 	})
 }
 

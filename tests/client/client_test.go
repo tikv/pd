@@ -930,7 +930,7 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	err := s.regionHeartbeat.Send(req)
 	regionsID := []uint64{regionID}
 	c.Assert(err, IsNil)
-	testutil.WaitUntilByInterval(c, func(c *C) bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		scatterResp, err := s.client.ScatterRegions(context.Background(), regionsID, pd.WithGroup("test"), pd.WithRetry(1))
 		if c.Check(err, NotNil) {
 			return false
@@ -943,6 +943,6 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 			return false
 		}
 		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
-	}, 1*time.Second)
+	}, testutil.WithSleepInterval(1*time.Second))
 	c.Succeed()
 }
