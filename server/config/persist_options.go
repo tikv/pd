@@ -22,17 +22,16 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
+	"go.etcd.io/etcd/clientv3"
 )
 
 // PersistOptions wraps all configurations that need to persist to storage and
@@ -283,11 +282,23 @@ func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
+	if v, ok, err := o.getTTLUint("schedule.leader-schedule-limit"); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse schedule.leader-schedule-limit from PersistOptions's ttl storage")
+	}
 	return o.GetScheduleConfig().LeaderScheduleLimit
 }
 
 // GetRegionScheduleLimit returns the limit for region schedule.
 func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
+	if v, ok, err := o.getTTLUint("schedule.region-schedule-limit"); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse schedule.region-schedule-limit from PersistOptions's ttl storage")
+	}
 	return o.GetScheduleConfig().RegionScheduleLimit
 }
 
