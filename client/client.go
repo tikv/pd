@@ -902,11 +902,7 @@ func (c *client) ScatterRegions(ctx context.Context, regionsID []uint64, opts ..
 		span = opentracing.StartSpan("pdclient.ScatterRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
-	options := &RegionsOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	return c.scatterRegionsWithOptions(ctx, regionsID, options.group, options.retryLimit)
+	return c.scatterRegionsWithOptions(ctx, regionsID, opts...)
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
@@ -931,9 +927,6 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 		span = opentracing.StartSpan("pdclient.SplitRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
-	start := time.Now()
-	defer func() { cmdDurationGetOperator.Observe(time.Since(start).Seconds()) }()
-
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	options := &RegionsOp{}
@@ -953,16 +946,19 @@ func (c *client) requestHeader() *pdpb.RequestHeader {
 	}
 }
 
-func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint64, group string, retryLimit uint64) (*pdpb.ScatterRegionResponse, error) {
+func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error) {
 	start := time.Now()
 	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
-
+	options := &RegionsOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
 		Header:     c.requestHeader(),
-		Group:      group,
+		Group:      options.group,
 		RegionsId:  regionsID,
-		RetryLimit: retryLimit,
+		RetryLimit: options.retryLimit,
 	})
 	cancel()
 	if err != nil {
