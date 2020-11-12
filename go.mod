@@ -52,6 +52,7 @@ require (
 )
 
 replace (
+	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad => github.com/JmPotato/log v0.0.0-20201112063346-bdda5b64c263
 	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 )
