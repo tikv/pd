@@ -147,7 +147,8 @@ const (
 	defaultPDTimeout      = 3 * time.Second
 	dialTimeout           = 3 * time.Second
 	updateLeaderTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
-	maxMergeTSORequests   = 10000       // should be higher if client is sending requests in burst
+	tsLoopDCCheckInterval = time.Minute
+	maxMergeTSORequests   = 10000 // should be higher if client is sending requests in burst
 	maxInitClusterRetries = 100
 )
 
@@ -206,17 +207,20 @@ func (c *client) tsCancelLoop() {
 	tsCancelLoopCtx, tsCancelLoopCancel := context.WithCancel(c.ctx)
 	defer tsCancelLoopCancel()
 
+	ticker := time.NewTicker(tsLoopDCCheckInterval)
+	defer ticker.Stop()
 	for {
-		select {
-		case <-tsCancelLoopCtx.Done():
-			return
-		default:
-		}
 		// Watch every dc-location's tsDeadlineCh
 		c.allocators.Range(func(dcLocation, _ interface{}) bool {
 			c.watchTSDeadline(tsCancelLoopCtx, dcLocation.(string))
 			return true
 		})
+		select {
+		case <-ticker.C:
+			continue
+		case <-tsCancelLoopCtx.Done():
+			return
+		}
 	}
 }
 
@@ -279,7 +283,7 @@ func (c *client) tsLoop() {
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
 	defer loopCancel()
 
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(tsLoopDCCheckInterval)
 	defer ticker.Stop()
 	for {
 		c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
