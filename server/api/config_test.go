@@ -318,3 +318,47 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 	c.Assert(s.svr.GetPersistOptions().GetReplicaScheduleLimit(), Not(Equals), uint64(999))
 	c.Assert(s.svr.GetPersistOptions().GetMergeScheduleLimit(), Not(Equals), uint64(999))
 }
+
+func (s *testConfigSuite) TestConfigTTLAfterTransferLeader(c *C) {
+	_, svrs, cleanup := mustNewCluster(c, 3)
+	defer cleanup()
+	leader := mustWaitLeader(c, svrs)
+	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=30", leader.GetAddr())
+	r := map[string]interface{}{
+		"schedule.max-snapshot-count":             999,
+		"schedule.enable-location-replacement":    false,
+		"schedule.max-merge-region-size":          999,
+		"schedule.max-merge-region-keys":          999,
+		"schedule.scheduler-max-waiting-operator": 999,
+		"schedule.leader-schedule-limit":          999,
+		"schedule.region-schedule-limit":          999,
+		"schedule.hot-region-schedule-limit":      999,
+		"schedule.replica-schedule-limit":         999,
+		"schedule.merge-schedule-limit":           999,
+	}
+	postData, err := json.Marshal(r)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
+	time.Sleep(5 * time.Second)
+	leader.Close()
+	// remove the old leader from svrs, or next mustWaitLeader will fail
+	for i, svr := range svrs {
+		if svr == leader {
+			svrs = append(svrs[:i], svrs[i+1:]...)
+			break
+		}
+	}
+	time.Sleep(5 * time.Second)
+	leader = mustWaitLeader(c, svrs)
+	c.Assert(leader.GetPersistOptions().GetMaxSnapshotCount(), Equals, uint64(999))
+	c.Assert(leader.GetPersistOptions().IsLocationReplacementEnabled(), Equals, false)
+	c.Assert(leader.GetPersistOptions().GetMaxMergeRegionSize(), Equals, uint64(999))
+	c.Assert(leader.GetPersistOptions().GetMaxMergeRegionKeys(), Equals, uint64(999))
+	c.Assert(leader.GetPersistOptions().GetSchedulerMaxWaitingOperator(), Equals, uint64(999))
+	c.Assert(leader.GetPersistOptions().GetLeaderScheduleLimit(), Equals, uint64(999))
+	c.Assert(leader.GetPersistOptions().GetRegionScheduleLimit(), Equals, uint64(999))
+	c.Assert(leader.GetPersistOptions().GetHotRegionScheduleLimit(), Equals, uint64(999))
+	c.Assert(leader.GetPersistOptions().GetReplicaScheduleLimit(), Equals, uint64(999))
+	c.Assert(leader.GetPersistOptions().GetMergeScheduleLimit(), Equals, uint64(999))
+}

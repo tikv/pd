@@ -693,7 +693,7 @@ func (o *PersistOptions) LoadTTLFromEtcd(ctx context.Context, client *clientv3.C
 		o.ttl = cache.NewStringTTL(ctx, time.Second*5, time.Minute*5)
 	}
 	for _, resp := range resps.Kvs {
-		key := string(resp.Key)
+		key := string(resp.Key)[len(ttlConfigPrefix):]
 		value := string(resp.Value)
 		leaseID := resp.Lease
 		resp, err := client.TimeToLive(ctx, clientv3.LeaseID(leaseID))
