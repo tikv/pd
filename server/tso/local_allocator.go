@@ -15,6 +15,8 @@ package tso
 
 import (
 	"context"
+	"sort"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -44,29 +46,29 @@ type LocalTSOAllocator struct {
 	rootPath        string
 	dcLocation      string
 	allocatorLeader atomic.Value // stored as *pdpb.Member
+	// allocatorManager is used to differentiate the Local TSO
+	allocatorManager *AllocatorManager
 }
 
 // NewLocalTSOAllocator creates a new local TSO allocator.
 func NewLocalTSOAllocator(
-	member *member.Member,
+	am *AllocatorManager,
 	leadership *election.Leadership,
 	dcLocation string,
-	saveInterval time.Duration,
-	updatePhysicalInterval time.Duration,
-	maxResetTSGap func() time.Duration,
 ) Allocator {
 	return &LocalTSOAllocator{
 		leadership: leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
 			rootPath:               leadership.GetLeaderKey(),
-			saveInterval:           saveInterval,
-			updatePhysicalInterval: updatePhysicalInterval,
-			maxResetTSGap:          maxResetTSGap,
+			saveInterval:           am.saveInterval,
+			updatePhysicalInterval: am.updatePhysicalInterval,
+			maxResetTSGap:          am.maxResetTSGap,
 		},
-		member:     member,
-		rootPath:   leadership.GetLeaderKey(),
-		dcLocation: dcLocation,
+		member:           am.member,
+		rootPath:         leadership.GetLeaderKey(),
+		dcLocation:       dcLocation,
+		allocatorManager: am,
 	}
 }
 
@@ -99,8 +101,11 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	// Todo: use the low bits of TSO's logical part to distinguish the different local TSO
-	return lta.timestampOracle.getTS(lta.leadership, count)
+	tso, err := lta.timestampOracle.getTS(lta.leadership, count)
+	if err != nil {
+		return tso, err
+	}
+	return lta.differentiateLocalTSO(tso), err
 }
 
 // Reset is used to reset the TSO allocator.
@@ -222,4 +227,26 @@ func (lta *LocalTSOAllocator) WatchAllocatorLeader(serverCtx context.Context, al
 	lta.setAllocatorLeader(allocatorLeader)
 	lta.leadership.Watch(serverCtx, revision)
 	lta.unsetAllocatorLeader()
+}
+
+func (lta *LocalTSOAllocator) differentiateLocalTSO(rawTSO pdpb.Timestamp) pdpb.Timestamp {
+	dcLocationMap := lta.allocatorManager.GetClusterDCLocations()
+	dcLocationList := make([]string, 0, len(dcLocationMap))
+	for dcLocation := range dcLocationMap {
+		dcLocationList = append(dcLocationList, dcLocation)
+	}
+	sort.Strings(dcLocationList)
+	idx := 0
+	for i, dcLocation := range dcLocationList {
+		if lta.dcLocation == dcLocation {
+			idx = i
+			break
+		}
+	}
+	shiftNum := len(strconv.FormatInt(int64(len(dcLocationList)), 10))
+	return pdpb.Timestamp{
+		Physical: rawTSO.Physical,
+		// Todo: prevent overflow
+		Logical: rawTSO.Logical*10*int64(shiftNum) + int64(idx),
+	}
 }

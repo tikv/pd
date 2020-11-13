@@ -179,9 +179,9 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 
 	var allocator Allocator
 	if dcLocation == config.GlobalDCLocation {
-		allocator = NewGlobalTSOAllocator(am, leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
+		allocator = NewGlobalTSOAllocator(am, leadership, am.getAllocatorPath(dcLocation))
 	} else {
-		allocator = NewLocalTSOAllocator(am.member, leadership, dcLocation, am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
+		allocator = NewLocalTSOAllocator(am, leadership, dcLocation)
 	}
 	// Update or create a new allocatorGroup
 	am.mu.allocatorGroups[dcLocation] = &allocatorGroup{

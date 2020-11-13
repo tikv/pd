@@ -65,18 +65,15 @@ func NewGlobalTSOAllocator(
 	am *AllocatorManager,
 	leadership *election.Leadership,
 	rootPath string,
-	saveInterval time.Duration,
-	updatePhysicalInterval time.Duration,
-	maxResetTSGap func() time.Duration,
 ) Allocator {
 	gta := &GlobalTSOAllocator{
 		leadership: leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
 			rootPath:               rootPath,
-			saveInterval:           saveInterval,
-			updatePhysicalInterval: updatePhysicalInterval,
-			maxResetTSGap:          maxResetTSGap,
+			saveInterval:           am.saveInterval,
+			updatePhysicalInterval: am.updatePhysicalInterval,
+			maxResetTSGap:          am.maxResetTSGap,
 		},
 		allocatorManager: am,
 	}
