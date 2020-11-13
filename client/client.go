@@ -252,7 +252,6 @@ func (c *client) checkStreamTimeout(streamCtx context.Context, cancel context.Ca
 	case <-time.After(c.timeout):
 		cancel()
 	case <-streamCtx.Done():
-		return
 	}
 	<-done
 }
@@ -296,12 +295,12 @@ func (c *client) tsLoop() {
 						cancel   context.CancelFunc
 						stream   pdpb.PD_TsoClient
 						opts     []opentracing.StartSpanOption
-						done     = make(chan struct{})
 						requests = make([]*tsoRequest, maxMergeTSORequests+1)
 					)
 					for {
 						if stream == nil {
 							ctx, cancel = context.WithCancel(loopCtx)
+							done := make(chan struct{})
 							go c.checkStreamTimeout(ctx, cancel, done)
 							stream, err = pdpb.NewPDClient(c.getClientConnByDCLocation(dc)).Tso(ctx)
 							done <- struct{}{}
