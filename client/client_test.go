@@ -15,6 +15,7 @@ package pd
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -78,6 +79,13 @@ func (s *testClientCtxSuite) TestClientCtx(c *C) {
 	_, err := NewClientWithContext(ctx, []string{"localhost:8080"}, SecurityOption{})
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Less, time.Second*4)
+}
+
+func (s *testClientCtxSuite) TestClientWithRetry(c *C) {
+	start := time.Now()
+	_, err := NewClientWithContext(context.TODO(), []string{"localhost:8080"}, SecurityOption{}, WithMaxErrorRetry(5))
+	c.Assert(err, NotNil)
+	c.Assert(time.Since(start), Less, time.Second*6)
 }
 
 var _ = Suite(&testClientDialOptionSuite{})
