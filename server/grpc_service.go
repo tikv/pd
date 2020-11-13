@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -807,6 +808,9 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			ExpiredAt: now.Unix() + request.TTL,
 			SafePoint: request.SafePoint,
 		}
+		if request.TTL == math.MaxInt64 {
+			ssp.ExpiredAt = math.MaxInt64
+		}
 		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
 			return nil, err
 		}
@@ -820,10 +824,6 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			if err != nil {
 				return nil, err
 			}
-		}
-		// If ssp is the first safepoint, it is the min value now
-		if min.SafePoint == 0 {
-			min = ssp
 		}
 	}
 
