@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 // Region contains information of a region's meta and its peers.
@@ -158,15 +159,9 @@ type client struct {
 	*baseClient
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding dc-location TSO channel.
-	tsoDispatcher struct {
-		sync.RWMutex
-		ch map[string]chan *tsoRequest
-	}
+	tsoDispatcher sync.Map // Same as map[string]chan *tsoRequest
 	// dc-location -> deadline
-	tsDeadline struct {
-		sync.RWMutex
-		ch map[string]chan deadline
-	}
+	tsDeadline sync.Map // Same as map[string]chan deadline
 	// dc-location -> int64
 	lastTSO struct {
 		sync.Mutex
@@ -190,8 +185,6 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	c := &client{
 		baseClient: base,
 	}
-	c.tsoDispatcher.ch = make(map[string]chan *tsoRequest)
-	c.tsDeadline.ch = make(map[string]chan deadline)
 	c.lastTSO.physical = make(map[string]int64)
 	c.lastTSO.logical = make(map[string]int64)
 
@@ -221,17 +214,17 @@ func (c *client) tsCancelLoop() {
 		default:
 		}
 		// Watch every dc-location's tsDeadlineCh
-		for _, dcLocation := range c.getDCLocations() {
-			c.watchTSDeadline(tsCancelLoopCtx, dcLocation)
-		}
+		c.allocators.Range(func(dcLocation, _ interface{}) bool {
+			c.watchTSDeadline(tsCancelLoopCtx, dcLocation.(string))
+			return true
+		})
 	}
 }
 
 func (c *client) watchTSDeadline(ctx context.Context, dcLocation string) {
-	c.tsDeadline.Lock()
-	defer c.tsDeadline.Unlock()
-	if _, exist := c.tsDeadline.ch[dcLocation]; !exist {
-		c.tsDeadline.ch[dcLocation] = make(chan deadline, 1)
+	if _, exist := c.tsDeadline.Load(dcLocation); !exist {
+		tsDeadlineCh := make(chan deadline, 1)
+		c.tsDeadline.Store(dcLocation, tsDeadlineCh)
 		go func(dc string, tsDeadlineCh <-chan deadline) {
 			for {
 				select {
@@ -248,7 +241,7 @@ func (c *client) watchTSDeadline(ctx context.Context, dcLocation string) {
 					return
 				}
 			}
-		}(dcLocation, c.tsDeadline.ch[dcLocation])
+		}(dcLocation, tsDeadlineCh)
 	}
 }
 
@@ -291,9 +284,11 @@ func (c *client) tsLoop() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
-		for _, dcLocation := range c.getDCLocations() {
+		c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
+			dcLocation := dcLocationKey.(string)
 			if !c.checkTSODispatcher(dcLocation) {
 				c.createTSODispatcher(dcLocation)
+				dispatcher, _ := c.tsoDispatcher.Load(dcLocation)
 				go func(dc string, tsoDispatcher chan *tsoRequest) {
 					var (
 						err      error
@@ -308,7 +303,7 @@ func (c *client) tsLoop() {
 						if stream == nil {
 							ctx, cancel = context.WithCancel(loopCtx)
 							go c.checkStreamTimeout(ctx, cancel, done)
-							stream, err = pdpb.NewPDClient(c.connMu.clientConns[c.connMu.allocators[dc]]).Tso(ctx)
+							stream, err = pdpb.NewPDClient(c.getClientConnByDCLocation(dc)).Tso(ctx)
 							done <- struct{}{}
 							if err != nil {
 								select {
@@ -341,11 +336,9 @@ func (c *client) tsLoop() {
 								done:   done,
 								cancel: cancel,
 							}
-							c.tsDeadline.RLock()
-							tsDeadlineCh := c.tsDeadline.ch[dc]
-							c.tsDeadline.RUnlock()
+							tsDeadlineCh, _ := c.tsDeadline.Load(dc)
 							select {
-							case tsDeadlineCh <- dl:
+							case tsDeadlineCh.(chan deadline) <- dl:
 							case <-ctx.Done():
 								return
 							}
@@ -367,9 +360,10 @@ func (c *client) tsLoop() {
 							stream = nil
 						}
 					}
-				}(dcLocation, c.tsoDispatcher.ch[dcLocation])
+				}(dcLocation, dispatcher.(chan *tsoRequest))
 			}
-		}
+			return true
+		})
 		select {
 		case <-ticker.C:
 			continue
@@ -380,19 +374,15 @@ func (c *client) tsLoop() {
 }
 
 func (c *client) checkTSODispatcher(dcLocation string) bool {
-	c.tsoDispatcher.RLock()
-	defer c.tsoDispatcher.RUnlock()
-	tsoChan, exist := c.tsoDispatcher.ch[dcLocation]
-	if !exist || tsoChan == nil {
+	tsoChan, ok := c.tsoDispatcher.Load(dcLocation)
+	if !ok || tsoChan == nil {
 		return false
 	}
 	return true
 }
 
 func (c *client) createTSODispatcher(dcLocation string) {
-	c.tsoDispatcher.Lock()
-	defer c.tsoDispatcher.Unlock()
-	c.tsoDispatcher.ch[dcLocation] = make(chan *tsoRequest, maxMergeTSORequests)
+	c.tsoDispatcher.Store(dcLocation, make(chan *tsoRequest, maxMergeTSORequests))
 }
 
 func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
@@ -486,27 +476,25 @@ func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.tsoDispatcher.RLock()
-	for _, tsoDispatcher := range c.tsoDispatcher.ch {
-		c.revokeTSORequest(errors.WithStack(errClosing), tsoDispatcher)
-	}
-	c.tsoDispatcher.RUnlock()
+	c.tsoDispatcher.Range(func(_, dispatcher interface{}) bool {
+		c.revokeTSORequest(errors.WithStack(errClosing), dispatcher.(chan *tsoRequest))
+		return true
+	})
 
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
-	for _, cc := range c.connMu.clientConns {
-		if err := cc.Close(); err != nil {
+	c.clientConns.Range(func(_, cc interface{}) bool {
+		if err := cc.(*grpc.ClientConn).Close(); err != nil {
 			log.Error("[pd] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
-	}
+		return true
+	})
 }
 
 // leaderClient gets the client of current PD leader.
 func (c *client) leaderClient() pdpb.PDClient {
-	c.connMu.RLock()
-	defer c.connMu.RUnlock()
-
-	return pdpb.NewPDClient(c.connMu.clientConns[c.connMu.leader])
+	if cc, ok := c.clientConns.Load(c.GetLeaderAddr()); ok {
+		return pdpb.NewPDClient(cc.(*grpc.ClientConn))
+	}
+	return nil
 }
 
 var tsoReqPool = sync.Pool{
@@ -533,14 +521,7 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req.start = time.Now()
 	req.dcLocation = dcLocation
 	c.waitForDispatcher()
-	if !c.checkTSODispatcher(dcLocation) {
-		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
-		log.Error("[pd] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
-		req.done <- err
-		return req
-	}
-	c.dispatchRequest(dcLocation, req)
-	return req
+	return c.dispatchRequest(dcLocation, req)
 }
 
 func (c *client) waitForDispatcher() {
@@ -554,15 +535,24 @@ func (c *client) waitForDispatcher() {
 }
 
 func (c *client) getDispatcherSize() int {
-	c.tsoDispatcher.RLock()
-	defer c.tsoDispatcher.RUnlock()
-	return len(c.tsoDispatcher.ch)
+	i := 0
+	c.tsoDispatcher.Range(func(_, _ interface{}) bool {
+		i++
+		return true
+	})
+	return i
 }
 
-func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) {
-	c.tsoDispatcher.RLock()
-	defer c.tsoDispatcher.RUnlock()
-	c.tsoDispatcher.ch[dcLocation] <- request
+func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) *tsoRequest {
+	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
+	if !ok {
+		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
+		log.Error("[pd] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
+		request.done <- err
+		return request
+	}
+	dispatcher.(chan *tsoRequest) <- request
+	return request
 }
 
 // TSFuture is a future which promises to return a TSO.

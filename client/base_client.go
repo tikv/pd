@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -33,15 +34,12 @@ import (
 type baseClient struct {
 	urls      []string
 	clusterID uint64
-	connMu    struct {
-		sync.RWMutex
-		// dc-location -> TSO allocator leader gRPC connection
-		clientConns map[string]*grpc.ClientConn
-		// PD leader URL
-		leader string
-		// dc-location -> TSO allocator leader URL
-		allocators map[string]string
-	}
+	// PD leader URL
+	leader atomic.Value // Store as string
+	// dc-location -> TSO allocator leader gRPC connection
+	clientConns sync.Map // Store as map[string]*grpc.ClientConn
+	// dc-location -> TSO allocator leader URL
+	allocators sync.Map // Store as map[string]string
 
 	checkLeaderCh chan struct{}
 
@@ -90,8 +88,6 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption, 
 		security:      security,
 		timeout:       defaultPDTimeout,
 	}
-	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
-	c.connMu.allocators = make(map[string]string)
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -163,9 +159,11 @@ func (c *baseClient) GetClusterID(context.Context) uint64 {
 // GetLeaderAddr returns the leader address.
 // For testing use.
 func (c *baseClient) GetLeaderAddr() string {
-	c.connMu.RLock()
-	defer c.connMu.RUnlock()
-	return c.connMu.leader
+	leaderAddr := c.leader.Load()
+	if leaderAddr == nil {
+		return ""
+	}
+	return leaderAddr.(string)
 }
 
 // GetURLs returns the URLs.
@@ -175,53 +173,48 @@ func (c *baseClient) GetURLs() []string {
 }
 
 func (c *baseClient) GetAllocatorLeaderURLs() map[string]string {
-	c.connMu.RLock()
-	defer c.connMu.RUnlock()
 	allocatorLeader := make(map[string]string)
-	for dcLocation, url := range c.connMu.allocators {
-		allocatorLeader[dcLocation] = url
-	}
+	c.allocators.Range(func(dcLocation, url interface{}) bool {
+		allocatorLeader[dcLocation.(string)] = url.(string)
+		return true
+	})
 	return allocatorLeader
 }
 
-func (c *baseClient) getDCLocations() []string {
-	c.connMu.RLock()
-	defer c.connMu.RUnlock()
-	dcLocations := make([]string, 0, len(c.connMu.allocators))
-	for dcLocation := range c.connMu.allocators {
-		dcLocations = append(dcLocations, dcLocation)
-	}
-	return dcLocations
-}
-
 func (c *baseClient) getAllocatorLeaderAddrByDCLocation(dcLocation string) (string, bool) {
-	c.connMu.RLock()
-	defer c.connMu.RUnlock()
-	url, exist := c.connMu.allocators[dcLocation]
-	return url, exist
+	url, exist := c.allocators.Load(dcLocation)
+	if !exist {
+		return "", false
+	}
+	return url.(string), true
 }
 
-func (c *baseClient) setAllocatorLeaderAddrByDCLocation(dcLocation string, addr string) {
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
-	c.connMu.allocators[dcLocation] = addr
+func (c *baseClient) getClientConnByDCLocation(dcLocation string) *grpc.ClientConn {
+	url, ok := c.allocators.Load(dcLocation)
+	if !ok {
+		return nil
+	}
+	cc, ok := c.clientConns.Load(url)
+	if !ok {
+		return nil
+	}
+	return cc.(*grpc.ClientConn)
 }
 
 const globalDCLocation = "global"
 
 func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
 	// Clean up the old TSO allocators
-	for dcLocation := range c.connMu.allocators {
+	c.allocators.Range(func(dcLocation, _ interface{}) bool {
 		// Skip the Global TSO Allocator
-		if dcLocation == globalDCLocation {
-			continue
+		if dcLocation.(string) == globalDCLocation {
+			return true
 		}
-		if _, exist := curAllocatorMap[dcLocation]; !exist {
-			delete(c.connMu.allocators, dcLocation)
+		if _, exist := curAllocatorMap[dcLocation.(string)]; !exist {
+			c.allocators.Delete(dcLocation)
 		}
-	}
+		return true
+	})
 }
 
 func (c *baseClient) initClusterID() error {
@@ -298,11 +291,7 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 func (c *baseClient) switchLeader(addrs []string) error {
 	// FIXME: How to safely compare leader urls? For now, only allows one client url.
 	addr := addrs[0]
-
-	c.connMu.RLock()
-	oldLeader := c.connMu.leader
-	c.connMu.RUnlock()
-
+	oldLeader := c.GetLeaderAddr()
 	if addr == oldLeader {
 		return nil
 	}
@@ -312,10 +301,8 @@ func (c *baseClient) switchLeader(addrs []string) error {
 		return err
 	}
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
-	c.connMu.leader = addr
-	c.connMu.allocators[globalDCLocation] = addr
+	c.leader.Store(addr)
+	c.allocators.Store(globalDCLocation, addr)
 	return nil
 }
 
@@ -340,7 +327,7 @@ func (c *baseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Memb
 		if _, err := c.getOrCreateGRPCConn(addr); err != nil {
 			return err
 		}
-		c.setAllocatorLeaderAddrByDCLocation(dcLocation, addr)
+		c.allocators.Store(dcLocation, addr)
 	}
 	// Garbage collection of the old TSO allocator leaders
 	c.gcAllocatorLeaderAddr(allocatorMap)
@@ -348,11 +335,9 @@ func (c *baseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Memb
 }
 
 func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
-	c.connMu.RLock()
-	conn, ok := c.connMu.clientConns[addr]
-	c.connMu.RUnlock()
+	conn, ok := c.clientConns.Load(addr)
 	if ok {
-		return conn, nil
+		return conn.(*grpc.ClientConn), nil
 	}
 	tlsCfg, err := grpcutil.TLSConfig{
 		CAPath:   c.security.CAPath,
@@ -362,20 +347,17 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 	if err != nil {
 		return nil, err
 	}
-	dctx, cancel := context.WithTimeout(c.ctx, dialTimeout)
+	dCtx, cancel := context.WithTimeout(c.ctx, dialTimeout)
 	defer cancel()
-	cc, err := grpcutil.GetClientConn(dctx, addr, tlsCfg, c.gRPCDialOptions...)
+	cc, err := grpcutil.GetClientConn(dCtx, addr, tlsCfg, c.gRPCDialOptions...)
 	if err != nil {
 		return nil, err
 	}
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
-	if old, ok := c.connMu.clientConns[addr]; ok {
+	if old, ok := c.clientConns.Load(addr); ok {
 		cc.Close()
 		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
-		return old, nil
+		return old.(*grpc.ClientConn), nil
 	}
-
-	c.connMu.clientConns[addr] = cc
+	c.clientConns.Store(addr, cc)
 	return cc, nil
 }
