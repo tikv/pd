@@ -18,7 +18,6 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/tikv/pd/pkg/errs"
 )
@@ -33,11 +32,13 @@ type MasterKey struct {
 	// Encryption key in plaintext. If it is nil, encryption is no-op.
 	// Never output it to info log or persist it on disk.
 	key []byte
+	// Key in ciphertext form. Used by KMS key type.
+	ciphertextKey []byte
 }
 
 // NewMasterKey obtains a master key from backend specified by given config.
 // The config may be altered to fill in metadata generated when initializing the master key.
-func NewMasterKey(config *encryptionpb.MasterKey) (*MasterKey, error) {
+func NewMasterKey(config *encryptionpb.MasterKey, ciphertextKey []byte) (*MasterKey, error) {
 	if config == nil {
 		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack("master key config is empty")
 	}
@@ -47,15 +48,21 @@ func NewMasterKey(config *encryptionpb.MasterKey) (*MasterKey, error) {
 		}, nil
 	}
 	if file := config.GetFile(); file != nil {
-		key, err := newMasterKeyFromFile(file)
-		if err != nil {
-			return nil, err
-		}
-		return &MasterKey{
-			key: key,
-		}, nil
+		return newMasterKeyFromFile(file)
 	}
-	return nil, errors.New("unrecognized master key type")
+	if kms := config.GetKms(); kms != nil {
+		return newMasterKeyFromKMS(kms, ciphertextKey)
+	}
+	return nil, errs.ErrEncryptionNewMasterKey.GenWithStack("unrecognized master key type")
+}
+
+// NewCustomMasterKeyForTest construct a master key instance from raw key and ciphertext key bytes.
+// Used for test only.
+func NewCustomMasterKeyForTest(key []byte, ciphertextKey []byte) *MasterKey {
+	return &MasterKey{
+		key:           key,
+		ciphertextKey: ciphertextKey,
+	}
 }
 
 // Encrypt encrypts given plaintext using the master key.
@@ -84,10 +91,16 @@ func (k *MasterKey) IsPlaintext() bool {
 	return k.key == nil
 }
 
+// CiphertextKey returns the key in encrypted form.
+// KMS key type recover the key by decrypting the ciphertextKey from KMS.
+func (k *MasterKey) CiphertextKey() []byte {
+	return k.ciphertextKey
+}
+
 // newMasterKeyFromFile reads a hex-string from file specified in the config, and construct a
 // MasterKey object. The key must be of 256 bits (32 bytes). The file can contain leading and
 // tailing spaces.
-func newMasterKeyFromFile(config *encryptionpb.MasterKeyFile) ([]byte, error) {
+func newMasterKeyFromFile(config *encryptionpb.MasterKeyFile) (*MasterKey, error) {
 	if config == nil {
 		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack("missing master key file config")
 	}
@@ -110,5 +123,5 @@ func newMasterKeyFromFile(config *encryptionpb.MasterKeyFile) ([]byte, error) {
 			"unexpected key length from master key file, expected %d vs actual %d",
 			masterKeyLength, len(key))
 	}
-	return key, nil
+	return &MasterKey{key: key}, nil
 }

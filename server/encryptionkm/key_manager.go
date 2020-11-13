@@ -76,9 +76,10 @@ func saveKeys(
 	leadership *election.Leadership,
 	masterKeyMeta *encryptionpb.MasterKey,
 	keys *encryptionpb.KeyDictionary,
-) error {
+	helper keyManagerHelper,
+) (err error) {
 	// Get master key.
-	masterKey, err := encryption.NewMasterKey(masterKeyMeta)
+	masterKey, err := helper.newMasterKey(masterKeyMeta, nil)
 	if err != nil {
 		return err
 	}
@@ -98,9 +99,10 @@ func saveKeys(
 		return err
 	}
 	content := &encryptionpb.EncryptedContent{
-		Content:   ciphertextContent,
-		MasterKey: masterKeyMeta,
-		Iv:        iv,
+		Content:       ciphertextContent,
+		MasterKey:     masterKeyMeta,
+		Iv:            iv,
+		CiphertextKey: masterKey.CiphertextKey(),
 	}
 	value, err := proto.Marshal(content)
 	if err != nil {
@@ -124,7 +126,10 @@ func saveKeys(
 }
 
 // extractKeysFromKV unpack encrypted keys from etcd KV.
-func extractKeysFromKV(kv *mvccpb.KeyValue) (*encryptionpb.KeyDictionary, error) {
+func extractKeysFromKV(
+	kv *mvccpb.KeyValue,
+	helper keyManagerHelper,
+) (*encryptionpb.KeyDictionary, error) {
 	content := &encryptionpb.EncryptedContent{}
 	err := content.Unmarshal(kv.Value)
 	if err != nil {
@@ -136,7 +141,7 @@ func extractKeysFromKV(kv *mvccpb.KeyValue) (*encryptionpb.KeyDictionary, error)
 		return nil, errs.ErrEncryptionLoadKeys.GenWithStack(
 			"no master key config found with encryption keys")
 	}
-	masterKey, err := encryption.NewMasterKey(masterKeyConfig)
+	masterKey, err := helper.newMasterKey(masterKeyConfig, content.CiphertextKey)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +277,7 @@ func (m *KeyManager) loadKeysFromKVImpl(
 	if kv.ModRevision <= m.mu.keysRevision {
 		return m.getKeys(), nil
 	}
-	keys, err := extractKeysFromKV(kv)
+	keys, err := extractKeysFromKV(kv, m.helper)
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +401,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 		return nil
 	}
 	// Store updated keys in etcd.
-	err = saveKeys(m.mu.leadership, m.masterKeyMeta, keys)
+	err = saveKeys(m.mu.leadership, m.masterKeyMeta, keys, m.helper)
 	if err != nil {
 		m.helper.eventSaveKeysFailure()
 		log.Error("failed to save keys", zap.Error(err))
@@ -488,6 +493,7 @@ func (m *KeyManager) SetLeadership(leadership *election.Leadership) error {
 type keyManagerHelper struct {
 	now                          func() time.Time
 	tick                         func(ticker *time.Ticker) <-chan time.Time
+	newMasterKey                 func(*encryptionpb.MasterKey, []byte) (*encryption.MasterKey, error)
 	eventAfterReloadByWatcher    func()
 	eventAfterTicker             func()
 	eventAfterLeaderCheckSuccess func()
@@ -498,6 +504,7 @@ func defaultKeyManagerHelper() keyManagerHelper {
 	return keyManagerHelper{
 		now:                          func() time.Time { return time.Now() },
 		tick:                         func(ticker *time.Ticker) <-chan time.Time { return ticker.C },
+		newMasterKey:                 encryption.NewMasterKey,
 		eventAfterReloadByWatcher:    func() {},
 		eventAfterTicker:             func() {},
 		eventAfterLeaderCheckSuccess: func() {},
