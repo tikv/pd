@@ -15,7 +15,6 @@ package pd
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
