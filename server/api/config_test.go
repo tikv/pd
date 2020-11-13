@@ -288,6 +288,9 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 		"schedule.scheduler-max-waiting-operator": 999,
 		"schedule.leader-schedule-limit":          999,
 		"schedule.region-schedule-limit":          999,
+		"schedule.hot-region-schedule-limit":      999,
+		"schedule.replica-schedule-limit":         999,
+		"schedule.merge-schedule-limit":           999,
 	}
 	postData, err := json.Marshal(r)
 	c.Assert(err, IsNil)
@@ -300,6 +303,9 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 	c.Assert(s.svr.GetPersistOptions().GetSchedulerMaxWaitingOperator(), Equals, uint64(999))
 	c.Assert(s.svr.GetPersistOptions().GetLeaderScheduleLimit(), Equals, uint64(999))
 	c.Assert(s.svr.GetPersistOptions().GetRegionScheduleLimit(), Equals, uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetHotRegionScheduleLimit(), Equals, uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetReplicaScheduleLimit(), Equals, uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetMergeScheduleLimit(), Equals, uint64(999))
 	time.Sleep(5 * time.Second)
 	c.Assert(s.svr.GetPersistOptions().GetMaxSnapshotCount(), Not(Equals), uint64(999))
 	c.Assert(s.svr.GetPersistOptions().IsLocationReplacementEnabled(), Equals, true)
@@ -308,4 +314,7 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 	c.Assert(s.svr.GetPersistOptions().GetSchedulerMaxWaitingOperator(), Not(Equals), uint64(999))
 	c.Assert(s.svr.GetPersistOptions().GetLeaderScheduleLimit(), Not(Equals), uint64(999))
 	c.Assert(s.svr.GetPersistOptions().GetRegionScheduleLimit(), Not(Equals), uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetHotRegionScheduleLimit(), Not(Equals), uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetReplicaScheduleLimit(), Not(Equals), uint64(999))
+	c.Assert(s.svr.GetPersistOptions().GetMergeScheduleLimit(), Not(Equals), uint64(999))
 }

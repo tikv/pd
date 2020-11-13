@@ -304,16 +304,34 @@ func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
 
 // GetReplicaScheduleLimit returns the limit for replica schedule.
 func (o *PersistOptions) GetReplicaScheduleLimit() uint64 {
+	if v, ok, err := o.getTTLUint("schedule.replica-schedule-limit"); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse schedule.replica-schedule-limit from PersistOptions's ttl storage")
+	}
 	return o.GetScheduleConfig().ReplicaScheduleLimit
 }
 
 // GetMergeScheduleLimit returns the limit for merge schedule.
 func (o *PersistOptions) GetMergeScheduleLimit() uint64 {
+	if v, ok, err := o.getTTLUint("schedule.merge-schedule-limit"); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse schedule.merge-schedule-limit from PersistOptions's ttl storage")
+	}
 	return o.GetScheduleConfig().MergeScheduleLimit
 }
 
 // GetHotRegionScheduleLimit returns the limit for hot region schedule.
 func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
+	if v, ok, err := o.getTTLUint("schedule.hot-region-schedule-limit"); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse schedule.hot-region-schedule-limit from PersistOptions's ttl storage")
+	}
 	return o.GetScheduleConfig().HotRegionScheduleLimit
 }
 
