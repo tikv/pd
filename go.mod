@@ -4,7 +4,6 @@ go 1.13
 
 require (
 	github.com/BurntSushi/toml v0.3.1
-	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
@@ -28,7 +27,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20201029093017-5a7df2af2ac7
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20201104042953-62eb316d5182
+	github.com/pingcap/kvproto v0.0.0-20201113092725-08f2872278eb
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
 	github.com/pingcap/sysutil v0.0.0-20201021075216-f93ced2829e2
 	github.com/pingcap/tiup v1.2.3
@@ -52,7 +51,6 @@ require (
 )
 
 replace (
-	github.com/pingcap/kvproto => github.com/Yisaer/kvproto v0.0.0-20201110052545-128289baa6a4
 	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 )
