@@ -53,7 +53,7 @@ type baseClient struct {
 
 	gRPCDialOptions []grpc.DialOption
 	timeout         time.Duration
-	maxRetryTimes	int
+	maxRetryTimes   int
 }
 
 // SecurityOption records options about tls
@@ -82,7 +82,7 @@ func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
 
 // WithMaxErrorRetry configures the client max retry times when connect meets error.
 func WithMaxErrorRetry(count int) ClientOption {
-	return func (c *baseClient) {
+	return func(c *baseClient) {
 		c.maxRetryTimes = count
 	}
 }
