@@ -101,11 +101,21 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	tso, err := lta.timestampOracle.getTS(lta.leadership, count)
-	if err != nil {
-		return tso, err
+	dcLocationMap := lta.allocatorManager.GetClusterDCLocations()
+	dcLocationList := make([]string, 0, len(dcLocationMap))
+	for dcLocation := range dcLocationMap {
+		dcLocationList = append(dcLocationList, dcLocation)
 	}
-	return lta.differentiateLocalTSO(tso), err
+	sort.Strings(dcLocationList)
+	serialNum := 0
+	for i, dcLocation := range dcLocationList {
+		if lta.dcLocation == dcLocation {
+			serialNum = i
+			break
+		}
+	}
+	shiftNum := len(strconv.FormatInt(int64(len(dcLocationList)), 10))
+	return lta.timestampOracle.getTS(lta.leadership, count, shiftNum, serialNum)
 }
 
 // Reset is used to reset the TSO allocator.
@@ -139,7 +149,7 @@ func (lta *LocalTSOAllocator) GetMember() *pdpb.Member {
 
 // GetCurrentTSO returns current TSO in memory.
 func (lta *LocalTSOAllocator) GetCurrentTSO() (pdpb.Timestamp, error) {
-	currentPhysical, currentLogical := lta.timestampOracle.getTSO()
+	currentPhysical, currentLogical := lta.timestampOracle.getDifferentiatedTSO()
 	if currentPhysical == typeutil.ZeroTime {
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 	}
@@ -227,26 +237,4 @@ func (lta *LocalTSOAllocator) WatchAllocatorLeader(serverCtx context.Context, al
 	lta.setAllocatorLeader(allocatorLeader)
 	lta.leadership.Watch(serverCtx, revision)
 	lta.unsetAllocatorLeader()
-}
-
-func (lta *LocalTSOAllocator) differentiateLocalTSO(rawTSO pdpb.Timestamp) pdpb.Timestamp {
-	dcLocationMap := lta.allocatorManager.GetClusterDCLocations()
-	dcLocationList := make([]string, 0, len(dcLocationMap))
-	for dcLocation := range dcLocationMap {
-		dcLocationList = append(dcLocationList, dcLocation)
-	}
-	sort.Strings(dcLocationList)
-	idx := 0
-	for i, dcLocation := range dcLocationList {
-		if lta.dcLocation == dcLocation {
-			idx = i
-			break
-		}
-	}
-	shiftNum := len(strconv.FormatInt(int64(len(dcLocationList)), 10))
-	return pdpb.Timestamp{
-		Physical: rawTSO.Physical,
-		// Todo: prevent overflow
-		Logical: rawTSO.Logical*10*int64(shiftNum) + int64(idx),
-	}
 }

@@ -43,8 +43,9 @@ const (
 
 // tsoObject is used to store the current TSO in memory.
 type tsoObject struct {
-	physical time.Time
-	logical  int64
+	physical              time.Time
+	logical               int64
+	differentiatedLogical int64
 }
 
 // timestampOracle is used to maintain the logic of TSO.
@@ -82,8 +83,17 @@ func (t *timestampOracle) getTSO() (time.Time, int64) {
 	return t.tsoMux.tso.physical, t.tsoMux.tso.logical
 }
 
+func (t *timestampOracle) getDifferentiatedTSO() (time.Time, int64) {
+	t.tsoMux.RLock()
+	defer t.tsoMux.RUnlock()
+	if t.tsoMux.tso == nil {
+		return typeutil.ZeroTime, 0
+	}
+	return t.tsoMux.tso.physical, t.tsoMux.tso.differentiatedLogical
+}
+
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
-func (t *timestampOracle) generateTSO(count int64) (physical int64, logical int64) {
+func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (physical int64, differentiatedLogical int64) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if t.tsoMux.tso == nil {
@@ -91,8 +101,16 @@ func (t *timestampOracle) generateTSO(count int64) (physical int64, logical int6
 	}
 	physical = t.tsoMux.tso.physical.UnixNano() / int64(time.Millisecond)
 	t.tsoMux.tso.logical += count
-	logical = t.tsoMux.tso.logical
-	return physical, logical
+	if shiftNum == 0 {
+		differentiatedLogical = t.tsoMux.tso.logical
+	} else {
+		// Todo: prevent overflow
+		differentiatedLogical = t.tsoMux.tso.logical*10*int64(shiftNum) + int64(serialNum)
+	}
+	if t.tsoMux.tso.differentiatedLogical < differentiatedLogical {
+		t.tsoMux.tso.differentiatedLogical = differentiatedLogical
+	}
+	return physical, differentiatedLogical
 }
 
 func (t *timestampOracle) getTimestampPath() string {
@@ -294,7 +312,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 }
 
 // getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, shiftNum, serialNum int) (pdpb.Timestamp, error) {
 	var resp pdpb.Timestamp
 
 	if count == 0 {
@@ -322,7 +340,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical = t.generateTSO(int64(count))
+		resp.Physical, resp.Logical = t.generateTSO(int64(count), shiftNum, serialNum)
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}

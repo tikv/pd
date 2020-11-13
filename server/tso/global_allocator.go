@@ -107,7 +107,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
 	// No dc-locations configured in the cluster
 	if len(dcLocationMap) == 0 {
-		return gta.timestampOracle.getTS(gta.leadership, count)
+		return gta.timestampOracle.getTS(gta.leadership, count, 0, 0)
 	}
 	// Send maxTS to all Local TSO Allocator leaders to prewrite
 	ctx, cancel := context.WithCancel(context.Background())
