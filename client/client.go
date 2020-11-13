@@ -138,6 +138,11 @@ type tsoRequest struct {
 	dcLocation string
 }
 
+type lastTSO struct {
+	physical int64
+	logical  int64
+}
+
 const (
 	defaultPDTimeout      = 3 * time.Second
 	dialTimeout           = 3 * time.Second
@@ -163,11 +168,7 @@ type client struct {
 	// dc-location -> deadline
 	tsDeadline sync.Map // Same as map[string]chan deadline
 	// dc-location -> int64
-	lastTSO struct {
-		sync.Mutex
-		physical map[string]int64
-		logical  map[string]int64
-	}
+	lastTSMap sync.Map // Same as map[string]*lastTSO
 }
 
 // NewClient creates a PD client.
@@ -185,8 +186,6 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	c := &client{
 		baseClient: base,
 	}
-	c.lastTSO.physical = make(map[string]int64)
-	c.lastTSO.logical = make(map[string]int64)
 
 	c.wg.Add(2)
 	go c.tsLoop()
@@ -435,16 +434,25 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 }
 
 func (c *client) compareAndSwapTS(dcLocation string, physical, logical, n int64) {
-	c.lastTSO.Lock()
-	defer c.lastTSO.Unlock()
-	lastPhysical := c.lastTSO.physical[dcLocation]
-	lastLogical := c.lastTSO.logical[dcLocation]
+	lastTSOInterface, ok := c.lastTSMap.Load(dcLocation)
+	if !ok {
+		var loaded bool
+		if lastTSOInterface, loaded = c.lastTSMap.LoadOrStore(dcLocation, &lastTSO{
+			physical: physical,
+			logical:  logical + n - 1,
+		}); !loaded {
+			return
+		}
+	}
+	lastTSOPointer := lastTSOInterface.(*lastTSO)
+	lastPhysical := lastTSOPointer.physical
+	lastLogical := lastTSOPointer.logical
 	if tsLessEqual(physical, logical, lastPhysical, lastLogical) {
 		panic(errors.Errorf("%s timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
 			dcLocation, physical, logical, lastPhysical, lastLogical))
 	}
-	c.lastTSO.physical[dcLocation] = physical
-	c.lastTSO.logical[dcLocation] = logical + n - 1
+	lastTSOPointer.physical = physical
+	lastTSOPointer.logical = logical + n - 1
 }
 
 func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
