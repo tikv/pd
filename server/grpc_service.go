@@ -724,9 +724,11 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		}, nil
 	}
 
+	//nolint
 	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
+			//nolint
 			return nil, errors.Errorf("region %d not found", request.GetRegionId())
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
