@@ -173,7 +173,7 @@ type client struct {
 	tsoDispatcher sync.Map // Same as map[string]chan *tsoRequest
 	// dc-location -> deadline
 	tsDeadline sync.Map // Same as map[string]chan deadline
-	// dc-location -> int64
+	// dc-location -> *lastTSO
 	lastTSMap sync.Map // Same as map[string]*lastTSO
 }
 
