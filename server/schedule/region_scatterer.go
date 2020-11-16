@@ -241,7 +241,7 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 		retryLimit = maxRetryLimit
 	}
 	ops := make([]*operator.Operator, 0, len(regions))
-	for currentRetry := 0; currentRetry < retryLimit; currentRetry++ {
+	for currentRetry := 0; currentRetry <= retryLimit; currentRetry++ {
 		for _, region := range regions {
 			op, err := r.Scatter(region, group)
 			failpoint.Inject("scatterFail", func() {
@@ -253,7 +253,9 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 				failures[region.GetID()] = err
 				continue
 			}
-			ops = append(ops, op)
+			if op != nil {
+				ops = append(ops, op)
+			}
 			delete(regions, region.GetID())
 			delete(failures, region.GetID())
 		}
