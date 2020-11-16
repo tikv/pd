@@ -714,6 +714,15 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 				failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 			}
 		}
+		if len(failures) > 0 {
+			log.Debug("scatter regions", zap.Errors("failures", func() []error {
+				r := make([]error, 0, len(failures))
+				for _, err := range failures {
+					r = append(r, err)
+				}
+				return r
+			}()))
+		}
 		percentage := 100
 		if len(failures) > 0 {
 			percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
