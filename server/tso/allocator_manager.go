@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,6 +77,8 @@ type AllocatorManager struct {
 		allocatorGroups map[string]*allocatorGroup
 		// dc-location/global (string) -> Member ID
 		clusterDCLocations map[string][]uint64
+		// sortedDCLocations is used to differentiate the different Local TSOs
+		sortedDCLocations []string
 	}
 	wg sync.WaitGroup
 	// for election use
@@ -161,6 +164,23 @@ func (am *AllocatorManager) GetClusterDCLocations() map[string][]uint64 {
 		copy(dcLocationMap[dcLocation], members)
 	}
 	return dcLocationMap
+}
+
+func (am *AllocatorManager) getClusterDCLocationLength() int {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return len(am.mu.clusterDCLocations)
+}
+
+func (am *AllocatorManager) getDCLocationIndex(dcLocation string) int {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	for i := range am.mu.sortedDCLocations {
+		if am.mu.sortedDCLocations[i] == dcLocation {
+			return i
+		}
+	}
+	return -1
 }
 
 func (am *AllocatorManager) getLocalTSOConfigPath() string {
@@ -437,6 +457,7 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	am.mu.clusterDCLocations = make(map[string][]uint64)
+	am.mu.sortedDCLocations = make([]string, 0, len(resp.Kvs))
 	for _, kv := range resp.Kvs {
 		// The key will contain the member ID and the value is its dcLocation
 		serverPath := strings.Split(string(kv.Key), "/")
@@ -451,7 +472,9 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 			continue
 		}
 		am.mu.clusterDCLocations[dcLocation] = append(am.mu.clusterDCLocations[dcLocation], serverID)
+		am.mu.sortedDCLocations = append(am.mu.sortedDCLocations, dcLocation)
 	}
+	sort.Strings(am.mu.sortedDCLocations)
 }
 
 // PriorityChecker is used to check the election priority of a Local TSO Allocator.

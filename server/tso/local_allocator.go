@@ -15,7 +15,6 @@ package tso
 
 import (
 	"context"
-	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -101,20 +100,11 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	dcLocationMap := lta.allocatorManager.GetClusterDCLocations()
-	dcLocationList := make([]string, 0, len(dcLocationMap))
-	for dcLocation := range dcLocationMap {
-		dcLocationList = append(dcLocationList, dcLocation)
+	serialNum := lta.allocatorManager.getDCLocationIndex(lta.dcLocation)
+	shiftNum := len(strconv.FormatInt(int64(lta.allocatorManager.getClusterDCLocationLength()), 10))
+	if serialNum == -1 || shiftNum == 0 {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("unable to get the dc-location index or length")
 	}
-	sort.Strings(dcLocationList)
-	serialNum := 0
-	for i, dcLocation := range dcLocationList {
-		if lta.dcLocation == dcLocation {
-			serialNum = i
-			break
-		}
-	}
-	shiftNum := len(strconv.FormatInt(int64(len(dcLocationList)), 10))
 	return lta.timestampOracle.getTS(lta.leadership, count, shiftNum, serialNum)
 }
 

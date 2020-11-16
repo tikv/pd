@@ -104,7 +104,6 @@ func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (phy
 	if shiftNum == 0 {
 		differentiatedLogical = t.tsoMux.tso.logical
 	} else {
-		// Todo: prevent overflow
 		differentiatedLogical = t.tsoMux.tso.logical*10*int64(shiftNum) + int64(serialNum)
 	}
 	if t.tsoMux.tso.differentiatedLogical < differentiatedLogical {
