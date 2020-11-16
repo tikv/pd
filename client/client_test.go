@@ -97,7 +97,6 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 		security:        SecurityOption{},
 		gRPCDialOptions: []grpc.DialOption{grpc.WithBlock()},
 	}
-	cli.connMu.clientConns = make(map[string]*grpc.ClientConn)
 
 	err := cli.updateLeader()
 	c.Assert(err, NotNil)
