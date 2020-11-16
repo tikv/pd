@@ -101,6 +101,16 @@ func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (phy
 	}
 	physical = t.tsoMux.tso.physical.UnixNano() / int64(time.Millisecond)
 	t.tsoMux.tso.logical += count
+	// Because the Local TSO in each Local TSO Allocator is independent, so they are possible
+	// to be the same at sometimes, to avoid this case, we need to use the logical part of the
+	// Local TSO to do some differentiating work. For example, we have three DCs: dc-1, dc-2 and
+	// dc-3. So the shiftNum is 1 because we have three DCs and only 1 digit is enough to distinguish
+	// them. Then, for dc-2, the serialNum is 1 because its index in all sorted dc-locations is 1.
+	// Once we get a noramal TSO like this: xxxxxxxxxxxxxxxxxx. We will make the TSO's low digits
+	// of logical part from each DC looks like:
+	//     dc-1: xxxxxxxxxxxxxxxxx0
+	//     dc-2: xxxxxxxxxxxxxxxxx1
+	//     dc-3: xxxxxxxxxxxxxxxxx2
 	if shiftNum == 0 {
 		differentiatedLogical = t.tsoMux.tso.logical
 	} else {
