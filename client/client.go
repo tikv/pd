@@ -93,6 +93,7 @@ type Client interface {
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
+	// NOTICE: This method is the old version of ScatterRegions, you should use the later one as your first choice.
 	ScatterRegion(ctx context.Context, regionID uint64) error
 	// ScatterRegions scatters the specified regions. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
