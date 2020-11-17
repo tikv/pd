@@ -23,7 +23,6 @@ require (
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.5.0
 	github.com/opentracing/opentracing-go v1.1.0
-	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
 	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20201022065613-94d8dc38a204
 	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
 	github.com/pingcap/errcode v0.3.0
