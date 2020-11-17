@@ -14,6 +14,7 @@
 package cluster
 
 import (
+	"github.com/tikv/pd/pkg/movingaverage"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +22,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -113,14 +113,14 @@ type StatEntry pdpb.StoreStats
 
 // CPUEntries saves a history of store statistics
 type CPUEntries struct {
-	cpu     statistics.MovingAvg
+	cpu     movingaverage.MovingAvg
 	updated time.Time
 }
 
 // NewCPUEntries returns the StateEntries with a fixed size
 func NewCPUEntries(size int) *CPUEntries {
 	return &CPUEntries{
-		cpu: statistics.NewMedianFilter(size),
+		cpu: movingaverage.NewMedianFilter(size),
 	}
 }
 
