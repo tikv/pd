@@ -472,7 +472,11 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 			continue
 		}
 		am.mu.clusterDCLocations[dcLocation] = append(am.mu.clusterDCLocations[dcLocation], serverID)
-		am.mu.sortedDCLocations = append(am.mu.sortedDCLocations, dcLocation)
+		if slice.NoneOf(am.mu.sortedDCLocations, func(i int) bool {
+			return am.mu.sortedDCLocations[i] == dcLocation
+		}) {
+			am.mu.sortedDCLocations = append(am.mu.sortedDCLocations, dcLocation)
+		}
 	}
 	sort.Strings(am.mu.sortedDCLocations)
 }
