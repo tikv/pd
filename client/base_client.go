@@ -51,6 +51,7 @@ type baseClient struct {
 
 	gRPCDialOptions []grpc.DialOption
 	timeout         time.Duration
+	maxRetryTimes   int
 }
 
 // SecurityOption records options about tls
@@ -77,6 +78,13 @@ func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
 	}
 }
 
+// WithMaxErrorRetry configures the client max retry times when connect meets error.
+func WithMaxErrorRetry(count int) ClientOption {
+	return func(c *baseClient) {
+		c.maxRetryTimes = count
+	}
+}
+
 // newBaseClient returns a new baseClient.
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption, opts ...ClientOption) (*baseClient, error) {
 	ctx1, cancel := context.WithCancel(ctx)
@@ -87,6 +95,7 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption, 
 		cancel:        cancel,
 		security:      security,
 		timeout:       defaultPDTimeout,
+		maxRetryTimes: maxInitClusterRetries,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -110,7 +119,7 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption, 
 
 func (c *baseClient) initRetry(f func() error) error {
 	var err error
-	for i := 0; i < maxInitClusterRetries; i++ {
+	for i := 0; i < c.maxRetryTimes; i++ {
 		if err = f(); err == nil {
 			return nil
 		}
