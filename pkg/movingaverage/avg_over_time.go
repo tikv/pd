@@ -11,17 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
+package movingaverage
 
 import (
 	"time"
 
 	"github.com/phf/go-queue/queue"
-)
-
-const (
-	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
-	StoreHeartBeatReportInterval = 10
 )
 
 type deltaWithInterval struct {
@@ -76,55 +71,4 @@ func (aot *AvgOverTime) Set(avg float64) {
 	aot.deltaSum = avg * aot.avgInterval.Seconds()
 	aot.intervalSum = aot.avgInterval
 	aot.que.PushBack(deltaWithInterval{delta: aot.deltaSum, interval: aot.intervalSum})
-}
-
-// TimeMedian is AvgOverTime + MedianFilter
-// Size of MedianFilter should be larger than double size of AvgOverTime to denoisy.
-// Delay is aotSize * mfSize * StoreHeartBeatReportInterval/2
-// and the min filled period is aotSize * StoreHeartBeatReportInterval, which is not related with mfSize
-type TimeMedian struct {
-	aotInterval time.Duration
-	aot         *AvgOverTime
-	mf          *MedianFilter
-	aotSize     int
-	mfSize      int
-}
-
-// NewTimeMedian returns a TimeMedian with given size.
-func NewTimeMedian(aotSize, mfSize, reportInterval int) *TimeMedian {
-	interval := time.Duration(aotSize*reportInterval) * time.Second
-	return &TimeMedian{
-		aotInterval: interval,
-		aot:         NewAvgOverTime(interval),
-		mf:          NewMedianFilter(mfSize),
-		aotSize:     aotSize,
-		mfSize:      mfSize,
-	}
-}
-
-// Get returns change rate in the median of the several intervals.
-func (t *TimeMedian) Get() float64 {
-	return t.mf.Get()
-}
-
-// Add adds recent change to TimeMedian.
-func (t *TimeMedian) Add(delta float64, interval time.Duration) {
-	if interval < time.Second {
-		return
-	}
-	t.aot.Add(delta, interval)
-	if t.aot.intervalSum >= t.aotInterval {
-		t.mf.Add(t.aot.Get())
-		t.aot.Clear()
-	}
-}
-
-// Set sets the given average.
-func (t *TimeMedian) Set(avg float64) {
-	t.mf.Set(avg)
-}
-
-// GetFilledPeriod returns filled period.
-func (t *TimeMedian) GetFilledPeriod() int { // it is unrelated with mfSize
-	return t.aotSize
 }
