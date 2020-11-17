@@ -91,12 +91,11 @@ type Client interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
-	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
+	// ScatterRegions scatters the specified regions. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
-	ScatterRegion(ctx context.Context, regionID uint64) error
-	// ScatterRegionWithOption scatters the specified region with the given options, should use it
-	// for a batch of regions.
-	ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...ScatterRegionOption) error
+	ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error)
+	// SplitRegions split regions by given split keys
+	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 	// Close closes the client.
@@ -116,17 +115,23 @@ func WithExcludeTombstone() GetStoreOption {
 	return func(op *GetStoreOp) { op.excludeTombstone = true }
 }
 
-// ScatterRegionOp represents available options when scatter regions
-type ScatterRegionOp struct {
-	group string
+// RegionsOp represents available options when operate regions
+type RegionsOp struct {
+	group      string
+	retryLimit uint64
 }
 
-// ScatterRegionOption configures ScatterRegionOp
-type ScatterRegionOption func(op *ScatterRegionOp)
+// RegionsOption configures RegionsOp
+type RegionsOption func(op *RegionsOp)
 
-// WithGroup specify the group during ScatterRegion
-func WithGroup(group string) ScatterRegionOption {
-	return func(op *ScatterRegionOp) { op.group = group }
+// WithGroup specify the group during Scatter/Split Regions
+func WithGroup(group string) RegionsOption {
+	return func(op *RegionsOp) { op.group = group }
+}
+
+// WithRetry specify the retry limit during Scatter/Split Regions
+func WithRetry(retry uint64) RegionsOption {
+	return func(op *RegionsOp) { op.retryLimit = retry }
 }
 
 type tsoRequest struct {
@@ -892,24 +897,12 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	return resp.GetMinSafePoint(), nil
 }
 
-func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
+func (c *client) ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("pdclient.ScatterRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
-	return c.scatterRegionsWithGroup(ctx, regionID, "")
-}
-
-func (c *client) ScatterRegionWithOption(ctx context.Context, regionID uint64, opts ...ScatterRegionOption) error {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ScatterRegionWithOption", opentracing.ChildOf(span.Context()))
-		defer span.Finish()
-	}
-	options := &ScatterRegionOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	return c.scatterRegionsWithGroup(ctx, regionID, options.group)
+	return c.scatterRegionsWithOptions(ctx, regionsID, opts...)
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
@@ -928,30 +921,55 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 	})
 }
 
+// SplitRegions split regions by given split keys
+func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.SplitRegions", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationSplitRegions.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	options := &RegionsOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	return c.leaderClient().SplitRegions(ctx, &pdpb.SplitRegionsRequest{
+		Header:     c.requestHeader(),
+		SplitKeys:  splitKeys,
+		RetryLimit: options.retryLimit,
+	})
+}
+
 func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
 		ClusterId: c.clusterID,
 	}
 }
 
-func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, group string) error {
+func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error) {
 	start := time.Now()
-	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
-
+	defer func() { cmdDurationScatterRegions.Observe(time.Since(start).Seconds()) }()
+	options := &RegionsOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
-		Header:   c.requestHeader(),
-		RegionId: regionID,
-		Group:    group,
+		Header:     c.requestHeader(),
+		Group:      options.group,
+		RegionsId:  regionsID,
+		RetryLimit: options.retryLimit,
 	})
 	cancel()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if resp.Header.GetError() != nil {
-		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.Header.GetError().String())
 	}
-	return nil
+	return resp, nil
 }
 
 func addrsToUrls(addrs []string) []string {
