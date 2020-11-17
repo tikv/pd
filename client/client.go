@@ -91,6 +91,9 @@ type Client interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
+	// and the distribution of these regions will be dispersed.
+	ScatterRegion(ctx context.Context, regionID uint64) error
 	// ScatterRegions scatters the specified regions. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error)
@@ -898,6 +901,34 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 		return 0, errors.WithStack(err)
 	}
 	return resp.GetMinSafePoint(), nil
+}
+
+func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	return c.scatterRegionsWithGroup(ctx, regionID, "")
+}
+
+func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, group string) error {
+	start := time.Now()
+	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+		Group:    group,
+	})
+	cancel()
+	if err != nil {
+		return err
+	}
+	if resp.Header.GetError() != nil {
+		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	}
+	return nil
 }
 
 func (c *client) ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error) {
