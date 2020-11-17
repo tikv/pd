@@ -164,42 +164,37 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 	o.SetReplicationConfig(v)
 }
 
+const (
+	maxSnapshotCountKey            = "schedule.max-snapshot-count"
+	maxMergeRegionSizeKey          = "schedule.max-merge-region-size"
+	maxPendingPeerCountKey         = "schedule.max-pending-peer-count"
+	maxMergeRegionKeysKey          = "schedule.max-merge-region-keys"
+	leaderScheduleLimitKey         = "schedule.leader-schedule-limit"
+	regionScheduleLimitKey         = "schedule.region-schedule-limit"
+	replicaRescheduleLimitKey      = "schedule.replica-schedule-limit"
+	mergeScheduleLimitKey          = "schedule.merge-schedule-limit"
+	hotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
+	schedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
+)
+
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
 func (o *PersistOptions) GetMaxSnapshotCount() uint64 {
-	if v, ok, err := o.getTTLUint("schedule.max-snapshot-count"); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse schedule.max-snapshot-count from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().MaxSnapshotCount
+	return o.getTTLUintOr(maxSnapshotCountKey, o.GetScheduleConfig().MaxSnapshotCount)
 }
 
 // GetMaxPendingPeerCount returns the number of the max pending peers.
 func (o *PersistOptions) GetMaxPendingPeerCount() uint64 {
-	return o.GetScheduleConfig().MaxPendingPeerCount
+	return o.getTTLUintOr(maxPendingPeerCountKey, o.GetScheduleConfig().MaxPendingPeerCount)
 }
 
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
-	if v, ok, err := o.getTTLUint("schedule.max-merge-region-size"); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse schedule.max-merge-region-size from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().MaxMergeRegionSize
+	return o.getTTLUintOr(maxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
-	if v, ok, err := o.getTTLUint("schedule.max-merge-region-keys"); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse schedule.max-merge-region-keys from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().MaxMergeRegionKeys
+	return o.getTTLUintOr(maxMergeRegionKeysKey, o.GetScheduleConfig().MaxMergeRegionKeys)
 }
 
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
@@ -282,57 +277,27 @@ func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
-	if v, ok, err := o.getTTLUint("schedule.leader-schedule-limit"); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse schedule.leader-schedule-limit from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().LeaderScheduleLimit
+	return o.getTTLUintOr(leaderScheduleLimitKey, o.GetScheduleConfig().LeaderScheduleLimit)
 }
 
 // GetRegionScheduleLimit returns the limit for region schedule.
 func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
-	if v, ok, err := o.getTTLUint("schedule.region-schedule-limit"); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse schedule.region-schedule-limit from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().RegionScheduleLimit
+	return o.getTTLUintOr(regionScheduleLimitKey, o.GetScheduleConfig().RegionScheduleLimit)
 }
 
 // GetReplicaScheduleLimit returns the limit for replica schedule.
 func (o *PersistOptions) GetReplicaScheduleLimit() uint64 {
-	if v, ok, err := o.getTTLUint("schedule.replica-schedule-limit"); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse schedule.replica-schedule-limit from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().ReplicaScheduleLimit
+	return o.getTTLUintOr(replicaRescheduleLimitKey, o.GetScheduleConfig().ReplicaScheduleLimit)
 }
 
 // GetMergeScheduleLimit returns the limit for merge schedule.
 func (o *PersistOptions) GetMergeScheduleLimit() uint64 {
-	if v, ok, err := o.getTTLUint("schedule.merge-schedule-limit"); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse schedule.merge-schedule-limit from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().MergeScheduleLimit
+	return o.getTTLUintOr(mergeScheduleLimitKey, o.GetScheduleConfig().MergeScheduleLimit)
 }
 
 // GetHotRegionScheduleLimit returns the limit for hot region schedule.
 func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
-	if v, ok, err := o.getTTLUint("schedule.hot-region-schedule-limit"); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse schedule.hot-region-schedule-limit from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().HotRegionScheduleLimit
+	return o.getTTLUintOr(hotRegionScheduleLimitKey, o.GetScheduleConfig().HotRegionScheduleLimit)
 }
 
 // GetStoreLimit returns the limit of a store.
@@ -443,13 +408,7 @@ func (o *PersistOptions) GetHighSpaceRatio() float64 {
 
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
 func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
-	if v, ok, err := o.getTTLUint("schedule.scheduler-max-waiting-operator"); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse schedule.scheduler-max-waiting-operator from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().SchedulerMaxWaitingOperator
+	return o.getTTLUintOr(schedulerMaxWaitingOperatorKey, o.GetScheduleConfig().SchedulerMaxWaitingOperator)
 }
 
 // GetLeaderSchedulePolicy is to get leader schedule policy.
@@ -671,6 +630,16 @@ func (o *PersistOptions) getTTLUint(key string) (uint64, bool, error) {
 	}
 	r, err := strconv.ParseUint(stringForm, 10, 64)
 	return r, true, err
+}
+
+func (o *PersistOptions) getTTLUintOr(key string, defaultValue uint64) uint64 {
+	if v, ok, err := o.getTTLUint(key); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse " + key + " from PersistOptions's ttl storage")
+	}
+	return defaultValue
 }
 
 func (o *PersistOptions) getTTLData(key string) (string, bool) {
