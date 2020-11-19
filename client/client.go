@@ -661,7 +661,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	for _, url := range memberURLs {
 		conn, err := c.getOrCreateGRPCConn(url)
 		if err != nil {
-			log.Error("[pd] can't get grpc connection", zap.String("memberURL", url), errs.ZapError(err))
+			log.Error("[pd] can't get grpc connection", zap.String("member-URL", url), errs.ZapError(err))
 			continue
 		}
 		cc := pdpb.NewPDClient(conn)
@@ -670,7 +670,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 			RegionKey: key,
 		})
 		if err != nil {
-			log.Error("[pd] can't get region info", zap.String("memberURL", url), errs.ZapError(err))
+			log.Error("[pd] can't get region info", zap.String("member-URL", url), errs.ZapError(err))
 			continue
 		}
 		if resp != nil {
