@@ -93,7 +93,7 @@ func (t *timestampOracle) getDifferentiatedTSO() (time.Time, int64) {
 }
 
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
-func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (physical int64, differentiatedLogical int64) {
+func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (physical, differentiatedLogical int64) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if t.tsoMux.tso == nil {
@@ -104,17 +104,17 @@ func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (phy
 	// Because the Local TSO in each Local TSO Allocator is independent, so they are possible
 	// to be the same at sometimes, to avoid this case, we need to use the logical part of the
 	// Local TSO to do some differentiating work. For example, we have three DCs: dc-1, dc-2 and
-	// dc-3. So the shiftNum is 1 because we have three DCs and only 1 digit is enough to distinguish
+	// dc-3. So the shiftNum is 2 bits because we have three DCs and 2 bits are enough to distinguish
 	// them. Then, for dc-2, the serialNum is 1 because its index in all sorted dc-locations is 1.
-	// Once we get a noramal TSO like this: xxxxxxxxxxxxxxxxxx. We will make the TSO's low digits
-	// of logical part from each DC looks like:
-	//     dc-1: xxxxxxxxxxxxxxxxx0
-	//     dc-2: xxxxxxxxxxxxxxxxx1
-	//     dc-3: xxxxxxxxxxxxxxxxx2
+	// Once we get a noramal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
+	// low bits of logical part from each DC looks like:
+	//     dc-1: xxxxxxxxxxxxxxxx00
+	//     dc-2: xxxxxxxxxxxxxxxx01
+	//     dc-3: xxxxxxxxxxxxxxxx10
 	if shiftNum == 0 {
 		differentiatedLogical = t.tsoMux.tso.logical
 	} else {
-		differentiatedLogical = t.tsoMux.tso.logical*10*int64(shiftNum) + int64(serialNum)
+		differentiatedLogical = t.tsoMux.tso.logical<<shiftNum + int64(serialNum)
 	}
 	if t.tsoMux.tso.differentiatedLogical < differentiatedLogical {
 		t.tsoMux.tso.differentiatedLogical = differentiatedLogical

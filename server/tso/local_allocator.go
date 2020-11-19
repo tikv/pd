@@ -15,7 +15,7 @@ package tso
 
 import (
 	"context"
-	"strconv"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -101,7 +101,7 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
 	serialNum := lta.allocatorManager.getDCLocationIndex(lta.dcLocation)
-	shiftNum := len(strconv.FormatInt(int64(lta.allocatorManager.getClusterDCLocationLength()), 10))
+	shiftNum := int(math.Ceil(math.Log2(float64(lta.allocatorManager.getClusterDCLocationLength()))))
 	if serialNum == -1 || shiftNum == 0 {
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("unable to get the dc-location index or length")
 	}
