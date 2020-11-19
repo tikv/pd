@@ -15,7 +15,14 @@ package movingaverage
 
 import (
 	"time"
+
+	"github.com/phf/go-queue/queue"
 )
+
+type deltaWithInterval struct {
+	delta    float64
+	interval time.Duration
+}
 
 // AvgOverTime maintains change rate in the last avgInterval.
 //
@@ -23,6 +30,7 @@ import (
 // stores recent changes that happened in the last avgInterval,
 // then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
+	que         *queue.Queue
 	deltaSum    float64
 	intervalSum time.Duration
 	avgInterval time.Duration
@@ -31,6 +39,7 @@ type AvgOverTime struct {
 // NewAvgOverTime returns an AvgOverTime with given interval.
 func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 	return &AvgOverTime{
+		que:         queue.New(),
 		deltaSum:    0,
 		intervalSum: 0,
 		avgInterval: interval,
@@ -44,12 +53,14 @@ func (aot *AvgOverTime) Get() float64 {
 
 // Clear clears the AvgOverTime.
 func (aot *AvgOverTime) Clear() {
+	aot.que = queue.New()
 	aot.intervalSum = 0
 	aot.deltaSum = 0
 }
 
 // Add adds recent change to AvgOverTime.
 func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
+	aot.que.PushBack(deltaWithInterval{delta, interval})
 	aot.deltaSum += delta
 	aot.intervalSum += interval
 }
@@ -59,4 +70,5 @@ func (aot *AvgOverTime) Set(avg float64) {
 	aot.Clear()
 	aot.deltaSum = avg * aot.avgInterval.Seconds()
 	aot.intervalSum = aot.avgInterval
+	aot.que.PushBack(deltaWithInterval{delta: aot.deltaSum, interval: aot.intervalSum})
 }
