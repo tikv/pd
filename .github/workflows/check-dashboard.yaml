@@ -2,11 +2,13 @@ on:
   push:
     branches:
       - master
+      - release-4.0
     paths:
       - "go.mod"
   pull_request:
     branches:
       - master
+      - release-4.0
     paths:
       - "go.mod"
 
