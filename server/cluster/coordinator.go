@@ -127,14 +127,19 @@ func (c *coordinator) patrolRegions() {
 				continue
 			}
 
-			checkerIsBusy, ops := c.checkers.CheckRegion(region)
-			if checkerIsBusy {
-				break
-			}
+			ops := c.checkers.CheckRegion(region)
 
 			key = region.GetEndKey()
-			if len(ops) > 0 {
+			if len(ops) == 0 {
+				continue
+			}
+
+			if !c.opController.ExceedStoreLimit(ops...) {
 				c.opController.AddWaitingOperator(ops...)
+				c.checkers.RemoveWaitingRegion(region.GetID())
+				c.cluster.RemoveSuspectRegion(region.GetID())
+			} else {
+				c.checkers.AddWaitingRegion(region)
 			}
 		}
 		// Updates the label level isolation statistics.
@@ -157,14 +162,15 @@ func (c *coordinator) checkSuspectRegions() {
 			c.cluster.RemoveSuspectRegion(id)
 			continue
 		}
-		checkerIsBusy, ops := c.checkers.CheckRegion(region)
-		if checkerIsBusy {
+		ops := c.checkers.CheckRegion(region)
+		if len(ops) == 0 {
 			continue
 		}
-		if len(ops) > 0 {
+
+		if !c.opController.ExceedStoreLimit(ops...) {
 			c.opController.AddWaitingOperator(ops...)
+			c.cluster.RemoveSuspectRegion(region.GetID())
 		}
-		c.cluster.RemoveSuspectRegion(id)
 	}
 }
 
@@ -197,6 +203,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 
 func (c *coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
+	log.Info("check waiting regions", zap.Int("waiting-length", len(items)))
 	for _, item := range items {
 		id := item.Key
 		region := c.cluster.GetRegion(id)
@@ -208,14 +215,16 @@ func (c *coordinator) checkWaitingRegions() {
 			c.checkers.RemoveWaitingRegion(id)
 			continue
 		}
-		checkerIsBusy, ops := c.checkers.CheckRegion(region)
-		if checkerIsBusy {
+		ops := c.checkers.CheckRegion(region)
+
+		if len(ops) == 0 {
 			continue
 		}
-		if len(ops) > 0 {
+
+		if !c.opController.ExceedStoreLimit(ops...) {
 			c.opController.AddWaitingOperator(ops...)
+			c.checkers.RemoveWaitingRegion(region.GetID())
 		}
-		c.checkers.RemoveWaitingRegion(id)
 	}
 }
 

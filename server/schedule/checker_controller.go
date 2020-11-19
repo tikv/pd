@@ -16,6 +16,7 @@ package schedule
 import (
 	"context"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -23,6 +24,7 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
+	"go.uber.org/zap"
 )
 
 // DefaultCacheSize is the default length of waiting list.
@@ -58,49 +60,43 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager 
 }
 
 // CheckRegion will check the region and add a new operator if needed.
-func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*operator.Operator) { //return checkerIsBusy,ops
+func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Operator { //return checkerIsBusy,ops
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
-	checkerIsBusy := true
 
 	if op := c.jointStateChecker.Check(region); op != nil {
-		return false, []*operator.Operator{op}
+		return []*operator.Operator{op}
 	}
 
 	if c.opts.IsPlacementRulesEnabled() {
-		if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-			checkerIsBusy = false
-			if op := c.ruleChecker.Check(region); op != nil {
-				return checkerIsBusy, []*operator.Operator{op}
+		if op := c.ruleChecker.Check(region); op != nil {
+			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+				return []*operator.Operator{op}
 			}
-		} else {
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
-			return false, []*operator.Operator{op}
+			return []*operator.Operator{op}
 		}
-		if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-			checkerIsBusy = false
-			if op := c.replicaChecker.Check(region); op != nil {
-				return checkerIsBusy, []*operator.Operator{op}
+		if op := c.replicaChecker.Check(region); op != nil {
+			log.Info("stat", zap.Uint64("op-count", opController.OperatorCount(operator.OpReplica)), zap.Uint64("replica-limit", c.opts.GetReplicaScheduleLimit()))
+			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+				return []*operator.Operator{op}
 			}
-		} else {
+			log.Info("add region to replica waiting list", zap.Uint64("region-id", region.GetID()))
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	}
 
 	if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.opts.GetMergeScheduleLimit() {
-		checkerIsBusy = false
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
-			return checkerIsBusy, ops
+			return ops
 		}
-	} else {
-		c.regionWaitingList.Put(region.GetID(), nil)
 	}
-	return checkerIsBusy, nil
+	return nil
 }
 
 // GetMergeChecker returns the merge checker.
@@ -111,6 +107,11 @@ func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 // GetWaitingRegions returns the regions in the waiting list.
 func (c *CheckerController) GetWaitingRegions() []*cache.Item {
 	return c.regionWaitingList.Elems()
+}
+
+// AddWaitingRegion returns the regions in the waiting list.
+func (c *CheckerController) AddWaitingRegion(region *core.RegionInfo) {
+	c.regionWaitingList.Put(region.GetID(), nil)
 }
 
 // RemoveWaitingRegion removes the region from the waiting list.
