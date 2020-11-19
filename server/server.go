@@ -864,9 +864,11 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	s.persistOptions.SetReplicationConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetReplicationConfig(old)
-		rule.Count = int(old.MaxReplicas)
-		if e := s.GetRaftCluster().GetRuleManager().SetRule(rule); e != nil {
-			log.Error("failed to roll back count of rule when update replication config", errs.ZapError(e))
+		if rule != nil {
+			rule.Count = int(old.MaxReplicas)
+			if e := s.GetRaftCluster().GetRuleManager().SetRule(rule); e != nil {
+				log.Error("failed to roll back count of rule when update replication config", errs.ZapError(e))
+			}
 		}
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
