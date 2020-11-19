@@ -1,0 +1,8 @@
+run:
+  deadline: 120s
+linters:
+  enable:
+    - misspell
+    - stylecheck
+  disable:
+    - errcheck
