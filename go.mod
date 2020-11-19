@@ -1,7 +1,5 @@
 module github.com/tikv/pd
 
-go 1.13
-
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
@@ -51,6 +49,8 @@ require (
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+go 1.13
 
 replace (
 	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
