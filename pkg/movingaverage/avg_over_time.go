@@ -30,7 +30,8 @@ type deltaWithInterval struct {
 // stores recent changes that happened in the last avgInterval,
 // then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
-	que         *queue.Queue
+	que         *queue.Queue      // The element is `deltaWithInterval`, sum of all elements' interval is less than `avgInterval`
+	margin      deltaWithInterval // The last one was PopFront.
 	deltaSum    float64
 	intervalSum time.Duration
 	avgInterval time.Duration
@@ -39,7 +40,11 @@ type AvgOverTime struct {
 // NewAvgOverTime returns an AvgOverTime with given interval.
 func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 	return &AvgOverTime{
-		que:         queue.New(),
+		que: queue.New(),
+		margin: deltaWithInterval{
+			delta:    0,
+			interval: 0,
+		},
 		deltaSum:    0,
 		intervalSum: 0,
 		avgInterval: interval,
@@ -48,46 +53,47 @@ func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 
 // Get returns change rate in the last interval.
 func (aot *AvgOverTime) Get() float64 {
-	if aot.que.Len() == 0 || aot.intervalSum < aot.avgInterval {
+	if aot.intervalSum < aot.avgInterval {
 		return 0
 	}
-
-	frontNode := aot.que.Front().(deltaWithInterval)
-	margin := frontNode.delta / frontNode.interval.Seconds() * (aot.intervalSum.Seconds() - aot.avgInterval.Seconds())
-	return (aot.deltaSum - margin) / aot.avgInterval.Seconds()
+	marginDelta := aot.margin.delta * (aot.intervalSum.Seconds() - aot.avgInterval.Seconds()) / aot.margin.interval.Seconds()
+	return (aot.deltaSum - marginDelta) / aot.avgInterval.Seconds()
 }
 
 // Clear clears the AvgOverTime.
 func (aot *AvgOverTime) Clear() {
-	aot.que = queue.New()
+	aot.que.Init()
+	aot.margin = deltaWithInterval{
+		delta:    0,
+		interval: 0,
+	}
 	aot.intervalSum = 0
 	aot.deltaSum = 0
 }
 
 // Add adds recent change to AvgOverTime.
 func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
-	if interval.Seconds() == 0 {
+	if interval == 0 {
 		return
 	}
+
 	aot.que.PushBack(deltaWithInterval{delta, interval})
 	aot.deltaSum += delta
 	aot.intervalSum += interval
 
-	for {
-		frontNode := aot.que.Front().(deltaWithInterval)
-		if aot.intervalSum-frontNode.interval < aot.avgInterval {
-			break
-		}
-		aot.deltaSum -= frontNode.delta
-		aot.intervalSum -= frontNode.interval
-		aot.que.PopFront()
+	for aot.intervalSum-aot.margin.interval >= aot.avgInterval {
+		aot.deltaSum -= aot.margin.delta
+		aot.intervalSum -= aot.margin.interval
+		aot.margin = aot.que.PopFront().(deltaWithInterval)
 	}
 }
 
 // Set sets AvgOverTime to the given average.
 func (aot *AvgOverTime) Set(avg float64) {
 	aot.Clear()
-	aot.deltaSum = avg * aot.avgInterval.Seconds()
+	aot.margin.delta = avg * aot.avgInterval.Seconds()
+	aot.margin.interval = aot.avgInterval
+	aot.deltaSum = aot.margin.delta
 	aot.intervalSum = aot.avgInterval
 	aot.que.PushBack(deltaWithInterval{delta: aot.deltaSum, interval: aot.intervalSum})
 }
