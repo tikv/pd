@@ -179,6 +179,8 @@ type client struct {
 	tsDeadline sync.Map // Same as map[string]chan deadline
 	// dc-location -> *lastTSO
 	lastTSMap sync.Map // Same as map[string]*lastTSO
+
+	checkTSDeadlineCh chan struct{}
 }
 
 // NewClient creates a PD client.
@@ -194,7 +196,8 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		return nil, err
 	}
 	c := &client{
-		baseClient: base,
+		baseClient:        base,
+		checkTSDeadlineCh: make(chan struct{}),
 	}
 
 	c.wg.Add(2)
@@ -225,6 +228,8 @@ func (c *client) tsCancelLoop() {
 			return true
 		})
 		select {
+		case <-c.checkTSDeadlineCh:
+			continue
 		case <-ticker.C:
 			continue
 		case <-tsCancelLoopCtx.Done():
@@ -254,6 +259,13 @@ func (c *client) watchTSDeadline(ctx context.Context, dcLocation string) {
 				}
 			}
 		}(dcLocation, tsDeadlineCh)
+	}
+}
+
+func (c *client) scheduleCheckTSDeadline() {
+	select {
+	case c.checkTSDeadlineCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -347,7 +359,12 @@ func (c *client) tsLoop() {
 								done:   done,
 								cancel: cancel,
 							}
-							tsDeadlineCh, _ := c.tsDeadline.Load(dc)
+							tsDeadlineCh, ok := c.tsDeadline.Load(dc)
+							if !ok || tsDeadlineCh == nil {
+								c.scheduleCheckTSDeadline()
+								time.Sleep(time.Millisecond * 100)
+								tsDeadlineCh, _ = c.tsDeadline.Load(dc)
+							}
 							select {
 							case tsDeadlineCh.(chan deadline) <- dl:
 							case <-ctx.Done():
