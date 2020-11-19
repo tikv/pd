@@ -341,9 +341,9 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfi
 func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	defer func() {
 		if typ == storelimit.RemovePeer {
-			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), 0)
+			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
 		} else if typ == storelimit.AddPeer {
-			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), 0)
+			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
 		}
 	}()
 	limit := o.GetStoreLimit(storeID)
