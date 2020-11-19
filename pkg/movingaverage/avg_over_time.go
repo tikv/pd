@@ -48,7 +48,13 @@ func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 
 // Get returns change rate in the last interval.
 func (aot *AvgOverTime) Get() float64 {
-	return aot.deltaSum / aot.intervalSum.Seconds()
+	if aot.que.Len() == 0 || aot.intervalSum < aot.avgInterval {
+		return 0
+	}
+
+	frontNode := aot.que.Front().(deltaWithInterval)
+	margin := frontNode.delta / frontNode.interval.Seconds() * (aot.intervalSum.Seconds() - aot.avgInterval.Seconds())
+	return (aot.deltaSum - margin) / aot.avgInterval.Seconds()
 }
 
 // Clear clears the AvgOverTime.
@@ -63,6 +69,13 @@ func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
 	aot.que.PushBack(deltaWithInterval{delta, interval})
 	aot.deltaSum += delta
 	aot.intervalSum += interval
+
+	frontNode := aot.que.Front().(deltaWithInterval)
+	if aot.intervalSum-frontNode.interval >= aot.avgInterval {
+		aot.que.PopFront()
+		aot.deltaSum -= frontNode.delta
+		aot.intervalSum -= frontNode.interval
+	}
 }
 
 // Set sets AvgOverTime to the given average.
@@ -71,4 +84,9 @@ func (aot *AvgOverTime) Set(avg float64) {
 	aot.deltaSum = avg * aot.avgInterval.Seconds()
 	aot.intervalSum = aot.avgInterval
 	aot.que.PushBack(deltaWithInterval{delta: aot.deltaSum, interval: aot.intervalSum})
+}
+
+// IsFull returns whether AvgOverTime is full
+func (aot *AvgOverTime) IsFull() bool {
+	return aot.intervalSum >= aot.avgInterval
 }
