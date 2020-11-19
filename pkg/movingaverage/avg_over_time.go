@@ -31,9 +31,9 @@ type deltaWithInterval struct {
 // then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
 	que         *queue.Queue      // The element is `deltaWithInterval`, sum of all elements' interval is less than `avgInterval`
-	margin      deltaWithInterval // The last one was PopFront.
-	deltaSum    float64
-	intervalSum time.Duration
+	margin      deltaWithInterval // The last element from `PopFront` in `que`
+	deltaSum    float64           // Including `margin` and all elements in `que`
+	intervalSum time.Duration     // Including `margin` and all elements in `que`
 	avgInterval time.Duration
 }
 
