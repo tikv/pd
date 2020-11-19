@@ -91,6 +91,10 @@ type Client interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
+	// and the distribution of these regions will be dispersed.
+	// NOTICE: This method is the old version of ScatterRegions, you should use the later one as your first choice.
+	ScatterRegion(ctx context.Context, regionID uint64) error
 	// ScatterRegions scatters the specified regions. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error)
@@ -175,6 +179,8 @@ type client struct {
 	tsDeadline sync.Map // Same as map[string]chan deadline
 	// dc-location -> *lastTSO
 	lastTSMap sync.Map // Same as map[string]*lastTSO
+
+	checkTSDeadlineCh chan struct{}
 }
 
 // NewClient creates a PD client.
@@ -190,7 +196,8 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		return nil, err
 	}
 	c := &client{
-		baseClient: base,
+		baseClient:        base,
+		checkTSDeadlineCh: make(chan struct{}),
 	}
 
 	c.wg.Add(2)
@@ -221,6 +228,8 @@ func (c *client) tsCancelLoop() {
 			return true
 		})
 		select {
+		case <-c.checkTSDeadlineCh:
+			continue
 		case <-ticker.C:
 			continue
 		case <-tsCancelLoopCtx.Done():
@@ -250,6 +259,13 @@ func (c *client) watchTSDeadline(ctx context.Context, dcLocation string) {
 				}
 			}
 		}(dcLocation, tsDeadlineCh)
+	}
+}
+
+func (c *client) scheduleCheckTSDeadline() {
+	select {
+	case c.checkTSDeadlineCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -343,7 +359,12 @@ func (c *client) tsLoop() {
 								done:   done,
 								cancel: cancel,
 							}
-							tsDeadlineCh, _ := c.tsDeadline.Load(dc)
+							tsDeadlineCh, ok := c.tsDeadline.Load(dc)
+							if !ok || tsDeadlineCh == nil {
+								c.scheduleCheckTSDeadline()
+								time.Sleep(time.Millisecond * 100)
+								tsDeadlineCh, _ = c.tsDeadline.Load(dc)
+							}
 							select {
 							case tsDeadlineCh.(chan deadline) <- dl:
 							case <-ctx.Done():
@@ -898,6 +919,34 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 		return 0, errors.WithStack(err)
 	}
 	return resp.GetMinSafePoint(), nil
+}
+
+func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	return c.scatterRegionsWithGroup(ctx, regionID, "")
+}
+
+func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, group string) error {
+	start := time.Now()
+	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+		Group:    group,
+	})
+	cancel()
+	if err != nil {
+		return err
+	}
+	if resp.Header.GetError() != nil {
+		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	}
+	return nil
 }
 
 func (c *client) ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error) {
