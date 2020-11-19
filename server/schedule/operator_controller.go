@@ -309,7 +309,6 @@ func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 
 	if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
 		for _, op := range ops {
-			operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 			_ = op.Cancel()
 			oc.buryOperator(op)
 		}
@@ -338,7 +337,7 @@ func (oc *OperatorController) PromoteWaitingOperator() {
 
 		if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
 			for _, op := range ops {
-				operatorWaitCounter.WithLabelValues(op.Desc(), "promote_canceled").Inc()
+				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-canceled").Inc()
 				_ = op.Cancel()
 				oc.buryOperator(op)
 			}
@@ -369,7 +368,7 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 		if region == nil {
 			log.Debug("region not found, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()))
-			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
+			operatorWaitCounter.WithLabelValues(op.Desc(), "not-found").Inc()
 			return false
 		}
 		if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() ||
@@ -378,14 +377,14 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Reflect("old", region.GetRegionEpoch()),
 				zap.Reflect("new", op.RegionEpoch()))
-			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
+			operatorWaitCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
 			return false
 		}
 		if old := oc.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
 			log.Debug("already have operator, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Reflect("old", old))
-			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
+			operatorWaitCounter.WithLabelValues(op.Desc(), "already-have").Inc()
 			return false
 		}
 		if op.Status() != operator.CREATED {
@@ -396,12 +395,12 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			failpoint.Inject("unexpectedOperator", func() {
 				panic(op)
 			})
-			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
+			operatorWaitCounter.WithLabelValues(op.Desc(), "unexpected-status").Inc()
 			return false
 		}
 		if oc.wopStatus.ops[op.Desc()] >= oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator() {
-			log.Debug("exceed_max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator()))
-			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed_max").Inc()
+			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator()))
+			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed-max").Inc()
 			return false
 		}
 	}
@@ -409,7 +408,7 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 	for _, op := range ops {
 		if op.CheckExpired() {
 			expired = true
-			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
+			operatorWaitCounter.WithLabelValues(op.Desc(), "expired").Inc()
 		}
 	}
 	return !expired
@@ -425,7 +424,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	log.Info("add operator",
 		zap.Uint64("region-id", regionID),
 		zap.Reflect("operator", op),
-		zap.String("additional info", op.GetAdditionalInfo()))
+		zap.String("additional-info", op.GetAdditionalInfo()))
 
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
@@ -539,7 +538,7 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
-			zap.String("additional info", op.GetAdditionalInfo()))
+			zap.String("additional-info", op.GetAdditionalInfo()))
 		operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 		operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
 		for _, counter := range op.FinishedCounters {
