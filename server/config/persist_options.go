@@ -303,20 +303,8 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 // GetStoreLimit returns the limit of a store.
 func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfig) {
 	defer func() {
-		if v, ok, err := o.getTTLFloat(fmt.Sprintf("remove-peer-%v", storeID)); ok {
-			if err == nil {
-				returnSC.RemovePeer = v
-			} else {
-				log.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
-			}
-		}
-		if v, ok, err := o.getTTLFloat(fmt.Sprintf("add-peer-%v", storeID)); ok {
-			if err == nil {
-				returnSC.AddPeer = v
-			} else {
-				log.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
-			}
-		}
+		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
+		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
 	}()
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
@@ -353,21 +341,9 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfi
 func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	defer func() {
 		if typ == storelimit.RemovePeer {
-			if v, ok, err := o.getTTLFloat(fmt.Sprintf("remove-peer-%v", storeID)); ok {
-				if err == nil {
-					returned = v
-				} else {
-					log.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
-				}
-			}
+			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), 0)
 		} else if typ == storelimit.AddPeer {
-			if v, ok, err := o.getTTLFloat(fmt.Sprintf("add-peer-%v", storeID)); ok {
-				if err == nil {
-					returned = v
-				} else {
-					log.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
-				}
-			}
+			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), 0)
 		}
 	}()
 	limit := o.GetStoreLimit(storeID)
@@ -614,15 +590,6 @@ func (o *PersistOptions) SetTTLData(parCtx context.Context, client *clientv3.Cli
 	return nil
 }
 
-func (o *PersistOptions) getTTLFloat(key string) (float64, bool, error) {
-	stringForm, ok := o.getTTLData(key)
-	if !ok {
-		return 0, false, nil
-	}
-	r, err := strconv.ParseFloat(stringForm, 64)
-	return r, true, err
-}
-
 func (o *PersistOptions) getTTLUint(key string) (uint64, bool, error) {
 	stringForm, ok := o.getTTLData(key)
 	if !ok {
@@ -634,6 +601,25 @@ func (o *PersistOptions) getTTLUint(key string) (uint64, bool, error) {
 
 func (o *PersistOptions) getTTLUintOr(key string, defaultValue uint64) uint64 {
 	if v, ok, err := o.getTTLUint(key); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse " + key + " from PersistOptions's ttl storage")
+	}
+	return defaultValue
+}
+
+func (o *PersistOptions) getTTLFloat(key string) (float64, bool, error) {
+	stringForm, ok := o.getTTLData(key)
+	if !ok {
+		return 0, false, nil
+	}
+	r, err := strconv.ParseFloat(stringForm, 64)
+	return r, true, err
+}
+
+func (o *PersistOptions) getTTLFloatOr(key string, defaultValue float64) float64 {
+	if v, ok, err := o.getTTLFloat(key); ok {
 		if err == nil {
 			return v
 		}
