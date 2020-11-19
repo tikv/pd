@@ -55,6 +55,7 @@ import (
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/urfave/negroni"
@@ -834,10 +835,16 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			}
 		}
 	}
+
+	var rule *placement.Rule
 	if cfg.EnablePlacementRules {
 		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
-		if cfg.MaxReplicas != old.MaxReplicas && !s.isOnlyDefaultRule() {
-			return errors.New("cannot update MaxReplicas when placement rules feature is enabled, please update rule instead")
+		if cfg.MaxReplicas != old.MaxReplicas {
+			rules := s.GetRaftCluster().GetRuleManager().GetAllRules()
+			if !(len(rules) == 1 && len(rules[0].StartKey) == 0 && len(rules[0].EndKey) == 0) {
+				return errors.New("cannot update MaxReplicas when placement rules feature is enabled and not only default rule exists, please update rule instead")
+			}
+			rule = rules[0]
 		}
 		// replication.LocationLabels won't work when placement rule is enabled
 		if !reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels) {
@@ -845,9 +852,22 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		}
 	}
 
+	if rule != nil {
+		rule.Count = int(cfg.MaxReplicas)
+		if err := s.GetRaftCluster().GetRuleManager().SetRule(rule); err != nil {
+			log.Error("failed to update rule count",
+				errs.ZapError(err))
+			return err
+		}
+	}
+
 	s.persistOptions.SetReplicationConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetReplicationConfig(old)
+		rule.Count = int(old.MaxReplicas)
+		if e := s.GetRaftCluster().GetRuleManager().SetRule(rule); e != nil {
+			log.Error("failed to roll back count of rule when update replication config", errs.ZapError(e))
+		}
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
@@ -856,11 +876,6 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	}
 	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
-}
-
-func (s *Server) isOnlyDefaultRule() bool {
-	rules := s.GetRaftCluster().GetRuleManager().GetAllRules()
-	return len(rules) == 1 && rules[0].GroupID == "pd" && rules[0].ID == "default"
 }
 
 // GetPDServerConfig gets the balance config information.
