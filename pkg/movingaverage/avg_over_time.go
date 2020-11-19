@@ -66,15 +66,21 @@ func (aot *AvgOverTime) Clear() {
 
 // Add adds recent change to AvgOverTime.
 func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
+	if interval.Seconds() == 0 {
+		return
+	}
 	aot.que.PushBack(deltaWithInterval{delta, interval})
 	aot.deltaSum += delta
 	aot.intervalSum += interval
 
-	frontNode := aot.que.Front().(deltaWithInterval)
-	if aot.intervalSum-frontNode.interval >= aot.avgInterval {
-		aot.que.PopFront()
+	for {
+		frontNode := aot.que.Front().(deltaWithInterval)
+		if aot.intervalSum-frontNode.interval < aot.avgInterval {
+			break
+		}
 		aot.deltaSum -= frontNode.delta
 		aot.intervalSum -= frontNode.interval
+		aot.que.PopFront()
 	}
 }
 
