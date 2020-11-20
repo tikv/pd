@@ -815,17 +815,24 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		TTL       int64
 		SafePoint uint64
 	}{
-		{"a", 1000, 1},
 		{"b", 1000, 2},
+		{"a", 1000, 1},
 		{"c", 1000, 3},
 	}
 	for _, ssp := range serviceSafePoints {
 		min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
 			ssp.ServiceID, 1000, ssp.SafePoint)
 		c.Assert(err, IsNil)
-		c.Assert(min, Equals, uint64(1))
+		// An service safepoint of ID "gc_worker" is automatically initialized as 0
+		c.Assert(min, Equals, uint64(0))
 	}
+
 	min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", math.MaxInt64, 10)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(1))
+
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", 1000, 4)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(2))
@@ -866,7 +873,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(minSsp.ExpiredAt, Less, oldMinSsp.ExpiredAt)
 
-	// TTL can be infinite
+	// TTL can be infinite (represented by math.MaxInt64)
 	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", math.MaxInt64, 3)
 	c.Assert(err, IsNil)
@@ -875,6 +882,32 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
+
+	// Delete "a" and "c"
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", -1, 3)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(4))
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"a", -1, 4)
+	c.Assert(err, IsNil)
+	// Now gc_worker is the only remaining service safe point.
+	c.Assert(min, Equals, uint64(10))
+
+	// gc_worker cannot be deleted.
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", -1, 10)
+	c.Assert(err, NotNil)
+
+	// Cannot set non-infinity TTL for gc_worker
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", 10000000, 10)
+	c.Assert(err, NotNil)
+
+	// Service safepoint must have a non-empty ID
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"", 1000, 15)
+	c.Assert(err, NotNil)
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {
@@ -885,7 +918,9 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 			ConfVer: 1,
 			Version: 1,
 		},
-		Peers: peers,
+		Peers:    peers,
+		StartKey: []byte("fff"),
+		EndKey:   []byte("ggg"),
 	}
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newHeader(s.srv),
@@ -893,10 +928,14 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 		Leader: peers[0],
 	}
 	err := s.regionHeartbeat.Send(req)
+	regionsID := []uint64{regionID}
 	c.Assert(err, IsNil)
 	testutil.WaitUntil(c, func(c *C) bool {
-		err := s.client.ScatterRegion(context.Background(), regionID)
+		scatterResp, err := s.client.ScatterRegions(context.Background(), regionsID, pd.WithGroup("test"), pd.WithRetry(1))
 		if c.Check(err, NotNil) {
+			return false
+		}
+		if c.Check(scatterResp.FinishedPercentage, Not(Equals), uint64(100)) {
 			return false
 		}
 		resp, err := s.client.GetOperator(context.Background(), regionID)
@@ -904,37 +943,6 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 			return false
 		}
 		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
-	})
-	c.Succeed()
-}
-
-func (s *testClientSuite) TestScatterRegionWithOption(c *C) {
-	regionID := regionIDAllocator.alloc()
-	region := &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers: peers,
-	}
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(s.srv),
-		Region: region,
-		Leader: peers[0],
-	}
-	err := s.regionHeartbeat.Send(req)
-	c.Assert(err, IsNil)
-	testutil.WaitUntil(c, func(c *C) bool {
-		err := s.client.ScatterRegionWithOption(context.Background(), regionID, pd.WithGroup("test-group"))
-		if c.Check(err, NotNil) {
-			return false
-		}
-		resp, err := s.client.GetOperator(context.Background(), regionID)
-		if c.Check(err, NotNil) {
-			return false
-		}
-		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
-	})
+	}, testutil.WithSleepInterval(1*time.Second))
 	c.Succeed()
 }

@@ -919,8 +919,8 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 		s.persistOptions.DeleteLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to update label property config",
 			zap.String("typ", typ),
-			zap.String("labelKey", labelKey),
-			zap.String("labelValue", labelValue),
+			zap.String("label-key", labelKey),
+			zap.String("label-value", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
 			errs.ZapError(err))
 		return err
@@ -938,8 +938,8 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 		s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to delete label property config",
 			zap.String("typ", typ),
-			zap.String("labelKey", labelKey),
-			zap.String("labelValue", labelValue),
+			zap.String("label-key", labelKey),
+			zap.String("label-value", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
 			errs.ZapError(err))
 		return err

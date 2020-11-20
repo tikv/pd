@@ -27,12 +27,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
+	log "github.com/sirupsen/logrus"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 // RegionInfo records detail region info for api usage.
@@ -710,6 +712,13 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	percentage := 100
 	if len(failures) > 0 {
 		percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+		log.Debug("scatter regions", zap.Errors("failures", func() []error {
+			r := make([]error, 0, len(failures))
+			for _, err := range failures {
+				r = append(r, err)
+			}
+			return r
+		}()))
 	}
 	s := struct {
 		ProcessedPercentage int `json:"processed-percentage"`
