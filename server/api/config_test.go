@@ -278,7 +278,7 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
 }
 
-var TTLConfig = map[string]interface{}{
+var ttlConfig = map[string]interface{}{
 	"schedule.max-snapshot-count":             999,
 	"schedule.enable-location-replacement":    false,
 	"schedule.max-merge-region-size":          999,
@@ -291,49 +291,26 @@ var TTLConfig = map[string]interface{}{
 	"schedule.merge-schedule-limit":           999,
 }
 
-func assertTTLConfig(c *C, svr *server.Server, checker Checker) {
-	c.Assert(svr.GetPersistOptions().GetMaxSnapshotCount(), checker, uint64(999))
-	c.Assert(svr.GetPersistOptions().IsLocationReplacementEnabled(), checker, false)
-	c.Assert(svr.GetPersistOptions().GetMaxMergeRegionSize(), checker, uint64(999))
-	c.Assert(svr.GetPersistOptions().GetMaxMergeRegionKeys(), checker, uint64(999))
-	c.Assert(svr.GetPersistOptions().GetSchedulerMaxWaitingOperator(), checker, uint64(999))
-	c.Assert(svr.GetPersistOptions().GetLeaderScheduleLimit(), checker, uint64(999))
-	c.Assert(svr.GetPersistOptions().GetRegionScheduleLimit(), checker, uint64(999))
-	c.Assert(svr.GetPersistOptions().GetHotRegionScheduleLimit(), checker, uint64(999))
-	c.Assert(svr.GetPersistOptions().GetReplicaScheduleLimit(), checker, uint64(999))
-	c.Assert(svr.GetPersistOptions().GetMergeScheduleLimit(), checker, uint64(999))
+func assertTTLConfig(c *C, options *config.PersistOptions, checker Checker) {
+	c.Assert(options.GetMaxSnapshotCount(), checker, uint64(999))
+	c.Assert(options.IsLocationReplacementEnabled(), checker, false)
+	c.Assert(options.GetMaxMergeRegionSize(), checker, uint64(999))
+	c.Assert(options.GetMaxMergeRegionKeys(), checker, uint64(999))
+	c.Assert(options.GetSchedulerMaxWaitingOperator(), checker, uint64(999))
+	c.Assert(options.GetLeaderScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetRegionScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetHotRegionScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetReplicaScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetMergeScheduleLimit(), checker, uint64(999))
 }
 
 func (s *testConfigSuite) TestConfigTTL(c *C) {
 	addr := fmt.Sprintf("%s/config?ttlSecond=2", s.urlPrefix)
-	postData, err := json.Marshal(TTLConfig)
+	postData, err := json.Marshal(ttlConfig)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
-	assertTTLConfig(c, s.svr, Equals)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
 	time.Sleep(3 * time.Second)
-	assertTTLConfig(c, s.svr, Not(Equals))
-}
-
-func (s *testConfigSuite) TestConfigTTLAfterTransferLeader(c *C) {
-	_, svrs, cleanup := mustNewCluster(c, 3)
-	defer cleanup()
-	leader := mustWaitLeader(c, svrs)
-	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=10", leader.GetAddr())
-	postData, err := json.Marshal(TTLConfig)
-	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
-	c.Assert(err, IsNil)
-	time.Sleep(3 * time.Second)
-	leader.Close()
-	// remove the old leader from svrs, or next mustWaitLeader will fail
-	for i, svr := range svrs {
-		if svr == leader {
-			svrs = append(svrs[:i], svrs[i+1:]...)
-			break
-		}
-	}
-	time.Sleep(3 * time.Second)
-	leader = mustWaitLeader(c, svrs)
-	assertTTLConfig(c, leader, Equals)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
 }
