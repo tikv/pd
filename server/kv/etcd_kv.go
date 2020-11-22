@@ -37,6 +37,10 @@ type etcdKVBase struct {
 	rootPath string
 }
 
+func (kv *etcdKVBase) NewTxn() Txn {
+	return EtcdTxn{txn: NewSlowLogTxn(kv.client), rootPath: kv.rootPath}
+}
+
 // NewEtcdKVBase creates a new etcd kv.
 func NewEtcdKVBase(client *clientv3.Client, rootPath string) *etcdKVBase {
 	return &etcdKVBase{
@@ -149,6 +153,15 @@ func (t *SlowLogTxn) Then(ops ...clientv3.Op) clientv3.Txn {
 	}
 }
 
+// Else takes a list of operations. The Ops list will be executed, if the
+// comparisons passed in If() failed.
+func (t *SlowLogTxn) Else(ops ...clientv3.Op) clientv3.Txn {
+	return &SlowLogTxn{
+		Txn:    t.Txn.Else(ops...),
+		cancel: t.cancel,
+	}
+}
+
 // Commit implements Txn Commit interface.
 func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	start := time.Now()
@@ -170,4 +183,83 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
 
 	return resp, errors.WithStack(err)
+}
+
+type EtcdTxn struct {
+	txn      clientv3.Txn
+	rootPath string
+}
+
+func (e EtcdTxn) If(cs ...Cmp) Txn {
+	var etcdCmps []clientv3.Cmp
+	for _, cmp := range cs {
+		var cmpOp func(string) clientv3.Cmp
+		switch cmp.target {
+		case cmpVersion:
+			cmpOp = clientv3.Version
+		case cmpCreate:
+			cmpOp = clientv3.CreateRevision
+		case cmpMod:
+			cmpOp = clientv3.ModRevision
+		case cmpValue:
+			cmpOp = clientv3.Value
+		default:
+			panic("invalid op type")
+		}
+
+		key := path.Join(e.rootPath, cmp.key)
+		etcdCmps = append(etcdCmps, clientv3.Compare(cmpOp(key), string(cmp.relation), cmp.value))
+	}
+
+	return EtcdTxn{txn: e.txn.If(etcdCmps...), rootPath: e.rootPath}
+}
+
+func (e EtcdTxn) Then(ops ...Op) Txn {
+	var etcdOps []clientv3.Op
+	for _, op := range ops {
+		key := strings.Join([]string{e.rootPath, op.key}, "/")
+
+		switch op.t {
+		case opSave:
+			etcdOps = append(etcdOps, clientv3.OpPut(key, op.value))
+		case opRemove:
+			etcdOps = append(etcdOps, clientv3.OpDelete(key))
+		case opRemoveRange:
+			rangeEnd := strings.Join([]string{e.rootPath, op.rangeEnd}, "/")
+			etcdOps = append(etcdOps, clientv3.OpDelete(key, clientv3.WithRange(rangeEnd), clientv3.WithLimit(op.limit)))
+		}
+	}
+
+	return EtcdTxn{txn: e.txn.Then(etcdOps...), rootPath: e.rootPath}
+}
+
+func (e EtcdTxn) Else(ops ...Op) Txn {
+	var etcdOps []clientv3.Op
+	for _, op := range ops {
+		key := strings.Join([]string{e.rootPath, op.key}, "/")
+
+		switch op.t {
+		case opSave:
+			etcdOps = append(etcdOps, clientv3.OpPut(key, op.value))
+		case opRemove:
+			etcdOps = append(etcdOps, clientv3.OpDelete(key))
+		case opRemoveRange:
+			rangeEnd := strings.Join([]string{e.rootPath, op.rangeEnd}, "/")
+			etcdOps = append(etcdOps, clientv3.OpDelete(key, clientv3.WithRange(rangeEnd), clientv3.WithLimit(op.limit)))
+		}
+	}
+
+	return EtcdTxn{txn: e.txn.Else(etcdOps...), rootPath: e.rootPath}
+}
+
+func (e EtcdTxn) Commit() (interface{}, error) {
+	resp, err := e.txn.Commit()
+	if err != nil {
+		return resp, err
+	}
+
+	if !resp.Succeeded {
+		return resp, ErrorTransactionFailed
+	}
+	return resp, nil
 }

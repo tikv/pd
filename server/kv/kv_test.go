@@ -54,6 +54,7 @@ func (s *testKVSuite) TestEtcd(c *C) {
 	kv := NewEtcdKVBase(client, rootPath)
 	s.testReadWrite(c, kv)
 	s.testRange(c, kv)
+	s.testTxn(c, kv)
 }
 
 func (s *testKVSuite) TestLevelDB(c *C) {
@@ -123,6 +124,82 @@ func (s *testKVSuite) testRange(c *C, kv Base) {
 		c.Assert(err, IsNil)
 		c.Assert(ks, DeepEquals, tc.expect)
 		c.Assert(vs, DeepEquals, tc.expect)
+	}
+}
+
+func (s *testKVSuite) testTxn(c *C, kv TxnBase) {
+	testCases := []struct {
+		_if      []Cmp
+		then     []Op
+		_else    []Op
+		expect   map[string]string
+		willFail bool
+	}{
+		{then: []Op{OpSave("key", "value")}, expect: map[string]string{"key": "value"}},
+		{
+			_if:    []Cmp{Eq(Value("key"), "value")},
+			then:   []Op{OpSave("foo", "bar1")},
+			_else:  []Op{OpSave("foo", "bar2")},
+			expect: map[string]string{"foo": "bar1"},
+		},
+		{
+			_if:      []Cmp{Eq(Value("foo"), "bar2")},
+			then:     []Op{OpSave("foo", "bar3")},
+			_else:    []Op{OpSave("foo", "bar4")},
+			expect:   map[string]string{"foo": "bar4"},
+			willFail: true,
+		},
+		{
+			_if:      []Cmp{Eq(Value("foo"), "boo")},
+			then:     []Op{OpSave("foo", "bar3")},
+			willFail: true,
+		},
+		{
+			_if:    []Cmp{Eq(Version("foo"), 2)},
+			then:   []Op{OpSave("test_version_eq", "pass")},
+			expect: map[string]string{"test_version_eq": "pass"},
+		},
+		{
+			_if:    []Cmp{Gt(Version("foo"), 1)},
+			then:   []Op{OpSave("test_version_gt", "pass")},
+			expect: map[string]string{"test_version_gt": "pass"},
+		},
+		{
+			_if:    []Cmp{Lt(Version("foo"), 3)},
+			then:   []Op{OpSave("test_version_lt", "pass")},
+			expect: map[string]string{"test_version_lt": "pass"},
+		},
+		{
+			_if:    []Cmp{Neq(Version("foo"), 0)},
+			then:   []Op{OpSave("test_version_neq", "pass")},
+			expect: map[string]string{"test_version_neq": "pass"},
+		},
+		{
+			then:   []Op{OpSave("key/1", "1"), OpSave("key/2", "2"), OpSave("key/3", "3")},
+			expect: map[string]string{"key/1": "1", "key/2": "2", "key/3": "3"},
+		},
+		{
+			then:   []Op{OpRemoveRange("key/", clientv3.GetPrefixRangeEnd("key/"), 0)},
+			expect: map[string]string{"key": "value", "key/1": "", "key/2": "", "key/3": ""},
+		},
+		{
+			then:   []Op{OpRemove("key")},
+			expect: map[string]string{"key": ""},
+		},
+	}
+
+	for _, testCases := range testCases {
+		_, err := kv.NewTxn().If(testCases._if...).Then(testCases.then...).Else(testCases._else...).Commit()
+		if testCases.willFail {
+			c.Assert(err, NotNil)
+		} else {
+			c.Assert(err, IsNil)
+		}
+		for k, v := range testCases.expect {
+			value, err := kv.Load(k)
+			c.Assert(err, IsNil)
+			c.Assert(value, Equals, v)
+		}
 	}
 }
 
