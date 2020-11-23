@@ -300,8 +300,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 }
 
 func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy bool, expectAddOperator int) {
-	checkerIsBusy, ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
-	c.Assert(checkerIsBusy, Equals, expectCheckerIsBusy)
+	ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
 	if ops == nil {
 		c.Assert(expectAddOperator, Equals, 0)
 	} else {
