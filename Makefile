@@ -183,15 +183,11 @@ errdoc: install-go-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
 
-travis_coverage: export GO111MODULE=on
-travis_coverage:
-ifeq ("$(TRAVIS_COVERAGE)", "1")
+coverage: export GO111MODULE=on
+coverage: install-go-tools
 	@$(FAILPOINT_ENABLE)
 	CGO_ENABLED=1 $(OVERALLS) -concurrency=8 -project=github.com/tikv/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
-else
-	@echo "coverage only runs in travis."
-endif
 
 simulator: export GO111MODULE=on
 simulator:
