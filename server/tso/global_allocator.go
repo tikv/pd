@@ -282,8 +282,8 @@ func (gta *GlobalTSOAllocator) Reset() {
 	gta.timestampOracle.ResetTimestamp()
 }
 
-// GetDcLocations return all the dcLocations the GlobalTSOAllocator will check
-func (gta *GlobalTSOAllocator) GetDcLocations() []string {
+// GetDCLocations return all the dcLocations the GlobalTSOAllocator will check
+func (gta *GlobalTSOAllocator) GetDCLocations() []string {
 	dcLocationsMap := gta.allocatorManager.GetClusterDCLocations()
 	dcLocations := make([]string, 0, len(dcLocationsMap))
 	for dc := range dcLocationsMap {

@@ -324,6 +324,9 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 		log.Error("failed to initialize the local TSO allocator", errs.ZapError(err))
 		return
 	}
+	// Make sure the local TSO allocator leader have the latest cluster dc-locations info
+	am.ClusterDCLocationChecker()
+	// Expose the local TSO allocator leader role to the outside to provide the service
 	allocator.EnableAllocatorLeader()
 	// The next leader is me, delete it to finish campaigning
 	am.deleteNextLeaderID(allocator.dcLocation)
