@@ -150,8 +150,8 @@ const (
 	tsLoopDCCheckInterval = time.Minute
 	maxMergeTSORequests   = 10000 // should be higher if client is sending requests in burst
 	maxInitClusterRetries = 100
-	defaultTsoInterval = 1 * time.Microsecond
-	defaultPushSize = 150
+	defaultTsoInterval    = 1 * time.Microsecond
+	defaultPushSize       = 1
 )
 
 var (
@@ -164,13 +164,13 @@ var (
 )
 
 type tsoController struct {
-	ticker *time.Ticker
-	interval time.Duration
+	ticker     *time.Ticker
+	pushSize   int
 	dispatcher *sync.Map
 }
 
 func newTsoController(dis *sync.Map) *tsoController {
-	return &tsoController{ticker: time.NewTicker(defaultTsoInterval), interval:defaultTsoInterval,
+	return &tsoController{ticker: time.NewTicker(defaultTsoInterval), pushSize: defaultPushSize,
 		dispatcher: dis}
 }
 
@@ -179,7 +179,10 @@ func (c *tsoController) canPush(dc string) bool {
 	case <-c.ticker.C:
 		return true
 	default:
-
+		dispatcher, _ := c.dispatcher.Load(dc)
+		if len(dispatcher.(chan *tsoRequest)) >= c.pushSize {
+			return true
+		}
 	}
 	return false
 }
@@ -193,7 +196,7 @@ type client struct {
 	tsDeadline sync.Map // Same as map[string]chan deadline
 	// dc-location -> int64
 	controller *tsoController
-	lastTSMap sync.Map // Same as map[string]*lastTSO
+	lastTSMap  sync.Map // Same as map[string]*lastTSO
 }
 
 // NewClient creates a PD client.
