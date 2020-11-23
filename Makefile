@@ -5,6 +5,8 @@ TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
 INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/" | grep -E "tests")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
+COVER_PKG :=  $(shell find . -iname "*_test.go" -exec dirname {} \; | \
+                     sort -u | sed -e "s/^\./github.com\/tikv\/pd/" |  tr "\n" "," )
 
 PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
@@ -155,6 +157,16 @@ basic-test:
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
+test-with-cover: install-go-tools dashboard-ui
+	# testing...
+	@$(FAILPOINT_ENABLE)
+	for PKG in $(TEST_PKGS); do\
+		set -euo pipefail;\
+		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG  2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
+		rm coverage.tmp;\
+	done
+	@$(FAILPOINT_DISABLE)
+
 check: install-go-tools check-all check-plugin errdoc
 
 check-all: static lint tidy
@@ -182,12 +194,6 @@ tidy:
 errdoc: install-go-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
-
-coverage: export GO111MODULE=on
-coverage: install-go-tools
-	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 $(OVERALLS) -concurrency=8 -project=github.com/tikv/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
-	@$(FAILPOINT_DISABLE)
 
 simulator: export GO111MODULE=on
 simulator:

@@ -1,0 +1,77 @@
+on: [push, pull_request]
+name: PD Tests
+jobs:
+  chunks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        worker_id: [1, 2, 3]
+    outputs:
+        job-total: ${{ strategy.job-total }}
+    steps:
+    - uses: actions/setup-go@v2
+      with:
+        go-version: 1.14
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Restore cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+          ~/work/pd/pd/.tools
+          ~/work/pd/pd/.dashboard_asset_cache
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    - name: Dispatch Packages
+      id: packages-units
+      env:
+        WORKER_ID: ${{ matrix.worker_id }}
+      run: |
+        go list ./... > packages.list
+        split packages.list -n r/${{ strategy.job-total }} packages_unit_ -a 1 --numeric-suffixes=1
+        packages="{$(cat packages_unit_${WORKER_ID} |tr "\n" ",")}"
+        echo ${packages}
+        echo "::set-output name=list::${packages}"
+    - name: Make Test
+      env:
+        WORKER_ID: ${{ matrix.worker_id }}
+      run: |
+        make test-with-cover TEST_PKGS="${{ steps.packages-units.outputs.list }}"
+        mv covprofile covprofile_$WORKER_ID
+        sed -i "/failpoint_binding/d" covprofile_$WORKER_ID
+    - name: Upload coverage result ${{ matrix.worker_id }}
+      uses: actions/upload-artifact@v2
+      with:
+        name: cover-reports
+        path: covprofile_${{ matrix.worker_id }}
+  report-coverage:
+    needs: chunks
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/setup-go@v2
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Download_1
+      uses: actions/download-artifact@v2
+      with:
+        name: cover-reports
+    - name: Merge
+      env:
+        TOTAL_JOBS: ${{needs.chunks.outputs.job-total}}
+      run: |
+        echo ${TOTAL_JOBS}
+        for i in {1..$TOTAL_JOBS}; do cat covprofile_$i >> covprofile; done
+        cat covprofile
+    - name: Send coverage
+      uses: codecov/codecov-action@v1
+      with:
+        token: ${{ secrets.CODECOV }}
+        file: ./covprofile
+        flags: unittests
+        name: codecov-umbrella
