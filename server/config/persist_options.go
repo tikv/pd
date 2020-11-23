@@ -309,27 +309,30 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfi
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
-	v1, ok1 := o.getTTLData("default-add-peer")
-	v2, ok2 := o.getTTLData("default-remove-peer")
 	cfg := o.GetScheduleConfig().Clone()
 	sc := StoreLimitConfig{
 		AddPeer:    DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
-	if ok1 || ok2 {
-		r, err := strconv.ParseFloat(v1, 64)
-		if err == nil {
-			returnSC.AddPeer = r
-		} else {
-			log.Warn("failed to parse schedule.add-peer-storeID from PersistOptions's ttl storage")
-		}
+	v, ok1, err := o.getTTLFloat("default-add-peer")
+	if err != nil {
+		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage")
+	}
+	canSetAddPeer := ok1 && err == nil
+	if canSetAddPeer {
+		returnSC.AddPeer = v
+	}
 
-		r, err = strconv.ParseFloat(v2, 64)
-		if err == nil {
-			returnSC.RemovePeer = r
-		} else {
-			log.Warn("failed to parse schedule.remove-peer-storeID from PersistOptions's ttl storage")
-		}
+	v, ok2, err := o.getTTLFloat("default-remove-peer")
+	if err != nil {
+		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage")
+	}
+	canSetRemovePeer := ok2 && err == nil
+	if canSetRemovePeer {
+		returnSC.RemovePeer = v
+	}
+
+	if canSetAddPeer || canSetRemovePeer {
 		return returnSC
 	}
 	cfg.StoreLimit[storeID] = sc
