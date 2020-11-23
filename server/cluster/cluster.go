@@ -920,13 +920,8 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 		return errors.Errorf("invalid put store %v", store)
 	}
 
-	v, err := versioninfo.ParseVersion(store.GetVersion())
-	if err != nil {
-		return errors.Errorf("invalid put store %v, error: %s", store, err)
-	}
-	clusterVersion := *c.opt.GetClusterVersion()
-	if !versioninfo.IsCompatible(clusterVersion, *v) {
-		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
+	if err := c.checkStoreVersion(store); err != nil {
+		return err
 	}
 
 	// Store address can not be the same as other stores.
@@ -960,10 +955,22 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 			core.SetStoreDeployPath(store.DeployPath),
 		)
 	}
-	if err = c.checkStoreLabels(s); err != nil {
+	if err := c.checkStoreLabels(s); err != nil {
 		return err
 	}
 	return c.putStoreLocked(s)
+}
+
+func (c *RaftCluster) checkStoreVersion(store *metapb.Store) error {
+	v, err := versioninfo.ParseVersion(store.GetVersion())
+	if err != nil {
+		return errors.Errorf("invalid put store %v, error: %s", store, err)
+	}
+	clusterVersion := *c.opt.GetClusterVersion()
+	if !versioninfo.IsCompatible(clusterVersion, *v) {
+		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
+	}
+	return nil
 }
 
 func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
@@ -1088,6 +1095,12 @@ func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) err
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	if store.GetState() == metapb.StoreState_Tombstone && state != metapb.StoreState_Tombstone {
+		if err := c.checkStoreVersion(store.GetMeta()); err != nil {
+			return err
+		}
 	}
 
 	newStore := store.Clone(core.SetStoreState(state))
