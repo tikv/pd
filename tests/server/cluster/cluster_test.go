@@ -168,6 +168,45 @@ func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 }
 
+func (s *clusterTestSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:1", "4.0.9")
+	rc := leaderServer.GetRaftCluster()
+	c.Assert(rc, NotNil)
+
+	// Put 2 new stores.
+	for _, id := range []uint64{2, 3} {
+		addr := fmt.Sprintf("127.0.0.1:%d", id)
+		store := newMetaStore(id, addr, "4.0.9", metapb.StoreState_Up, fmt.Sprintf("test/store%d", id))
+		_, err = putStore(c, grpcPDClient, clusterID, store)
+		c.Assert(err, IsNil)
+	}
+	c.Assert(rc.GetClusterVersion(), Equals, "4.0.9")
+
+	// Upgrade 2 stores to 5.0.0.
+	for _, id := range []uint64{2, 3} {
+		addr := fmt.Sprintf("127.0.0.1:%d", id)
+		store := newMetaStore(id, addr, "5.0.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", id))
+		_, err = putStore(c, grpcPDClient, clusterID, store)
+		c.Assert(err, IsNil)
+	}
+	c.Assert(rc.GetClusterVersion(), Equals, "4.0.9")
+
+	// Delete the other store.
+	rc.BuryStore(1, true)
+	c.Assert(rc.GetClusterVersion(), Equals, "5.0.0")
+}
+
 func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient pdpb.PDClient, store *metapb.Store) {
 	// Update store.
 	_, err := putStore(c, grpcPDClient, clusterID, store)
@@ -805,19 +844,23 @@ func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
 	return req
 }
 
-func newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.BootstrapRequest {
+func newBootstrapRequest(c *C, clusterID uint64, storeAddr string, storeVersion ...string) *pdpb.BootstrapRequest {
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
 		Store:  &metapb.Store{Id: 1, Address: storeAddr},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 
+	if len(storeVersion) != 0 {
+		req.Store.Version = storeVersion[0]
+	}
+
 	return req
 }
 
 // helper function to check and bootstrap.
-func bootstrapCluster(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, storeAddr string) {
-	req := newBootstrapRequest(c, clusterID, storeAddr)
+func bootstrapCluster(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, storeAddr string, storeVersion ...string) {
+	req := newBootstrapRequest(c, clusterID, storeAddr, storeVersion...)
 	_, err := grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
 }
