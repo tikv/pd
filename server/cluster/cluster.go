@@ -1042,7 +1042,6 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 
 	// Bury a tombstone store should be OK, nothing to do.
 	if store.IsTombstone() {
-		c.onStoreVersionChangeLocked()
 		return nil
 	}
 
