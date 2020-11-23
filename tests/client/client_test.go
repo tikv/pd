@@ -950,6 +950,22 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	c.Succeed()
 }
 
+type testConfigTTLSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testConfigTTLSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *testConfigTTLSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+var _ = SerialSuites(&testConfigTTLSuite{})
+
 var ttlConfig = map[string]interface{}{
 	"schedule.max-snapshot-count":             999,
 	"schedule.enable-location-replacement":    false,
@@ -976,7 +992,7 @@ func assertTTLConfig(c *C, options *config.PersistOptions, checker Checker) {
 	c.Assert(options.GetMergeScheduleLimit(), checker, uint64(999))
 }
 
-func (s *testClientSuite) TestConfigTTLAfterTransferLeader(c *C) {
+func (s *testConfigTTLSuite) TestConfigTTLAfterTransferLeader(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
