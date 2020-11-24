@@ -578,14 +578,14 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 	return false
 }
 
-const ttlConfigPrefix = "/config/ttl/"
+const ttlConfigPrefix = "/config/ttl"
 
 // SetTTLData set temporary configuration
 func (o *PersistOptions) SetTTLData(parCtx context.Context, client *clientv3.Client, key string, value string, ttl time.Duration) error {
 	if o.ttl == nil {
 		o.ttl = cache.NewStringTTL(parCtx, time.Second*5, time.Minute*5)
 	}
-	_, err := etcdutil.EtcdKVPutWithTTL(parCtx, client, ttlConfigPrefix+key, value, int64(ttl.Seconds()))
+	_, err := etcdutil.EtcdKVPutWithTTL(parCtx, client, ttlConfigPrefix+"/"+key, value, int64(ttl.Seconds()))
 	if err != nil {
 		return err
 	}
@@ -651,7 +651,7 @@ func (o *PersistOptions) LoadTTLFromEtcd(ctx context.Context, client *clientv3.C
 		o.ttl = cache.NewStringTTL(ctx, time.Second*5, time.Minute*5)
 	}
 	for _, resp := range resps.Kvs {
-		key := string(resp.Key)[len(ttlConfigPrefix):]
+		key := string(resp.Key)[len(ttlConfigPrefix)+1:]
 		value := string(resp.Value)
 		leaseID := resp.Lease
 		resp, err := client.TimeToLive(ctx, clientv3.LeaseID(leaseID))
