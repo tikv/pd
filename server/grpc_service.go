@@ -242,14 +242,12 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 
-	if err := rc.PutStore(store, false); err != nil {
+	if err := rc.PutStore(store); err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	rc.OnStoreVersionChange()
 	CheckPDVersion(s.persistOptions)
-	rc.AddStoreLimit(store)
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),

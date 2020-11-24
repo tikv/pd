@@ -906,13 +906,22 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
 	newStore.Labels = labels
 	// PutStore will perform label merge.
-	err := c.PutStore(newStore, force)
-	return err
+	return c.putStoreImpl(newStore, force)
 }
 
 // PutStore puts a store.
+func (c *RaftCluster) PutStore(store *metapb.Store) error {
+	if err := c.putStoreImpl(store, false); err != nil {
+		return err
+	}
+	c.OnStoreVersionChange()
+	c.AddStoreLimit(store)
+	return nil
+}
+
+// putStoreImpl puts a store.
 // If 'force' is true, then overwrite the store's labels.
-func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
+func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	c.Lock()
 	defer c.Unlock()
 
