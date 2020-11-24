@@ -619,7 +619,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
+	c.Lock()
+	if c.regionStats != nil {
+		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
+	}
+
 	if len(writeItems) == 0 && len(readItems) == 0 && !saveKV && !saveCache && !isNew {
+		c.Unlock()
 		return nil
 	}
 
@@ -627,7 +633,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		time.Sleep(500 * time.Millisecond)
 	})
 
-	c.Lock()
 	if saveCache {
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
@@ -673,10 +678,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 	if isNew {
 		c.prepareChecker.collect(region)
-	}
-
-	if c.regionStats != nil {
-		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
 	}
 
 	for _, writeItem := range writeItems {

@@ -46,16 +46,17 @@ type CheckerController struct {
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
 func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, opController *OperatorController) *CheckerController {
+	regionWaitingList := cache.NewCache(DefaultCacheSize, cache.DefaultCacheType)
 	return &CheckerController{
 		cluster:           cluster,
 		opts:              cluster.GetOpts(),
 		opController:      opController,
 		learnerChecker:    checker.NewLearnerChecker(cluster),
-		replicaChecker:    checker.NewReplicaChecker(cluster),
+		replicaChecker:    checker.NewReplicaChecker(cluster, regionWaitingList),
 		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager),
 		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
 		jointStateChecker: checker.NewJointStateChecker(cluster),
-		regionWaitingList: cache.NewCache(DefaultCacheSize, cache.DefaultCacheType),
+		regionWaitingList: regionWaitingList,
 	}
 }
 
