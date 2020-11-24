@@ -125,6 +125,30 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	// Put 4 stores.
+	for _, store := range newTestStores(4, "2.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	// Store 3 and 4 offline normally.
+	for _, id := range []uint64{3, 4} {
+		c.Assert(cluster.RemoveStore(id), IsNil)
+		c.Assert(cluster.BuryStore(id, false), IsNil)
+	}
+	// Change the status of 3 directly back to Up.
+	c.Assert(cluster.SetStoreState(3, metapb.StoreState_Up), IsNil)
+	// Update store 1 2 3
+	for _, store := range newTestStores(3, "3.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	// Since the store 4 version is too low, setting it to Up should fail.
+	c.Assert(cluster.SetStoreState(4, metapb.StoreState_Up), NotNil)
+}
+
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
