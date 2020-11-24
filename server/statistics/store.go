@@ -40,13 +40,6 @@ func NewStoresStats() *StoresStats {
 	}
 }
 
-// CreateRollingStoreStats creates RollingStoreStats with a given store ID.
-func (s *StoresStats) CreateRollingStoreStats(storeID uint64) {
-	s.Lock()
-	defer s.Unlock()
-	s.rollingStoresStats[storeID] = newRollingStoreStats()
-}
-
 // RemoveRollingStoreStats removes RollingStoreStats with a given store ID.
 func (s *StoresStats) RemoveRollingStoreStats(storeID uint64) {
 	s.Lock()
