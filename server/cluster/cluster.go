@@ -1625,7 +1625,12 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
 
 // AddStoreLimit add a store limit for a given store ID.
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
+	storeID := store.GetId()
 	cfg := c.opt.GetScheduleConfig().Clone()
+	if _, ok := cfg.StoreLimit[storeID]; ok {
+		return
+	}
+
 	sc := config.StoreLimitConfig{
 		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
@@ -1636,7 +1641,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 			RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 		}
 	}
-	storeID := store.GetId()
+
 	cfg.StoreLimit[storeID] = sc
 	c.opt.SetScheduleConfig(cfg)
 }
