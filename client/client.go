@@ -330,7 +330,11 @@ func (c *client) tsLoop() {
 							done <- struct{}{}
 							if err != nil {
 								select {
-								case <-ctx.Done():
+								// The only case that will make the dispatcher goroutine exist
+								// is that the loopCtx is done. Otherwise there is no circumstance
+								// this goroutine should return.
+								case <-loopCtx.Done():
+									cancel()
 									return
 								default:
 								}
@@ -340,7 +344,8 @@ func (c *client) tsLoop() {
 								c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
 								select {
 								case <-time.After(time.Second):
-								case <-ctx.Done():
+								case <-loopCtx.Done():
+									cancel()
 									return
 								}
 								continue
@@ -367,18 +372,21 @@ func (c *client) tsLoop() {
 							}
 							select {
 							case tsDeadlineCh.(chan deadline) <- dl:
-							case <-ctx.Done():
+							case <-loopCtx.Done():
+								cancel()
 								return
 							}
 							opts = extractSpanReference(requests[:pendingPlus1], opts[:0])
 							err = c.processTSORequests(stream, dc, requests[:pendingPlus1], opts)
 							close(done)
-						case <-ctx.Done():
+						case <-loopCtx.Done():
+							cancel()
 							return
 						}
 						if err != nil {
 							select {
 							case <-loopCtx.Done():
+								cancel()
 								return
 							default:
 							}
