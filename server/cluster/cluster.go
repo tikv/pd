@@ -907,18 +907,8 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		return errors.Errorf("invalid put store %v", store)
 	}
 
-<<<<<<< HEAD
-	v, err := ParseVersion(store.GetVersion())
-	if err != nil {
-		return errors.Errorf("invalid put store %v, error: %s", store, err)
-	}
-	clusterVersion := *c.opt.GetClusterVersion()
-	if !IsCompatible(clusterVersion, *v) {
-		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
-=======
 	if err := c.checkStoreVersion(store); err != nil {
 		return err
->>>>>>> 57bfeb79... server: check the store version when changing tombstone status (#3200)
 	}
 
 	// Store address can not be the same as other stores.
@@ -959,12 +949,12 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 }
 
 func (c *RaftCluster) checkStoreVersion(store *metapb.Store) error {
-	v, err := versioninfo.ParseVersion(store.GetVersion())
+	v, err := ParseVersion(store.GetVersion())
 	if err != nil {
 		return errors.Errorf("invalid put store %v, error: %s", store, err)
 	}
 	clusterVersion := *c.opt.GetClusterVersion()
-	if !versioninfo.IsCompatible(clusterVersion, *v) {
+	if !IsCompatible(clusterVersion, *v) {
 		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
 	}
 	return nil
