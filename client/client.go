@@ -312,7 +312,7 @@ func (c *client) tsLoop() {
 			if !c.checkTSODispatcher(dcLocation) {
 				c.createTSODispatcher(dcLocation)
 				dispatcher, _ := c.tsoDispatcher.Load(dcLocation)
-				// Each goroutine is responsible for handling the tso stream request for its dcLocation.
+				// Each goroutine is responsible for handling the tso stream request for its dc-location.
 				// The only case that will make the dispatcher goroutine exit
 				// is that the loopCtx is done, otherwise there is no circumstance
 				// this goroutine should exit.
@@ -331,7 +331,7 @@ func (c *client) tsLoop() {
 						}
 					}()
 					for {
-						// if the tso stream for the corresponding dcLocation pdclient is not correspond,
+						// If the tso stream for the corresponding dc-location has not been created yet or needs to be re-created,
 						// we will try to create the stream first.
 						if stream == nil {
 							ctx, cancel = context.WithCancel(loopCtx)
