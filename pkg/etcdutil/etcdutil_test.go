@@ -202,22 +202,24 @@ func (s *testEtcdutilSuite) TestEtcdKVPutWithTTL(c *C) {
 
 	<-etcd.Server.ReadyNotify()
 
-	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl1", "val1", 5)
+	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl1", "val1", 2)
 	c.Assert(err, IsNil)
-	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl2", "val2", 10)
+	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl2", "val2", 5)
 	c.Assert(err, IsNil)
 
-	time.Sleep(6 * time.Second)
-	// Test simple point get
+	time.Sleep(3 * time.Second)
+	// test/ttl1 is outdated
 	resp, err := EtcdKVGet(client, "test/ttl1")
 	c.Assert(err, IsNil)
 	c.Assert(resp.Count, Equals, int64(0))
+	// but test/ttl2 is not
 	resp, err = EtcdKVGet(client, "test/ttl2")
 	c.Assert(err, IsNil)
 	c.Assert(string(resp.Kvs[0].Value), Equals, "val2")
 
-	time.Sleep(6 * time.Second)
+	time.Sleep(3 * time.Second)
 
+	// test/ttl2 is also outdated
 	resp, err = EtcdKVGet(client, "test/ttl2")
 	c.Assert(err, IsNil)
 	c.Assert(resp.Count, Equals, int64(0))
