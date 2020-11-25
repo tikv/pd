@@ -33,14 +33,26 @@ import (
 // SelectSourceStores selects stores that be selected as source store from the list.
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
-		return slice.AllOf(filters, func(i int) bool { return filters[i].Source(opt, s) })
+		return slice.AllOf(filters, func(i int) bool {
+			if !filters[i].Source(opt, s) {
+				filterCounter.WithLabelValues("filter-source", s.GetAddress(), fmt.Sprintf("%d", s.GetID()), filters[i].Scope(), filters[i].Type()).Inc()
+				return false
+			}
+			return true
+		})
 	})
 }
 
 // SelectTargetStores selects stores that be selected as target store from the list.
 func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
-		return slice.AllOf(filters, func(i int) bool { return filters[i].Target(opt, s) })
+		return slice.AllOf(filters, func(i int) bool {
+			if !filters[i].Target(opt, s) {
+				filterCounter.WithLabelValues("filter-target", s.GetAddress(), fmt.Sprintf("%d", s.GetID()), filters[i].Scope(), filters[i].Type()).Inc()
+				return false
+			}
+			return true
+		})
 	})
 }
 
