@@ -396,6 +396,7 @@ func (c *client) tsLoop() {
 							}
 							log.Error("[pd] getTS error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
 							c.ScheduleCheckLeader()
+							cancel()
 							stream = nil
 						}
 					}
