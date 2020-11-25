@@ -305,12 +305,12 @@ func assertTTLConfig(c *C, options *config.PersistOptions, checker Checker) {
 }
 
 func (s *testConfigSuite) TestConfigTTL(c *C) {
-	addr := fmt.Sprintf("%s/config?ttlSecond=2", s.urlPrefix)
+	addr := fmt.Sprintf("%s/config?ttlSecond=1", s.urlPrefix)
 	postData, err := json.Marshal(ttlConfig)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
-	time.Sleep(3 * time.Second)
+	time.Sleep(2 * time.Second)
 	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
 }

@@ -204,7 +204,7 @@ func (s *testEtcdutilSuite) TestEtcdKVPutWithTTL(c *C) {
 
 	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl1", "val1", 2)
 	c.Assert(err, IsNil)
-	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl2", "val2", 5)
+	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl2", "val2", 4)
 	c.Assert(err, IsNil)
 
 	time.Sleep(3 * time.Second)
@@ -217,7 +217,7 @@ func (s *testEtcdutilSuite) TestEtcdKVPutWithTTL(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(string(resp.Kvs[0].Value), Equals, "val2")
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	// test/ttl2 is also outdated
 	resp, err = EtcdKVGet(client, "test/ttl2")
