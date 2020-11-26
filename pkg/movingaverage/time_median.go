@@ -20,11 +20,12 @@ import "time"
 // Delay is aotSize * mfSize * reportInterval/2
 // and the min filled period is aotSize * reportInterval, which is not related with mfSize
 type TimeMedian struct {
-	aotInterval time.Duration
-	aot         *AvgOverTime
-	mf          *MedianFilter
-	aotSize     int
-	mfSize      int
+	aotInterval   time.Duration
+	aot           *AvgOverTime
+	mf            *MedianFilter
+	aotSize       int
+	mfSize        int
+	instantaneous float64
 }
 
 // NewTimeMedian returns a TimeMedian with given size.
@@ -49,6 +50,7 @@ func (t *TimeMedian) Add(delta float64, interval time.Duration) {
 	if interval < time.Second {
 		return
 	}
+	t.instantaneous = delta / interval.Seconds()
 	t.aot.Add(delta, interval)
 	if t.aot.intervalSum >= t.aotInterval {
 		t.mf.Add(t.aot.Get())
@@ -64,4 +66,9 @@ func (t *TimeMedian) Set(avg float64) {
 // GetFilledPeriod returns filled period.
 func (t *TimeMedian) GetFilledPeriod() int { // it is unrelated with mfSize
 	return t.aotSize
+}
+
+// GetInstantaneous returns instantaneous speed
+func (t *TimeMedian) GetInstantaneous() float64 {
+	return t.instantaneous
 }

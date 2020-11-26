@@ -329,12 +329,15 @@ type storeLoadDetail struct {
 
 func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	peers := make([]statistics.HotPeerStat, 0, len(li.HotPeers))
+	var totalBytesRate, totalKeysRate float64
 	for _, peer := range li.HotPeers {
 		peers = append(peers, *peer.Clone())
+		totalBytesRate += peer.ByteRate
+		totalKeysRate += peer.KeyRate
 	}
 	return &statistics.HotPeersStat{
-		TotalBytesRate: li.LoadPred.Current.ByteRate,
-		TotalKeysRate:  li.LoadPred.Current.KeyRate,
+		TotalBytesRate: totalBytesRate,
+		TotalKeysRate:  totalKeysRate,
 		Count:          len(li.HotPeers),
 		Stats:          peers,
 	}
