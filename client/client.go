@@ -164,26 +164,27 @@ var (
 )
 
 type tsoController struct {
-	ticker     *time.Ticker
+	last       time.Time
 	pushSize   int
 	dispatcher *sync.Map
 }
 
 func newTsoController(dis *sync.Map) *tsoController {
-	return &tsoController{ticker: time.NewTicker(defaultTsoInterval), pushSize: defaultPushSize,
+	return &tsoController{last: time.Now(), pushSize: defaultPushSize,
 		dispatcher: dis}
 }
 
-func (c *tsoController) canPush(dc string) bool {
-	select {
-	case <-c.ticker.C:
+func (c *tsoController) canPush(dc string, cur time.Time) bool {
+	if cur.Sub(c.last) > defaultTsoInterval{
+		c.last = cur
 		return true
-	default:
-		dispatcher, _ := c.dispatcher.Load(dc)
-		if len(dispatcher.(chan *tsoRequest)) >= c.pushSize {
-			return true
-		}
 	}
+
+	//dispatcher, _ := c.dispatcher.Load(dc)
+	//if len(dispatcher.(chan *tsoRequest)) >= c.pushSize {
+	//	return true
+	//}
+
 	return false
 }
 
