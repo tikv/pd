@@ -147,6 +147,29 @@ func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
 	c.Assert(cluster.SetStoreState(4, metapb.StoreState_Up), NotNil)
 }
 
+func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	// Put 3 new 4.0.9 stores.
+	for _, store := range newTestStores(3, "4.0.9") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	c.Assert(cluster.GetClusterVersion(), Equals, "4.0.9")
+
+	// Upgrade 2 stores to 5.0.0.
+	for _, store := range newTestStores(2, "5.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	c.Assert(cluster.GetClusterVersion(), Equals, "4.0.9")
+
+	// Bury the other store.
+	c.Assert(cluster.RemoveStore(3), IsNil)
+	c.Assert(cluster.BuryStore(3, false), IsNil)
+	c.Assert(cluster.GetClusterVersion(), Equals, "5.0.0")
+}
+
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
