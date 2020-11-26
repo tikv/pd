@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	check "github.com/pingcap/check"
+	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"google.golang.org/grpc"
 )
@@ -32,14 +32,32 @@ const (
 // may call c.Fatal() to abort the test, or c.Log() to add more information.
 type CheckFunc func(c *check.C) bool
 
+// WaitOp represents available options when execute WaitUntil
+type WaitOp struct {
+	SleepInterval time.Duration
+}
+
+// WaitOption configures WaitOp
+type WaitOption func(op *WaitOp)
+
+// WithSleepInterval specify the sleep duration
+func WithSleepInterval(sleep time.Duration) WaitOption {
+	return func(op *WaitOp) { op.SleepInterval = sleep }
+}
+
 // WaitUntil repeatedly evaluates f() for a period of time, util it returns true.
-func WaitUntil(c *check.C, f CheckFunc) {
+func WaitUntil(c *check.C, f CheckFunc, opts ...WaitOption) {
 	c.Log("wait start")
+	options := &WaitOp{}
+	options.SleepInterval = waitRetrySleep
+	for _, opt := range opts {
+		opt(options)
+	}
 	for i := 0; i < waitMaxRetry; i++ {
 		if f(c) {
 			return
 		}
-		time.Sleep(waitRetrySleep)
+		time.Sleep(options.SleepInterval)
 	}
 	c.Fatal("wait timeout")
 }

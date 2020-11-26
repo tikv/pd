@@ -116,7 +116,7 @@ func putStores(cli pdpb.PDClient) {
 
 func newStartKey(id uint64) []byte {
 	k := make([]byte, *keyLen)
-	copy(k, []byte(fmt.Sprintf("%010d", id)))
+	copy(k, fmt.Sprintf("%010d", id))
 	return k
 }
 

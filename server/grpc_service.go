@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -241,14 +242,12 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 
-	if err := rc.PutStore(store, false); err != nil {
+	if err := rc.PutStore(store); err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	rc.OnStoreVersionChange()
 	CheckPDVersion(s.persistOptions)
-	rc.AddStoreLimit(store)
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
@@ -703,16 +702,41 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+	if len(request.GetRegionsId()) > 0 {
+		ops, failures, err := rc.GetRegionScatter().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
+		if err != nil {
+			return nil, err
+		}
+		for _, op := range ops {
+			if ok := rc.GetOperatorController().AddOperator(op); !ok {
+				failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
+			}
+		}
+		percentage := 100
+		if len(failures) > 0 {
+			percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+			log.Debug("scatter regions", zap.Errors("failures", func() []error {
+				r := make([]error, 0, len(failures))
+				for _, err := range failures {
+					r = append(r, err)
+				}
+				return r
+			}()))
+		}
+		return &pdpb.ScatterRegionResponse{
+			Header:             s.header(),
+			FinishedPercentage: uint64(percentage),
+		}, nil
+	}
+
+	//nolint
 	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
+			//nolint
 			return nil, errors.Errorf("region %d not found", request.GetRegionId())
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
-	}
-
-	if rc.IsRegionHot(region) {
-		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
 
 	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())
@@ -724,7 +748,8 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 	}
 
 	return &pdpb.ScatterRegionResponse{
-		Header: s.header(),
+		Header:             s.header(),
+		FinishedPercentage: 100,
 	}, nil
 }
 
@@ -838,7 +863,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			return nil, err
 		}
 		log.Info("update service GC safe point",
-			zap.String("service-id", string(ssp.ServiceID)),
+			zap.String("service-id", ssp.ServiceID),
 			zap.Int64("expire-at", ssp.ExpiredAt),
 			zap.Uint64("safepoint", ssp.SafePoint))
 		// If the min safepoint is updated, load the next one
@@ -847,10 +872,6 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			if err != nil {
 				return nil, err
 			}
-		}
-		// If ssp is the first safepoint, it is the min value now
-		if min.SafePoint == 0 {
-			min = ssp
 		}
 	}
 
@@ -991,6 +1012,45 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	return &pdpb.SyncMaxTSResponse{
 		Header: s.header(),
 		Dcs:    processedDCs,
+	}, nil
+}
+
+// SplitRegions split regions by the given split keys
+func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
+	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+	finishedPercentage, newRegionIDs := s.cluster.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
+	return &pdpb.SplitRegionsResponse{
+		Header:             s.header(),
+		RegionsId:          newRegionIDs,
+		FinishedPercentage: uint64(finishedPercentage),
+	}, nil
+}
+
+// GetDCLocations will return the dcLocations which hold by the Global TSO Allocator.
+// If the receiving PD Member is not PD Leader, GetDCLocations will return error.
+func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocationsRequest) (*pdpb.GetDCLocationsResponse, error) {
+	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+	if !s.member.IsLeader() {
+		return nil, fmt.Errorf("receiving pd member[%v] is not pd leader", s.member.ID())
+	}
+	allocator, err := s.GetTSOAllocatorManager().GetAllocator(config.GlobalDCLocation)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tso allocator[%v]", config.GlobalDCLocation)
+	}
+	globalAllocator, ok := allocator.(*tso.GlobalTSOAllocator)
+	if !ok {
+		return nil, fmt.Errorf("tso allocator[%v] is not global tso allocator", config.GlobalDCLocation)
+	}
+	if !globalAllocator.IsInitialize() {
+		return nil, fmt.Errorf("global tso alloactor is not initialized")
+	}
+	return &pdpb.GetDCLocationsResponse{
+		Header:      s.header(),
+		DcLocations: globalAllocator.GetDcLocations(),
 	}, nil
 }
 

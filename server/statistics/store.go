@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
@@ -38,13 +39,6 @@ func NewStoresStats() *StoresStats {
 	return &StoresStats{
 		rollingStoresStats: make(map[uint64]*RollingStoreStats),
 	}
-}
-
-// CreateRollingStoreStats creates RollingStoreStats with a given store ID.
-func (s *StoresStats) CreateRollingStoreStats(storeID uint64) {
-	s.Lock()
-	defer s.Unlock()
-	s.rollingStoresStats[storeID] = newRollingStoreStats()
 }
 
 // RemoveRollingStoreStats removes RollingStoreStats with a given store ID.
@@ -294,13 +288,13 @@ func (s *StoresStats) UpdateStoreHeartbeatMetrics(store *core.StoreInfo) {
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex
-	bytesWriteRate          *TimeMedian
-	bytesReadRate           *TimeMedian
-	keysWriteRate           *TimeMedian
-	keysReadRate            *TimeMedian
-	totalCPUUsage           MovingAvg
-	totalBytesDiskReadRate  MovingAvg
-	totalBytesDiskWriteRate MovingAvg
+	bytesWriteRate          *movingaverage.TimeMedian
+	bytesReadRate           *movingaverage.TimeMedian
+	keysWriteRate           *movingaverage.TimeMedian
+	keysReadRate            *movingaverage.TimeMedian
+	totalCPUUsage           movingaverage.MovingAvg
+	totalBytesDiskReadRate  movingaverage.MovingAvg
+	totalBytesDiskWriteRate movingaverage.MovingAvg
 }
 
 const (
@@ -316,13 +310,13 @@ const (
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate:          NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
-		bytesReadRate:           NewTimeMedian(DefaultAotSize, DefaultReadMfSize, StoreHeartBeatReportInterval),
-		keysWriteRate:           NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
-		keysReadRate:            NewTimeMedian(DefaultAotSize, DefaultReadMfSize, StoreHeartBeatReportInterval),
-		totalCPUUsage:           NewMedianFilter(storeStatsRollingWindows),
-		totalBytesDiskReadRate:  NewMedianFilter(storeStatsRollingWindows),
-		totalBytesDiskWriteRate: NewMedianFilter(storeStatsRollingWindows),
+		bytesWriteRate:          movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
+		bytesReadRate:           movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, StoreHeartBeatReportInterval),
+		keysWriteRate:           movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
+		keysReadRate:            movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, StoreHeartBeatReportInterval),
+		totalCPUUsage:           movingaverage.NewMedianFilter(storeStatsRollingWindows),
+		totalBytesDiskReadRate:  movingaverage.NewMedianFilter(storeStatsRollingWindows),
+		totalBytesDiskWriteRate: movingaverage.NewMedianFilter(storeStatsRollingWindows),
 	}
 }
 

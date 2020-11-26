@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
+	github.com/aws/aws-sdk-go v1.35.3
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
@@ -26,12 +27,12 @@ require (
 	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20201022065613-94d8dc38a204
 	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
 	github.com/pingcap/errcode v0.3.0
-	github.com/pingcap/errors v0.11.5-0.20200917111840-a15ef68f753d
+	github.com/pingcap/errors v0.11.5-0.20201029093017-5a7df2af2ac7
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20201027123903-c4791e779a8c
-	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
+	github.com/pingcap/kvproto v0.0.0-20201113092725-08f2872278eb
+	github.com/pingcap/log v0.0.0-20201112100606-8f1e84a3abc8
 	github.com/pingcap/sysutil v0.0.0-20201021075216-f93ced2829e2
-	github.com/pingcap/tiup v1.2.2
+	github.com/pingcap/tiup v1.2.3
 	github.com/prometheus/client_golang v1.2.1
 	github.com/prometheus/common v0.9.1
 	github.com/sasha-s/go-deadlock v0.2.0

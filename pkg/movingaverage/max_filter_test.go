@@ -1,4 +1,4 @@
-// Copyright 2018 TiKV Project Authors.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,19 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
+package movingaverage
 
 import (
-	"fmt"
+	. "github.com/pingcap/check"
 )
 
-const (
-	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
-	StoreHeartBeatReportInterval = 10
-	// RegionHeartBeatReportInterval is the heartbeat report interval of a region.
-	RegionHeartBeatReportInterval = 60
-)
+var _ = Suite(&testMaxFilter{})
 
-func storeTag(id uint64) string {
-	return fmt.Sprintf("store-%d", id)
+type testMaxFilter struct{}
+
+func (t *testMaxFilter) TestMaxFilter(c *C) {
+	var empty float64 = 0
+	data := []float64{2, 1, 3, 4, 1, 1, 3, 3, 2, 0, 5}
+	expected := []float64{2, 2, 3, 4, 4, 4, 4, 4, 3, 3, 5}
+
+	mf := NewMaxFilter(5)
+	c.Assert(mf.Get(), Equals, empty)
+
+	checkReset(c, mf, empty)
+	checkAdd(c, mf, data, expected)
+	checkSet(c, mf, data, expected)
 }

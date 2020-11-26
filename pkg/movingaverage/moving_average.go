@@ -1,4 +1,4 @@
-// Copyright 2018 TiKV Project Authors.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,19 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
+package movingaverage
 
-import (
-	"fmt"
-)
-
-const (
-	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
-	StoreHeartBeatReportInterval = 10
-	// RegionHeartBeatReportInterval is the heartbeat report interval of a region.
-	RegionHeartBeatReportInterval = 60
-)
-
-func storeTag(id uint64) string {
-	return fmt.Sprintf("store-%d", id)
+// MovingAvg provides moving average.
+// Ref: https://en.wikipedia.org/wiki/Moving_average
+type MovingAvg interface {
+	// Add adds a data point to the data set.
+	Add(data float64)
+	// Get returns the moving average.
+	Get() float64
+	// Reset cleans the data set.
+	Reset()
+	// Set = Reset + Add
+	Set(data float64)
 }

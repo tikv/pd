@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -59,11 +58,6 @@ type GlobalTSOAllocator struct {
 	timestampOracle *timestampOracle
 	// for global TSO synchronization
 	allocatorManager *AllocatorManager
-	// for gRPC use
-	localAllocatorConn struct {
-		sync.RWMutex
-		clientConns map[string]*grpc.ClientConn
-	}
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
@@ -86,7 +80,6 @@ func NewGlobalTSOAllocator(
 		},
 		allocatorManager: am,
 	}
-	gta.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
 	return gta
 }
 
@@ -107,7 +100,7 @@ func (gta *GlobalTSOAllocator) UpdateTSO() error {
 
 // SetTSO sets the physical part with given TSO.
 func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
-	return gta.timestampOracle.ResetUserTimestamp(gta.leadership, tso)
+	return gta.timestampOracle.resetUserTimestamp(gta.leadership, tso, false)
 }
 
 // GenerateTSO is used to generate a given number of TSOs.
@@ -141,7 +134,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	}
 	if tsoutil.CompareTimestamp(&currentGlobalTSO, maxTSO) < 0 {
 		// Update the global TSO in memory
-		if err := gta.SetTSO(tsoutil.GenerateTS(maxTSO)); err != nil {
+		if err := gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(maxTSO), true); err != nil {
 			log.Warn("update the global tso in memory failed", errs.ZapError(err))
 		}
 	}
@@ -178,7 +171,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 		var errList []error
 		wg := sync.WaitGroup{}
 		for _, leaderURL := range leaderURLs {
-			leaderConn, err := gta.getOrCreateGRPCConn(ctx, leaderURL)
+			leaderConn, err := gta.allocatorManager.getOrCreateGRPCConn(ctx, leaderURL)
 			if err != nil {
 				return err
 			}
@@ -216,23 +209,47 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 		if len(errList) > 0 {
 			return errs.ErrSyncMaxTS.FastGenWithCause(errList)
 		}
-		var syncedDCs []string
+		var (
+			respCount         int
+			syncedDCs         []string
+			inCollectingPhase bool
+		)
 		for resp := range respCh {
+			respCount++
 			if resp == nil {
 				return errs.ErrSyncMaxTS.FastGenWithCause("got nil response")
 			}
-			syncedDCs = append(syncedDCs, resp.GetDcs()...)
-			// Compare and get the max one
-			if resp.GetMaxLocalTs() != nil && resp.GetMaxLocalTs().GetPhysical() != 0 {
+			// Once we get a non-nil and non-zero MaxLocalTs first, we will think it's in the first phase
+			// of the Global TSO synchronization. So that we can have more detailed processing logic
+			// for each phase. For example, if we think we're in the first phase of the Global TSO
+			// synchronization, the inCollectingPhase will be set to true, and during this phase,
+			// any response with nil or empty MaxLocalTs will be regarded as an invalid response.
+			// Then the whole synchronization will fail.
+			if respCount == 1 && resp.GetMaxLocalTs() != nil && resp.GetMaxLocalTs().GetPhysical() != 0 {
+				inCollectingPhase = true
+			}
+			if inCollectingPhase {
+				// Handle the response of the first phase: collect all the Local TSOs
+				if resp.GetMaxLocalTs() == nil || resp.GetMaxLocalTs().GetPhysical() == 0 {
+					return errs.ErrSyncMaxTS.FastGenWithCause("got nil or zero max local ts in the first sync phase")
+				}
+				// Compare and get the max one
 				if tsoutil.CompareTimestamp(resp.GetMaxLocalTs(), maxTSO) > 0 {
 					*maxTSO = *(resp.GetMaxLocalTs())
 				}
+				syncedDCs = append(syncedDCs, resp.GetDcs()...)
+			} else {
+				// Handle the response of the second phase: set all the Local TSOs to the maxTSO
+				if resp.GetMaxLocalTs() != nil {
+					return errs.ErrSyncMaxTS.FastGenWithCause("got non-nil max local ts in the second sync phase")
+				}
+				syncedDCs = append(syncedDCs, resp.GetDcs()...)
 			}
 		}
 		if !gta.checkSyncedDCs(dcLocationMap, syncedDCs) {
 			// Only retry one time when synchronization is incomplete
 			if maxRetryCount == 1 {
-				log.Warn("unsynced dc-locations found, will retry", zap.Strings("syncedDCs", syncedDCs))
+				log.Warn("unsynced dc-locations found, will retry", zap.Strings("synced-DCs", syncedDCs))
 				maxRetryCount++
 				// To make sure we have the newest dc-location info
 				gta.allocatorManager.ClusterDCLocationChecker()
@@ -251,36 +268,8 @@ func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string][]uint64,
 			unsyncedDCs = append(unsyncedDCs, dcLocation)
 		}
 	}
-	log.Info("check unsynced dc-locations", zap.Strings("unsyncedDCs", unsyncedDCs), zap.Strings("syncedDCs", syncedDCs))
+	log.Info("check unsynced dc-locations", zap.Strings("unsynced-DCs", unsyncedDCs), zap.Strings("synced-DCs", syncedDCs))
 	return len(unsyncedDCs) == 0
-}
-
-func (gta *GlobalTSOAllocator) getOrCreateGRPCConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
-	gta.localAllocatorConn.RLock()
-	conn, ok := gta.localAllocatorConn.clientConns[addr]
-	gta.localAllocatorConn.RUnlock()
-	if ok {
-		return conn, nil
-	}
-	tlsCfg, err := gta.allocatorManager.securityConfig.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, dialTimeout)
-	defer cancel()
-	cc, err := grpcutil.GetClientConn(ctxWithTimeout, addr, tlsCfg)
-	if err != nil {
-		return nil, err
-	}
-	gta.localAllocatorConn.Lock()
-	defer gta.localAllocatorConn.Unlock()
-	if old, ok := gta.localAllocatorConn.clientConns[addr]; ok {
-		cc.Close()
-		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
-		return old, nil
-	}
-	gta.localAllocatorConn.clientConns[addr] = cc
-	return cc, nil
 }
 
 func (gta *GlobalTSOAllocator) getCurrentTSO() (pdpb.Timestamp, error) {
@@ -294,4 +283,14 @@ func (gta *GlobalTSOAllocator) getCurrentTSO() (pdpb.Timestamp, error) {
 // Reset is used to reset the TSO allocator.
 func (gta *GlobalTSOAllocator) Reset() {
 	gta.timestampOracle.ResetTimestamp()
+}
+
+// GetDcLocations return all the dcLocations the GlobalTSOAllocator will check
+func (gta *GlobalTSOAllocator) GetDcLocations() []string {
+	dcLocationsMap := gta.allocatorManager.GetClusterDCLocations()
+	dcLocations := make([]string, 0, len(dcLocationsMap))
+	for dc := range dcLocationsMap {
+		dcLocations = append(dcLocations, dc)
+	}
+	return dcLocations
 }

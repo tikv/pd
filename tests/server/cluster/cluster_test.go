@@ -367,7 +367,7 @@ func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
 	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Offline, fmt.Sprintf("test/store%d", storeID))
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	err = rc.PutStore(store, false)
+	err = rc.PutStore(store)
 	c.Assert(err, IsNil)
 	c.Assert(tc, NotNil)
 
@@ -913,7 +913,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 			},
 			StartKey: []byte{byte(i + 1)},
 			EndKey:   []byte{byte(i + 2)},
-			Peers:    []*metapb.Peer{{Id: i + 10, StoreId: uint64(i)}},
+			Peers:    []*metapb.Peer{{Id: i + 10, StoreId: i}},
 		}
 		region := core.NewRegionInfo(r, r.Peers[0], core.SetApproximateSize(10))
 

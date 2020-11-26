@@ -13,7 +13,11 @@
 
 package statistics
 
-import "time"
+import (
+	"time"
+
+	"github.com/tikv/pd/pkg/movingaverage"
+)
 
 const (
 	byteDim int = iota
@@ -36,8 +40,8 @@ type HotPeerStat struct {
 	KeyRate  float64  `json:"flow_keys"`
 
 	// rolling statistics, recording some recently added records.
-	RollingByteRate *TimeMedian
-	RollingKeyRate  *TimeMedian
+	RollingByteRate *movingaverage.TimeMedian
+	RollingKeyRate  *movingaverage.TimeMedian
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`

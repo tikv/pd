@@ -242,9 +242,9 @@ var (
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
 	// DefaultStoreLimit is the default store limit of add peer and remove peer.
-	DefaultStoreLimit StoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
+	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
 	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
-	DefaultTiFlashStoreLimit StoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
+	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
 )
 
 func init() {
@@ -317,7 +317,7 @@ func adjustFloat64(v *float64, defValue float64) {
 }
 
 func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
-	if v.Duration == 0 {
+	if v.Duration <= 0 {
 		v.Duration = defValue
 	}
 }
@@ -751,6 +751,7 @@ const (
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
+	defaultEnableCrossTableMerge       = true
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -801,6 +802,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
+	}
+	if !meta.IsDefined("enable-cross-table-merge") {
+		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)

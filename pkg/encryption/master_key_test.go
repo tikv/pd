@@ -36,7 +36,7 @@ func (s *testMasterKeySuite) TestPlaintextMasterKey(c *C) {
 			Plaintext: &encryptionpb.MasterKeyPlaintext{},
 		},
 	}
-	masterKey, err := NewMasterKey(config)
+	masterKey, err := NewMasterKey(config, nil)
 	c.Assert(err, IsNil)
 	c.Assert(masterKey, Not(IsNil))
 	c.Assert(len(masterKey.key), Equals, 0)
@@ -62,7 +62,7 @@ func (s *testMasterKeySuite) TestEncrypt(c *C) {
 	plaintext := "this-is-a-plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
 	c.Assert(err, IsNil)
-	c.Assert(len([]byte(iv)), Equals, ivLengthGCM)
+	c.Assert(len(iv), Equals, ivLengthGCM)
 	plaintext2, err := AesGcmDecrypt(key, ciphertext, iv)
 	c.Assert(err, IsNil)
 	c.Assert(string(plaintext2), Equals, plaintext)
@@ -91,7 +91,7 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyMissingPath(c *C) {
 			},
 		},
 	}
-	_, err := NewMasterKey(config)
+	_, err := NewMasterKey(config, nil)
 	c.Assert(err, Not(IsNil))
 }
 
@@ -106,7 +106,7 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyMissingFile(c *C) {
 			},
 		},
 	}
-	_, err = NewMasterKey(config)
+	_, err = NewMasterKey(config, nil)
 	c.Assert(err, Not(IsNil))
 }
 
@@ -122,7 +122,7 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyNotHexString(c *C) {
 			},
 		},
 	}
-	_, err = NewMasterKey(config)
+	_, err = NewMasterKey(config, nil)
 	c.Assert(err, Not(IsNil))
 }
 
@@ -138,7 +138,7 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyLengthMismatch(c *C) {
 			},
 		},
 	}
-	_, err = NewMasterKey(config)
+	_, err = NewMasterKey(config, nil)
 	c.Assert(err, Not(IsNil))
 }
 
@@ -155,7 +155,7 @@ func (s *testMasterKeySuite) TestNewFileMasterKey(c *C) {
 			},
 		},
 	}
-	masterKey, err := NewMasterKey(config)
+	masterKey, err := NewMasterKey(config, nil)
 	c.Assert(err, IsNil)
 	c.Assert(hex.EncodeToString(masterKey.key), Equals, key)
 }

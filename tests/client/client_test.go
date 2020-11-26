@@ -309,6 +309,43 @@ func (s *clientTestSuite) TestLocalTSO(c *C) {
 	wg.Wait()
 }
 
+func (s *clientTestSuite) TestNonexistentLocalTSO(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	for _, dcLocation := range dcLocationConfig {
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdLeader) > 0
+		})
+	}
+
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+
+	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
+	c.Assert(p, Equals, int64(0))
+	c.Assert(l, Equals, int64(0))
+	c.Assert(err, NotNil)
+}
+
 func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	c.Assert(err, IsNil)
@@ -778,17 +815,24 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		TTL       int64
 		SafePoint uint64
 	}{
-		{"a", 1000, 1},
 		{"b", 1000, 2},
+		{"a", 1000, 1},
 		{"c", 1000, 3},
 	}
 	for _, ssp := range serviceSafePoints {
 		min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
 			ssp.ServiceID, 1000, ssp.SafePoint)
 		c.Assert(err, IsNil)
-		c.Assert(min, Equals, uint64(1))
+		// An service safepoint of ID "gc_worker" is automatically initialized as 0
+		c.Assert(min, Equals, uint64(0))
 	}
+
 	min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", math.MaxInt64, 10)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(1))
+
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", 1000, 4)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(2))
@@ -829,7 +873,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(minSsp.ExpiredAt, Less, oldMinSsp.ExpiredAt)
 
-	// TTL can be infinite
+	// TTL can be infinite (represented by math.MaxInt64)
 	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", math.MaxInt64, 3)
 	c.Assert(err, IsNil)
@@ -838,6 +882,32 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
+
+	// Delete "a" and "c"
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", -1, 3)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(4))
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"a", -1, 4)
+	c.Assert(err, IsNil)
+	// Now gc_worker is the only remaining service safe point.
+	c.Assert(min, Equals, uint64(10))
+
+	// gc_worker cannot be deleted.
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", -1, 10)
+	c.Assert(err, NotNil)
+
+	// Cannot set non-infinity TTL for gc_worker
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", 10000000, 10)
+	c.Assert(err, NotNil)
+
+	// Service safepoint must have a non-empty ID
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"", 1000, 15)
+	c.Assert(err, NotNil)
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {
@@ -848,7 +918,9 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 			ConfVer: 1,
 			Version: 1,
 		},
-		Peers: peers,
+		Peers:    peers,
+		StartKey: []byte("fff"),
+		EndKey:   []byte("ggg"),
 	}
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newHeader(s.srv),
@@ -856,10 +928,14 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 		Leader: peers[0],
 	}
 	err := s.regionHeartbeat.Send(req)
+	regionsID := []uint64{regionID}
 	c.Assert(err, IsNil)
 	testutil.WaitUntil(c, func(c *C) bool {
-		err := s.client.ScatterRegion(context.Background(), regionID)
+		scatterResp, err := s.client.ScatterRegions(context.Background(), regionsID, pd.WithGroup("test"), pd.WithRetry(1))
 		if c.Check(err, NotNil) {
+			return false
+		}
+		if c.Check(scatterResp.FinishedPercentage, Not(Equals), uint64(100)) {
 			return false
 		}
 		resp, err := s.client.GetOperator(context.Background(), regionID)
@@ -867,37 +943,6 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 			return false
 		}
 		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
-	})
-	c.Succeed()
-}
-
-func (s *testClientSuite) TestScatterRegionWithOption(c *C) {
-	regionID := regionIDAllocator.alloc()
-	region := &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers: peers,
-	}
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(s.srv),
-		Region: region,
-		Leader: peers[0],
-	}
-	err := s.regionHeartbeat.Send(req)
-	c.Assert(err, IsNil)
-	testutil.WaitUntil(c, func(c *C) bool {
-		err := s.client.ScatterRegionWithOption(context.Background(), regionID, pd.WithGroup("test-group"))
-		if c.Check(err, NotNil) {
-			return false
-		}
-		resp, err := s.client.GetOperator(context.Background(), regionID)
-		if c.Check(err, NotNil) {
-			return false
-		}
-		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
-	})
+	}, testutil.WithSleepInterval(1*time.Second))
 	c.Succeed()
 }

@@ -56,7 +56,7 @@ var (
 var (
 	ErrClientCreateTSOStream = errors.Normalize("create TSO stream failed", errors.RFCCodeText("PD:client:ErrClientCreateTSOStream"))
 	ErrClientGetTSOTimeout   = errors.Normalize("get TSO timeout", errors.RFCCodeText("PD:client:ErrClientGetTSOTimeout"))
-	ErrClientGetTSO          = errors.Normalize("get TSO failed", errors.RFCCodeText("PD:client:ErrClientGetTSO"))
+	ErrClientGetTSO          = errors.Normalize("get TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetTSO"))
 	ErrClientGetLeader       = errors.Normalize("get leader from %v error", errors.RFCCodeText("PD:client:ErrClientGetLeader"))
 	ErrClientGetMember       = errors.Normalize("get member failed", errors.RFCCodeText("PD:client:ErrClientGetMember"))
 )
@@ -104,7 +104,7 @@ var (
 	ErrUnsupportedMetricsType   = errors.Normalize("unsupported metrics type %v", errors.RFCCodeText("PD:autoscaling:ErrUnsupportedMetricsType"))
 	ErrUnsupportedComponentType = errors.Normalize("unsupported component type %v", errors.RFCCodeText("PD:autoscaling:ErrUnsupportedComponentType"))
 	ErrUnexpectedType           = errors.Normalize("unexpected type %v", errors.RFCCodeText("PD:autoscaling:ErrUnexpectedType"))
-	ErrTypeConversion           = errors.Normalize(("type conversion error"), errors.RFCCodeText("PD:autoscaling:ErrTypeConversion"))
+	ErrTypeConversion           = errors.Normalize("type conversion error", errors.RFCCodeText("PD:autoscaling:ErrTypeConversion"))
 	ErrEmptyMetricsResponse     = errors.Normalize("metrics response from Prometheus is empty", errors.RFCCodeText("PD:autoscaling:ErrEmptyMetricsResponse"))
 	ErrEmptyMetricsResult       = errors.Normalize("result from Prometheus is empty, %s", errors.RFCCodeText("PD:autoscaling:ErrEmptyMetricsResult"))
 )
@@ -285,4 +285,5 @@ var (
 	ErrEncryptionLoadKeys           = errors.Normalize("load data keys error", errors.RFCCodeText("PD:encryption:ErrEncryptionLoadKeys"))
 	ErrEncryptionRotateDataKey      = errors.Normalize("failed to rotate data key", errors.RFCCodeText("PD:encryption:ErrEncryptionRotateDataKey"))
 	ErrEncryptionSaveDataKeys       = errors.Normalize("failed to save data keys", errors.RFCCodeText("PD:encryption:ErrEncryptionSaveDataKeys"))
+	ErrEncryptionKMS                = errors.Normalize("KMS error", errors.RFCCodeText("PD:ErrEncryptionKMS"))
 )
