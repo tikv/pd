@@ -47,7 +47,7 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 	stores := make([]*core.StoreInfo, 0, len(metaStores))
 	for _, m := range metaStores {
 		s := core.NewStoreInfo(m, core.SetLastHeartbeatTS(time.Now()))
-		storesStats.CreateRollingStoreStats(m.GetId())
+		storesStats.GetOrCreateRollingStoreStats(m.GetId())
 		stores = append(stores, s)
 	}
 

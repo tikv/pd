@@ -1079,7 +1079,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	}
 
 	if err != nil {
-		log.Debug("fail to create operator", zap.Stringer("rwType", bs.rwTy), zap.Stringer("opType", bs.opTy), errs.ZapError(err))
+		log.Debug("fail to create operator", zap.Stringer("rw-type", bs.rwTy), zap.Stringer("op-type", bs.opTy), errs.ZapError(err))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
 		return nil, nil
 	}
