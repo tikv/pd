@@ -379,9 +379,9 @@ func summaryStoresLoad(
 		byteExp := allByteSum / storeLen
 		keyExp := allKeySum / storeLen
 		countExp := allCount / storeLen
-		detail.LoadPred.Future.ExpByteRate = byteExp
-		detail.LoadPred.Future.ExpKeyRate = keyExp
-		detail.LoadPred.Future.ExpCount = countExp
+		detail.LoadPred.Expect.ByteRate = byteExp
+		detail.LoadPred.Expect.KeyRate = keyExp
+		detail.LoadPred.Expect.Count = countExp
 		// Debug
 		{
 			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
@@ -658,8 +658,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		if detail.LoadPred.min().ByteRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpByteRate &&
-			detail.LoadPred.min().KeyRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpKeyRate {
+		if detail.LoadPred.min().ByteRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.ByteRate &&
+			detail.LoadPred.min().KeyRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.KeyRate {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 		}
@@ -828,8 +828,8 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 	for _, store := range candidates {
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
-			if detail.LoadPred.max().ByteRate*dstToleranceRatio < detail.LoadPred.Future.ExpByteRate &&
-				detail.LoadPred.max().KeyRate*dstToleranceRatio < detail.LoadPred.Future.ExpKeyRate {
+			if detail.LoadPred.max().ByteRate*dstToleranceRatio < detail.LoadPred.Expect.ByteRate &&
+				detail.LoadPred.max().KeyRate*dstToleranceRatio < detail.LoadPred.Expect.KeyRate {
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}
