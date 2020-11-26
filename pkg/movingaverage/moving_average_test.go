@@ -107,8 +107,8 @@ func (t *testMovingAvg) TestMovingAvg(c *C) {
 	}
 	for _, test := range testCases {
 		c.Assert(test.ma.Get(), Equals, empty)
-		t.checkReset(c, test.ma, empty)
-		t.checkAdd(c, test.ma, data, test.expected)
-		t.checkSet(c, test.ma, data, test.expected)
+		checkReset(c, test.ma, empty)
+		checkAdd(c, test.ma, data, test.expected)
+		checkSet(c, test.ma, data, test.expected)
 	}
 }
