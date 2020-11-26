@@ -289,7 +289,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Duration("cost", time.Since(start)),
 	)
 	for _, store := range c.GetStores() {
-		c.storesStats.CreateRollingStoreStats(store.GetID())
+		c.storesStats.GetOrCreateRollingStoreStats(store.GetID())
 	}
 	return c, nil
 }
@@ -884,13 +884,22 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
 	newStore.Labels = labels
 	// PutStore will perform label merge.
-	err := c.PutStore(newStore, force)
-	return err
+	return c.putStoreImpl(newStore, force)
 }
 
 // PutStore puts a store.
+func (c *RaftCluster) PutStore(store *metapb.Store) error {
+	if err := c.putStoreImpl(store, false); err != nil {
+		return err
+	}
+	c.OnStoreVersionChange()
+	c.AddStoreLimit(store)
+	return nil
+}
+
+// putStoreImpl puts a store.
 // If 'force' is true, then overwrite the store's labels.
-func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
+func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -898,13 +907,8 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 		return errors.Errorf("invalid put store %v", store)
 	}
 
-	v, err := ParseVersion(store.GetVersion())
-	if err != nil {
-		return errors.Errorf("invalid put store %v, error: %s", store, err)
-	}
-	clusterVersion := *c.opt.GetClusterVersion()
-	if !IsCompatible(clusterVersion, *v) {
-		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
+	if err := c.checkStoreVersion(store); err != nil {
+		return err
 	}
 
 	// Store address can not be the same as other stores.
@@ -938,10 +942,22 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 			core.SetStoreDeployPath(store.DeployPath),
 		)
 	}
-	if err = c.checkStoreLabels(s); err != nil {
+	if err := c.checkStoreLabels(s); err != nil {
 		return err
 	}
 	return c.putStoreLocked(s)
+}
+
+func (c *RaftCluster) checkStoreVersion(store *metapb.Store) error {
+	v, err := ParseVersion(store.GetVersion())
+	if err != nil {
+		return errors.Errorf("invalid put store %v, error: %s", store, err)
+	}
+	clusterVersion := *c.opt.GetClusterVersion()
+	if !IsCompatible(clusterVersion, *v) {
+		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
+	}
+	return nil
 }
 
 func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
@@ -1066,6 +1082,12 @@ func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) err
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
+	if store.GetState() == metapb.StoreState_Tombstone && state != metapb.StoreState_Tombstone {
+		if err := c.checkStoreVersion(store.GetMeta()); err != nil {
+			return err
+		}
+	}
+
 	newStore := store.Clone(core.SetStoreState(state))
 	log.Warn("store update state",
 		zap.Uint64("store-id", storeID),
@@ -1102,7 +1124,7 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 		}
 	}
 	c.core.PutStore(store)
-	c.storesStats.CreateRollingStoreStats(store.GetID())
+	c.storesStats.GetOrCreateRollingStoreStats(store.GetID())
 	return nil
 }
 
@@ -1731,7 +1753,12 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
 
 // AddStoreLimit add a store limit for a given store ID.
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
+	storeID := store.GetId()
 	cfg := c.opt.GetScheduleConfig().Clone()
+	if _, ok := cfg.StoreLimit[storeID]; ok {
+		return
+	}
+
 	sc := config.StoreLimitConfig{
 		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
@@ -1742,7 +1769,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 			RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 		}
 	}
-	storeID := store.GetId()
+
 	cfg.StoreLimit[storeID] = sc
 	c.opt.SetScheduleConfig(cfg)
 }
