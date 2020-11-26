@@ -14,6 +14,7 @@
 package statistics
 
 import (
+	"math"
 	"time"
 
 	"github.com/tikv/pd/pkg/movingaverage"
@@ -35,8 +36,9 @@ type HotPeerStat struct {
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int `json:"anti_count"`
 
-	ByteRate float64 `json:"flow_bytes"`
-	KeyRate  float64 `json:"flow_keys"`
+	Kind     FlowKind `json:"-"`
+	ByteRate float64  `json:"flow_bytes"`
+	KeyRate  float64  `json:"flow_keys"`
 
 	// rolling statistics, recording some recently added records.
 	rollingByteRate *movingaverage.TimeMedian
@@ -45,7 +47,6 @@ type HotPeerStat struct {
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
 
-	kind       FlowKind
 	needDelete bool
 	isLeader   bool
 	isNew      bool
@@ -87,17 +88,17 @@ func (stat *HotPeerStat) IsNew() bool {
 // GetByteRate returns denoised BytesRate if possible.
 func (stat *HotPeerStat) GetByteRate() float64 {
 	if stat.rollingByteRate == nil {
-		return float64(int(stat.ByteRate))
+		return math.Round(stat.ByteRate)
 	}
-	return float64(int(stat.rollingByteRate.Get()))
+	return math.Round(stat.rollingByteRate.Get())
 }
 
 // GetKeyRate returns denoised KeysRate if possible.
 func (stat *HotPeerStat) GetKeyRate() float64 {
 	if stat.rollingKeyRate == nil {
-		return float64(int(stat.KeyRate))
+		return math.Round(stat.KeyRate)
 	}
-	return float64(int(stat.rollingKeyRate.Get()))
+	return math.Round(stat.rollingKeyRate.Get())
 }
 
 // Clone clones the HotPeerStat

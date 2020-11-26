@@ -49,7 +49,7 @@ func (w *HotCache) CheckRead(region *core.RegionInfo) []*HotPeerStat {
 
 // Update updates the cache.
 func (w *HotCache) Update(item *HotPeerStat) {
-	switch item.kind {
+	switch item.Kind {
 	case WriteFlow:
 		w.writeFlow.Update(item)
 	case ReadFlow:
@@ -57,11 +57,11 @@ func (w *HotCache) Update(item *HotPeerStat) {
 	}
 
 	if item.IsNeedDelete() {
-		w.incMetrics("remove_item", item.StoreID, item.kind)
+		w.incMetrics("remove_item", item.StoreID, item.Kind)
 	} else if item.IsNew() {
-		w.incMetrics("add_item", item.StoreID, item.kind)
+		w.incMetrics("add_item", item.StoreID, item.Kind)
 	} else {
-		w.incMetrics("update_item", item.StoreID, item.kind)
+		w.incMetrics("update_item", item.StoreID, item.Kind)
 	}
 }
 

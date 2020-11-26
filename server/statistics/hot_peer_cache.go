@@ -152,7 +152,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 		newItem := &HotPeerStat{
 			StoreID:        storeID,
 			RegionID:       region.GetID(),
-			kind:           f.kind,
+			Kind:           f.kind,
 			ByteRate:       byteRate,
 			KeyRate:        keyRate,
 			LastUpdateTime: time.Now(),
