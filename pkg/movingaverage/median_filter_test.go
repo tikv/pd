@@ -38,14 +38,14 @@ func addRandData(ma MovingAvg, n int, mx float64) {
 
 // checkReset checks the Reset works properly.
 // emptyValue is the moving average of empty data set.
-func (t *testMovingAvg) checkReset(c *C, ma MovingAvg, emptyValue float64) {
+func checkReset(c *C, ma MovingAvg, emptyValue float64) {
 	addRandData(ma, 100, 1000)
 	ma.Reset()
 	c.Assert(ma.Get(), Equals, emptyValue)
 }
 
 // checkAddGet checks Add works properly.
-func (t *testMovingAvg) checkAdd(c *C, ma MovingAvg, data []float64, expected []float64) {
+func checkAdd(c *C, ma MovingAvg, data []float64, expected []float64) {
 	c.Assert(len(data), Equals, len(expected))
 	for i, x := range data {
 		ma.Add(x)
@@ -54,19 +54,19 @@ func (t *testMovingAvg) checkAdd(c *C, ma MovingAvg, data []float64, expected []
 }
 
 // checkSet checks Set = Reset + Add
-func (t *testMovingAvg) checkSet(c *C, ma MovingAvg, data []float64, expected []float64) {
+func checkSet(c *C, ma MovingAvg, data []float64, expected []float64) {
 	c.Assert(len(data), Equals, len(expected))
 
 	// Reset + Add
 	addRandData(ma, 100, 1000)
 	ma.Reset()
-	t.checkAdd(c, ma, data, expected)
+	checkAdd(c, ma, data, expected)
 
 	// Set
 	addRandData(ma, 100, 1000)
 	ma.Set(data[0])
 	c.Assert(ma.Get(), Equals, expected[0])
-	t.checkAdd(c, ma, data[1:], expected[1:])
+	checkAdd(c, ma, data[1:], expected[1:])
 }
 
 func (t *testMovingAvg) TestMedianFilter(c *C) {
@@ -77,7 +77,7 @@ func (t *testMovingAvg) TestMedianFilter(c *C) {
 	mf := NewMedianFilter(5)
 	c.Assert(mf.Get(), Equals, empty)
 
-	t.checkReset(c, mf, empty)
-	t.checkAdd(c, mf, data, expected)
-	t.checkSet(c, mf, data, expected)
+	checkReset(c, mf, empty)
+	checkAdd(c, mf, data, expected)
+	checkSet(c, mf, data, expected)
 }
