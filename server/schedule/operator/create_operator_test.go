@@ -19,6 +19,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
@@ -51,6 +52,103 @@ func (s *testCreateOperatorSuite) SetUpTest(c *C) {
 	s.cluster.AddLabelsStore(8, 0, map[string]string{"zone": "z2", "host": "h1"})
 	s.cluster.AddLabelsStore(9, 0, map[string]string{"zone": "z2", "host": "h2"})
 	s.cluster.AddLabelsStore(10, 0, map[string]string{"zone": "z3", "host": "h1", "noleader": "true"})
+}
+
+func (s *testCreateOperatorSuite) TestCreateSplitRegionOperator(c *C) {
+	type testCase struct {
+		startKey      []byte
+		endKey        []byte
+		originPeers   []*metapb.Peer // first is leader
+		policy        pdpb.CheckPolicy
+		keys          [][]byte
+		expectedError bool
+	}
+	cases := []testCase{
+		{
+			startKey: []byte("a"),
+			endKey:   []byte("b"),
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			policy:        pdpb.CheckPolicy_APPROXIMATE,
+			expectedError: false,
+		},
+		{
+			startKey: []byte("c"),
+			endKey:   []byte("d"),
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			policy:        pdpb.CheckPolicy_SCAN,
+			expectedError: false,
+		},
+		{
+			startKey: []byte("e"),
+			endKey:   []byte("h"),
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			policy:        pdpb.CheckPolicy_USEKEY,
+			keys:          [][]byte{[]byte("f"), []byte("g")},
+			expectedError: false,
+		},
+		{
+			startKey: []byte("i"),
+			endKey:   []byte("j"),
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+			},
+			policy:        pdpb.CheckPolicy_APPROXIMATE,
+			expectedError: true,
+		},
+		{
+			startKey: []byte("k"),
+			endKey:   []byte("l"),
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
+			},
+			policy:        pdpb.CheckPolicy_APPROXIMATE,
+			expectedError: true,
+		},
+	}
+
+	for _, tc := range cases {
+		region := core.NewRegionInfo(&metapb.Region{
+			Id:       1,
+			StartKey: tc.startKey,
+			EndKey:   tc.endKey,
+			Peers:    tc.originPeers,
+		}, tc.originPeers[0])
+		op, err := CreateSplitRegionOperator("test", region, 0, tc.policy, tc.keys)
+		if tc.expectedError {
+			c.Assert(err, NotNil)
+			continue
+		}
+		c.Assert(err, IsNil)
+		c.Assert(op.Kind(), Equals, OpSplit)
+		c.Assert(len(op.steps), Equals, 1)
+		for i := 0; i < op.Len(); i++ {
+			switch step := op.Step(i).(type) {
+			case SplitRegion:
+				c.Assert(step.StartKey, DeepEquals, tc.startKey)
+				c.Assert(step.EndKey, DeepEquals, tc.endKey)
+				c.Assert(step.Policy, Equals, tc.policy)
+				c.Assert(step.SplitKeys, DeepEquals, tc.keys)
+			default:
+				c.Errorf("unexpected type: %s", step.String())
+			}
+		}
+	}
 }
 
 func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
