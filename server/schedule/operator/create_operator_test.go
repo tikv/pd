@@ -151,6 +151,132 @@ func (s *testCreateOperatorSuite) TestCreateSplitRegionOperator(c *C) {
 	}
 }
 
+func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
+	type testCase struct {
+		sourcePeers   []*metapb.Peer // first is leader
+		targetPeers   []*metapb.Peer // first is leader
+		kind          OpKind
+		expectedError bool
+		prepareSteps  []OpStep
+	}
+	cases := []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			OpMerge,
+			false,
+			[]OpStep{},
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			[]*metapb.Peer{
+				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			OpMerge | OpLeader | OpRegion,
+			false,
+			[]OpStep{
+				AddLearner{ToStore: 3},
+				TransferLeader{FromStore: 1, ToStore: 2},
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{{ToStore: 3}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
+				},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 3}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
+				},
+				RemovePeer{FromStore: 1},
+			},
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+			},
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			true,
+			nil,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 2, Role: metapb.PeerRole_IncomingVoter},
+			},
+			0,
+			true,
+			nil,
+		},
+	}
+
+	for _, tc := range cases {
+		source := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: tc.sourcePeers}, tc.sourcePeers[0])
+		target := core.NewRegionInfo(&metapb.Region{Id: 86, Peers: tc.targetPeers}, tc.targetPeers[0])
+		ops, err := CreateMergeRegionOperator("test", s.cluster, source, target, 0)
+		if tc.expectedError {
+			c.Assert(err, NotNil)
+			continue
+		}
+		c.Assert(err, IsNil)
+		c.Assert(len(ops), Equals, 2)
+		c.Assert(ops[0].kind, Equals, tc.kind)
+		c.Assert(ops[0].Len(), Equals, len(tc.prepareSteps)+1)
+		c.Assert(ops[1].kind, Equals, tc.kind)
+		c.Assert(ops[1].Len(), Equals, 1)
+		c.Assert(ops[1].Step(0).(MergeRegion), DeepEquals, MergeRegion{source.GetMeta(), target.GetMeta(), true})
+
+		expectedSteps := append(tc.prepareSteps, MergeRegion{source.GetMeta(), target.GetMeta(), false})
+		for i := 0; i < ops[0].Len(); i++ {
+			switch step := ops[0].Step(i).(type) {
+			case TransferLeader:
+				c.Assert(step.FromStore, Equals, expectedSteps[i].(TransferLeader).FromStore)
+				c.Assert(step.ToStore, Equals, expectedSteps[i].(TransferLeader).ToStore)
+			case AddLearner:
+				c.Assert(step.ToStore, Equals, expectedSteps[i].(AddLearner).ToStore)
+			case RemovePeer:
+				c.Assert(step.FromStore, Equals, expectedSteps[i].(RemovePeer).FromStore)
+			case ChangePeerV2Enter:
+				c.Assert(len(step.PromoteLearners), Equals, len(expectedSteps[i].(ChangePeerV2Enter).PromoteLearners))
+				c.Assert(len(step.DemoteVoters), Equals, len(expectedSteps[i].(ChangePeerV2Enter).DemoteVoters))
+				for j, p := range expectedSteps[i].(ChangePeerV2Enter).PromoteLearners {
+					c.Assert(step.PromoteLearners[j].ToStore, Equals, p.ToStore)
+				}
+				for j, d := range expectedSteps[i].(ChangePeerV2Enter).DemoteVoters {
+					c.Assert(step.DemoteVoters[j].ToStore, Equals, d.ToStore)
+				}
+			case ChangePeerV2Leave:
+				c.Assert(len(step.PromoteLearners), Equals, len(expectedSteps[i].(ChangePeerV2Leave).PromoteLearners))
+				c.Assert(len(step.DemoteVoters), Equals, len(expectedSteps[i].(ChangePeerV2Leave).DemoteVoters))
+				for j, p := range expectedSteps[i].(ChangePeerV2Leave).PromoteLearners {
+					c.Assert(step.PromoteLearners[j].ToStore, Equals, p.ToStore)
+				}
+				for j, d := range expectedSteps[i].(ChangePeerV2Leave).DemoteVoters {
+					c.Assert(step.DemoteVoters[j].ToStore, Equals, d.ToStore)
+				}
+			case MergeRegion:
+				c.Assert(step, DeepEquals, expectedSteps[i].(MergeRegion))
+			}
+		}
+	}
+}
+
 func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 	type testCase struct {
 		originPeers []*metapb.Peer // first is leader
