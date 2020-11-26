@@ -1305,19 +1305,11 @@ func (c *RaftCluster) AllocID() (uint64, error) {
 func (c *RaftCluster) OnStoreVersionChange() {
 	c.RLock()
 	defer c.RUnlock()
-<<<<<<< HEAD
-	var (
-		minVersion     *semver.Version
-		clusterVersion *semver.Version
-	)
-
-=======
 	c.onStoreVersionChangeLocked()
 }
 
 func (c *RaftCluster) onStoreVersionChangeLocked() {
 	var minVersion *semver.Version
->>>>>>> 7445c235... check cluster version on store tombstone (#3196)
 	stores := c.GetStores()
 	for _, s := range stores {
 		if s.IsTombstone() {
@@ -1329,7 +1321,7 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 			minVersion = v
 		}
 	}
-	clusterVersion = c.opt.GetClusterVersion()
+	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
 	failpoint.Inject("versionChangeConcurrency", func() {
