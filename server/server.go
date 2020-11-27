@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/tikv/pd/server/auth"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -97,6 +98,9 @@ type Server struct {
 	etcdCfg        *embed.Config
 	persistOptions *config.PersistOptions
 	handler        *Handler
+
+	// RBAC
+	authManager *auth.Manager
 
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -380,6 +384,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
+	s.authManager = auth.NewManager(s.storage.Base.(kv.TxnBase))
 
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
@@ -696,6 +701,7 @@ func (s *Server) GetStorage() *core.Storage {
 // When we use it, we should prevent calling GetStorage, otherwise, it may cause a data race problem.
 func (s *Server) SetStorage(storage *core.Storage) {
 	s.storage = storage
+	s.authManager = auth.NewManager(s.storage.Base.(kv.TxnBase))
 }
 
 // GetBasicCluster returns the basic cluster of server.
@@ -1040,6 +1046,11 @@ func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 	s.cluster.Lock()
 	defer s.cluster.Unlock()
 	return s.cluster.LoadClusterStatus()
+}
+
+// GetAuthManager gets auth manager.
+func (s *Server) GetAuthManager() *auth.Manager {
+	return s.authManager
 }
 
 // SetLogLevel sets log level.
