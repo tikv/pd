@@ -329,8 +329,8 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 		peers = append(peers, *peer.Clone())
 	}
 	return &statistics.HotPeersStat{
-		TotalBytesRate: li.LoadPred.Current.ByteRate,
-		TotalKeysRate:  li.LoadPred.Current.KeyRate,
+		TotalBytesRate: math.Round(li.LoadPred.Current.ByteRate),
+		TotalKeysRate:  math.Round(li.LoadPred.Current.KeyRate),
 		Count:          len(li.HotPeers),
 		Stats:          peers,
 	}
