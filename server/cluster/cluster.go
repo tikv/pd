@@ -1073,6 +1073,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 		zap.Uint64("store-id", newStore.GetID()),
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
+	c.onStoreVersionChangeLocked()
 	if err == nil {
 		c.RemoveStoreLimit(storeID)
 	}
@@ -1334,6 +1335,10 @@ func (c *RaftCluster) AllocID() (uint64, error) {
 func (c *RaftCluster) OnStoreVersionChange() {
 	c.RLock()
 	defer c.RUnlock()
+	c.onStoreVersionChangeLocked()
+}
+
+func (c *RaftCluster) onStoreVersionChangeLocked() {
 	var minVersion *semver.Version
 	stores := c.GetStores()
 	for _, s := range stores {
