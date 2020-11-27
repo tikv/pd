@@ -278,28 +278,39 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
 }
 
+var ttlConfig = map[string]interface{}{
+	"schedule.max-snapshot-count":             999,
+	"schedule.enable-location-replacement":    false,
+	"schedule.max-merge-region-size":          999,
+	"schedule.max-merge-region-keys":          999,
+	"schedule.scheduler-max-waiting-operator": 999,
+	"schedule.leader-schedule-limit":          999,
+	"schedule.region-schedule-limit":          999,
+	"schedule.hot-region-schedule-limit":      999,
+	"schedule.replica-schedule-limit":         999,
+	"schedule.merge-schedule-limit":           999,
+}
+
+func assertTTLConfig(c *C, options *config.PersistOptions, checker Checker) {
+	c.Assert(options.GetMaxSnapshotCount(), checker, uint64(999))
+	c.Assert(options.IsLocationReplacementEnabled(), checker, false)
+	c.Assert(options.GetMaxMergeRegionSize(), checker, uint64(999))
+	c.Assert(options.GetMaxMergeRegionKeys(), checker, uint64(999))
+	c.Assert(options.GetSchedulerMaxWaitingOperator(), checker, uint64(999))
+	c.Assert(options.GetLeaderScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetRegionScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetHotRegionScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetReplicaScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetMergeScheduleLimit(), checker, uint64(999))
+}
+
 func (s *testConfigSuite) TestConfigTTL(c *C) {
-	addr := fmt.Sprintf("%s/config?ttlSecond=3", s.urlPrefix)
-	r := map[string]interface{}{
-		"schedule.max-snapshot-count":             999,
-		"schedule.enable-location-replacement":    false,
-		"schedule.max-merge-region-size":          999,
-		"schedule.max-merge-region-keys":          999,
-		"schedule.scheduler-max-waiting-operator": 999,
-	}
-	postData, err := json.Marshal(r)
+	addr := fmt.Sprintf("%s/config?ttlSecond=1", s.urlPrefix)
+	postData, err := json.Marshal(ttlConfig)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
-	c.Assert(s.svr.GetPersistOptions().GetMaxSnapshotCount(), Equals, uint64(999))
-	c.Assert(s.svr.GetPersistOptions().IsLocationReplacementEnabled(), Equals, false)
-	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionSize(), Equals, uint64(999))
-	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionKeys(), Equals, uint64(999))
-	c.Assert(s.svr.GetPersistOptions().GetSchedulerMaxWaitingOperator(), Equals, uint64(999))
-	time.Sleep(5 * time.Second)
-	c.Assert(s.svr.GetPersistOptions().GetMaxSnapshotCount(), Not(Equals), uint64(999))
-	c.Assert(s.svr.GetPersistOptions().IsLocationReplacementEnabled(), Equals, true)
-	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionSize(), Not(Equals), uint64(999))
-	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionKeys(), Not(Equals), uint64(999))
-	c.Assert(s.svr.GetPersistOptions().GetSchedulerMaxWaitingOperator(), Not(Equals), uint64(999))
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
+	time.Sleep(2 * time.Second)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
 }
