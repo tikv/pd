@@ -234,6 +234,11 @@ func (c *TTLString) Put(key string, value interface{}) {
 	c.ttlCache.put(key, value)
 }
 
+// PutWithTTL puts an item into cache with specified TTL.
+func (c *TTLString) PutWithTTL(key string, value interface{}, ttl time.Duration) {
+	c.ttlCache.putWithTTL(key, value, ttl)
+}
+
 // Pop one key/value that is not expired
 func (c *TTLString) Pop() (string, interface{}, bool) {
 	k, v, success := c.ttlCache.pop()

@@ -161,3 +161,13 @@ func GetProtoMsgWithModRev(c *clientv3.Client, key string, msg proto.Message, op
 	}
 	return true, resp.Kvs[0].ModRevision, nil
 }
+
+// EtcdKVPutWithTTL put (key, value) into etcd with a ttl of ttlSeconds
+func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value string, ttlSeconds int64) (*clientv3.PutResponse, error) {
+	kv := clientv3.NewKV(c)
+	grantResp, err := c.Grant(ctx, ttlSeconds)
+	if err != nil {
+		return nil, err
+	}
+	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
+}

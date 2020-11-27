@@ -454,7 +454,6 @@ func (s *Server) Run() error {
 	if err := s.startEtcd(s.ctx); err != nil {
 		return err
 	}
-
 	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}
@@ -1149,7 +1148,10 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.stopRaftCluster()
-
+	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
+		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
+		return
+	}
 	s.member.EnableLeader()
 	defer s.member.DisableLeader()
 
@@ -1253,8 +1255,11 @@ func (s *Server) PersistFile(name string, data []byte) error {
 }
 
 // SaveTTLConfig save ttl config
-func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) {
+func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) error {
 	for k, v := range data {
-		s.persistOptions.SetTTLData(s.ctx, k, v, ttl)
+		if err := s.persistOptions.SetTTLData(s.ctx, s.client, k, fmt.Sprint(v), ttl); err != nil {
+			return err
+		}
 	}
+	return nil
 }

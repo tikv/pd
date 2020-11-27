@@ -904,8 +904,8 @@ func (h *Handler) GetAddr() string {
 }
 
 // SetStoreLimitTTL set storeLimit with ttl
-func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) {
-	h.s.SaveTTLConfig(map[string]interface{}{
+func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) error {
+	return h.s.SaveTTLConfig(map[string]interface{}{
 		data: value,
 	}, ttl)
 }

@@ -109,7 +109,11 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 
 	// if ttlSecond defined, we will apply if to temp configuration.
 	if ttls > 0 {
-		h.svr.SaveTTLConfig(conf, time.Duration(ttls)*time.Second)
+		err := h.svr.SaveTTLConfig(conf, time.Duration(ttls)*time.Second)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		h.rd.JSON(w, http.StatusOK, "The config is updated.")
 		return
 	}
