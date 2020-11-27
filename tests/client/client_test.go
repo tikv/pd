@@ -14,7 +14,10 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"math"
 	"path/filepath"
 	"sort"
@@ -945,4 +948,66 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
 	}, testutil.WithSleepInterval(1*time.Second))
 	c.Succeed()
+}
+
+type testConfigTTLSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testConfigTTLSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *testConfigTTLSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+var _ = SerialSuites(&testConfigTTLSuite{})
+
+var ttlConfig = map[string]interface{}{
+	"schedule.max-snapshot-count":             999,
+	"schedule.enable-location-replacement":    false,
+	"schedule.max-merge-region-size":          999,
+	"schedule.max-merge-region-keys":          999,
+	"schedule.scheduler-max-waiting-operator": 999,
+	"schedule.leader-schedule-limit":          999,
+	"schedule.region-schedule-limit":          999,
+	"schedule.hot-region-schedule-limit":      999,
+	"schedule.replica-schedule-limit":         999,
+	"schedule.merge-schedule-limit":           999,
+}
+
+func assertTTLConfig(c *C, options *config.PersistOptions, checker Checker) {
+	c.Assert(options.GetMaxSnapshotCount(), checker, uint64(999))
+	c.Assert(options.IsLocationReplacementEnabled(), checker, false)
+	c.Assert(options.GetMaxMergeRegionSize(), checker, uint64(999))
+	c.Assert(options.GetMaxMergeRegionKeys(), checker, uint64(999))
+	c.Assert(options.GetSchedulerMaxWaitingOperator(), checker, uint64(999))
+	c.Assert(options.GetLeaderScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetRegionScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetHotRegionScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetReplicaScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetMergeScheduleLimit(), checker, uint64(999))
+}
+
+func (s *testConfigTTLSuite) TestConfigTTLAfterTransferLeader(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	leader := cluster.GetServer(cluster.WaitLeader())
+	c.Assert(leader.BootstrapCluster(), IsNil)
+	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
+	postData, err := json.Marshal(ttlConfig)
+	c.Assert(err, IsNil)
+	_, err = leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
+	c.Assert(err, IsNil)
+	time.Sleep(2 * time.Second)
+	_ = leader.Destroy()
+	time.Sleep(2 * time.Second)
+	leader = cluster.GetServer(cluster.WaitLeader())
+	assertTTLConfig(c, leader.GetPersistOptions(), Equals)
 }

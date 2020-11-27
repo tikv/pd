@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/tempurl"
@@ -185,5 +186,43 @@ func (s *testEtcdutilSuite) TestEtcdKVGet(c *C) {
 	resp, err = EtcdKVGet(client, next, withRange, withLimit, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	c.Assert(err, IsNil)
 	c.Assert(len(resp.Kvs), Equals, 2)
+	cleanConfig(cfg)
+}
+
+func (s *testEtcdutilSuite) TestEtcdKVPutWithTTL(c *C) {
+	cfg := newTestSingleConfig()
+	etcd, err := embed.StartEtcd(cfg)
+	c.Assert(err, IsNil)
+
+	ep := cfg.LCUrls[0].String()
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: []string{ep},
+	})
+	c.Assert(err, IsNil)
+
+	<-etcd.Server.ReadyNotify()
+
+	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl1", "val1", 2)
+	c.Assert(err, IsNil)
+	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl2", "val2", 4)
+	c.Assert(err, IsNil)
+
+	time.Sleep(3 * time.Second)
+	// test/ttl1 is outdated
+	resp, err := EtcdKVGet(client, "test/ttl1")
+	c.Assert(err, IsNil)
+	c.Assert(resp.Count, Equals, int64(0))
+	// but test/ttl2 is not
+	resp, err = EtcdKVGet(client, "test/ttl2")
+	c.Assert(err, IsNil)
+	c.Assert(string(resp.Kvs[0].Value), Equals, "val2")
+
+	time.Sleep(2 * time.Second)
+
+	// test/ttl2 is also outdated
+	resp, err = EtcdKVGet(client, "test/ttl2")
+	c.Assert(err, IsNil)
+	c.Assert(resp.Count, Equals, int64(0))
+
 	cleanConfig(cfg)
 }
