@@ -21,11 +21,14 @@ import (
 )
 
 var (
-	ErrorInvalidAction = func(action Action) error { return errors.Errorf("invalid action: %s", action) }
+	// ErrInvalidAction is error info for invalid action.
+	ErrInvalidAction = func(action Action) error { return errors.Errorf("invalid action: %s", action) }
 )
 
+// Action represents rbac actions.
 type Action string
 
+// All available actions types.
 const (
 	GET    Action = "get"
 	LIST   Action = "list"
@@ -34,6 +37,7 @@ const (
 	DELETE Action = "delete"
 )
 
+// Permission represents a permission to a specific pair of resource and action.
 type Permission struct {
 	resource string
 	action   Action
@@ -44,11 +48,13 @@ type jsonPermission struct {
 	Action   Action `json:"action"`
 }
 
+// MarshalJSON implements Marshaler interface.
 func (p *Permission) MarshalJSON() ([]byte, error) {
 	_p := jsonPermission{Resource: p.resource, Action: p.action}
 	return json.Marshal(_p)
 }
 
+// UnmarshalJSON implements Unmarshaler interface.
 func (p *Permission) UnmarshalJSON(bytes []byte) error {
 	var _p jsonPermission
 
@@ -65,6 +71,7 @@ func (p *Permission) UnmarshalJSON(bytes []byte) error {
 	return nil
 }
 
+// NewPermission safely creates a new permission instance.
 func NewPermission(resource string, action Action) (*Permission, error) {
 	err := validateAction(action)
 	if err != nil {
@@ -73,14 +80,17 @@ func NewPermission(resource string, action Action) (*Permission, error) {
 	return &Permission{resource: resource, action: action}, nil
 }
 
+// GetAction returns the action of this permission.
 func (p *Permission) GetAction() Action {
 	return p.action
 }
 
+// GetResource returns the resource of this permission.
 func (p *Permission) GetResource() string {
 	return p.resource
 }
 
+// String implements Stringer interface.
 func (p *Permission) String() string {
 	var builder strings.Builder
 	builder.WriteString(string(p.action))
@@ -96,6 +106,6 @@ func validateAction(action Action) error {
 	case GET, LIST, CREATE, UPDATE, DELETE:
 		return nil
 	default:
-		return ErrorInvalidAction(action)
+		return ErrInvalidAction(action)
 	}
 }

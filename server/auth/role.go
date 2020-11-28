@@ -18,6 +18,8 @@ import (
 	"sort"
 )
 
+// Role records role info.
+// Read-Only once created.
 type Role struct {
 	name        string
 	permissions map[Permission]struct{}
@@ -28,6 +30,7 @@ type jsonRole struct {
 	Permissions []Permission `json:"permissions"`
 }
 
+// MarshalJSON implements Marshaler interface.
 func (r *Role) MarshalJSON() ([]byte, error) {
 	permissions := make([]Permission, 0, len(r.permissions))
 	for p := range r.permissions {
@@ -39,6 +42,7 @@ func (r *Role) MarshalJSON() ([]byte, error) {
 	return json.Marshal(_r)
 }
 
+// UnmarshalJSON implements Unmarshaler interface.
 func (r *Role) UnmarshalJSON(bytes []byte) error {
 	var _r jsonRole
 
@@ -55,6 +59,7 @@ func (r *Role) UnmarshalJSON(bytes []byte) error {
 	return nil
 }
 
+// NewRole safely creates a new role instance.
 func NewRole(name string) (*Role, error) {
 	err := validateName(name)
 	if err != nil {
@@ -64,7 +69,8 @@ func NewRole(name string) (*Role, error) {
 	return &Role{name: name, permissions: make(map[Permission]struct{})}, nil
 }
 
-func NewRoleFromJson(j string) (*Role, error) {
+// NewRoleFromJSON safely deserialize a json string to a role instance.
+func NewRoleFromJSON(j string) (*Role, error) {
 	role := Role{permissions: make(map[Permission]struct{})}
 	err := json.Unmarshal([]byte(j), &role)
 	if err != nil {
@@ -79,18 +85,22 @@ func NewRoleFromJson(j string) (*Role, error) {
 	return &role, nil
 }
 
+// Clone creates a deep copy of role instance.
 func (r *Role) Clone() *Role {
 	return &Role{name: r.name, permissions: r.permissions}
 }
 
+// GetName returns name of this role.
 func (r *Role) GetName() string {
 	return r.name
 }
 
+// GetPermissions returns permissions of this role.
 func (r *Role) GetPermissions() map[Permission]struct{} {
 	return r.permissions
 }
 
+// HasPermission checks whether this user has a specific permission.
 func (r *Role) HasPermission(permission Permission) bool {
 	for p := range r.permissions {
 		if p == permission {
@@ -101,6 +111,8 @@ func (r *Role) HasPermission(permission Permission) bool {
 	return false
 }
 
+// sortPermissions is used to ensure that identical sets of permissions always yield the same json output,
+// so that we may reliably check them when committing kv transactions.
 func sortPermissions(permissions []Permission) {
 	sort.Slice(permissions, func(i, j int) bool {
 		if permissions[i].resource != permissions[j].resource {

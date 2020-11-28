@@ -18,10 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/pingcap/pd/pkg/tempurl"
-	"github.com/tikv/pd/server/kv"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 	"io/ioutil"
 	"net/url"
 	"os"
@@ -29,6 +25,12 @@ import (
 	"reflect"
 	"strconv"
 	"testing"
+
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
+
+	"github.com/tikv/pd/pkg/tempurl"
+	"github.com/tikv/pd/server/kv"
 
 	. "github.com/pingcap/check"
 )
@@ -66,7 +68,7 @@ func (s *testAuthSuite) TestUser(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(string(j), Equals, marshalledUser)
 
-	unmarshalledUser, err := NewUserFromJson(string(j))
+	unmarshalledUser, err := NewUserFromJSON(string(j))
 	c.Assert(err, IsNil)
 	c.Assert(unmarshalledUser, DeepEquals, user)
 
@@ -82,8 +84,11 @@ func (s *testAuthSuite) TestRole(c *C) {
 	role, err := NewRole("test")
 	c.Assert(err, IsNil)
 	p1, err := NewPermission("storage", "get")
+	c.Assert(err, IsNil)
 	p2, err := NewPermission("region", "list")
+	c.Assert(err, IsNil)
 	p3, err := NewPermission("region", "get")
+	c.Assert(err, IsNil)
 	p4, err := NewPermission("region", "delete")
 	c.Assert(err, IsNil)
 	role.permissions = map[Permission]struct{}{*p1: {}, *p2: {}, *p3: {}}
@@ -103,7 +108,7 @@ func (s *testAuthSuite) TestRole(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(string(j), Equals, marshalledRole)
 
-	unmarshalledRole, err := NewRoleFromJson(string(j))
+	unmarshalledRole, err := NewRoleFromJSON(string(j))
 	c.Assert(err, IsNil)
 	c.Assert(unmarshalledRole, DeepEquals, role)
 }
@@ -158,17 +163,27 @@ func (s *testAuthSuite) testGetUser(c *C, m *Manager) {
 		user, err := m.GetUser("bob")
 		c.Assert(err, IsNil)
 		c.Assert(user, DeepEquals, &expectedUser)
-		user, err = m.GetUser("john")
+		_, err = m.GetUser("john")
 		c.Assert(err, NotNil)
-		c.Assert(err.Error(), Equals, ErrorUserNotFound("john").Error())
+		c.Assert(err.Error(), Equals, ErrUserNotFound("john").Error())
 	}
 }
 
 func (s *testAuthSuite) testGetUsers(c *C, m *Manager) {
 	expectedUsers := []User{
-		{username: "alice", hash: "13dc8554575637802eec3c0117f41591a990e1a2d37160018c48c9125063838a", roleKeys: map[string]struct{}{"reader": {}}},
-		{username: "bob", hash: "da7655b5bf67039c3e76a99d8e6fb6969370bbc0fa440cae699cf1a3e2f1e0a1", roleKeys: map[string]struct{}{"reader": {}, "writer": {}}},
-		{username: "lambda", hash: "f9f967e71dff16bd5ce92e62d50140503a3ce399f294b1848adb210149bc1fd0", roleKeys: map[string]struct{}{"admin": {}}},
+		{
+			username: "alice",
+			hash:     "13dc8554575637802eec3c0117f41591a990e1a2d37160018c48c9125063838a",
+			roleKeys: map[string]struct{}{"reader": {}}},
+		{
+			username: "bob",
+			hash:     "da7655b5bf67039c3e76a99d8e6fb6969370bbc0fa440cae699cf1a3e2f1e0a1",
+			roleKeys: map[string]struct{}{"reader": {}, "writer": {}}},
+		{
+			username: "lambda",
+			hash:     "f9f967e71dff16bd5ce92e62d50140503a3ce399f294b1848adb210149bc1fd0",
+			roleKeys: map[string]struct{}{"admin": {}},
+		},
 	}
 	users, err := m.GetUsers()
 	c.Assert(err, IsNil)
@@ -191,14 +206,14 @@ func (s *testAuthSuite) testCreateUser(c *C, m *Manager) {
 	expectedUser := User{username: "jane", hash: "100e060425c270b01138bc4ed9b498897d2ec525baa766d9a57004b318e99e19", roleKeys: map[string]struct{}{}}
 	err := m.CreateUser("bob", "bobpass")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorUserExists("bob").Error())
+	c.Assert(err.Error(), Equals, ErrUserExists("bob").Error())
 	err = m.CreateUser("!", "!pass")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorInvalidName.Error())
+	c.Assert(err.Error(), Equals, ErrInvalidName.Error())
 
 	_, err = m.GetUser("jane")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorUserNotFound("jane").Error())
+	c.Assert(err.Error(), Equals, ErrUserNotFound("jane").Error())
 	err = m.CreateUser("jane", "janepass")
 	c.Assert(err, IsNil)
 	user, err := m.GetUser("jane")
@@ -209,13 +224,13 @@ func (s *testAuthSuite) testCreateUser(c *C, m *Manager) {
 func (s *testAuthSuite) testDeleteUser(c *C, m *Manager) {
 	err := m.DeleteUser("john")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorUserNotFound("john").Error())
+	c.Assert(err.Error(), Equals, ErrUserNotFound("john").Error())
 
 	err = m.DeleteUser("alice")
 	c.Assert(err, IsNil)
 	err = m.DeleteUser("alice")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorUserNotFound("alice").Error())
+	c.Assert(err.Error(), Equals, ErrUserNotFound("alice").Error())
 }
 
 func (s *testAuthSuite) testChangePassword(c *C, m *Manager) {
@@ -234,7 +249,7 @@ func (s *testAuthSuite) testChangePassword(c *C, m *Manager) {
 func (s *testAuthSuite) testSetRole(c *C, m *Manager) {
 	err := m.SetRole("alice", map[string]struct{}{"somebody": {}, "admin": {}})
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorRoleNotFound("somebody").Error())
+	c.Assert(err.Error(), Equals, ErrRoleNotFound("somebody").Error())
 
 	err = m.SetRole("alice", map[string]struct{}{"writer": {}, "admin": {}})
 	c.Assert(err, IsNil)
@@ -247,11 +262,11 @@ func (s *testAuthSuite) testSetRole(c *C, m *Manager) {
 func (s *testAuthSuite) testAddRole(c *C, m *Manager) {
 	err := m.AddRole("alice", "reader")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorUserHasRole("alice", "reader").Error())
+	c.Assert(err.Error(), Equals, ErrUserHasRole("alice", "reader").Error())
 
 	err = m.AddRole("alice", "somebody")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorRoleNotFound("somebody").Error())
+	c.Assert(err.Error(), Equals, ErrRoleNotFound("somebody").Error())
 
 	err = m.AddRole("alice", "writer")
 	c.Assert(err, IsNil)
@@ -264,11 +279,11 @@ func (s *testAuthSuite) testAddRole(c *C, m *Manager) {
 func (s *testAuthSuite) testRemoveRole(c *C, m *Manager) {
 	err := m.RemoveRole("alice", "writer")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorUserMissingRole("alice", "writer").Error())
+	c.Assert(err.Error(), Equals, ErrUserMissingRole("alice", "writer").Error())
 
 	err = m.RemoveRole("alice", "somebody")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorRoleNotFound("somebody").Error())
+	c.Assert(err.Error(), Equals, ErrRoleNotFound("somebody").Error())
 
 	err = m.RemoveRole("alice", "reader")
 	c.Assert(err, IsNil)
@@ -281,18 +296,38 @@ func (s *testAuthSuite) testRemoveRole(c *C, m *Manager) {
 func (s *testAuthSuite) testHasPermissions(c *C, m *Manager) {
 	_, err := m.HasPermissions("john", map[Permission]struct{}{})
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorUserNotFound("john").Error())
+	c.Assert(err.Error(), Equals, ErrUserNotFound("john").Error())
 
 	testCases := []struct {
 		username    string
 		permissions map[Permission]struct{}
 		expected    bool
 	}{
-		{username: "alice", permissions: map[Permission]struct{}{{resource: "store", action: "get"}: {}}, expected: true},
-		{username: "alice", permissions: map[Permission]struct{}{{resource: "store", action: "get"}: {}, {resource: "region", action: "list"}: {}}, expected: true},
-		{username: "alice", permissions: map[Permission]struct{}{{resource: "store", action: "update"}: {}}, expected: false},
-		{username: "alice", permissions: map[Permission]struct{}{{resource: "store", action: "get"}: {}, {resource: "region", action: "update"}: {}}, expected: false},
-		{username: "alice", permissions: map[Permission]struct{}{{resource: "user", action: "get"}: {}}, expected: false},
+		{
+			username:    "alice",
+			permissions: map[Permission]struct{}{{resource: "store", action: "get"}: {}},
+			expected:    true,
+		},
+		{
+			username:    "alice",
+			permissions: map[Permission]struct{}{{resource: "store", action: "get"}: {}, {resource: "region", action: "list"}: {}},
+			expected:    true,
+		},
+		{
+			username:    "alice",
+			permissions: map[Permission]struct{}{{resource: "store", action: "update"}: {}},
+			expected:    false,
+		},
+		{
+			username:    "alice",
+			permissions: map[Permission]struct{}{{resource: "store", action: "get"}: {}, {resource: "region", action: "update"}: {}},
+			expected:    false,
+		},
+		{
+			username:    "alice",
+			permissions: map[Permission]struct{}{{resource: "user", action: "get"}: {}},
+			expected:    false,
+		},
 	}
 	for _, testCase := range testCases {
 		hasPermission, err := m.HasPermissions(testCase.username, testCase.permissions)
@@ -315,9 +350,9 @@ func (s *testAuthSuite) testGetRole(c *C, m *Manager) {
 		role, err := m.GetRole("reader")
 		c.Assert(err, IsNil)
 		c.Assert(role, DeepEquals, &expectedRole)
-		role, err = m.GetRole("somebody")
+		_, err = m.GetRole("somebody")
 		c.Assert(err, NotNil)
-		c.Assert(err.Error(), Equals, ErrorRoleNotFound("somebody").Error())
+		c.Assert(err.Error(), Equals, ErrRoleNotFound("somebody").Error())
 	}
 }
 
@@ -370,14 +405,14 @@ func (s *testAuthSuite) testCreateRole(c *C, m *Manager) {
 	expectedRole := Role{name: "nobody", permissions: map[Permission]struct{}{}}
 	err := m.CreateRole("reader")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorRoleExists("reader").Error())
+	c.Assert(err.Error(), Equals, ErrRoleExists("reader").Error())
 	err = m.CreateRole("!")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorInvalidName.Error())
+	c.Assert(err.Error(), Equals, ErrInvalidName.Error())
 
 	_, err = m.GetRole("nobody")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorRoleNotFound("nobody").Error())
+	c.Assert(err.Error(), Equals, ErrRoleNotFound("nobody").Error())
 	err = m.CreateRole("nobody")
 	c.Assert(err, IsNil)
 	role, err := m.GetRole("nobody")
@@ -388,7 +423,7 @@ func (s *testAuthSuite) testCreateRole(c *C, m *Manager) {
 func (s *testAuthSuite) testDeleteRole(c *C, m *Manager) {
 	err := m.DeleteRole("somebody")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorRoleNotFound("somebody").Error())
+	c.Assert(err.Error(), Equals, ErrRoleNotFound("somebody").Error())
 
 	err = m.DeleteRole("reader")
 	c.Assert(err, IsNil)
@@ -401,7 +436,7 @@ func (s *testAuthSuite) testDeleteRole(c *C, m *Manager) {
 
 	err = m.DeleteRole("reader")
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorRoleNotFound("reader").Error())
+	c.Assert(err.Error(), Equals, ErrRoleNotFound("reader").Error())
 }
 
 func (s *testAuthSuite) testSetPermissions(c *C, m *Manager) {
@@ -422,7 +457,7 @@ func (s *testAuthSuite) testSetPermissions(c *C, m *Manager) {
 func (s *testAuthSuite) testAddPermission(c *C, m *Manager) {
 	err := m.AddPermission("reader", Permission{resource: "region", action: "get"})
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorRoleHasPermission("reader", Permission{resource: "region", action: "get"}).Error())
+	c.Assert(err.Error(), Equals, ErrRoleHasPermission("reader", Permission{resource: "region", action: "get"}).Error())
 
 	err = m.AddPermission("reader", Permission{resource: "region", action: "update"})
 	c.Assert(err, IsNil)
@@ -441,7 +476,7 @@ func (s *testAuthSuite) testAddPermission(c *C, m *Manager) {
 func (s *testAuthSuite) testRemovePermission(c *C, m *Manager) {
 	err := m.RemovePermission("reader", Permission{resource: "region", action: "update"})
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, ErrorRoleMissingPermission("reader", Permission{resource: "region", action: "update"}).Error())
+	c.Assert(err.Error(), Equals, ErrRoleMissingPermission("reader", Permission{resource: "region", action: "update"}).Error())
 
 	err = m.RemovePermission("reader", Permission{resource: "region", action: "get"})
 	c.Assert(err, IsNil)
@@ -510,9 +545,18 @@ func initKV(c *C, client *clientv3.Client, rootPath string) {
 		Hash     string   `json:"hash"`
 		Roles    []string `json:"roles"`
 	}{
-		{Username: "alice", Hash: "13dc8554575637802eec3c0117f41591a990e1a2d37160018c48c9125063838a", Roles: []string{"reader"}},         // pass: alicepass
-		{Username: "bob", Hash: "da7655b5bf67039c3e76a99d8e6fb6969370bbc0fa440cae699cf1a3e2f1e0a1", Roles: []string{"reader", "writer"}}, // pass: bobpass
-		{Username: "lambda", Hash: "f9f967e71dff16bd5ce92e62d50140503a3ce399f294b1848adb210149bc1fd0", Roles: []string{"admin"}},         // pass: lambdapass
+		{
+			Username: "alice",
+			Hash:     "13dc8554575637802eec3c0117f41591a990e1a2d37160018c48c9125063838a", // pass: alicepass
+			Roles:    []string{"reader"}},
+		{
+			Username: "bob",
+			Hash:     "da7655b5bf67039c3e76a99d8e6fb6969370bbc0fa440cae699cf1a3e2f1e0a1", // pass: bobpass
+			Roles:    []string{"reader", "writer"}},
+		{
+			Username: "lambda",
+			Hash:     "f9f967e71dff16bd5ce92e62d50140503a3ce399f294b1848adb210149bc1fd0", // pass: lambdapass
+			Roles:    []string{"admin"}},
 	}
 	for _, role := range roles {
 		value, err := json.Marshal(role)

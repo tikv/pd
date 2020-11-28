@@ -17,9 +17,11 @@ package kv
 import "github.com/pingcap/errors"
 
 var (
-	ErrorTransactionFailed = errors.Errorf("kv transaction failed")
+	// ErrTransactionFailed is error info for failed transactions.
+	ErrTransactionFailed = errors.Errorf("kv transaction failed")
 )
 
+// Txn wraps kv transaction.
 type Txn interface {
 	If(cs ...Cmp) Txn
 	Then(ops ...Op) Txn
@@ -27,6 +29,7 @@ type Txn interface {
 	Commit() (interface{}, error)
 }
 
+// TxnBase is an abstract interface for load/save pd cluster data.
 type TxnBase interface {
 	Base
 	NewTxn() Txn
@@ -50,6 +53,7 @@ const (
 	cmpNeq cmpRelation = "!="
 )
 
+// Cmp wraps transaction condition.
 type Cmp struct {
 	target   cmpTarget
 	key      string
@@ -57,34 +61,48 @@ type Cmp struct {
 	value    interface{}
 }
 
+// Version is a transaction condition based on version of a key.
 func Version(key string) Cmp {
 	return Cmp{target: cmpVersion, key: key}
 }
+
+// Create is a transaction condition based on creation revision of a key.
 func Create(key string) Cmp {
 	return Cmp{target: cmpCreate, key: key}
 }
+
+// Mod is a transaction condition based on modification revision of a key.
 func Mod(key string) Cmp {
 	return Cmp{target: cmpMod, key: key}
 }
+
+// Value is a transaction condition based on value of a key.
 func Value(key string) Cmp {
 	return Cmp{target: cmpValue, key: key}
 }
 
+// Eq is a transaction condition based on equality of target and given value.
 func Eq(cmp Cmp, value interface{}) Cmp {
 	cmp.relation = cmpEq
 	cmp.value = value
 	return cmp
 }
+
+// Gt is a transaction condition that given value is greater than target.
 func Gt(cmp Cmp, value interface{}) Cmp {
 	cmp.relation = cmpGt
 	cmp.value = value
 	return cmp
 }
+
+// Lt is a transaction condition that given value is less than target.
 func Lt(cmp Cmp, value interface{}) Cmp {
 	cmp.relation = cmpLt
 	cmp.value = value
 	return cmp
 }
+
+// Neq is a transaction condition based on inequality of target and given value.
 func Neq(cmp Cmp, value interface{}) Cmp {
 	cmp.relation = cmpNeq
 	cmp.value = value
@@ -99,6 +117,7 @@ const (
 	opRemoveRange
 )
 
+// Op wraps transaction operator.
 type Op struct {
 	t        opType
 	key      string
@@ -107,14 +126,17 @@ type Op struct {
 	limit    int64
 }
 
+// OpSave is a save operator.
 func OpSave(key string, value string) Op {
 	return Op{t: opSave, key: key, value: value}
 }
 
+// OpRemove is a remove operator.
 func OpRemove(key string) Op {
 	return Op{t: opRemove, key: key}
 }
 
+// OpRemoveRange is a range remove operator.
 func OpRemoveRange(key string, rangeEnd string, limit int64) Op {
 	return Op{t: opRemoveRange, key: key, rangeEnd: rangeEnd, limit: limit}
 }

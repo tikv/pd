@@ -18,6 +18,8 @@ import (
 	"sort"
 )
 
+// User records user info.
+// Read-Only once created.
 type User struct {
 	username string
 	hash     string
@@ -30,11 +32,14 @@ type jsonUser struct {
 	RoleKeys []string `json:"roles"`
 }
 
+// SafeUser records user info without password hash, so it's safe to serialize it and send it as API responses.
+// Read-Only once created.
 type SafeUser struct {
 	Username string   `json:"username"`
 	RoleKeys []string `json:"roles"`
 }
 
+// MarshalJSON implements Marshaler interface.
 func (u *User) MarshalJSON() ([]byte, error) {
 	roleKeys := make([]string, 0, len(u.roleKeys))
 	for k := range u.roleKeys {
@@ -46,6 +51,7 @@ func (u *User) MarshalJSON() ([]byte, error) {
 	return json.Marshal(_u)
 }
 
+// UnmarshalJSON implements Unmarshaler interface.
 func (u *User) UnmarshalJSON(bytes []byte) error {
 	var _u jsonUser
 
@@ -63,6 +69,7 @@ func (u *User) UnmarshalJSON(bytes []byte) error {
 	return nil
 }
 
+// NewUser safely creates a new user instance.
 func NewUser(username string, hash string) (*User, error) {
 	err := validateName(username)
 	if err != nil {
@@ -72,7 +79,8 @@ func NewUser(username string, hash string) (*User, error) {
 	return &User{username: username, hash: hash, roleKeys: make(map[string]struct{})}, nil
 }
 
-func NewUserFromJson(j string) (*User, error) {
+// NewUserFromJSON safely deserialize a json string to a user instance.
+func NewUserFromJSON(j string) (*User, error) {
 	user := User{roleKeys: make(map[string]struct{})}
 	err := json.Unmarshal([]byte(j), &user)
 	if err != nil {
@@ -87,10 +95,12 @@ func NewUserFromJson(j string) (*User, error) {
 	return &user, nil
 }
 
+// Clone creates a deep copy of user instance.
 func (u *User) Clone() *User {
 	return &User{username: u.username, hash: u.hash, roleKeys: u.roleKeys}
 }
 
+// GetSafeUser returns a SafeUser instance. More details is available in the comment of SafeUser struct.
 func (u *User) GetSafeUser() SafeUser {
 	roleKeys := make([]string, 0, len(u.roleKeys))
 	for k := range u.roleKeys {
@@ -101,14 +111,17 @@ func (u *User) GetSafeUser() SafeUser {
 	return SafeUser{Username: u.username, RoleKeys: roleKeys}
 }
 
+// GetUsername returns username of this user.
 func (u *User) GetUsername() string {
 	return u.username
 }
 
+// GetRoleKeys returns role keys of this user.
 func (u *User) GetRoleKeys() map[string]struct{} {
 	return u.roleKeys
 }
 
+// HasRole checks whether this user has a specific role.
 func (u *User) HasRole(name string) bool {
 	for k := range u.roleKeys {
 		if k == name {
@@ -119,6 +132,7 @@ func (u *User) HasRole(name string) bool {
 	return false
 }
 
+// ComparePassword checks whether given string matches the password of this user.
 func (u *User) ComparePassword(candidate string) error {
 	return compareHashAndPassword(u.hash, candidate)
 }

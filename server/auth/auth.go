@@ -28,18 +28,26 @@ import (
 )
 
 var (
-	ErrorUserNotFound    = func(name string) error { return errors.Errorf("user not found: %s", name) }
-	ErrorUserExists      = func(name string) error { return errors.Errorf("user already exists: %s", name) }
-	ErrorRoleNotFound    = func(name string) error { return errors.Errorf("role not found: %s", name) }
-	ErrorRoleExists      = func(name string) error { return errors.Errorf("role already exists: %s", name) }
-	ErrorUserHasRole     = func(user string, role string) error { return errors.Errorf("user %s already has role: %s", user, role) }
-	ErrorUserMissingRole = func(user string, role string) error {
+	// ErrUserNotFound is error info for user not found.
+	ErrUserNotFound = func(name string) error { return errors.Errorf("user not found: %s", name) }
+	// ErrUserExists is error info for user exists.
+	ErrUserExists = func(name string) error { return errors.Errorf("user already exists: %s", name) }
+	// ErrRoleNotFound is error info for role not found.
+	ErrRoleNotFound = func(name string) error { return errors.Errorf("role not found: %s", name) }
+	// ErrRoleExists is error info for role exists.
+	ErrRoleExists = func(name string) error { return errors.Errorf("role already exists: %s", name) }
+	// ErrUserHasRole is error info for user has role.
+	ErrUserHasRole = func(user string, role string) error { return errors.Errorf("user %s already has role: %s", user, role) }
+	// ErrUserMissingRole is error info for user lacks a required role.
+	ErrUserMissingRole = func(user string, role string) error {
 		return errors.Errorf("user %s doesn't have role: %s", user, role)
 	}
-	ErrorRoleHasPermission = func(role string, permission Permission) error {
+	// ErrRoleHasPermission is error info for role has permission.
+	ErrRoleHasPermission = func(role string, permission Permission) error {
 		return errors.Errorf("role %s already has permission: %s", role, permission.String())
 	}
-	ErrorRoleMissingPermission = func(role string, permission Permission) error {
+	// ErrRoleMissingPermission is error info for role lacks a required role.
+	ErrRoleMissingPermission = func(role string, permission Permission) error {
 		return errors.Errorf("role %s doesn't have permission: %s", role, permission.String())
 	}
 )
@@ -49,16 +57,19 @@ var (
 	rolePrefix = "roles"
 )
 
+// Manager is used for the rbac storage, cache, management and enforcing logic.
 type Manager struct {
 	kv    kv.TxnBase
 	users sync.Map // map[string]*User
 	roles sync.Map // map[string]*Role
 }
 
+// NewManager creates a new Manager.
 func NewManager(k kv.TxnBase) *Manager {
 	return &Manager{kv: k}
 }
 
+// GetUser returns a user.
 func (m *Manager) GetUser(name string) (*User, error) {
 	_cachedUser, ok := m.users.Load(name)
 	// Cache hit, so we return cached value.
@@ -66,22 +77,22 @@ func (m *Manager) GetUser(name string) (*User, error) {
 		cachedUser := _cachedUser.(*User)
 		// Nil in cache implies this user doesn't exist
 		if cachedUser == nil {
-			return nil, ErrorUserNotFound(name)
+			return nil, ErrUserNotFound(name)
 		}
 		return cachedUser, nil
 	}
 
 	// Cache miss. Load value from etcd.
-	userJson, err := m.kv.Load(path.Join(userPrefix, name))
+	userJSON, err := m.kv.Load(path.Join(userPrefix, name))
 	if err != nil {
 		return nil, err
 	}
 
 	var user *User
-	if userJson == "" {
+	if userJSON == "" {
 		user = nil
 	} else {
-		user, err = NewUserFromJson(userJson)
+		user, err = NewUserFromJSON(userJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -93,11 +104,12 @@ func (m *Manager) GetUser(name string) (*User, error) {
 	latestUser := _latestUser.(*User)
 
 	if latestUser == nil {
-		return nil, ErrorUserNotFound(name)
+		return nil, ErrUserNotFound(name)
 	}
 	return latestUser, nil
 }
 
+// GetUsers returns all available users.
 func (m *Manager) GetUsers() (map[*User]struct{}, error) {
 	// NOTE: GetUsers doesn't use the cache and read data from kv directly to avoid cache inconsistency.
 	usersPath := strings.Join([]string{userPrefix, ""}, "/")
@@ -107,8 +119,8 @@ func (m *Manager) GetUsers() (map[*User]struct{}, error) {
 	}
 
 	users := make(map[*User]struct{})
-	for _, userJson := range _users {
-		user, err := NewUserFromJson(userJson)
+	for _, userJSON := range _users {
+		user, err := NewUserFromJSON(userJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -119,6 +131,7 @@ func (m *Manager) GetUsers() (map[*User]struct{}, error) {
 	return users, nil
 }
 
+// GetUserKeys returns names of all available users.
 func (m *Manager) GetUserKeys() (map[string]struct{}, error) {
 	// NOTE: GetRoleKeys doesn't use the cache and read data from kv directly to avoid cache inconsistency.
 	usersPath := strings.Join([]string{userPrefix, ""}, "/")
@@ -135,22 +148,23 @@ func (m *Manager) GetUserKeys() (map[string]struct{}, error) {
 	return keys, nil
 }
 
+// CreateUser creates a new user.
 func (m *Manager) CreateUser(name string, password string) error {
-	user, err := m.GetUser(name)
+	_, err := m.GetUser(name)
 	if err == nil {
-		return ErrorUserExists(name)
+		return ErrUserExists(name)
 	}
-	if err.Error() != ErrorUserNotFound(name).Error() {
+	if err.Error() != ErrUserNotFound(name).Error() {
 		return err
 	}
 
-	user, err = NewUser(name, GenerateHash(password))
+	user, err := NewUser(name, GenerateHash(password))
 	if err != nil {
 		return err
 	}
 
 	// Try to add user to kv first.
-	userJson, err := json.Marshal(user)
+	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return err
 	}
@@ -158,7 +172,7 @@ func (m *Manager) CreateUser(name string, password string) error {
 
 	_, err = m.kv.NewTxn().
 		If(kv.Eq(kv.Create(userPath), 0)).
-		Then(kv.OpSave(name, string(userJson))).
+		Then(kv.OpSave(name, string(userJSON))).
 		Commit()
 	if err != nil {
 		return err
@@ -170,6 +184,7 @@ func (m *Manager) CreateUser(name string, password string) error {
 	return nil
 }
 
+// DeleteUser deletes a user.
 func (m *Manager) DeleteUser(name string) error {
 	user, err := m.GetUser(name)
 	if err != nil {
@@ -177,14 +192,14 @@ func (m *Manager) DeleteUser(name string) error {
 	}
 
 	// Try to delete user from kv first.
-	userJson, err := json.Marshal(user)
+	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return err
 	}
 	userPath := path.Join(userPrefix, name)
 
 	_, err = m.kv.NewTxn().
-		If(kv.Eq(kv.Value(userPath), string(userJson))).
+		If(kv.Eq(kv.Value(userPath), string(userJSON))).
 		Then(kv.OpRemove(userPath)).
 		Commit()
 	if err != nil {
@@ -197,13 +212,14 @@ func (m *Manager) DeleteUser(name string) error {
 	return nil
 }
 
+// ChangePassword changes password of a user.
 func (m *Manager) ChangePassword(name string, password string) error {
 	_user, err := m.GetUser(name)
 	if err != nil {
 		return err
 	}
 
-	_userJson, err := json.Marshal(_user)
+	_userJSON, err := json.Marshal(_user)
 	if err != nil {
 		return err
 	}
@@ -212,15 +228,15 @@ func (m *Manager) ChangePassword(name string, password string) error {
 	user.hash = GenerateHash(password)
 
 	// Try to update user in kv first.
-	userJson, err := json.Marshal(user)
+	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return err
 	}
 	userPath := path.Join(userPrefix, name)
 
 	_, err = m.kv.NewTxn().
-		If(kv.Eq(kv.Value(userPath), string(_userJson))).
-		Then(kv.OpSave(userPath, string(userJson))).
+		If(kv.Eq(kv.Value(userPath), string(_userJSON))).
+		Then(kv.OpSave(userPath, string(userJSON))).
 		Commit()
 	if err != nil {
 		return err
@@ -232,13 +248,14 @@ func (m *Manager) ChangePassword(name string, password string) error {
 	return nil
 }
 
+// SetRole sets roles of a user.
 func (m *Manager) SetRole(name string, roles map[string]struct{}) error {
 	_user, err := m.GetUser(name)
 	if err != nil {
 		return err
 	}
 
-	_userJson, err := json.Marshal(_user)
+	_userJSON, err := json.Marshal(_user)
 	if err != nil {
 		return err
 	}
@@ -256,16 +273,16 @@ func (m *Manager) SetRole(name string, roles map[string]struct{}) error {
 	user.roleKeys = roles
 
 	// Try to update user in kv first.
-	userJson, err := json.Marshal(user)
+	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return err
 	}
 	userPath := path.Join(userPrefix, name)
 
-	cmps = append(cmps, kv.Eq(kv.Value(userPath), string(_userJson)))
+	cmps = append(cmps, kv.Eq(kv.Value(userPath), string(_userJSON)))
 	_, err = m.kv.NewTxn().
 		If(cmps...).
-		Then(kv.OpSave(userPath, string(userJson))).
+		Then(kv.OpSave(userPath, string(userJSON))).
 		Commit()
 	if err != nil {
 		return err
@@ -277,6 +294,7 @@ func (m *Manager) SetRole(name string, roles map[string]struct{}) error {
 	return nil
 }
 
+// AddRole adds a role to a user.
 func (m *Manager) AddRole(name string, roleName string) error {
 	_user, err := m.GetUser(name)
 	if err != nil {
@@ -288,14 +306,14 @@ func (m *Manager) AddRole(name string, roleName string) error {
 	}
 
 	if _, ok := _user.roleKeys[roleName]; ok {
-		return ErrorUserHasRole(name, roleName)
+		return ErrUserHasRole(name, roleName)
 	}
 	_, err = m.GetRole(roleName)
 	if err != nil {
-		return ErrorRoleNotFound(roleName)
+		return ErrRoleNotFound(roleName)
 	}
 
-	_userJson, err := json.Marshal(_user)
+	_userJSON, err := json.Marshal(_user)
 	if err != nil {
 		return err
 	}
@@ -304,7 +322,7 @@ func (m *Manager) AddRole(name string, roleName string) error {
 	user.roleKeys[roleName] = struct{}{}
 
 	// Try to update user in kv first.
-	userJson, err := json.Marshal(user)
+	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return err
 	}
@@ -312,9 +330,9 @@ func (m *Manager) AddRole(name string, roleName string) error {
 	rolePath := path.Join(rolePrefix, roleName)
 
 	_, err = m.kv.NewTxn().
-		If(kv.Eq(kv.Value(userPath), string(_userJson)),
+		If(kv.Eq(kv.Value(userPath), string(_userJSON)),
 			kv.Gt(kv.Create(rolePath), 0)).
-		Then(kv.OpSave(userPath, string(userJson))).
+		Then(kv.OpSave(userPath, string(userJSON))).
 		Commit()
 	if err != nil {
 		return err
@@ -326,6 +344,7 @@ func (m *Manager) AddRole(name string, roleName string) error {
 	return nil
 }
 
+// RemoveRole removes a role from a user.
 func (m *Manager) RemoveRole(name string, roleName string) error {
 	_user, err := m.GetUser(name)
 	if err != nil {
@@ -337,10 +356,10 @@ func (m *Manager) RemoveRole(name string, roleName string) error {
 	}
 
 	if _, ok := _user.roleKeys[roleName]; !ok {
-		return ErrorUserMissingRole(name, roleName)
+		return ErrUserMissingRole(name, roleName)
 	}
 
-	_userJson, err := json.Marshal(_user)
+	_userJSON, err := json.Marshal(_user)
 	if err != nil {
 		return err
 	}
@@ -349,15 +368,15 @@ func (m *Manager) RemoveRole(name string, roleName string) error {
 	delete(user.roleKeys, roleName)
 
 	// Try to update user in kv first.
-	userJson, err := json.Marshal(user)
+	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return err
 	}
 	userPath := path.Join(userPrefix, name)
 
 	_, err = m.kv.NewTxn().
-		If(kv.Eq(kv.Value(userPath), string(_userJson))).
-		Then(kv.OpSave(userPath, string(userJson))).
+		If(kv.Eq(kv.Value(userPath), string(_userJSON))).
+		Then(kv.OpSave(userPath, string(userJSON))).
 		Commit()
 	if err != nil {
 		return err
@@ -369,6 +388,7 @@ func (m *Manager) RemoveRole(name string, roleName string) error {
 	return nil
 }
 
+// HasPermissions checks whether a user has each of a given set of permissions.
 func (m *Manager) HasPermissions(name string, expectedPermissions map[Permission]struct{}) (bool, error) {
 	user, err := m.GetUser(name)
 	if err != nil {
@@ -382,12 +402,11 @@ func (m *Manager) HasPermissions(name string, expectedPermissions map[Permission
 
 		role, err := m.GetRole(roleName)
 		if err != nil {
-			if err.Error() == ErrorRoleNotFound(roleName).Error() {
+			if err.Error() == ErrRoleNotFound(roleName).Error() {
 				log.Warn("missing role when validating user permission. skipped.", zap.String("user", name), errs.ZapError(err))
 				continue
-			} else {
-				return false, err
 			}
+			return false, err
 		}
 
 		for expectedPermission := range expectedPermissions {
@@ -401,6 +420,7 @@ func (m *Manager) HasPermissions(name string, expectedPermissions map[Permission
 	return len(expectedPermissions) == 0, nil
 }
 
+// GetRole returns a role.
 func (m *Manager) GetRole(name string) (*Role, error) {
 	_cachedRole, ok := m.roles.Load(name)
 	// Cache hit, so we return cached value.
@@ -408,22 +428,22 @@ func (m *Manager) GetRole(name string) (*Role, error) {
 		cachedRole := _cachedRole.(*Role)
 		// Nil in cache implies this user doesn't exist
 		if cachedRole == nil {
-			return nil, ErrorRoleNotFound(name)
+			return nil, ErrRoleNotFound(name)
 		}
 		return cachedRole, nil
 	}
 
 	// Cache miss. Load value from etcd.
-	roleJson, err := m.kv.Load(path.Join(rolePrefix, name))
+	roleJSON, err := m.kv.Load(path.Join(rolePrefix, name))
 	if err != nil {
 		return nil, err
 	}
 
 	var role *Role
-	if roleJson == "" {
+	if roleJSON == "" {
 		role = nil
 	} else {
-		role, err = NewRoleFromJson(roleJson)
+		role, err = NewRoleFromJSON(roleJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -435,11 +455,12 @@ func (m *Manager) GetRole(name string) (*Role, error) {
 	latestRole := _latestRole.(*Role)
 
 	if latestRole == nil {
-		return nil, ErrorRoleNotFound(name)
+		return nil, ErrRoleNotFound(name)
 	}
 	return latestRole, nil
 }
 
+// GetRoles returns all available roles.
 func (m *Manager) GetRoles() (map[*Role]struct{}, error) {
 	// NOTE: GetRoles doesn't use the cache and read data from kv directly to avoid cache inconsistency.
 	rolesPath := strings.Join([]string{rolePrefix, ""}, "/")
@@ -449,8 +470,8 @@ func (m *Manager) GetRoles() (map[*Role]struct{}, error) {
 	}
 
 	roles := make(map[*Role]struct{})
-	for _, roleJson := range _roles {
-		role, err := NewRoleFromJson(roleJson)
+	for _, roleJSON := range _roles {
+		role, err := NewRoleFromJSON(roleJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -461,6 +482,7 @@ func (m *Manager) GetRoles() (map[*Role]struct{}, error) {
 	return roles, nil
 }
 
+// GetRoleKeys returns names of all available roles.
 func (m *Manager) GetRoleKeys() (map[string]struct{}, error) {
 	// NOTE: GetRoleKeys doesn't use the cache and read data from kv directly to avoid cache inconsistency.
 	rolesPath := strings.Join([]string{rolePrefix, ""}, "/")
@@ -477,22 +499,23 @@ func (m *Manager) GetRoleKeys() (map[string]struct{}, error) {
 	return keys, nil
 }
 
+// CreateRole creates a new role.
 func (m *Manager) CreateRole(name string) error {
-	role, err := m.GetRole(name)
+	_, err := m.GetRole(name)
 	if err == nil {
-		return ErrorRoleExists(name)
+		return ErrRoleExists(name)
 	}
-	if err.Error() != ErrorRoleNotFound(name).Error() {
+	if err.Error() != ErrRoleNotFound(name).Error() {
 		return err
 	}
 
-	role, err = NewRole(name)
+	role, err := NewRole(name)
 	if err != nil {
 		return err
 	}
 
 	// Try to add role to kv first.
-	roleJson, err := json.Marshal(role)
+	roleJSON, err := json.Marshal(role)
 	if err != nil {
 		return err
 	}
@@ -500,7 +523,7 @@ func (m *Manager) CreateRole(name string) error {
 
 	_, err = m.kv.NewTxn().
 		If(kv.Eq(kv.Create(rolePath), 0)).
-		Then(kv.OpSave(name, string(roleJson))).
+		Then(kv.OpSave(name, string(roleJSON))).
 		Commit()
 	if err != nil {
 		return err
@@ -512,6 +535,7 @@ func (m *Manager) CreateRole(name string) error {
 	return nil
 }
 
+// DeleteRole deletes a role.
 func (m *Manager) DeleteRole(name string) error {
 	role, err := m.GetRole(name)
 	if err != nil {
@@ -538,30 +562,30 @@ func (m *Manager) DeleteRole(name string) error {
 				}
 			}
 			newUser := User{username: user.username, hash: user.hash, roleKeys: newRoles}
-			userJson, err := user.MarshalJSON()
+			userJSON, err := user.MarshalJSON()
 			if err != nil {
 				return err
 			}
-			newUserJson, err := newUser.MarshalJSON()
+			newUserJSON, err := newUser.MarshalJSON()
 			if err != nil {
 				return err
 			}
 
 			editedUsers = append(editedUsers, name)
 			userPath := path.Join(userPrefix, user.username)
-			cmps = append(cmps, kv.Eq(kv.Value(userPath), string(userJson)))
-			ops = append(ops, kv.OpSave(userPath, string(newUserJson)))
+			cmps = append(cmps, kv.Eq(kv.Value(userPath), string(userJSON)))
+			ops = append(ops, kv.OpSave(userPath, string(newUserJSON)))
 		}
 	}
 
 	// Then delete the role itself
-	roleJson, err := json.Marshal(role)
+	roleJSON, err := json.Marshal(role)
 	if err != nil {
 		return err
 	}
 	rolePath := path.Join(rolePrefix, name)
 
-	cmps = append(cmps, kv.Eq(kv.Value(rolePath), string(roleJson)))
+	cmps = append(cmps, kv.Eq(kv.Value(rolePath), string(roleJSON)))
 	ops = append(ops, kv.OpRemove(rolePath))
 	_, err = m.kv.NewTxn().
 		If(cmps...).
@@ -587,13 +611,14 @@ func (m *Manager) DeleteRole(name string) error {
 	return nil
 }
 
+// SetPermissions sets permissions of a role.
 func (m *Manager) SetPermissions(name string, permissions map[Permission]struct{}) error {
 	_role, err := m.GetRole(name)
 	if err != nil {
 		return err
 	}
 
-	_roleJson, err := json.Marshal(_role)
+	_roleJSON, err := json.Marshal(_role)
 	if err != nil {
 		return err
 	}
@@ -602,15 +627,15 @@ func (m *Manager) SetPermissions(name string, permissions map[Permission]struct{
 	role.permissions = permissions
 
 	// Try to update user in kv first.
-	roleJson, err := json.Marshal(role)
+	roleJSON, err := json.Marshal(role)
 	if err != nil {
 		return err
 	}
 	rolePath := path.Join(rolePrefix, name)
 
 	_, err = m.kv.NewTxn().
-		If(kv.Eq(kv.Value(rolePath), string(_roleJson))).
-		Then(kv.OpSave(rolePath, string(roleJson))).
+		If(kv.Eq(kv.Value(rolePath), string(_roleJSON))).
+		Then(kv.OpSave(rolePath, string(roleJSON))).
 		Commit()
 	if err != nil {
 		return err
@@ -622,6 +647,7 @@ func (m *Manager) SetPermissions(name string, permissions map[Permission]struct{
 	return nil
 }
 
+// AddPermission adds a permission to a role.
 func (m *Manager) AddPermission(name string, permission Permission) error {
 	_role, err := m.GetRole(name)
 	if err != nil {
@@ -629,10 +655,10 @@ func (m *Manager) AddPermission(name string, permission Permission) error {
 	}
 
 	if _, ok := _role.permissions[permission]; ok {
-		return ErrorRoleHasPermission(name, permission)
+		return ErrRoleHasPermission(name, permission)
 	}
 
-	_roleJson, err := json.Marshal(_role)
+	_roleJSON, err := json.Marshal(_role)
 	if err != nil {
 		return err
 	}
@@ -641,15 +667,15 @@ func (m *Manager) AddPermission(name string, permission Permission) error {
 	role.permissions[permission] = struct{}{}
 
 	// Try to update user in kv first.
-	roleJson, err := json.Marshal(role)
+	roleJSON, err := json.Marshal(role)
 	if err != nil {
 		return err
 	}
 	rolePath := path.Join(rolePrefix, name)
 
 	_, err = m.kv.NewTxn().
-		If(kv.Eq(kv.Value(rolePath), string(_roleJson))).
-		Then(kv.OpSave(rolePath, string(roleJson))).
+		If(kv.Eq(kv.Value(rolePath), string(_roleJSON))).
+		Then(kv.OpSave(rolePath, string(roleJSON))).
 		Commit()
 	if err != nil {
 		return err
@@ -661,6 +687,7 @@ func (m *Manager) AddPermission(name string, permission Permission) error {
 	return nil
 }
 
+// RemovePermission removes a permission from a role.
 func (m *Manager) RemovePermission(name string, permission Permission) error {
 	_role, err := m.GetRole(name)
 	if err != nil {
@@ -668,10 +695,10 @@ func (m *Manager) RemovePermission(name string, permission Permission) error {
 	}
 
 	if _, ok := _role.permissions[permission]; !ok {
-		return ErrorRoleMissingPermission(name, permission)
+		return ErrRoleMissingPermission(name, permission)
 	}
 
-	_roleJson, err := json.Marshal(_role)
+	_roleJSON, err := json.Marshal(_role)
 	if err != nil {
 		return err
 	}
@@ -680,15 +707,15 @@ func (m *Manager) RemovePermission(name string, permission Permission) error {
 	delete(role.permissions, permission)
 
 	// Try to update user in kv first.
-	roleJson, err := json.Marshal(role)
+	roleJSON, err := json.Marshal(role)
 	if err != nil {
 		return err
 	}
 	rolePath := path.Join(rolePrefix, name)
 
 	_, err = m.kv.NewTxn().
-		If(kv.Eq(kv.Value(rolePath), string(_roleJson))).
-		Then(kv.OpSave(rolePath, string(roleJson))).
+		If(kv.Eq(kv.Value(rolePath), string(_roleJSON))).
+		Then(kv.OpSave(rolePath, string(roleJSON))).
 		Commit()
 	if err != nil {
 		return err
@@ -700,6 +727,7 @@ func (m *Manager) RemovePermission(name string, permission Permission) error {
 	return nil
 }
 
+// InvalidateCache purges memory cache of users and roles.
 func (m *Manager) InvalidateCache() {
 	m.users.Range(func(key, _ interface{}) bool {
 		m.users.Delete(key)

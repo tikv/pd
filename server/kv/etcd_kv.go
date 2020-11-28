@@ -38,7 +38,7 @@ type etcdKVBase struct {
 }
 
 func (kv *etcdKVBase) NewTxn() Txn {
-	return EtcdTxn{txn: NewSlowLogTxn(kv.client), rootPath: kv.rootPath}
+	return etcdTxn{txn: NewSlowLogTxn(kv.client), rootPath: kv.rootPath}
 }
 
 // NewEtcdKVBase creates a new etcd kv.
@@ -185,12 +185,12 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	return resp, errors.WithStack(err)
 }
 
-type EtcdTxn struct {
+type etcdTxn struct {
 	txn      clientv3.Txn
 	rootPath string
 }
 
-func (e EtcdTxn) If(cs ...Cmp) Txn {
+func (e etcdTxn) If(cs ...Cmp) Txn {
 	var etcdCmps []clientv3.Cmp
 	for _, cmp := range cs {
 		var cmpOp func(string) clientv3.Cmp
@@ -211,10 +211,10 @@ func (e EtcdTxn) If(cs ...Cmp) Txn {
 		etcdCmps = append(etcdCmps, clientv3.Compare(cmpOp(key), string(cmp.relation), cmp.value))
 	}
 
-	return EtcdTxn{txn: e.txn.If(etcdCmps...), rootPath: e.rootPath}
+	return etcdTxn{txn: e.txn.If(etcdCmps...), rootPath: e.rootPath}
 }
 
-func (e EtcdTxn) Then(ops ...Op) Txn {
+func (e etcdTxn) Then(ops ...Op) Txn {
 	var etcdOps []clientv3.Op
 	for _, op := range ops {
 		key := strings.Join([]string{e.rootPath, op.key}, "/")
@@ -230,10 +230,10 @@ func (e EtcdTxn) Then(ops ...Op) Txn {
 		}
 	}
 
-	return EtcdTxn{txn: e.txn.Then(etcdOps...), rootPath: e.rootPath}
+	return etcdTxn{txn: e.txn.Then(etcdOps...), rootPath: e.rootPath}
 }
 
-func (e EtcdTxn) Else(ops ...Op) Txn {
+func (e etcdTxn) Else(ops ...Op) Txn {
 	var etcdOps []clientv3.Op
 	for _, op := range ops {
 		key := strings.Join([]string{e.rootPath, op.key}, "/")
@@ -249,17 +249,17 @@ func (e EtcdTxn) Else(ops ...Op) Txn {
 		}
 	}
 
-	return EtcdTxn{txn: e.txn.Else(etcdOps...), rootPath: e.rootPath}
+	return etcdTxn{txn: e.txn.Else(etcdOps...), rootPath: e.rootPath}
 }
 
-func (e EtcdTxn) Commit() (interface{}, error) {
+func (e etcdTxn) Commit() (interface{}, error) {
 	resp, err := e.txn.Commit()
 	if err != nil {
 		return resp, err
 	}
 
 	if !resp.Succeeded {
-		return resp, ErrorTransactionFailed
+		return resp, ErrTransactionFailed
 	}
 	return resp, nil
 }

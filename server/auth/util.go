@@ -26,8 +26,10 @@ var (
 )
 
 var (
-	ErrorPasswordMismatch = errors.New("given password doesn't match the hash")
-	ErrorInvalidName      = errors.New("invalid key name")
+	// ErrPasswordMismatch is error info for password mismatch.
+	ErrPasswordMismatch = errors.New("given password doesn't match the hash")
+	// ErrInvalidName is error info for invalid name.
+	ErrInvalidName = errors.New("invalid key name")
 )
 
 func compareHashAndPassword(hash string, password string) error {
@@ -35,9 +37,10 @@ func compareHashAndPassword(hash string, password string) error {
 	if hash == hashFromPlain {
 		return nil
 	}
-	return ErrorPasswordMismatch
+	return ErrPasswordMismatch
 }
 
+// GenerateHash generates hash for a given password.
 func GenerateHash(password string) string {
 	hashFromPassword := sha256.Sum256([]byte(password))
 	return hex.EncodeToString(hashFromPassword[:])
@@ -47,5 +50,5 @@ func validateName(name string) error {
 	if patName.MatchString(name) {
 		return nil
 	}
-	return ErrorInvalidName
+	return ErrInvalidName
 }

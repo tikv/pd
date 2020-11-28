@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/tikv/pd/server/auth"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -46,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/auth"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -701,7 +701,6 @@ func (s *Server) GetStorage() *core.Storage {
 // When we use it, we should prevent calling GetStorage, otherwise, it may cause a data race problem.
 func (s *Server) SetStorage(storage *core.Storage) {
 	s.storage = storage
-	s.authManager = auth.NewManager(s.storage.Base.(kv.TxnBase))
 }
 
 // GetBasicCluster returns the basic cluster of server.
