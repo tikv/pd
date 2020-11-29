@@ -9,7 +9,6 @@ import (
 	"github.com/tikv/pd/server/schedule/opt"
 )
 
-// RuleChecker fix/improve region by anti rules.
 type AntiRuleChecker struct {
 	cluster         opt.Cluster
 	antiRuleManager *anti.AntiRuleManager
@@ -25,7 +24,7 @@ func NewAntiChecker(cluster opt.Cluster, antiRuleManager *anti.AntiRuleManager) 
 	}
 }
 
-//traverse all regions
+//Check checks the anti rules that fits given region
 func (ac *AntiRuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	//anti rule only affects and checks leader region
 	if region.GetID() != region.GetLeader().GetId() {
