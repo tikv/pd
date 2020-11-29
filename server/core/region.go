@@ -154,6 +154,8 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 }
 
 func (r *RegionInfo) GetCountInAntiScore() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.countInAntiScore
 }
 
