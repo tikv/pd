@@ -114,9 +114,6 @@ type RaftCluster struct {
 	ruleManager     *placement.RuleManager
 	antiRuleManager *anti.AntiRuleManager
 
-	//antiRuleID -> storeID -> affinityScore
-	antiScore map[uint64]map[uint64]uint64
-
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
@@ -145,36 +142,6 @@ func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSy
 		httpClient:   httpClient,
 		etcdClient:   etcdClient,
 	}
-}
-
-func (c *RaftCluster) GetAntiScoreByRuleID(ruleID uint64) map[uint64]uint64 {
-	c.RLock()
-	defer c.RUnlock()
-	return c.antiScore[ruleID]
-}
-
-func (c *RaftCluster) IncrAntiScore(ruleID, storeID uint64) error {
-	c.Lock()
-	defer c.Unlock()
-	if store, ok := c.antiScore[ruleID]; ok {
-		if _, ok := store[storeID]; ok {
-			c.antiScore[ruleID][storeID]++
-			return nil
-		}
-	}
-	return errors.Errorf("incr failed, unable to get ruleID(%d) or storeID(%d) in antiScore map", ruleID, storeID)
-}
-
-func (c *RaftCluster) DecrAntiScore(ruleID, storeID uint64) error {
-	c.Lock()
-	defer c.Unlock()
-	if store, ok := c.antiScore[ruleID]; ok {
-		if _, ok := store[storeID]; ok {
-			c.antiScore[ruleID][storeID]--
-			return nil
-		}
-	}
-	return errors.Errorf("decr failed, unable to get ruleID(%d) or storeID(%d) in antiScore map", ruleID, storeID)
 }
 
 // LoadClusterStatus loads the cluster status.

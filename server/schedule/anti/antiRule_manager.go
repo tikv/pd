@@ -2,6 +2,7 @@ package anti
 
 import (
 	"fmt"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"sync"
@@ -14,6 +15,8 @@ type AntiRuleManager struct {
 	initialized bool
 	//antiRuleConfig *antiRuleConfig
 	antiRules []AntiRule
+	//antiRuleID -> storeID -> affinityScore
+	antiScore map[uint64]map[uint64]uint64
 }
 
 // NewAntiRuleManager creates a AntiRuleManager instance.
@@ -21,6 +24,35 @@ func NewAntiRuleManager() *AntiRuleManager {
 	return &AntiRuleManager{}
 }
 
+func (m *AntiRuleManager) GetAntiScoreByRuleID(ruleID uint64) map[uint64]uint64 {
+	m.RLock()
+	defer m.RUnlock()
+	return m.antiScore[ruleID]
+}
+
+func (m *AntiRuleManager) IncrAntiScore(ruleID, storeID uint64) error {
+	m.Lock()
+	defer m.Unlock()
+	if store, ok := m.antiScore[ruleID]; ok {
+		if _, ok := store[storeID]; ok {
+			m.antiScore[ruleID][storeID]++
+			return nil
+		}
+	}
+	return errors.Errorf("incr failed, unable to get ruleID(%d) or storeID(%d) in antiScore map", ruleID, storeID)
+}
+
+func (m *AntiRuleManager) DecrAntiScore(ruleID, storeID uint64) error {
+	m.Lock()
+	defer m.Unlock()
+	if store, ok := m.antiScore[ruleID]; ok {
+		if _, ok := store[storeID]; ok {
+			m.antiScore[ruleID][storeID]--
+			return nil
+		}
+	}
+	return errors.Errorf("decr failed, unable to get ruleID(%d) or storeID(%d) in antiScore map", ruleID, storeID)
+}
 
 // GetRule returns the all the anti rules
 func (m *AntiRuleManager) GetAntiRules() []AntiRule {
@@ -51,8 +83,6 @@ func (m *AntiRuleManager) setAntiRule(antiRule *AntiRule) {
 	log.Info("placement antiRule updated", zap.String("antiRule", fmt.Sprint(antiRule)))
 
 }
-
-
 
 /*
 

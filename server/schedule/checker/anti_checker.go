@@ -3,7 +3,6 @@ package checker
 import (
 	"bytes"
 	log "github.com/sirupsen/logrus"
-	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/anti"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -27,7 +26,7 @@ func NewAntiChecker(cluster opt.Cluster, antiRuleManager *anti.AntiRuleManager) 
 }
 
 //traverse all regions
-func (ac *AntiRuleChecker) Check(region *core.RegionInfo, rc *cluster.RaftCluster) *operator.Operator {
+func (ac *AntiRuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	//anti rule only affects and checks leader region
 	if region.GetID() != region.GetLeader().GetId() {
 		return nil
@@ -47,7 +46,7 @@ func (ac *AntiRuleChecker) Check(region *core.RegionInfo, rc *cluster.RaftCluste
 		}
 	}
 
-	storeScore := rc.GetAntiScoreByRuleID(ruleFit.ID)
+	storeScore := ac.antiRuleManager.GetAntiScoreByRuleID(ruleFit.ID)
 	if len(storeScore) < 1 {
 		return nil
 	}
@@ -86,10 +85,10 @@ func (ac *AntiRuleChecker) Check(region *core.RegionInfo, rc *cluster.RaftCluste
 		log.Errorf("create anti rule transferLeader op failed: %s", err.Error())
 		return nil
 	}
-	if err := rc.DecrAntiScore(ruleFit.ID, currStore); err != nil {
+	if err := ac.antiRuleManager.DecrAntiScore(ruleFit.ID, currStore); err != nil {
 		return nil
 	}
-	if err := rc.IncrAntiScore(ruleFit.ID, minStoreID); err != nil {
+	if err := ac.antiRuleManager.IncrAntiScore(ruleFit.ID, minStoreID); err != nil {
 		return nil
 	}
 

@@ -15,7 +15,6 @@ package schedule
 
 import (
 	"context"
-	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/schedule/anti"
 
 	"github.com/tikv/pd/server/config"
@@ -56,7 +55,7 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager 
 }
 
 // CheckRegion will check the region and add a new operator if needed.
-func (c *CheckerController) CheckRegion(region *core.RegionInfo, cluster *cluster.RaftCluster) (bool, []*operator.Operator) { //return checkerIsBusy,ops
+func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*operator.Operator) { //return checkerIsBusy,ops
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
@@ -67,7 +66,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo, cluster *cluste
 	}
 
 	//todo default anti rule enabled
-	if op := c.antiChecker.Check(region, cluster); op != nil {
+	if op := c.antiChecker.Check(region); op != nil {
 		return true, []*operator.Operator{op}
 	}
 

@@ -118,7 +118,7 @@ func (c *coordinator) patrolRegions() {
 				c.cluster.RemoveSuspectRegion(id)
 				continue
 			}
-			checkerIsBusy, ops := c.checkers.CheckRegion(region, c.cluster)
+			checkerIsBusy, ops := c.checkers.CheckRegion(region)
 			if checkerIsBusy {
 				continue
 			}
@@ -144,7 +144,7 @@ func (c *coordinator) patrolRegions() {
 				continue
 			}
 
-			checkerIsBusy, ops := c.checkers.CheckRegion(region, c.cluster)
+			checkerIsBusy, ops := c.checkers.CheckRegion(region)
 			if checkerIsBusy {
 				break
 			}
