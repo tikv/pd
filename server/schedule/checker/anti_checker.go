@@ -50,19 +50,18 @@ func (ac *AntiRuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	if len(storeScore) < 1 {
 		return nil
 	}
-	var minScore, minStoreID, maxScore, maxStoreID uint64
+	var minScore, minStoreID, maxScore uint64
 	//pick up a record as the initial record
 	for ID, score := range storeScore {
 		minScore = score
 		maxScore = score
 		minStoreID = ID
-		maxStoreID = ID
+
 		break
 	}
 	for ID, score := range storeScore {
 		if score > maxScore {
 			maxScore = score
-			maxStoreID = ID
 			continue
 		}
 		if score < minScore {
