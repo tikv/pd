@@ -76,7 +76,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
-		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, opController),
+		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, cluster.antiRuleManager, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:      make(map[string]*scheduleController),
@@ -118,7 +118,7 @@ func (c *coordinator) patrolRegions() {
 				c.cluster.RemoveSuspectRegion(id)
 				continue
 			}
-			checkerIsBusy, ops := c.checkers.CheckRegion(region)
+			checkerIsBusy, ops := c.checkers.CheckRegion(region, c.cluster)
 			if checkerIsBusy {
 				continue
 			}
@@ -144,7 +144,7 @@ func (c *coordinator) patrolRegions() {
 				continue
 			}
 
-			checkerIsBusy, ops := c.checkers.CheckRegion(region)
+			checkerIsBusy, ops := c.checkers.CheckRegion(region, c.cluster)
 			if checkerIsBusy {
 				break
 			}

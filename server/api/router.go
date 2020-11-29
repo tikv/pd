@@ -98,7 +98,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	clusterRouter.HandleFunc("/config/rules/region/{region}", rulesHandler.GetAllByRegion).Methods("GET")
 	clusterRouter.HandleFunc("/config/rules/key/{key}", rulesHandler.GetAllByKey).Methods("GET")
 	clusterRouter.HandleFunc("/config/rule/{group}/{id}", rulesHandler.Get).Methods("GET")
-	clusterRouter.HandleFunc("/config/rule", rulesHandler.Set).Methods("POST")
+	clusterRouter.HandleFunc("/config/rule", rulesHandler.	Set).Methods("POST")
 	clusterRouter.HandleFunc("/config/rule/{group}/{id}", rulesHandler.Delete).Methods("DELETE")
 
 	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.GetGroupConfig).Methods("GET")
@@ -114,6 +114,9 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	clusterRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.GetGroupBundle).Methods("GET")
 	clusterRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.SetGroupBundle).Methods("POST")
 	escapeRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.DeleteGroupBundle).Methods("DELETE")
+
+	antiRulesHandler := newAntiRulesHandler(svr, rd)
+	clusterRouter.HandleFunc("/config/anti-rule", antiRulesHandler.Set).Methods("POST")
 
 	storeHandler := newStoreHandler(handler, rd)
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Get).Methods("GET")

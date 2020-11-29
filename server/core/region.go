@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/gogo/protobuf/proto"
@@ -37,6 +38,8 @@ var errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error 
 // RegionInfo records detail region info.
 // Read-Only once created.
 type RegionInfo struct {
+	mu                sync.Mutex
+	countInAnti       bool
 	term              uint64
 	meta              *metapb.Region
 	learners          []*metapb.Peer
@@ -148,6 +151,16 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 	classifyVoterAndLearner(region)
 	return region
+}
+
+func (r *RegionInfo) GetCountInAnti() bool {
+	return r.countInAnti
+}
+
+func (r *RegionInfo) SetCountInAntiTrue() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.countInAnti = true
 }
 
 // GetTerm returns the current term of the region

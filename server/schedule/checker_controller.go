@@ -15,6 +15,8 @@ package schedule
 
 import (
 	"context"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/schedule/anti"
 
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -32,13 +34,14 @@ type CheckerController struct {
 	learnerChecker    *checker.LearnerChecker
 	replicaChecker    *checker.ReplicaChecker
 	ruleChecker       *checker.RuleChecker
+	antiChecker       *checker.AntiRuleChecker
 	mergeChecker      *checker.MergeChecker
 	jointStateChecker *checker.JointStateChecker
 }
 
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
-func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, opController *OperatorController) *CheckerController {
+func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, antiManager *anti.AntiRuleManager, opController *OperatorController) *CheckerController {
 	return &CheckerController{
 		cluster:           cluster,
 		opts:              cluster.GetOpts(),
@@ -46,13 +49,14 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager 
 		learnerChecker:    checker.NewLearnerChecker(cluster),
 		replicaChecker:    checker.NewReplicaChecker(cluster),
 		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager),
+		antiChecker:       checker.NewAntiChecker(cluster, antiManager),
 		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
 		jointStateChecker: checker.NewJointStateChecker(cluster),
 	}
 }
 
 // CheckRegion will check the region and add a new operator if needed.
-func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*operator.Operator) { //return checkerIsBusy,ops
+func (c *CheckerController) CheckRegion(region *core.RegionInfo, cluster *cluster.RaftCluster) (bool, []*operator.Operator) { //return checkerIsBusy,ops
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
@@ -60,6 +64,11 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 
 	if op := c.jointStateChecker.Check(region); op != nil {
 		return false, []*operator.Operator{op}
+	}
+
+	//todo default anti rule enabled
+	if op := c.antiChecker.Check(region, cluster); op != nil {
+		return true, []*operator.Operator{op}
 	}
 
 	if c.opts.IsPlacementRulesEnabled() {

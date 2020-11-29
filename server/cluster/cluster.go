@@ -16,6 +16,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"github.com/tikv/pd/server/schedule/anti"
 	"net/http"
 	"sync"
 	"time"
@@ -110,9 +111,14 @@ type RaftCluster struct {
 	quit         chan struct{}
 	regionSyncer *syncer.RegionSyncer
 
-	ruleManager *placement.RuleManager
-	etcdClient  *clientv3.Client
-	httpClient  *http.Client
+	ruleManager     *placement.RuleManager
+	antiRuleManager *anti.AntiRuleManager
+
+	//antiRuleID -> storeID -> affinityScore
+	antiScore map[uint64]map[uint64]uint64
+
+	etcdClient *clientv3.Client
+	httpClient *http.Client
 
 	replicationMode *replication.ModeManager
 	traceRegionFlow bool
@@ -139,6 +145,36 @@ func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSy
 		httpClient:   httpClient,
 		etcdClient:   etcdClient,
 	}
+}
+
+func (c *RaftCluster) GetAntiScoreByRuleID(ruleID uint64) map[uint64]uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.antiScore[ruleID]
+}
+
+func (c *RaftCluster) IncrAntiScore(ruleID, storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+	if store, ok := c.antiScore[ruleID]; ok {
+		if _, ok := store[storeID]; ok {
+			c.antiScore[ruleID][storeID]++
+			return nil
+		}
+	}
+	return errors.Errorf("incr failed, unable to get ruleID(%d) or storeID(%d) in antiScore map", ruleID, storeID)
+}
+
+func (c *RaftCluster) DecrAntiScore(ruleID, storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+	if store, ok := c.antiScore[ruleID]; ok {
+		if _, ok := store[storeID]; ok {
+			c.antiScore[ruleID][storeID]--
+			return nil
+		}
+	}
+	return errors.Errorf("decr failed, unable to get ruleID(%d) or storeID(%d) in antiScore map", ruleID, storeID)
 }
 
 // LoadClusterStatus loads the cluster status.
@@ -236,6 +272,8 @@ func (c *RaftCluster) Start(s Server) error {
 			return err
 		}
 	}
+
+	c.antiRuleManager = anti.NewAntiRuleManager()
 
 	c.componentManager = component.NewManager(c.storage)
 	_, err = c.storage.LoadComponent(&c.componentManager)
@@ -1475,6 +1513,13 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 // FitRegion tries to fit the region with placement rules.
 func (c *RaftCluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
 	return c.GetRuleManager().FitRegion(c, region)
+}
+
+// GetRuleManager returns the rule manager reference.
+func (c *RaftCluster) GetAntiRuleManager() *anti.AntiRuleManager {
+	c.RLock()
+	defer c.RUnlock()
+	return c.antiRuleManager
 }
 
 type prepareChecker struct {
