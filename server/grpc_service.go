@@ -454,7 +454,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			for _, rule := range rc.GetAntiRuleManager().GetAntiRules() {
 				if bytes.Compare(rule.StartKey, region.GetStartKey()) <= 0 && bytes.Compare(rule.EndKey, region.GetEndKey()) >= 0 {
 					//todo error handling
-					rc.IncrAntiScore(rule.ID, region.GetLeader().StoreId)
+					rc.GetAntiRuleManager().IncrAntiScore(rule.ID, region.GetLeader().StoreId)
 				}
 			}
 			region.SetCountInAntiTrue()
