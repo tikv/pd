@@ -1482,7 +1482,7 @@ func (c *RaftCluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
 	return c.GetRuleManager().FitRegion(c, region)
 }
 
-// GetRuleManager returns the rule manager reference.
+// GetAntiRuleManager returns the anti rule manager reference.
 func (c *RaftCluster) GetAntiRuleManager() *anti.AntiRuleManager {
 	c.RLock()
 	defer c.RUnlock()

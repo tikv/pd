@@ -9,11 +9,9 @@ import (
 )
 
 // AntiRuleManager is responsible for the lifecycle of all anti-affinity Rules.
-// It is thread safe.
 type AntiRuleManager struct {
 	sync.RWMutex
 	initialized bool
-	//antiRuleConfig *antiRuleConfig
 	antiRules []AntiRule
 	//antiRuleID -> storeID -> affinityScore
 	antiScore map[uint64]map[uint64]uint64
@@ -54,21 +52,21 @@ func (m *AntiRuleManager) DecrAntiScore(ruleID, storeID uint64) error {
 	return errors.Errorf("decr failed, unable to get ruleID(%d) or storeID(%d) in antiScore map", ruleID, storeID)
 }
 
-// GetRule returns the all the anti rules
+// GetAntiRules returns the all the anti rules.
 func (m *AntiRuleManager) GetAntiRules() []AntiRule {
 	m.RLock()
 	defer m.RUnlock()
 	return m.getAntiRules()
 }
 
-// SetRule inserts or updates a Rule.
+// SetAntiRule inserts an anti Rule.
 func (m *AntiRuleManager) SetAntiRule(antiRule *AntiRule) {
 	m.Lock()
 	defer m.Unlock()
 	m.setAntiRule(antiRule)
 }
 
-// getAntiRule returns the AntiRule with the same (group, id).
+// getAntiRules returns all the AntiRule.
 func (m *AntiRuleManager) getAntiRules() []AntiRule {
 	m.RLock()
 	defer m.RUnlock()

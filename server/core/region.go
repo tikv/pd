@@ -39,7 +39,7 @@ var errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error 
 // Read-Only once created.
 type RegionInfo struct {
 	mu                sync.Mutex
-	countInAnti       bool
+	countInAntiScore  bool
 	term              uint64
 	meta              *metapb.Region
 	learners          []*metapb.Peer
@@ -153,14 +153,14 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	return region
 }
 
-func (r *RegionInfo) GetCountInAnti() bool {
-	return r.countInAnti
+func (r *RegionInfo) GetCountInAntiScore() bool {
+	return r.countInAntiScore
 }
 
-func (r *RegionInfo) SetCountInAntiTrue() {
+func (r *RegionInfo) SetCountInAntiScoreTrue() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.countInAnti = true
+	r.countInAntiScore = true
 }
 
 // GetTerm returns the current term of the region
