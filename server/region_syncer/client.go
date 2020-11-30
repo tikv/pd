@@ -51,8 +51,38 @@ func (s *RegionSyncer) reset() {
 
 func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
 	s.reset()
+<<<<<<< HEAD
 
 	cc, err := grpcutil.GetClientConn(addr, s.securityConfig["caPath"], s.securityConfig["certPath"], s.securityConfig["keyPath"], grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)))
+=======
+	ctx, cancel := context.WithCancel(s.server.LoopContext())
+	tlsCfg, err := s.tlsConfig.ToTLSConfig()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	cc, err := grpcutil.GetClientConn(
+		ctx,
+		addr,
+		tlsCfg,
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:    keepaliveTime,
+			Timeout: keepaliveTimeout,
+		}),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay:  time.Second,     // Default was 1s.
+				Multiplier: 1.6,             // Default
+				Jitter:     0.2,             // Default
+				MaxDelay:   3 * time.Second, // Default was 120s.
+			},
+			MinConnectTimeout: 5 * time.Second,
+		}),
+		// WithBlock will block the dial step until success or cancel the context.
+		grpc.WithBlock(),
+	)
+>>>>>>> 9d6beaf6... make PermitWithoutStream false in region_syncer client (#3233)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
