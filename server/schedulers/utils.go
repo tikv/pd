@@ -759,6 +759,9 @@ func splitProcedure(storeInfos []*storeInfo, candidateRegions *regionContainer, 
 		zap.Float64("balanceRatio0", balanceRatio0),
 		zap.Float64("balanceRatio1", balanceRatio1),
 	)
+	for _, store := range storeInfos {
+		log.Info("store load before scheduling", zap.Uint64("storeID", store.id), zap.Float64("dim0", store.loads[0]), zap.Float64("dim1", store.loads[1]))
+	}
 
 	// mark regions that can be removed so that the difference of two dimensions' loads does not exceed `ratio`
 	// identify regions that need to be split

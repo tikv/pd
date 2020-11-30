@@ -337,7 +337,7 @@ func (h *multiDimensionScheduler) greedyTwoDimension(bs *balanceSolver) {
 	} else {
 		pendingRegions = migrationProcedure(h.storeInfos, h.candidateRegions, balanceRatio)
 
-		// pendingRegions = greedySingle(h.storeInfos, balanceRatio, 0)
+		// pendingRegions = greedySingle(h.storeInfos, balanceRatio, 0, nil)
 		// pendingRegions1 := greedySingle(h.storeInfos, balanceRatio, 1)
 		// pendingRegions = append(pendingRegions, pendingRegions1...)
 	}
