@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -151,9 +152,10 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 		case d := <-durCh:
 			s.update(d)
 		case <-statCtx.Done():
-			fmt.Println("\nTotal:")
-			fmt.Println(total.Counter())
-			fmt.Println(total.Percentage())
+			//fmt.Println("\nTotal:")
+			//fmt.Println(total.Counter())
+			//fmt.Println(total.Percentage())
+			total.show()
 			if *verbose {
 				fmt.Println(collectMetrics(promServer))
 			}
@@ -176,6 +178,8 @@ const (
 )
 
 type stats struct {
+	batchSize		float64
+	latency			time.Duration
 	maxDur          time.Duration
 	minDur          time.Duration
 	count           int
@@ -201,6 +205,7 @@ func newStats() *stats {
 
 func (s *stats) update(dur time.Duration) {
 	s.count++
+	s.latency += dur
 
 	if dur > s.maxDur {
 		s.maxDur = dur
@@ -274,6 +279,8 @@ func (s *stats) merge(other *stats) {
 	}
 
 	s.count += other.count
+	s.latency += other.latency
+	s.batchSize += float64(other.count) * other.latency.Seconds()
 	s.milliCnt += other.milliCnt
 	s.twoMilliCnt += other.twoMilliCnt
 	s.fiveMilliCnt += other.fiveMilliCnt
@@ -304,6 +311,13 @@ func (s *stats) Percentage() string {
 
 func (s *stats) calculate(count int) float64 {
 	return float64(count) * 100 / float64(s.count)
+}
+
+func (s *stats) show() {
+	file, _ := os.Create("result.txt")
+	bytes, _ := json.Marshal(s)
+	file.Write(bytes)
+	file.Close()
 }
 
 func reqWorker(ctx context.Context, pdCli pd.Client, durCh chan time.Duration) {

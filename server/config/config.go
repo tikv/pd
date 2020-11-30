@@ -232,7 +232,7 @@ const (
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
 
 	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
-	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
+	DefaultTSOUpdatePhysicalInterval = 5 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
 )

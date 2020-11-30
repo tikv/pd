@@ -354,7 +354,7 @@ func (c *client) tsLoop() {
 								continue
 							}
 						}
-						if c.controller.canPush(dc) {
+						if c.controller.canPush(dc, time.Now()) {
 							select {
 							case first := <-tsoDispatcher:
 								pendingPlus1 := len(tsoDispatcher) + 1
