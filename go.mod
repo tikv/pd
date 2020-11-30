@@ -31,7 +31,7 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
 	github.com/pingcap/kvproto v0.0.0-20201113092725-08f2872278eb
 	github.com/pingcap/log v0.0.0-20201112100606-8f1e84a3abc8
-	github.com/pingcap/sysutil v0.0.0-20201021075216-f93ced2829e2
+	github.com/pingcap/sysutil v0.0.0-20201130064824-f0c8aa6a6966
 	github.com/pingcap/tiup v1.2.3
 	github.com/prometheus/client_golang v1.2.1
 	github.com/prometheus/common v0.9.1
