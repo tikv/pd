@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 	"go.etcd.io/etcd/clientv3"

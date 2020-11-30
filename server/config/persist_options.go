@@ -30,14 +30,10 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
-<<<<<<< HEAD
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/storelimit"
-=======
-	"github.com/tikv/pd/server/core/storelimit"
 	"go.etcd.io/etcd/clientv3"
->>>>>>> 1eeb4c87... Persist temporary setting to etcd  (#3131)
 )
 
 // PersistOptions wraps all configurations that need to persist to storage and
