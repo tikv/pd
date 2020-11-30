@@ -1,4 +1,12 @@
-on: [push, pull_request]
+on:
+  push:
+      branches:
+        - master
+        - release-4.0
+  pull_request:
+    branches:
+      - master
+      - release-4.0
 name: PD Tests
 jobs:
   chunks:
@@ -41,7 +49,7 @@ jobs:
         echo github.com/tikv/pd/tests/client > packages_unit_${{ strategy.job-total }}
         echo github.com/tikv/pd/server/api >> packages_unit_${{ strategy.job-total }}
         packages="{$(cat packages_unit_${WORKER_ID} |tr "\n" ",")}"
-        echo ${packages}
+        echo "This worker will test the chunk - ${packages}"
         echo "::set-output name=list::${packages}"
     - name: Make Test
       env:
