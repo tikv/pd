@@ -27,10 +27,17 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20200917111840-a15ef68f753d
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
+<<<<<<< HEAD
 	github.com/pingcap/kvproto v0.0.0-20200907074027-32a3a0accf7d
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
 	github.com/pingcap/sysutil v0.0.0-20201021075216-f93ced2829e2
 	github.com/pingcap/tiup v1.2.2
+=======
+	github.com/pingcap/kvproto v0.0.0-20201113092725-08f2872278eb
+	github.com/pingcap/log v0.0.0-20201112100606-8f1e84a3abc8
+	github.com/pingcap/sysutil v0.0.0-20201130064824-f0c8aa6a6966
+	github.com/pingcap/tiup v1.2.3
+>>>>>>> 59f8e220... *: update go.mod for sysutil (#3232)
 	github.com/prometheus/client_golang v1.2.1
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/sirupsen/logrus v1.4.2
