@@ -179,7 +179,7 @@ const (
 
 type stats struct {
 	batchSize		float64
-	latency			time.Duration
+	latency			float64
 	maxDur          time.Duration
 	minDur          time.Duration
 	count           int
@@ -205,7 +205,7 @@ func newStats() *stats {
 
 func (s *stats) update(dur time.Duration) {
 	s.count++
-	s.latency += dur
+	s.latency += dur.Seconds()
 
 	if dur > s.maxDur {
 		s.maxDur = dur
@@ -280,7 +280,7 @@ func (s *stats) merge(other *stats) {
 
 	s.count += other.count
 	s.latency += other.latency
-	s.batchSize += float64(other.count) * other.latency.Seconds()
+	s.batchSize += float64(other.count) * other.latency
 	s.milliCnt += other.milliCnt
 	s.twoMilliCnt += other.twoMilliCnt
 	s.fiveMilliCnt += other.fiveMilliCnt
@@ -314,6 +314,8 @@ func (s *stats) calculate(count int) float64 {
 }
 
 func (s *stats) show() {
+	s.latency /= float64(s.count)
+	s.batchSize /= (*duration).Seconds()
 	file, _ := os.Create("result.txt")
 	bytes, _ := json.Marshal(s)
 	file.Write(bytes)
