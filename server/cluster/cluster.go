@@ -519,6 +519,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 	c.storesStats.UpdateTotalKeysRate(c.core.GetStores)
+	c.storesStats.UpdateTotalOps(c.core.GetStores)
 	c.storesStats.FilterUnhealthyStore(c)
 
 	// c.limiter is nil before "start" is called
@@ -602,7 +603,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
-			region.GetKeysRead() != origin.GetKeysRead()) {
+			region.GetKeysRead() != origin.GetKeysRead() ||
+			region.GetOpsWrite() != origin.GetOpsWrite() ||
+			region.GetOpsRead() != origin.GetOpsRead()) {
 			saveCache, needSync = true, true
 		}
 
@@ -1415,6 +1418,20 @@ func (c *RaftCluster) GetStoresKeysReadStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresKeysReadStat()
+}
+
+// GetStoresOpsReadStat returns the read ops stat of all StoreInfo.
+func (c *RaftCluster) GetStoresOpsReadStat() map[uint64]float64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.storesStats.GetStoresOpsReadStat()
+}
+
+// GetStoresOpsWriteStat returns the write ops stat of all StoreInfo.
+func (c *RaftCluster) GetStoresOpsWriteStat() map[uint64]float64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.storesStats.GetStoresOpsWriteStat()
 }
 
 // RegionReadStats returns hot region's read stats.

@@ -38,10 +38,12 @@ var (
 		WriteFlow: {
 			byteDim: 256,
 			keyDim:  16,
+			opsDim:  16,
 		},
 		ReadFlow: {
 			byteDim: 256,
 			keyDim:  16,
+			opsDim:  16,
 		},
 	}
 )
@@ -107,12 +109,14 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *StoresStats) (ret []*HotPeerStat) {
 	totalBytes := float64(f.getTotalBytes(region))
 	totalKeys := float64(f.getTotalKeys(region))
+	totalOps := float64(f.getTotalOps(region))
 
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
 	byteRate := totalBytes / float64(interval)
 	keyRate := totalKeys / float64(interval)
+	ops := totalOps / float64(interval)
 
 	// old region is in the front and new region is in the back
 	// which ensures it will hit the cache if moving peer or transfer leader occurs with the same replica number
@@ -137,6 +141,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 			Kind:           f.kind,
 			ByteRate:       byteRate,
 			KeyRate:        keyRate,
+			Ops:            ops,
 			LastUpdateTime: time.Now(),
 			Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
 			needDelete:     isExpired,
@@ -207,6 +212,16 @@ func (f *hotPeerCache) getTotalKeys(region *core.RegionInfo) uint64 {
 	return 0
 }
 
+func (f *hotPeerCache) getTotalOps(region *core.RegionInfo) uint64 {
+	switch f.kind {
+	case WriteFlow:
+		return region.GetOpsWrite()
+	case ReadFlow:
+		return region.GetOpsRead()
+	}
+	return 0
+}
+
 func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat {
 	if hotPeers, ok := f.peersOfStore[storeID]; ok {
 		if v := hotPeers.Get(regionID); v != nil {
@@ -235,6 +250,7 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) [dimLen]float64 {
 	ret := [dimLen]float64{
 		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate,
 		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).KeyRate,
+		opsDim:  tn.GetTopNMin(opsDim).(*HotPeerStat).Ops,
 	}
 	for k := 0; k < dimLen; k++ {
 		ret[k] = math.Max(ret[k]*hotThresholdRatio, minThresholds[k])
@@ -295,7 +311,8 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesStats *StoresStats) *HotPeerStat {
 	thresholds := f.calcHotThresholds(newItem.StoreID)
 	isHot := newItem.ByteRate >= thresholds[byteDim] ||
-		newItem.KeyRate >= thresholds[keyDim]
+		newItem.KeyRate >= thresholds[keyDim] ||
+		newItem.Ops >= thresholds[opsDim]
 
 	if newItem.needDelete {
 		return newItem
@@ -304,6 +321,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 	if oldItem != nil {
 		newItem.rollingByteRate = oldItem.rollingByteRate
 		newItem.rollingKeyRate = oldItem.rollingKeyRate
+		newItem.rollingOps = oldItem.rollingOps
 		if isHot {
 			newItem.HotDegree = oldItem.HotDegree + 1
 			newItem.AntiCount = hotRegionAntiCount
@@ -320,12 +338,14 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 		}
 		newItem.rollingByteRate = NewMedianFilter(rollingWindowsSize)
 		newItem.rollingKeyRate = NewMedianFilter(rollingWindowsSize)
+		newItem.rollingOps = NewMedianFilter(rollingWindowsSize)
 		newItem.AntiCount = hotRegionAntiCount
 		newItem.isNew = true
 	}
 
 	newItem.rollingByteRate.Add(newItem.ByteRate)
 	newItem.rollingKeyRate.Add(newItem.KeyRate)
+	newItem.rollingOps.Add(newItem.Ops)
 
 	return newItem
 }

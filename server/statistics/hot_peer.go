@@ -18,6 +18,7 @@ import "time"
 const (
 	byteDim int = iota
 	keyDim
+	opsDim
 	dimLen
 )
 
@@ -34,10 +35,12 @@ type HotPeerStat struct {
 	Kind     FlowKind `json:"kind"`
 	ByteRate float64  `json:"flow_bytes"`
 	KeyRate  float64  `json:"flow_keys"`
+	Ops      float64  `json:"flow_ops"`
 
 	// rolling statistics, recording some recently added records.
 	rollingByteRate MovingAvg
 	rollingKeyRate  MovingAvg
+	rollingOps      MovingAvg
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
@@ -61,9 +64,11 @@ func (stat *HotPeerStat) Less(k int, than TopNItem) bool {
 	case keyDim:
 		return stat.GetKeyRate() < rhs.GetKeyRate()
 	case byteDim:
+		return stat.GetByteRate() < rhs.GetByteRate()
+	case opsDim:
 		fallthrough
 	default:
-		return stat.GetByteRate() < rhs.GetByteRate()
+		return stat.GetOps() < rhs.GetOps()
 	}
 }
 
@@ -98,6 +103,14 @@ func (stat *HotPeerStat) GetKeyRate() float64 {
 	return stat.rollingKeyRate.Get()
 }
 
+// GetOps returns denoised ops if possible.
+func (stat *HotPeerStat) GetOps() float64 {
+	if stat.rollingOps == nil {
+		return stat.Ops
+	}
+	return stat.rollingOps.Get()
+}
+
 // Clone clones the HotPeerStat
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
@@ -105,5 +118,7 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret.rollingByteRate = nil
 	ret.KeyRate = stat.GetKeyRate()
 	ret.rollingKeyRate = nil
+	ret.Ops = stat.GetOps()
+	ret.rollingOps = nil
 	return &ret
 }

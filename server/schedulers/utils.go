@@ -145,12 +145,14 @@ type Influence struct {
 	ByteRate float64
 	KeyRate  float64
 	Count    float64
+	Ops      float64
 }
 
 func (infl Influence) add(rhs *Influence, w float64) Influence {
 	infl.ByteRate += rhs.ByteRate * w
 	infl.KeyRate += rhs.KeyRate * w
 	infl.Count += rhs.Count * w
+	infl.Ops += rhs.Ops * w
 	return infl
 }
 
@@ -189,11 +191,13 @@ type storeLoad struct {
 	ByteRate float64
 	KeyRate  float64
 	Count    float64
+	Ops      float64
 
 	// Exp means Expectation, it is calculated from the average value from summary of byte/key rate, count.
 	ExpByteRate float64
 	ExpKeyRate  float64
 	ExpCount    float64
+	ExpOps      float64
 }
 
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
@@ -201,6 +205,7 @@ func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	future.ByteRate += infl.ByteRate
 	future.KeyRate += infl.KeyRate
 	future.Count += infl.Count
+	future.Ops += infl.Ops
 	return &storeLoadPred{
 		Current: *load,
 		Future:  future,
@@ -217,6 +222,10 @@ func stLdKeyRate(ld *storeLoad) float64 {
 
 func stLdCount(ld *storeLoad) float64 {
 	return ld.Count
+}
+
+func stLdOps(ld *storeLoad) float64 {
+	return ld.Ops
 }
 
 type storeLoadCmp func(ld1, ld2 *storeLoad) int
@@ -274,6 +283,7 @@ func (lp *storeLoadPred) diff() *storeLoad {
 		ByteRate: mx.ByteRate - mn.ByteRate,
 		KeyRate:  mx.KeyRate - mn.KeyRate,
 		Count:    mx.Count - mn.Count,
+		Ops:      mx.Ops - mn.Ops,
 	}
 }
 
@@ -313,6 +323,7 @@ func minLoad(a, b *storeLoad) *storeLoad {
 		ByteRate: math.Min(a.ByteRate, b.ByteRate),
 		KeyRate:  math.Min(a.KeyRate, b.KeyRate),
 		Count:    math.Min(a.Count, b.Count),
+		Ops:      math.Min(a.Ops, b.Ops),
 	}
 }
 
@@ -321,6 +332,7 @@ func maxLoad(a, b *storeLoad) *storeLoad {
 		ByteRate: math.Max(a.ByteRate, b.ByteRate),
 		KeyRate:  math.Max(a.KeyRate, b.KeyRate),
 		Count:    math.Max(a.Count, b.Count),
+		Ops:      math.Max(a.Ops, b.Ops),
 	}
 }
 
@@ -337,6 +349,7 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	return &statistics.HotPeersStat{
 		TotalBytesRate: li.LoadPred.Current.ByteRate,
 		TotalKeysRate:  li.LoadPred.Current.KeyRate,
+		TotalOps:       li.LoadPred.Current.Ops,
 		Count:          len(li.HotPeers),
 		Stats:          peers,
 	}
@@ -604,7 +617,7 @@ func (si *storeInfo) sortBy(dimID uint64) {
 	}
 }
 
-func calcMaxMeanRatio(storeInfos []*storeInfo) (float64, float64) {
+func calcMaxMeanRatio(storeInfos []*storeInfo) (ratio1 float64, ratio2 float64) {
 	var ratios []float64
 	for dimID := uint64(0); dimID < DimensionCount; dimID++ {
 		var maxLoad, avgLoad float64
@@ -615,7 +628,8 @@ func calcMaxMeanRatio(storeInfos []*storeInfo) (float64, float64) {
 		avgLoad /= float64(len(storeInfos))
 		ratios = append(ratios, maxLoad/avgLoad)
 	}
-	return ratios[0], ratios[1]
+	ratio1, ratio2 = ratios[0], ratios[1]
+	return
 }
 
 func loadBalanced(loads []float64, balanceRatio float64) bool {

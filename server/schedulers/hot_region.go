@@ -208,10 +208,12 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionRead := cluster.RegionReadStats()
 		storeByte := storesStat.GetStoresBytesReadStat()
 		storeKey := storesStat.GetStoresKeysReadStat()
+		storeOps := storesStat.GetStoresOpsReadStat()
 		hotRegionThreshold := getHotRegionThreshold(storesStat, read)
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
 			storeByte,
 			storeKey,
+			storeOps,
 			h.pendingSums[readLeader],
 			regionRead,
 			minHotDegree,
@@ -223,10 +225,12 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionWrite := cluster.RegionWriteStats()
 		storeByte := storesStat.GetStoresBytesWriteStat()
 		storeKey := storesStat.GetStoresKeysWriteStat()
+		storeOps := storesStat.GetStoresOpsWriteStat()
 		hotRegionThreshold := getHotRegionThreshold(storesStat, write)
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storeByte,
 			storeKey,
+			storeOps,
 			h.pendingSums[writeLeader],
 			regionWrite,
 			minHotDegree,
@@ -236,6 +240,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storeByte,
 			storeKey,
+			storeOps,
 			h.pendingSums[writePeer],
 			regionWrite,
 			minHotDegree,
@@ -263,7 +268,7 @@ func getHotRegionThreshold(stats *statistics.StoresStats, typ rwType) [2]uint64 
 		if hotRegionThreshold[0] < hotReadRegionMinFlowRate {
 			hotRegionThreshold[0] = hotReadRegionMinFlowRate
 		}
-		hotRegionThreshold[1] = uint64(stats.TotalKeysWriteRate() / divisor)
+		hotRegionThreshold[1] = uint64(stats.TotalKeysReadRate() / divisor)
 		if hotRegionThreshold[1] < hotReadRegionMinKeyRate {
 			hotRegionThreshold[1] = hotReadRegionMinKeyRate
 		}
@@ -311,6 +316,7 @@ func (h *hotScheduler) gcRegionPendings() {
 func summaryStoresLoad(
 	storeByteRate map[uint64]float64,
 	storeKeyRate map[uint64]float64,
+	storeOps map[uint64]float64,
 	storePendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
 	minHotDegree int,
@@ -323,26 +329,31 @@ func summaryStoresLoad(
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
 	allByteSum := 0.0
 	allKeySum := 0.0
+	allOpsSum := 0.0
 	allCount := 0.0
 
 	// Stores without byte rate statistics is not available to schedule.
 	for id, byteRate := range storeByteRate {
 		keyRate := storeKeyRate[id]
+		ops := storeOps[id]
 
 		// Find all hot peers first
 		hotPeers := make([]*statistics.HotPeerStat, 0)
 		{
 			byteSum := 0.0
 			keySum := 0.0
+			opsSum := 0.0
 			for _, peer := range filterHotPeers(kind, minHotDegree, hotRegionThreshold, storeHotPeers[id], hotPeerFilterTy) {
 				byteSum += peer.GetByteRate()
 				keySum += peer.GetKeyRate()
+				opsSum += peer.GetOps()
 				hotPeers = append(hotPeers, peer.Clone())
 			}
 			// Use sum of hot peers to estimate leader-only byte rate.
 			if kind == core.LeaderKind && rwTy == write {
 				byteRate = byteSum
 				keyRate = keySum
+				ops = opsSum
 			}
 
 			// Metric for debug.
@@ -354,15 +365,21 @@ func summaryStoresLoad(
 				ty := "key-rate-" + rwTy.String() + "-" + kind.String()
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keySum)
 			}
+			{
+				ty := "ops-" + rwTy.String() + "-" + kind.String()
+				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(opsSum)
+			}
 		}
 		allByteSum += byteRate
 		allKeySum += keyRate
+		allOpsSum += ops
 		allCount += float64(len(hotPeers))
 
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
 			ByteRate: byteRate,
 			KeyRate:  keyRate,
+			Ops:      ops,
 			Count:    float64(len(hotPeers)),
 		}).ToLoadPred(storePendings[id])
 
@@ -378,9 +395,11 @@ func summaryStoresLoad(
 	for id, detail := range loadDetail {
 		byteExp := allByteSum / storeLen
 		keyExp := allKeySum / storeLen
+		opsExp := allOpsSum / storeLen
 		countExp := allCount / storeLen
 		detail.LoadPred.Future.ExpByteRate = byteExp
 		detail.LoadPred.Future.ExpKeyRate = keyExp
+		detail.LoadPred.Future.ExpOps = opsExp
 		detail.LoadPred.Future.ExpCount = countExp
 		// Debug
 		{
@@ -390,6 +409,10 @@ func summaryStoresLoad(
 		{
 			ty := "exp-key-rate-" + rwTy.String() + "-" + kind.String()
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keyExp)
+		}
+		{
+			ty := "exp-ops-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(opsExp)
 		}
 		{
 			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
