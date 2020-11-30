@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -159,6 +160,30 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 			if *verbose {
 				fmt.Println(collectMetrics(promServer))
 			}
+			time.Sleep(5 * time.Second)
+			files, _ := ioutil.ReadDir(".")
+			all := newStats()
+			count := 0.0
+			for _, file := range files {
+				name := file.Name()
+				if strings.Contains(name, "result") {
+					count++
+					f, _ := os.Open(name)
+					bytes := make([]byte, 1024)
+					f.Read(bytes)
+					temp := newStats()
+					json.Unmarshal(bytes, temp)
+					all.Latency += temp.Latency
+					all.QPS += temp.QPS
+					all.BatchSize += temp.BatchSize
+					f.Close()
+				}
+			}
+			all.Latency /= count
+			all.QPS /= count
+			all.BatchSize /= count
+			bytes, _ := json.Marshal(all)
+			fmt.Println(string(bytes))
 			return
 		}
 	}
@@ -281,7 +306,6 @@ func (s *stats) merge(other *stats) {
 
 	s.count += other.count
 	s.Latency += other.Latency
-	s.BatchSize += float64(other.count) * other.Latency
 	s.milliCnt += other.milliCnt
 	s.twoMilliCnt += other.twoMilliCnt
 	s.fiveMilliCnt += other.fiveMilliCnt
@@ -316,8 +340,8 @@ func (s *stats) calculate(count int) float64 {
 
 func (s *stats) show() {
 	s.Latency /= float64(s.count)
-	s.BatchSize /= (*duration).Seconds()
 	s.QPS = float64(s.count) / (*duration).Seconds()
+	s.BatchSize = s.QPS * s.Latency / float64(*clientNumber)
 	file, _ := os.Create("result.txt")
 	bytes, _ := json.Marshal(s)
 	file.Write(bytes)
