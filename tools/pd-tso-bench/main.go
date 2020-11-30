@@ -170,9 +170,12 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 					count++
 					f, _ := os.Open(name)
 					bytes := make([]byte, 1024)
-					f.Read(bytes)
+					n, _ := f.Read(bytes)
 					temp := newStats()
-					json.Unmarshal(bytes, temp)
+					err := json.Unmarshal(bytes[:n], temp)
+					if err != nil {
+						log.Fatal(err.Error())
+					}
 					all.Latency += temp.Latency
 					all.QPS += temp.QPS
 					all.BatchSize += temp.BatchSize
@@ -182,7 +185,10 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 			all.Latency /= count
 			all.QPS /= count
 			all.BatchSize /= count
-			bytes, _ := json.Marshal(all)
+			bytes, err := json.Marshal(all)
+			if err != nil {
+				log.Fatal(err.Error())
+			}
 			fmt.Println(string(bytes))
 			return
 		}
