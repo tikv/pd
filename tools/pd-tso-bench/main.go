@@ -99,7 +99,7 @@ func bench(mainCtx context.Context) {
 	}
 
 	ctx, cancel := context.WithCancel(mainCtx)
-	// To avoid the first time high latency.
+	// To avoid the first time high Latency.
 	for idx, pdCli := range pdClients {
 		_, _, err := pdCli.GetLocalTS(ctx, *dcLocation)
 		if err != nil {
@@ -178,18 +178,19 @@ const (
 )
 
 type stats struct {
-	batchSize		float64
-	latency			float64
-	maxDur          time.Duration
-	minDur          time.Duration
-	count           int
-	milliCnt        int
-	twoMilliCnt     int
-	fiveMilliCnt    int
-	tenMSCnt        int
-	thirtyCnt       int
-	fiftyCnt        int
-	oneHundredCnt   int
+	BatchSize     float64
+	Latency       float64
+	QPS			  float64
+	maxDur        time.Duration
+	minDur        time.Duration
+	count         int
+	milliCnt      int
+	twoMilliCnt   int
+	fiveMilliCnt  int
+	tenMSCnt      int
+	thirtyCnt     int
+	fiftyCnt      int
+	oneHundredCnt int
 	twoHundredCnt   int
 	fourHundredCnt  int
 	eightHundredCnt int
@@ -205,7 +206,7 @@ func newStats() *stats {
 
 func (s *stats) update(dur time.Duration) {
 	s.count++
-	s.latency += dur.Seconds()
+	s.Latency += dur.Seconds()
 
 	if dur > s.maxDur {
 		s.maxDur = dur
@@ -279,8 +280,8 @@ func (s *stats) merge(other *stats) {
 	}
 
 	s.count += other.count
-	s.latency += other.latency
-	s.batchSize += float64(other.count) * other.latency
+	s.Latency += other.Latency
+	s.BatchSize += float64(other.count) * other.Latency
 	s.milliCnt += other.milliCnt
 	s.twoMilliCnt += other.twoMilliCnt
 	s.fiveMilliCnt += other.fiveMilliCnt
@@ -314,8 +315,9 @@ func (s *stats) calculate(count int) float64 {
 }
 
 func (s *stats) show() {
-	s.latency /= float64(s.count)
-	s.batchSize /= (*duration).Seconds()
+	s.Latency /= float64(s.count)
+	s.BatchSize /= (*duration).Seconds()
+	s.QPS = float64(s.count) / (*duration).Seconds()
 	file, _ := os.Create("result.txt")
 	bytes, _ := json.Marshal(s)
 	file.Write(bytes)
