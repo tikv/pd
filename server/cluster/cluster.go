@@ -677,10 +677,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	for _, writeItem := range writeItems {
-		c.hotSpotCache.Update(writeItem)
+		c.hotSpotCache.Update(region, writeItem)
 	}
 	for _, readItem := range readItems {
-		c.hotSpotCache.Update(readItem)
+		c.hotSpotCache.Update(region, readItem)
 	}
 	c.Unlock()
 

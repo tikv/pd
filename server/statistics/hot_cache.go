@@ -48,12 +48,20 @@ func (w *HotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*Hot
 }
 
 // Update updates the cache.
-func (w *HotCache) Update(item *HotPeerStat) {
+func (w *HotCache) Update(region *core.RegionInfo, item *HotPeerStat) {
 	switch item.Kind {
 	case WriteFlow:
 		w.writeFlow.Update(item)
+
+		region.WriteBytesRate = item.GetByteRate()
+		region.WriteKeysRate = item.GetKeyRate()
+		region.WriteOpsRate = item.GetOps()
 	case ReadFlow:
 		w.readFlow.Update(item)
+
+		region.ReadBytesRate = item.GetByteRate()
+		region.ReadKeysRate = item.GetKeyRate()
+		region.ReadOpsRate = item.GetOps()
 	}
 
 	if item.IsNeedDelete() {

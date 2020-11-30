@@ -54,6 +54,12 @@ type RegionInfo struct {
 	approximateKeys   int64
 	interval          *pdpb.TimeInterval
 	replicationStatus *replication_modepb.RegionReplicationStatus
+	WriteBytesRate float64
+	WriteKeysRate float64
+	WriteOpsRate float64
+	ReadBytesRate float64
+	ReadKeysRate float64
+	ReadOpsRate float64
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.

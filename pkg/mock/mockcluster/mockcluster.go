@@ -320,7 +320,7 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(
 	r = r.Clone(core.SetReportInterval(reportInterval))
 	items := mc.HotCache.CheckRead(r, mc.StoresStats)
 	for _, item := range items {
-		mc.HotCache.Update(item)
+		mc.HotCache.Update(r, item)
 	}
 	mc.PutRegion(r)
 }
@@ -337,7 +337,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	r = r.Clone(core.SetReportInterval(reportInterval))
 	items := mc.HotCache.CheckWrite(r, mc.StoresStats)
 	for _, item := range items {
-		mc.HotCache.Update(item)
+		mc.HotCache.Update(r, item)
 	}
 	mc.PutRegion(r)
 }
