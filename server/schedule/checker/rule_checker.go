@@ -138,11 +138,19 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		checkerCounter.WithLabelValues("rule_checker", "fix-peer-role").Inc()
 		return operator.CreatePromoteLearnerOperator("fix-peer-role", c.cluster, region, peer)
 	}
-	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.Role == placement.Follower {
+	if region.GetLeader().GetId() != peer.GetId() && rf.Rule.Role == placement.Leader {
 		checkerCounter.WithLabelValues("rule_checker", "fix-leader-role").Inc()
+		if c.allowLeader(fit, peer) {
+			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, region.GetLeader().StoreId, peer.GetStoreId(), 0)
+		}
+		checkerCounter.WithLabelValues("rule_checker", "not-allow-leader")
+		return nil, errors.New("peer cannot be leader")
+	}
+	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.Role == placement.Follower {
+		checkerCounter.WithLabelValues("rule_checker", "fix-follower-role").Inc()
 		for _, p := range region.GetPeers() {
 			if c.allowLeader(fit, p) {
-				return operator.CreateTransferLeaderOperator("fix-peer-role", c.cluster, region, peer.GetStoreId(), p.GetStoreId(), 0)
+				return operator.CreateTransferLeaderOperator("fix-follower-role", c.cluster, region, peer.GetStoreId(), p.GetStoreId(), 0)
 			}
 		}
 		checkerCounter.WithLabelValues("rule_checker", "no-new-leader").Inc()
