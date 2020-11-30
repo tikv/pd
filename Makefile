@@ -5,8 +5,6 @@ TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
 INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/" | grep -E "tests")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
-COVER_PKG :=  $(shell find . -iname "*_test.go" -exec dirname {} \; | \
-                     sort -u | sed -e "s/^\./github.com\/tikv\/pd/" |  tr "\n" "," )
 
 PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'

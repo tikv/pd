@@ -11,7 +11,6 @@ require (
 	github.com/coreos/go-semver v0.3.0
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f
 	github.com/docker/go-units v0.4.0
-	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/go-echarts/go-echarts v1.0.0
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/protobuf v1.3.4
@@ -19,7 +18,6 @@ require (
 	github.com/gorilla/mux v1.7.4
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/juju/ratelimit v1.0.1
-	github.com/kr/pretty v0.2.0 // indirect
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.5.0
@@ -48,12 +46,9 @@ require (
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.uber.org/goleak v0.10.0
 	go.uber.org/zap v1.15.0
-	golang.org/x/crypto v0.0.0-20200510223506-06a226fb4e37 // indirect
-	golang.org/x/sys v0.0.0-20200602225109-6fdc65e7d980 // indirect
 	golang.org/x/tools v0.0.0-20200527183253-8e7acdbce89d
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
-	gopkg.in/yaml.v2 v2.3.0 // indirect
 )
 
 replace (
