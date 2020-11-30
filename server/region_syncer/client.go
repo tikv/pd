@@ -72,9 +72,8 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 		tlsCfg,
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                keepaliveTime,
-			Timeout:             keepaliveTimeout,
-			PermitWithoutStream: true,
+			Time:    keepaliveTime,
+			Timeout: keepaliveTimeout,
 		}),
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff: backoff.Config{
