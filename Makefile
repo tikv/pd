@@ -165,7 +165,7 @@ test-with-cover: install-go-tools dashboard-ui
 	done
 	@$(FAILPOINT_DISABLE)
 
-check: install-go-tools check-all check-plugin errdoc
+check: install-go-tools check-all check-plugin errdoc check_missing_tests
 
 check-all: static lint tidy
 	@echo "checking"
@@ -192,6 +192,9 @@ tidy:
 errdoc: install-go-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
+
+check_missing_tests:
+	./scripts/check-missing-tests.sh
 
 simulator: export GO111MODULE=on
 simulator:
