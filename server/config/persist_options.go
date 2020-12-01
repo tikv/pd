@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -172,7 +173,34 @@ const (
 	mergeScheduleLimitKey          = "schedule.merge-schedule-limit"
 	hotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
 	schedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
+	enableLocationReplacement      = "schedule.enable-location-replacement"
 )
+
+var supportedTTLConfigs = []string{
+	maxSnapshotCountKey,
+	maxMergeRegionSizeKey,
+	maxPendingPeerCountKey,
+	maxMergeRegionKeysKey,
+	leaderScheduleLimitKey,
+	regionScheduleLimitKey,
+	replicaRescheduleLimitKey,
+	mergeScheduleLimitKey,
+	hotRegionScheduleLimitKey,
+	schedulerMaxWaitingOperatorKey,
+	enableLocationReplacement,
+	"default-add-peer",
+	"default-remove-peer",
+}
+
+// IsSupportedTTLConfig checks whether a key is a supported config item with ttl
+func IsSupportedTTLConfig(key string) bool {
+	for _, supportedConfig := range supportedTTLConfigs {
+		if key == supportedConfig {
+			return true
+		}
+	}
+	return strings.HasPrefix(key, "add-peer-") || strings.HasPrefix(key, "remove-peer-")
+}
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
 func (o *PersistOptions) GetMaxSnapshotCount() uint64 {
@@ -434,12 +462,12 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
-	if v, ok := o.getTTLData("schedule.enable-location-replacement"); ok {
+	if v, ok := o.getTTLData(enableLocationReplacement); ok {
 		result, err := strconv.ParseBool(v)
 		if err == nil {
 			return result
 		}
-		log.Warn("failed to parse schedule.enable-location-replacement from PersistOptions's ttl storage")
+		log.Warn("failed to parse " + enableLocationReplacement + " from PersistOptions's ttl storage")
 	}
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
