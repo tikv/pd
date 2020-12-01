@@ -291,6 +291,10 @@ var ttlConfig = map[string]interface{}{
 	"schedule.merge-schedule-limit":           999,
 }
 
+var invalidTTLConfig = map[string]interface{}{
+	"schedule.invalid-ttl-config": 0,
+}
+
 func assertTTLConfig(c *C, options *config.PersistOptions, checker Checker) {
 	c.Assert(options.GetMaxSnapshotCount(), checker, uint64(999))
 	c.Assert(options.IsLocationReplacementEnabled(), checker, false)
@@ -313,4 +317,10 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
 	time.Sleep(2 * time.Second)
 	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
+
+	postData, err = json.Marshal(invalidTTLConfig)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, Not(IsNil))
+	c.Assert(err.Error(), Equals, "\"unsupported ttl config schedule.invalid-ttl-config\"\n")
 }
