@@ -22,4 +22,5 @@ jobs:
             ${{ runner.os }}-go-
       - name: Make Check
         run: |
+          make build
           make check

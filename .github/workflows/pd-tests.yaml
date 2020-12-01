@@ -39,7 +39,6 @@ jobs:
         id: packages-units
         env:
           WORKER_ID: ${{ matrix.worker_id }}
-          TYPE: ${{ matrix.type }}
         run: |
           go list ./... |grep -v -E  "github.com/tikv/pd/tests/client|github.com/tikv/pd/server/api" > packages.list
           total=$(expr ${{ strategy.job-total }} - 1)
@@ -67,9 +66,6 @@ jobs:
     needs: chunks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-go@v2
-        with:
-          go-version: ${{ matrix.go-version }}
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Download chunk report
