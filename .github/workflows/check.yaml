@@ -1,7 +1,7 @@
 on: [push, pull_request]
-name: Check All
+name: Check PD
 jobs:
-  job:
+  statics:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-go@v2
