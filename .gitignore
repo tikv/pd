@@ -17,3 +17,5 @@ default*
 docs/swagger/*
 !docs/swagger/placeholder.go
 *.before
+covprofile
+coverage.tmp
