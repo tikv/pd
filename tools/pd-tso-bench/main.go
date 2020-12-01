@@ -118,7 +118,13 @@ func bench(mainCtx context.Context) {
 	wg.Add(1)
 	go showStats(ctx, durCh)
 
-	time.Sleep(*duration)
+	timer := time.NewTimer(*duration)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
 	cancel()
 
 	wg.Wait()

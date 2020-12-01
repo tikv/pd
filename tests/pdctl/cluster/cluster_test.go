@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -62,7 +63,6 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	ci := &metapb.Cluster{}
 	c.Assert(json.Unmarshal(output, ci), IsNil)
 	c.Assert(ci, DeepEquals, cluster.GetCluster())
-
 	echo := pdctl.GetEcho([]string{"-u", pdAddr, "--cacert=ca.pem", "cluster"})
 	c.Assert(strings.Contains(echo, "no such file or directory"), IsTrue)
 
@@ -82,6 +82,11 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	c.Assert(json.Unmarshal(output, cs), IsNil)
 	clusterStatus, err := cluster.GetClusterStatus()
 	c.Assert(err, IsNil)
+	c.Assert(clusterStatus.RaftBootstrapTime.Equal(cs.RaftBootstrapTime), IsTrue)
+	// ref: https://github.com/onsi/gomega/issues/264
+	clusterStatus.RaftBootstrapTime = time.Time{}
+	cs.RaftBootstrapTime = time.Time{}
+
 	c.Assert(cs, DeepEquals, clusterStatus)
 
 	// ping
