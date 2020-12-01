@@ -1,8 +1,8 @@
 on:
   push:
-      branches:
-        - master
-        - release-4.0
+    branches:
+      - master
+      - release-4.0
   pull_request:
     branches:
       - master
@@ -29,8 +29,8 @@ jobs:
         path: |
           ~/go/pkg/mod
           ~/.cache/go-build
-          ~/work/pd/pd/.tools
-          ~/work/pd/pd/.dashboard_asset_cache
+          **/.tools
+          **/.dashboard_asset_cache
         key: ${{ runner.os }}-go-${{ matrix.worker_id }}-${{ hashFiles('**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-${{ matrix.worker_id }}
