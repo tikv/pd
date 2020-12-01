@@ -40,7 +40,8 @@ import (
 
 const (
 	// The timeout to wait transfer etcd leader to complete.
-	moveLeaderTimeout = 5 * time.Second
+	moveLeaderTimeout          = 5 * time.Second
+	dcLocationConfigEtcdPrefix = "dc-location"
 )
 
 // Member is used for the election related logic.
@@ -297,6 +298,14 @@ func (m *Member) getMemberLeaderPriorityPath(id uint64) string {
 	return path.Join(m.rootPath, fmt.Sprintf("member/%d/leader_priority", id))
 }
 
+func (m *Member) GetDCLocationPathPrefix() string {
+	return path.Join(m.rootPath, dcLocationConfigEtcdPrefix)
+}
+
+func (m *Member) GetDCLocationPath(id uint64) string {
+	return path.Join(m.rootPath, dcLocationConfigEtcdPrefix, fmt.Sprint(id))
+}
+
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
 func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 	key := m.getMemberLeaderPriorityPath(id)
@@ -305,7 +314,7 @@ func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 		return errors.WithStack(err)
 	}
 	if !res.Succeeded {
-		return errors.New("save leader priority failed, maybe not leader")
+		return errors.New("save etcd leader priority failed, maybe not pd leader")
 	}
 	return nil
 }
@@ -319,6 +328,19 @@ func (m *Member) DeleteMemberLeaderPriority(id uint64) error {
 	}
 	if !res.Succeeded {
 		return errors.New("delete etcd leader priority failed, maybe not pd leader")
+	}
+	return nil
+}
+
+// DeleteDCLocation removes a member's dc-location.
+func (m *Member) DeleteDCLocation(id uint64) error {
+	key := m.GetDCLocationPath(id)
+	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if !res.Succeeded {
+		return errors.New("delete dc-location failed, maybe not pd leader")
 	}
 	return nil
 }

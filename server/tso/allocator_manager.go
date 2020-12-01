@@ -40,7 +40,6 @@ import (
 const (
 	checkStep                   = 1 * time.Minute
 	patrolStep                  = 1 * time.Second
-	dcLocationConfigEtcdPrefix  = "dc-location"
 	defaultAllocatorLeaderLease = 3
 	leaderTickInterval          = 50 * time.Millisecond
 )
@@ -119,19 +118,19 @@ func NewAllocatorManager(
 // cluster know the DC-level topology for later Local TSO Allocator campaign.
 func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConfig) error {
 	serverName := am.member.Member().Name
-	serverID := fmt.Sprint(am.member.ID())
+	serverID := am.member.ID()
 	log.Info("write dc-location into etcd",
 		zap.String("dc-location", localTSOConfig.DCLocation),
 		zap.String("server-name", serverName),
-		zap.String("server-id", serverID))
+		zap.Uint64("server-id", serverID))
 	if !localTSOConfig.EnableLocalTSO {
 		log.Info("pd server doesn't enable local tso, skip writing dc-location into etcd",
 			zap.String("server-name", serverName),
-			zap.String("server-id", serverID))
+			zap.Uint64("server-id", serverID))
 		return nil
 	}
 	// The key-value pair in etcd will be like: serverID -> dcLocation
-	dcLocationKey := path.Join(am.getLocalTSOConfigPath(), serverID)
+	dcLocationKey := am.member.GetDCLocationPath(serverID)
 	resp, err := kv.
 		NewSlowLogTxn(am.member.Client()).
 		Then(clientv3.OpPut(dcLocationKey, localTSOConfig.DCLocation)).
@@ -143,7 +142,7 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 		log.Warn("write dc-location into etcd failed",
 			zap.String("dc-location", localTSOConfig.DCLocation),
 			zap.String("server-name", serverName),
-			zap.String("server-id", serverID))
+			zap.Uint64("server-id", serverID))
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 	am.ClusterDCLocationChecker()
@@ -161,10 +160,6 @@ func (am *AllocatorManager) GetClusterDCLocations() map[string][]uint64 {
 		copy(dcLocationMap[dcLocation], members)
 	}
 	return dcLocationMap
-}
-
-func (am *AllocatorManager) getLocalTSOConfigPath() string {
-	return path.Join(am.rootPath, dcLocationConfigEtcdPrefix)
 }
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
@@ -427,7 +422,7 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 func (am *AllocatorManager) ClusterDCLocationChecker() {
 	resp, err := etcdutil.EtcdKVGet(
 		am.member.Client(),
-		am.getLocalTSOConfigPath(),
+		am.member.GetDCLocationPathPrefix(),
 		clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
