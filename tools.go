@@ -16,7 +16,6 @@
 package tools
 
 import (
-	_ "github.com/go-playground/overalls"
 	_ "github.com/mgechev/revive"
 	_ "github.com/pingcap/failpoint/failpoint-ctl"
 	_ "github.com/pingcap/tiup/components/errdoc/errdoc-gen"

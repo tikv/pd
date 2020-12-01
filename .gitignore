@@ -16,3 +16,9 @@ default*
 /.tools/bin
 docs/swagger/*
 !docs/swagger/placeholder.go
+<<<<<<< HEAD
+=======
+*.before
+covprofile
+coverage.tmp
+>>>>>>> fe49b631... ci: use github action to run tests and report to codecov (#3194)
