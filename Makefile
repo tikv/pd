@@ -155,7 +155,7 @@ basic-test:
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-check: install-go-tools check-all check-plugin errdoc
+check: install-go-tools check-all check-plugin errdoc check_missing_tests
 
 check-all: static lint tidy
 	@echo "checking"
@@ -182,6 +182,9 @@ tidy:
 errdoc: install-go-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
+
+check_missing_tests:
+	./scripts/check-missing-tests.sh
 
 travis_coverage: export GO111MODULE=on
 travis_coverage:
