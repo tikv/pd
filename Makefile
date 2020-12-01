@@ -155,7 +155,7 @@ basic-test:
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-test-with-cover: check dashboard-ui
+test-with-cover: dashboard-ui check
 	# testing...
 	@$(FAILPOINT_ENABLE)
 	for PKG in $(TEST_PKGS); do\
