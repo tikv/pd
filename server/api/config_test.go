@@ -322,4 +322,5 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, Not(IsNil))
+	c.Assert(err.Error(), Equals, "\"unsupported ttl config schedule.invalid-ttl-config\"\n")
 }

@@ -1294,7 +1294,7 @@ func (s *Server) PersistFile(name string, data []byte) error {
 func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) error {
 	for k := range data {
 		if !config.IsSupportedTTLConfig(k) {
-			return errors.New("unsupported ttl config " + k)
+			return fmt.Errorf("unsupported ttl config %s", k)
 		}
 	}
 	for k, v := range data {
