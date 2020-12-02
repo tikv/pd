@@ -14,13 +14,13 @@
 package cluster
 
 import (
-	"github.com/tikv/pd/pkg/movingaverage"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
 	"go.uber.org/zap"
 )
