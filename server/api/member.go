@@ -133,8 +133,8 @@ func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete dc-location.
-	err = h.svr.GetMember().DeleteDCLocation(id)
+	// Delete dc-location info.
+	err = h.svr.GetMember().DeleteMemberDCLocationInfo(id)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -172,8 +172,8 @@ func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete dc-location.
-	err = h.svr.GetMember().DeleteDCLocation(id)
+	// Delete dc-location info.
+	err = h.svr.GetMember().DeleteMemberDCLocationInfo(id)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

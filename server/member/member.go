@@ -298,12 +298,14 @@ func (m *Member) getMemberLeaderPriorityPath(id uint64) string {
 	return path.Join(m.rootPath, fmt.Sprintf("member/%d/leader_priority", id))
 }
 
+// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 func (m *Member) GetDCLocationPathPrefix() string {
 	return path.Join(m.rootPath, dcLocationConfigEtcdPrefix)
 }
 
+// GetDCLocationPath returns the dc-location path of a member with the given member ID.
 func (m *Member) GetDCLocationPath(id uint64) string {
-	return path.Join(m.rootPath, dcLocationConfigEtcdPrefix, fmt.Sprint(id))
+	return path.Join(m.GetDCLocationPathPrefix(), fmt.Sprint(id))
 }
 
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
@@ -332,15 +334,15 @@ func (m *Member) DeleteMemberLeaderPriority(id uint64) error {
 	return nil
 }
 
-// DeleteDCLocation removes a member's dc-location.
-func (m *Member) DeleteDCLocation(id uint64) error {
+// DeleteMemberDCLocationInfo removes a member's dc-location info.
+func (m *Member) DeleteMemberDCLocationInfo(id uint64) error {
 	key := m.GetDCLocationPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}
 	if !res.Succeeded {
-		return errors.New("delete dc-location failed, maybe not pd leader")
+		return errors.New("delete dc-location info failed, maybe not pd leader")
 	}
 	return nil
 }
