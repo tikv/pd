@@ -99,8 +99,9 @@ func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (phy
 // Because the Local TSO in each Local TSO Allocator is independent, so they are possible
 // to be the same at sometimes, to avoid this case, we need to use the logical part of the
 // Local TSO to do some differentiating work. For example, we have three DCs: dc-1, dc-2 and
-// dc-3. So the shiftNum is 2 bits because we have three DCs and 2 bits are enough to distinguish
-// them. Then, for dc-2, the serialNum is 1 because its index in all sorted dc-locations is 1.
+// dc-3. So the shiftNum is 2 bits because we have three DCs + a global scope, and 2 bits are
+// enough to distinguish them. Then, for dc-2, the serialNum is 1 because its index in all
+// sorted dc-locations is 1.
 // Once we get a noramal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
 // low bits of logical part from each DC looks like:
 //     dc-1: xxxxxxxxxxxxxxxx00
