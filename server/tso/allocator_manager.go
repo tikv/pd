@@ -235,7 +235,17 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 			log.Error("pd leader is not aware of dc-location during allocatorLeaderLoop, wait next round",
 				zap.String("dc-location", allocator.dcLocation),
 				zap.String("wait-duration", checkStep.String()))
-			time.Sleep(checkStep)
+			// Because the checkStep is long, we use select here to check whether the ctx is done.
+			checkTicker := time.NewTicker(checkStep)
+			defer checkTicker.Stop()
+			select {
+			case <-ctx.Done():
+				log.Info("server is closed, return local tso allocator leader loop",
+					zap.String("dc-location", allocator.dcLocation),
+					zap.String("local-tso-allocator-name", am.member.Member().Name))
+				return
+			case <-checkTicker.C:
+			}
 			continue
 		}
 
