@@ -43,9 +43,8 @@ const (
 
 // tsoObject is used to store the current TSO in memory.
 type tsoObject struct {
-	physical              time.Time
-	logical               int64
-	differentiatedLogical int64
+	physical time.Time
+	logical  int64
 }
 
 // timestampOracle is used to maintain the logic of TSO.
@@ -84,7 +83,7 @@ func (t *timestampOracle) getTSO() (time.Time, int64) {
 }
 
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
-func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (physical, differentiatedLogical int64) {
+func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (physical, logical int64) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if t.tsoMux.tso == nil {
@@ -93,11 +92,8 @@ func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (phy
 	physical = t.tsoMux.tso.physical.UnixNano() / int64(time.Millisecond)
 	t.tsoMux.tso.logical += count
 	// Differentiate the TSO to avoid the potential conflict caused by the same TSO
-	differentiatedLogical = differentiateLogical(t.tsoMux.tso.logical, shiftNum, serialNum)
-	if t.tsoMux.tso.differentiatedLogical < differentiatedLogical {
-		t.tsoMux.tso.differentiatedLogical = differentiatedLogical
-	}
-	return physical, differentiatedLogical
+	logical = differentiateLogical(t.tsoMux.tso.logical, shiftNum, serialNum)
+	return physical, logical
 }
 
 // Because the Local TSO in each Local TSO Allocator is independent, so they are possible
