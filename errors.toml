@@ -11,6 +11,31 @@ error = '''
 redirect failed
 '''
 
+["PD:auth:ErrInvalidName"]
+error = '''
+key name may only contain alphanumeric and underscores, and may only start with an alphabetic character.
+'''
+
+["PD:auth:ErrRoleExists"]
+error = '''
+role already exists: %s
+'''
+
+["PD:auth:ErrRoleHasPermission"]
+error = '''
+role %s already has permission: %s
+'''
+
+["PD:auth:ErrRoleMissingPermission"]
+error = '''
+role %s doesn't have permission: %s
+'''
+
+["PD:auth:ErrRoleNotFound"]
+error = '''
+role not found: %s
+'''
+
 ["PD:autoscaling:ErrEmptyMetricsResponse"]
 error = '''
 metrics response from Prometheus is empty
