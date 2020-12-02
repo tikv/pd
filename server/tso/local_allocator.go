@@ -101,7 +101,8 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
 	serialNum := lta.allocatorManager.getDCLocationIndex(lta.dcLocation)
-	shiftNum := int(math.Ceil(math.Log2(float64(lta.allocatorManager.getClusterDCLocationLength()))))
+	// log2(the number of dc-locations + global)
+	shiftNum := int(math.Ceil(math.Log2(float64(lta.allocatorManager.getSortedDCLocationLength() + 1))))
 	if serialNum == -1 || shiftNum == 0 {
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("unable to get the dc-location index or length")
 	}
@@ -137,9 +138,9 @@ func (lta *LocalTSOAllocator) GetMember() *pdpb.Member {
 	return lta.member.Member()
 }
 
-// GetCurrentTSO returns current TSO in memory.
+// GetCurrentTSO returns current raw TSO in memory without differentiating it.
 func (lta *LocalTSOAllocator) GetCurrentTSO() (pdpb.Timestamp, error) {
-	currentPhysical, currentLogical := lta.timestampOracle.getDifferentiatedTSO()
+	currentPhysical, currentLogical := lta.timestampOracle.getTSO()
 	if currentPhysical == typeutil.ZeroTime {
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 	}

@@ -16,6 +16,7 @@ package tso
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -126,6 +127,14 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		currentGlobalTSO pdpb.Timestamp
 		err              error
 	)
+	// Differentiate the Global TSO synced from all the other Local TSOs
+	serialNum := gta.allocatorManager.getSortedDCLocationLength()
+	// log2(the number of dc-locations + global)
+	shiftNum := int(math.Ceil(math.Log2(float64(serialNum + 1))))
+	if serialNum == -1 || shiftNum == 0 {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("unable to get the dc-location index or length")
+	}
+	maxTSO.Logical = differentiateLogical(maxTSO.Logical, shiftNum, serialNum)
 	if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
 		return pdpb.Timestamp{}, err
 	}

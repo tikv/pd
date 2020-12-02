@@ -83,15 +83,6 @@ func (t *timestampOracle) getTSO() (time.Time, int64) {
 	return t.tsoMux.tso.physical, t.tsoMux.tso.logical
 }
 
-func (t *timestampOracle) getDifferentiatedTSO() (time.Time, int64) {
-	t.tsoMux.RLock()
-	defer t.tsoMux.RUnlock()
-	if t.tsoMux.tso == nil {
-		return typeutil.ZeroTime, 0
-	}
-	return t.tsoMux.tso.physical, t.tsoMux.tso.differentiatedLogical
-}
-
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
 func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (physical, differentiatedLogical int64) {
 	t.tsoMux.Lock()
@@ -101,25 +92,31 @@ func (t *timestampOracle) generateTSO(count int64, shiftNum, serialNum int) (phy
 	}
 	physical = t.tsoMux.tso.physical.UnixNano() / int64(time.Millisecond)
 	t.tsoMux.tso.logical += count
-	// Because the Local TSO in each Local TSO Allocator is independent, so they are possible
-	// to be the same at sometimes, to avoid this case, we need to use the logical part of the
-	// Local TSO to do some differentiating work. For example, we have three DCs: dc-1, dc-2 and
-	// dc-3. So the shiftNum is 2 bits because we have three DCs and 2 bits are enough to distinguish
-	// them. Then, for dc-2, the serialNum is 1 because its index in all sorted dc-locations is 1.
-	// Once we get a noramal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
-	// low bits of logical part from each DC looks like:
-	//     dc-1: xxxxxxxxxxxxxxxx00
-	//     dc-2: xxxxxxxxxxxxxxxx01
-	//     dc-3: xxxxxxxxxxxxxxxx10
-	if shiftNum == 0 {
-		differentiatedLogical = t.tsoMux.tso.logical
-	} else {
-		differentiatedLogical = t.tsoMux.tso.logical<<shiftNum + int64(serialNum)
-	}
+	// Differentiate the TSO to avoid the potential conflict caused by the same TSO
+	differentiatedLogical = differentiateLogical(t.tsoMux.tso.logical, shiftNum, serialNum)
 	if t.tsoMux.tso.differentiatedLogical < differentiatedLogical {
 		t.tsoMux.tso.differentiatedLogical = differentiatedLogical
 	}
 	return physical, differentiatedLogical
+}
+
+// Because the Local TSO in each Local TSO Allocator is independent, so they are possible
+// to be the same at sometimes, to avoid this case, we need to use the logical part of the
+// Local TSO to do some differentiating work. For example, we have three DCs: dc-1, dc-2 and
+// dc-3. So the shiftNum is 2 bits because we have three DCs and 2 bits are enough to distinguish
+// them. Then, for dc-2, the serialNum is 1 because its index in all sorted dc-locations is 1.
+// Once we get a noramal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
+// low bits of logical part from each DC looks like:
+//     dc-1: xxxxxxxxxxxxxxxx00
+//     dc-2: xxxxxxxxxxxxxxxx01
+//     dc-3: xxxxxxxxxxxxxxxx10
+//   global: xxxxxxxxxxxxxxxx11
+func differentiateLogical(rawLogical int64, shiftNum, serialNum int) int64 {
+	differentiatedLogical := rawLogical
+	if shiftNum != 0 {
+		differentiatedLogical = rawLogical<<shiftNum + int64(serialNum)
+	}
+	return differentiatedLogical
 }
 
 func (t *timestampOracle) getTimestampPath() string {

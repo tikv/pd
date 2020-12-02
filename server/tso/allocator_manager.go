@@ -168,10 +168,10 @@ func (am *AllocatorManager) GetClusterDCLocations() map[string][]uint64 {
 	return dcLocationMap
 }
 
-func (am *AllocatorManager) getClusterDCLocationLength() int {
+func (am *AllocatorManager) getSortedDCLocationLength() int {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	return len(am.mu.clusterDCLocations)
+	return len(am.mu.sortedDCLocations)
 }
 
 func (am *AllocatorManager) getDCLocationIndex(dcLocation string) int {
