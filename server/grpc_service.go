@@ -961,7 +961,7 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 //    with its current TSO in memory to make sure their local TSOs are not less
 //    than MaxTS by writing MaxTS into memory to finish the global TSO synchronization.
 func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
 		return nil, err
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
@@ -1017,7 +1017,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 
 // SplitRegions split regions by the given split keys
 func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
 	finishedPercentage, newRegionIDs := s.cluster.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
@@ -1031,7 +1031,7 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 // GetDCLocations will return the dcLocations which hold by the Global TSO Allocator.
 // If the receiving PD Member is not PD Leader, GetDCLocations will return error.
 func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocationsRequest) (*pdpb.GetDCLocationsResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+	if err := s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
 	}
 	if !s.member.IsLeader() {
@@ -1050,19 +1050,22 @@ func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocation
 	}
 	return &pdpb.GetDCLocationsResponse{
 		Header:      s.header(),
-		DcLocations: globalAllocator.GetDCLocations(),
+		DcLocations: globalAllocator.GetSortedDCLocations(),
 	}, nil
 }
 
 // validateInternalRequest checks if server is closed, which is used to validate
 // the gRPC communication between PD servers internally.
-func (s *Server) validateInternalRequest(header *pdpb.RequestHeader) error {
+func (s *Server) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
 	if s.IsClosed() {
 		return errors.WithStack(ErrNotStarted)
 	}
-	leaderID := s.GetLeader().GetMemberId()
-	if leaderID != header.GetSenderId() {
-		return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
+	// If onlyAllowLeader is true, check whether the sender is the PD leader.
+	if onlyAllowLeader {
+		leaderID := s.GetLeader().GetMemberId()
+		if leaderID != header.GetSenderId() {
+			return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
+		}
 	}
 	return nil
 }

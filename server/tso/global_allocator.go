@@ -282,12 +282,13 @@ func (gta *GlobalTSOAllocator) Reset() {
 	gta.timestampOracle.ResetTimestamp()
 }
 
-// GetDCLocations return all the dcLocations the GlobalTSOAllocator will check
-func (gta *GlobalTSOAllocator) GetDCLocations() []string {
-	dcLocationsMap := gta.allocatorManager.GetClusterDCLocations()
-	dcLocations := make([]string, 0, len(dcLocationsMap))
-	for dc := range dcLocationsMap {
-		dcLocations = append(dcLocations, dc)
-	}
+// GetSortedDCLocations returns the sorted dc-locations from the perspective of a PD leader.
+// It will be used to check whether the PD leader is aware of a certain dc-location from etcd,
+// and to differentiate the TSO in the cluster.
+func (gta *GlobalTSOAllocator) GetSortedDCLocations() []string {
+	gta.allocatorManager.mu.RLock()
+	defer gta.allocatorManager.mu.RUnlock()
+	dcLocations := make([]string, len(gta.allocatorManager.mu.sortedDCLocations))
+	copy(dcLocations, gta.allocatorManager.mu.sortedDCLocations)
 	return dcLocations
 }
