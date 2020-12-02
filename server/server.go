@@ -1256,6 +1256,11 @@ func (s *Server) PersistFile(name string, data []byte) error {
 
 // SaveTTLConfig save ttl config
 func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) error {
+	for k := range data {
+		if !config.IsSupportedTTLConfig(k) {
+			return fmt.Errorf("unsupported ttl config %s", k)
+		}
+	}
 	for k, v := range data {
 		if err := s.persistOptions.SetTTLData(s.ctx, s.client, k, fmt.Sprint(v), ttl); err != nil {
 			return err
