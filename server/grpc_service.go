@@ -1046,7 +1046,7 @@ func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocation
 		return nil, fmt.Errorf("tso allocator[%v] is not global tso allocator", config.GlobalDCLocation)
 	}
 	if !globalAllocator.IsInitialize() {
-		return nil, fmt.Errorf("global tso alloactor is not initialized")
+		return nil, fmt.Errorf("global tso allocator is not initialized")
 	}
 	return &pdpb.GetDCLocationsResponse{
 		Header:      s.header(),
@@ -1060,7 +1060,7 @@ func (s *Server) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLe
 	if s.IsClosed() {
 		return errors.WithStack(ErrNotStarted)
 	}
-	// If onlyAllowLeader is true, check whether the sender is the PD leader.
+	// If onlyAllowLeader is true, check whether the sender is PD leader.
 	if onlyAllowLeader {
 		leaderID := s.GetLeader().GetMemberId()
 		if leaderID != header.GetSenderId() {

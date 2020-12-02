@@ -777,7 +777,7 @@ func (am *AllocatorManager) updateSortedDCLocations(ctx context.Context) error {
 	defer cancel()
 	resp, err := pdpb.NewPDClient(conn).GetDCLocations(getCtx, &pdpb.GetDCLocationsRequest{
 		Header: &pdpb.RequestHeader{
-			SenderId: am.member.GetLeader().GetMemberId(),
+			SenderId: am.member.Member().GetMemberId(),
 		},
 	})
 	if err != nil {
