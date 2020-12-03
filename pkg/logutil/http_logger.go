@@ -52,13 +52,17 @@ func (l *HTTPLogger) AddCloseCallback(fs ...func()) {
 func (l *HTTPLogger) Plug(names ...string) {
 	l.AddCloseCallback(func() {
 		for _, name := range names {
-			pl := GetOrCreatePluggableLogger(name)
-			pl.SetLogger(nil)
+			pl := GetPluggableLogger(name, false)
+			if pl != nil {
+				pl.SetLogger(nil)
+			}
 		}
 	})
 	for _, name := range names {
-		pl := GetOrCreatePluggableLogger(name)
-		pl.SetLogger(l.logger)
+		pl := GetPluggableLogger(name, false)
+		if pl != nil {
+			pl.SetLogger(l.logger)
+		}
 	}
 }
 

@@ -88,24 +88,36 @@ type loggerManager struct {
 	Loggers map[string]*PluggableLogger
 }
 
+func (m *loggerManager) Init() {
+	m.Lock()
+	defer m.Unlock()
+	m.Loggers = make(map[string]*PluggableLogger)
+}
+
+// GetPluggableLogger gets a pluggable zap.Logger.
+func (m *loggerManager) GetPluggableLogger(name string, createIfNotExist bool) *PluggableLogger {
+	m.Lock()
+	defer m.Unlock()
+	l, ok := m.Loggers[name]
+	if !ok {
+		if !createIfNotExist {
+			return nil
+		}
+		l = new(PluggableLogger)
+		l.name = name
+		l.logger.Store((*zap.Logger)(nil))
+		m.Loggers[name] = l
+	}
+	return l
+}
+
 var globalLoggerManager loggerManager
 
 func init() {
-	globalLoggerManager.Lock()
-	defer globalLoggerManager.Unlock()
-	globalLoggerManager.Loggers = make(map[string]*PluggableLogger)
+	globalLoggerManager.Init()
 }
 
-// NewPluggableLogger gets a pluggable zap.Logger.
-func GetOrCreatePluggableLogger(name string) *PluggableLogger {
-	globalLoggerManager.Lock()
-	defer globalLoggerManager.Unlock()
-	l, ok := globalLoggerManager.Loggers[name]
-	if !ok {
-		l = new(PluggableLogger)
-		l.name = name
-		l.logger.Store(nil)
-		globalLoggerManager.Loggers[name] = l
-	}
-	return l
+// GetPluggableLogger gets a pluggable zap.Logger.
+func GetPluggableLogger(name string, createIfNotExist bool) *PluggableLogger {
+	return globalLoggerManager.GetPluggableLogger(name, createIfNotExist)
 }
