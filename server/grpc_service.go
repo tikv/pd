@@ -242,14 +242,12 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 
-	if err := rc.PutStore(store, false); err != nil {
+	if err := rc.PutStore(store); err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	rc.OnStoreVersionChange()
 	CheckPDVersion(s.persistOptions)
-	rc.AddStoreLimit(store)
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
@@ -963,7 +961,7 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 //    with its current TSO in memory to make sure their local TSOs are not less
 //    than MaxTS by writing MaxTS into memory to finish the global TSO synchronization.
 func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
 		return nil, err
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
@@ -1019,7 +1017,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 
 // SplitRegions split regions by the given split keys
 func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
 	finishedPercentage, newRegionIDs := s.cluster.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
@@ -1033,7 +1031,7 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 // GetDCLocations will return the dcLocations which hold by the Global TSO Allocator.
 // If the receiving PD Member is not PD Leader, GetDCLocations will return error.
 func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocationsRequest) (*pdpb.GetDCLocationsResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+	if err := s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
 	}
 	if !s.member.IsLeader() {
@@ -1048,7 +1046,7 @@ func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocation
 		return nil, fmt.Errorf("tso allocator[%v] is not global tso allocator", config.GlobalDCLocation)
 	}
 	if !globalAllocator.IsInitialize() {
-		return nil, fmt.Errorf("global tso alloactor is not initialized")
+		return nil, fmt.Errorf("global tso allocator is not initialized")
 	}
 	return &pdpb.GetDCLocationsResponse{
 		Header:      s.header(),
@@ -1058,13 +1056,16 @@ func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocation
 
 // validateInternalRequest checks if server is closed, which is used to validate
 // the gRPC communication between PD servers internally.
-func (s *Server) validateInternalRequest(header *pdpb.RequestHeader) error {
+func (s *Server) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
 	if s.IsClosed() {
 		return errors.WithStack(ErrNotStarted)
 	}
-	leaderID := s.GetLeader().GetMemberId()
-	if leaderID != header.GetSenderId() {
-		return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
+	// If onlyAllowLeader is true, check whether the sender is PD leader.
+	if onlyAllowLeader {
+		leaderID := s.GetLeader().GetMemberId()
+		if leaderID != header.GetSenderId() {
+			return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
+		}
 	}
 	return nil
 }

@@ -179,6 +179,8 @@ type client struct {
 	tsDeadline sync.Map // Same as map[string]chan deadline
 	// dc-location -> *lastTSO
 	lastTSMap sync.Map // Same as map[string]*lastTSO
+
+	checkTSDeadlineCh chan struct{}
 }
 
 // NewClient creates a PD client.
@@ -194,7 +196,8 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		return nil, err
 	}
 	c := &client{
-		baseClient: base,
+		baseClient:        base,
+		checkTSDeadlineCh: make(chan struct{}),
 	}
 
 	c.wg.Add(2)
@@ -225,6 +228,8 @@ func (c *client) tsCancelLoop() {
 			return true
 		})
 		select {
+		case <-c.checkTSDeadlineCh:
+			continue
 		case <-ticker.C:
 			continue
 		case <-tsCancelLoopCtx.Done():
@@ -254,6 +259,13 @@ func (c *client) watchTSDeadline(ctx context.Context, dcLocation string) {
 				}
 			}
 		}(dcLocation, tsDeadlineCh)
+	}
+}
+
+func (c *client) scheduleCheckTSDeadline() {
+	select {
+	case c.checkTSDeadlineCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -300,6 +312,10 @@ func (c *client) tsLoop() {
 			if !c.checkTSODispatcher(dcLocation) {
 				c.createTSODispatcher(dcLocation)
 				dispatcher, _ := c.tsoDispatcher.Load(dcLocation)
+				// Each goroutine is responsible for handling the tso stream request for its dc-location.
+				// The only case that will make the dispatcher goroutine exit
+				// is that the loopCtx is done, otherwise there is no circumstance
+				// this goroutine should exit.
 				go func(dc string, tsoDispatcher chan *tsoRequest) {
 					var (
 						err      error
@@ -309,7 +325,14 @@ func (c *client) tsLoop() {
 						opts     []opentracing.StartSpanOption
 						requests = make([]*tsoRequest, maxMergeTSORequests+1)
 					)
+					defer func() {
+						if cancel != nil {
+							cancel()
+						}
+					}()
 					for {
+						// If the tso stream for the corresponding dc-location has not been created yet or needs to be re-created,
+						// we will try to create the stream first.
 						if stream == nil {
 							ctx, cancel = context.WithCancel(loopCtx)
 							done := make(chan struct{})
@@ -318,7 +341,7 @@ func (c *client) tsLoop() {
 							done <- struct{}{}
 							if err != nil {
 								select {
-								case <-ctx.Done():
+								case <-loopCtx.Done():
 									return
 								default:
 								}
@@ -328,7 +351,7 @@ func (c *client) tsLoop() {
 								c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
 								select {
 								case <-time.After(time.Second):
-								case <-ctx.Done():
+								case <-loopCtx.Done():
 									return
 								}
 								continue
@@ -347,18 +370,24 @@ func (c *client) tsLoop() {
 								done:   done,
 								cancel: cancel,
 							}
-							tsDeadlineCh, _ := c.tsDeadline.Load(dc)
+							tsDeadlineCh, ok := c.tsDeadline.Load(dc)
+							if !ok || tsDeadlineCh == nil {
+								c.scheduleCheckTSDeadline()
+								time.Sleep(time.Millisecond * 100)
+								tsDeadlineCh, _ = c.tsDeadline.Load(dc)
+							}
 							select {
 							case tsDeadlineCh.(chan deadline) <- dl:
-							case <-ctx.Done():
+							case <-loopCtx.Done():
 								return
 							}
 							opts = extractSpanReference(requests[:pendingPlus1], opts[:0])
 							err = c.processTSORequests(stream, dc, requests[:pendingPlus1], opts)
 							close(done)
-						case <-ctx.Done():
+						case <-loopCtx.Done():
 							return
 						}
+						// If error happens during tso stream handling, reset stream and run the next trial.
 						if err != nil {
 							select {
 							case <-loopCtx.Done():
@@ -665,7 +694,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	for _, url := range memberURLs {
 		conn, err := c.getOrCreateGRPCConn(url)
 		if err != nil {
-			log.Error("[pd] can't get grpc connection", zap.String("memberURL", url), errs.ZapError(err))
+			log.Error("[pd] can't get grpc connection", zap.String("member-URL", url), errs.ZapError(err))
 			continue
 		}
 		cc := pdpb.NewPDClient(conn)
@@ -674,7 +703,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 			RegionKey: key,
 		})
 		if err != nil {
-			log.Error("[pd] can't get region info", zap.String("memberURL", url), errs.ZapError(err))
+			log.Error("[pd] can't get region info", zap.String("member-URL", url), errs.ZapError(err))
 			continue
 		}
 		if resp != nil {

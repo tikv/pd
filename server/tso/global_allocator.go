@@ -249,7 +249,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 		if !gta.checkSyncedDCs(dcLocationMap, syncedDCs) {
 			// Only retry one time when synchronization is incomplete
 			if maxRetryCount == 1 {
-				log.Warn("unsynced dc-locations found, will retry", zap.Strings("syncedDCs", syncedDCs))
+				log.Warn("unsynced dc-locations found, will retry", zap.Strings("synced-DCs", syncedDCs))
 				maxRetryCount++
 				// To make sure we have the newest dc-location info
 				gta.allocatorManager.ClusterDCLocationChecker()
@@ -268,7 +268,7 @@ func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string][]uint64,
 			unsyncedDCs = append(unsyncedDCs, dcLocation)
 		}
 	}
-	log.Info("check unsynced dc-locations", zap.Strings("unsyncedDCs", unsyncedDCs), zap.Strings("syncedDCs", syncedDCs))
+	log.Info("check unsynced dc-locations", zap.Strings("unsynced-DCs", unsyncedDCs), zap.Strings("synced-DCs", syncedDCs))
 	return len(unsyncedDCs) == 0
 }
 
