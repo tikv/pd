@@ -254,13 +254,14 @@ func (lg *wrapLogrus) V(l int) bool {
 	return int(lg.Logger.Level) <= logrusLevel
 }
 
-var once sync.Once
+var (
+	initLoggerOnce sync.Once
+	initLoggerErr  error
+)
 
 // InitLogger initializes PD's logger.
 func InitLogger(cfg *zaplog.Config) error {
-	var err error
-
-	once.Do(func() {
+	initLoggerOnce.Do(func() {
 		log.SetLevel(StringToLogLevel(cfg.Level))
 		log.AddHook(&contextHook{})
 
@@ -281,9 +282,9 @@ func InitLogger(cfg *zaplog.Config) error {
 			return
 		}
 
-		err = InitFileLog(&cfg.File)
+		initLoggerErr = InitFileLog(&cfg.File)
 	})
-	return err
+	return initLoggerErr
 }
 
 // LogPanic logs the panic reason and stack, then exit the process.
