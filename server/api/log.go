@@ -72,12 +72,14 @@ func (h *logHandler) SetGlobalLevel(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The log level is updated.")
 }
 
+const defaultGetLogSecond = 600 // 10 minutes
+
 // @Tags admin
 // @Summary Get logs.
-// @Param name query string true "name"
-// @Param second query integer false "duration of getting"
+// @Param name query []string true "name"
+// @Param second query integer false "duration of getting" collectionFormat(multi)
 // @Produce text
-// @Success 200 {string} string "Finished."
+// @Success 200 {string} string "Finished getting logs."
 // @Failure 400 {string} string "The input is invalid."
 // @Router /admin/log [get]
 func (h *logHandler) GetLog(w http.ResponseWriter, r *http.Request) {
@@ -91,9 +93,13 @@ func (h *logHandler) GetLog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if second <= 0 {
+		second = defaultGetLogSecond
+	}
+
 	names := query["name"]
 	if len(names) == 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "empty names.")
+		h.rd.JSON(w, http.StatusBadRequest, "empty name.")
 		return
 	}
 
