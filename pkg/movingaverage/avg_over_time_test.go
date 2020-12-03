@@ -68,6 +68,10 @@ func (t *testAvgOverTimeSuite) TestChange(c *C) {
 	}
 	c.Assert(aot.Get(), LessEqual, 678.)
 	c.Assert(aot.Get(), GreaterEqual, 99.)
+
+	// clear
+	aot.Set(10)
+	c.Assert(aot.Get(), Equals, 10)
 }
 
 func (t *testAvgOverTimeSuite) TestMinFilled(c *C) {
@@ -87,6 +91,7 @@ func (t *testAvgOverTimeSuite) TestMinFilled(c *C) {
 
 func (t *testAvgOverTimeSuite) TestUnstableInterval(c *C) {
 	aot := NewAvgOverTime(5 * time.Second)
+	c.Assert(aot.Get(), Equals, 0)
 	// warm up
 	for i := 0; i < 5; i++ {
 		aot.Add(1000, time.Second)
