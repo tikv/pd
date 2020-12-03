@@ -168,9 +168,6 @@ func (stat *HotPeerStat) clearLastAverage() {
 
 // Log is used to output some info
 func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Field)) {
-	if stat == nil {
-		return
-	}
 	level(str,
 		zap.Uint64("interval", stat.interval),
 		zap.Uint64("region", stat.RegionID),

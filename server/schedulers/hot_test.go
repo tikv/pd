@@ -1065,31 +1065,35 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
+	s.checkRegionFlowTest(c, tc.AddLeaderRegionWithWriteInfo)
+	s.checkRegionFlowTest(c, tc.AddLeaderRegionWithReadInfo)
+}
 
+func (s *testHotCacheSuite) checkRegionFlowTest(c *C, heartbeat func(
+	regionID uint64, leaderID uint64,
+	readBytes, readKeys uint64,
+	reportInterval uint64,
+	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat) {
 	// hot degree increase
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
-	items := tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
-	c.Check(items, HasLen, 3)
+	heartbeat(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	heartbeat(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	items := heartbeat(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
 	for _, item := range items {
 		c.Check(item.HotDegree, Equals, 3)
 	}
 
 	// transfer leader and skip the first heartbeat
-	items = tc.AddLeaderRegionWithWriteInfo(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3}, 1)
-	c.Check(items, HasLen, 3)
+	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3}, 1)
 	for _, item := range items {
 		c.Check(item.HotDegree, Equals, 3)
 	}
 
 	// move peer: add peer and remove peer
-	items = tc.AddLeaderRegionWithWriteInfo(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3, 4}, 1)
-	c.Check(items, HasLen, 4)
+	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3, 4}, 1)
 	for _, item := range items {
 		c.Check(item.HotDegree, Equals, 4)
 	}
-	items = tc.AddLeaderRegionWithWriteInfo(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 4}, 1)
-	c.Check(items, HasLen, 4)
+	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 4}, 1)
 	for _, item := range items {
 		if item.StoreID == 3 {
 			c.Check(item.IsNeedDelete(), IsTrue)
