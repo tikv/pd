@@ -17,6 +17,8 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
@@ -46,7 +48,7 @@ func newLogHandler(svr *server.Server, rd *render.Render) *logHandler {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /admin/log [post]
-func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
+func (h *logHandler) SetGlobalLevel(w http.ResponseWriter, r *http.Request) {
 	var level string
 	data, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
@@ -68,4 +70,45 @@ func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 
 	h.rd.JSON(w, http.StatusOK, "The log level is updated.")
+}
+
+// @Tags admin
+// @Summary Get logs.
+// @Param name query string true "name"
+// @Param second query integer false "duration of getting"
+// @Produce text
+// @Success 200 {string} string "Finished."
+// @Failure 400 {string} string "The input is invalid."
+// @Router /admin/log [get]
+func (h *logHandler) GetLog(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	var second int64
+	if secondStr := query.Get("second"); secondStr != "" {
+		var err error
+		second, err = strconv.ParseInt(secondStr, 10, 64)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	names := query["name"]
+	if len(names) == 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "empty names.")
+		return
+	}
+
+	logConfig := h.svr.GetConfig().Log
+	httpLogger, err := logutil.NewHTTPLogger(&logConfig, w)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	httpLogger.Plug(names...)
+	defer httpLogger.Close()
+
+	select {
+	case <-time.After(time.Duration(second) * time.Second):
+	case <-r.Context().Done():
+	}
 }
