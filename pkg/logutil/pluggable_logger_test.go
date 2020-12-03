@@ -61,7 +61,7 @@ func (s *testPluggableLoggerSuite) TestPluggableLogger(c *C) {
 	}, zapcore.AddSync(buffer))
 	c.Assert(err, IsNil)
 	pl.SetLogger(lg)
-	pl.Info("bar", zap.Int64("int64", 42))
+	pl.Info("world", zap.Int64("answer", 42))
 	c.Assert(lg.Sync(), IsNil)
-	c.Assert(buffer.String(), Equals, "[INFO] [bar] [int64=42]\n")
+	c.Assert(buffer.String(), Equals, "[INFO] [world] [answer=42]\n")
 }
