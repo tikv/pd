@@ -1058,3 +1058,71 @@ func addRegionInfo(tc *mockcluster.Cluster, rwTy rwType, regions []testRegionInf
 		)
 	}
 }
+
+func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	tc.SetMaxReplicas(3)
+	tc.SetLocationLabels([]string{"zone", "host"})
+	tc.DisableFeature(versioninfo.JointConsensus)
+
+	// hot degree increase
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	items := tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	c.Check(items, HasLen, 3)
+	for _, item := range items {
+		c.Check(item.HotDegree, Equals, 3)
+	}
+
+	// transfer leader and skip the first heartbeat
+	items = tc.AddLeaderRegionWithWriteInfo(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3}, 1)
+	c.Check(items, HasLen, 3)
+	for _, item := range items {
+		c.Check(item.HotDegree, Equals, 3)
+	}
+
+	// move peer: add peer and remove peer
+	items = tc.AddLeaderRegionWithWriteInfo(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3, 4}, 1)
+	c.Check(items, HasLen, 4)
+	for _, item := range items {
+		c.Check(item.HotDegree, Equals, 4)
+	}
+	items = tc.AddLeaderRegionWithWriteInfo(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 4}, 1)
+	c.Check(items, HasLen, 4)
+	for _, item := range items {
+		if item.StoreID == 3 {
+			c.Check(item.IsNeedDelete(), IsTrue)
+			continue
+		}
+		c.Check(item.HotDegree, Equals, 5)
+	}
+}
+
+func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	tc.SetMaxReplicas(3)
+	tc.SetLocationLabels([]string{"zone", "host"})
+	tc.DisableFeature(versioninfo.JointConsensus)
+	// some peers are hot, and some are cold #3198
+	rate := uint64(512 * KB)
+	for i := 0; i < statistics.TopNN; i++ {
+		for j := 0; j < statistics.DefaultAotSize; j++ {
+			tc.AddLeaderRegionWithWriteInfo(uint64(i+100), 1, rate*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+		}
+	}
+	items := tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	c.Check(items[0].GetThresholds()[0], Equals, float64(rate)*statistics.HotThresholdRatio)
+	// Threshold of store 1,2,3 is 409.6 KB and others are 1 KB
+	rate = 10 * KB
+	tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3, 4}, 1)
+	items = tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{3, 4}, 1)
+	for _, item := range items {
+		if item.StoreID < 4 {
+			c.Check(item.IsNeedDelete(), IsTrue)
+		} else {
+			c.Check(item.IsNeedDelete(), IsFalse)
+		}
+	}
+}

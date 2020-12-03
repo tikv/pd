@@ -15,11 +15,17 @@ package statistics
 
 import (
 	"math/rand"
+	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testHotPeerCache{})
 
@@ -210,4 +216,56 @@ func newPeers(n int, pid genID, sid genID) []*metapb.Peer {
 		peers = append(peers, peer)
 	}
 	return peers
+}
+
+func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
+	cache := NewHotStoresStats(ReadFlow)
+
+	// skip interval=0
+	newItem := &HotPeerStat{needDelete: false}
+	newItem = cache.updateHotPeerStat(newItem, nil, 0, 0, 0, [2]float64{0.0, 0.0})
+	c.Check(newItem, IsNil)
+
+	// new peer, interval is larger than report interval, but no hot
+	newItem = &HotPeerStat{needDelete: false}
+	newItem = cache.updateHotPeerStat(newItem, nil, 0, 0, 60*time.Second, [2]float64{1.0, 1.0})
+	c.Check(newItem, IsNil)
+
+	// new peer, interval is less than report interval
+	newItem = &HotPeerStat{needDelete: false}
+	newItem = cache.updateHotPeerStat(newItem, nil, 60, 60, 30*time.Second, [2]float64{0.0, 0.0})
+	c.Check(newItem, NotNil)
+	c.Check(newItem.HotDegree, Equals, 0)
+	c.Check(newItem.AntiCount, Equals, 0)
+	// sum of interval is less than report interval
+	oldItem := newItem
+	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 10*time.Second, [2]float64{0.0, 0.0})
+	c.Check(newItem.HotDegree, Equals, 0)
+	c.Check(newItem.AntiCount, Equals, 0)
+	// sum of interval is larger than report interval, and hot
+	oldItem = newItem
+	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 30*time.Second, [2]float64{0.0, 0.0})
+	c.Check(newItem.HotDegree, Equals, 1)
+	c.Check(newItem.AntiCount, Equals, 2)
+	// sum of interval is less than report interval
+	oldItem = newItem
+	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 10*time.Second, [2]float64{0.0, 0.0})
+	c.Check(newItem.HotDegree, Equals, 1)
+	c.Check(newItem.AntiCount, Equals, 2)
+	// sum of interval is larger than report interval, and hot
+	oldItem = newItem
+	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 50*time.Second, [2]float64{0.0, 0.0})
+	c.Check(newItem.HotDegree, Equals, 2)
+	c.Check(newItem.AntiCount, Equals, 2)
+	// sum of interval is larger than report interval, and cold
+	oldItem = newItem
+	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 60*time.Second, [2]float64{10.0, 10.0})
+	c.Check(newItem.HotDegree, Equals, 1)
+	c.Check(newItem.AntiCount, Equals, 1)
+	// sum of interval is larger than report interval, and cold
+	oldItem = newItem
+	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 60*time.Second, [2]float64{10.0, 10.0})
+	c.Check(newItem.HotDegree, Equals, 0)
+	c.Check(newItem.AntiCount, Equals, 0)
+	c.Check(newItem.needDelete, Equals, true)
 }

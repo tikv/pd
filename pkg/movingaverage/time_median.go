@@ -17,22 +17,22 @@ import "time"
 
 // TimeMedian is AvgOverTime + MedianFilter
 // Size of MedianFilter should be larger than double size of AvgOverTime to denoisy.
-// Delay is aotSize * mfSize * reportInterval/2
+// Delay is aotSize * mfSize * reportInterval/4
 // and the min filled period is aotSize * reportInterval, which is not related with mfSize
 type TimeMedian struct {
-	aotInterval time.Duration
-	aot         *AvgOverTime
-	mf          *MedianFilter
-	aotSize     int
-	mfSize      int
+	aotInterval   time.Duration
+	aot           *AvgOverTime
+	mf            *MedianFilter
+	aotSize       int
+	mfSize        int
+	instantaneous float64
 }
 
 // NewTimeMedian returns a TimeMedian with given size.
-func NewTimeMedian(aotSize, mfSize, reportInterval int) *TimeMedian {
-	interval := time.Duration(aotSize*reportInterval) * time.Second
+func NewTimeMedian(aotSize, mfSize int, reportInterval time.Duration) *TimeMedian {
 	return &TimeMedian{
-		aotInterval: interval,
-		aot:         NewAvgOverTime(interval),
+		aotInterval: reportInterval,
+		aot:         NewAvgOverTime(time.Duration(aotSize) * reportInterval),
 		mf:          NewMedianFilter(mfSize),
 		aotSize:     aotSize,
 		mfSize:      mfSize,
@@ -46,13 +46,10 @@ func (t *TimeMedian) Get() float64 {
 
 // Add adds recent change to TimeMedian.
 func (t *TimeMedian) Add(delta float64, interval time.Duration) {
-	if interval < time.Second {
-		return
-	}
+	t.instantaneous = delta / interval.Seconds()
 	t.aot.Add(delta, interval)
-	if t.aot.intervalSum >= t.aotInterval {
+	if t.aot.IsFull() {
 		t.mf.Add(t.aot.Get())
-		t.aot.Clear()
 	}
 }
 
@@ -64,4 +61,9 @@ func (t *TimeMedian) Set(avg float64) {
 // GetFilledPeriod returns filled period.
 func (t *TimeMedian) GetFilledPeriod() int { // it is unrelated with mfSize
 	return t.aotSize
+}
+
+// GetInstantaneous returns instantaneous speed
+func (t *TimeMedian) GetInstantaneous() float64 {
+	return t.instantaneous
 }

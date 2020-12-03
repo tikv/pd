@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/movingaverage"
+	"go.uber.org/zap"
 )
 
 const (
@@ -25,6 +26,42 @@ const (
 	keyDim
 	dimLen
 )
+
+type dimStat struct {
+	typ         int
+	Rolling     *movingaverage.TimeMedian
+	LastAverage *movingaverage.AvgOverTime
+}
+
+func newDimStat(typ int) *dimStat {
+	reportInterval := time.Duration(RegionHeartBeatReportInterval) * time.Second
+	return &dimStat{
+		typ:         typ,
+		Rolling:     movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
+		LastAverage: movingaverage.NewAvgOverTime(reportInterval),
+	}
+}
+
+func (d *dimStat) Add(delta float64, interval time.Duration) {
+	d.LastAverage.Add(delta, interval)
+	d.Rolling.Add(delta, interval)
+}
+
+func (d *dimStat) isHot(thresholds [dimLen]float64) bool {
+	return d.LastAverage.IsFull() && d.LastAverage.Get() >= thresholds[d.typ]
+}
+
+func (d *dimStat) isFull() bool {
+	return d.LastAverage.IsFull()
+}
+
+func (d *dimStat) clearLastAverage() {
+	d.LastAverage.Clear()
+}
+
+func (d *dimStat) Get() float64 {
+	return d.Rolling.Get()
+}
 
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
@@ -41,15 +78,19 @@ type HotPeerStat struct {
 	KeyRate  float64  `json:"flow_keys"`
 
 	// rolling statistics, recording some recently added records.
-	rollingByteRate *movingaverage.TimeMedian
-	rollingKeyRate  *movingaverage.TimeMedian
+	rollingByteRate *dimStat
+	rollingKeyRate  *dimStat
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
 
-	needDelete bool
-	isLeader   bool
-	isNew      bool
+	needDelete         bool
+	isLeader           bool
+	isNew              bool
+	justTransferLeader bool
+	interval           uint64
+	thresholds         [dimLen]float64
+	peers              []uint64
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -101,6 +142,11 @@ func (stat *HotPeerStat) GetKeyRate() float64 {
 	return math.Round(stat.rollingKeyRate.Get())
 }
 
+// GetThresholds returns thresholds
+func (stat *HotPeerStat) GetThresholds() [dimLen]float64 {
+	return stat.thresholds
+}
+
 // Clone clones the HotPeerStat
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
@@ -109,4 +155,34 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret.KeyRate = stat.GetKeyRate()
 	ret.rollingKeyRate = nil
 	return &ret
+}
+
+func (stat *HotPeerStat) isHot(thresholds [dimLen]float64) bool {
+	return stat.rollingByteRate.isHot(thresholds) || stat.rollingKeyRate.isHot(thresholds)
+}
+
+func (stat *HotPeerStat) clearLastAverage() {
+	stat.rollingByteRate.clearLastAverage()
+	stat.rollingKeyRate.clearLastAverage()
+}
+
+// Log is used to output some info
+func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Field)) {
+	if stat == nil {
+		return
+	}
+	level(str,
+		zap.Uint64("interval", stat.interval),
+		zap.Uint64("region", stat.RegionID),
+		zap.Uint64("store", stat.StoreID),
+		zap.Float64("byte-rate", stat.GetByteRate()),
+		zap.Float64("byte-rate-threshold", stat.thresholds[byteDim]),
+		zap.Float64("key-rate", stat.GetKeyRate()),
+		zap.Float64("key-rate-threshold", stat.thresholds[keyDim]),
+		zap.Int("hot-degree", stat.HotDegree),
+		zap.Int("hot-anti-count", stat.AntiCount),
+		zap.Bool("just-transfer-leader", stat.justTransferLeader),
+		zap.Bool("is-leader", stat.isLeader),
+		zap.Bool("need-delete", stat.IsNeedDelete()),
+		zap.String("type", stat.Kind.String()))
 }
