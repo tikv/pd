@@ -57,19 +57,15 @@ func (s *testLogSuite) TestSetLogLevel(c *C) {
 }
 
 func (s *testLogSuite) TestGetLog(c *C) {
-	pl := logutil.GetPluggableLogger("api", true)
+	pl := logutil.GetPluggableLogger("test_api", true)
 	answerCh := make(chan int64, 1)
 	go func() {
 		defer close(answerCh)
-		resp := make(map[string]interface{})
-		err := readJSON(testDialClient, s.urlPrefix+"/log?name=api&second=5", resp)
-		if err != nil {
-			return
+		var resp struct {
+			Answer int64 `json:"answer"`
 		}
-		if answer, ok := resp["answer"].(json.Number); ok {
-			if answer, err := answer.Int64(); err == nil {
-				answerCh <- answer
-			}
+		if err := readJSON(testDialClient, s.urlPrefix+"/log?name=test_api&second=3", &resp); err == nil {
+			answerCh <- resp.Answer
 		}
 	}()
 	time.Sleep(1 * time.Second)
