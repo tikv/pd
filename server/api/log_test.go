@@ -16,10 +16,13 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server"
+	"go.uber.org/zap"
 )
 
 var _ = Suite(&testLogSuite{})
@@ -51,4 +54,26 @@ func (s *testLogSuite) TestSetLogLevel(c *C) {
 	err = postJSON(testDialClient, s.urlPrefix+"/log", data)
 	c.Assert(err, IsNil)
 	c.Assert(log.GetLevel().String(), Equals, level)
+}
+
+func (s *testLogSuite) TestGetLog(c *C) {
+	pl := logutil.GetPluggableLogger("api", true)
+	answerCh := make(chan int64, 1)
+	go func() {
+		defer close(answerCh)
+		resp := make(map[string]interface{})
+		err := readJSON(testDialClient, s.urlPrefix+"/log?name=api&second=5", resp)
+		if err != nil {
+			return
+		}
+		if answer, ok := resp["answer"].(json.Number); ok {
+			if answer, err := answer.Int64(); err == nil {
+				answerCh <- answer
+			}
+		}
+	}()
+	time.Sleep(1 * time.Second)
+	pl.Info("world", zap.Int("answer", 42))
+	answer := <-answerCh
+	c.Assert(answer, Equals, int64(42))
 }

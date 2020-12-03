@@ -104,6 +104,7 @@ func (h *logHandler) GetLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logConfig := h.svr.GetConfig().Log
+	logConfig.Format = "json"
 	httpLogger, err := logutil.NewHTTPLogger(&logConfig, w)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
