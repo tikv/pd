@@ -131,7 +131,7 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 
 	for serverName, server := range cluster.GetServers() {
 		tsoAllocatorManager := server.GetTSOAllocatorManager()
-		dcLocation, _ := testCase.dcLocationConfig[serverName]
+		dcLocation := testCase.dcLocationConfig[serverName]
 		suffixResp, err := etcdutil.EtcdKVGet(
 			cluster.GetEtcdClient(),
 			tsoAllocatorManager.GetLocalTSOSuffixPath(dcLocation))
