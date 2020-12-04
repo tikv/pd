@@ -103,10 +103,10 @@ func (t *timestampOracle) generateTSO(count int64, needSuffix bool) (physical in
 
 // Because the Local TSO in each Local TSO Allocator is independent, so they are possible
 // to be the same at sometimes, to avoid this case, we need to use the logical part of the
-// Local TSO to do some differentiating work. For example, we have three DCs: dc-1, dc-2 and
-// dc-3.
-// The bits of suffix is defined by the const suffixBits. Then, for dc-2, the suffix may be 1
-// because its suffix persisted in the etcd is 1.
+// Local TSO to do some differentiating work.
+// For example, we have three DCs: dc-1, dc-2 and dc-3. The bits of suffix is defined by
+// the const suffixBits. Then, for dc-2, the suffix may be 1 because its suffix persisted
+// in the etcd is 1.
 // Once we get a noramal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
 // low bits of logical part from each DC looks like:
 //   global: xxxxxxxxxx00000000

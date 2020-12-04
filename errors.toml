@@ -596,6 +596,11 @@ error = '''
 sync max ts failed, %s
 '''
 
+["PD:tso:ErrWriteTSOSuffix"]
+error = '''
+write local tso suffix failed, %s
+'''
+
 ["PD:typeutil:ErrBytesToUint64"]
 error = '''
 invalid data, must 8 bytes, but %d

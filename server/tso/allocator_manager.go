@@ -16,6 +16,7 @@ package tso
 import (
 	"context"
 	"fmt"
+	"math"
 	"path"
 	"strconv"
 	"strings"
@@ -146,21 +147,27 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 			zap.Uint64("server-id", serverID))
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
-	if err := am.checkAndWriteTSOSuffix(localTSOConfig.DCLocation); err != nil {
+	// Check whether we have the Local TSO suffix been written into etcd already
+	if err := am.writeTSOSuffix(localTSOConfig.DCLocation); err != nil {
 		return err
 	}
 	am.ClusterDCLocationChecker()
 	return nil
 }
 
-// checkAndWriteTSOSuffix will check whether we have the Local TSO suffix written into the etcd.
+// WriteTSOSuffix will check whether we have the Local TSO suffix written into the etcd.
 // If not, it will write a number into etcd according to the its joining order.
 // If yes, it will just return without doing anything.
-func (am *AllocatorManager) checkAndWriteTSOSuffix(dcLocation string) error {
+func (am *AllocatorManager) writeTSOSuffix(dcLocation string) error {
 	client := am.member.Client()
 	resp, err := etcdutil.EtcdKVGet(client, am.getLocalTSOSuffixPathPrefix())
 	if err != nil {
 		return err
+	}
+	// The dc-location number meets the upper limit, don't write
+	// The upper limit: 2**suffixBits
+	if len(resp.Kvs) == int(math.Pow(2, suffixBits))-1 {
+		return errs.ErrWriteTSOSuffix.FastGenByArgs("the number of dc-location meets the upper limit")
 	}
 	// Check first before writing.
 	if slice.NoneOf(resp.Kvs, func(i int) bool {
@@ -169,6 +176,7 @@ func (am *AllocatorManager) checkAndWriteTSOSuffix(dcLocation string) error {
 	}) {
 		localTSOSuffixKey := am.getLocalTSOSuffixPath(dcLocation)
 		// The Local TSO suffix is determined by the joining order of this dc-location.
+		// Todo: clean up the useless dc-location suffix
 		localTSOSuffixValue := strconv.FormatInt(int64(len(resp.Kvs)), 10)
 		resp, err := kv.NewSlowLogTxn(client).
 			If(clientv3.Compare(clientv3.CreateRevision(localTSOSuffixKey), "=", 0)).
@@ -353,6 +361,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 	log.Info("initialize the local TSO allocator",
 		zap.String("dc-location", allocator.dcLocation),
 		zap.String("name", am.member.Member().Name))
+	// Try to get the Local TSO suffix for this allocator's dcLocation
 	suffix, err := am.getLocalTSOSuffix(allocator.dcLocation)
 	if err != nil {
 		log.Error("failed to get the local TSO suffix", errs.ZapError(err))
@@ -397,7 +406,7 @@ func (am *AllocatorManager) getLocalTSOSuffix(dcLocation string) (int, error) {
 		return -1, err
 	}
 	if len(resp.Kvs) == 0 {
-		if err := am.checkAndWriteTSOSuffix(dcLocation); err != nil {
+		if err := am.writeTSOSuffix(dcLocation); err != nil {
 			return -1, err
 		}
 	}
