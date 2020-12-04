@@ -123,15 +123,20 @@ func NewAllocatorManager(
 func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConfig) error {
 	serverName := am.member.Member().Name
 	serverID := am.member.ID()
-	log.Info("write dc-location into etcd",
-		zap.String("dc-location", localTSOConfig.DCLocation),
-		zap.String("server-name", serverName),
-		zap.Uint64("server-id", serverID))
 	if !localTSOConfig.EnableLocalTSO {
 		log.Info("pd server doesn't enable local tso, skip writing dc-location into etcd",
 			zap.String("server-name", serverName),
 			zap.Uint64("server-id", serverID))
 		return nil
+	}
+	if err := am.checkDCLocationUpperLimit(); err != nil {
+		log.Error("check dc-location upper limit failed",
+			zap.Int("upper-limit", int(math.Pow(2, SuffixBits))-1),
+			zap.String("dc-location", localTSOConfig.DCLocation),
+			zap.String("server-name", serverName),
+			zap.Uint64("server-id", serverID),
+			errs.ZapError(err))
+		return err
 	}
 	// The key-value pair in etcd will be like: serverID -> dcLocation
 	dcLocationKey := am.member.GetDCLocationPath(serverID)
@@ -149,8 +154,51 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 			zap.Uint64("server-id", serverID))
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
+	log.Info("write dc-location into etcd",
+		zap.String("dc-location", localTSOConfig.DCLocation),
+		zap.String("server-name", serverName),
+		zap.Uint64("server-id", serverID))
 	am.ClusterDCLocationChecker()
 	return nil
+}
+
+func (am *AllocatorManager) checkDCLocationUpperLimit() error {
+	clusterDCLocations, err := am.getClusterDCLocationsFromEtcd()
+	if err != nil {
+		return err
+	}
+	// Check whether the dc-location number meets the upper limit (2**suffixBits)
+	if len(clusterDCLocations) == int(math.Pow(2, SuffixBits))-1 {
+		return errs.ErrSetLocalTSOConfig.FastGenByArgs("the number of dc-location meets the upper limit")
+	}
+	return nil
+}
+
+func (am *AllocatorManager) getClusterDCLocationsFromEtcd() (clusterDCLocations map[string][]uint64, err error) {
+	resp, err := etcdutil.EtcdKVGet(
+		am.member.Client(),
+		am.member.GetDCLocationPathPrefix(),
+		clientv3.WithPrefix())
+	if err != nil {
+		return clusterDCLocations, err
+	}
+	clusterDCLocations = make(map[string][]uint64)
+	for _, kv := range resp.Kvs {
+		// The key will contain the member ID and the value is its dcLocation
+		serverPath := strings.Split(string(kv.Key), "/")
+		dcLocation := string(kv.Value)
+		// Get serverID from serverPath, e.g, /pd/dc-location/1232143243253 -> 1232143243253
+		serverID, err := strconv.ParseUint(serverPath[len(serverPath)-1], 10, 64)
+		if err != nil {
+			log.Warn("get server id and dcLocation from etcd failed, invalid server id",
+				zap.Any("splitted-serverPath", serverPath),
+				zap.String("dc-location", dcLocation),
+				errs.ZapError(err))
+			continue
+		}
+		clusterDCLocations[dcLocation] = append(clusterDCLocations[dcLocation], serverID)
+	}
+	return clusterDCLocations, nil
 }
 
 // GetClusterDCLocations returns all dc-locations of a cluster with a map
@@ -456,35 +504,15 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 	if am.member.GetLeader() == nil {
 		return
 	}
-	resp, err := etcdutil.EtcdKVGet(
-		am.member.Client(),
-		am.member.GetDCLocationPathPrefix(),
-		clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	clusterDCLocations, err := am.getClusterDCLocationsFromEtcd()
 	if err != nil {
-		log.Error("get cluster dc-locations failed", errs.ZapError(err))
+		log.Error("get cluster dc-locations from etcd failed", errs.ZapError(err))
 		return
-	}
-	newClusterDCLocations := make(map[string][]uint64)
-	for _, kv := range resp.Kvs {
-		// The key will contain the member ID and the value is its dcLocation
-		serverPath := strings.Split(string(kv.Key), "/")
-		dcLocation := string(kv.Value)
-		// Get serverID from serverPath, e.g, /pd/dc-location/1232143243253 -> 1232143243253
-		serverID, err := strconv.ParseUint(serverPath[len(serverPath)-1], 10, 64)
-		if err != nil {
-			log.Warn("get server id and dcLocation from etcd failed, invalid server id",
-				zap.Any("splitted-serverPath", serverPath),
-				zap.String("dc-location", dcLocation),
-				errs.ZapError(err))
-			continue
-		}
-		newClusterDCLocations[dcLocation] = append(newClusterDCLocations[dcLocation], serverID)
 	}
 	// Only leader can write the TSO suffix to the etcd in order to make it consistent in the cluster
 	if am.member.IsStillLeader() {
 		am.mu.RLock()
-		for dcLocation := range newClusterDCLocations {
+		for dcLocation := range clusterDCLocations {
 			if _, exist := am.mu.clusterDCLocations[dcLocation]; exist {
 				continue
 			}
@@ -495,7 +523,7 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 		am.mu.RUnlock()
 	}
 	am.mu.Lock()
-	am.mu.clusterDCLocations = newClusterDCLocations
+	am.mu.clusterDCLocations = clusterDCLocations
 	am.mu.Unlock()
 }
 
@@ -503,21 +531,11 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 // If not, it will write a number into etcd according to the its joining order.
 // If yes, it will just return without doing anything.
 func (am *AllocatorManager) writeTSOSuffix(dcLocation string, suffixNum int64) error {
-	client := am.member.Client()
-	getResp, err := etcdutil.EtcdKVGet(client, am.GetLocalTSOSuffixPathPrefix())
-	if err != nil {
-		return err
-	}
-	// The dc-location number meets the upper limit (2**suffixBits), don't write
-	if len(getResp.Kvs) == int(math.Pow(2, SuffixBits))-1 {
-		return errs.ErrWriteTSOSuffix.FastGenByArgs("the number of dc-location meets the upper limit")
-	}
-
 	localTSOSuffixKey := am.GetLocalTSOSuffixPath(dcLocation)
 	// The Local TSO suffix is determined by the joining order of this dc-location.
 	localTSOSuffixValue := strconv.FormatInt(suffixNum, 10)
 	// Todo: clean up the useless dc-location suffix
-	txnResp, err := kv.NewSlowLogTxn(client).
+	txnResp, err := kv.NewSlowLogTxn(am.member.Client()).
 		If(clientv3.Compare(clientv3.CreateRevision(localTSOSuffixKey), "=", 0)).
 		Then(clientv3.OpPut(localTSOSuffixKey, localTSOSuffixValue)).
 		Commit()
