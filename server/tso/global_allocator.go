@@ -16,7 +16,6 @@ package tso
 import (
 	"context"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -36,7 +35,7 @@ type Allocator interface {
 	// Initialize is used to initialize a TSO allocator.
 	// It will synchronize TSO with etcd and initialize the
 	// memory for later allocation work.
-	Initialize() error
+	Initialize(suffix int) error
 	// IsInitialize is used to indicates whether this allocator is initialized.
 	IsInitialize() bool
 	// UpdateTSO is used to update the TSO in memory and the time window in etcd.
@@ -66,15 +65,18 @@ func NewGlobalTSOAllocator(
 	am *AllocatorManager,
 	leadership *election.Leadership,
 	rootPath string,
+	saveInterval time.Duration,
+	updatePhysicalInterval time.Duration,
+	maxResetTSGap func() time.Duration,
 ) Allocator {
 	gta := &GlobalTSOAllocator{
 		leadership: leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
 			rootPath:               rootPath,
-			saveInterval:           am.saveInterval,
-			updatePhysicalInterval: am.updatePhysicalInterval,
-			maxResetTSGap:          am.maxResetTSGap,
+			saveInterval:           saveInterval,
+			updatePhysicalInterval: updatePhysicalInterval,
+			maxResetTSGap:          maxResetTSGap,
 		},
 		allocatorManager: am,
 	}
@@ -82,7 +84,9 @@ func NewGlobalTSOAllocator(
 }
 
 // Initialize will initialize the created global TSO allocator.
-func (gta *GlobalTSOAllocator) Initialize() error {
+func (gta *GlobalTSOAllocator) Initialize(int) error {
+	// The suffix of a Global TSO should always be 0.
+	gta.timestampOracle.suffix = 0
 	return gta.timestampOracle.SyncTimestamp(gta.leadership)
 }
 
@@ -108,7 +112,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
 	// No dc-locations configured in the cluster
 	if len(dcLocationMap) == 0 {
-		return gta.timestampOracle.getTS(gta.leadership, count, 0, 0)
+		return gta.timestampOracle.getTS(gta.leadership, count, false)
 	}
 	// Send maxTS to all Local TSO Allocator leaders to prewrite
 	ctx, cancel := context.WithCancel(context.Background())
@@ -119,6 +123,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		return pdpb.Timestamp{}, err
 	}
 	maxTSO.Logical += int64(count)
+	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical)
 	// Sync the MaxTS with all Local TSO Allocator leaders then
 	if err := gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
@@ -127,14 +132,6 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		currentGlobalTSO pdpb.Timestamp
 		err              error
 	)
-	// Differentiate the Global TSO synced from all the other Local TSOs
-	serialNum := gta.allocatorManager.getSortedDCLocationLength()
-	// log2(the number of dc-locations + global)
-	shiftNum := int(math.Ceil(math.Log2(float64(serialNum + 1))))
-	if serialNum == -1 || shiftNum == 0 {
-		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("unable to get the dc-location index or length")
-	}
-	maxTSO.Logical = differentiateLogical(maxTSO.Logical, shiftNum, serialNum)
 	if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
 		return pdpb.Timestamp{}, err
 	}
@@ -291,13 +288,12 @@ func (gta *GlobalTSOAllocator) Reset() {
 	gta.timestampOracle.ResetTimestamp()
 }
 
-// GetSortedDCLocations returns the sorted dc-locations from the perspective of a PD leader.
-// It will be used to check whether the PD leader is aware of a certain dc-location from etcd,
-// and to differentiate the TSO in the cluster.
-func (gta *GlobalTSOAllocator) GetSortedDCLocations() []string {
-	gta.allocatorManager.mu.RLock()
-	defer gta.allocatorManager.mu.RUnlock()
-	dcLocations := make([]string, len(gta.allocatorManager.mu.sortedDCLocations))
-	copy(dcLocations, gta.allocatorManager.mu.sortedDCLocations)
+// GetDcLocations return all the dcLocations the GlobalTSOAllocator will check
+func (gta *GlobalTSOAllocator) GetDcLocations() []string {
+	dcLocationsMap := gta.allocatorManager.GetClusterDCLocations()
+	dcLocations := make([]string, 0, len(dcLocationsMap))
+	for dc := range dcLocationsMap {
+		dcLocations = append(dcLocations, dc)
+	}
 	return dcLocations
 }
