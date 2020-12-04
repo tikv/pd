@@ -95,7 +95,11 @@ func CreateMoveLeaderOperator(desc string, cluster opt.Cluster, region *core.Reg
 }
 
 // CreateSplitRegionOperator creates an operator that splits a region.
-func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, keys [][]byte) *Operator {
+func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, keys [][]byte) (*Operator, error) {
+	if core.IsInJointState(region.GetPeers()...) {
+		return nil, errors.Errorf("cannot split region which is in joint state")
+	}
+
 	step := SplitRegion{
 		StartKey:  region.GetStartKey(),
 		EndKey:    region.GetEndKey(),
@@ -110,11 +114,15 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, step)
+	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, step), nil
 }
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
 func CreateMergeRegionOperator(desc string, cluster opt.Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OpKind) ([]*Operator, error) {
+	if core.IsInJointState(source.GetPeers()...) || core.IsInJointState(target.GetPeers()...) {
+		return nil, errors.Errorf("cannot merge regions which are in joint state")
+	}
+
 	var steps []OpStep
 	if !isRegionMatch(source, target) {
 		peers := make(map[uint64]*metapb.Peer)
