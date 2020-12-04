@@ -155,7 +155,17 @@ basic-test:
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-check: install-go-tools check-all check-plugin errdoc
+test-with-cover: install-go-tools dashboard-ui
+	# testing...
+	@$(FAILPOINT_ENABLE)
+	for PKG in $(TEST_PKGS); do\
+		set -euo pipefail;\
+		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG  2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
+		rm coverage.tmp;\
+	done
+	@$(FAILPOINT_DISABLE)
+
+check: install-go-tools check-all check-plugin errdoc check-missing-tests
 
 check-all: static lint tidy
 	@echo "checking"
@@ -183,15 +193,8 @@ errdoc: install-go-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
 
-travis_coverage: export GO111MODULE=on
-travis_coverage:
-ifeq ("$(TRAVIS_COVERAGE)", "1")
-	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 $(OVERALLS) -concurrency=8 -project=github.com/tikv/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
-	@$(FAILPOINT_DISABLE)
-else
-	@echo "coverage only runs in travis."
-endif
+check-missing-tests:
+	./scripts/check-missing-tests.sh
 
 simulator: export GO111MODULE=on
 simulator:
