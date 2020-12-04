@@ -1050,7 +1050,7 @@ func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocation
 	}
 	return &pdpb.GetDCLocationsResponse{
 		Header:      s.header(),
-		DcLocations: globalAllocator.GetDcLocations(),
+		DcLocations: globalAllocator.GetSortedDCLocations(),
 	}, nil
 }
 

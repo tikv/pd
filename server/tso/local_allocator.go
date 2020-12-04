@@ -15,6 +15,7 @@ package tso
 
 import (
 	"context"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -44,29 +45,29 @@ type LocalTSOAllocator struct {
 	rootPath        string
 	dcLocation      string
 	allocatorLeader atomic.Value // stored as *pdpb.Member
+	// allocatorManager is used to differentiate the Local TSO
+	allocatorManager *AllocatorManager
 }
 
 // NewLocalTSOAllocator creates a new local TSO allocator.
 func NewLocalTSOAllocator(
-	member *member.Member,
+	am *AllocatorManager,
 	leadership *election.Leadership,
 	dcLocation string,
-	saveInterval time.Duration,
-	updatePhysicalInterval time.Duration,
-	maxResetTSGap func() time.Duration,
 ) Allocator {
 	return &LocalTSOAllocator{
 		leadership: leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
 			rootPath:               leadership.GetLeaderKey(),
-			saveInterval:           saveInterval,
-			updatePhysicalInterval: updatePhysicalInterval,
-			maxResetTSGap:          maxResetTSGap,
+			saveInterval:           am.saveInterval,
+			updatePhysicalInterval: am.updatePhysicalInterval,
+			maxResetTSGap:          am.maxResetTSGap,
 		},
-		member:     member,
-		rootPath:   leadership.GetLeaderKey(),
-		dcLocation: dcLocation,
+		member:           am.member,
+		rootPath:         leadership.GetLeaderKey(),
+		dcLocation:       dcLocation,
+		allocatorManager: am,
 	}
 }
 
@@ -99,8 +100,13 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	// Todo: use the low bits of TSO's logical part to distinguish the different local TSO
-	return lta.timestampOracle.getTS(lta.leadership, count)
+	serialNum := lta.allocatorManager.getDCLocationIndex(lta.dcLocation)
+	// log2(the number of dc-locations + global)
+	shiftNum := int(math.Ceil(math.Log2(float64(lta.allocatorManager.getSortedDCLocationLength() + 1))))
+	if serialNum == -1 || shiftNum == 0 {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("unable to get the dc-location index or length")
+	}
+	return lta.timestampOracle.getTS(lta.leadership, count, shiftNum, serialNum)
 }
 
 // Reset is used to reset the TSO allocator.
@@ -132,7 +138,7 @@ func (lta *LocalTSOAllocator) GetMember() *pdpb.Member {
 	return lta.member.Member()
 }
 
-// GetCurrentTSO returns current TSO in memory.
+// GetCurrentTSO returns current raw TSO in memory without differentiating it.
 func (lta *LocalTSOAllocator) GetCurrentTSO() (pdpb.Timestamp, error) {
 	currentPhysical, currentLogical := lta.timestampOracle.getTSO()
 	if currentPhysical == typeutil.ZeroTime {
