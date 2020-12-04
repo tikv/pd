@@ -124,6 +124,13 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	}
 	maxTSO.Logical += int64(count)
 	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical)
+	// If the maxTSO's logical part is bigger than maxLogical, just add a updateTimestampGuard
+	// to the physical time and empty the logical part. We just need to make sure it's bigger than
+	// all the other Local TSOs.
+	if maxTSO.GetLogical() > maxLogical {
+		maxTSO.Physical += updateTimestampGuard.Milliseconds()
+		maxTSO.Logical = 0
+	}
 	// Sync the MaxTS with all Local TSO Allocator leaders then
 	if err := gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
