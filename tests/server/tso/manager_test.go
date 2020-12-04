@@ -15,13 +15,16 @@ package tso_test
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"go.etcd.io/etcd/clientv3"
 )
 
 var _ = Suite(&testManagerSuite{})
@@ -89,6 +92,66 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 			}
 		}
 		c.Assert(obtainedServerNumber, Equals, serverNumber)
+	}
+}
+
+func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
+	testCase := struct {
+		dcLocationNumber int
+		dcLocationConfig map[string]string
+	}{
+		dcLocationNumber: 3,
+		dcLocationConfig: map[string]string{
+			"pd1": "dc-1",
+			"pd2": "dc-1",
+			"pd3": "dc-2",
+			"pd4": "dc-2",
+			"pd5": "dc-3",
+			"pd6": "dc-3",
+		},
+	}
+	serverNumber := len(testCase.dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = testCase.dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	// Wait for each DC's Local TSO Allocator leader
+	for _, dcLocation := range testCase.dcLocationConfig {
+		testutil.WaitUntil(c, func(c *C) bool {
+			leaderName := cluster.WaitAllocatorLeader(dcLocation)
+			return len(leaderName) > 0
+		})
+	}
+
+	for serverName, server := range cluster.GetServers() {
+		tsoAllocatorManager := server.GetTSOAllocatorManager()
+		dcLocation, _ := testCase.dcLocationConfig[serverName]
+		suffixResp, err := etcdutil.EtcdKVGet(
+			cluster.GetEtcdClient(),
+			tsoAllocatorManager.GetLocalTSOSuffixPath(dcLocation))
+		c.Assert(err, IsNil)
+		c.Assert(len(suffixResp.Kvs), Equals, 1)
+		// Test the increment of the suffix
+		allSuffixResp, err := etcdutil.EtcdKVGet(
+			cluster.GetEtcdClient(),
+			tsoAllocatorManager.GetLocalTSOSuffixPathPrefix(),
+			clientv3.WithPrefix(),
+			clientv3.WithSort(clientv3.SortByValue, clientv3.SortAscend))
+		c.Assert(err, IsNil)
+		c.Assert(len(allSuffixResp.Kvs), Equals, testCase.dcLocationNumber)
+		var lastSuffixNum int64
+		for _, kv := range allSuffixResp.Kvs {
+			suffixNum, err := strconv.ParseInt(string(kv.Value), 10, 64)
+			c.Assert(err, IsNil)
+			c.Assert(suffixNum, Greater, lastSuffixNum)
+			lastSuffixNum = suffixNum
+		}
 	}
 }
 

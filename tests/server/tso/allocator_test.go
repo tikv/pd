@@ -15,8 +15,10 @@ package tso_test
 
 import (
 	"context"
+	"strconv"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -114,6 +116,68 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 					allocatorLeaderMemberIDs,
 					func(i int) bool { return allocatorLeaderMemberIDs[i] == allocatorFollowerMemberID }),
 				IsTrue)
+		}
+	}
+}
+
+func (s *testAllocatorSuite) TestLocalTSODifferent(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	// Wait for each DC's Local TSO Allocator leader
+	for _, dcLocation := range dcLocationConfig {
+		testutil.WaitUntil(c, func(c *C) bool {
+			leaderName := cluster.WaitAllocatorLeader(dcLocation)
+			return len(leaderName) > 0
+		})
+	}
+
+	for serverName, server := range cluster.GetServers() {
+		dcLocation := dcLocationConfig[serverName]
+		tsoAllocatorManager := server.GetTSOAllocatorManager()
+		suffixResp, err := etcdutil.EtcdKVGet(
+			cluster.GetEtcdClient(),
+			tsoAllocatorManager.GetLocalTSOSuffixPath(dcLocation))
+		c.Assert(err, IsNil)
+		c.Assert(len(suffixResp.Kvs), Equals, 1)
+		// Test whether the Local TSO has the right suffix
+		suffix, err := strconv.ParseInt(string(suffixResp.Kvs[0].Value), 10, 64)
+		c.Assert(err, IsNil)
+		var leaderName string
+		testutil.WaitUntil(c, func(c *C) bool {
+			leaderName = cluster.WaitAllocatorLeader(dcLocation)
+			return len(leaderName) > 0
+		})
+		// Check the Local TSO suffix
+		if serverName == leaderName {
+			allocator, err := server.GetTSOAllocatorManager().GetAllocator(dcLocation)
+			c.Assert(err, IsNil)
+			c.Assert(allocator, NotNil)
+			localTSO, err := allocator.GenerateTSO(1)
+			c.Assert(err, IsNil)
+			c.Assert(suffix, Equals, localTSO.Logical&((1<<tso.SuffixBits)-1))
+		}
+		// Check the Global TSO suffix
+		if serverName == server.GetLeader().Name {
+			allocator, err := server.GetTSOAllocatorManager().GetAllocator(config.GlobalDCLocation)
+			c.Assert(err, IsNil)
+			c.Assert(allocator, NotNil)
+			globalTSO, err := allocator.GenerateTSO(1)
+			c.Assert(err, IsNil)
+			c.Assert(int64(0), Equals, globalTSO.Logical&((1<<tso.SuffixBits)-1))
 		}
 	}
 }

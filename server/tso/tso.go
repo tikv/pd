@@ -39,8 +39,8 @@ const (
 	// When a TSO's logical time reaches this limit,
 	// the physical time will be forced to increase.
 	maxLogical = int64(1 << 18)
-	// suffix bits
-	suffixBits = 8
+	// SuffixBits indicates the number of suffix bits
+	SuffixBits = 8
 )
 
 // tsoObject is used to store the current TSO in memory.
@@ -114,7 +114,7 @@ func (t *timestampOracle) generateTSO(count int64, needSuffix bool) (physical in
 //     dc-2: xxxxxxxxxx00000010
 //     dc-3: xxxxxxxxxx00000011
 func (t *timestampOracle) differentiateLogical(rawLogical int64) int64 {
-	return rawLogical<<suffixBits + int64(t.suffix)
+	return rawLogical<<SuffixBits + int64(t.suffix)
 }
 
 func (t *timestampOracle) getTimestampPath() string {
