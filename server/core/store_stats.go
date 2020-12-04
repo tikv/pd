@@ -24,8 +24,13 @@ import (
 type storeStats struct {
 	mu       sync.RWMutex
 	rawStats *pdpb.StoreStats
-	// smooth available size and record deviation to calculate region score.
-	avgAvailable             *movingaverage.HMA
+
+	// avgAvailable is used to make available smooth, aka no sudden changes.
+	avgAvailable *movingaverage.HMA
+	// Following two fields are used to trace the deviation when available
+	// records' deviation range to make scheduling able to converge.
+	// Here `MaxFilter` is used to make the scheduling more conservative, and
+	// `HMA` is used to make it smooth.
 	maxAvailableDeviation    *movingaverage.MaxFilter
 	avgMaxAvailableDeviation *movingaverage.HMA
 }
