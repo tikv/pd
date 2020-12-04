@@ -61,6 +61,8 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
+
+	cluster.WaitLeader()
 	// To speed up the test, we force to do the check
 	for _, server := range cluster.GetServers() {
 		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
@@ -137,6 +139,7 @@ func (s *testAllocatorSuite) TestLocalTSODifferent(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
+	cluster.WaitLeader()
 	// Wait for each DC's Local TSO Allocator leader
 	for _, dcLocation := range dcLocationConfig {
 		testutil.WaitUntil(c, func(c *C) bool {

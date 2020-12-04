@@ -1175,6 +1175,7 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
 		return
 	}
+	s.tsoAllocatorManager.ClusterDCLocationChecker()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))

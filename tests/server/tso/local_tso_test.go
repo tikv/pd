@@ -60,6 +60,8 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
+
+	cluster.WaitLeader()
 	// To speed up the test, we force to do the check
 	for _, server := range cluster.GetServers() {
 		server.GetTSOAllocatorManager().ClusterDCLocationChecker()

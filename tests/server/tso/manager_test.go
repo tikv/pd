@@ -71,6 +71,7 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
+	cluster.WaitLeader()
 	serverNameMap := make(map[uint64]string)
 	for _, server := range cluster.GetServers() {
 		serverNameMap[server.GetServerID()] = server.GetServer().Name()
@@ -121,6 +122,7 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
+	cluster.WaitLeader()
 	// Wait for each DC's Local TSO Allocator leader
 	for _, dcLocation := range testCase.dcLocationConfig {
 		testutil.WaitUntil(c, func(c *C) bool {
@@ -199,6 +201,7 @@ func (s *testPrioritySuite) TestAllocatorPriority(c *C) {
 	// pd2: dc-2 allocator leader
 	// pd3: dc-3 allocator leader
 
+	cluster.WaitLeader()
 	// To speed up the test, we force to do the check
 	for _, server := range cluster.GetServers() {
 		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
