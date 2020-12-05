@@ -158,7 +158,7 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 		zap.String("dc-location", localTSOConfig.DCLocation),
 		zap.String("server-name", serverName),
 		zap.Uint64("server-id", serverID))
-	am.ClusterDCLocationChecker()
+	go am.ClusterDCLocationChecker()
 	return nil
 }
 
@@ -425,8 +425,10 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 		case <-patrolTicker.C:
 			am.allocatorPatroller(serverCtx)
 		case <-checkerTicker.C:
-			am.ClusterDCLocationChecker()
-			am.PriorityChecker()
+			// These two functions are low frequency and time consuming,
+			// we can run them concurrently.
+			go am.ClusterDCLocationChecker()
+			go am.PriorityChecker()
 		case <-serverCtx.Done():
 			return
 		}

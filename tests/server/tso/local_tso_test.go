@@ -62,10 +62,6 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 	c.Assert(err, IsNil)
 
 	cluster.WaitLeader()
-	// To speed up the test, we force to do the check
-	for _, server := range cluster.GetServers() {
-		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
-	}
 	dcClientMap := make(map[string]pdpb.PDClient)
 	for _, dcLocation := range dcLocationConfig {
 		var pdName string

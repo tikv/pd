@@ -1126,6 +1126,8 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
+			// Check the cluster dc-location after the PD leader is elected
+			go s.tsoAllocatorManager.ClusterDCLocationChecker()
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
@@ -1175,7 +1177,8 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
 		return
 	}
-	s.tsoAllocatorManager.ClusterDCLocationChecker()
+	// Check the cluster dc-location after the PD leader is elected
+	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
