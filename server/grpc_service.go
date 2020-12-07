@@ -418,10 +418,13 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		region := core.RegionFromHeartbeat(request)
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
+			msg := fmt.Sprintf("invalid request leader, %v", request)
+			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
 		if region.GetID() == 0 {
-			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-region").Inc()
 			msg := fmt.Sprintf("invalid request region, %v", request)
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
@@ -431,7 +434,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		if len(region.GetPeers()) == 0 {
 			log.Warn("invalid region, zero region peer count",
 				logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
-			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "no-peer").Inc()
 			msg := fmt.Sprintf("invalid region, zero region peer count: %v", logutil.RedactStringer(core.RegionToHexMeta(region.GetMeta())))
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
