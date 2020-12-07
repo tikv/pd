@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package operator_test
+package operatortest
 
 import (
 	"context"
@@ -63,23 +63,31 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 
 	stores := []*metapb.Store{
 		{
-			Id:    1,
-			State: metapb.StoreState_Up,
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:    2,
-			State: metapb.StoreState_Up,
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:    3,
-			State: metapb.StoreState_Up,
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().Add(-time.Minute * 20).UnixNano(),
 		},
 	}
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 	}
 
 	pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
@@ -196,6 +204,12 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "follower", "3")
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "not match"), IsTrue)
+	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-peer", "1", "2", "4")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "is unhealthy"), IsTrue)
+	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "leader", "4", "follower")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "is unhealthy"), IsTrue)
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "follower", "leader", "3", "follower")
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "invalid"), IsTrue)

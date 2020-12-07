@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package config_test
+package configtest
 
 import (
 	"context"
@@ -71,14 +71,14 @@ func (s *configTestSuite) TestConfig(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
-	store := metapb.Store{
+	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	// config show
@@ -239,14 +239,15 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -326,14 +327,15 @@ func (s *configTestSuite) TestPlacementRuleGroups(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -389,14 +391,15 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -526,14 +529,15 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	conf := config.ReplicationModeConfig{

@@ -11,11 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package log_test
+package logtest
 
 import (
 	"context"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -47,14 +48,15 @@ func (s *logTestSuite) TestLog(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	var testCases = []struct {

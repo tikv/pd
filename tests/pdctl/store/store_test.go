@@ -11,13 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package store_test
+package storetest
 
 import (
 	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -53,22 +54,19 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	stores := []*metapb.Store{
 		{
-			Id:      1,
-			Address: "tikv1",
-			State:   metapb.StoreState_Up,
-			Version: "2.0.0",
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:      3,
-			Address: "tikv3",
-			State:   metapb.StoreState_Up,
-			Version: "2.0.0",
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:      2,
-			Address: "tikv2",
-			State:   metapb.StoreState_Tombstone,
-			Version: "2.0.0",
+			Id:            2,
+			State:         metapb.StoreState_Tombstone,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
 
@@ -76,7 +74,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
 
