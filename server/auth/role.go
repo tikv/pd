@@ -46,21 +46,21 @@ func (r *Role) MarshalJSON() ([]byte, error) {
 	}
 	sortPermissions(permissions)
 
-	_r := jsonRole{Name: r.Name, Permissions: permissions}
-	return json.Marshal(_r)
+	role := jsonRole{Name: r.Name, Permissions: permissions}
+	return json.Marshal(role)
 }
 
 // UnmarshalJSON implements Unmarshaler interface.
 func (r *Role) UnmarshalJSON(bytes []byte) error {
-	var _r jsonRole
+	var role jsonRole
 
-	err := json.Unmarshal(bytes, &_r)
+	err := json.Unmarshal(bytes, &role)
 	if err != nil {
 		return err
 	}
 
-	r.Name = _r.Name
-	for _, permission := range _r.Permissions {
+	r.Name = role.Name
+	for _, permission := range role.Permissions {
 		r.Permissions[permission] = struct{}{}
 	}
 
