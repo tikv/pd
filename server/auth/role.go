@@ -15,7 +15,6 @@ package auth
 
 import (
 	"encoding/json"
-	"sort"
 
 	"github.com/tikv/pd/pkg/errs"
 )
@@ -27,44 +26,8 @@ const (
 // Role records role info.
 // Read-Only once created.
 type Role struct {
-	Name        string
-	Permissions map[Permission]struct{}
-}
-
-// jsonRole is used as an intermediate model when marshaling/unmarshaling json data
-// because we need to convert map[Permission]struct{} from/to []Permission first.
-type jsonRole struct {
 	Name        string       `json:"name"`
 	Permissions []Permission `json:"permissions"`
-}
-
-// MarshalJSON implements Marshaler interface.
-func (r *Role) MarshalJSON() ([]byte, error) {
-	permissions := make([]Permission, 0, len(r.Permissions))
-	for p := range r.Permissions {
-		permissions = append(permissions, p)
-	}
-	sortPermissions(permissions)
-
-	role := jsonRole{Name: r.Name, Permissions: permissions}
-	return json.Marshal(role)
-}
-
-// UnmarshalJSON implements Unmarshaler interface.
-func (r *Role) UnmarshalJSON(bytes []byte) error {
-	var role jsonRole
-
-	err := json.Unmarshal(bytes, &role)
-	if err != nil {
-		return err
-	}
-
-	r.Name = role.Name
-	for _, permission := range role.Permissions {
-		r.Permissions[permission] = struct{}{}
-	}
-
-	return nil
 }
 
 // NewRole safely creates a new role instance.
@@ -74,12 +37,12 @@ func NewRole(name string) (*Role, error) {
 		return nil, errs.ErrInvalidRoleName.FastGenByArgs(name)
 	}
 
-	return &Role{Name: name, Permissions: make(map[Permission]struct{})}, nil
+	return &Role{Name: name, Permissions: make([]Permission, 0)}, nil
 }
 
 // NewRoleFromJSON safely deserialize a json string to a role instance.
 func NewRoleFromJSON(j string) (*Role, error) {
-	role := Role{Permissions: make(map[Permission]struct{})}
+	role := Role{Permissions: make([]Permission, 0)}
 	err := json.Unmarshal([]byte(j), &role)
 	if err != nil {
 		return nil, err
@@ -104,27 +67,38 @@ func (r *Role) GetName() string {
 }
 
 // GetPermissions returns permissions of this role.
-func (r *Role) GetPermissions() map[Permission]struct{} {
+func (r *Role) GetPermissions() []Permission {
 	return r.Permissions
 }
 
 // HasPermission checks whether this user has a specific permission.
 func (r *Role) HasPermission(permission Permission) bool {
-	for p := range r.Permissions {
+	for _, p := range r.Permissions {
 		if p == permission {
 			return true
 		}
 	}
-
 	return false
 }
 
-// sortPermissions is used to ensure that identical sets of permissions always yield the same json output.
-func sortPermissions(permissions []Permission) {
-	sort.Slice(permissions, func(i, j int) bool {
-		if permissions[i].Resource != permissions[j].Resource {
-			return permissions[i].Resource < permissions[j].Resource
+// AppendPermission appends a permission to this role.
+func (r *Role) AppendPermission(permission Permission) bool {
+	if ok := r.HasPermission(permission); ok {
+		return false
+	}
+
+	r.Permissions = append(r.Permissions, permission)
+	return true
+}
+
+// RemovePermission deletes a permission from this role.
+func (r *Role) RemovePermission(permission Permission) bool {
+	for i, perm := range r.Permissions {
+		if perm == permission {
+			r.Permissions[i] = r.Permissions[len(r.Permissions)-1]
+			r.Permissions = r.Permissions[:len(r.Permissions)-1]
+			return true
 		}
-		return permissions[i].Action < permissions[j].Action
-	})
+	}
+	return false
 }

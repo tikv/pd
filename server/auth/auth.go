@@ -118,8 +118,21 @@ func (m *roleManager) DeleteRole(name string) error {
 	return nil
 }
 
+// RoleHasPermission checks whether a role has a specific permission.
+func (m *roleManager) RoleHasPermission(name string, permission Permission) (bool, error) {
+	role, err := m.GetRole(name)
+	if err != nil {
+		return false, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return role.HasPermission(permission), nil
+}
+
 // SetPermissions sets permissions of a role.
-func (m *roleManager) SetPermissions(name string, permissions map[Permission]struct{}) error {
+func (m *roleManager) SetPermissions(name string, permissions []Permission) error {
 	role, err := m.GetRole(name)
 	if err != nil {
 		return err
@@ -156,11 +169,9 @@ func (m *roleManager) AddPermission(name string, permission Permission) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := role.Permissions[permission]; ok {
+	if ok := role.AppendPermission(permission); !ok {
 		return errs.ErrRoleHasPermission.FastGenByArgs(name, permission)
 	}
-
-	role.Permissions[permission] = struct{}{}
 
 	roleJSON, err := json.Marshal(role)
 	if err != nil {
@@ -190,11 +201,9 @@ func (m *roleManager) RemovePermission(name string, permission Permission) error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := role.Permissions[permission]; !ok {
+	if ok := role.RemovePermission(permission); !ok {
 		return errs.ErrRoleMissingPermission.FastGenByArgs(name, permission)
 	}
-
-	delete(role.Permissions, permission)
 
 	roleJSON, err := json.Marshal(role)
 	if err != nil {

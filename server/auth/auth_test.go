@@ -78,11 +78,11 @@ func (s *testAuthSuite) TestRoleManager(c *C) {
 func (s *testAuthSuite) testGetRole(c *C, m *roleManager) {
 	expectedRole := Role{
 		Name: "reader",
-		Permissions: map[Permission]struct{}{
-			{Resource: "store", Action: "get"}:   {},
-			{Resource: "store", Action: "list"}:  {},
-			{Resource: "region", Action: "get"}:  {},
-			{Resource: "region", Action: "list"}: {},
+		Permissions: []Permission{
+			{Resource: "region", Action: "get"},
+			{Resource: "region", Action: "list"},
+			{Resource: "store", Action: "get"},
+			{Resource: "store", Action: "list"},
 		},
 	}
 	role, err := m.GetRole("reader")
@@ -95,31 +95,31 @@ func (s *testAuthSuite) testGetRole(c *C, m *roleManager) {
 
 func (s *testAuthSuite) testGetRoles(c *C, m *roleManager) {
 	expectedRoles := []Role{
-		{Name: "reader", Permissions: map[Permission]struct{}{
-			{Resource: "store", Action: "get"}:   {},
-			{Resource: "store", Action: "list"}:  {},
-			{Resource: "region", Action: "get"}:  {},
-			{Resource: "region", Action: "list"}: {},
+		{Name: "reader", Permissions: []Permission{
+			{Resource: "region", Action: "get"},
+			{Resource: "region", Action: "list"},
+			{Resource: "store", Action: "get"},
+			{Resource: "store", Action: "list"},
 		}},
-		{Name: "writer", Permissions: map[Permission]struct{}{
-			{Resource: "store", Action: "update"}:  {},
-			{Resource: "store", Action: "delete"}:  {},
-			{Resource: "region", Action: "update"}: {},
-			{Resource: "region", Action: "delete"}: {},
+		{Name: "writer", Permissions: []Permission{
+			{Resource: "region", Action: "delete"},
+			{Resource: "region", Action: "update"},
+			{Resource: "store", Action: "delete"},
+			{Resource: "store", Action: "update"},
 		}},
-		{Name: "admin", Permissions: map[Permission]struct{}{
-			{Resource: "store", Action: "get"}:     {},
-			{Resource: "store", Action: "list"}:    {},
-			{Resource: "store", Action: "update"}:  {},
-			{Resource: "store", Action: "delete"}:  {},
-			{Resource: "region", Action: "get"}:    {},
-			{Resource: "region", Action: "list"}:   {},
-			{Resource: "region", Action: "update"}: {},
-			{Resource: "region", Action: "delete"}: {},
-			{Resource: "users", Action: "get"}:     {},
-			{Resource: "users", Action: "list"}:    {},
-			{Resource: "users", Action: "update"}:  {},
-			{Resource: "users", Action: "delete"}:  {},
+		{Name: "admin", Permissions: []Permission{
+			{Resource: "region", Action: "delete"},
+			{Resource: "region", Action: "get"},
+			{Resource: "region", Action: "list"},
+			{Resource: "region", Action: "update"},
+			{Resource: "store", Action: "delete"},
+			{Resource: "store", Action: "get"},
+			{Resource: "store", Action: "list"},
+			{Resource: "store", Action: "update"},
+			{Resource: "users", Action: "delete"},
+			{Resource: "users", Action: "get"},
+			{Resource: "users", Action: "list"},
+			{Resource: "users", Action: "update"},
 		}},
 	}
 	roles := m.GetRoles()
@@ -138,7 +138,7 @@ func (s *testAuthSuite) testGetRoles(c *C, m *roleManager) {
 }
 
 func (s *testAuthSuite) testCreateRole(c *C, m *roleManager) {
-	expectedRole := Role{Name: "nobody", Permissions: map[Permission]struct{}{}}
+	expectedRole := Role{Name: "nobody", Permissions: []Permission{}}
 	err := m.CreateRole("reader")
 	c.Assert(err, NotNil)
 	c.Assert(errs.ErrRoleExists.Equal(err), IsTrue)
@@ -170,17 +170,17 @@ func (s *testAuthSuite) testDeleteRole(c *C, m *roleManager) {
 }
 
 func (s *testAuthSuite) testSetPermissions(c *C, m *roleManager) {
-	err := m.SetPermissions("reader", map[Permission]struct{}{
-		{Resource: "region", Action: "get"}: {},
-		{Resource: "store", Action: "list"}: {},
+	err := m.SetPermissions("reader", []Permission{
+		{Resource: "region", Action: "get"},
+		{Resource: "store", Action: "list"},
 	})
 	c.Assert(err, IsNil)
 
 	role, err := m.GetRole("reader")
 	c.Assert(err, IsNil)
-	c.Assert(role.GetPermissions(), DeepEquals, map[Permission]struct{}{
-		{Resource: "region", Action: "get"}: {},
-		{Resource: "store", Action: "list"}: {},
+	c.Assert(role.GetPermissions(), DeepEquals, []Permission{
+		{Resource: "region", Action: "get"},
+		{Resource: "store", Action: "list"},
 	})
 }
 
@@ -194,12 +194,12 @@ func (s *testAuthSuite) testAddPermission(c *C, m *roleManager) {
 
 	role, err := m.GetRole("reader")
 	c.Assert(err, IsNil)
-	c.Assert(role.GetPermissions(), DeepEquals, map[Permission]struct{}{
-		{Resource: "region", Action: "get"}:    {},
-		{Resource: "region", Action: "list"}:   {},
-		{Resource: "region", Action: "update"}: {},
-		{Resource: "store", Action: "get"}:     {},
-		{Resource: "store", Action: "list"}:    {},
+	c.Assert(role.GetPermissions(), DeepEquals, []Permission{
+		{Resource: "region", Action: "get"},
+		{Resource: "region", Action: "list"},
+		{Resource: "store", Action: "get"},
+		{Resource: "store", Action: "list"},
+		{Resource: "region", Action: "update"},
 	})
 }
 
@@ -213,10 +213,10 @@ func (s *testAuthSuite) testRemovePermission(c *C, m *roleManager) {
 
 	role, err := m.GetRole("reader")
 	c.Assert(err, IsNil)
-	c.Assert(role.GetPermissions(), DeepEquals, map[Permission]struct{}{
-		{Resource: "region", Action: "list"}: {},
-		{Resource: "store", Action: "get"}:   {},
-		{Resource: "store", Action: "list"}:  {},
+	c.Assert(role.GetPermissions(), DeepEquals, []Permission{
+		{Resource: "store", Action: "list"},
+		{Resource: "region", Action: "list"},
+		{Resource: "store", Action: "get"},
 	})
 }
 
@@ -259,10 +259,10 @@ func initKV(c *C, client *clientv3.Client, rootPath string) {
 			{Resource: "region", Action: "get"},
 			{Resource: "region", Action: "list"},
 			{Resource: "region", Action: "update"},
-			{Resource: "store", Action: "update"},
 			{Resource: "store", Action: "delete"},
 			{Resource: "store", Action: "get"},
 			{Resource: "store", Action: "list"},
+			{Resource: "store", Action: "update"},
 			{Resource: "users", Action: "delete"},
 			{Resource: "users", Action: "get"},
 			{Resource: "users", Action: "list"},
