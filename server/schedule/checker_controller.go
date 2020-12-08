@@ -16,7 +16,6 @@ package schedule
 import (
 	"context"
 
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -24,7 +23,6 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
-	"go.uber.org/zap"
 )
 
 // DefaultCacheSize is the default length of waiting list.
@@ -82,11 +80,9 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 			return []*operator.Operator{op}
 		}
 		if op := c.replicaChecker.Check(region); op != nil {
-			log.Info("stat", zap.Uint64("op-count", opController.OperatorCount(operator.OpReplica)), zap.Uint64("replica-limit", c.opts.GetReplicaScheduleLimit()))
 			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
 			}
-			log.Info("add region to replica waiting list", zap.Uint64("region-id", region.GetID()))
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	}
