@@ -18,8 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tikv/pd/pkg/movingaverage"
-
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/movingaverage"
