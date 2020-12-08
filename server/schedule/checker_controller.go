@@ -44,7 +44,7 @@ type CheckerController struct {
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
 func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, opController *OperatorController) *CheckerController {
-	regionWaitingList := cache.NewCache(DefaultCacheSize, cache.DefaultCacheType)
+	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &CheckerController{
 		cluster:           cluster,
 		opts:              cluster.GetOpts(),
