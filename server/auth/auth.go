@@ -75,7 +75,7 @@ func (m *roleManager) CreateRole(name string) error {
 
 	roleJSON, err := json.Marshal(role)
 	if err != nil {
-		return err
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
 	rolePath := path.Join(rolePrefix, name)
 
@@ -146,7 +146,7 @@ func (m *roleManager) SetPermissions(name string, permissions []Permission) erro
 	// Update role in kv
 	roleJSON, err := json.Marshal(role)
 	if err != nil {
-		return err
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
 	rolePath := path.Join(rolePrefix, name)
 
@@ -175,7 +175,7 @@ func (m *roleManager) AddPermission(name string, permission Permission) error {
 
 	roleJSON, err := json.Marshal(role)
 	if err != nil {
-		return err
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
 	rolePath := path.Join(rolePrefix, name)
 
@@ -207,7 +207,7 @@ func (m *roleManager) RemovePermission(name string, permission Permission) error
 
 	roleJSON, err := json.Marshal(role)
 	if err != nil {
-		return err
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
 	rolePath := path.Join(rolePrefix, name)
 

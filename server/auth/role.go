@@ -45,7 +45,7 @@ func NewRoleFromJSON(j string) (*Role, error) {
 	role := Role{Permissions: make([]Permission, 0)}
 	err := json.Unmarshal([]byte(j), &role)
 	if err != nil {
-		return nil, err
+		return nil, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 
 	ok := validateName(role.Name)
