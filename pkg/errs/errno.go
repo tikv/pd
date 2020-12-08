@@ -290,9 +290,10 @@ var (
 
 // auth
 var (
-	ErrRoleNotFound          = errors.Normalize("role not found: %s", errors.RFCCodeText("PD:auth:ErrRoleNotFound"))
-	ErrRoleExists            = errors.Normalize("role already exists: %s", errors.RFCCodeText("PD:auth:ErrRoleExists"))
-	ErrInvalidName           = errors.Normalize("key name may only contain alphanumeric and underscores, and may only start with an alphabetic character.", errors.RFCCodeText("PD:auth:ErrInvalidName"))
-	ErrRoleHasPermission     = errors.Normalize("role %s already has permission: %s", errors.RFCCodeText("PD:auth:ErrRoleHasPermission"))
-	ErrRoleMissingPermission = errors.Normalize("role %s doesn't have permission: %s", errors.RFCCodeText("PD:auth:ErrRoleMissingPermission"))
+	ErrInvalidPermissionAction = errors.Normalize("invalid permission action: %s", errors.RFCCodeText("PD:auth:ErrInvalidPermissionAction"))
+	ErrRoleNotFound            = errors.Normalize("role not found: %s", errors.RFCCodeText("PD:auth:ErrRoleNotFound"))
+	ErrRoleExists              = errors.Normalize("role already exists: %s", errors.RFCCodeText("PD:auth:ErrRoleExists"))
+	ErrInvalidRoleName         = errors.Normalize("role name may only contain alphanumeric and underscores, and may only start with an alphabetic character.", errors.RFCCodeText("PD:auth:ErrInvalidRoleName"))
+	ErrRoleHasPermission       = errors.Normalize("role %s already has permission: %s", errors.RFCCodeText("PD:auth:ErrRoleHasPermission"))
+	ErrRoleMissingPermission   = errors.Normalize("role %s doesn't have permission: %s", errors.RFCCodeText("PD:auth:ErrRoleMissingPermission"))
 )

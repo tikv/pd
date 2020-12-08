@@ -11,9 +11,14 @@ error = '''
 redirect failed
 '''
 
-["PD:auth:ErrInvalidName"]
+["PD:auth:ErrInvalidPermissionAction"]
 error = '''
-key name may only contain alphanumeric and underscores, and may only start with an alphabetic character.
+invalid permission action: %s
+'''
+
+["PD:auth:ErrInvalidRoleName"]
+error = '''
+role name may only contain alphanumeric and underscores, and may only start with an alphabetic character.
 '''
 
 ["PD:auth:ErrRoleExists"]

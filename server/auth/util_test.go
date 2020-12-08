@@ -23,12 +23,12 @@ var _ = Suite(&testUtilSuite{})
 type testUtilSuite struct{}
 
 func (s *testUtilSuite) TestValidateName(c *C) {
-	err := validateName("123abc")
-	c.Assert(err, NotNil)
+	ok := validateName("123abc")
+	c.Assert(ok, IsFalse)
 
-	err = validateName("fo1-/23")
-	c.Assert(err, NotNil)
+	ok = validateName("fo1-/23")
+	c.Assert(ok, IsFalse)
 
-	err = validateName("fo_o123")
-	c.Assert(err, IsNil)
+	ok = validateName("fo_o123")
+	c.Assert(ok, IsTrue)
 }

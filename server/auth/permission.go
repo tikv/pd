@@ -17,12 +17,7 @@ package auth
 import (
 	"strings"
 
-	"github.com/pingcap/errors"
-)
-
-var (
-	// ErrInvalidAction is error info for invalid action.
-	ErrInvalidAction = func(action Action) error { return errors.Errorf("invalid action: %s", action) }
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // Action represents rbac actions.
@@ -68,6 +63,6 @@ func validateAction(action Action) error {
 	case GET, LIST, CREATE, UPDATE, DELETE:
 		return nil
 	default:
-		return ErrInvalidAction(action)
+		return errs.ErrInvalidPermissionAction.FastGenByArgs(action)
 	}
 }

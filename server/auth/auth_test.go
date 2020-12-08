@@ -144,7 +144,7 @@ func (s *testAuthSuite) testCreateRole(c *C, m *roleManager) {
 	c.Assert(errs.ErrRoleExists.Equal(err), IsTrue)
 	err = m.CreateRole("!")
 	c.Assert(err, NotNil)
-	c.Assert(errs.ErrInvalidName.Equal(err), IsTrue)
+	c.Assert(errs.ErrInvalidRoleName.Equal(err), IsTrue)
 
 	_, err = m.GetRole("nobody")
 	c.Assert(err, NotNil)

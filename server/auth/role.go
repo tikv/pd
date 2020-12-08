@@ -16,10 +16,11 @@ package auth
 
 import (
 	"encoding/json"
+	"github.com/tikv/pd/pkg/errs"
 	"sort"
 )
 
-var (
+const (
 	rolePrefix = "roles"
 )
 
@@ -68,9 +69,9 @@ func (r *Role) UnmarshalJSON(bytes []byte) error {
 
 // NewRole safely creates a new role instance.
 func NewRole(name string) (*Role, error) {
-	err := validateName(name)
-	if err != nil {
-		return nil, err
+	ok := validateName(name)
+	if !ok {
+		return nil, errs.ErrInvalidRoleName.FastGenByArgs(name)
 	}
 
 	return &Role{Name: name, Permissions: make(map[Permission]struct{})}, nil
@@ -84,9 +85,9 @@ func NewRoleFromJSON(j string) (*Role, error) {
 		return nil, err
 	}
 
-	err = validateName(role.Name)
-	if err != nil {
-		return nil, err
+	ok := validateName(role.Name)
+	if !ok {
+		return nil, errs.ErrInvalidRoleName.FastGenByArgs(role.Name)
 	}
 
 	return &role, nil

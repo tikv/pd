@@ -16,17 +16,12 @@ package auth
 
 import (
 	"regexp"
-
-	"github.com/tikv/pd/pkg/errs"
 )
 
 var (
 	patName = regexp.MustCompile("^([A-Za-z])[A-Za-z0-9_]*$")
 )
 
-func validateName(name string) error {
-	if patName.MatchString(name) {
-		return nil
-	}
-	return errs.ErrInvalidName.FastGenByArgs()
+func validateName(name string) bool {
+	return patName.MatchString(name)
 }
