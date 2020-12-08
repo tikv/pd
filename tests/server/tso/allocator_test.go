@@ -16,6 +16,7 @@ package tso_test
 import (
 	"context"
 	"strconv"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -151,6 +152,23 @@ func (s *testAllocatorSuite) TestDifferentLocalTSO(c *C) {
 			return len(leaderName) > 0
 		})
 	}
+
+	// Wait for all nodes becoming healthy.
+	time.Sleep(time.Second * 5)
+
+	// Join a new dc-location
+	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = "dc-4"
+	})
+	c.Assert(err, IsNil)
+	err = pd4.Run()
+	c.Assert(err, IsNil)
+	dcLocationConfig["pd4"] = "dc-4"
+	testutil.WaitUntil(c, func(c *C) bool {
+		leaderName := cluster.WaitAllocatorLeader("dc-4")
+		return len(leaderName) > 0
+	})
 
 	for serverName, server := range cluster.GetServers() {
 		dcLocation := dcLocationConfig[serverName]

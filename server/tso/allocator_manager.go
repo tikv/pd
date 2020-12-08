@@ -150,13 +150,13 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		log.Warn("write dc-location into etcd failed",
+		log.Warn("write dc-location configuration into etcd failed",
 			zap.String("dc-location", localTSOConfig.DCLocation),
 			zap.String("server-name", serverName),
 			zap.Uint64("server-id", serverID))
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
-	log.Info("write dc-location into etcd",
+	log.Info("write dc-location configuration into etcd",
 		zap.String("dc-location", localTSOConfig.DCLocation),
 		zap.String("server-name", serverName),
 		zap.Uint64("server-id", serverID))
@@ -192,9 +192,9 @@ func (am *AllocatorManager) getClusterDCLocationsFromEtcd() (clusterDCLocations 
 	for _, kv := range resp.Kvs {
 		// The key will contain the member ID and the value is its dcLocation
 		serverPath := strings.Split(string(kv.Key), "/")
-		dcLocation := string(kv.Value)
 		// Get serverID from serverPath, e.g, /pd/dc-location/1232143243253 -> 1232143243253
 		serverID, err := strconv.ParseUint(serverPath[len(serverPath)-1], 10, 64)
+		dcLocation := string(kv.Value)
 		if err != nil {
 			log.Warn("get server id and dcLocation from etcd failed, invalid server id",
 				zap.Any("splitted-serverPath", serverPath),
