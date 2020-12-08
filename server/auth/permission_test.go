@@ -17,8 +17,9 @@ package auth
 import (
 	"encoding/json"
 
-	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/errs"
+
+	. "github.com/pingcap/check"
 )
 
 var _ = Suite(&testPermissionSuite{})

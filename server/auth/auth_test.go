@@ -16,12 +16,8 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/tempurl"
-	"github.com/tikv/pd/server/kv"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 	"io/ioutil"
 	"net/url"
 	"os"
@@ -30,7 +26,12 @@ import (
 	"strconv"
 	"testing"
 
-	"encoding/json"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/tempurl"
+	"github.com/tikv/pd/server/kv"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
+
 	. "github.com/pingcap/check"
 )
 

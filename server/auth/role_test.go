@@ -16,6 +16,7 @@ package auth
 
 import (
 	"encoding/json"
+
 	. "github.com/pingcap/check"
 )
 

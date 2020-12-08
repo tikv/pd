@@ -16,8 +16,9 @@ package auth
 
 import (
 	"encoding/json"
-	"github.com/tikv/pd/pkg/errs"
 	"sort"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 const (
