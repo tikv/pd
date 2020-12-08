@@ -63,6 +63,11 @@ type allocatorGroup struct {
 	allocator  Allocator
 }
 
+type dcLocationInfo struct {
+	serverIDs []uint64 // dc-location/global (string) -> Member ID
+	suffix    int32    // dc-location (string) -> Suffix sign (int)
+}
+
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
@@ -74,12 +79,8 @@ type AllocatorManager struct {
 		//      TSO for global transactions, such as cross-region cases.
 		//   2. Local TSO Allocator, servers for DC-level transactions.
 		// dc-location/global (string) -> TSO Allocator
-		allocatorGroups map[string]*allocatorGroup
-		// dc-location/global (string) -> Member ID
-		clusterDCLocations map[string][]uint64
-		// suffixDCLocations is a map of the dc-locations to its TSO suffix.
-		// dc-location (string) -> Suffix number (int)
-		suffixDCLocations map[string]int32
+		allocatorGroups    map[string]*allocatorGroup
+		clusterDCLocations map[string]*dcLocationInfo
 	}
 	wg sync.WaitGroup
 	// for election use
@@ -115,7 +116,7 @@ func NewAllocatorManager(
 		securityConfig:         sc,
 	}
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
-	allocatorManager.mu.suffixDCLocations = make(map[string]int32)
+	allocatorManager.mu.clusterDCLocations = make(map[string]*dcLocationInfo)
 	allocatorManager.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
 	return allocatorManager
 }
@@ -213,9 +214,9 @@ func (am *AllocatorManager) GetClusterDCLocations() map[string][]uint64 {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	dcLocationMap := make(map[string][]uint64)
-	for dcLocation, members := range am.mu.clusterDCLocations {
-		dcLocationMap[dcLocation] = make([]uint64, len(members))
-		copy(dcLocationMap[dcLocation], members)
+	for dcLocation, info := range am.mu.clusterDCLocations {
+		dcLocationMap[dcLocation] = make([]uint64, len(info.serverIDs))
+		copy(dcLocationMap[dcLocation], info.serverIDs)
 	}
 	return dcLocationMap
 }
@@ -225,8 +226,8 @@ func (am *AllocatorManager) GetSuffixDCLocations() map[string]int32 {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	suffixDCLocationMap := make(map[string]int32)
-	for dcLocation, suffixNum := range am.mu.suffixDCLocations {
-		suffixDCLocationMap[dcLocation] = suffixNum
+	for dcLocation, info := range am.mu.clusterDCLocations {
+		suffixDCLocationMap[dcLocation] = info.suffix
 	}
 	return suffixDCLocationMap
 }
@@ -509,17 +510,32 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 	if am.member.GetLeader() == nil {
 		return
 	}
-	clusterDCLocations, err := am.getClusterDCLocationsFromEtcd()
+	newClusterDCLocations, err := am.getClusterDCLocationsFromEtcd()
 	if err != nil {
 		log.Error("get cluster dc-locations from etcd failed", errs.ZapError(err))
 		return
 	}
 	am.mu.Lock()
 	defer am.mu.Unlock()
+	// Clean up the useless dc-locations
+	for dcLocation := range am.mu.clusterDCLocations {
+		if _, ok := newClusterDCLocations[dcLocation]; !ok {
+			delete(am.mu.clusterDCLocations, dcLocation)
+		}
+	}
+	// Update the new dc-locations
+	for dcLocation, serverIDs := range newClusterDCLocations {
+		if _, ok := am.mu.clusterDCLocations[dcLocation]; !ok {
+			am.mu.clusterDCLocations[dcLocation] = &dcLocationInfo{
+				serverIDs: serverIDs,
+				suffix:    -1,
+			}
+		}
+	}
 	// Only leader can write the TSO suffix to etcd in order to make it consistent in the cluster
 	if am.member.IsStillLeader() {
-		for dcLocation := range clusterDCLocations {
-			if _, exist := am.mu.clusterDCLocations[dcLocation]; exist {
+		for dcLocation, info := range am.mu.clusterDCLocations {
+			if info.suffix > 0 {
 				continue
 			}
 			suffixNum, err := am.getOrCreateLocalTSOSuffix(dcLocation)
@@ -527,10 +543,9 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 				log.Warn("get or create the local tso suffix failed", zap.String("dc-location", dcLocation), errs.ZapError(err))
 				continue
 			}
-			am.mu.suffixDCLocations[dcLocation] = suffixNum
+			am.mu.clusterDCLocations[dcLocation].suffix = suffixNum
 		}
 	}
-	am.mu.clusterDCLocations = clusterDCLocations
 }
 
 // getOrCreateLocalTSOSuffix will check whether we have the Local TSO suffix written into etcd.
@@ -566,7 +581,6 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 	localTSOSuffixKey := am.GetLocalTSOSuffixPath(dcLocation)
 	// The Local TSO suffix is determined by the joining order of this dc-location.
 	localTSOSuffixValue := strconv.FormatInt(maxSuffixNum, 10)
-	// Todo: clean up the useless dc-location suffix
 	txnResp, err := kv.NewSlowLogTxn(am.member.Client()).
 		If(clientv3.Compare(clientv3.CreateRevision(localTSOSuffixKey), "=", 0)).
 		Then(clientv3.OpPut(localTSOSuffixKey, localTSOSuffixValue)).
@@ -684,8 +698,8 @@ func (am *AllocatorManager) PriorityChecker() {
 func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	for dcLocation, serverIDs := range am.mu.clusterDCLocations {
-		if slice.AnyOf(serverIDs, func(i int) bool { return serverIDs[i] == serverID }) {
+	for dcLocation, info := range am.mu.clusterDCLocations {
+		if slice.AnyOf(info.serverIDs, func(i int) bool { return info.serverIDs[i] == serverID }) {
 			return dcLocation, nil
 		}
 	}
