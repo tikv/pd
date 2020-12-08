@@ -122,7 +122,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	}
 }
 
-func (s *testAllocatorSuite) TestLocalTSODifferent(c *C) {
+func (s *testAllocatorSuite) TestDifferentLocalTSO(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",

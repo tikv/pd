@@ -138,6 +138,10 @@ func (s *testLocalTSOSuite) testGetDcLocations(c *C, pdCli pdpb.PDClient, req *p
 	resp, err := pdCli.GetDCLocations(ctx, req)
 	c.Assert(err, IsNil)
 	sort.Strings(dcLocations)
-	sort.Strings(resp.DcLocations)
-	c.Assert(resp.DcLocations, DeepEquals, dcLocations)
+	respDCLocations := make([]string, 0, len(resp.DcLocations))
+	for dcLocation := range resp.DcLocations {
+		respDCLocations = append(respDCLocations, dcLocation)
+	}
+	sort.Strings(respDCLocations)
+	c.Assert(respDCLocations, DeepEquals, dcLocations)
 }

@@ -77,13 +77,15 @@ type AllocatorManager struct {
 		allocatorGroups map[string]*allocatorGroup
 		// dc-location/global (string) -> Member ID
 		clusterDCLocations map[string][]uint64
+		// suffixDCLocations is a map of the dc-locations to its TSO suffix.
+		// dc-location (string) -> Suffix number (int)
+		suffixDCLocations map[string]int32
 	}
 	wg sync.WaitGroup
 	// for election use
 	member *member.Member
 	// TSO config
 	rootPath               string
-	suffixNum              int64 // only leader will use this
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
 	maxResetTSGap          func() time.Duration
@@ -107,13 +109,13 @@ func NewAllocatorManager(
 	allocatorManager := &AllocatorManager{
 		member:                 m,
 		rootPath:               rootPath,
-		suffixNum:              1,
 		saveInterval:           saveInterval,
 		updatePhysicalInterval: updatePhysicalInterval,
 		maxResetTSGap:          maxResetTSGap,
 		securityConfig:         sc,
 	}
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
+	allocatorManager.mu.suffixDCLocations = make(map[string]int32)
 	allocatorManager.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
 	return allocatorManager
 }
@@ -129,7 +131,7 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 			zap.Uint64("server-id", serverID))
 		return nil
 	}
-	if err := am.checkDCLocationUpperLimit(); err != nil {
+	if err := am.checkDCLocationUpperLimit(localTSOConfig.DCLocation); err != nil {
 		log.Error("check dc-location upper limit failed",
 			zap.Int("upper-limit", int(math.Pow(2, SuffixBits))-1),
 			zap.String("dc-location", localTSOConfig.DCLocation),
@@ -162,10 +164,14 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 	return nil
 }
 
-func (am *AllocatorManager) checkDCLocationUpperLimit() error {
+func (am *AllocatorManager) checkDCLocationUpperLimit(dcLocation string) error {
 	clusterDCLocations, err := am.getClusterDCLocationsFromEtcd()
 	if err != nil {
 		return err
+	}
+	// It's ok to add a new PD to the old dc-location.
+	if _, ok := clusterDCLocations[dcLocation]; ok {
+		return nil
 	}
 	// Check whether the dc-location number meets the upper limit (2**suffixBits)
 	if len(clusterDCLocations) == int(math.Pow(2, SuffixBits))-1 {
@@ -212,6 +218,17 @@ func (am *AllocatorManager) GetClusterDCLocations() map[string][]uint64 {
 		copy(dcLocationMap[dcLocation], members)
 	}
 	return dcLocationMap
+}
+
+// GetSuffixDCLocations returns a copy of am.mu.suffixDCLocations.
+func (am *AllocatorManager) GetSuffixDCLocations() map[string]int32 {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	suffixDCLocationMap := make(map[string]int32)
+	for dcLocation, suffixNum := range am.mu.suffixDCLocations {
+		suffixDCLocationMap[dcLocation] = suffixNum
+	}
+	return suffixDCLocationMap
 }
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
@@ -275,7 +292,9 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 		default:
 		}
 
-		ok, err := am.isLeaderAwareOfDCLocation(ctx, allocator.dcLocation)
+		// Make sure the leader is aware of this new dc-location in order to make the
+		// Global TSO synchronization can cover up this dc-location.
+		ok, suffix, err := am.isLeaderAwareOfDCLocation(ctx, allocator.dcLocation)
 		if err != nil {
 			log.Error("get dc-locations from pd leader failed",
 				zap.String("dc-location", allocator.dcLocation),
@@ -287,7 +306,8 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 			log.Error("pd leader is not aware of dc-location during allocatorLeaderLoop, wait next round",
 				zap.String("dc-location", allocator.dcLocation),
 				zap.String("wait-duration", checkStep.String()))
-			// Because the checkStep is long, we use select here to check whether the ctx is done.
+			// Because the checkStep is long, we use select here to check whether the ctx is done
+			// to prevent the leak of goroutine.
 			checkTicker := time.NewTicker(checkStep)
 			defer checkTicker.Stop()
 			select {
@@ -297,8 +317,8 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 					zap.String("local-tso-allocator-name", am.member.Member().Name))
 				return
 			case <-checkTicker.C:
+				continue
 			}
-			continue
 		}
 
 		allocatorLeader, rev, checkAgain := allocator.CheckAllocatorLeader()
@@ -331,11 +351,11 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		am.campaignAllocatorLeader(ctx, allocator)
+		am.campaignAllocatorLeader(ctx, allocator, suffix)
 	}
 }
 
-func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, allocator *LocalTSOAllocator) {
+func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, allocator *LocalTSOAllocator, suffix int) {
 	log.Info("start to campaign local tso allocator leader",
 		zap.String("dc-location", allocator.dcLocation),
 		zap.String("name", am.member.Member().Name))
@@ -357,14 +377,9 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 	log.Info("initialize the local TSO allocator",
 		zap.String("dc-location", allocator.dcLocation),
 		zap.String("name", am.member.Member().Name))
-	// Try to get the Local TSO suffix for this allocator's dcLocation
-	suffix, err := am.getLocalTSOSuffix(allocator.dcLocation)
-	if err != nil {
-		log.Error("failed to get the local TSO suffix", errs.ZapError(err))
-		return
-	}
 	if err := allocator.Initialize(suffix); err != nil {
-		log.Error("failed to initialize the local TSO allocator", errs.ZapError(err))
+		log.Error("failed to initialize the local TSO allocator",
+			zap.String("dc-location", allocator.dcLocation), errs.ZapError(err))
 		return
 	}
 	allocator.EnableAllocatorLeader()
@@ -394,18 +409,6 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 			return
 		}
 	}
-}
-
-func (am *AllocatorManager) getLocalTSOSuffix(dcLocation string) (int, error) {
-	resp, err := etcdutil.EtcdKVGet(am.member.Client(), am.GetLocalTSOSuffixPath(dcLocation))
-	if err != nil {
-		return -1, err
-	}
-	suffix, err := strconv.ParseInt(string(resp.Kvs[0].Value), 10, 32)
-	if err != nil {
-		return -1, err
-	}
-	return int(suffix), nil
 }
 
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
@@ -511,38 +514,65 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 		log.Error("get cluster dc-locations from etcd failed", errs.ZapError(err))
 		return
 	}
-	// Only leader can write the TSO suffix to the etcd in order to make it consistent in the cluster
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	// Only leader can write the TSO suffix to etcd in order to make it consistent in the cluster
 	if am.member.IsStillLeader() {
-		am.mu.RLock()
 		for dcLocation := range clusterDCLocations {
 			if _, exist := am.mu.clusterDCLocations[dcLocation]; exist {
 				continue
 			}
-			if err := am.writeTSOSuffix(dcLocation, am.getIncrementingSuffixNum()); err != nil {
+			suffixNum, err := am.getOrCreateLocalTSOSuffix(dcLocation)
+			if err != nil {
+				log.Warn("get or create the local tso suffix failed", zap.String("dc-location", dcLocation), errs.ZapError(err))
 				continue
 			}
+			am.mu.suffixDCLocations[dcLocation] = suffixNum
 		}
-		am.mu.RUnlock()
 	}
-	am.mu.Lock()
 	am.mu.clusterDCLocations = clusterDCLocations
-	am.mu.Unlock()
 }
 
-// writeTSOSuffix will check whether we have the Local TSO suffix written into the etcd.
+// getOrCreateLocalTSOSuffix will check whether we have the Local TSO suffix written into etcd.
 // If not, it will write a number into etcd according to the its joining order.
-// If yes, it will just return without doing anything.
-func (am *AllocatorManager) writeTSOSuffix(dcLocation string, suffixNum int64) error {
+// If yes, it will just return the previous persisted one.
+func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32, error) {
+	// Try to get the suffix from etcd
+	resp, err := etcdutil.EtcdKVGet(
+		am.member.Client(),
+		am.GetLocalTSOSuffixPathPrefix(),
+		clientv3.WithPrefix())
+	if err != nil {
+		return -1, err
+	}
+	var maxSuffixNum int64
+	for _, kv := range resp.Kvs {
+		suffix, err := strconv.ParseInt(string(kv.Value), 10, 32)
+		if err != nil {
+			return -1, err
+		}
+		splittedKey := strings.Split(string(kv.Key), "/")
+		curDCLocation := splittedKey[len(splittedKey)-1]
+		// If we already have the suffix persistted in etcd before,
+		// just use it as the result directly.
+		if curDCLocation == dcLocation {
+			return int32(suffix), nil
+		}
+		if suffix > maxSuffixNum {
+			maxSuffixNum = suffix
+		}
+	}
+	maxSuffixNum++
 	localTSOSuffixKey := am.GetLocalTSOSuffixPath(dcLocation)
 	// The Local TSO suffix is determined by the joining order of this dc-location.
-	localTSOSuffixValue := strconv.FormatInt(suffixNum, 10)
+	localTSOSuffixValue := strconv.FormatInt(maxSuffixNum, 10)
 	// Todo: clean up the useless dc-location suffix
 	txnResp, err := kv.NewSlowLogTxn(am.member.Client()).
 		If(clientv3.Compare(clientv3.CreateRevision(localTSOSuffixKey), "=", 0)).
 		Then(clientv3.OpPut(localTSOSuffixKey, localTSOSuffixValue)).
 		Commit()
 	if err != nil {
-		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+		return -1, errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	// If the etcd txn failed, it means there is already a suffix written previously.
 	if !txnResp.Succeeded {
@@ -551,8 +581,9 @@ func (am *AllocatorManager) writeTSOSuffix(dcLocation string, suffixNum int64) e
 			zap.String("local-tso-surfix", localTSOSuffixValue),
 			zap.String("server-name", am.member.Member().Name),
 			zap.Uint64("server-id", am.member.ID()))
+		return -1, errs.ErrEtcdTxn.FastGenByArgs()
 	}
-	return nil
+	return int32(maxSuffixNum), nil
 }
 
 // GetLocalTSOSuffixPathPrefix returns the etcd key prefix of the Local TSO suffix for the given dc-location.
@@ -563,13 +594,6 @@ func (am *AllocatorManager) GetLocalTSOSuffixPathPrefix() string {
 // GetLocalTSOSuffixPath returns the etcd key of the Local TSO suffix for the given dc-location.
 func (am *AllocatorManager) GetLocalTSOSuffixPath(dcLocation string) string {
 	return path.Join(am.GetLocalTSOSuffixPathPrefix(), dcLocation)
-}
-
-func (am *AllocatorManager) getIncrementingSuffixNum() int64 {
-	defer func() {
-		am.suffixNum++
-	}()
-	return am.suffixNum
 }
 
 // PriorityChecker is used to check the election priority of a Local TSO Allocator.
@@ -818,26 +842,18 @@ func (am *AllocatorManager) getOrCreateGRPCConn(ctx context.Context, addr string
 	return conn, nil
 }
 
-func (am *AllocatorManager) isLeaderAwareOfDCLocation(ctx context.Context, dcLocation string) (bool, error) {
+func (am *AllocatorManager) isLeaderAwareOfDCLocation(ctx context.Context, dcLocation string) (bool, int, error) {
 	dcLocations, err := am.getLeaderDCLocations(ctx)
 	if err != nil {
-		return false, err
+		return false, -1, err
 	}
-	for _, dc := range dcLocations {
-		if dcLocation == dc {
-			return true, nil
-		}
-	}
-	return false, nil
+	suffix, ok := dcLocations[dcLocation]
+	return ok, int(suffix), nil
 }
 
-func (am *AllocatorManager) getLeaderDCLocations(ctx context.Context) ([]string, error) {
-	dcLocations := make([]string, 0)
+func (am *AllocatorManager) getLeaderDCLocations(ctx context.Context) (map[string]int32, error) {
 	if am.member.IsStillLeader() {
-		for dcLocation := range am.GetClusterDCLocations() {
-			dcLocations = append(dcLocations, dcLocation)
-		}
-		return dcLocations, nil
+		return am.GetSuffixDCLocations(), nil
 	}
 
 	leaderAddrs := am.member.GetLeader().GetClientUrls()

@@ -98,10 +98,10 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 
 func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 	testCase := struct {
-		dcLocationNumber int
+		dcLocations      []string
 		dcLocationConfig map[string]string
 	}{
-		dcLocationNumber: 3,
+		dcLocations: []string{"dc-1", "dc-2", "dc-3"},
 		dcLocationConfig: map[string]string{
 			"pd1": "dc-1",
 			"pd2": "dc-1",
@@ -135,9 +135,8 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 		})
 	}
 
-	for serverName, server := range cluster.GetServers() {
-		tsoAllocatorManager := server.GetTSOAllocatorManager()
-		dcLocation := testCase.dcLocationConfig[serverName]
+	tsoAllocatorManager := cluster.GetServer("pd1").GetTSOAllocatorManager()
+	for _, dcLocation := range testCase.dcLocations {
 		suffixResp, err := etcdutil.EtcdKVGet(
 			cluster.GetEtcdClient(),
 			tsoAllocatorManager.GetLocalTSOSuffixPath(dcLocation))
@@ -150,7 +149,7 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 			clientv3.WithPrefix(),
 			clientv3.WithSort(clientv3.SortByValue, clientv3.SortAscend))
 		c.Assert(err, IsNil)
-		c.Assert(len(allSuffixResp.Kvs), Equals, testCase.dcLocationNumber)
+		c.Assert(len(allSuffixResp.Kvs), Equals, len(testCase.dcLocations))
 		var lastSuffixNum int64
 		for _, kv := range allSuffixResp.Kvs {
 			suffixNum, err := strconv.ParseInt(string(kv.Value), 10, 64)
