@@ -76,9 +76,9 @@ const defaultGetLogSecond = 600 // 10 minutes
 
 // @Tags admin
 // @Summary Get logs.
-// @Param name query []string true "name"
-// @Param second query integer false "duration of getting" collectionFormat(multi)
-// @Produce text
+// @Param name query []string true "name" collectionFormat(multi)
+// @Param second query integer false "duration of getting"
+// @Produce plain
 // @Success 200 {string} string "Finished getting logs."
 // @Failure 400 {string} string "The input is invalid."
 // @Router /admin/log [get]
