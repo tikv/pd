@@ -10,7 +10,6 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 
 package auth
 
@@ -144,7 +143,6 @@ func (m *roleManager) SetPermissions(name string, permissions map[Permission]str
 	}
 
 	// No need to update role in memory cache again.
-
 	return nil
 }
 
@@ -155,12 +153,12 @@ func (m *roleManager) AddPermission(name string, permission Permission) error {
 		return err
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if _, ok := role.Permissions[permission]; ok {
 		return errs.ErrRoleHasPermission.FastGenByArgs(name, permission)
 	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	role.Permissions[permission] = struct{}{}
 
@@ -189,12 +187,12 @@ func (m *roleManager) RemovePermission(name string, permission Permission) error
 		return err
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if _, ok := role.Permissions[permission]; !ok {
 		return errs.ErrRoleMissingPermission.FastGenByArgs(name, permission)
 	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	delete(role.Permissions, permission)
 
