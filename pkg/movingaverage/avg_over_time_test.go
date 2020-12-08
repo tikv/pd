@@ -14,6 +14,7 @@
 package movingaverage
 
 import (
+	"math/rand"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -67,6 +68,10 @@ func (t *testAvgOverTimeSuite) TestChange(c *C) {
 	}
 	c.Assert(aot.Get(), LessEqual, 678.)
 	c.Assert(aot.Get(), GreaterEqual, 99.)
+
+	// clear
+	aot.Set(10)
+	c.Assert(aot.Get(), Equals, 10.)
 }
 
 func (t *testAvgOverTimeSuite) TestMinFilled(c *C) {
@@ -81,5 +86,32 @@ func (t *testAvgOverTimeSuite) TestMinFilled(c *C) {
 			}
 			c.Assert(tm.Get(), Equals, rate)
 		}
+	}
+}
+
+func (t *testAvgOverTimeSuite) TestUnstableInterval(c *C) {
+	aot := NewAvgOverTime(5 * time.Second)
+	c.Assert(aot.Get(), Equals, 0.)
+	// warm up
+	for i := 0; i < 5; i++ {
+		aot.Add(1000, time.Second)
+	}
+	// same rate, different interval
+	for i := 0; i < 1000; i++ {
+		r := float64(rand.Intn(5))
+		aot.Add(1000*r, time.Second*time.Duration(r))
+		c.Assert(aot.Get(), LessEqual, 1010.)
+		c.Assert(aot.Get(), GreaterEqual, 990.)
+	}
+	// warm up
+	for i := 0; i < 5; i++ {
+		aot.Add(500, time.Second)
+	}
+	// different rate, same interval
+	for i := 0; i < 1000; i++ {
+		rate := float64(i%5*100) + 500
+		aot.Add(rate*3, time.Second*3)
+		c.Assert(aot.Get(), LessEqual, 910.)
+		c.Assert(aot.Get(), GreaterEqual, 490.)
 	}
 }
