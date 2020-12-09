@@ -122,7 +122,8 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical, gta.allocatorManager.GetClusterDCLocationsNumber())
 	// If the maxTSO's logical part is bigger than maxLogical, just add a updateTimestampGuard
 	// to the physical time and empty the logical part. We just need to make sure it's bigger than
-	// all the other Local TSOs.
+	// all the other Local TSOs. And because the Global TSO's suffix will always be zero,
+	// so there's no need to differentiate it again here.
 	if maxTSO.GetLogical() > maxLogical {
 		maxTSO.Physical += updateTimestampGuard.Milliseconds()
 		maxTSO.Logical = 0

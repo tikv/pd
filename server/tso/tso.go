@@ -14,6 +14,7 @@
 package tso
 
 import (
+	"math"
 	"path"
 	"sync"
 	"sync/atomic"
@@ -40,7 +41,7 @@ const (
 	// the physical time will be forced to increase.
 	maxLogical = int64(1 << 18)
 	// MaxSuffixBits indicates the max number of suffix bits.
-	MaxSuffixBits = 8
+	MaxSuffixBits = 4
 )
 
 // tsoObject is used to store the current TSO in memory.
@@ -105,8 +106,8 @@ func (t *timestampOracle) generateTSO(count int64, suffixBits int) (physical int
 // to be the same at sometimes, to avoid this case, we need to use the logical part of the
 // Local TSO to do some differentiating work.
 // For example, we have three DCs: dc-1, dc-2 and dc-3. The bits of suffix is defined by
-// the const suffixBits. Then, for dc-2, the suffix may be 1 because its suffix persisted
-// in the etcd is 1.
+// the const suffixBits. Then, for dc-2, the suffix may be 1 because it's persisted
+// in etcd with the value of 1.
 // Once we get a noramal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
 // low bits of logical part from each DC looks like:
 //   global: xxxxxxxxxx00000000
@@ -316,7 +317,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 }
 
 // getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, dcLocationNum int) (pdpb.Timestamp, error) {
 	var resp pdpb.Timestamp
 
 	if count == 0 {
@@ -344,7 +345,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical = t.generateTSO(int64(count), suffixBits)
+		resp.Physical, resp.Logical = t.generateTSO(int64(count), CalSuffixBits(dcLocationNum))
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
@@ -363,6 +364,11 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 		return resp, nil
 	}
 	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
+}
+
+// CalSuffixBits calculates the bits of suffix by the number of dc-locations.
+func CalSuffixBits(dcLocationNum int) int {
+	return int(math.Ceil(math.Log2(float64(dcLocationNum))))
 }
 
 // ResetTimestamp is used to reset the timestamp in memory.
