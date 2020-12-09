@@ -161,7 +161,7 @@ type evictLeaderScheduler struct {
 // out of a store.
 func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true},
+		&filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true},
 	}
 
 	base := schedulers.NewBaseScheduler(opController)

@@ -137,7 +137,7 @@ type engineContext struct {
 }
 
 func newEngineContext(filters ...filter.Filter) engineContext {
-	filters = append(filters, filter.StoreStateFilter{ActionScope: regionScatterName})
+	filters = append(filters, &filter.StoreStateFilter{ActionScope: regionScatterName})
 	return engineContext{
 		filters:        filters,
 		selectedPeer:   newSelectedStores(true),
@@ -278,7 +278,7 @@ func (r *RegionScatterer) selectPeerToReplace(group string, stores map[uint64]*c
 func (r *RegionScatterer) collectAvailableStores(group string, region *core.RegionInfo, context engineContext) map[uint64]*core.StoreInfo {
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
-		filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
+		&filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
 	}
 	filters = append(filters, context.filters...)
 	filters = append(filters, context.selectedPeer.newFilters(r.name, group)...)
