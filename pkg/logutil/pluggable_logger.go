@@ -27,13 +27,13 @@ type PluggableLogger struct {
 }
 
 // GetName gets the pluggable logger's name.
-func (l PluggableLogger) GetName() string {
+func (l *PluggableLogger) GetName() string {
 	return l.name
 }
 
 // GetLogger gets the logger. If it is nil,
 // it means that the current related log does not need to be output.
-func (l PluggableLogger) GetLogger() *zap.Logger {
+func (l *PluggableLogger) GetLogger() *zap.Logger {
 	logger := l.logger.Load().(*zap.Logger)
 	if logger == nil {
 		return nil
@@ -49,7 +49,7 @@ func (l *PluggableLogger) SetLogger(logger *zap.Logger) {
 
 // Debug logs a message at DebugLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
-func (l PluggableLogger) Debug(msg string, fields ...zap.Field) {
+func (l *PluggableLogger) Debug(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Debug(msg, fields...)
 	}
@@ -57,7 +57,7 @@ func (l PluggableLogger) Debug(msg string, fields ...zap.Field) {
 
 // Info logs a message at InfoLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
-func (l PluggableLogger) Info(msg string, fields ...zap.Field) {
+func (l *PluggableLogger) Info(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Info(msg, fields...)
 	}
@@ -65,7 +65,7 @@ func (l PluggableLogger) Info(msg string, fields ...zap.Field) {
 
 // Warn logs a message at WarnLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
-func (l PluggableLogger) Warn(msg string, fields ...zap.Field) {
+func (l *PluggableLogger) Warn(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Warn(msg, fields...)
 	}
@@ -73,7 +73,7 @@ func (l PluggableLogger) Warn(msg string, fields ...zap.Field) {
 
 // Error logs a message at ErrorLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
-func (l PluggableLogger) Error(msg string, fields ...zap.Field) {
+func (l *PluggableLogger) Error(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Error(msg, fields...)
 	}
@@ -83,7 +83,7 @@ func (l PluggableLogger) Error(msg string, fields ...zap.Field) {
 // at the log site, as well as any fields accumulated on the logger.
 //
 // The logger then panics, even if logging at PanicLevel is disabled.
-func (l PluggableLogger) Panic(msg string, fields ...zap.Field) {
+func (l *PluggableLogger) Panic(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Panic(msg, fields...)
 	}
@@ -94,7 +94,7 @@ func (l PluggableLogger) Panic(msg string, fields ...zap.Field) {
 //
 // The logger then calls os.Exit(1), even if logging at FatalLevel is
 // disabled.
-func (l PluggableLogger) Fatal(msg string, fields ...zap.Field) {
+func (l *PluggableLogger) Fatal(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Fatal(msg, fields...)
 	}
