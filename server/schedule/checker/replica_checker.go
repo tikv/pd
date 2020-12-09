@@ -236,6 +236,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	if target == 0 {
 		reason := fmt.Sprintf("no-store-%s", status)
 		checkerCounter.WithLabelValues("replica_checker", reason).Inc()
+		r.regionWaitingList.Put(region.GetID(), nil)
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		return nil
 	}

@@ -446,6 +446,55 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	waitNoResponse(c, stream)
 }
 
+func (s *testCoordinatorSuite) TestCheckCache(c *C) {
+	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
+		// Turn off replica scheduling.
+		cfg.ReplicaScheduleLimit = 0
+	}, nil, nil, c)
+	defer cleanup()
+
+	c.Assert(tc.addRegionStore(1, 0), IsNil)
+	c.Assert(tc.addRegionStore(2, 0), IsNil)
+	c.Assert(tc.addRegionStore(3, 0), IsNil)
+
+	// Add peer to store 1 with two replicas.
+	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`), IsNil)
+
+	// case 1: operator cannot be created due to replica-schedule-limit restriction
+	co.wg.Add(1)
+	co.patrolRegions()
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+
+	// cancel the replica-schedule-limit restriction
+	opt := tc.GetOpts()
+	cfg := opt.GetScheduleConfig()
+	cfg.ReplicaScheduleLimit = 10
+	tc.GetOpts().SetScheduleConfig(cfg)
+	co.wg.Add(1)
+	co.patrolRegions()
+	oc := co.opController
+	c.Assert(len(oc.GetOperators()), Equals, 1)
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 0)
+
+	// case 2: operator cannot be created due to store limit restriction
+	oc.RemoveOperator(oc.GetOperator(1))
+	tc.SetStoreLimit(1, storelimit.AddPeer, 0)
+	co.wg.Add(1)
+	co.patrolRegions()
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+
+	// cancel the store limit restriction
+	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
+	co.wg.Add(1)
+	co.patrolRegions()
+	c.Assert(len(oc.GetOperators()), Equals, 1)
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 0)
+
+	co.wg.Wait()
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"), IsNil)
+}
+
 func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()

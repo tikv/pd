@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
@@ -148,6 +149,9 @@ func (c *coordinator) patrolRegions() {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
 		}
+		failpoint.Inject("break-patrol", func() {
+			failpoint.Break()
+		})
 	}
 }
 
@@ -216,7 +220,6 @@ func (c *coordinator) checkWaitingRegions() {
 			continue
 		}
 		ops := c.checkers.CheckRegion(region)
-
 		if len(ops) == 0 {
 			continue
 		}
