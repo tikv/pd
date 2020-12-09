@@ -52,33 +52,29 @@ type Allocator interface {
 
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalTSOAllocator struct {
+	// for global TSO synchronization
+	allocatorManager *AllocatorManager
 	// leadership is used to check the current PD server's leadership
 	// to determine whether a TSO request could be processed.
 	leadership      *election.Leadership
 	timestampOracle *timestampOracle
-	// for global TSO synchronization
-	allocatorManager *AllocatorManager
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
 func NewGlobalTSOAllocator(
 	am *AllocatorManager,
 	leadership *election.Leadership,
-	rootPath string,
-	saveInterval time.Duration,
-	updatePhysicalInterval time.Duration,
-	maxResetTSGap func() time.Duration,
 ) Allocator {
 	gta := &GlobalTSOAllocator{
-		leadership: leadership,
+		allocatorManager: am,
+		leadership:       leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
-			rootPath:               rootPath,
-			saveInterval:           saveInterval,
-			updatePhysicalInterval: updatePhysicalInterval,
-			maxResetTSGap:          maxResetTSGap,
+			rootPath:               am.rootPath,
+			saveInterval:           am.saveInterval,
+			updatePhysicalInterval: am.updatePhysicalInterval,
+			maxResetTSGap:          am.maxResetTSGap,
 		},
-		allocatorManager: am,
 	}
 	return gta
 }
@@ -112,7 +108,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
 	// No dc-locations configured in the cluster
 	if len(dcLocationMap) == 0 {
-		return gta.timestampOracle.getTS(gta.leadership, count, false)
+		return gta.timestampOracle.getTS(gta.leadership, count, 0)
 	}
 	// Send maxTS to all Local TSO Allocator leaders to prewrite
 	ctx, cancel := context.WithCancel(context.Background())
@@ -123,7 +119,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		return pdpb.Timestamp{}, err
 	}
 	maxTSO.Logical += int64(count)
-	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical)
+	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical, gta.allocatorManager.GetClusterDCLocationsNumber())
 	// If the maxTSO's logical part is bigger than maxLogical, just add a updateTimestampGuard
 	// to the physical time and empty the logical part. We just need to make sure it's bigger than
 	// all the other Local TSOs.

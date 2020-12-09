@@ -193,7 +193,7 @@ func (s *testAllocatorSuite) TestDifferentLocalTSO(c *C) {
 			c.Assert(allocator, NotNil)
 			localTSO, err := allocator.GenerateTSO(1)
 			c.Assert(err, IsNil)
-			c.Assert(suffix, Equals, localTSO.Logical&((1<<tso.SuffixBits)-1))
+			c.Assert(suffix, Equals, localTSO.Logical&((1<<tsoAllocatorManager.GetClusterDCLocationsNumber())-1))
 		}
 		// Check the Global TSO suffix
 		if serverName == server.GetLeader().Name {
@@ -202,7 +202,7 @@ func (s *testAllocatorSuite) TestDifferentLocalTSO(c *C) {
 			c.Assert(allocator, NotNil)
 			globalTSO, err := allocator.GenerateTSO(1)
 			c.Assert(err, IsNil)
-			c.Assert(int64(0), Equals, globalTSO.Logical&((1<<tso.SuffixBits)-1))
+			c.Assert(int64(0), Equals, globalTSO.Logical&((1<<tsoAllocatorManager.GetClusterDCLocationsNumber())-1))
 		}
 	}
 }

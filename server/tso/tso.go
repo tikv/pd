@@ -39,8 +39,8 @@ const (
 	// When a TSO's logical time reaches this limit,
 	// the physical time will be forced to increase.
 	maxLogical = int64(1 << 18)
-	// SuffixBits indicates the number of suffix bits
-	SuffixBits = 8
+	// MaxSuffixBits indicates the max number of suffix bits.
+	MaxSuffixBits = 8
 )
 
 // tsoObject is used to store the current TSO in memory.
@@ -86,7 +86,7 @@ func (t *timestampOracle) getTSO() (time.Time, int64) {
 }
 
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
-func (t *timestampOracle) generateTSO(count int64, needSuffix bool) (physical int64, logical int64) {
+func (t *timestampOracle) generateTSO(count int64, suffixBits int) (physical int64, logical int64) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if t.tsoMux.tso == nil {
@@ -95,8 +95,8 @@ func (t *timestampOracle) generateTSO(count int64, needSuffix bool) (physical in
 	physical = t.tsoMux.tso.physical.UnixNano() / int64(time.Millisecond)
 	t.tsoMux.tso.logical += count
 	logical = t.tsoMux.tso.logical
-	if needSuffix {
-		logical = t.differentiateLogical(logical)
+	if suffixBits > 0 && t.suffix >= 0 {
+		logical = t.differentiateLogical(logical, suffixBits)
 	}
 	return physical, logical
 }
@@ -113,8 +113,8 @@ func (t *timestampOracle) generateTSO(count int64, needSuffix bool) (physical in
 //     dc-1: xxxxxxxxxx00000001
 //     dc-2: xxxxxxxxxx00000010
 //     dc-3: xxxxxxxxxx00000011
-func (t *timestampOracle) differentiateLogical(rawLogical int64) int64 {
-	return rawLogical<<SuffixBits + int64(t.suffix)
+func (t *timestampOracle) differentiateLogical(rawLogical int64, suffixBits int) int64 {
+	return rawLogical<<suffixBits + int64(t.suffix)
 }
 
 func (t *timestampOracle) getTimestampPath() string {
@@ -316,7 +316,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 }
 
 // getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, needSuffix bool) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
 	var resp pdpb.Timestamp
 
 	if count == 0 {
@@ -344,7 +344,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, n
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical = t.generateTSO(int64(count), needSuffix)
+		resp.Physical, resp.Logical = t.generateTSO(int64(count), suffixBits)
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}

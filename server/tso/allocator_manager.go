@@ -134,7 +134,7 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 	}
 	if err := am.checkDCLocationUpperLimit(localTSOConfig.DCLocation); err != nil {
 		log.Error("check dc-location upper limit failed",
-			zap.Int("upper-limit", int(math.Pow(2, SuffixBits))-1),
+			zap.Int("upper-limit", int(math.Pow(2, MaxSuffixBits))-1),
 			zap.String("dc-location", localTSOConfig.DCLocation),
 			zap.String("server-name", serverName),
 			zap.Uint64("server-id", serverID),
@@ -174,8 +174,9 @@ func (am *AllocatorManager) checkDCLocationUpperLimit(dcLocation string) error {
 	if _, ok := clusterDCLocations[dcLocation]; ok {
 		return nil
 	}
-	// Check whether the dc-location number meets the upper limit (2**suffixBits)
-	if len(clusterDCLocations) == int(math.Pow(2, SuffixBits))-1 {
+	// Check whether the dc-location number meets the upper limit 2**(LogicalBits-1)-1,
+	// which includes 1 global and 2**(LogicalBits-1) local
+	if len(clusterDCLocations) == int(math.Pow(2, MaxSuffixBits))-1 {
 		return errs.ErrSetLocalTSOConfig.FastGenByArgs("the number of dc-location meets the upper limit")
 	}
 	return nil
@@ -221,6 +222,13 @@ func (am *AllocatorManager) GetClusterDCLocations() map[string][]uint64 {
 	return dcLocationMap
 }
 
+// GetClusterDCLocationsNumber returns the number of cluster dc-locations.
+func (am *AllocatorManager) GetClusterDCLocationsNumber() int {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return len(am.mu.clusterDCLocations)
+}
+
 // GetSuffixDCLocations returns a copy of am.mu.suffixDCLocations.
 func (am *AllocatorManager) GetSuffixDCLocations() map[string]int32 {
 	am.mu.RLock()
@@ -244,9 +252,9 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 
 	var allocator Allocator
 	if dcLocation == config.GlobalDCLocation {
-		allocator = NewGlobalTSOAllocator(am, leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
+		allocator = NewGlobalTSOAllocator(am, leadership)
 	} else {
-		allocator = NewLocalTSOAllocator(am.member, leadership, dcLocation, am.saveInterval, am.updatePhysicalInterval, am.maxResetTSGap)
+		allocator = NewLocalTSOAllocator(am, leadership, dcLocation)
 	}
 	// Update or create a new allocatorGroup
 	am.mu.allocatorGroups[dcLocation] = &allocatorGroup{
@@ -299,13 +307,15 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 		if err != nil {
 			log.Error("get dc-locations from pd leader failed",
 				zap.String("dc-location", allocator.dcLocation),
+				zap.Int("suffix", suffix),
 				errs.ZapError(err))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		if !ok {
-			log.Error("pd leader is not aware of dc-location during allocatorLeaderLoop, wait next round",
+		if !ok || suffix <= 0 {
+			log.Warn("pd leader is not aware of dc-location during allocatorLeaderLoop, wait next round",
 				zap.String("dc-location", allocator.dcLocation),
+				zap.Int("suffix", suffix),
 				zap.String("wait-duration", checkStep.String()))
 			// Because the checkStep is long, we use select here to check whether the ctx is done
 			// to prevent the leak of goroutine.
