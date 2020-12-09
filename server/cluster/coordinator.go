@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -454,21 +453,6 @@ func (c *coordinator) resetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
 }
 
-func collectStoreMetrics(rw, storeAddress, storeLabel string, storeID uint64, getStats func(storeID uint64) (string, *statistics.HotPeersStat)) {
-	typ, stat := getStats(storeID)
-	hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, strings.Join([]string{"total", rw, "bytes", typ}, "_")).Set(stat.TotalBytesRate)
-	hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, strings.Join([]string{"total", rw, "keys", typ}, "_")).Set(stat.TotalKeysRate)
-	hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, strings.Join([]string{"hot", rw, "region", typ}, "_")).Set(float64(stat.Count))
-}
-
-func collectPendings(rw, storeAddress, storeLabel string, storeID uint64, pendings map[uint64]schedulers.Influence) {
-	infl := pendings[storeID]
-	// TODO: add to tidb-ansible after merging pending influence into operator influence.
-	hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, rw+"_pending_influence_byte_rate").Set(infl.ByteRate)
-	hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, rw+"_pending_influence_key_rate").Set(infl.KeyRate)
-	hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, rw+"_pending_influence_count").Set(infl.Count)
-}
-
 func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
 	// Collects hot write region metrics.
@@ -481,26 +465,61 @@ func (c *coordinator) collectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
 	pendings := s.Scheduler.(hasHotStatus).GetWritePendingInfluence()
-	rw := "write"
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := fmt.Sprintf("%d", storeID)
-		collectStoreMetrics(rw, storeAddress, storeLabel, storeID, status.GetStoreStatAsPeer)
-		collectStoreMetrics(rw, storeAddress, storeLabel, storeID, status.GetStoreStatAsLeader)
-		collectPendings(rw, storeAddress, storeLabel, storeID, pendings)
+		stat, ok := status.AsPeer[storeID]
+		if ok {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(stat.TotalBytesRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_keys_as_peer").Set(stat.TotalKeysRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(float64(stat.Count))
+		} else {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_keys_as_peer").Set(0)
+		}
+
+		stat, ok = status.AsLeader[storeID]
+		if ok {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(stat.TotalBytesRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_keys_as_leader").Set(stat.TotalKeysRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(float64(stat.Count))
+		} else {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_keys_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(0)
+		}
+
+		infl := pendings[storeID]
+		// TODO: add to tidb-ansible after merging pending influence into operator influence.
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.ByteRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_key_rate").Set(infl.KeyRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_count").Set(infl.Count)
 	}
 
 	// Collects hot read region metrics.
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
 	pendings = s.Scheduler.(hasHotStatus).GetReadPendingInfluence()
-	rw = "read"
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := fmt.Sprintf("%d", storeID)
-		collectStoreMetrics(rw, storeAddress, storeLabel, storeID, status.GetStoreStatAsLeader)
-		collectPendings(rw, storeAddress, storeLabel, storeID, pendings)
+		stat, ok := status.AsLeader[storeID]
+		if ok {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(stat.TotalBytesRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_keys_as_leader").Set(stat.TotalKeysRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(float64(stat.Count))
+		} else {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_keys_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
+		}
+
+		infl := pendings[storeID]
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.ByteRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_key_rate").Set(infl.KeyRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_count").Set(infl.Count)
 	}
 }
 

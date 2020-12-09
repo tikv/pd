@@ -3425,7 +3425,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_write_bytes_as_leader\"}",
+              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_written_bytes_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3438,7 +3438,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Total write bytes on hot leader Regions",
+          "title": "Total written bytes on hot leader Regions",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -3617,7 +3617,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_write_bytes_as_peer\"}",
+              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_written_bytes_as_peer\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3629,7 +3629,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Total write bytes on hot peer Regions",
+          "title": "Total written bytes on hot peer Regions",
           "tooltip": {
             "shared": true,
             "sort": 0,
