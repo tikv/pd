@@ -181,7 +181,11 @@ type splitRegionsHandler struct {
 }
 
 func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error {
-	op := operator.CreateSplitRegionOperator("region-splitter", region, 0, pdpb.CheckPolicy_USEKEY, splitKeys)
+	op, err := operator.CreateSplitRegionOperator("region-splitter", region, 0, pdpb.CheckPolicy_USEKEY, splitKeys)
+	if err != nil {
+		return err
+	}
+
 	if ok := h.oc.AddOperator(op); !ok {
 		log.Warn("add region split operator failed", zap.Uint64("region-id", region.GetID()))
 		return errors.New("add region split operator failed")

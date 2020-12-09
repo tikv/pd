@@ -16,6 +16,7 @@ package schedule
 import (
 	"bytes"
 	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
