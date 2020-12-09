@@ -40,10 +40,10 @@ func (s *testRoleSuite) TestRole(c *C) {
 
 	c.Assert(role.GetName(), Equals, "test")
 	c.Assert(role.GetPermissions(), DeepEquals, []Permission{*p1, *p2})
-	c.Assert(role.AppendPermission(*p2), IsFalse)
-	c.Assert(role.AppendPermission(*p3), IsTrue)
-	c.Assert(role.HasPermission(*p3), IsTrue)
-	c.Assert(role.HasPermission(*p4), IsFalse)
+	c.Assert(role.appendPermission(*p2), IsFalse)
+	c.Assert(role.appendPermission(*p3), IsTrue)
+	c.Assert(role.hasPermission(*p3), IsTrue)
+	c.Assert(role.hasPermission(*p4), IsFalse)
 
 	c.Assert(role.Clone(), DeepEquals, role)
 
@@ -59,9 +59,9 @@ func (s *testRoleSuite) TestRole(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(unmarshalledRole, DeepEquals, role)
 
-	c.Assert(role.RemovePermission(*p4), IsFalse)
-	c.Assert(role.RemovePermission(*p1), IsTrue)
-	c.Assert(role.RemovePermission(*p2), IsTrue)
-	c.Assert(role.RemovePermission(*p3), IsTrue)
+	c.Assert(role.removePermission(*p4), IsFalse)
+	c.Assert(role.removePermission(*p1), IsTrue)
+	c.Assert(role.removePermission(*p2), IsTrue)
+	c.Assert(role.removePermission(*p3), IsTrue)
 	c.Assert(role.GetPermissions(), DeepEquals, []Permission{})
 }

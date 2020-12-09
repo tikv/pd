@@ -128,7 +128,7 @@ func (m *roleManager) RoleHasPermission(name string, permission Permission) (boo
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return role.HasPermission(permission), nil
+	return role.hasPermission(permission), nil
 }
 
 // SetPermissions sets permissions of a role.
@@ -169,7 +169,7 @@ func (m *roleManager) AddPermission(name string, permission Permission) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if ok := role.AppendPermission(permission); !ok {
+	if ok := role.appendPermission(permission); !ok {
 		return errs.ErrRoleHasPermission.FastGenByArgs(name, permission)
 	}
 
@@ -201,7 +201,7 @@ func (m *roleManager) RemovePermission(name string, permission Permission) error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if ok := role.RemovePermission(permission); !ok {
+	if ok := role.removePermission(permission); !ok {
 		return errs.ErrRoleMissingPermission.FastGenByArgs(name, permission)
 	}
 

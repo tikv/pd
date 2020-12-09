@@ -71,8 +71,8 @@ func (r *Role) GetPermissions() []Permission {
 	return r.Permissions
 }
 
-// HasPermission checks whether this user has a specific permission.
-func (r *Role) HasPermission(permission Permission) bool {
+// hasPermission checks whether this user has a specific permission.
+func (r *Role) hasPermission(permission Permission) bool {
 	for _, p := range r.Permissions {
 		if p == permission {
 			return true
@@ -81,9 +81,9 @@ func (r *Role) HasPermission(permission Permission) bool {
 	return false
 }
 
-// AppendPermission appends a permission to this role.
-func (r *Role) AppendPermission(permission Permission) bool {
-	if ok := r.HasPermission(permission); ok {
+// appendPermission appends a permission to this role.
+func (r *Role) appendPermission(permission Permission) bool {
+	if ok := r.hasPermission(permission); ok {
 		return false
 	}
 
@@ -91,8 +91,8 @@ func (r *Role) AppendPermission(permission Permission) bool {
 	return true
 }
 
-// RemovePermission deletes a permission from this role.
-func (r *Role) RemovePermission(permission Permission) bool {
+// removePermission deletes a permission from this role.
+func (r *Role) removePermission(permission Permission) bool {
 	for i, perm := range r.Permissions {
 		if perm == permission {
 			r.Permissions[i] = r.Permissions[len(r.Permissions)-1]
