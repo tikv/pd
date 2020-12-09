@@ -164,7 +164,7 @@ func SetLastPersistTime(lastPersist time.Time) StoreCreateOption {
 // SetStoreStats sets the statistics information for the store.
 func SetStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.stats = stats
+		store.storeStats.updateRawStats(stats)
 	}
 }
 
