@@ -20,7 +20,6 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -35,8 +34,8 @@ const (
 
 // StoreInfo contains information about a store.
 type StoreInfo struct {
-	meta                *metapb.Store
-	stats               *pdpb.StoreStats
+	meta *metapb.Store
+	*storeStats
 	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
 	leaderCount         int
 	regionCount         int
@@ -53,7 +52,7 @@ type StoreInfo struct {
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{
 		meta:         store,
-		stats:        &pdpb.StoreStats{},
+		storeStats:   newStoreStats(),
 		leaderWeight: 1.0,
 		regionWeight: 1.0,
 	}
@@ -68,7 +67,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	meta := proto.Clone(s.meta).(*metapb.Store)
 	store := &StoreInfo{
 		meta:                meta,
-		stats:               s.stats,
+		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
@@ -91,7 +90,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
 		meta:                s.meta,
-		stats:               s.stats,
+		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
@@ -172,66 +171,6 @@ func (s *StoreInfo) GetLabels() []*metapb.StoreLabel {
 // GetID returns the ID of the store.
 func (s *StoreInfo) GetID() uint64 {
 	return s.meta.GetId()
-}
-
-// GetStoreStats returns the statistics information of the store.
-func (s *StoreInfo) GetStoreStats() *pdpb.StoreStats {
-	return s.stats
-}
-
-// GetCapacity returns the capacity size of the store.
-func (s *StoreInfo) GetCapacity() uint64 {
-	return s.stats.GetCapacity()
-}
-
-// GetAvailable returns the available size of the store.
-func (s *StoreInfo) GetAvailable() uint64 {
-	return s.stats.GetAvailable()
-}
-
-// GetUsedSize returns the used size of the store.
-func (s *StoreInfo) GetUsedSize() uint64 {
-	return s.stats.GetUsedSize()
-}
-
-// GetBytesWritten returns the bytes written for the store during this period.
-func (s *StoreInfo) GetBytesWritten() uint64 {
-	return s.stats.GetBytesWritten()
-}
-
-// GetBytesRead returns the bytes read for the store during this period.
-func (s *StoreInfo) GetBytesRead() uint64 {
-	return s.stats.GetBytesRead()
-}
-
-// GetKeysWritten returns the keys written for the store during this period.
-func (s *StoreInfo) GetKeysWritten() uint64 {
-	return s.stats.GetKeysWritten()
-}
-
-// GetKeysRead returns the keys read for the store during this period.
-func (s *StoreInfo) GetKeysRead() uint64 {
-	return s.stats.GetKeysRead()
-}
-
-// IsBusy returns if the store is busy.
-func (s *StoreInfo) IsBusy() bool {
-	return s.stats.GetIsBusy()
-}
-
-// GetSendingSnapCount returns the current sending snapshot count of the store.
-func (s *StoreInfo) GetSendingSnapCount() uint32 {
-	return s.stats.GetSendingSnapCount()
-}
-
-// GetReceivingSnapCount returns the current receiving snapshot count of the store.
-func (s *StoreInfo) GetReceivingSnapCount() uint32 {
-	return s.stats.GetReceivingSnapCount()
-}
-
-// GetApplyingSnapCount returns the current applying snapshot count of the store.
-func (s *StoreInfo) GetApplyingSnapCount() uint32 {
-	return s.stats.GetApplyingSnapCount()
 }
 
 // GetLeaderCount returns the leader count of the store.
