@@ -19,6 +19,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -41,7 +42,7 @@ func (s *testRuleCheckerSuite) SetUpTest(c *C) {
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.cluster.SetEnablePlacementRules(true)
 	s.ruleManager = s.cluster.RuleManager
-	s.rc = NewRuleChecker(s.cluster, s.ruleManager)
+	s.rc = NewRuleChecker(s.cluster, s.ruleManager, cache.NewDefaultCache(10))
 }
 
 func (s *testRuleCheckerSuite) TestFixRange(c *C) {
