@@ -457,7 +457,7 @@ func (s *testCoordinatorSuite) TestCheckCache(c *C) {
 	c.Assert(tc.addRegionStore(2, 0), IsNil)
 	c.Assert(tc.addRegionStore(3, 0), IsNil)
 
-	// Add peer to store 1 with two replicas.
+	// Add a peer with two replicas.
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`), IsNil)
 
