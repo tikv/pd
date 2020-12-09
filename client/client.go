@@ -56,6 +56,10 @@ type Client interface {
 	GetLocalTS(ctx context.Context, dcLocation string) (int64, int64, error)
 	// GetLocalTSAsync gets a local timestamp from PD, without block the caller.
 	GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture
+	// GetLastTS gets the last timestamp given by GetTS.
+	GetLastTS(ctx context.Context) (int64, int64, error)
+	// GetLastLocalTS gets the last timestamp given by GetLastLocalTS.
+	GetLastLocalTS(ctx context.Context, dcLocation string) (int64, int64, error)
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -638,9 +642,24 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	return resp.Wait()
 }
 
+func (c *client) GetLastTS(ctx context.Context) (physical int64, logical int64, err error) {
+	return c.GetLastLocalTS(ctx, globalDCLocation)
+}
+
 func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
 	resp := c.GetLocalTSAsync(ctx, dcLocation)
 	return resp.Wait()
+}
+
+func (c *client) GetLastLocalTS(ctx context.Context, dcLocation string) (int64, int64, error) {
+	lastTSOInterface, ok := c.lastTSMap.Load(dcLocation)
+	if !ok {
+		err := fmt.Errorf("func GetLastLocalTS fail : get last local TS before get first TS or something wrong happen")
+		log.Error(err.Error(), zap.String("dc-location", dcLocation), errs.ZapError(err))
+		return 0, 0, err
+	}
+	lastTSOPointer := lastTSOInterface.(*lastTSO)
+	return lastTSOPointer.physical, lastTSOPointer.logical, nil
 }
 
 func (c *client) parseRegionResponse(res *pdpb.GetRegionResponse) *Region {

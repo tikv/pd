@@ -527,6 +527,39 @@ func (s *testClientSuite) TestTSO(c *C) {
 	}
 }
 
+func (s *testClientSuite) TestLastTSO(c *C) {
+	_, _, err := s.client.GetLastTS(context.Background())
+	c.Assert(err, NotNil)
+
+	p0, l0, err := s.client.GetTS(context.Background())
+	c.Assert(err, IsNil)
+
+	p0Last, l0Last, err := s.client.GetLastTS(context.Background())
+	c.Assert(err, IsNil)
+
+	c.Assert(p0, Equals, p0Last)
+	c.Assert(l0, Equals, l0Last)
+
+	p0, l0, err = s.client.GetTS(context.Background())
+	c.Assert(err, IsNil)
+
+	p0Last, l0Last, err = s.client.GetLastTS(context.Background())
+	c.Assert(err, IsNil)
+
+	c.Assert(p0, Equals, p0Last)
+	c.Assert(l0, Equals, l0Last)
+
+	var p, l int64
+	for i := 0; i < 100; i++ {
+		p, l, err = s.client.GetTS(context.Background())
+		c.Assert(err, IsNil)
+	}
+	pLast, lLast, err := s.client.GetLastTS(context.Background())
+	c.Assert(err, IsNil)
+	c.Assert(p, Equals, pLast)
+	c.Assert(l, Equals, lLast)
+}
+
 func (s *testClientSuite) TestTSORace(c *C) {
 	var wg sync.WaitGroup
 	begin := make(chan struct{})
