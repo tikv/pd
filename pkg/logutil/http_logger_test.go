@@ -15,11 +15,11 @@ package logutil
 
 import (
 	"bytes"
-	"go.uber.org/zap"
 	"net/http"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 var _ = Suite(&testHTTPLoggerSuite{})

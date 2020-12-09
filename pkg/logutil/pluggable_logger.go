@@ -47,36 +47,53 @@ func (l *PluggableLogger) SetLogger(logger *zap.Logger) {
 	l.logger.Store(logger)
 }
 
+// Debug logs a message at DebugLevel. The message includes any fields passed
+// at the log site, as well as any fields accumulated on the logger.
 func (l PluggableLogger) Debug(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Debug(msg, fields...)
 	}
 }
 
+// Info logs a message at InfoLevel. The message includes any fields passed
+// at the log site, as well as any fields accumulated on the logger.
 func (l PluggableLogger) Info(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Info(msg, fields...)
 	}
 }
 
+// Warn logs a message at WarnLevel. The message includes any fields passed
+// at the log site, as well as any fields accumulated on the logger.
 func (l PluggableLogger) Warn(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Warn(msg, fields...)
 	}
 }
 
+// Error logs a message at ErrorLevel. The message includes any fields passed
+// at the log site, as well as any fields accumulated on the logger.
 func (l PluggableLogger) Error(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Error(msg, fields...)
 	}
 }
 
+// Panic logs a message at PanicLevel. The message includes any fields passed
+// at the log site, as well as any fields accumulated on the logger.
+//
+// The logger then panics, even if logging at PanicLevel is disabled.
 func (l PluggableLogger) Panic(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Panic(msg, fields...)
 	}
 }
 
+// Fatal logs a message at FatalLevel. The message includes any fields passed
+// at the log site, as well as any fields accumulated on the logger.
+//
+// The logger then calls os.Exit(1), even if logging at FatalLevel is
+// disabled.
 func (l PluggableLogger) Fatal(msg string, fields ...zap.Field) {
 	if logger := l.GetLogger(); logger != nil {
 		logger.Fatal(msg, fields...)
