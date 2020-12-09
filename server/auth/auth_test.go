@@ -14,22 +14,13 @@
 package auth
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
-	"io/ioutil"
-	"net/url"
-	"os"
 	"path"
 	"reflect"
-	"strconv"
 	"testing"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/tempurl"
 	"github.com/tikv/pd/server/kv"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 
 	. "github.com/pingcap/check"
 )
@@ -44,20 +35,6 @@ type testAuthSuite struct{}
 type testFunc func(*C, *roleManager)
 
 func (s *testAuthSuite) TestRoleManager(c *C) {
-	cfg := newTestSingleConfig()
-	defer cleanConfig(cfg)
-	etcd, err := embed.StartEtcd(cfg)
-	c.Assert(err, IsNil)
-	defer etcd.Close()
-
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	c.Assert(err, IsNil)
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-
-	manager := newRoleManager(kv.NewEtcdKVBase(client, rootPath))
 	testFuncs := []testFunc{
 		s.testGetRole,
 		s.testGetRoles,
@@ -68,8 +45,10 @@ func (s *testAuthSuite) TestRoleManager(c *C) {
 		s.testRemovePermission,
 	}
 	for _, f := range testFuncs {
-		initKV(c, client, rootPath)
-		err = manager.UpdateCache()
+		k := kv.NewMemoryKV()
+		initKV(c, k)
+		manager := newRoleManager(k)
+		err := manager.UpdateCache()
 		c.Assert(err, IsNil)
 		f(c, manager)
 	}
@@ -220,12 +199,7 @@ func (s *testAuthSuite) testRemovePermission(c *C, m *roleManager) {
 	})
 }
 
-func initKV(c *C, client *clientv3.Client, rootPath string) {
-	_, err := client.Delete(context.TODO(), rootPath, clientv3.WithPrefix())
-	c.Assert(err, IsNil)
-
-	rolePrefix := path.Join(rootPath, "roles")
-
+func initKV(c *C, k kv.Base) {
 	roles := []struct {
 		Name        string `json:"name"`
 		Permissions []struct {
@@ -272,33 +246,7 @@ func initKV(c *C, client *clientv3.Client, rootPath string) {
 	for _, role := range roles {
 		value, err := json.Marshal(role)
 		c.Assert(err, IsNil)
-		_, err = client.Put(context.TODO(), path.Join(rolePrefix, role.Name), string(value))
+		err = k.Save(path.Join(rolePrefix, role.Name), string(value))
 		c.Assert(err, IsNil)
 	}
-}
-
-func newTestSingleConfig() *embed.Config {
-	cfg := embed.NewConfig()
-	cfg.Name = "test_etcd"
-	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_etcd")
-	cfg.WalDir = ""
-	cfg.Logger = "zap"
-	cfg.LogOutputs = []string{"stdout"}
-
-	pu, _ := url.Parse(tempurl.Alloc())
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
-	cu, _ := url.Parse(tempurl.Alloc())
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
-
-	cfg.StrictReconfigCheck = false
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
-	cfg.ClusterState = embed.ClusterStateFlagNew
-	return cfg
-}
-
-func cleanConfig(cfg *embed.Config) {
-	// Clean data directory
-	_ = os.RemoveAll(cfg.Dir)
 }
