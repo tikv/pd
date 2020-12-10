@@ -654,8 +654,9 @@ func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical in
 func (c *client) GetLastLocalTS(ctx context.Context, dcLocation string) (int64, int64, error) {
 	lastTSOInterface, ok := c.lastTSMap.Load(dcLocation)
 	if !ok {
-		err := fmt.Errorf("func GetLastLocalTS fail : get last local TS before get first TS or something wrong happen")
-		log.Error(err.Error(), zap.String("dc-location", dcLocation), errs.ZapError(err))
+		err := errors.New("func GetLastLocalTS fail : get last local TS before get first TS or something wrong happen")
+		log.Error("[pd] get last local TS before get first TS or something wrong happen", zap.String("dc-location", dcLocation), errs.ZapError(err))
+
 		return 0, 0, err
 	}
 	lastTSOPointer := lastTSOInterface.(*lastTSO)
