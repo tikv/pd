@@ -31,11 +31,10 @@ type HTTPLogger struct {
 // NewHTTPLogger returns a HTTPLogger.
 func NewHTTPLogger(conf *log.Config, w http.ResponseWriter) (*HTTPLogger, error) {
 	syncer := zapcore.AddSync(w)
-	logger, props, err := log.InitLoggerWithWriteSyncer(conf, syncer, zap.AddStacktrace(zapcore.FatalLevel))
+	logger, _, err := log.InitLoggerWithWriteSyncer(conf, syncer, zap.AddStacktrace(zapcore.FatalLevel))
 	if err != nil {
 		return nil, err
 	}
-	props.Level.SetLevel(zapcore.DebugLevel)
 	return &HTTPLogger{
 		writer:         w,
 		logger:         logger,
