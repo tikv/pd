@@ -329,8 +329,8 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	for _, peer := range li.HotPeers {
 		if peer.HotDegree > 0 {
 			peers = append(peers, *peer.Clone())
-      totalBytesRate += peer.ByteRate
-      totalKeysRate += peer.KeyRate
+			totalBytesRate += peer.ByteRate
+			totalKeysRate += peer.KeyRate
 		}
 	}
 	return &statistics.HotPeersStat{
