@@ -58,6 +58,8 @@ type Client interface {
 	GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture
 	// GetLastTS gets the last timestamp given by GetTS.
 	GetLastTS(ctx context.Context) (int64, int64, error)
+	// GetLastTSAndNow gets the last timestamp and new timestamp given by GetTS.
+	GetLastTSAndNow(ctx context.Context) (int64, int64, int64, int64, error)
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -649,6 +651,21 @@ func (c *client) GetLastTS(ctx context.Context) (physical int64, logical int64, 
 	}
 	lastTSOPointer := lastTSOInterface.(*lastTSO)
 	return lastTSOPointer.physical, lastTSOPointer.logical, nil
+}
+
+func (c *client) GetLastTSAndNow(ctx context.Context) (
+	lastPhysical int64, lastLogical int64, physicalNow int64, logicalNow int64, err error) {
+	lastPhysical, lastLogical, err = c.GetLastTS(ctx)
+	if err != nil {
+		log.Error("[pd] can't get last ts", zap.String("dc-location", globalDCLocation), errs.ZapError(err))
+		return 0, 0, 0, 0, err
+	}
+	physicalNow, logicalNow, err = c.GetTS(ctx)
+	if err != nil {
+		log.Error("[pd] can't get ts", zap.String("dc-location", globalDCLocation), errs.ZapError(err))
+		return 0, 0, 0, 0, err
+	}
+	return lastPhysical, lastLogical, physicalNow, logicalNow, nil
 }
 
 func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
