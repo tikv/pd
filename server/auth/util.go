@@ -14,12 +14,30 @@
 package auth
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"regexp"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 var (
 	patName = regexp.MustCompile("^([A-Za-z])[A-Za-z0-9_]*$")
 )
+
+func compareHashAndPassword(hash string, password string) error {
+	hashFromPlain := GenerateHash(password)
+	if hash == hashFromPlain {
+		return nil
+	}
+	return errs.ErrPasswordMismatch.FastGenByArgs()
+}
+
+// GenerateHash generates hash for a given password.
+func GenerateHash(password string) string {
+	hashFromPassword := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(hashFromPassword[:])
+}
 
 func validateName(name string) bool {
 	return patName.MatchString(name)

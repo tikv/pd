@@ -21,6 +21,16 @@ error = '''
 role name may only contain alphanumeric and underscores, and may only start with an alphabetic character.
 '''
 
+["PD:auth:ErrInvalidUserName"]
+error = '''
+user name may only contain alphanumeric and underscores, and may only start with an alphabetic character.
+'''
+
+["PD:auth:ErrPasswordMismatch"]
+error = '''
+given password doesn't match the hash
+'''
+
 ["PD:auth:ErrRoleExists"]
 error = '''
 role already exists: %s
@@ -39,6 +49,26 @@ role %s doesn't have permission: %s
 ["PD:auth:ErrRoleNotFound"]
 error = '''
 role not found: %s
+'''
+
+["PD:auth:ErrUserExists"]
+error = '''
+user already exists: %s
+'''
+
+["PD:auth:ErrUserHasPermission"]
+error = '''
+role %s already has permission: %s
+'''
+
+["PD:auth:ErrUserMissingPermission"]
+error = '''
+role %s doesn't have permission: %s
+'''
+
+["PD:auth:ErrUserNotFound"]
+error = '''
+user not found: %s
 '''
 
 ["PD:autoscaling:ErrEmptyMetricsResponse"]

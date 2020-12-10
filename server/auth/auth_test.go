@@ -32,10 +32,11 @@ func Test(t *testing.T) {
 var _ = Suite(&testAuthSuite{})
 
 type testAuthSuite struct{}
-type testFunc func(*C, *roleManager)
+type testUserFunc func(*C, *userManager)
+type testRoleFunc func(*C, *roleManager)
 
 func (s *testAuthSuite) TestRoleManager(c *C) {
-	testFuncs := []testFunc{
+	testFuncs := []testRoleFunc{
 		s.testGetRole,
 		s.testGetRoles,
 		s.testCreateRole,
@@ -52,6 +53,156 @@ func (s *testAuthSuite) TestRoleManager(c *C) {
 		c.Assert(err, IsNil)
 		f(c, manager)
 	}
+}
+
+func (s *testAuthSuite) TestUserManager(c *C) {
+	testFuncs := []testUserFunc{
+		s.testGetUser,
+		s.testGetUsers,
+		s.testCreateUser,
+		s.testDeleteUser,
+		s.testChangePassword,
+		s.testSetRoles,
+		s.testAddRole,
+		s.testRemoveRole,
+	}
+	for _, f := range testFuncs {
+		k := kv.NewMemoryKV()
+		initKV(c, k)
+		manager := newUserManager(k)
+		err := manager.UpdateCache()
+		c.Assert(err, IsNil)
+		f(c, manager)
+	}
+}
+
+func (s *testAuthSuite) testGetUser(c *C, m *userManager) {
+	expectedUser := User{
+		Username: "bob",
+		Hash:     "da7655b5bf67039c3e76a99d8e6fb6969370bbc0fa440cae699cf1a3e2f1e0a1",
+		RoleKeys: []string{"reader", "writer"},
+	}
+	user, err := m.GetUser("bob")
+	c.Assert(err, IsNil)
+	c.Assert(user, DeepEquals, &expectedUser)
+	_, err = m.GetUser("john")
+	c.Assert(err, NotNil)
+	c.Assert(errs.ErrUserNotFound.Equal(err), IsTrue)
+}
+
+func (s *testAuthSuite) testGetUsers(c *C, m *userManager) {
+	expectedUsers := []User{
+		{
+			Username: "alice",
+			Hash:     "13dc8554575637802eec3c0117f41591a990e1a2d37160018c48c9125063838a",
+			RoleKeys: []string{"reader"}},
+		{
+			Username: "bob",
+			Hash:     "da7655b5bf67039c3e76a99d8e6fb6969370bbc0fa440cae699cf1a3e2f1e0a1",
+			RoleKeys: []string{"reader", "writer"}},
+		{
+			Username: "lambda",
+			Hash:     "f9f967e71dff16bd5ce92e62d50140503a3ce399f294b1848adb210149bc1fd0",
+			RoleKeys: []string{"admin"},
+		},
+	}
+	users := m.GetUsers()
+	c.Assert(len(users), Equals, 3)
+	for _, user := range users {
+		hasUser := false
+		for _, expectedUser := range expectedUsers {
+			if user.Username == expectedUser.Username &&
+				user.Hash == expectedUser.Hash &&
+				reflect.DeepEqual(user.RoleKeys, expectedUser.RoleKeys) {
+				hasUser = true
+				break
+			}
+		}
+		c.Assert(hasUser, IsTrue)
+	}
+}
+
+func (s *testAuthSuite) testCreateUser(c *C, m *userManager) {
+	expectedUser := User{Username: "jane", Hash: "100e060425c270b01138bc4ed9b498897d2ec525baa766d9a57004b318e99e19", RoleKeys: []string{}}
+	err := m.CreateUser("bob", "bobpass")
+	c.Assert(err, NotNil)
+	c.Assert(errs.ErrUserExists.Equal(err), IsTrue)
+	err = m.CreateUser("!", "!pass")
+	c.Assert(err, NotNil)
+	c.Assert(errs.ErrInvalidUserName.Equal(err), IsTrue)
+
+	_, err = m.GetUser("jane")
+	c.Assert(err, NotNil)
+	c.Assert(errs.ErrUserNotFound.Equal(err), IsTrue)
+	err = m.CreateUser("jane", "janepass")
+	c.Assert(err, IsNil)
+	user, err := m.GetUser("jane")
+	c.Assert(err, IsNil)
+	c.Assert(user, DeepEquals, &expectedUser)
+}
+
+func (s *testAuthSuite) testDeleteUser(c *C, m *userManager) {
+	err := m.DeleteUser("john")
+	c.Assert(err, NotNil)
+	c.Assert(errs.ErrUserNotFound.Equal(err), IsTrue)
+
+	err = m.DeleteUser("alice")
+	c.Assert(err, IsNil)
+	err = m.DeleteUser("alice")
+	c.Assert(err, NotNil)
+	c.Assert(errs.ErrUserNotFound.Equal(err), IsTrue)
+}
+
+func (s *testAuthSuite) testChangePassword(c *C, m *userManager) {
+	err := m.ChangePassword("john", "johnpass")
+	c.Assert(err, NotNil)
+	c.Assert(errs.ErrUserNotFound.Equal(err), IsTrue)
+
+	user, err := m.GetUser("alice")
+	c.Assert(err, IsNil)
+	c.Assert(user.ComparePassword("alicepass"), IsNil)
+
+	err = m.ChangePassword("alice", "testpass")
+	c.Assert(err, IsNil)
+
+	user, err = m.GetUser("alice")
+	c.Assert(err, IsNil)
+	c.Assert(user.ComparePassword("testpass"), IsNil)
+}
+
+func (s *testAuthSuite) testSetRoles(c *C, m *userManager) {
+	err := m.SetRoles("alice", []string{"writer", "admin"})
+	c.Assert(err, IsNil)
+
+	user, err := m.GetUser("alice")
+	c.Assert(err, IsNil)
+	c.Assert(user.GetRoleKeys(), DeepEquals, []string{"writer", "admin"})
+}
+
+func (s *testAuthSuite) testAddRole(c *C, m *userManager) {
+	err := m.AddRole("alice", "reader")
+	c.Assert(err, NotNil)
+	c.Assert(errs.ErrUserHasRole.Equal(err), IsTrue)
+
+	err = m.AddRole("alice", "writer")
+	c.Assert(err, IsNil)
+
+	user, err := m.GetUser("alice")
+	c.Assert(err, IsNil)
+	c.Assert(user.GetRoleKeys(), DeepEquals, []string{"reader", "writer"})
+}
+
+func (s *testAuthSuite) testRemoveRole(c *C, m *userManager) {
+	err := m.RemoveRole("alice", "writer")
+	c.Assert(err, NotNil)
+	c.Assert(errs.ErrUserMissingRole.Equal(err), IsTrue)
+
+	err = m.RemoveRole("alice", "reader")
+	c.Assert(err, IsNil)
+
+	user, err := m.GetUser("alice")
+	c.Assert(err, IsNil)
+	c.Assert(user.GetRoleKeys(), DeepEquals, []string{})
 }
 
 func (s *testAuthSuite) testGetRole(c *C, m *roleManager) {
@@ -243,10 +394,34 @@ func initKV(c *C, k kv.Base) {
 			{Resource: "users", Action: "update"},
 		}},
 	}
+	users := []struct {
+		Username string   `json:"username"`
+		Hash     string   `json:"hash"`
+		Roles    []string `json:"roles"`
+	}{
+		{
+			Username: "alice",
+			Hash:     "13dc8554575637802eec3c0117f41591a990e1a2d37160018c48c9125063838a", // pass: alicepass
+			Roles:    []string{"reader"}},
+		{
+			Username: "bob",
+			Hash:     "da7655b5bf67039c3e76a99d8e6fb6969370bbc0fa440cae699cf1a3e2f1e0a1", // pass: bobpass
+			Roles:    []string{"reader", "writer"}},
+		{
+			Username: "lambda",
+			Hash:     "f9f967e71dff16bd5ce92e62d50140503a3ce399f294b1848adb210149bc1fd0", // pass: lambdapass
+			Roles:    []string{"admin"}},
+	}
 	for _, role := range roles {
 		value, err := json.Marshal(role)
 		c.Assert(err, IsNil)
 		err = k.Save(path.Join(rolePrefix, role.Name), string(value))
+		c.Assert(err, IsNil)
+	}
+	for _, user := range users {
+		value, err := json.Marshal(user)
+		c.Assert(err, IsNil)
+		err = k.Save(path.Join(userPrefix, user.Username), string(value))
 		c.Assert(err, IsNil)
 	}
 }

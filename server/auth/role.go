@@ -19,10 +19,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-const (
-	rolePrefix = "roles"
-)
-
 // Role records role info.
 // Read-Only once created.
 type Role struct {

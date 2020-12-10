@@ -21,6 +21,19 @@ var _ = Suite(&testUtilSuite{})
 
 type testUtilSuite struct{}
 
+func (s *testUtilSuite) TestGenerateHash(c *C) {
+	hash := GenerateHash("ItsaCrazilysEcurepass")
+	c.Assert(hash, Equals, "a0705ec8c6c0dab42344570b50608935174f84b5c365e9ff2b3ed92e0fc8e037")
+}
+
+func (s *testUtilSuite) TestCompareHashAndPasswordSuite(c *C) {
+	err := compareHashAndPassword("a0705ec8c6c0dab42344570b50608935174f84b5c365e9ff2b3ed92e0fc8e037", "ItsaCrazilysEcurepass")
+	c.Assert(err, IsNil)
+
+	err = compareHashAndPassword("a0705ec8c6c0dab42344570b50608935174f84b5c365e9ff2b3ed92e0fc8e037", "blablabla")
+	c.Assert(err, NotNil)
+}
+
 func (s *testUtilSuite) TestValidateName(c *C) {
 	ok := validateName("123abc")
 	c.Assert(ok, IsFalse)
