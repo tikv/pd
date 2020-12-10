@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -505,6 +506,9 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 	path := path.Join(schedulerConfigPrefix, p, "list")
 	r, err := doRequest(cmd, path, http.MethodGet)
 	if err != nil {
+		if strings.Contains(err.Error(), "404") {
+			err = errors.New("[404] scheduler not found")
+		}
 		cmd.Println(err)
 		return
 	}
