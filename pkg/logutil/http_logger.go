@@ -15,6 +15,7 @@ package logutil
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -25,19 +26,21 @@ import (
 type HTTPLogger struct {
 	writer         http.ResponseWriter
 	logger         *zap.Logger
+	properties     *log.ZapProperties
 	closeCallbacks []func()
 }
 
 // NewHTTPLogger returns a HTTPLogger.
 func NewHTTPLogger(conf *log.Config, w http.ResponseWriter) (*HTTPLogger, error) {
 	syncer := zapcore.AddSync(w)
-	logger, _, err := log.InitLoggerWithWriteSyncer(conf, syncer, zap.AddStacktrace(zapcore.FatalLevel))
+	logger, properties, err := log.InitLoggerWithWriteSyncer(conf, syncer, zap.AddStacktrace(zapcore.FatalLevel))
 	if err != nil {
 		return nil, err
 	}
 	return &HTTPLogger{
 		writer:         w,
 		logger:         logger,
+		properties:     properties,
 		closeCallbacks: make([]func(), 0),
 	}, nil
 }
@@ -68,7 +71,13 @@ func (l *HTTPLogger) Plug(names ...string) {
 // Close will call close callbacks and close all output.
 func (l *HTTPLogger) Close() {
 	defer l.logger.Sync()
+
+	// TODO: Use a better way to prevent logger writing later.
+	l.properties.Level.SetLevel(zapcore.FatalLevel)
+
 	for _, f := range l.closeCallbacks {
 		f()
 	}
+
+	time.Sleep(100 * time.Millisecond)
 }
