@@ -60,6 +60,7 @@ func (l *HTTPLogger) Plug(names ...string) {
 			}
 		}
 	})
+	l.writer.WriteHeader(http.StatusOK)
 	for _, name := range names {
 		pl := GetPluggableLogger(name, false)
 		if pl != nil {
