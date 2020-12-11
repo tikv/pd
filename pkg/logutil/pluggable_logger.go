@@ -16,6 +16,7 @@ package logutil
 import (
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"go.uber.org/zap"
 )
@@ -23,7 +24,7 @@ import (
 // PluggableLogger is a pluggable zap.Logger.
 type PluggableLogger struct {
 	name   string
-	logger atomic.Value // zap.Logger
+	logger unsafe.Pointer // zap.Logger
 }
 
 // GetName gets the pluggable logger's name.
@@ -34,17 +35,21 @@ func (l *PluggableLogger) GetName() string {
 // GetLogger gets the logger. If it is nil,
 // it means that the current related log does not need to be output.
 func (l *PluggableLogger) GetLogger() *zap.Logger {
-	logger := l.logger.Load().(*zap.Logger)
+	logger := (*zap.Logger)(atomic.LoadPointer(&l.logger))
 	if logger == nil {
 		return nil
 	}
 	return logger.WithOptions(zap.AddCallerSkip(1))
 }
 
-// SetLogger sets the logger. If it is nil,
-// it means that the current related log does not need to be output.
-func (l *PluggableLogger) SetLogger(logger *zap.Logger) {
-	l.logger.Store(logger)
+// PlugLogger plugs the logger. If there is other logger, it will be replaced.
+func (l *PluggableLogger) PlugLogger(logger *zap.Logger) {
+	atomic.StorePointer(&l.logger, unsafe.Pointer(logger))
+}
+
+// UnplugLogger unplugs the logger. If it has been replaced, nothing will be done.
+func (l *PluggableLogger) UnplugLogger(logger *zap.Logger) {
+	atomic.CompareAndSwapPointer(&l.logger, unsafe.Pointer(logger), nil)
 }
 
 // Debug logs a message at DebugLevel. The message includes any fields passed
@@ -120,9 +125,7 @@ func (m *loggerManager) GetPluggableLogger(name string, createIfNotExist bool) *
 		if !createIfNotExist {
 			return nil
 		}
-		l = new(PluggableLogger)
-		l.name = name
-		l.logger.Store((*zap.Logger)(nil))
+		l = &PluggableLogger{name: name}
 		m.Loggers[name] = l
 	}
 	return l
