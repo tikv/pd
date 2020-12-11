@@ -15,7 +15,7 @@ package logutil
 
 import (
 	"net/http"
-	"time"
+	"sync"
 
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -24,25 +24,24 @@ import (
 
 // HTTPLogger is a Logger that outputs logs to ResponseWriter.
 type HTTPLogger struct {
-	writer         http.ResponseWriter
+	httpWriteSyncer
 	logger         *zap.Logger
-	properties     *log.ZapProperties
 	closeCallbacks []func()
 }
 
 // NewHTTPLogger returns a HTTPLogger.
 func NewHTTPLogger(conf *log.Config, w http.ResponseWriter) (*HTTPLogger, error) {
-	syncer := zapcore.AddSync(w)
-	logger, properties, err := log.InitLoggerWithWriteSyncer(conf, syncer, zap.AddStacktrace(zapcore.FatalLevel))
+	hl := new(HTTPLogger)
+	hl.httpWriteSyncer.Init(w)
+
+	logger, _, err := log.InitLoggerWithWriteSyncer(conf, &hl.httpWriteSyncer, zap.AddStacktrace(zapcore.FatalLevel))
 	if err != nil {
 		return nil, err
 	}
-	return &HTTPLogger{
-		writer:         w,
-		logger:         logger,
-		properties:     properties,
-		closeCallbacks: make([]func(), 0),
-	}, nil
+
+	hl.logger = logger
+	hl.closeCallbacks = make([]func(), 0)
+	return hl, nil
 }
 
 // AddCloseCallback adds some callbacks when closing.
@@ -60,7 +59,6 @@ func (l *HTTPLogger) Plug(names ...string) {
 			}
 		}
 	})
-	l.writer.WriteHeader(http.StatusOK)
 	for _, name := range names {
 		pl := GetPluggableLogger(name, false)
 		if pl != nil {
@@ -73,12 +71,45 @@ func (l *HTTPLogger) Plug(names ...string) {
 func (l *HTTPLogger) Close() {
 	defer l.logger.Sync()
 
-	// TODO: Use a better way to prevent logger writing later.
-	l.properties.Level.SetLevel(zapcore.FatalLevel)
-
 	for _, f := range l.closeCallbacks {
 		f()
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	l.httpWriteSyncer.Close()
+}
+
+// httpWriteSyncer is an implementation similar to zapcore.lockedWriteSyncer.
+type httpWriteSyncer struct {
+	sync.Mutex
+	Writer http.ResponseWriter
+	Closed bool
+}
+
+func (s *httpWriteSyncer) Init(writer http.ResponseWriter) {
+	s.Lock()
+	defer s.Unlock()
+	writer.WriteHeader(http.StatusOK)
+	s.Writer = writer
+	s.Closed = false
+}
+
+func (s *httpWriteSyncer) Close() {
+	s.Lock()
+	defer s.Unlock()
+	s.Closed = true
+}
+
+func (s *httpWriteSyncer) Write(bs []byte) (int, error) {
+	s.Lock()
+	defer s.Unlock()
+
+	if s.Closed {
+		return len(bs), nil
+	}
+
+	return s.Writer.Write(bs)
+}
+
+func (s *httpWriteSyncer) Sync() error {
+	return nil
 }
