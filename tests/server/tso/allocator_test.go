@@ -19,6 +19,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/testutil"
@@ -63,18 +64,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	cluster.WaitLeader()
-	// To speed up the test, we force to do the check
-	for _, server := range cluster.GetServers() {
-		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
-	}
-	// Wait for each DC's Local TSO Allocator leader
-	for _, dcLocation := range dcLocationConfig {
-		testutil.WaitUntil(c, func(c *C) bool {
-			leaderName := cluster.WaitAllocatorLeader(dcLocation)
-			return len(leaderName) > 0
-		})
-	}
+	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
 	// To check whether we have enough Local TSO Allocator leaders
 	allAllocatorLeaders := make([]tso.Allocator, 0, dcLocationNum)
 	for _, server := range cluster.GetServers() {
@@ -140,18 +130,7 @@ func (s *testAllocatorSuite) TestDifferentLocalTSO(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	cluster.WaitLeader()
-	// To speed up the test, we force to do the check
-	for _, server := range cluster.GetServers() {
-		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
-	}
-	// Wait for each DC's Local TSO Allocator leader
-	for _, dcLocation := range dcLocationConfig {
-		testutil.WaitUntil(c, func(c *C) bool {
-			leaderName := cluster.WaitAllocatorLeader(dcLocation)
-			return len(leaderName) > 0
-		})
-	}
+	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
@@ -170,40 +149,50 @@ func (s *testAllocatorSuite) TestDifferentLocalTSO(c *C) {
 		return len(leaderName) > 0
 	})
 
+	// Scatter the Local TSO Allocators to different servers
+	waitAllocatorPriorityCheck(cluster)
+	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+
 	for serverName, server := range cluster.GetServers() {
-		dcLocation := dcLocationConfig[serverName]
 		tsoAllocatorManager := server.GetTSOAllocatorManager()
-		suffixResp, err := etcdutil.EtcdKVGet(
-			cluster.GetEtcdClient(),
-			tsoAllocatorManager.GetLocalTSOSuffixPath(dcLocation))
+		localAllocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
 		c.Assert(err, IsNil)
-		c.Assert(len(suffixResp.Kvs), Equals, 1)
-		// Test whether the Local TSO has the right suffix
-		suffix, err := strconv.ParseInt(string(suffixResp.Kvs[0].Value), 10, 64)
-		c.Assert(err, IsNil)
-		var leaderName string
-		testutil.WaitUntil(c, func(c *C) bool {
-			leaderName = cluster.WaitAllocatorLeader(dcLocation)
-			return len(leaderName) > 0
-		})
-		suffixBits := tso.CalSuffixBits(tsoAllocatorManager.GetClusterDCLocationsNumber())
-		// Check the Local TSO suffix
-		if serverName == leaderName {
-			allocator, err := server.GetTSOAllocatorManager().GetAllocator(dcLocation)
-			c.Assert(err, IsNil)
-			c.Assert(allocator, NotNil)
-			localTSO, err := allocator.GenerateTSO(1)
-			c.Assert(err, IsNil)
-			c.Assert(suffix, Equals, localTSO.Logical&((1<<suffixBits)-1))
+		for _, localAllocatorLeader := range localAllocatorLeaders {
+			s.testTSOSuffix(c, cluster, tsoAllocatorManager, localAllocatorLeader.GetDCLocation())
 		}
-		// Check the Global TSO suffix
-		if serverName == server.GetLeader().Name {
-			allocator, err := server.GetTSOAllocatorManager().GetAllocator(config.GlobalDCLocation)
-			c.Assert(err, IsNil)
-			c.Assert(allocator, NotNil)
-			globalTSO, err := allocator.GenerateTSO(1)
-			c.Assert(err, IsNil)
-			c.Assert(int64(0), Equals, globalTSO.Logical&((1<<suffixBits)-1))
+		if serverName == cluster.GetLeader() {
+			s.testTSOSuffix(c, cluster, tsoAllocatorManager, config.GlobalDCLocation)
 		}
 	}
+}
+
+func (s *testAllocatorSuite) testTSOSuffix(c *C, cluster *tests.TestCluster, am *tso.AllocatorManager, dcLocation string) {
+	suffixBits := tso.CalSuffixBits(am.GetMaxSuffix())
+	c.Assert(suffixBits, Greater, 0)
+	var suffix int64
+	// The suffix of a Global TSO will always be 0
+	if dcLocation != config.GlobalDCLocation {
+		suffixResp, err := etcdutil.EtcdKVGet(
+			cluster.GetEtcdClient(),
+			am.GetLocalTSOSuffixPath(dcLocation))
+		c.Assert(err, IsNil)
+		c.Assert(len(suffixResp.Kvs), Equals, 1)
+		suffix, err = strconv.ParseInt(string(suffixResp.Kvs[0].Value), 10, 64)
+		c.Assert(err, IsNil)
+		c.Assert(suffixBits, GreaterEqual, tso.CalSuffixBits(int32(suffix)))
+	}
+	allocator, err := am.GetAllocator(dcLocation)
+	c.Assert(err, IsNil)
+	var tso pdpb.Timestamp
+	testutil.WaitUntil(c, func(c *C) bool {
+		tso, err = allocator.GenerateTSO(1)
+		if err != nil {
+			c.Assert(err.Error(), Matches, `.*global tso sync is not done yet.*`)
+			// Force to do the sync to speed up the test
+			cluster.GetServer(cluster.GetLeader()).GetTSOAllocatorManager().ClusterDCLocationChecker()
+		}
+		return tso.GetPhysical() != 0
+	})
+	// Test whether the TSO has the right suffix
+	c.Assert(suffix, Equals, tso.Logical&((1<<suffixBits)-1))
 }

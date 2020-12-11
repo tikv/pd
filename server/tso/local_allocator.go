@@ -96,7 +96,7 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	return lta.timestampOracle.getTS(lta.leadership, count, lta.allocatorManager.GetClusterDCLocationsNumber())
+	return lta.timestampOracle.getTS(lta.leadership, count, lta.allocatorManager.GetMaxSuffix())
 }
 
 // Reset is used to reset the TSO allocator.
@@ -168,7 +168,7 @@ func (lta *LocalTSOAllocator) KeepAllocatorLeader(ctx context.Context) {
 // IsStillAllocatorLeader returns whether the allocator is still a
 // Local TSO Allocator leader by checking its leadership's lease.
 func (lta *LocalTSOAllocator) IsStillAllocatorLeader() bool {
-	return lta.leadership.Check()
+	return lta.leadership.Check() && lta.GetAllocatorLeader().GetMemberId() == lta.GetMember().GetMemberId()
 }
 
 // isSameLeader checks whether a server is the leader itself.
@@ -216,6 +216,10 @@ func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool)
 // WatchAllocatorLeader is used to watch the changes of the Local TSO Allocator leader.
 func (lta *LocalTSOAllocator) WatchAllocatorLeader(serverCtx context.Context, allocatorLeader *pdpb.Member, revision int64) {
 	lta.setAllocatorLeader(allocatorLeader)
+	// The leader is elected out, which means the sync is over
+	lta.allocatorManager.setNeedSyncMaxTSO(lta.dcLocation, false)
+	// Check the cluster dc-locations to update the max suffix bits
+	go lta.allocatorManager.ClusterDCLocationChecker()
 	lta.leadership.Watch(serverCtx, revision)
 	lta.unsetAllocatorLeader()
 }

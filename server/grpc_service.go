@@ -1027,19 +1027,32 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 	}, nil
 }
 
-// GetDCLocations will return the dcLocations which hold by the Global TSO Allocator.
-// If the receiving PD Member is not PD Leader, GetDCLocations will return error.
-func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocationsRequest) (*pdpb.GetDCLocationsResponse, error) {
+// GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager, and will collect current max
+// Local TSO if the NeedSyncMaxTSO flag in dc-location info is true.
+func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
 	if err := s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
 	}
 	if !s.member.IsStillLeader() {
 		return nil, fmt.Errorf("receiving pd member[%v] is not pd leader", s.member.ID())
 	}
-	return &pdpb.GetDCLocationsResponse{
-		Header:      s.header(),
-		DcLocations: s.tsoAllocatorManager.GetSuffixDCLocations(),
-	}, nil
+	am := s.tsoAllocatorManager
+	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
+	if !ok {
+		am.ClusterDCLocationChecker()
+		return nil, fmt.Errorf("dc-location %s is not found", request.GetDcLocation())
+	}
+	resp := &pdpb.GetDCLocationInfoResponse{
+		Header: s.header(),
+		Suffix: info.Suffix,
+	}
+	if info.NeedSyncMaxTSO {
+		var err error
+		if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return resp, nil
 }
 
 // validateInternalRequest checks if server is closed, which is used to validate
