@@ -29,12 +29,12 @@ const (
 
 type dimStat struct {
 	typ         int
-	Rolling     *movingaverage.TimeMedian
-	LastAverage *movingaverage.AvgOverTime
+	Rolling     *movingaverage.TimeMedian // it's used to statistic hot degree and average speed.
+	LastAverage *movingaverage.AvgOverTime // it's used to obtain the average speed in last second as instantaneous speed.
 }
 
 func newDimStat(typ int) *dimStat {
-	reportInterval := time.Duration(RegionHeartBeatReportInterval) * time.Second
+	reportInterval := RegionHeartBeatReportInterval * time.Second
 	return &dimStat{
 		typ:         typ,
 		Rolling:     movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),

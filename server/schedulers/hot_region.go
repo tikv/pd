@@ -804,13 +804,13 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
 		switch {
 		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-			// If use the case, both byte rate and key rate will be more balanced, the best choice.
+			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
 			rank = -3
 		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-			// If use the case, byte rate will be not worsened, key rate will be more balanced.
+			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
 			rank = -2
 		case byteHot && byteDecRatio <= greatDecRatio:
-			// If use the case, byte rate will be more balanced, ignore the key rate.
+			// If belong to the case, byte rate will be more balanced, ignore the key rate.
 			rank = -1
 		}
 	}
