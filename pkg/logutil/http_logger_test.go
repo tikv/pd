@@ -29,7 +29,7 @@ type testHTTPLoggerSuite struct {
 	logger *HTTPLogger
 }
 
-func (s *testHTTPLoggerSuite) SetUpSuite(c *C) {
+func (s *testHTTPLoggerSuite) SetUpTest(c *C) {
 	writer := newTestResponseWriter()
 	lg, err := NewHTTPLogger(&log.Config{
 		Level:               "info",
