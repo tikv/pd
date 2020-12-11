@@ -395,7 +395,7 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	r.keysWriteRate.Add(float64(stats.KeysWritten), time.Duration(interval)*time.Second)
 	r.keysReadRate.Add(float64(stats.KeysRead), time.Duration(interval)*time.Second)
 	r.opsRead.Add(float64(stats.Ops), time.Duration(interval)*time.Second)
-	r.opsWrite.Add(float64(stats.OpsW), time.Duration(interval)*time.Second)
+	r.opsWrite.Add(float64(stats.Ops), time.Duration(interval)*time.Second)
 
 	// Updates the cpu usages and disk rw rates of store.
 	r.totalCPUUsage.Add(collect(stats.GetCpuUsages()))
@@ -417,7 +417,7 @@ func (r *RollingStoreStats) Set(stats *pdpb.StoreStats) {
 	r.keysWriteRate.Set(float64(stats.KeysWritten) / float64(interval))
 	r.keysReadRate.Set(float64(stats.KeysRead) / float64(interval))
 	r.opsRead.Set(float64(stats.Ops) / float64(interval))
-	r.opsWrite.Set(float64(stats.OpsW) / float64(interval))
+	r.opsWrite.Set(float64(stats.Ops) / float64(interval))
 }
 
 // GetBytesRate returns the bytes write rate and the bytes read rate.

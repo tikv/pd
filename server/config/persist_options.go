@@ -388,6 +388,11 @@ func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
 }
 
+// GetHotSchedulerMode is used to control scheduling.
+func (o *PersistOptions) GetHotSchedulerMode() int {
+	return int(o.GetScheduleConfig().HotSchedulerMode)
+}
+
 // GetSchedulers gets the scheduler configurations.
 func (o *PersistOptions) GetSchedulers() SchedulerConfigs {
 	return o.GetScheduleConfig().Schedulers

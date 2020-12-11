@@ -122,6 +122,7 @@ type multiDimensionScheduler struct {
 	storeFlowRateHistroy     *stableAnalysis
 	storeQPSHistroy          *stableAnalysis
 	hotRegionLoadRateHistory []*stableAnalysis
+	mode                     int
 }
 
 func newMultiDimensionScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *multiDimensionScheduler {
@@ -186,7 +187,8 @@ func (h *multiDimensionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 	defer h.Unlock()
 
 	h.hotSched.prepareForBalance(cluster)
-	bs := newBalanceSolver(h.hotSched, cluster, read, transferLeader)
+	bs := newBalanceSolver(h.hotSched, cluster, write, movePeer)
+	h.mode = cluster.GetOpts().GetHotSchedulerMode()
 
 	for {
 		switch h.schStatus {
@@ -262,7 +264,7 @@ func (h *multiDimensionScheduler) checkStoreLoad(bs *balanceSolver) bool {
 	if time.Since(h.lastCheckLoadTime) > 10*time.Second {
 		h.lastCheckLoadTime = time.Now()
 		if expByteRate < storeMinExpFlowRate && expKeyRate < storeMinExpQPSRate {
-			log.Info("the load is too low")
+			log.Info("the load is too low", zap.Float64("curExpByteRate", expByteRate), zap.Float64("curExpKeyRate", expKeyRate))
 			return false
 		}
 
@@ -309,13 +311,15 @@ func (h *multiDimensionScheduler) initLoadInfo(bs *balanceSolver) {
 	h.storeInfos = make([]*storeInfo, 0)
 	h.candidateRegions = newRegionContainer()
 
+	peerID := uint64(1)
 	// create RegionInfo and StoreInfo to normalize flow data
 	for id, loadDetail := range bs.stLoadDetail {
 		hotRegions := make(map[uint64]*regionInfo)
 		for _, peer := range loadDetail.HotPeers {
-			hotRegions[peer.RegionID] = newRegionInfo(peer.RegionID, id,
+			hotRegions[peer.RegionID] = newRegionInfo(peerID, peer.RegionID, id,
 				peer.GetByteRate()/loadDetail.LoadPred.Future.ExpByteRate,
 				peer.GetKeyRate()/loadDetail.LoadPred.Future.ExpKeyRate)
+			peerID++
 			totalHotRegionFlowRate += peer.GetByteRate()
 			totalHotRegionQPS += peer.GetKeyRate()
 		}
@@ -333,11 +337,11 @@ func (h *multiDimensionScheduler) initLoadInfo(bs *balanceSolver) {
 func (h *multiDimensionScheduler) greedyTwoDimension(bs *balanceSolver) {
 	var pendingRegions []*regionInfo
 	if h.schStatus == scheduleSplit {
-		pendingRegions = splitProcedure(h.storeInfos, h.candidateRegions, balanceRatio)
+		// pendingRegions = splitProcedure(h.storeInfos, h.candidateRegions, balanceRatio)
 	} else {
-		pendingRegions = migrationProcedure(h.storeInfos, h.candidateRegions, balanceRatio)
+		// pendingRegions = migrationProcedure(h.storeInfos, h.candidateRegions, balanceRatio)
 
-		// pendingRegions = greedySingle(h.storeInfos, balanceRatio, 0, nil)
+		pendingRegions = greedySingle(h.storeInfos, balanceRatio, uint64(h.mode%10), nil)
 		// pendingRegions1 := greedySingle(h.storeInfos, balanceRatio, 1)
 		// pendingRegions = append(pendingRegions, pendingRegions1...)
 	}
@@ -358,7 +362,7 @@ func (h *multiDimensionScheduler) processPendingOps(bs *balanceSolver, rw rwType
 	hotRegions := make(map[uint64]*regionInfo)
 	for id, loadDetail := range bs.stLoadDetail {
 		for _, peer := range loadDetail.HotPeers {
-			hotRegions[peer.RegionID] = newRegionInfo(peer.RegionID, id,
+			hotRegions[peer.RegionID] = newRegionInfo(peer.RegionID, peer.RegionID, id,
 				peer.GetByteRate()/loadDetail.LoadPred.Future.ExpByteRate,
 				peer.GetKeyRate()/loadDetail.LoadPred.Future.ExpKeyRate)
 		}
@@ -424,6 +428,7 @@ func (h *multiDimensionScheduler) processPendingOps(bs *balanceSolver, rw rwType
 	return pendingOps, done
 }
 
+// to do: peer split
 func (h *multiDimensionScheduler) updateSplitInfos(bs *balanceSolver, splitRegionInfos map[uint64][]uint64) {
 	for regionID, splittedIDs := range splitRegionInfos {
 		log.Info("update split info", zap.Uint64("regionID", regionID))
@@ -434,7 +439,7 @@ func (h *multiDimensionScheduler) updateSplitInfos(bs *balanceSolver, splitRegio
 
 			// estimate load of splitted region
 			for _, id := range splittedIDs {
-				splitRegion := newRegionInfo(id, region.srcStoreID,
+				splitRegion := newRegionInfo(id, id, region.srcStoreID, // id
 					region.loads[0]*region.splitRatio,
 					region.loads[1]*region.splitRatio)
 				region.splittedRegions[id] = splitRegion
@@ -487,7 +492,7 @@ func (h *multiDimensionScheduler) generateOperator(bs *balanceSolver, ri *region
 		opTy     opType
 	)
 
-	regionID := ri.id
+	regionID := ri.regionID
 	srcStoreID := ri.srcStoreID
 	dstStoreID := ri.dstStoreID
 
@@ -499,7 +504,7 @@ func (h *multiDimensionScheduler) generateOperator(bs *balanceSolver, ri *region
 
 	if ri.NeedSplit() {
 		opts := []float64{float64(ri.splitDimID), ri.splitRatio}
-		op := operator.CreateSplitRegionOperator("hotspot-split-region", bs.cluster.GetRegion(ri.id), operator.OpAdmin, pdpb.CheckPolicy_RATIO, nil, opts)
+		op := operator.CreateSplitRegionOperator("hotspot-split-region", region, operator.OpAdmin, pdpb.CheckPolicy_RATIO, nil, opts)
 		return op
 	}
 
@@ -525,7 +530,7 @@ func (h *multiDimensionScheduler) generateOperator(bs *balanceSolver, ri *region
 			hotDirectionCounter.WithLabelValues("move-peer", rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
 	} else { // transfer leader
 		opTy = transferLeader
-		if region.GetLeader().GetStoreId() == dstStoreID {
+		if region.GetLeader().GetStoreId() == dstStoreID || region.GetLeader().GetStoreId() != srcStoreID {
 			log.Info("leader is already transferred", zap.Uint64("regionID", regionID), zap.Uint64("leaderStoreID", dstStoreID))
 			return nil
 		}
@@ -601,7 +606,7 @@ func (h *multiDimensionScheduler) genScheduleRequestFromFile(bs *balanceSolver) 
 	for _, cmd := range schCmds {
 		log.Info(fmt.Sprintf("parse schedule cmd: %v", cmd))
 		ri := &regionInfo{
-			id:         cmd.regionID,
+			regionID:   cmd.regionID,
 			srcStoreID: cmd.srcStoreID,
 			dstStoreID: cmd.dstStoreID,
 		}

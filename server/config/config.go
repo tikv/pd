@@ -683,6 +683,8 @@ type ScheduleConfig struct {
 	// is overwritten, the value is fixed until it is deleted.
 	// Default: manual
 	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
+
+	HotSchedulerMode uint64 `toml:"hot-scheduler-mode" json:"hot-scheduler-mode"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -729,6 +731,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableDebugMetrics:           c.EnableDebugMetrics,
 		StoreLimitMode:               c.StoreLimitMode,
 		Schedulers:                   schedulers,
+		HotSchedulerMode:             c.HotSchedulerMode,
 	}
 }
 
@@ -803,6 +806,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("store-limit-mode") {
 		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
+	if !meta.IsDefined("hot-scheduler-mode") {
+		adjustUint64(&c.HotSchedulerMode, 0)
+	}
+
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 

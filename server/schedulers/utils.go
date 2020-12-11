@@ -419,6 +419,7 @@ const DimensionCount = 2
 
 type regionInfo struct {
 	id              uint64
+	regionID        uint64
 	srcStoreID      uint64
 	dstStoreID      uint64
 	loads           [DimensionCount]float64
@@ -429,9 +430,10 @@ type regionInfo struct {
 	splittedRegions map[uint64]*regionInfo
 }
 
-func newRegionInfo(id uint64, srcStoreID uint64, load1 float64, load2 float64) *regionInfo {
+func newRegionInfo(id uint64, regionID uint64, srcStoreID uint64, load1 float64, load2 float64) *regionInfo {
 	return &regionInfo{
 		id:         id,
+		regionID:   regionID,
 		srcStoreID: srcStoreID,
 		dstStoreID: srcStoreID,
 		loads:      [DimensionCount]float64{load1, load2},

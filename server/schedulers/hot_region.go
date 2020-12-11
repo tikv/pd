@@ -187,6 +187,10 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 
 	h.prepareForBalance(cluster)
 
+	mode := cluster.GetOpts().GetHotSchedulerMode()
+	if mode >= 10 {
+		return nil
+	}
 	switch typ {
 	case read:
 		return h.balanceHotReadRegions(cluster)

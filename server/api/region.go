@@ -50,12 +50,12 @@ type RegionInfo struct {
 	ApproximateSize int64             `json:"approximate_size"`
 	ApproximateKeys int64             `json:"approximate_keys"`
 
-	WriteBytesRate  float64            `json:"write_bytes_rate"`
-	WriteKeysRate  float64            `json:"write_keys_rate"`
-	WriteOpsRate  float64            `json:"write_ops_rate"`
-	ReadBytesRate  float64            `json:"read_bytes_rate"`
-	ReadKeysRate  float64            `json:"read_keys_rate"`
-	ReadOpsRate  float64            `json:"read_ops_rate"`
+	WriteBytesRate float64 `json:"write_bytes_rate"`
+	WriteKeysRate  float64 `json:"write_keys_rate"`
+	WriteOpsRate   float64 `json:"write_ops_rate"`
+	ReadBytesRate  float64 `json:"read_bytes_rate"`
+	ReadKeysRate   float64 `json:"read_keys_rate"`
+	ReadOpsRate    float64 `json:"read_ops_rate"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
