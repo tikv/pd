@@ -53,14 +53,14 @@ func (l *HTTPLogger) Plug(names ...string) {
 		for _, name := range names {
 			pl := GetPluggableLogger(name, false)
 			if pl != nil {
-				pl.SetLogger(nil)
+				pl.UnplugLogger(l.logger)
 			}
 		}
 	})
 	for _, name := range names {
 		pl := GetPluggableLogger(name, false)
 		if pl != nil {
-			pl.SetLogger(l.logger)
+			pl.PlugLogger(l.logger)
 		}
 	}
 }

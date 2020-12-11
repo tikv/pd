@@ -40,11 +40,12 @@ func (s *testPluggableLoggerSuite) TestLoggerManager(c *C) {
 	c.Assert(logger.GetLogger(), IsNil)
 	c.Assert(logger.GetName(), Equals, "test")
 	// Plug logger.
-	s.testLoggerManager.GetPluggableLogger("test", false).SetLogger(zap.NewNop())
+	nop := zap.NewNop()
+	s.testLoggerManager.GetPluggableLogger("test", false).PlugLogger(nop)
 	c.Assert(logger.GetLogger(), NotNil)
 	logger.Debug("noop")
 	// Unplug logger.
-	s.testLoggerManager.GetPluggableLogger("test", false).SetLogger(nil)
+	s.testLoggerManager.GetPluggableLogger("test", false).UnplugLogger(nop)
 	c.Assert(logger.GetLogger(), IsNil)
 	logger.Debug("noop")
 }
@@ -60,8 +61,9 @@ func (s *testPluggableLoggerSuite) TestPluggableLogger(c *C) {
 		DisableErrorVerbose: true,
 	}, zapcore.AddSync(buffer))
 	c.Assert(err, IsNil)
-	pl.SetLogger(lg)
+	pl.PlugLogger(lg)
 	pl.Info("world", zap.Int64("answer", 42))
 	c.Assert(lg.Sync(), IsNil)
 	c.Assert(buffer.String(), Equals, "[INFO] [world] [answer=42]\n")
+	pl.UnplugLogger(lg)
 }
