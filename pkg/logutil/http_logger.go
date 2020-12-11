@@ -67,7 +67,6 @@ func (l *HTTPLogger) Plug(names ...string) {
 
 // Close will call close callbacks and close all output.
 func (l *HTTPLogger) Close() {
-	defer l.writer.WriteHeader(http.StatusOK)
 	defer l.logger.Sync()
 	for _, f := range l.closeCallbacks {
 		f()
