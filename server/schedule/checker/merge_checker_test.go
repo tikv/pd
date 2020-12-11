@@ -147,6 +147,12 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	// The size should be small enough.
 	ops = s.mc.Check(s.regions[1])
 	c.Assert(ops, IsNil)
+	// target region size is too large
+	s.cluster.PutRegion(s.regions[1].Clone(core.SetApproximateSize(600)))
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	// change the size back
+	s.cluster.PutRegion(s.regions[1].Clone(core.SetApproximateSize(200)))
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	// Check merge with previous region.

@@ -753,7 +753,11 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 		}
 	}
 
-	op := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, pdpb.CheckPolicy(policy), splitKeys)
+	op, err := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, pdpb.CheckPolicy(policy), splitKeys)
+	if err != nil {
+		return err
+	}
+
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -911,8 +915,8 @@ func (h *Handler) GetAddr() string {
 }
 
 // SetStoreLimitTTL set storeLimit with ttl
-func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) {
-	h.s.SaveTTLConfig(map[string]interface{}{
+func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) error {
+	return h.s.SaveTTLConfig(map[string]interface{}{
 		data: value,
 	}, ttl)
 }

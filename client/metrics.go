@@ -67,6 +67,7 @@ var (
 	cmdDurationGetAllStores             = cmdDuration.WithLabelValues("get_all_stores")
 	cmdDurationUpdateGCSafePoint        = cmdDuration.WithLabelValues("update_gc_safe_point")
 	cmdDurationUpdateServiceGCSafePoint = cmdDuration.WithLabelValues("update_service_gc_safe_point")
+	cmdDurationScatterRegion            = cmdDuration.WithLabelValues("scatter_region")
 	cmdDurationScatterRegions           = cmdDuration.WithLabelValues("scatter_regions")
 	cmdDurationGetOperator              = cmdDuration.WithLabelValues("get_operator")
 	cmdDurationSplitRegions             = cmdDuration.WithLabelValues("split_regions")

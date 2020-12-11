@@ -41,13 +41,6 @@ func NewStoresStats() *StoresStats {
 	}
 }
 
-// CreateRollingStoreStats creates RollingStoreStats with a given store ID.
-func (s *StoresStats) CreateRollingStoreStats(storeID uint64) {
-	s.Lock()
-	defer s.Unlock()
-	s.rollingStoresStats[storeID] = newRollingStoreStats()
-}
-
 // RemoveRollingStoreStats removes RollingStoreStats with a given store ID.
 func (s *StoresStats) RemoveRollingStoreStats(storeID uint64) {
 	s.Lock()
@@ -375,6 +368,13 @@ func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64)
 	return r.bytesWriteRate.Get(), r.bytesReadRate.Get()
 }
 
+// GetBytesRateInstantaneous returns the bytes write rate and the bytes read rate instantaneously.
+func (r *RollingStoreStats) GetBytesRateInstantaneous() (writeRate float64, readRate float64) {
+	r.RLock()
+	defer r.RUnlock()
+	return r.bytesWriteRate.GetInstantaneous(), r.bytesReadRate.GetInstantaneous()
+}
+
 // GetBytesWriteRate returns the bytes write rate.
 func (r *RollingStoreStats) GetBytesWriteRate() float64 {
 	r.RLock()
@@ -394,6 +394,13 @@ func (r *RollingStoreStats) GetKeysRate() (writeRate float64, readRate float64) 
 	r.RLock()
 	defer r.RUnlock()
 	return r.keysWriteRate.Get(), r.keysReadRate.Get()
+}
+
+// GetKeysRateInstantaneous returns the keys write rate and the keys read rate instantaneously.
+func (r *RollingStoreStats) GetKeysRateInstantaneous() (writeRate float64, readRate float64) {
+	r.RLock()
+	defer r.RUnlock()
+	return r.keysWriteRate.GetInstantaneous(), r.keysReadRate.GetInstantaneous()
 }
 
 // GetKeysWriteRate returns the keys write rate.

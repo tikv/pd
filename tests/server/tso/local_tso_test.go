@@ -60,10 +60,8 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-	// To speed up the test, we force to do the check
-	for _, server := range cluster.GetServers() {
-		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
-	}
+
+	cluster.WaitLeader()
 	dcClientMap := make(map[string]pdpb.PDClient)
 	for _, dcLocation := range dcLocationConfig {
 		var pdName string
@@ -140,6 +138,10 @@ func (s *testLocalTSOSuite) testGetDcLocations(c *C, pdCli pdpb.PDClient, req *p
 	resp, err := pdCli.GetDCLocations(ctx, req)
 	c.Assert(err, IsNil)
 	sort.Strings(dcLocations)
-	sort.Strings(resp.DcLocations)
-	c.Assert(resp.DcLocations, DeepEquals, dcLocations)
+	respDCLocations := make([]string, 0, len(resp.DcLocations))
+	for dcLocation := range resp.DcLocations {
+		respDCLocations = append(respDCLocations, dcLocation)
+	}
+	sort.Strings(respDCLocations)
+	c.Assert(respDCLocations, DeepEquals, dcLocations)
 }

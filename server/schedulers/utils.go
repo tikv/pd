@@ -187,11 +187,6 @@ type storeLoad struct {
 	ByteRate float64
 	KeyRate  float64
 	Count    float64
-
-	// Exp means Expectation, it is calculated from the average value from summary of byte/key rate, count.
-	ExpByteRate float64
-	ExpKeyRate  float64
-	ExpCount    float64
 }
 
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
@@ -256,6 +251,7 @@ func rankCmp(a, b float64, rank func(value float64) int64) int {
 type storeLoadPred struct {
 	Current storeLoad
 	Future  storeLoad
+	Expect  storeLoad
 }
 
 func (lp *storeLoadPred) min() *storeLoad {
@@ -329,12 +325,15 @@ type storeLoadDetail struct {
 
 func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	peers := make([]statistics.HotPeerStat, 0, len(li.HotPeers))
+	var totalBytesRate, totalKeysRate float64
 	for _, peer := range li.HotPeers {
 		peers = append(peers, *peer.Clone())
+		totalBytesRate += peer.ByteRate
+		totalKeysRate += peer.KeyRate
 	}
 	return &statistics.HotPeersStat{
-		TotalBytesRate: li.LoadPred.Current.ByteRate,
-		TotalKeysRate:  li.LoadPred.Current.KeyRate,
+		TotalBytesRate: math.Round(totalBytesRate),
+		TotalKeysRate:  math.Round(totalKeysRate),
 		Count:          len(li.HotPeers),
 		Stats:          peers,
 	}

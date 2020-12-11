@@ -250,6 +250,8 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	c.Assert(strings.Contains(echo, "404"), IsTrue)
 
 	// test hot region config
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"})
+	c.Assert(strings.Contains(echo, "[404] scheduler not found"), IsTrue)
 	var conf map[string]interface{}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
 	expected1 := map[string]interface{}{

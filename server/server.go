@@ -467,7 +467,6 @@ func (s *Server) Run() error {
 	if err := s.startEtcd(s.ctx); err != nil {
 		return err
 	}
-
 	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}
@@ -942,8 +941,8 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 		s.persistOptions.DeleteLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to update label property config",
 			zap.String("typ", typ),
-			zap.String("labelKey", labelKey),
-			zap.String("labelValue", labelValue),
+			zap.String("label-key", labelKey),
+			zap.String("label-value", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
 			errs.ZapError(err))
 		return err
@@ -961,8 +960,8 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 		s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to delete label property config",
 			zap.String("typ", typ),
-			zap.String("labelKey", labelKey),
-			zap.String("labelValue", labelValue),
+			zap.String("label-key", labelKey),
+			zap.String("label-value", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
 			errs.ZapError(err))
 		return err
@@ -1150,6 +1149,8 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
+			// Check the cluster dc-location after the PD leader is elected
+			go s.tsoAllocatorManager.ClusterDCLocationChecker()
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
@@ -1199,6 +1200,8 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
 		return
 	}
+	// Check the cluster dc-location after the PD leader is elected
+	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
@@ -1216,7 +1219,10 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.stopRaftCluster()
-
+	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
+		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
+		return
+	}
 	s.member.EnableLeader()
 
 	CheckPDVersion(s.persistOptions)
@@ -1312,8 +1318,16 @@ func (s *Server) PersistFile(name string, data []byte) error {
 }
 
 // SaveTTLConfig save ttl config
-func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) {
-	for k, v := range data {
-		s.persistOptions.SetTTLData(s.ctx, k, v, ttl)
+func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) error {
+	for k := range data {
+		if !config.IsSupportedTTLConfig(k) {
+			return fmt.Errorf("unsupported ttl config %s", k)
+		}
 	}
+	for k, v := range data {
+		if err := s.persistOptions.SetTTLData(s.ctx, s.client, k, fmt.Sprint(v), ttl); err != nil {
+			return err
+		}
+	}
+	return nil
 }
