@@ -549,6 +549,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 		core.SetPendingPeerCount(pendingPeerCount),
 		core.SetLeaderSize(leaderSize),
 		core.SetRegionSize(regionSize),
+		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.PutStore(newStore)
 }
