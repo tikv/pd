@@ -312,9 +312,9 @@ func newRollingStoreStats() *RollingStoreStats {
 	interval := StoreHeartBeatReportInterval * time.Second
 	return &RollingStoreStats{
 		bytesWriteRate:          movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval),
-		bytesReadRate:           movingaverage.NewTimeMedian(8, DefaultReadMfSize, interval),
+		bytesReadRate:           movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, interval),
 		keysWriteRate:           movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval),
-		keysReadRate:            movingaverage.NewTimeMedian(8, DefaultReadMfSize, interval),
+		keysReadRate:            movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, interval),
 		totalCPUUsage:           movingaverage.NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskReadRate:  movingaverage.NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskWriteRate: movingaverage.NewMedianFilter(storeStatsRollingWindows),
