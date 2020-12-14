@@ -389,7 +389,7 @@ func (c *Config) Parse(arguments []string) error {
 		return errors.Errorf("'%s' is an invalid flag", c.flagSet.Arg(0))
 	}
 
-	err = c.Adjust(meta)
+	err = c.Adjust(meta, false)
 	return err
 }
 
@@ -461,7 +461,7 @@ func (m *configMetaData) CheckUndecoded() error {
 }
 
 // Adjust is used to adjust the PD configurations.
-func (c *Config) Adjust(meta *toml.MetaData) error {
+func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configMetaData := newConfigMetadata(meta)
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
@@ -538,7 +538,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustString(&c.Metric.PushJob, c.Name)
 
-	if err := c.Schedule.adjust(configMetaData.Child("schedule")); err != nil {
+	if err := c.Schedule.adjust(configMetaData.Child("schedule"), reloading); err != nil {
 		return err
 	}
 	if err := c.Replication.adjust(configMetaData.Child("replication")); err != nil {
@@ -654,6 +654,8 @@ type ScheduleConfig struct {
 	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
 	HighSpaceRatio float64 `toml:"high-space-ratio" json:"high-space-ratio"`
+	// RegionScoreFormulaVersion is used to control the formula used to calculate region score.
+	RegionScoreFormulaVersion string `toml:"region-score-formula-version" json:"region-score-formula-version"`
 	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
 	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator" json:"scheduler-max-waiting-operator"`
 	// WARN: DisableLearner is deprecated.
@@ -728,22 +730,23 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 }
 
 const (
-	defaultMaxReplicas            = 3
-	defaultMaxSnapshotCount       = 3
-	defaultMaxPendingPeerCount    = 16
-	defaultMaxMergeRegionSize     = 20
-	defaultMaxMergeRegionKeys     = 200000
-	defaultSplitMergeInterval     = 1 * time.Hour
-	defaultPatrolRegionInterval   = 100 * time.Millisecond
-	defaultMaxStoreDownTime       = 30 * time.Minute
-	defaultLeaderScheduleLimit    = 4
-	defaultRegionScheduleLimit    = 2048
-	defaultReplicaScheduleLimit   = 64
-	defaultMergeScheduleLimit     = 8
-	defaultHotRegionScheduleLimit = 4
-	defaultTolerantSizeRatio      = 0
-	defaultLowSpaceRatio          = 0.8
-	defaultHighSpaceRatio         = 0.7
+	defaultMaxReplicas               = 3
+	defaultMaxSnapshotCount          = 3
+	defaultMaxPendingPeerCount       = 16
+	defaultMaxMergeRegionSize        = 20
+	defaultMaxMergeRegionKeys        = 200000
+	defaultSplitMergeInterval        = 1 * time.Hour
+	defaultPatrolRegionInterval      = 100 * time.Millisecond
+	defaultMaxStoreDownTime          = 30 * time.Minute
+	defaultLeaderScheduleLimit       = 4
+	defaultRegionScheduleLimit       = 2048
+	defaultReplicaScheduleLimit      = 64
+	defaultMergeScheduleLimit        = 8
+	defaultHotRegionScheduleLimit    = 4
+	defaultTolerantSizeRatio         = 0
+	defaultLowSpaceRatio             = 0.8
+	defaultHighSpaceRatio            = 0.7
+	defaultRegionScoreFormulaVersion = "v2"
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
@@ -754,7 +757,7 @@ const (
 	defaultEnableCrossTableMerge       = true
 )
 
-func (c *ScheduleConfig) adjust(meta *configMetaData) error {
+func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	if !meta.IsDefined("max-snapshot-count") {
 		adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	}
@@ -808,6 +811,11 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+
+	// new cluster:v2, old cluster:v1
+	if !meta.IsDefined("region-score-formula-version") && !reloading {
+		adjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
+	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 

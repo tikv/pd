@@ -30,6 +30,7 @@ const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
 	storePersistInterval = 5 * time.Minute
 	mb                   = 1 << 20 // megabyte
+	gb                   = 1 << 30
 )
 
 // StoreInfo contains information about a store.
@@ -234,7 +235,21 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 }
 
 // RegionScore returns the store's region score.
-func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+// Deviation It is used to control the direction of the deviation considered
+// when calculating the region score. It is set to -1 when it is the source
+// store of balance, 1 when it is the target, and 0 in the rest of cases.
+func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64, deviation int) float64 {
+	switch version {
+	case "v2":
+		return s.regionScoreV2(delta, deviation)
+	case "v1":
+		fallthrough
+	default:
+		return s.regionScoreV1(highSpaceRatio, lowSpaceRatio, delta)
+	}
+}
+
+func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	var score float64
 	var amplification float64
 	available := float64(s.GetAvailable()) / mb
@@ -279,6 +294,26 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	return score / math.Max(s.GetRegionWeight(), minWeight)
 }
 
+func (s *StoreInfo) regionScoreV2(delta int64, deviation int) float64 {
+	A := float64(float64(s.GetAvgAvailable())-float64(deviation)*float64(s.GetAvailableDeviation())) / gb
+	C := float64(s.GetCapacity()) / gb
+	R := float64(s.GetRegionSize() + delta)
+	var (
+		K, M float64 = 1, 256 // Experience value to control the weight of the available influence on score
+		F    float64 = 20     // Experience value to prevent some nodes from running out of disk space prematurely.
+	)
+
+	var score float64
+	if A >= C || C < 1 {
+		score = R
+	} else if A > F {
+		score = (K + M*(math.Log(C)-math.Log(A-F+1))/(C-A+F-1)) * R
+	} else {
+		score = (K+M*math.Log(C)/C)*R + (F-A)*(K+M*math.Log(F)/F)
+	}
+	return score / math.Max(s.GetRegionWeight(), minWeight)
+}
+
 // StorageSize returns store's used storage size reported from tikv.
 func (s *StoreInfo) StorageSize() uint64 {
 	return s.GetUsedSize()
@@ -316,18 +351,6 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 		return s.GetLeaderSize()
 	case RegionKind:
 		return s.GetRegionSize()
-	default:
-		return 0
-	}
-}
-
-// ResourceScore returns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
-	switch scheduleKind.Resource {
-	case LeaderKind:
-		return s.LeaderScore(scheduleKind.Policy, delta)
-	case RegionKind:
-		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
 	default:
 		return 0
 	}

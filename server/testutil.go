@@ -88,7 +88,7 @@ func NewTestSingleConfig(c *check.C) *config.Config {
 		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
 	})
 
-	c.Assert(cfg.Adjust(nil), check.IsNil)
+	c.Assert(cfg.Adjust(nil, false), check.IsNil)
 
 	return cfg
 }

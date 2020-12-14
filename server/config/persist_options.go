@@ -413,6 +413,11 @@ func (o *PersistOptions) GetHighSpaceRatio() float64 {
 	return o.GetScheduleConfig().HighSpaceRatio
 }
 
+// GetRegionScoreFormulaVersion returns the formula version config.
+func (o *PersistOptions) GetRegionScoreFormulaVersion() string {
+	return o.GetScheduleConfig().RegionScoreFormulaVersion
+}
+
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
 func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
 	return o.getTTLUintOr(schedulerMaxWaitingOperatorKey, o.GetScheduleConfig().SchedulerMaxWaitingOperator)
@@ -563,7 +568,7 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 func (o *PersistOptions) Reload(storage *core.Storage) error {
 	cfg := &Config{}
 	// pass nil to initialize cfg to default values (all items undefined)
-	cfg.Adjust(nil)
+	cfg.Adjust(nil, true)
 
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
