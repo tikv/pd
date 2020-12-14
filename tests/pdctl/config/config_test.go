@@ -393,10 +393,6 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 
-	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "max-replicas", "1")
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "please update rule instead"), IsTrue)
-
 	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "location-labels", "dc,rack")
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "please update rule instead"), IsTrue)
@@ -566,4 +562,91 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 	c.Assert(err, IsNil)
 	conf.DRAutoSync.PrimaryReplicas = 5
 	check()
+}
+
+func (s *configTestSuite) TestUpdateMaxReplicas(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctl.InitCommand()
+
+	store := metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	defer cluster.Destroy()
+
+	checkMaxReplicas := func(expect uint64) {
+		args := []string{"-u", pdAddr, "config", "show", "replication"}
+		_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+		c.Assert(err, IsNil)
+		replicationCfg := config.ReplicationConfig{}
+		c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
+		c.Assert(replicationCfg.MaxReplicas, Equals, expect)
+	}
+
+	checkRuleCount := func(expect int) {
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
+		_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+		c.Assert(err, IsNil)
+		rule := placement.Rule{}
+		c.Assert(json.Unmarshal(output, &rule), IsNil)
+		c.Assert(rule.Count, Equals, expect)
+	}
+
+	// update successfully when placement rules is not enabled.
+	_, output, err := pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "max-replicas", "2")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	checkMaxReplicas(2)
+
+	// update successfully when only one default rule exists.
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	checkMaxReplicas(3)
+	checkRuleCount(3)
+
+	// update unsuccessfully when many rule exists.
+	f, _ := ioutil.TempFile("/tmp", "pd_tests")
+	fname := f.Name()
+	f.Close()
+	defer func() {
+		os.RemoveAll(fname)
+	}()
+
+	rules := []placement.Rule{
+		{
+			GroupID: "pd",
+			ID:      "test1",
+			Role:    "voter",
+			Count:   1,
+		},
+	}
+	b, err := json.Marshal(rules)
+	c.Assert(err, IsNil)
+	ioutil.WriteFile(fname, b, 0644)
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
+	c.Assert(err, IsNil)
+	checkMaxReplicas(3)
+	checkRuleCount(3)
+
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "max-replicas", "4")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "please update rule instead"), IsTrue)
+	checkMaxReplicas(3)
+	checkRuleCount(3)
 }
