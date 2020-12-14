@@ -61,8 +61,9 @@ func (c *testCluster) addRegionStore(storeID uint64, regionCount int, regionSize
 	}
 
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - regionSize
+	stats.Capacity = 100 * (1 << 30)
+	stats.UsedSize = regionSize * (1 << 20)
+	stats.Available = stats.Capacity - stats.UsedSize
 	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
