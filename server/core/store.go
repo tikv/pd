@@ -307,8 +307,11 @@ func (s *StoreInfo) regionScoreV2(delta int64, deviation int) float64 {
 	if A >= C || C < 1 {
 		score = R
 	} else if A > F {
+		// As the amount of data increases (available becomes smaller), the weight of region size on total score
+		// increases. Ideally, all nodes converge at the position where remaining space is F (default 20GiB).
 		score = (K + M*(math.Log(C)-math.Log(A-F+1))/(C-A+F-1)) * R
 	} else {
+		// When remaining space is less then F, the score is mainly determined by available space.
 		score = (K+M*math.Log(C)/C)*R + (F-A)*(K+M*math.Log(F)/F)
 	}
 	return score / math.Max(s.GetRegionWeight(), minWeight)
