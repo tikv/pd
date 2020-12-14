@@ -29,7 +29,7 @@ const (
 
 type dimStat struct {
 	typ         int
-	Rolling     *movingaverage.TimeMedian // it's used to statistic hot degree and average speed.
+	Rolling     *movingaverage.TimeMedian  // it's used to statistic hot degree and average speed.
 	LastAverage *movingaverage.AvgOverTime // it's used to obtain the average speed in last second as instantaneous speed.
 }
 
