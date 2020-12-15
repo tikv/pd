@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/movingaverage"
-	"go.uber.org/zap"
 )
 
 const (
@@ -164,22 +163,4 @@ func (stat *HotPeerStat) isHot(thresholds [dimLen]float64) bool {
 func (stat *HotPeerStat) clearLastAverage() {
 	stat.rollingByteRate.clearLastAverage()
 	stat.rollingKeyRate.clearLastAverage()
-}
-
-// Log is used to output some info
-func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Field)) {
-	level(str,
-		zap.Uint64("interval", stat.interval),
-		zap.Uint64("region", stat.RegionID),
-		zap.Uint64("store", stat.StoreID),
-		zap.Float64("byte-rate", stat.GetByteRate()),
-		zap.Float64("byte-rate-threshold", stat.thresholds[byteDim]),
-		zap.Float64("key-rate", stat.GetKeyRate()),
-		zap.Float64("key-rate-threshold", stat.thresholds[keyDim]),
-		zap.Int("hot-degree", stat.HotDegree),
-		zap.Int("hot-anti-count", stat.AntiCount),
-		zap.Bool("just-transfer-leader", stat.justTransferLeader),
-		zap.Bool("is-leader", stat.isLeader),
-		zap.Bool("need-delete", stat.IsNeedDelete()),
-		zap.String("type", stat.Kind.String()))
 }

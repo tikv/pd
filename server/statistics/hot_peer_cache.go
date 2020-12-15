@@ -92,7 +92,6 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 		if stores, ok := f.storesOfRegion[item.RegionID]; ok {
 			delete(stores, item.StoreID)
 		}
-		item.Log("delete from cache", log.Debug)
 	} else {
 		peers, ok := f.peersOfStore[item.StoreID]
 		if !ok {
@@ -107,7 +106,6 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 			f.storesOfRegion[item.RegionID] = stores
 		}
 		stores[item.StoreID] = struct{}{}
-		item.Log("region heartbeat update", log.Debug)
 	}
 }
 
