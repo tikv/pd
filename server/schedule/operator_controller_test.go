@@ -352,6 +352,8 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	tc.AddLeaderStore(2, 0)
 	for i := uint64(1); i <= 1000; i++ {
 		tc.AddLeaderRegion(i, i)
+		// make it small region
+		tc.PutRegion(tc.GetRegion(i).Clone(core.SetApproximateSize(10)))
 	}
 
 	tc.SetStoreLimit(2, storelimit.AddPeer, 60)
@@ -415,6 +417,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 
 	cluster.AddLeaderStore(1, 2)
 	cluster.AddLeaderStore(2, 0)
+	cluster.SetAllStoresLimit(storelimit.RemovePeer, 600)
 	cluster.AddLeaderRegion(1, 1, 2)
 	steps := []operator.OpStep{
 		operator.TransferLeader{FromStore: 1, ToStore: 2},
