@@ -15,11 +15,11 @@ package logutil
 
 import (
 	"bytes"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var _ = Suite(&testPluggableLoggerSuite{})
