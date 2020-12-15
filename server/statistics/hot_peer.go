@@ -156,8 +156,8 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	return &ret
 }
 
-func (stat *HotPeerStat) isHot(thresholds [dimLen]float64) bool {
-	return stat.rollingByteRate.isHot(thresholds) || stat.rollingKeyRate.isHot(thresholds)
+func (stat *HotPeerStat) isHot() bool {
+	return stat.rollingByteRate.isHot(stat.thresholds) || stat.rollingKeyRate.isHot(stat.thresholds)
 }
 
 func (stat *HotPeerStat) clearLastAverage() {
