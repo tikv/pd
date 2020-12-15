@@ -45,9 +45,16 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	tolerantResource := getTolerantResource(cluster, region, kind)
 	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceProperty(kind)
 	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
+	sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
 	opts := cluster.GetOpts()
-	sourceScore = source.ResourceScore(kind, opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
-	targetScore = target.ResourceScore(kind, opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetInfluence+tolerantResource)
+	switch kind.Resource {
+	case core.LeaderKind:
+		sourceScore = source.LeaderScore(kind.Policy, sourceDelta)
+		targetScore = target.LeaderScore(kind.Policy, targetDelta)
+	case core.RegionKind:
+		sourceScore = source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta, -1)
+		targetScore = target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta, 1)
+	}
 	if opts.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(targetInfluence))
