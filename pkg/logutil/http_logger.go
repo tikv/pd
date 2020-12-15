@@ -15,8 +15,10 @@ package logutil
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -50,7 +52,7 @@ func (l *HTTPLogger) AddCloseCallback(fs ...func()) {
 }
 
 // Plug will plug the HTTPLogger into PluggableLogger.
-func (l *HTTPLogger) Plug(names ...string) (count int) {
+func (l *HTTPLogger) Plug(names ...string) error {
 	l.AddCloseCallback(func() {
 		for _, name := range names {
 			pl := GetPluggableLogger(name, false)
@@ -60,15 +62,20 @@ func (l *HTTPLogger) Plug(names ...string) (count int) {
 		}
 	})
 
+	var notExist []string
 	for _, name := range names {
-		pl := GetPluggableLogger(name, false)
-		if pl != nil {
+		if pl := GetPluggableLogger(name, false); pl != nil {
 			pl.PlugLogger(l.logger)
-			count++
+		} else {
+			notExist = append(notExist, name)
 		}
 	}
 
-	return count
+	if len(notExist) > 0 {
+		return errors.Errorf("these names do not exist: %s", strings.Join(notExist, ","))
+	}
+
+	return nil
 }
 
 // Close will call close callbacks and close all output.

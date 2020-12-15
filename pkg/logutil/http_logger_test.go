@@ -53,9 +53,14 @@ func (s *testHTTPLoggerSuite) TestClose(c *C) {
 	c.Assert(closed, IsTrue)
 }
 
+func (s *testHTTPLoggerSuite) TestNotExist(c *C) {
+	err := s.logger.Plug("not_exist_1", "not_exist_2")
+	c.Assert(err, ErrorMatches, "these names do not exist: not_exist_1,not_exist_2")
+}
+
 func (s *testHTTPLoggerSuite) TestLogger(c *C) {
 	pl := GetPluggableLogger("http", true)
-	c.Assert(s.logger.Plug("http"), Equals, 1)
+	c.Assert(s.logger.Plug("http"), IsNil)
 	pl.Info("world", zap.Int64("answer", 42))
 	s.logger.Close()
 	c.Assert(s.writer.GetCode(), Equals, http.StatusOK)
