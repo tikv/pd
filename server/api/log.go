@@ -93,8 +93,12 @@ func (h *logHandler) GetLog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if second <= 0 {
+	if second == 0 {
 		second = defaultGetLogSecond
+	}
+	if second < 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "duration is less than 0.")
+		return
 	}
 
 	names := query["name"]
@@ -112,8 +116,13 @@ func (h *logHandler) GetLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpLogger.Plug(names...)
+	count := httpLogger.Plug(names...)
 	defer httpLogger.Close()
+
+	if count != len(names) {
+		h.rd.JSON(w, http.StatusBadRequest, "some loggers do not exist.")
+		return
+	}
 
 	select {
 	case <-time.After(time.Duration(second) * time.Second):

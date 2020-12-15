@@ -50,7 +50,7 @@ func (l *HTTPLogger) AddCloseCallback(fs ...func()) {
 }
 
 // Plug will plug the HTTPLogger into PluggableLogger.
-func (l *HTTPLogger) Plug(names ...string) {
+func (l *HTTPLogger) Plug(names ...string) (count int) {
 	l.AddCloseCallback(func() {
 		for _, name := range names {
 			pl := GetPluggableLogger(name, false)
@@ -59,12 +59,16 @@ func (l *HTTPLogger) Plug(names ...string) {
 			}
 		}
 	})
+
 	for _, name := range names {
 		pl := GetPluggableLogger(name, false)
 		if pl != nil {
 			pl.PlugLogger(l.logger)
+			count++
 		}
 	}
+
+	return count
 }
 
 // Close will call close callbacks and close all output.

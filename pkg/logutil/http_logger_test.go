@@ -55,7 +55,7 @@ func (s *testHTTPLoggerSuite) TestClose(c *C) {
 
 func (s *testHTTPLoggerSuite) TestLogger(c *C) {
 	pl := GetPluggableLogger("http", true)
-	s.logger.Plug("http")
+	c.Assert(s.logger.Plug("http"), Equals, 1)
 	pl.Info("world", zap.Int64("answer", 42))
 	s.logger.Close()
 	c.Assert(s.writer.GetCode(), Equals, http.StatusOK)
