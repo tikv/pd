@@ -59,7 +59,7 @@ func (s *testConfigSuite) TestTLS(c *C) {
 func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
 	cfg := NewConfig()
 	cfg.Join = "127.0.0.1:2379" // Wrong join addr without scheme.
-	c.Assert(cfg.Adjust(nil), NotNil)
+	c.Assert(cfg.Adjust(nil, false), NotNil)
 }
 
 func (s *testConfigSuite) TestReloadConfig(c *C) {
@@ -114,9 +114,29 @@ func (s *testConfigSuite) TestReloadUpgrade(c *C) {
 	c.Assert(newOpt.GetPDServerConfig().KeyType, Equals, defaultKeyType) // should be set to default value.
 }
 
+func (s *testConfigSuite) TestReloadUpgrade2(c *C) {
+	opt, err := newTestScheduleOption()
+	c.Assert(err, IsNil)
+
+	// Simulate an old configuration that does not contain ScheduleConfig.
+	type OldConfig struct {
+		Replication ReplicationConfig `toml:"replication" json:"replication"`
+	}
+	old := &OldConfig{
+		Replication: *opt.GetReplicationConfig(),
+	}
+	storage := core.NewStorage(kv.NewMemoryKV())
+	c.Assert(storage.SaveConfig(old), IsNil)
+
+	newOpt, err := newTestScheduleOption()
+	c.Assert(err, IsNil)
+	c.Assert(newOpt.Reload(storage), IsNil)
+	c.Assert(newOpt.GetScheduleConfig().RegionScoreFormulaVersion, Equals, "") // formulaVersion keep old value when reloading.
+}
+
 func (s *testConfigSuite) TestValidation(c *C) {
 	cfg := NewConfig()
-	c.Assert(cfg.Adjust(nil), IsNil)
+	c.Assert(cfg.Adjust(nil, false), IsNil)
 
 	cfg.Log.File.Filename = path.Join(cfg.DataDir, "test")
 	c.Assert(cfg.Validate(), NotNil)
@@ -154,7 +174,7 @@ leader-schedule-limit = 0
 	cfg := NewConfig()
 	meta, err := toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
+	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 
 	// When invalid, use default values.
@@ -185,7 +205,7 @@ type = "random-merge"
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
+	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(cfg.WarningMsgs[0], "Config contains undefined item"), IsTrue)
 
@@ -200,7 +220,7 @@ type = "random-merge-schedulers"
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
+	err = cfg.Adjust(&meta, false)
 	c.Assert(err, NotNil)
 
 	// Check correct schedulers name
@@ -214,7 +234,7 @@ type = "random-merge"
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
+	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 
 	cfgData = `
@@ -225,7 +245,7 @@ address = "localhost:9090"
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
+	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 
 	c.Assert(cfg.Metric.PushInterval.Duration, Equals, 35*time.Second)
@@ -238,7 +258,7 @@ tso-update-physical-interval = "10ms"
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
+	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 
 	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, minTSOUpdatePhysicalInterval)
@@ -249,7 +269,7 @@ tso-update-physical-interval = "15s"
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
+	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 
 	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, maxTSOUpdatePhysicalInterval)
@@ -260,7 +280,7 @@ func (s *testConfigSuite) TestMigrateFlags(c *C) {
 		cfg := NewConfig()
 		meta, err := toml.Decode(s, &cfg)
 		c.Assert(err, IsNil)
-		err = cfg.Adjust(&meta)
+		err = cfg.Adjust(&meta, false)
 		return cfg, err
 	}
 	cfg, err := load(`
@@ -290,7 +310,7 @@ disable-make-up-replica = false
 
 func newTestScheduleOption() (*PersistOptions, error) {
 	cfg := NewConfig()
-	if err := cfg.Adjust(nil); err != nil {
+	if err := cfg.Adjust(nil, false); err != nil {
 		return nil, err
 	}
 	opt := NewPersistOptions(cfg)
@@ -354,7 +374,7 @@ dashboard-address = "foo"
 		cfg := NewConfig()
 		meta, err := toml.Decode(t.cfgData, &cfg)
 		c.Assert(err, IsNil)
-		err = cfg.Adjust(&meta)
+		err = cfg.Adjust(&meta, false)
 		c.Assert(err != nil, Equals, t.hasErr)
 		if !t.hasErr {
 			c.Assert(cfg.PDServerCfg.DashboardAddress, Equals, t.dashboardAddress)
@@ -372,7 +392,7 @@ tidb-cert-path = "/path/client.pem"
 	cfg := NewConfig()
 	meta, err := toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
+	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.Dashboard.TiDBCAPath, Equals, "/path/ca.pem")
 	c.Assert(cfg.Dashboard.TiDBKeyPath, Equals, "/path/client-key.pem")
@@ -393,7 +413,7 @@ tidb-cert-path = "/path/client.pem"
 		cfg = NewConfig()
 		meta, err = toml.Decode(cfgData, &cfg)
 		c.Assert(err, IsNil)
-		err = cfg.Adjust(&meta)
+		err = cfg.Adjust(&meta, false)
 		c.Assert(err, IsNil)
 		c.Assert(cfg.Dashboard.EnableTelemetry, Equals, test.EnableTelemetry)
 	}
@@ -415,7 +435,7 @@ wait-store-timeout = "120s"
 	cfg := NewConfig()
 	meta, err := toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
+	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 
 	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "dr-auto-sync")
@@ -430,20 +450,20 @@ wait-store-timeout = "120s"
 	cfg = NewConfig()
 	meta, err = toml.Decode("", &cfg)
 	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
+	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
 }
 
 func (s *testConfigSuite) TestConfigClone(c *C) {
 	cfg := &Config{}
-	cfg.Adjust(nil)
+	cfg.Adjust(nil, false)
 	c.Assert(cfg.Clone(), DeepEquals, cfg)
 
 	emptyConfigMetaData := newConfigMetadata(nil)
 
 	schedule := &ScheduleConfig{}
-	schedule.adjust(emptyConfigMetaData)
+	schedule.adjust(emptyConfigMetaData, false)
 	c.Assert(schedule.Clone(), DeepEquals, schedule)
 
 	replication := &ReplicationConfig{}

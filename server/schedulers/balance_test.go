@@ -101,6 +101,7 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.SetTolerantSizeRatio(2.5)
+	tc.SetRegionScoreFormulaVersion("v1")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	oc := schedule.NewOperatorController(ctx, nil, nil)
@@ -749,6 +750,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetTolerantSizeRatio(1)
 	tc.SetRegionScheduleLimit(1)
+	tc.SetRegionScoreFormulaVersion("v1")
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	source := core.NewRegionInfo(

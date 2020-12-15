@@ -80,6 +80,11 @@ func (mc *Cluster) SetTolerantSizeRatio(v float64) {
 	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.TolerantSizeRatio = v })
 }
 
+// SetRegionScoreFormulaVersion updates the RegionScoreFormulaVersion configuration.
+func (mc *Cluster) SetRegionScoreFormulaVersion(v string) {
+	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.RegionScoreFormulaVersion = v })
+}
+
 // SetLeaderScheduleLimit updates the LeaderScheduleLimit configuration.
 func (mc *Cluster) SetLeaderScheduleLimit(v int) {
 	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.LeaderScheduleLimit = uint64(v) })
