@@ -50,12 +50,12 @@ type RegionInfo struct {
 	ApproximateSize int64             `json:"approximate_size"`
 	ApproximateKeys int64             `json:"approximate_keys"`
 
-	WriteBytesRate float64 `json:"write_bytes_rate"`
-	WriteKeysRate  float64 `json:"write_keys_rate"`
-	WriteOpsRate   float64 `json:"write_ops_rate"`
-	ReadBytesRate  float64 `json:"read_bytes_rate"`
-	ReadKeysRate   float64 `json:"read_keys_rate"`
-	ReadOpsRate    float64 `json:"read_ops_rate"`
+	WriteBytesRate uint64 `json:"write_bytes_rate"`
+	WriteKeysRate  uint64 `json:"write_keys_rate"`
+	WriteOpsRate   uint64 `json:"write_ops_rate"`
+	ReadBytesRate  uint64 `json:"read_bytes_rate"`
+	ReadKeysRate   uint64 `json:"read_keys_rate"`
+	ReadOpsRate    uint64 `json:"read_ops_rate"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
@@ -103,12 +103,12 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ApproximateKeys = r.GetApproximateKeys()
 	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())
 
-	s.WriteBytesRate = r.WriteBytesRate
-	s.WriteKeysRate = r.WriteKeysRate
-	s.WriteOpsRate = r.WriteOpsRate
-	s.ReadBytesRate = r.ReadBytesRate
-	s.ReadKeysRate = r.ReadKeysRate
-	s.ReadOpsRate = r.ReadOpsRate
+	s.WriteBytesRate = uint64(r.WriteBytesRate)
+	s.WriteKeysRate = uint64(r.WriteKeysRate)
+	s.WriteOpsRate = uint64(r.WriteOpsRate)
+	s.ReadBytesRate = uint64(r.ReadBytesRate)
+	s.ReadKeysRate = uint64(r.ReadKeysRate)
+	s.ReadOpsRate = uint64(r.ReadOpsRate)
 	return s
 }
 

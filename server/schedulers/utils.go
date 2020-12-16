@@ -428,6 +428,8 @@ type regionInfo struct {
 	splitDimID      uint64
 	splittedIDs     []uint64
 	splittedRegions map[uint64]*regionInfo
+
+	peerStat *statistics.HotPeerStat
 }
 
 func newRegionInfo(id uint64, regionID uint64, srcStoreID uint64, load1 float64, load2 float64) *regionInfo {
@@ -598,7 +600,10 @@ func (si *storeInfo) remove(region *regionInfo) {
 
 func (si *storeInfo) classifyRegion() {
 	for _, region := range si.regions {
-		if region.loads[0] >= region.loads[1] {
+		if region.loads[0] == region.loads[1] {
+			si.candiRegions[0] = append(si.candiRegions[0], region)
+			si.candiRegions[1] = append(si.candiRegions[1], region)
+		} else if region.loads[0] > region.loads[1] {
 			si.candiRegions[0] = append(si.candiRegions[0], region)
 		} else {
 			si.candiRegions[1] = append(si.candiRegions[1], region)

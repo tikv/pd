@@ -685,6 +685,7 @@ type ScheduleConfig struct {
 	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
 
 	HotSchedulerMode uint64 `toml:"hot-scheduler-mode" json:"hot-scheduler-mode"`
+	HotBalanceRatio float64 `toml:"hot-balance-ratio" json:"hot-balance-ratio"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -732,6 +733,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		StoreLimitMode:               c.StoreLimitMode,
 		Schedulers:                   schedulers,
 		HotSchedulerMode:             c.HotSchedulerMode,
+		HotBalanceRatio:			  c.HotBalanceRatio,
 	}
 }
 
@@ -808,6 +810,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("hot-scheduler-mode") {
 		adjustUint64(&c.HotSchedulerMode, 0)
+	}
+	if !meta.IsDefined("hot-balance-ratio") {
+		adjustFloat64(&c.HotBalanceRatio, 0.1)
 	}
 
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)

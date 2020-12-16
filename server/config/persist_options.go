@@ -393,6 +393,11 @@ func (o *PersistOptions) GetHotSchedulerMode() int {
 	return int(o.GetScheduleConfig().HotSchedulerMode)
 }
 
+// GetHotBalanceRatio is used to control scheduling.
+func (o *PersistOptions) GetHotBalanceRatio() float64 {
+	return float64(o.GetScheduleConfig().HotBalanceRatio)
+}
+
 // GetSchedulers gets the scheduler configurations.
 func (o *PersistOptions) GetSchedulers() SchedulerConfigs {
 	return o.GetScheduleConfig().Schedulers

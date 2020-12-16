@@ -81,6 +81,9 @@ const (
 	hotReadRegionMinFlowRate  = 128 * 1024
 	hotWriteRegionMinKeyRate  = 256
 	hotReadRegionMinKeyRate   = 512
+
+	loadNums = uint64(2)
+	balanceRatioConst = float64(0.1)
 )
 
 // schedulePeerPr the probability of schedule the hot peer.
@@ -109,6 +112,8 @@ type hotScheduler struct {
 	pendingSums [resourceTypeLen]map[uint64]Influence
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
+
+	balanceRatio float64
 }
 
 func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
@@ -122,6 +127,7 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 		regionPendings: make(map[uint64][2]*operator.Operator),
 		conf:           conf,
+		balanceRatio:   balanceRatioConst,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.pendings[ty] = map[*pendingInfluence]struct{}{}
@@ -188,14 +194,15 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 	h.prepareForBalance(cluster)
 
 	mode := cluster.GetOpts().GetHotSchedulerMode()
+	h.balanceRatio = cluster.GetOpts().GetHotBalanceRatio()
 	if mode >= 10 {
 		return nil
 	}
 	switch typ {
 	case read:
-		return h.balanceHotReadRegions(cluster)
+		return h.balanceHotReadRegionsMulti(cluster)
 	case write:
-		return h.balanceHotWriteRegions(cluster)
+		return h.balanceHotWriteRegionsMulti(cluster)
 	}
 	return nil
 }
@@ -488,6 +495,47 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 	return true
 }
 
+func (h *hotScheduler) balanceHotReadRegionsMulti(cluster opt.Cluster) []*operator.Operator {
+	// prefer to balance by leader
+	leaderSolver := newBalanceSolver(h, cluster, read, transferLeader)
+	ops := leaderSolver.solveMultiLoads()
+	if len(ops) > 0 {
+		return ops
+	}
+
+	peerSolver := newBalanceSolver(h, cluster, read, movePeer)
+	ops = peerSolver.solveMultiLoads()
+	if len(ops) > 0 {
+		return ops
+	}
+
+	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
+	return nil
+}
+
+func (h *hotScheduler) balanceHotWriteRegionsMulti(cluster opt.Cluster) []*operator.Operator {
+	// prefer to balance by peer
+	s := h.r.Intn(100)
+	switch {
+	case s < int(schedulePeerPr*100):
+		peerSolver := newBalanceSolver(h, cluster, write, movePeer)
+		ops := peerSolver.solveMultiLoads()
+		if len(ops) > 0 {
+			return ops
+		}
+	default:
+	}
+
+	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
+	ops := leaderSolver.solveMultiLoads()
+	if len(ops) > 0 {
+		return ops
+	}
+
+	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
+	return nil
+}
+
 func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
 	// prefer to balance by leader
 	leaderSolver := newBalanceSolver(h, cluster, read, transferLeader)
@@ -541,6 +589,8 @@ type balanceSolver struct {
 	maxSrc   *storeLoad
 	minDst   *storeLoad
 	rankStep *storeLoad
+
+	storeInfos []*storeInfo
 }
 
 type solution struct {
@@ -585,6 +635,31 @@ func (bs *balanceSolver) init() {
 		KeyRate:  maxCur.KeyRate * bs.sche.conf.GetKeyRankStepRatio(),
 		Count:    maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
+
+	bs.initLoadInfo()
+}
+
+func (bs *balanceSolver) initLoadInfo() {
+	bs.storeInfos = make([]*storeInfo, 0)
+
+	peerID := uint64(1)
+	// create RegionInfo and StoreInfo to normalize flow data
+	for storeID, loadDetail := range bs.stLoadDetail {
+		hotRegions := make(map[uint64]*regionInfo)
+		for _, peer := range loadDetail.HotPeers {
+			hotRegions[peerID] = newRegionInfo(peerID, peer.RegionID, storeID,
+				peer.GetByteRate()/loadDetail.LoadPred.Future.ExpByteRate,
+				peer.GetKeyRate()/loadDetail.LoadPred.Future.ExpKeyRate)
+			hotRegions[peerID].peerStat = peer
+			peerID++
+		}
+		si := newStoreInfo(storeID,
+			[]float64{loadDetail.LoadPred.Future.ByteRate / loadDetail.LoadPred.Future.ExpByteRate,
+				loadDetail.LoadPred.Future.KeyRate / loadDetail.LoadPred.Future.ExpKeyRate},
+			hotRegions)
+		bs.storeInfos = append(bs.storeInfos, si)
+
+	}
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
@@ -613,6 +688,171 @@ func (bs *balanceSolver) isValid() bool {
 		return false
 	}
 	return true
+}
+
+func (bs *balanceSolver) pickBestDstStore(dimID uint64, region *regionInfo) *storeInfo {
+	var dstStore *storeInfo
+	filters, candiStores := bs.getFilterAnadCandidateStores()
+
+	var selectedStoreIDs []uint64
+	selectedStores := make(map[uint64]*core.StoreInfo)
+	for _, store := range candiStores {
+		if filter.Target(bs.cluster.GetOpts(), store, filters) {
+			selectedStores[store.GetID()] = store
+			selectedStoreIDs = append(selectedStoreIDs, store.GetID())
+		}
+	}
+
+	minLoad := 1000.0
+	for _, store := range bs.storeInfos {
+		if _, ok := selectedStores[store.id]; !ok {
+			continue
+		}
+		afterLoad := store.loads[dimID] + region.loads[dimID]
+		if afterLoad <= 1 + bs.sche.balanceRatio {
+			if afterLoad < minLoad {
+				dstStore = store
+				minLoad = afterLoad
+			}
+		}
+	}
+	log.Info("pickBestDstStore",
+		zap.Uint64("regionID", region.regionID),
+		zap.String("selectedStores", fmt.Sprintf("%+v", selectedStoreIDs)),
+	)
+	return dstStore
+}
+
+func (bs *balanceSolver) solveMultiLoads() []*operator.Operator {
+	var expByteRate, expKeyRate float64
+	for _, loadDetail := range bs.stLoadDetail {
+		expByteRate = loadDetail.LoadPred.Future.ExpByteRate
+		expKeyRate = loadDetail.LoadPred.Future.ExpKeyRate
+		break
+	}
+
+	if expByteRate < hotWriteRegionMinFlowRate && expKeyRate < hotWriteRegionMinKeyRate {
+		return nil
+	}
+
+	maxIDAndLoad := func(store *storeInfo) (id uint64, load float64) {
+		for i := uint64(0); i < loadNums; i++ {
+			if store.loads[i] > load {
+				load = store.loads[i]
+				id = i
+			}
+		}
+		return
+	}
+
+	// prefer IO
+	sort.Slice(bs.storeInfos, func(i, j int) bool {
+		return bs.storeInfos[i].loads[0] > bs.storeInfos[j].loads[0]
+	})
+
+	log.Info("run solve", 
+		zap.Stringer("opTy", bs.opTy),
+		zap.Stringer("rwTy", bs.rwTy),
+	)
+
+	for _, store := range bs.storeInfos {
+		log.Info("store load",
+			zap.Uint64("id", store.id),
+			zap.String("storeLoad", fmt.Sprintf("%+v", store.loads)),
+		)
+	}
+
+	bs.cur = &solution{}
+
+	hasFound := true
+	for hasFound {
+		hasFound = false
+		for _, store := range bs.storeInfos {
+			store.classifyRegion()
+			for {
+				maxID, maxLoad := maxIDAndLoad(store)
+				if maxLoad <= 1 + bs.sche.balanceRatio {
+					break
+				} else {
+					var selectedRegion *regionInfo
+					for {
+						if len(store.candiRegions[maxID]) == 0 {
+							log.Info("no candi region",
+								zap.Uint64("storeID", store.id),
+								zap.String("storeLoad", fmt.Sprintf("%+v", store.loads)),
+							)
+							break
+						}
+						length := len(store.candiRegions[maxID])
+						selectedRegion = store.candiRegions[maxID][length-1]
+						store.candiRegions[maxID] = store.candiRegions[maxID][:length-1]
+						
+						if _, ok := bs.sche.regionPendings[selectedRegion.regionID]; !ok {
+							break
+						} else {
+							log.Info("filter pending region",
+								zap.Uint64("storeID", store.id),
+								zap.Uint64("regionID", selectedRegion.regionID),
+								zap.String("storeLoad", fmt.Sprintf("%+v", store.loads)),
+							)
+							selectedRegion = nil
+						}
+					}
+					if selectedRegion == nil { // no suitable region
+						break
+					}
+					if maxLoad - selectedRegion.loads[maxID] >= 1 - bs.sche.balanceRatio {
+						bs.cur.srcStoreID = store.id
+						bs.cur.srcPeerStat = selectedRegion.peerStat
+						bs.cur.region = bs.getRegion()
+						if bs.cur.region == nil {
+							log.Info("no region",
+								zap.Uint64("regionID", selectedRegion.regionID),
+							)
+							continue
+						}
+
+						dstStore := bs.pickBestDstStore(maxID, selectedRegion)
+						if dstStore == nil { // there is no suitable place,  consider next region
+							log.Info("no suitable store",
+								zap.Uint64("regionID", selectedRegion.regionID),
+							)
+							continue
+						}
+						bs.cur.dstStoreID = dstStore.id
+
+						hasFound = true
+						log.Info("find placement",
+							zap.Uint64("regionID", selectedRegion.regionID),
+							zap.Uint64("srcStoreID", store.id),
+							zap.Uint64("dstStoreID", dstStore.id),
+							zap.String("regionLoad", fmt.Sprintf("%+v", selectedRegion.loads)),
+							zap.String("srdStoreLoad", fmt.Sprintf("%+v", store.loads)),
+							zap.String("dstStoreLoad", fmt.Sprintf("%+v", dstStore.loads)),
+							zap.Uint64("balanceWhichLoad", maxID),
+						)
+						
+						ops, infls := bs.buildOperators()
+						if ops == nil {
+							log.Info("build operation failed",
+								zap.Uint64("regionID", selectedRegion.regionID),
+							)
+						}
+
+						for i := 0; i < len(ops); i++ {
+							// TODO: multiple operators need to be atomic.
+							if !bs.sche.addPendingInfluence(ops[i], bs.cur.srcStoreID, bs.cur.dstStoreID, infls[i], bs.rwTy, bs.opTy) {
+								return nil
+							}
+						}
+						return ops
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // solve travels all the src stores, hot peers, dst stores and select each one of them to make a best scheduling solution.
@@ -811,14 +1051,10 @@ func (bs *balanceSolver) getRegion() *core.RegionInfo {
 }
 
 // filterDstStores select the candidate store by filters
-func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
-	var (
-		filters    []filter.Filter
-		candidates []*core.StoreInfo
-	)
+func (bs *balanceSolver) getFilterAnadCandidateStores() (filters []filter.Filter, candidates []*core.StoreInfo) {
 	srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
 	if srcStore == nil {
-		return nil
+		return
 	}
 
 	switch bs.opTy {
@@ -844,8 +1080,14 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		candidates = bs.cluster.GetFollowerStores(bs.cur.region)
 
 	default:
-		return nil
+		return
 	}
+	return
+}
+
+// filterDstStores select the candidate store by filters
+func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
+	filters, candidates := bs.getFilterAnadCandidateStores()
 	return bs.pickDstStores(filters, candidates)
 }
 
@@ -1106,7 +1348,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	}
 
 	if err != nil {
-		log.Debug("fail to create operator", zap.Stringer("rwType", bs.rwTy), zap.Stringer("opType", bs.opTy), errs.ZapError(err))
+		log.Info("fail to create operator", zap.Stringer("rwType", bs.rwTy), zap.Stringer("opType", bs.opTy), errs.ZapError(err))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
 		return nil, nil
 	}

@@ -63,9 +63,8 @@ const (
 	minHotScheduleIntervalHR = time.Second
 	maxHotScheduleIntervalHR = 20 * time.Second
 
-	balanceRatio        = 0.05
 	batchOperationLimit = 4
-	operationRetryLimit = 10
+	operationRetryLimit = 3
 	// wait for the new splitted regions to be identified as hot
 	waitSplitInfoStableInterval = 10 * time.Second
 
@@ -123,6 +122,7 @@ type multiDimensionScheduler struct {
 	storeQPSHistroy          *stableAnalysis
 	hotRegionLoadRateHistory []*stableAnalysis
 	mode                     int
+	balanceRatio			 float64
 }
 
 func newMultiDimensionScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *multiDimensionScheduler {
@@ -141,6 +141,7 @@ func newMultiDimensionScheduler(opController *schedule.OperatorController, conf 
 		storeFlowRateHistroy:     newStableAnalysis(5, 0.15),
 		storeQPSHistroy:          newStableAnalysis(5, 0.15),
 		hotRegionLoadRateHistory: []*stableAnalysis{newStableAnalysis(5, 0.15), newStableAnalysis(5, 0.15)},
+		balanceRatio: 			balanceRatioConst,
 	}
 	return ret
 }
@@ -189,6 +190,7 @@ func (h *multiDimensionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 	h.hotSched.prepareForBalance(cluster)
 	bs := newBalanceSolver(h.hotSched, cluster, write, movePeer)
 	h.mode = cluster.GetOpts().GetHotSchedulerMode()
+	h.balanceRatio = cluster.GetOpts().GetHotBalanceRatio()
 
 	for {
 		switch h.schStatus {
@@ -249,7 +251,7 @@ func (h *multiDimensionScheduler) isLoadBalanced(bs *balanceSolver) bool {
 			}
 		}
 	}
-	return loadBalanced(storeLoads[0], balanceRatio) && loadBalanced(storeLoads[1], balanceRatio)
+	return loadBalanced(storeLoads[0], h.balanceRatio) && loadBalanced(storeLoads[1], h.balanceRatio)
 }
 
 func (h *multiDimensionScheduler) checkStoreLoad(bs *balanceSolver) bool {
@@ -316,7 +318,7 @@ func (h *multiDimensionScheduler) initLoadInfo(bs *balanceSolver) {
 	for id, loadDetail := range bs.stLoadDetail {
 		hotRegions := make(map[uint64]*regionInfo)
 		for _, peer := range loadDetail.HotPeers {
-			hotRegions[peer.RegionID] = newRegionInfo(peerID, peer.RegionID, id,
+			hotRegions[peerID] = newRegionInfo(peerID, peer.RegionID, id,
 				peer.GetByteRate()/loadDetail.LoadPred.Future.ExpByteRate,
 				peer.GetKeyRate()/loadDetail.LoadPred.Future.ExpKeyRate)
 			peerID++
@@ -337,12 +339,12 @@ func (h *multiDimensionScheduler) initLoadInfo(bs *balanceSolver) {
 func (h *multiDimensionScheduler) greedyTwoDimension(bs *balanceSolver) {
 	var pendingRegions []*regionInfo
 	if h.schStatus == scheduleSplit {
-		// pendingRegions = splitProcedure(h.storeInfos, h.candidateRegions, balanceRatio)
+		// pendingRegions = splitProcedure(h.storeInfos, h.candidateRegions, h.balanceRatio)
 	} else {
-		// pendingRegions = migrationProcedure(h.storeInfos, h.candidateRegions, balanceRatio)
+		// pendingRegions = migrationProcedure(h.storeInfos, h.candidateRegions, h.balanceRatio)
 
-		pendingRegions = greedySingle(h.storeInfos, balanceRatio, uint64(h.mode%10), nil)
-		// pendingRegions1 := greedySingle(h.storeInfos, balanceRatio, 1)
+		pendingRegions = greedySingle(h.storeInfos, h.balanceRatio, uint64(h.mode%10), nil)
+		// pendingRegions1 := greedySingle(h.storeInfos, h.balanceRatio, 1)
 		// pendingRegions = append(pendingRegions, pendingRegions1...)
 	}
 
