@@ -272,7 +272,8 @@ func (m *userManager) UpdateCache() error {
 	m.users = make(map[string]*User)
 	for i := range keys {
 		value := values[i]
-		user, err := NewUserFromJSON(value)
+
+		user, err := UnmarshalUser(value)
 		if err != nil {
 			return err
 		}
@@ -493,7 +494,7 @@ func (m *roleManager) UpdateCache() error {
 	m.roles = make(map[string]*Role)
 	for i := range keys {
 		value := values[i]
-		role, err := NewRoleFromJSON(value)
+		role, err := UnmarshalRole(value)
 		if err != nil {
 			return err
 		}

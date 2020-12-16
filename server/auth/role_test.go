@@ -55,7 +55,7 @@ func (s *testRoleSuite) TestRole(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(string(j), Equals, marshalledRole)
 
-	unmarshalledRole, err := NewRoleFromJSON(string(j))
+	unmarshalledRole, err := UnmarshalRole(string(j))
 	c.Assert(err, IsNil)
 	c.Assert(unmarshalledRole, DeepEquals, role)
 

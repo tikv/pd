@@ -36,8 +36,8 @@ func NewRole(name string) (*Role, error) {
 	return &Role{Name: name, Permissions: make([]Permission, 0)}, nil
 }
 
-// NewRoleFromJSON safely deserialize a json string to a role instance.
-func NewRoleFromJSON(j string) (*Role, error) {
+// UnmarshalRole safely deserialize a json string to a role instance.
+func UnmarshalRole(j string) (*Role, error) {
 	role := Role{Permissions: make([]Permission, 0)}
 	err := json.Unmarshal([]byte(j), &role)
 	if err != nil {

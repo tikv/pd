@@ -50,7 +50,7 @@ func (s *testUserSuite) TestUser(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(string(j), Equals, marshalledUser)
 
-	unmarshalledUser, err := NewUserFromJSON(string(j))
+	unmarshalledUser, err := UnmarshalUser(string(j))
 	c.Assert(err, IsNil)
 	c.Assert(unmarshalledUser, DeepEquals, user)
 

@@ -23,7 +23,7 @@ import (
 // Read-Only once created.
 type User struct {
 	Username string   `json:"username"`
-	Hash     string   `json:"hash"`
+	Hash     string   `json:"hash"` // sha256 hash for password
 	RoleKeys []string `json:"roles"`
 }
 
@@ -37,8 +37,8 @@ func NewUser(username string, hash string) (*User, error) {
 	return &User{Username: username, Hash: hash, RoleKeys: make([]string, 0)}, nil
 }
 
-// NewUserFromJSON safely deserialize a json string to a user instance.
-func NewUserFromJSON(j string) (*User, error) {
+// UnmarshalUser safely deserialize a json string to a user instance.
+func UnmarshalUser(j string) (*User, error) {
 	user := User{RoleKeys: make([]string, 0)}
 	err := json.Unmarshal([]byte(j), &user)
 	if err != nil {
