@@ -140,10 +140,12 @@ func (m *userManager) ChangePassword(name string, password string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	user.Hash = GenerateHash(password)
+	updatedUser := user.Clone()
+	hash := GenerateHash(password)
+	updatedUser.Hash = hash
 
 	// Update user in kv
-	userJSON, err := json.Marshal(user)
+	userJSON, err := json.Marshal(updatedUser)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
@@ -154,7 +156,9 @@ func (m *userManager) ChangePassword(name string, password string) error {
 		return err
 	}
 
-	// No need to update user in memory cache again.
+	// Update user in memory cache.
+	user.Hash = hash
+
 	return nil
 }
 
@@ -168,10 +172,11 @@ func (m *userManager) SetRoles(name string, roles []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	user.RoleKeys = roles
+	updatedUser := user.Clone()
+	updatedUser.RoleKeys = roles
 
 	// Update user in kv
-	userJSON, err := json.Marshal(user)
+	userJSON, err := json.Marshal(updatedUser)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
@@ -182,7 +187,9 @@ func (m *userManager) SetRoles(name string, roles []string) error {
 		return err
 	}
 
-	// No need to update user in memory cache again.
+	// Update user in memory cache.
+	user.RoleKeys = roles
+
 	return nil
 }
 
@@ -280,7 +287,7 @@ type roleManager struct {
 	roles map[string]*Role
 }
 
-// newRoleManager creates a new roleManager for debug purposes.
+// newRoleManager creates a new roleManager.
 func newRoleManager(kv kv.Base) *roleManager {
 	return &roleManager{kv: kv, roles: make(map[string]*Role)}
 }
@@ -386,10 +393,11 @@ func (m *roleManager) SetPermissions(name string, permissions []Permission) erro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	role.Permissions = permissions
+	updatedRole := role.Clone()
+	updatedRole.Permissions = permissions
 
 	// Update role in kv
-	roleJSON, err := json.Marshal(role)
+	roleJSON, err := json.Marshal(updatedRole)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
@@ -400,7 +408,9 @@ func (m *roleManager) SetPermissions(name string, permissions []Permission) erro
 		return err
 	}
 
-	// No need to update role in memory cache again.
+	// Update role in memory cache.
+	role.Permissions = permissions
+
 	return nil
 }
 
@@ -430,7 +440,7 @@ func (m *roleManager) AddPermission(name string, permission Permission) error {
 		return err
 	}
 
-	// Update user in memory cache.
+	// Update role in memory cache.
 	m.roles[name] = role
 
 	return nil
@@ -462,7 +472,7 @@ func (m *roleManager) RemovePermission(name string, permission Permission) error
 		return err
 	}
 
-	// Update user in memory cache.
+	// Update role in memory cache.
 	m.roles[name] = role
 
 	return nil
