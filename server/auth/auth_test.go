@@ -15,7 +15,6 @@ package auth
 
 import (
 	"encoding/json"
-	"path"
 	"reflect"
 	"testing"
 
@@ -415,13 +414,13 @@ func initKV(c *C, k kv.Base) {
 	for _, role := range roles {
 		value, err := json.Marshal(role)
 		c.Assert(err, IsNil)
-		err = k.Save(path.Join(rolePrefix, role.Name), string(value))
+		err = k.Save(GetRolePath(role.Name), string(value))
 		c.Assert(err, IsNil)
 	}
 	for _, user := range users {
 		value, err := json.Marshal(user)
 		c.Assert(err, IsNil)
-		err = k.Save(path.Join(userPrefix, user.Username), string(value))
+		err = k.Save(GetUserPath(user.Username), string(value))
 		c.Assert(err, IsNil)
 	}
 }

@@ -15,18 +15,11 @@ package auth
 
 import (
 	"encoding/json"
-	"path"
-	"strings"
 	"sync"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
-)
-
-const (
-	userPrefix = "users"
-	rolePrefix = "roles"
 )
 
 // RBACManager is used for the rbac storage, cache, management and enforcing logic.
@@ -54,7 +47,7 @@ type userManager struct {
 	users map[string]*User
 }
 
-// newUserManager creates a new roleManager for debug purposes.
+// newUserManager creates a new roleManager.
 func newUserManager(kv kv.Base) *userManager {
 	return &userManager{kv: kv, users: make(map[string]*User)}
 }
@@ -96,7 +89,7 @@ func (m *userManager) CreateUser(name string, password string) error {
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	userPath := path.Join(userPrefix, name)
+	userPath := GetUserPath(name)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -120,7 +113,7 @@ func (m *userManager) DeleteUser(name string) error {
 		return err
 	}
 
-	userPath := path.Join(userPrefix, name)
+	userPath := GetUserPath(name)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -154,7 +147,7 @@ func (m *userManager) ChangePassword(name string, password string) error {
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	userPath := path.Join(userPrefix, name)
+	userPath := GetUserPath(name)
 
 	err = m.kv.Save(userPath, string(userJSON))
 	if err != nil {
@@ -182,7 +175,7 @@ func (m *userManager) SetRoles(name string, roles []string) error {
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	userPath := path.Join(userPrefix, name)
+	userPath := GetUserPath(name)
 
 	err = m.kv.Save(userPath, string(userJSON))
 	if err != nil {
@@ -211,7 +204,7 @@ func (m *userManager) AddRole(name string, role string) error {
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	userPath := path.Join(userPrefix, name)
+	userPath := GetUserPath(name)
 
 	// Update user in kv.
 	err = m.kv.Save(userPath, string(userJSON))
@@ -243,7 +236,7 @@ func (m *userManager) RemoveRole(name string, role string) error {
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	userPath := path.Join(userPrefix, name)
+	userPath := GetUserPath(name)
 
 	// Update user in kv.
 	err = m.kv.Save(userPath, string(userJSON))
@@ -262,7 +255,7 @@ func (m *userManager) UpdateCache() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	userPath := strings.Join([]string{userPrefix, ""}, "/")
+	userPath := GetUserPath("")
 
 	keys, values, err := m.kv.LoadRange(userPath, clientv3.GetPrefixRangeEnd(userPath), 0)
 	if err != nil {
@@ -329,7 +322,7 @@ func (m *roleManager) CreateRole(name string) error {
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	rolePath := path.Join(rolePrefix, name)
+	rolePath := GetRolePath(name)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -353,7 +346,7 @@ func (m *roleManager) DeleteRole(name string) error {
 		return err
 	}
 
-	rolePath := path.Join(rolePrefix, name)
+	rolePath := GetRolePath(name)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -400,7 +393,7 @@ func (m *roleManager) SetPermissions(name string, permissions []Permission) erro
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	rolePath := path.Join(rolePrefix, name)
+	rolePath := GetRolePath(name)
 
 	err = m.kv.Save(rolePath, string(roleJSON))
 	if err != nil {
@@ -429,7 +422,7 @@ func (m *roleManager) AddPermission(name string, permission Permission) error {
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	rolePath := path.Join(rolePrefix, name)
+	rolePath := GetRolePath(name)
 
 	// Update user in kv.
 	err = m.kv.Save(rolePath, string(roleJSON))
@@ -461,7 +454,7 @@ func (m *roleManager) RemovePermission(name string, permission Permission) error
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	rolePath := path.Join(rolePrefix, name)
+	rolePath := GetRolePath(name)
 
 	// Update user in kv.
 	err = m.kv.Save(rolePath, string(roleJSON))
@@ -480,7 +473,7 @@ func (m *roleManager) UpdateCache() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	rolePath := strings.Join([]string{rolePrefix, ""}, "/")
+	rolePath := GetRolePath("")
 
 	keys, values, err := m.kv.LoadRange(rolePath, clientv3.GetPrefixRangeEnd(rolePath), 0)
 	if err != nil {

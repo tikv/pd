@@ -44,3 +44,13 @@ func (s *testUtilSuite) TestValidateName(c *C) {
 	ok = validateName("fo_o123")
 	c.Assert(ok, IsTrue)
 }
+
+func (s *testUtilSuite) TestGetUserPath(c *C) {
+	c.Assert(GetUserPath(""), Equals, "users/")
+	c.Assert(GetUserPath("john"), Equals, "users/john")
+}
+
+func (s *testUtilSuite) TestGetRolePath(c *C) {
+	c.Assert(GetRolePath(""), Equals, "roles/")
+	c.Assert(GetRolePath("john"), Equals, "roles/john")
+}
