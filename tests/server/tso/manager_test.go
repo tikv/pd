@@ -15,13 +15,16 @@ package tso_test
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"go.etcd.io/etcd/clientv3"
 )
 
 var _ = Suite(&testManagerSuite{})
@@ -68,6 +71,7 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
+	cluster.WaitLeader()
 	serverNameMap := make(map[uint64]string)
 	for _, server := range cluster.GetServers() {
 		serverNameMap[server.GetServerID()] = server.GetServer().Name()
@@ -89,6 +93,70 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 			}
 		}
 		c.Assert(obtainedServerNumber, Equals, serverNumber)
+	}
+}
+
+func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
+	testCase := struct {
+		dcLocations      []string
+		dcLocationConfig map[string]string
+	}{
+		dcLocations: []string{"dc-1", "dc-2", "dc-3"},
+		dcLocationConfig: map[string]string{
+			"pd1": "dc-1",
+			"pd2": "dc-1",
+			"pd3": "dc-2",
+			"pd4": "dc-2",
+			"pd5": "dc-3",
+			"pd6": "dc-3",
+		},
+	}
+	serverNumber := len(testCase.dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = testCase.dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	cluster.WaitLeader()
+	// To speed up the test, we force to do the check
+	for _, server := range cluster.GetServers() {
+		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
+	}
+	// Wait for each DC's Local TSO Allocator leader
+	for _, dcLocation := range testCase.dcLocationConfig {
+		testutil.WaitUntil(c, func(c *C) bool {
+			leaderName := cluster.WaitAllocatorLeader(dcLocation)
+			return len(leaderName) > 0
+		})
+	}
+
+	tsoAllocatorManager := cluster.GetServer("pd1").GetTSOAllocatorManager()
+	for _, dcLocation := range testCase.dcLocations {
+		suffixResp, err := etcdutil.EtcdKVGet(
+			cluster.GetEtcdClient(),
+			tsoAllocatorManager.GetLocalTSOSuffixPath(dcLocation))
+		c.Assert(err, IsNil)
+		c.Assert(len(suffixResp.Kvs), Equals, 1)
+		// Test the increment of the suffix
+		allSuffixResp, err := etcdutil.EtcdKVGet(
+			cluster.GetEtcdClient(),
+			tsoAllocatorManager.GetLocalTSOSuffixPathPrefix(),
+			clientv3.WithPrefix(),
+			clientv3.WithSort(clientv3.SortByValue, clientv3.SortAscend))
+		c.Assert(err, IsNil)
+		c.Assert(len(allSuffixResp.Kvs), Equals, len(testCase.dcLocations))
+		var lastSuffixNum int64
+		for _, kv := range allSuffixResp.Kvs {
+			suffixNum, err := strconv.ParseInt(string(kv.Value), 10, 64)
+			c.Assert(err, IsNil)
+			c.Assert(suffixNum, Greater, lastSuffixNum)
+			lastSuffixNum = suffixNum
+		}
 	}
 }
 
@@ -136,10 +204,7 @@ func (s *testPrioritySuite) TestAllocatorPriority(c *C) {
 	// pd2: dc-2 allocator leader
 	// pd3: dc-3 allocator leader
 
-	// To speed up the test, we force to do the check
-	for _, server := range cluster.GetServers() {
-		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
-	}
+	cluster.WaitLeader()
 	// Wait for each DC's Local TSO Allocator leader
 	for _, dcLocation := range dcLocationConfig {
 		testutil.WaitUntil(c, func(c *C) bool {

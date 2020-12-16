@@ -63,7 +63,7 @@ func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Router /config/default [get]
 func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
 	config := config.NewConfig()
-	err := config.Adjust(nil)
+	err := config.Adjust(nil, false)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}

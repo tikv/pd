@@ -768,7 +768,7 @@ type testCluster struct {
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
-	if err := cfg.Adjust(nil); err != nil {
+	if err := cfg.Adjust(nil, false); err != nil {
 		return nil, nil, err
 	}
 	opt := config.NewPersistOptions(cfg)

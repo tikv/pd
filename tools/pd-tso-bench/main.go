@@ -184,6 +184,7 @@ const (
 type stats struct {
 	maxDur          time.Duration
 	minDur          time.Duration
+	totalDur        time.Duration
 	count           int
 	milliCnt        int
 	twoMilliCnt     int
@@ -207,6 +208,7 @@ func newStats() *stats {
 
 func (s *stats) update(dur time.Duration) {
 	s.count++
+	s.totalDur += dur
 
 	if dur > s.maxDur {
 		s.maxDur = dur
@@ -280,6 +282,7 @@ func (s *stats) merge(other *stats) {
 	}
 
 	s.count += other.count
+	s.totalDur += other.totalDur
 	s.milliCnt += other.milliCnt
 	s.twoMilliCnt += other.twoMilliCnt
 	s.fiveMilliCnt += other.fiveMilliCnt
@@ -295,8 +298,8 @@ func (s *stats) merge(other *stats) {
 
 func (s *stats) Counter() string {
 	return fmt.Sprintf(
-		"count:%d, max:%d, min:%d, >1ms:%d, >2ms:%d, >5ms:%d, >10ms:%d, >30ms:%d >50ms:%d >100ms:%d >200ms:%d >400ms:%d >800ms:%d >1s:%d",
-		s.count, s.maxDur.Nanoseconds()/int64(time.Millisecond), s.minDur.Nanoseconds()/int64(time.Millisecond),
+		"count:%d, max:%d, min:%d, avg:%d, >1ms:%d, >2ms:%d, >5ms:%d, >10ms:%d, >30ms:%d >50ms:%d >100ms:%d >200ms:%d >400ms:%d >800ms:%d >1s:%d",
+		s.count, s.maxDur.Nanoseconds()/int64(time.Millisecond), s.minDur.Nanoseconds()/int64(time.Millisecond), s.totalDur.Nanoseconds()/int64(s.count)/int64(time.Millisecond),
 		s.milliCnt, s.twoMilliCnt, s.fiveMilliCnt, s.tenMSCnt, s.thirtyCnt, s.fiftyCnt, s.oneHundredCnt, s.twoHundredCnt, s.fourHundredCnt,
 		s.eightHundredCnt, s.oneThousandCnt)
 }

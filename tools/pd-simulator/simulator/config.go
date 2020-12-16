@@ -94,5 +94,5 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	adjustDuration(&sc.ServerConfig.ElectionInterval, defaultElectionInterval)
 	adjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
-	return sc.ServerConfig.Adjust(meta)
+	return sc.ServerConfig.Adjust(meta, false)
 }

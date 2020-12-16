@@ -574,7 +574,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
-	err = cfg.Adjust(nil)
+	err = cfg.Adjust(nil, false)
 	c.Assert(err, IsNil)
 	opt := config.NewPersistOptions(cfg)
 	c.Assert(err, IsNil)
