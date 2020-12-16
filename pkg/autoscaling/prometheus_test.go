@@ -126,7 +126,7 @@ func (c *normalClient) buildCPUMockData(component ComponentType) {
 	cpuUsageQuery := fmt.Sprintf(cpuUsagePromQLTemplate[component], mockDuration)
 	cpuQuotaQuery := cpuQuotaPromQLTemplate[component]
 
-	results := make([]result, 0)
+	var results []result
 	for i := 0; i < instanceCount; i++ {
 		results = append(results, result{
 			Value: []interface{}{time.Now().Unix(), fmt.Sprintf("%f", mockResultValue)},
