@@ -88,9 +88,9 @@ func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 	mc.PutRegion(r)
 }
 
-// GetStoresStats gets stores statistics.
-func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
-	return mc.HotStat.StoresStats
+// GetStoresLoads gets stores load statistics.
+func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
+	return mc.HotStat.GetStoresLoads()
 }
 
 // GetStoreRegionCount gets region count with a given store.

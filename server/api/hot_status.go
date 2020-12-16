@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 )
 
@@ -64,16 +65,17 @@ func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Requ
 // @Success 200 {object} HotStoreStats
 // @Router /hotspot/stores [get]
 func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) {
-	bytesWriteStats := h.GetHotBytesWriteStores()
-	bytesReadStats := h.GetHotBytesReadStores()
-	keysWriteStats := h.GetHotKeysWriteStores()
-	keysReadStats := h.GetHotKeysReadStores()
-
 	stats := HotStoreStats{
-		BytesWriteStats: bytesWriteStats,
-		BytesReadStats:  bytesReadStats,
-		KeysWriteStats:  keysWriteStats,
-		KeysReadStats:   keysReadStats,
+		BytesWriteStats: make(map[uint64]float64),
+		BytesReadStats:  make(map[uint64]float64),
+		KeysWriteStats:  make(map[uint64]float64),
+		KeysReadStats:   make(map[uint64]float64),
+	}
+	for id, loads := range h.GetStoresLoads() {
+		stats.BytesWriteStats[id] = loads[statistics.StoreWriteBytes]
+		stats.BytesReadStats[id] = loads[statistics.StoreReadBytes]
+		stats.KeysWriteStats[id] = loads[statistics.StoreWriteKeys]
+		stats.KeysReadStats[id] = loads[statistics.StoreReadKeys]
 	}
 	h.rd.JSON(w, http.StatusOK, stats)
 }
