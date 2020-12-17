@@ -19,6 +19,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
@@ -44,7 +45,7 @@ func (s *testReplicaCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
 	s.cluster = mockcluster.NewCluster(cfg)
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
-	s.rc = NewReplicaChecker(s.cluster)
+	s.rc = NewReplicaChecker(s.cluster, cache.NewDefaultCache(10))
 	stats := &pdpb.StoreStats{
 		Capacity:  100,
 		Available: 100,
@@ -152,7 +153,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMaxSnapshotCount(2)
 	tc.DisableFeature(versioninfo.JointConsensus)
-	rc := NewReplicaChecker(tc)
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
 	// Add stores 1,2,3,4.
 	tc.AddRegionStore(1, 4)
@@ -228,7 +229,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 
-	rc := NewReplicaChecker(tc)
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
 	// now region peer in store 1,2,3.but we just have store 1,2
 	// This happens only in recovering the PD tc
@@ -246,7 +247,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 
-	rc := NewReplicaChecker(tc)
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
@@ -298,7 +299,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 
-	rc := NewReplicaChecker(tc)
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
 	tc.AddLabelsStore(1, 9, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 8, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -377,7 +378,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	tc.SetMaxReplicas(5)
 	tc.SetLocationLabels([]string{"zone", "host"})
 
-	rc := NewReplicaChecker(tc)
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
@@ -405,7 +406,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 	tc := mockcluster.NewCluster(opt)
 	tc.SetLocationLabels([]string{"zone"})
 	tc.DisableFeature(versioninfo.JointConsensus)
-	rc := NewReplicaChecker(tc)
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(1, 0.5, 0.5)
@@ -440,7 +441,7 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
-	rc := NewReplicaChecker(tc)
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
