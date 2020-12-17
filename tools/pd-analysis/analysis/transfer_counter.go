@@ -233,7 +233,7 @@ func (c *TransferCounter) PrintResult() {
 	log.Println("Necessary Schedules: ", c.Necessary)
 
 	// Output csv file
-	fd, err := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	fd, err := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
 	if err != nil {
 		log.Fatal(err)
 	}
