@@ -269,7 +269,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 }
 
 func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string][]uint64, syncedDCs []string) bool {
-	unsyncedDCs := make([]string, 0)
+	var unsyncedDCs []string
 	for dcLocation := range dcLocationMap {
 		if slice.NoneOf(syncedDCs, func(i int) bool { return syncedDCs[i] == dcLocation }) {
 			unsyncedDCs = append(unsyncedDCs, dcLocation)

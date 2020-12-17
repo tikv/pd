@@ -288,7 +288,7 @@ func summaryStoresLoad(
 		keyRate := storeKeyRate[id]
 
 		// Find all hot peers first
-		hotPeers := make([]*statistics.HotPeerStat, 0)
+		var hotPeers []*statistics.HotPeerStat
 		{
 			byteSum := 0.0
 			keySum := 0.0
@@ -365,7 +365,7 @@ func filterHotPeers(
 	minHotDegree int,
 	peers []*statistics.HotPeerStat,
 ) []*statistics.HotPeerStat {
-	ret := make([]*statistics.HotPeerStat, 0)
+	var ret []*statistics.HotPeerStat
 	for _, peer := range peers {
 		if (kind == core.LeaderKind && !peer.IsLeader()) ||
 			peer.HotDegree < minHotDegree {
