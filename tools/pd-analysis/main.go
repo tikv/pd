@@ -50,7 +50,7 @@ func main() {
 		Logger.Fatal("Need to specify one input pd log.")
 	}
 	if *output != "" {
-		f, err := os.OpenFile(*output, os.O_WRONLY|os.O_CREATE|os.O_SYNC|os.O_APPEND, 0755)
+		f, err := os.OpenFile(*output, os.O_WRONLY|os.O_CREATE|os.O_SYNC|os.O_APPEND, 0600)
 		if err != nil {
 			Logger.Fatal(err.Error())
 		} else {
