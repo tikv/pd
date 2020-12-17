@@ -784,7 +784,7 @@ func (am *AllocatorManager) resetAllocatorGroup(dcLocation string) {
 func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) []*allocatorGroup {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	allocatorGroups := make([]*allocatorGroup, 0)
+	var allocatorGroups []*allocatorGroup
 	for _, ag := range am.mu.allocatorGroups {
 		if ag == nil {
 			continue

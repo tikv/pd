@@ -122,14 +122,15 @@ func newAwsCredentials() (*credentials.Credentials, error) {
 		providers = append(providers, webIdentityProvider)
 	}
 
-	// Credentials from AWS environment variables.
-	providers = append(providers, &credentials.EnvProvider{})
-
-	// Credentials from default AWS credentials file.
-	providers = append(providers, &credentials.SharedCredentialsProvider{
-		Filename: "",
-		Profile:  "",
-	})
+	providers = append(providers,
+		// Credentials from AWS environment variables.
+		&credentials.EnvProvider{},
+		// Credentials from default AWS credentials file.
+		&credentials.SharedCredentialsProvider{
+			Filename: "",
+			Profile:  "",
+		},
+	)
 
 	credentials := credentials.NewChainCredentials(providers)
 	return credentials, nil

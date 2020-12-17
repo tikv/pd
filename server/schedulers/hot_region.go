@@ -292,7 +292,7 @@ func summaryStoresLoad(
 		storeLen++
 
 		// Find all hot peers first
-		hotPeers := make([]*statistics.HotPeerStat, 0)
+		var hotPeers []*statistics.HotPeerStat
 		{
 			byteSum := 0.0
 			keySum := 0.0
@@ -302,6 +302,8 @@ func summaryStoresLoad(
 				hotPeers = append(hotPeers, peer.Clone())
 			}
 			// Use sum of hot peers to estimate leader-only byte rate.
+			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time, while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
+			// But none of the current dimension reflect this difference, so we create a new dimension to reflect it.
 			if kind == core.LeaderKind && rwTy == write {
 				byteRate = byteSum
 				keyRate = keySum
@@ -366,7 +368,7 @@ func filterHotPeers(
 	minHotDegree int,
 	peers []*statistics.HotPeerStat,
 ) []*statistics.HotPeerStat {
-	ret := make([]*statistics.HotPeerStat, 0)
+	var ret []*statistics.HotPeerStat
 	for _, peer := range peers {
 		if (kind == core.LeaderKind && !peer.IsLeader()) ||
 			peer.HotDegree < minHotDegree {
