@@ -273,7 +273,6 @@ func summaryStoresLoad(
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storesLoads))
 	allByteSum := 0.0
 	allKeySum := 0.0
-	storeLen := 0.0
 	allCount := 0.0
 
 	for id, loads := range storesLoads {
@@ -284,12 +283,6 @@ func summaryStoresLoad(
 		case write:
 			byteRate, keyRate = loads[statistics.StoreWriteBytes], loads[statistics.StoreWriteKeys]
 		}
-
-		// Stores without byte rate statistics is not available to schedule.
-		if byteRate == 0 {
-			continue
-		}
-		storeLen++
 
 		// Find all hot peers first
 		var hotPeers []*statistics.HotPeerStat
@@ -337,6 +330,7 @@ func summaryStoresLoad(
 		}
 	}
 
+	storeLen := float64(len(storesLoads))
 	// store expectation byte/key rate and count for each store-load detail.
 	for id, detail := range loadDetail {
 		byteExp := allByteSum / storeLen
