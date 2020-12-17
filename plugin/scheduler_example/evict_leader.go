@@ -143,8 +143,7 @@ func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 	defer conf.mu.RUnlock()
 	var res []string
 	for index := range conf.StoreIDWitRanges[id] {
-		res = append(res, (string)(conf.StoreIDWitRanges[id][index].StartKey))
-		res = append(res, (string)(conf.StoreIDWitRanges[id][index].EndKey))
+		res = append(res, (string)(conf.StoreIDWitRanges[id][index].StartKey), (string)(conf.StoreIDWitRanges[id][index].EndKey))
 	}
 	return res
 }
