@@ -122,24 +122,12 @@ func WithGroup(group string) ScatterRegionOption {
 }
 
 type tsoRequest struct {
-<<<<<<< HEAD
-	start    time.Time
-	ctx      context.Context
-	done     chan error
-=======
 	start      time.Time
 	clientCtx  context.Context
 	requestCtx context.Context
 	done       chan error
 	physical   int64
 	logical    int64
-	dcLocation string
-}
-
-type lastTSO struct {
->>>>>>> 52fa5093... client: fix the pd client could be blocked in some cases (#3283)
-	physical int64
-	logical  int64
 }
 
 const (
@@ -452,13 +440,9 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 		ctx = opentracing.ContextWithSpan(ctx, span)
 	}
 	req := tsoReqPool.Get().(*tsoRequest)
-<<<<<<< HEAD
-=======
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
->>>>>>> 52fa5093... client: fix the pd client could be blocked in some cases (#3283)
 	req.start = time.Now()
-	req.ctx = ctx
 	req.physical = 0
 	req.logical = 0
 	c.tsoRequests <- req
