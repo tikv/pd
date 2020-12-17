@@ -666,7 +666,7 @@ func NewIsolationFilter(scope, isolationLevel string, locationLabels []string, r
 	}
 	// Collect all constraints for given isolationLevel
 	for _, regionStore := range regionStores {
-		constraintList := make([]string, 0)
+		var constraintList []string
 		for i := 0; i <= isolationLevelIdx; i++ {
 			constraintList = append(constraintList, regionStore.GetLabelValue(locationLabels[i]))
 		}

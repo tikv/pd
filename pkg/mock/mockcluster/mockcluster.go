@@ -43,8 +43,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
-	*statistics.HotCache
-	*statistics.StoresStats
+	*statistics.HotStat
 	*config.PersistOptions
 	ID               uint64
 	suspectRegions   map[uint64]struct{}
@@ -56,8 +55,7 @@ func NewCluster(opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
 		BasicCluster:     core.NewBasicCluster(),
 		IDAllocator:      mockid.NewIDAllocator(),
-		HotCache:         statistics.NewHotCache(),
-		StoresStats:      statistics.NewStoresStats(),
+		HotStat:          statistics.NewHotStat(),
 		PersistOptions:   opts,
 		suspectRegions:   map[uint64]struct{}{},
 		disabledFeatures: make(map[versioninfo.Feature]struct{}),
@@ -92,7 +90,7 @@ func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 
 // GetStoresStats gets stores statistics.
 func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
-	return mc.StoresStats
+	return mc.HotStat.StoresStats
 }
 
 // GetStoreRegionCount gets region count with a given store.

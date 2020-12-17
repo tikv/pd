@@ -132,8 +132,7 @@ func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 	var res []string
 	ranges := conf.StoreIDWithRanges[id]
 	for index := range ranges {
-		res = append(res, (string)(ranges[index].StartKey))
-		res = append(res, (string)(ranges[index].EndKey))
+		res = append(res, (string)(ranges[index].StartKey), (string)(ranges[index].EndKey))
 	}
 	return res
 }

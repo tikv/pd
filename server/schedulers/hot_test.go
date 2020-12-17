@@ -944,16 +944,18 @@ func (s *testHotCacheSuite) TestKeyThresholds(c *C) {
 		tc := mockcluster.NewCluster(opt)
 		regions := []testRegionInfo{}
 		for i := 1; i <= 1000; i += 2 {
-			regions = append(regions, testRegionInfo{
-				id:      uint64(i),
-				peers:   []uint64{1, 2, 3},
-				keyRate: 100 * KB,
-			})
-			regions = append(regions, testRegionInfo{
-				id:      uint64(i + 1),
-				peers:   []uint64{1, 2, 3},
-				keyRate: 10 * KB,
-			})
+			regions = append(regions,
+				testRegionInfo{
+					id:      uint64(i),
+					peers:   []uint64{1, 2, 3},
+					keyRate: 100 * KB,
+				},
+				testRegionInfo{
+					id:      uint64(i + 1),
+					peers:   []uint64{1, 2, 3},
+					keyRate: 10 * KB,
+				},
+			)
 		}
 
 		{ // read
