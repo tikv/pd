@@ -56,12 +56,8 @@ func (s *testClusterSuite) TestCluster(c *C) {
 
 	c2 := &metapb.Cluster{}
 	r := config.ReplicationConfig{
-		EnablePlacementRules: true,
-		MaxReplicas:          6,
+		MaxReplicas: 6,
 	}
-	// Cannot set the replicas when placement rules is enabled.
-	c.Assert(s.svr.SetReplicationConfig(r), NotNil)
-	r.EnablePlacementRules = false
 	c.Assert(s.svr.SetReplicationConfig(r), IsNil)
 	err = readJSON(testDialClient, url, c2)
 	c.Assert(err, IsNil)

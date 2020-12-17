@@ -16,6 +16,7 @@ package schedule
 import (
 	"context"
 
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/checker"
@@ -23,6 +24,9 @@ import (
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
+
+// DefaultCacheSize is the default length of waiting list.
+const DefaultCacheSize = 1000
 
 // CheckerController is used to manage all checkers.
 type CheckerController struct {
@@ -34,64 +38,80 @@ type CheckerController struct {
 	ruleChecker       *checker.RuleChecker
 	mergeChecker      *checker.MergeChecker
 	jointStateChecker *checker.JointStateChecker
+	regionWaitingList cache.Cache
 }
 
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
 func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, opController *OperatorController) *CheckerController {
+	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &CheckerController{
 		cluster:           cluster,
 		opts:              cluster.GetOpts(),
 		opController:      opController,
 		learnerChecker:    checker.NewLearnerChecker(cluster),
-		replicaChecker:    checker.NewReplicaChecker(cluster),
-		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager),
+		replicaChecker:    checker.NewReplicaChecker(cluster, regionWaitingList),
+		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager, regionWaitingList),
 		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
 		jointStateChecker: checker.NewJointStateChecker(cluster),
+		regionWaitingList: regionWaitingList,
 	}
 }
 
 // CheckRegion will check the region and add a new operator if needed.
-func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*operator.Operator) { //return checkerIsBusy,ops
+func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
-	checkerIsBusy := true
 
 	if op := c.jointStateChecker.Check(region); op != nil {
-		return false, []*operator.Operator{op}
+		return []*operator.Operator{op}
 	}
 
 	if c.opts.IsPlacementRulesEnabled() {
-		if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-			checkerIsBusy = false
-			if op := c.ruleChecker.Check(region); op != nil {
-				return checkerIsBusy, []*operator.Operator{op}
+		if op := c.ruleChecker.Check(region); op != nil {
+			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+				return []*operator.Operator{op}
 			}
+			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
-			return false, []*operator.Operator{op}
+			return []*operator.Operator{op}
 		}
-		if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-			checkerIsBusy = false
-			if op := c.replicaChecker.Check(region); op != nil {
-				return checkerIsBusy, []*operator.Operator{op}
+		if op := c.replicaChecker.Check(region); op != nil {
+			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+				return []*operator.Operator{op}
 			}
+			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	}
 
 	if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.opts.GetMergeScheduleLimit() {
-		checkerIsBusy = false
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
-			return checkerIsBusy, ops
+			return ops
 		}
 	}
-	return checkerIsBusy, nil
+	return nil
 }
 
 // GetMergeChecker returns the merge checker.
 func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 	return c.mergeChecker
+}
+
+// GetWaitingRegions returns the regions in the waiting list.
+func (c *CheckerController) GetWaitingRegions() []*cache.Item {
+	return c.regionWaitingList.Elems()
+}
+
+// AddWaitingRegion returns the regions in the waiting list.
+func (c *CheckerController) AddWaitingRegion(region *core.RegionInfo) {
+	c.regionWaitingList.Put(region.GetID(), nil)
+}
+
+// RemoveWaitingRegion removes the region from the waiting list.
+func (c *CheckerController) RemoveWaitingRegion(id uint64) {
+	c.regionWaitingList.Remove(id)
 }

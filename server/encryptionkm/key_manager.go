@@ -502,7 +502,7 @@ type keyManagerHelper struct {
 
 func defaultKeyManagerHelper() keyManagerHelper {
 	return keyManagerHelper{
-		now:                          func() time.Time { return time.Now() },
+		now:                          time.Now,
 		tick:                         func(ticker *time.Ticker) <-chan time.Time { return ticker.C },
 		newMasterKey:                 encryption.NewMasterKey,
 		eventAfterReloadByWatcher:    func() {},
