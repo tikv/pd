@@ -587,7 +587,7 @@ func (m *RuleManager) DeleteGroupBundle(id string, regex bool) error {
 		if err != nil {
 			return err
 		}
-		matchID = func(a string) bool { return r.MatchString(a) }
+		matchID = r.MatchString
 	}
 
 	p := m.beginPatch()
