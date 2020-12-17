@@ -32,6 +32,12 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultStoreCapacity = 100 * (1 << 30) // 100GiB
+	defaultRegionSize    = 96 * (1 << 20)  // 96MiB
+	mb                   = (1 << 20)       // 1MiB
+)
+
 // Cluster is used to mock clusterInfo for test use.
 type Cluster struct {
 	*core.BasicCluster
@@ -206,13 +212,14 @@ func (mc *Cluster) SetStoreBusy(storeID uint64, busy bool) {
 // AddLeaderStore adds store with specified count of leader.
 func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes ...int64) {
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - uint64(leaderCount)*10
+	stats.Capacity = defaultStoreCapacity
+	stats.UsedSize = uint64(leaderCount) * defaultRegionSize
+	stats.Available = stats.Capacity - uint64(leaderCount)*defaultRegionSize
 	var leaderSize int64
 	if len(leaderSizes) != 0 {
 		leaderSize = leaderSizes[0]
 	} else {
-		leaderSize = int64(leaderCount) * 10
+		leaderSize = int64(leaderCount) * defaultRegionSize / mb
 	}
 
 	store := core.NewStoreInfo(
@@ -230,8 +237,9 @@ func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes .
 // AddRegionStore adds store with specified count of region.
 func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - uint64(regionCount)*10
+	stats.Capacity = defaultStoreCapacity
+	stats.UsedSize = uint64(regionCount) * defaultRegionSize
+	stats.Available = stats.Capacity - uint64(regionCount)*defaultRegionSize
 	store := core.NewStoreInfo(
 		&metapb.Store{Id: storeID, Labels: []*metapb.StoreLabel{
 			{
@@ -241,7 +249,7 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 		}},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*10),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
@@ -269,8 +277,9 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 		newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
 	}
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - uint64(regionCount)*10
+	stats.Capacity = defaultStoreCapacity
+	stats.Available = stats.Capacity - uint64(regionCount)*defaultRegionSize
+	stats.UsedSize = uint64(regionCount) * defaultRegionSize
 	store := core.NewStoreInfo(
 		&metapb.Store{
 			Id:     storeID,
@@ -278,7 +287,7 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 		},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*10),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
@@ -289,7 +298,7 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 // AddLeaderRegion adds region with specified leader and followers.
 func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
 	origin := mc.newMockRegionInfo(regionID, leaderStoreID, followerStoreIDs...)
-	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
 }
@@ -297,7 +306,7 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, follow
 // AddRegionWithLearner adds region with specified leader, followers and learners.
 func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, followerStoreIDs, learnerStoreIDs []uint64) *core.RegionInfo {
 	origin := mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)
-	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
 }
@@ -395,7 +404,7 @@ func (mc *Cluster) UpdateLeaderCount(storeID uint64, leaderCount int) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
 		core.SetLeaderCount(leaderCount),
-		core.SetLeaderSize(int64(leaderCount)*10),
+		core.SetLeaderSize(int64(leaderCount)*defaultRegionSize/mb),
 	)
 	mc.PutStore(newStore)
 }
@@ -405,7 +414,7 @@ func (mc *Cluster) UpdateRegionCount(storeID uint64, regionCount int) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*10),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
 	)
 	mc.PutStore(newStore)
 }
@@ -430,7 +439,7 @@ func (mc *Cluster) UpdatePendingPeerCount(storeID uint64, pendingPeerCount int) 
 func (mc *Cluster) UpdateStorageRatio(storeID uint64, usedRatio, availableRatio float64) {
 	store := mc.GetStore(storeID)
 	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.Capacity = 1000 * (1 << 20)
+	newStats.Capacity = defaultStoreCapacity
 	newStats.UsedSize = uint64(float64(newStats.Capacity) * usedRatio)
 	newStats.Available = uint64(float64(newStats.Capacity) * availableRatio)
 	newStore := store.Clone(core.SetStoreStats(newStats))
@@ -530,9 +539,9 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	regionSize := mc.Regions.GetStoreRegionSize(id)
 	store := mc.Stores.GetStore(id)
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - uint64(store.GetRegionSize())
-	stats.UsedSize = uint64(store.GetRegionSize())
+	stats.Capacity = defaultStoreCapacity
+	stats.Available = stats.Capacity - uint64(store.GetRegionSize()*mb)
+	stats.UsedSize = uint64(store.GetRegionSize() * mb)
 	newStore := store.Clone(
 		core.SetStoreStats(stats),
 		core.SetLeaderCount(leaderCount),
@@ -540,6 +549,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 		core.SetPendingPeerCount(pendingPeerCount),
 		core.SetLeaderSize(leaderSize),
 		core.SetRegionSize(regionSize),
+		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.PutStore(newStore)
 }

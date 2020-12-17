@@ -55,6 +55,7 @@ import (
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/urfave/negroni"
@@ -833,19 +834,41 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			}
 		}
 	}
+
+	var rule *placement.Rule
 	if cfg.EnablePlacementRules {
-		// replication.MaxReplicas and replication.LocationLabels won't work when placement rule is enabled
+		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
 		if cfg.MaxReplicas != old.MaxReplicas {
-			return errors.New("cannot update MaxReplicas when placement rules feature is enabled, please update rule instead")
+			rules := s.GetRaftCluster().GetRuleManager().GetAllRules()
+			if !(len(rules) == 1 && len(rules[0].StartKey) == 0 && len(rules[0].EndKey) == 0) {
+				return errors.New("cannot update MaxReplicas when placement rules feature is enabled and not only default rule exists, please update rule instead")
+			}
+			rule = rules[0]
 		}
+		// replication.LocationLabels won't work when placement rule is enabled
 		if !reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels) {
 			return errors.New("cannot update LocationLabels when placement rules feature is enabled, please update rule instead")
+		}
+	}
+
+	if rule != nil {
+		rule.Count = int(cfg.MaxReplicas)
+		if err := s.GetRaftCluster().GetRuleManager().SetRule(rule); err != nil {
+			log.Error("failed to update rule count",
+				errs.ZapError(err))
+			return err
 		}
 	}
 
 	s.persistOptions.SetReplicationConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetReplicationConfig(old)
+		if rule != nil {
+			rule.Count = int(old.MaxReplicas)
+			if e := s.GetRaftCluster().GetRuleManager().SetRule(rule); e != nil {
+				log.Error("failed to roll back count of rule when update replication config", errs.ZapError(e))
+			}
+		}
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),

@@ -61,8 +61,9 @@ func (c *testCluster) addRegionStore(storeID uint64, regionCount int, regionSize
 	}
 
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - regionSize
+	stats.Capacity = 100 * (1 << 30)
+	stats.UsedSize = regionSize * (1 << 20)
+	stats.Available = stats.Capacity - stats.UsedSize
 	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
@@ -300,8 +301,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 }
 
 func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy bool, expectAddOperator int) {
-	checkerIsBusy, ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
-	c.Assert(checkerIsBusy, Equals, expectCheckerIsBusy)
+	ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
 	if ops == nil {
 		c.Assert(expectAddOperator, Equals, 0)
 	} else {
@@ -445,6 +445,55 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(3)}))
 	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
+}
+
+func (s *testCoordinatorSuite) TestCheckCache(c *C) {
+	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
+		// Turn off replica scheduling.
+		cfg.ReplicaScheduleLimit = 0
+	}, nil, nil, c)
+	defer cleanup()
+
+	c.Assert(tc.addRegionStore(1, 0), IsNil)
+	c.Assert(tc.addRegionStore(2, 0), IsNil)
+	c.Assert(tc.addRegionStore(3, 0), IsNil)
+
+	// Add a peer with two replicas.
+	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`), IsNil)
+
+	// case 1: operator cannot be created due to replica-schedule-limit restriction
+	co.wg.Add(1)
+	co.patrolRegions()
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+
+	// cancel the replica-schedule-limit restriction
+	opt := tc.GetOpts()
+	cfg := opt.GetScheduleConfig()
+	cfg.ReplicaScheduleLimit = 10
+	tc.GetOpts().SetScheduleConfig(cfg)
+	co.wg.Add(1)
+	co.patrolRegions()
+	oc := co.opController
+	c.Assert(len(oc.GetOperators()), Equals, 1)
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 0)
+
+	// case 2: operator cannot be created due to store limit restriction
+	oc.RemoveOperator(oc.GetOperator(1))
+	tc.SetStoreLimit(1, storelimit.AddPeer, 0)
+	co.wg.Add(1)
+	co.patrolRegions()
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+
+	// cancel the store limit restriction
+	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
+	co.wg.Add(1)
+	co.patrolRegions()
+	c.Assert(len(oc.GetOperators()), Equals, 1)
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 0)
+
+	co.wg.Wait()
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"), IsNil)
 }
 
 func (s *testCoordinatorSuite) TestPeerState(c *C) {
