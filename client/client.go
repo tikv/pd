@@ -140,6 +140,7 @@ func WithRetry(retry uint64) RegionsOption {
 
 type tsoRequest struct {
 	start      time.Time
+	client     *client
 	ctx        context.Context
 	done       chan error
 	physical   int64
@@ -567,6 +568,7 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	}
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.ctx = ctx
+	req.client = c
 	req.start = time.Now()
 	req.dcLocation = dcLocation
 	c.waitForDispatcher()
@@ -630,6 +632,8 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 		return
 	case <-req.ctx.Done():
 		return 0, 0, errors.WithStack(req.ctx.Err())
+	case <-req.client.ctx.Done():
+		return 0, 0, errors.WithStack(req.client.ctx.Err())
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/testutil"
 	"go.uber.org/goleak"
@@ -108,4 +109,34 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	err := cli.updateLeader()
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Greater, 500*time.Millisecond)
+}
+
+var _ = Suite(&testTsoRequestSuite{})
+
+type testTsoRequestSuite struct{}
+
+func (s *testTsoRequestSuite) TestTsoRequestWait(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cli := &client{
+		baseClient: &baseClient{
+			urls:            []string{"localhost:8080"},
+			checkLeaderCh:   make(chan struct{}, 1),
+			ctx:             ctx,
+			cancel:          cancel,
+			security:        SecurityOption{},
+			gRPCDialOptions: []grpc.DialOption{grpc.WithBlock()},
+		},
+		checkTSDeadlineCh: make(chan struct{}),
+	}
+
+	tsoRequest := &tsoRequest{
+		done:     make(chan error, 1),
+		physical: 0,
+		logical:  0,
+		ctx:      context.TODO(),
+		client:   cli,
+	}
+	cancel()
+	_, _, err := tsoRequest.Wait()
+	c.Assert(errors.Cause(err), Equals, context.Canceled)
 }
