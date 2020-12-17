@@ -120,7 +120,7 @@ func (c *TransferCounter) prepare() {
 		c.unIndexMap[storeID] = index
 	}
 
-	c.graphMat = make([][]uint64, 0)
+	c.graphMat = nil
 	for i := 0; i < c.scheduledStoreNum; i++ {
 		tmp := make([]uint64, c.scheduledStoreNum)
 		c.graphMat = append(c.graphMat, tmp)

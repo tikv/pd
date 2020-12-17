@@ -657,7 +657,7 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	if c.cluster == nil {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	s := make([]*scheduleController, 0)
+	var s []*scheduleController
 	if name != "all" {
 		sc, ok := c.schedulers[name]
 		if !ok {

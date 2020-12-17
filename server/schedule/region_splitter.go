@@ -245,7 +245,7 @@ func (r *splitKeyResults) getSplitRegions() map[uint64][]byte {
 }
 
 func (r *splitKeyResults) getUnProcessedKeys(splitKeys [][]byte) [][]byte {
-	unProcessedKeys := make([][]byte, 0)
+	var unProcessedKeys [][]byte
 	for _, splitKey := range splitKeys {
 		processed := false
 		for _, regionStartKey := range r.newRegions {
