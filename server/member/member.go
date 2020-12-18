@@ -157,7 +157,7 @@ func (m *Member) KeepLeader(ctx context.Context) {
 // IsStillLeader returns whether the PD leader is still a PD leader
 // by checking its leadership's lease.
 func (m *Member) IsStillLeader() bool {
-	return m.leadership.Check()
+	return m.leadership.Check() && m.GetLeader().GetMemberId() == m.member.GetMemberId()
 }
 
 // CheckLeader checks returns true if it is needed to check later.

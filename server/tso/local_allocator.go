@@ -168,7 +168,7 @@ func (lta *LocalTSOAllocator) KeepAllocatorLeader(ctx context.Context) {
 // IsStillAllocatorLeader returns whether the allocator is still a
 // Local TSO Allocator leader by checking its leadership's lease.
 func (lta *LocalTSOAllocator) IsStillAllocatorLeader() bool {
-	return lta.leadership.Check()
+	return lta.leadership.Check() && lta.GetAllocatorLeader().GetMemberId() == lta.GetMember().GetMemberId()
 }
 
 // isSameLeader checks whether a server is the leader itself.

@@ -301,6 +301,38 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 		default:
 		}
 
+		allocatorLeader, rev, checkAgain := allocator.CheckAllocatorLeader()
+		if checkAgain {
+			continue
+		}
+		if allocatorLeader != nil {
+			log.Info("start to watch allocator leader",
+				zap.Stringer(fmt.Sprintf("%s-allocator-leader", allocator.dcLocation), allocatorLeader),
+				zap.String("local-tso-allocator-name", am.member.Member().Name))
+			// WatchAllocatorLeader will keep looping and never return unless the Local TSO Allocator leader has changed.
+			allocator.WatchAllocatorLeader(ctx, allocatorLeader, rev)
+			log.Info("local tso allocator leader has changed, try to re-campaign a local tso allocator leader",
+				zap.String("dc-location", allocator.dcLocation))
+		}
+
+		// Check the next-leader key
+		nextLeader, err := am.getNextLeaderID(allocator.dcLocation)
+		if err != nil {
+			log.Error("get next leader from etcd failed",
+				zap.String("dc-location", allocator.dcLocation),
+				errs.ZapError(err))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		if nextLeader != 0 && nextLeader != am.member.ID() {
+			log.Info("skip campaigning of the local tso allocator leader and check later",
+				zap.String("server-name", am.member.Member().Name),
+				zap.Uint64("server-id", am.member.ID()),
+				zap.Uint64("next-leader-id", nextLeader))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		// Make sure the leader is aware of this new dc-location in order to make the
 		// Global TSO synchronization can cover up this dc-location.
 		ok, suffix, err := am.isLeaderAwareOfDCLocation(ctx, allocator.dcLocation)
@@ -332,36 +364,6 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 			}
 		}
 
-		allocatorLeader, rev, checkAgain := allocator.CheckAllocatorLeader()
-		if checkAgain {
-			continue
-		}
-		if allocatorLeader != nil {
-			log.Info("start to watch allocator leader",
-				zap.Stringer(fmt.Sprintf("%s-allocator-leader", allocator.dcLocation), allocatorLeader),
-				zap.String("local-tso-allocator-name", am.member.Member().Name))
-			// WatchAllocatorLeader will keep looping and never return unless the Local TSO Allocator leader has changed.
-			allocator.WatchAllocatorLeader(ctx, allocatorLeader, rev)
-			log.Info("local tso allocator leader has changed, try to re-campaign a local tso allocator leader",
-				zap.String("dc-location", allocator.dcLocation))
-		}
-		// Check the next-leader key
-		nextLeader, err := am.getNextLeaderID(allocator.dcLocation)
-		if err != nil {
-			log.Error("get next leader from etcd failed",
-				zap.String("dc-location", allocator.dcLocation),
-				errs.ZapError(err))
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-		if nextLeader != 0 && nextLeader != am.member.ID() {
-			log.Info("skip campaigning of the local tso allocator leader and check later",
-				zap.String("server-name", am.member.Member().Name),
-				zap.Uint64("server-id", am.member.ID()),
-				zap.Uint64("next-leader-id", nextLeader))
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
 		am.campaignAllocatorLeader(ctx, allocator, suffix)
 	}
 }
