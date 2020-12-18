@@ -301,6 +301,7 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 		default:
 		}
 
+		// Check whether the Local TSO Allocator has the leader already
 		allocatorLeader, rev, checkAgain := allocator.CheckAllocatorLeader()
 		if checkAgain {
 			continue
