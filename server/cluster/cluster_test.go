@@ -108,7 +108,7 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 		}
 		c.Assert(cluster.putStoreLocked(store), IsNil)
 		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
-		c.Assert(cluster.storesStats.GetRollingStoreStats(store.GetID()), NotNil)
+		c.Assert(cluster.hotStat.GetRollingStoreStats(store.GetID()), NotNil)
 	}
 
 	for _, store := range stores {
@@ -121,7 +121,7 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 		newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
 		c.Assert(cluster.putStoreLocked(newStore), IsNil)
 		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
-		c.Assert(cluster.storesStats.GetRollingStoreStats(store.GetID()), IsNil)
+		c.Assert(cluster.hotStat.GetRollingStoreStats(store.GetID()), IsNil)
 	}
 }
 
@@ -768,7 +768,7 @@ type testCluster struct {
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
-	if err := cfg.Adjust(nil); err != nil {
+	if err := cfg.Adjust(nil, false); err != nil {
 		return nil, nil, err
 	}
 	opt := config.NewPersistOptions(cfg)

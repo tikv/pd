@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -408,7 +409,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 func newConfigHotRegionCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "balance-hot-region-scheduler",
-		Short: "evict-leader-scheduler config",
+		Short: "balance-hot-region-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
 	c.AddCommand(&cobra.Command{
@@ -505,6 +506,9 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 	path := path.Join(schedulerConfigPrefix, p, "list")
 	r, err := doRequest(cmd, path, http.MethodGet)
 	if err != nil {
+		if strings.Contains(err.Error(), "404") {
+			err = errors.New("[404] scheduler not found")
+		}
 		cmd.Println(err)
 		return
 	}

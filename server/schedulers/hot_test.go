@@ -944,16 +944,18 @@ func (s *testHotCacheSuite) TestKeyThresholds(c *C) {
 		tc := mockcluster.NewCluster(opt)
 		regions := []testRegionInfo{}
 		for i := 1; i <= 1000; i += 2 {
-			regions = append(regions, testRegionInfo{
-				id:      uint64(i),
-				peers:   []uint64{1, 2, 3},
-				keyRate: 100 * KB,
-			})
-			regions = append(regions, testRegionInfo{
-				id:      uint64(i + 1),
-				peers:   []uint64{1, 2, 3},
-				keyRate: 10 * KB,
-			})
+			regions = append(regions,
+				testRegionInfo{
+					id:      uint64(i),
+					peers:   []uint64{1, 2, 3},
+					keyRate: 100 * KB,
+				},
+				testRegionInfo{
+					id:      uint64(i + 1),
+					peers:   []uint64{1, 2, 3},
+					keyRate: 10 * KB,
+				},
+			)
 		}
 
 		{ // read
@@ -1056,5 +1058,78 @@ func addRegionInfo(tc *mockcluster.Cluster, rwTy rwType, regions []testRegionInf
 			statistics.RegionHeartBeatReportInterval,
 			r.peers[1:],
 		)
+	}
+}
+
+func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	tc.SetMaxReplicas(3)
+	tc.SetLocationLabels([]string{"zone", "host"})
+	tc.DisableFeature(versioninfo.JointConsensus)
+	s.checkRegionFlowTest(c, tc.AddLeaderRegionWithWriteInfo)
+	s.checkRegionFlowTest(c, tc.AddLeaderRegionWithReadInfo)
+}
+
+func (s *testHotCacheSuite) checkRegionFlowTest(c *C, heartbeat func(
+	regionID uint64, leaderID uint64,
+	readBytes, readKeys uint64,
+	reportInterval uint64,
+	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat) {
+	// hot degree increase
+	heartbeat(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	heartbeat(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	items := heartbeat(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	for _, item := range items {
+		c.Check(item.HotDegree, Equals, 3)
+	}
+
+	// transfer leader and skip the first heartbeat
+	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3}, 1)
+	for _, item := range items {
+		c.Check(item.HotDegree, Equals, 3)
+	}
+
+	// move peer: add peer and remove peer
+	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3, 4}, 1)
+	for _, item := range items {
+		c.Check(item.HotDegree, Equals, 4)
+	}
+	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 4}, 1)
+	for _, item := range items {
+		if item.StoreID == 3 {
+			c.Check(item.IsNeedDelete(), IsTrue)
+			continue
+		}
+		c.Check(item.HotDegree, Equals, 5)
+	}
+}
+
+func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	tc.SetMaxReplicas(3)
+	tc.SetLocationLabels([]string{"zone", "host"})
+	tc.DisableFeature(versioninfo.JointConsensus)
+	// some peers are hot, and some are cold #3198
+	rate := uint64(512 * KB)
+	for i := 0; i < statistics.TopNN; i++ {
+		for j := 0; j < statistics.DefaultAotSize; j++ {
+			tc.AddLeaderRegionWithWriteInfo(uint64(i+100), 1, rate*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+		}
+	}
+	items := tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	c.Check(items[0].GetThresholds()[0], Equals, float64(rate)*statistics.HotThresholdRatio)
+	// Threshold of store 1,2,3 is 409.6 KB and others are 1 KB
+	// Make the hot threshold of some store is high and the others are low
+	rate = 10 * KB
+	tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3, 4}, 1)
+	items = tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{3, 4}, 1)
+	for _, item := range items {
+		if item.StoreID < 4 {
+			c.Check(item.IsNeedDelete(), IsTrue)
+		} else {
+			c.Check(item.IsNeedDelete(), IsFalse)
+		}
 	}
 }

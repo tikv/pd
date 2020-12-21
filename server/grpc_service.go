@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -1037,23 +1036,12 @@ func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocation
 	if err := s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
 	}
-	if !s.member.IsLeader() {
+	if !s.member.IsStillLeader() {
 		return nil, fmt.Errorf("receiving pd member[%v] is not pd leader", s.member.ID())
-	}
-	allocator, err := s.GetTSOAllocatorManager().GetAllocator(config.GlobalDCLocation)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tso allocator[%v]", config.GlobalDCLocation)
-	}
-	globalAllocator, ok := allocator.(*tso.GlobalTSOAllocator)
-	if !ok {
-		return nil, fmt.Errorf("tso allocator[%v] is not global tso allocator", config.GlobalDCLocation)
-	}
-	if !globalAllocator.IsInitialize() {
-		return nil, fmt.Errorf("global tso allocator is not initialized")
 	}
 	return &pdpb.GetDCLocationsResponse{
 		Header:      s.header(),
-		DcLocations: globalAllocator.GetDcLocations(),
+		DcLocations: s.tsoAllocatorManager.GetSuffixDCLocations(),
 	}, nil
 }
 

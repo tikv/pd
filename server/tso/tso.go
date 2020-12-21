@@ -14,6 +14,7 @@
 package tso
 
 import (
+	"math"
 	"path"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,8 @@ const (
 	// When a TSO's logical time reaches this limit,
 	// the physical time will be forced to increase.
 	maxLogical = int64(1 << 18)
+	// MaxSuffixBits indicates the max number of suffix bits.
+	MaxSuffixBits = 4
 )
 
 // tsoObject is used to store the current TSO in memory.
@@ -62,6 +65,7 @@ type timestampOracle struct {
 	}
 	// last timestamp window stored in etcd
 	lastSavedTime atomic.Value // stored as time.Time
+	suffix        int
 }
 
 func (t *timestampOracle) setTSOPhysical(next time.Time) {
@@ -83,7 +87,7 @@ func (t *timestampOracle) getTSO() (time.Time, int64) {
 }
 
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
-func (t *timestampOracle) generateTSO(count int64) (physical int64, logical int64) {
+func (t *timestampOracle) generateTSO(count int64, suffixBits int) (physical int64, logical int64) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if t.tsoMux.tso == nil {
@@ -92,7 +96,26 @@ func (t *timestampOracle) generateTSO(count int64) (physical int64, logical int6
 	physical = t.tsoMux.tso.physical.UnixNano() / int64(time.Millisecond)
 	t.tsoMux.tso.logical += count
 	logical = t.tsoMux.tso.logical
+	if suffixBits > 0 && t.suffix >= 0 {
+		logical = t.differentiateLogical(logical, suffixBits)
+	}
 	return physical, logical
+}
+
+// Because the Local TSO in each Local TSO Allocator is independent, so they are possible
+// to be the same at sometimes, to avoid this case, we need to use the logical part of the
+// Local TSO to do some differentiating work.
+// For example, we have three DCs: dc-1, dc-2 and dc-3. The bits of suffix is defined by
+// the const suffixBits. Then, for dc-2, the suffix may be 1 because it's persisted
+// in etcd with the value of 1.
+// Once we get a noramal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
+// low bits of logical part from each DC looks like:
+//   global: xxxxxxxxxx00000000
+//     dc-1: xxxxxxxxxx00000001
+//     dc-2: xxxxxxxxxx00000010
+//     dc-3: xxxxxxxxxx00000011
+func (t *timestampOracle) differentiateLogical(rawLogical int64, suffixBits int) int64 {
+	return rawLogical<<suffixBits + int64(t.suffix)
 }
 
 func (t *timestampOracle) getTimestampPath() string {
@@ -294,7 +317,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 }
 
 // getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, dcLocationNum int) (pdpb.Timestamp, error) {
 	var resp pdpb.Timestamp
 
 	if count == 0 {
@@ -322,7 +345,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical = t.generateTSO(int64(count))
+		resp.Physical, resp.Logical = t.generateTSO(int64(count), CalSuffixBits(dcLocationNum))
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
@@ -341,6 +364,11 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32) (
 		return resp, nil
 	}
 	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
+}
+
+// CalSuffixBits calculates the bits of suffix by the number of dc-locations.
+func CalSuffixBits(dcLocationNum int) int {
+	return int(math.Ceil(math.Log2(float64(dcLocationNum))))
 }
 
 // ResetTimestamp is used to reset the timestamp in memory.

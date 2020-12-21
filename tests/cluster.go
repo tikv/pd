@@ -577,8 +577,8 @@ func (c *TestCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 }
 
 // Join is used to add a new TestServer into the cluster.
-func (c *TestCluster) Join(ctx context.Context) (*TestServer, error) {
-	conf, err := c.config.Join().Generate()
+func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
+	conf, err := c.config.Join().Generate(opts...)
 	if err != nil {
 		return nil, err
 	}

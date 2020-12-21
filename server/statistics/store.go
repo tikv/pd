@@ -309,11 +309,12 @@ const (
 
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
+	interval := StoreHeartBeatReportInterval * time.Second
 	return &RollingStoreStats{
-		bytesWriteRate:          movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
-		bytesReadRate:           movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, StoreHeartBeatReportInterval),
-		keysWriteRate:           movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval),
-		keysReadRate:            movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, StoreHeartBeatReportInterval),
+		bytesWriteRate:          movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval),
+		bytesReadRate:           movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, interval),
+		keysWriteRate:           movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval),
+		keysReadRate:            movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, interval),
 		totalCPUUsage:           movingaverage.NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskReadRate:  movingaverage.NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskWriteRate: movingaverage.NewMedianFilter(storeStatsRollingWindows),
@@ -368,6 +369,13 @@ func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64)
 	return r.bytesWriteRate.Get(), r.bytesReadRate.Get()
 }
 
+// GetBytesRateInstantaneous returns the bytes write rate and the bytes read rate instantaneously.
+func (r *RollingStoreStats) GetBytesRateInstantaneous() (writeRate float64, readRate float64) {
+	r.RLock()
+	defer r.RUnlock()
+	return r.bytesWriteRate.GetInstantaneous(), r.bytesReadRate.GetInstantaneous()
+}
+
 // GetBytesWriteRate returns the bytes write rate.
 func (r *RollingStoreStats) GetBytesWriteRate() float64 {
 	r.RLock()
@@ -387,6 +395,13 @@ func (r *RollingStoreStats) GetKeysRate() (writeRate float64, readRate float64) 
 	r.RLock()
 	defer r.RUnlock()
 	return r.keysWriteRate.Get(), r.keysReadRate.Get()
+}
+
+// GetKeysRateInstantaneous returns the keys write rate and the keys read rate instantaneously.
+func (r *RollingStoreStats) GetKeysRateInstantaneous() (writeRate float64, readRate float64) {
+	r.RLock()
+	defer r.RUnlock()
+	return r.keysWriteRate.GetInstantaneous(), r.keysReadRate.GetInstantaneous()
 }
 
 // GetKeysWriteRate returns the keys write rate.

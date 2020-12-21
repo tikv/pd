@@ -35,7 +35,7 @@ type Allocator interface {
 	// Initialize is used to initialize a TSO allocator.
 	// It will synchronize TSO with etcd and initialize the
 	// memory for later allocation work.
-	Initialize() error
+	Initialize(suffix int) error
 	// IsInitialize is used to indicates whether this allocator is initialized.
 	IsInitialize() bool
 	// UpdateTSO is used to update the TSO in memory and the time window in etcd.
@@ -52,39 +52,37 @@ type Allocator interface {
 
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalTSOAllocator struct {
+	// for global TSO synchronization
+	allocatorManager *AllocatorManager
 	// leadership is used to check the current PD server's leadership
 	// to determine whether a TSO request could be processed.
 	leadership      *election.Leadership
 	timestampOracle *timestampOracle
-	// for global TSO synchronization
-	allocatorManager *AllocatorManager
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
 func NewGlobalTSOAllocator(
 	am *AllocatorManager,
 	leadership *election.Leadership,
-	rootPath string,
-	saveInterval time.Duration,
-	updatePhysicalInterval time.Duration,
-	maxResetTSGap func() time.Duration,
 ) Allocator {
 	gta := &GlobalTSOAllocator{
-		leadership: leadership,
+		allocatorManager: am,
+		leadership:       leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
-			rootPath:               rootPath,
-			saveInterval:           saveInterval,
-			updatePhysicalInterval: updatePhysicalInterval,
-			maxResetTSGap:          maxResetTSGap,
+			rootPath:               am.rootPath,
+			saveInterval:           am.saveInterval,
+			updatePhysicalInterval: am.updatePhysicalInterval,
+			maxResetTSGap:          am.maxResetTSGap,
 		},
-		allocatorManager: am,
 	}
 	return gta
 }
 
 // Initialize will initialize the created global TSO allocator.
-func (gta *GlobalTSOAllocator) Initialize() error {
+func (gta *GlobalTSOAllocator) Initialize(int) error {
+	// The suffix of a Global TSO should always be 0.
+	gta.timestampOracle.suffix = 0
 	return gta.timestampOracle.SyncTimestamp(gta.leadership)
 }
 
@@ -110,7 +108,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
 	// No dc-locations configured in the cluster
 	if len(dcLocationMap) == 0 {
-		return gta.timestampOracle.getTS(gta.leadership, count)
+		return gta.timestampOracle.getTS(gta.leadership, count, 0)
 	}
 	// Send maxTS to all Local TSO Allocator leaders to prewrite
 	ctx, cancel := context.WithCancel(context.Background())
@@ -121,6 +119,15 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		return pdpb.Timestamp{}, err
 	}
 	maxTSO.Logical += int64(count)
+	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical, gta.allocatorManager.GetClusterDCLocationsNumber())
+	// If the maxTSO's logical part is bigger than maxLogical, just add a updateTimestampGuard
+	// to the physical time and empty the logical part. We just need to make sure it's bigger than
+	// all the other Local TSOs. And because the Global TSO's suffix will always be zero,
+	// so there's no need to differentiate it again here.
+	if maxTSO.GetLogical() > maxLogical {
+		maxTSO.Physical += updateTimestampGuard.Milliseconds()
+		maxTSO.Logical = 0
+	}
 	// Sync the MaxTS with all Local TSO Allocator leaders then
 	if err := gta.syncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
@@ -262,7 +269,7 @@ func (gta *GlobalTSOAllocator) syncMaxTS(ctx context.Context, dcLocationMap map[
 }
 
 func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string][]uint64, syncedDCs []string) bool {
-	unsyncedDCs := make([]string, 0)
+	var unsyncedDCs []string
 	for dcLocation := range dcLocationMap {
 		if slice.NoneOf(syncedDCs, func(i int) bool { return syncedDCs[i] == dcLocation }) {
 			unsyncedDCs = append(unsyncedDCs, dcLocation)

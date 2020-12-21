@@ -32,13 +32,18 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultStoreCapacity = 100 * (1 << 30) // 100GiB
+	defaultRegionSize    = 96 * (1 << 20)  // 96MiB
+	mb                   = (1 << 20)       // 1MiB
+)
+
 // Cluster is used to mock clusterInfo for test use.
 type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
-	*statistics.HotCache
-	*statistics.StoresStats
+	*statistics.HotStat
 	*config.PersistOptions
 	ID               uint64
 	suspectRegions   map[uint64]struct{}
@@ -50,8 +55,7 @@ func NewCluster(opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
 		BasicCluster:     core.NewBasicCluster(),
 		IDAllocator:      mockid.NewIDAllocator(),
-		HotCache:         statistics.NewHotCache(),
-		StoresStats:      statistics.NewStoresStats(),
+		HotStat:          statistics.NewHotStat(),
 		PersistOptions:   opts,
 		suspectRegions:   map[uint64]struct{}{},
 		disabledFeatures: make(map[versioninfo.Feature]struct{}),
@@ -86,7 +90,7 @@ func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 
 // GetStoresStats gets stores statistics.
 func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
-	return mc.StoresStats
+	return mc.HotStat.StoresStats
 }
 
 // GetStoreRegionCount gets region count with a given store.
@@ -206,13 +210,14 @@ func (mc *Cluster) SetStoreBusy(storeID uint64, busy bool) {
 // AddLeaderStore adds store with specified count of leader.
 func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes ...int64) {
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - uint64(leaderCount)*10
+	stats.Capacity = defaultStoreCapacity
+	stats.UsedSize = uint64(leaderCount) * defaultRegionSize
+	stats.Available = stats.Capacity - uint64(leaderCount)*defaultRegionSize
 	var leaderSize int64
 	if len(leaderSizes) != 0 {
 		leaderSize = leaderSizes[0]
 	} else {
-		leaderSize = int64(leaderCount) * 10
+		leaderSize = int64(leaderCount) * defaultRegionSize / mb
 	}
 
 	store := core.NewStoreInfo(
@@ -230,8 +235,9 @@ func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes .
 // AddRegionStore adds store with specified count of region.
 func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - uint64(regionCount)*10
+	stats.Capacity = defaultStoreCapacity
+	stats.UsedSize = uint64(regionCount) * defaultRegionSize
+	stats.Available = stats.Capacity - uint64(regionCount)*defaultRegionSize
 	store := core.NewStoreInfo(
 		&metapb.Store{Id: storeID, Labels: []*metapb.StoreLabel{
 			{
@@ -241,7 +247,7 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 		}},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*10),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
@@ -269,8 +275,9 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 		newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
 	}
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - uint64(regionCount)*10
+	stats.Capacity = defaultStoreCapacity
+	stats.Available = stats.Capacity - uint64(regionCount)*defaultRegionSize
+	stats.UsedSize = uint64(regionCount) * defaultRegionSize
 	store := core.NewStoreInfo(
 		&metapb.Store{
 			Id:     storeID,
@@ -278,7 +285,7 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 		},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*10),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
@@ -289,7 +296,7 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 // AddLeaderRegion adds region with specified leader and followers.
 func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
 	origin := mc.newMockRegionInfo(regionID, leaderStoreID, followerStoreIDs...)
-	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
 }
@@ -297,7 +304,7 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, follow
 // AddRegionWithLearner adds region with specified leader, followers and learners.
 func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, followerStoreIDs, learnerStoreIDs []uint64) *core.RegionInfo {
 	origin := mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)
-	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
 }
@@ -317,19 +324,25 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(
 	regionID uint64, leaderID uint64,
 	readBytes, readKeys uint64,
 	reportInterval uint64,
-	followerIds []uint64) {
+	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
-	num := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
-	for i := 0; i < num; i++ {
+	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
+	if len(filledNums) > 0 {
+		filledNum = filledNums[0]
+	}
+
+	var items []*statistics.HotPeerStat
+	for i := 0; i < filledNum; i++ {
 		items := mc.HotCache.CheckRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
 	}
 	mc.PutRegion(r)
+	return items
 }
 
 // AddLeaderRegionWithWriteInfo adds region with specified leader, followers and write info.
@@ -337,19 +350,26 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	regionID uint64, leaderID uint64,
 	writtenBytes, writtenKeys uint64,
 	reportInterval uint64,
-	followerIds []uint64) {
+	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	r = r.Clone(core.SetWrittenKeys(writtenKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
-	num := mc.HotCache.GetFilledPeriod(statistics.WriteFlow)
-	for i := 0; i < num; i++ {
-		items := mc.HotCache.CheckWrite(r)
+
+	filledNum := mc.HotCache.GetFilledPeriod(statistics.WriteFlow)
+	if len(filledNums) > 0 {
+		filledNum = filledNums[0]
+	}
+
+	var items []*statistics.HotPeerStat
+	for i := 0; i < filledNum; i++ {
+		items = mc.HotCache.CheckWrite(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
 	}
 	mc.PutRegion(r)
+	return items
 }
 
 // UpdateStoreLeaderWeight updates store leader weight.
@@ -395,7 +415,7 @@ func (mc *Cluster) UpdateLeaderCount(storeID uint64, leaderCount int) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
 		core.SetLeaderCount(leaderCount),
-		core.SetLeaderSize(int64(leaderCount)*10),
+		core.SetLeaderSize(int64(leaderCount)*defaultRegionSize/mb),
 	)
 	mc.PutStore(newStore)
 }
@@ -405,7 +425,7 @@ func (mc *Cluster) UpdateRegionCount(storeID uint64, regionCount int) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*10),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
 	)
 	mc.PutStore(newStore)
 }
@@ -430,7 +450,7 @@ func (mc *Cluster) UpdatePendingPeerCount(storeID uint64, pendingPeerCount int) 
 func (mc *Cluster) UpdateStorageRatio(storeID uint64, usedRatio, availableRatio float64) {
 	store := mc.GetStore(storeID)
 	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.Capacity = 1000 * (1 << 20)
+	newStats.Capacity = defaultStoreCapacity
 	newStats.UsedSize = uint64(float64(newStats.Capacity) * usedRatio)
 	newStats.Available = uint64(float64(newStats.Capacity) * availableRatio)
 	newStore := store.Clone(core.SetStoreStats(newStats))
@@ -530,9 +550,9 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	regionSize := mc.Regions.GetStoreRegionSize(id)
 	store := mc.Stores.GetStore(id)
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - uint64(store.GetRegionSize())
-	stats.UsedSize = uint64(store.GetRegionSize())
+	stats.Capacity = defaultStoreCapacity
+	stats.Available = stats.Capacity - uint64(store.GetRegionSize()*mb)
+	stats.UsedSize = uint64(store.GetRegionSize() * mb)
 	newStore := store.Clone(
 		core.SetStoreStats(stats),
 		core.SetLeaderCount(leaderCount),
@@ -540,6 +560,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 		core.SetPendingPeerCount(pendingPeerCount),
 		core.SetLeaderSize(leaderSize),
 		core.SetRegionSize(regionSize),
+		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.PutStore(newStore)
 }

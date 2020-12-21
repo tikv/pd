@@ -93,7 +93,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	s.RegionCount += store.GetRegionCount()
 	s.LeaderCount += store.GetLeaderCount()
 
-	storeStatusGauge.WithLabelValues(storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetRegionScoreFormulaVersion(), s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0, 0))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderSchedulePolicy(), 0))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_size").Set(float64(store.GetRegionSize()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_count").Set(float64(store.GetRegionCount()))
@@ -109,12 +109,16 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		return
 	}
 
-	storeWriteRateByte, storeReadRateByte := storeFlowStats.GetBytesRate()
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes").Set(storeWriteRateByte)
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes").Set(storeReadRateByte)
-	storeWriteRateKey, storeReadRateKey := storeFlowStats.GetKeysWriteRate(), storeFlowStats.GetKeysReadRate()
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys").Set(storeWriteRateKey)
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys").Set(storeReadRateKey)
+	collect := func(getBytesRate, getKeysRate func() (float64, float64), tail string) {
+		storeWriteRateByte, storeReadRateByte := getBytesRate()
+		storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes"+tail).Set(storeWriteRateByte) // store_write_rate_bytes or store_write_rate_bytes_instant
+		storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes"+tail).Set(storeReadRateByte)   // store_read_rate_bytes or store_read_rate_bytes_instant
+		storeWriteRateKey, storeReadRateKey := getKeysRate()
+		storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys"+tail).Set(storeWriteRateKey) // store_write_rate_keys or store_write_rate_keys_instant
+		storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys"+tail).Set(storeReadRateKey)   // store_read_rate_keys or store_read_rate_keys_instant
+	}
+	collect(storeFlowStats.GetBytesRate, storeFlowStats.GetKeysRate, "")
+	collect(storeFlowStats.GetBytesRateInstantaneous, storeFlowStats.GetKeysRateInstantaneous, "_instant")
 
 	// Store's threads statistics.
 	storeCPUUsage := stats.GetStoreCPUUsage(store.GetID())

@@ -18,6 +18,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -41,15 +42,17 @@ const (
 // Unhealthy replica management, mainly used for disaster recovery of TiKV.
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
-	cluster opt.Cluster
-	opts    *config.PersistOptions
+	cluster           opt.Cluster
+	opts              *config.PersistOptions
+	regionWaitingList cache.Cache
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster opt.Cluster) *ReplicaChecker {
+func NewReplicaChecker(cluster opt.Cluster, regionWaitingList cache.Cache) *ReplicaChecker {
 	return &ReplicaChecker{
-		cluster: cluster,
-		opts:    cluster.GetOpts(),
+		cluster:           cluster,
+		opts:              cluster.GetOpts(),
+		regionWaitingList: regionWaitingList,
 	}
 }
 
@@ -150,6 +153,7 @@ func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 	if target == 0 {
 		log.Debug("no store to add replica", zap.Uint64("region-id", region.GetID()))
 		checkerCounter.WithLabelValues("replica_checker", "no-target-store").Inc()
+		r.regionWaitingList.Put(region.GetID(), nil)
 		return nil
 	}
 	newPeer := &metapb.Peer{StoreId: target}
@@ -175,6 +179,7 @@ func (r *ReplicaChecker) checkRemoveExtraReplica(region *core.RegionInfo) *opera
 	old := r.strategy(region).SelectStoreToRemove(regionStores)
 	if old == 0 {
 		checkerCounter.WithLabelValues("replica_checker", "no-worst-peer").Inc()
+		r.regionWaitingList.Put(region.GetID(), nil)
 		return nil
 	}
 	op, err := operator.CreateRemovePeerOperator("remove-extra-replica", r.cluster, operator.OpReplica, region, old)
@@ -231,6 +236,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	if target == 0 {
 		reason := fmt.Sprintf("no-store-%s", status)
 		checkerCounter.WithLabelValues("replica_checker", reason).Inc()
+		r.regionWaitingList.Put(region.GetID(), nil)
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		return nil
 	}
