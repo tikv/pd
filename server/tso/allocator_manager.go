@@ -476,7 +476,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !allocator.IsStillAllocatorLeader() {
+			if !allocator.IsAllocatorLeader() {
 				log.Info("no longer a local tso allocator leader because lease has expired, local tso allocator leader will step down",
 					zap.String("dc-location", allocator.dcLocation),
 					zap.Any("dc-location-info", dcLocationInfo),
@@ -617,7 +617,7 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 		}
 	}
 	// Only leader can write the TSO suffix to etcd in order to make it consistent in the cluster
-	if am.member.IsStillLeader() {
+	if am.member.IsLeader() {
 		for dcLocation, info := range am.mu.clusterDCLocations {
 			if info.Suffix > 0 {
 				continue
@@ -992,7 +992,7 @@ func (am *AllocatorManager) getOrCreateGRPCConn(ctx context.Context, addr string
 }
 
 func (am *AllocatorManager) getDCLocationInfoFromLeader(ctx context.Context, dcLocation string) (bool, *pdpb.GetDCLocationInfoResponse, error) {
-	if am.member.IsStillLeader() {
+	if am.member.IsLeader() {
 		info, ok := am.GetDCLocationInfo(dcLocation)
 		if !ok {
 			return false, &pdpb.GetDCLocationInfoResponse{}, nil

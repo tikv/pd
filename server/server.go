@@ -1234,7 +1234,7 @@ func (s *Server) campaignLeader() {
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !s.member.IsStillLeader() {
+			if !s.member.IsLeader() {
 				log.Info("no longer a leader because lease has expired, pd leader will step down")
 				return
 			}
