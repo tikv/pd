@@ -245,7 +245,7 @@ func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
 	if err != nil {
 		return false
 	}
-	return !s.server.IsClosed() && allocator.(*tso.LocalTSOAllocator).IsStillAllocatorLeader()
+	return !s.server.IsClosed() && allocator.(*tso.LocalTSOAllocator).IsAllocatorLeader()
 }
 
 // GetEtcdLeader returns the builtin etcd leader.
@@ -363,7 +363,7 @@ func (s *TestServer) BootstrapCluster() error {
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
 	for i := 0; i < 100; i++ {
-		if s.server.GetMember().IsStillLeader() {
+		if s.server.GetMember().IsLeader() {
 			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)

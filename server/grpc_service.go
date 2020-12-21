@@ -417,10 +417,13 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		region := core.RegionFromHeartbeat(request)
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
+			msg := fmt.Sprintf("invalid request leader, %v", request)
+			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
 		if region.GetID() == 0 {
-			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-region").Inc()
 			msg := fmt.Sprintf("invalid request region, %v", request)
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
@@ -430,7 +433,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		if len(region.GetPeers()) == 0 {
 			log.Warn("invalid region, zero region peer count",
 				logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
-			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "no-peer").Inc()
 			msg := fmt.Sprintf("invalid region, zero region peer count: %v", logutil.RedactStringer(core.RegionToHexMeta(region.GetMeta())))
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
@@ -980,7 +983,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		for _, allocator := range allocatorLeaders {
 			// No longer leader, just skip here because
 			// the global allocator will check if all DCs are handled.
-			if !allocator.IsStillAllocatorLeader() {
+			if !allocator.IsAllocatorLeader() {
 				continue
 			}
 			currentLocalTSO, err := allocator.GetCurrentTSO()
@@ -1000,7 +1003,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	}
 	// The second phase of synchronization: do the writing
 	for _, allocator := range allocatorLeaders {
-		if !allocator.IsStillAllocatorLeader() {
+		if !allocator.IsAllocatorLeader() {
 			continue
 		}
 		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
@@ -1033,7 +1036,7 @@ func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocation
 	if err := s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
 	}
-	if !s.member.IsStillLeader() {
+	if !s.member.IsLeader() {
 		return nil, fmt.Errorf("receiving pd member[%v] is not pd leader", s.member.ID())
 	}
 	return &pdpb.GetDCLocationsResponse{
