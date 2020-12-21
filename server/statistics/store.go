@@ -152,10 +152,11 @@ const (
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	timeMedians := make(map[StoreStatKind]*movingaverage.TimeMedian)
-	timeMedians[StoreReadBytes] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, StoreHeartBeatReportInterval)
-	timeMedians[StoreReadKeys] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, StoreHeartBeatReportInterval)
-	timeMedians[StoreWriteBytes] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval)
-	timeMedians[StoreWriteKeys] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, StoreHeartBeatReportInterval)
+	interval := StoreHeartBeatReportInterval * time.Second
+	timeMedians[StoreReadBytes] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, interval)
+	timeMedians[StoreReadKeys] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, interval)
+	timeMedians[StoreWriteBytes] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval)
+	timeMedians[StoreWriteKeys] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval)
 
 	movingAvgs := make(map[StoreStatKind]movingaverage.MovingAvg)
 	movingAvgs[StoreCPUUsage] = movingaverage.NewMedianFilter(storeStatsRollingWindows)
