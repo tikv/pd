@@ -291,6 +291,12 @@ func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
 
 // similar logic with leaderLoop in server/server.go
 func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *LocalTSOAllocator) {
+	var checkTicker *time.Ticker
+	defer func() {
+		if checkTicker != nil {
+			checkTicker.Stop()
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -319,8 +325,9 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 				zap.String("wait-duration", checkStep.String()))
 			// Because the checkStep is long, we use select here to check whether the ctx is done
 			// to prevent the leak of goroutine.
-			checkTicker := time.NewTicker(checkStep)
-			defer checkTicker.Stop()
+			if checkTicker == nil {
+				checkTicker = time.NewTicker(checkStep)
+			}
 			select {
 			case <-ctx.Done():
 				log.Info("server is closed, return local tso allocator leader loop",
