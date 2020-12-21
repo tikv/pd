@@ -107,9 +107,11 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
+		ls.getLease().Close()
 		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
+		ls.getLease().Close()
 		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 	log.Info("write leaderData to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))

@@ -94,10 +94,9 @@ func (m *Member) Client() *clientv3.Client {
 	return m.client
 }
 
-// IsLeader returns whether the server is PD leader or not.
+// IsLeader returns whether the server is PD leader or not by checking its leadership's lease and leader info.
 func (m *Member) IsLeader() bool {
-	// If server is not started. Both leaderID and ID could be 0.
-	return m.GetLeaderID() == m.ID()
+	return m.leadership.Check() && m.GetLeader().GetMemberId() == m.member.GetMemberId()
 }
 
 // GetLeaderID returns current PD leader's member ID.
@@ -152,12 +151,6 @@ func (m *Member) CampaignLeader(leaseTimeout int64) error {
 // KeepLeader is used to keep the PD leader's leadership.
 func (m *Member) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
-}
-
-// IsStillLeader returns whether the PD leader is still a PD leader
-// by checking its leadership's lease.
-func (m *Member) IsStillLeader() bool {
-	return m.leadership.Check()
 }
 
 // CheckLeader checks returns true if it is needed to check later.
