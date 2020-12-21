@@ -71,7 +71,7 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	cluster.WaitLeader()
+	waitAllLeaders(s.ctx, c, cluster, testCase.dcLocationConfig)
 	serverNameMap := make(map[uint64]string)
 	for _, server := range cluster.GetServers() {
 		serverNameMap[server.GetServerID()] = server.GetServer().Name()
@@ -93,6 +93,22 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 			}
 		}
 		c.Assert(obtainedServerNumber, Equals, serverNumber)
+	}
+}
+
+// waitAllLeaders will block and wait for the election of PD leader and all Local TSO Allocators.
+func waitAllLeaders(ctx context.Context, c *C, cluster *tests.TestCluster, dcLocations map[string]string) {
+	cluster.WaitLeader()
+	// To speed up the test, we force to do the check
+	for _, server := range cluster.GetServers() {
+		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
+	}
+	// Wait for each DC's Local TSO Allocator leader
+	for _, dcLocation := range dcLocations {
+		testutil.WaitUntil(c, func(c *C) bool {
+			leaderName := cluster.WaitAllocatorLeader(dcLocation)
+			return len(leaderName) > 0
+		})
 	}
 }
 
@@ -122,18 +138,7 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	cluster.WaitLeader()
-	// To speed up the test, we force to do the check
-	for _, server := range cluster.GetServers() {
-		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
-	}
-	// Wait for each DC's Local TSO Allocator leader
-	for _, dcLocation := range testCase.dcLocationConfig {
-		testutil.WaitUntil(c, func(c *C) bool {
-			leaderName := cluster.WaitAllocatorLeader(dcLocation)
-			return len(leaderName) > 0
-		})
-	}
+	waitAllLeaders(s.ctx, c, cluster, testCase.dcLocationConfig)
 
 	tsoAllocatorManager := cluster.GetServer("pd1").GetTSOAllocatorManager()
 	for _, dcLocation := range testCase.dcLocations {
@@ -204,24 +209,20 @@ func (s *testPrioritySuite) TestAllocatorPriority(c *C) {
 	// pd2: dc-2 allocator leader
 	// pd3: dc-3 allocator leader
 
-	cluster.WaitLeader()
-	// Wait for each DC's Local TSO Allocator leader
-	for _, dcLocation := range dcLocationConfig {
-		testutil.WaitUntil(c, func(c *C) bool {
-			leaderName := cluster.WaitAllocatorLeader(dcLocation)
-			return len(leaderName) > 0
-		})
+	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+	waitAllocatorPriorityCheck(cluster)
+
+	for serverName, dcLocation := range dcLocationConfig {
+		currentLeaderName := cluster.WaitAllocatorLeader(dcLocation)
+		c.Assert(currentLeaderName, Equals, serverName)
 	}
-	// Same as above
+}
+
+func waitAllocatorPriorityCheck(cluster *tests.TestCluster) {
 	for _, server := range cluster.GetServers() {
 		server.GetTSOAllocatorManager().PriorityChecker()
 	}
 	// Because the leader changing may take quite a long period,
 	// so we sleep longer here to wait.
 	time.Sleep(waitAllocatorPriorityCheckInterval)
-
-	for serverName, dcLocation := range dcLocationConfig {
-		currentLeaderName := cluster.WaitAllocatorLeader(dcLocation)
-		c.Assert(currentLeaderName, Equals, serverName)
-	}
 }
