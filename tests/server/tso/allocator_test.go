@@ -186,11 +186,7 @@ func (s *testAllocatorSuite) testTSOSuffix(c *C, cluster *tests.TestCluster, am 
 	var tso pdpb.Timestamp
 	testutil.WaitUntil(c, func(c *C) bool {
 		tso, err = allocator.GenerateTSO(1)
-		if err != nil {
-			c.Assert(err.Error(), Matches, `.*global tso sync is not done yet.*`)
-			// Force to do the sync to speed up the test
-			cluster.GetServer(cluster.GetLeader()).GetTSOAllocatorManager().ClusterDCLocationChecker()
-		}
+		c.Assert(err, IsNil)
 		return tso.GetPhysical() != 0
 	})
 	// Test whether the TSO has the right suffix
