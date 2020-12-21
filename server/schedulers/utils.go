@@ -334,14 +334,16 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	peers := make([]statistics.HotPeerStat, 0, len(li.HotPeers))
 	var totalBytesRate, totalKeysRate float64
 	for _, peer := range li.HotPeers {
-		peers = append(peers, *peer.Clone())
-		totalBytesRate += peer.ByteRate
-		totalKeysRate += peer.KeyRate
+		if peer.HotDegree > 0 {
+			peers = append(peers, *peer.Clone())
+			totalBytesRate += peer.ByteRate
+			totalKeysRate += peer.KeyRate
+		}
 	}
 	return &statistics.HotPeersStat{
 		TotalBytesRate: math.Round(totalBytesRate),
 		TotalKeysRate:  math.Round(totalKeysRate),
-		Count:          len(li.HotPeers),
+		Count:          len(peers),
 		Stats:          peers,
 	}
 }

@@ -409,7 +409,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 func newConfigHotRegionCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "balance-hot-region-scheduler",
-		Short: "evict-leader-scheduler config",
+		Short: "balance-hot-region-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
 	c.AddCommand(&cobra.Command{

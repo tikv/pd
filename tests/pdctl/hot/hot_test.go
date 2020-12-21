@@ -80,7 +80,9 @@ func (s *hotTestSuite) TestHot(c *C) {
 	newStats.KeysRead = keysRead
 	rc := leaderServer.GetRaftCluster()
 	for i := statistics.DefaultWriteMfSize; i > 0; i-- {
-		newStats.Interval = &pdpb.TimeInterval{StartTimestamp: uint64(now - 10*i), EndTimestamp: uint64(now - 10*i + 10)}
+		start := uint64(now - statistics.StoreHeartBeatReportInterval*i)
+		end := start + statistics.StoreHeartBeatReportInterval
+		newStats.Interval = &pdpb.TimeInterval{StartTimestamp: start, EndTimestamp: end}
 		rc.GetStoresStats().Observe(ss.GetID(), newStats)
 	}
 
@@ -89,17 +91,19 @@ func (s *hotTestSuite) TestHot(c *C) {
 	c.Assert(err, IsNil)
 	hotStores := api.HotStoreStats{}
 	c.Assert(json.Unmarshal(output, &hotStores), IsNil)
-	c.Assert(hotStores.BytesWriteStats[1], Equals, float64(bytesWritten)/10)
-	c.Assert(hotStores.BytesReadStats[1], Equals, float64(bytesRead)/10)
-	c.Assert(hotStores.KeysWriteStats[1], Equals, float64(keysWritten)/10)
-	c.Assert(hotStores.KeysReadStats[1], Equals, float64(keysRead)/10)
+	c.Assert(hotStores.BytesWriteStats[1], Equals, float64(bytesWritten)/statistics.StoreHeartBeatReportInterval)
+	c.Assert(hotStores.BytesReadStats[1], Equals, float64(bytesRead)/statistics.StoreHeartBeatReportInterval)
+	c.Assert(hotStores.KeysWriteStats[1], Equals, float64(keysWritten)/statistics.StoreHeartBeatReportInterval)
+	c.Assert(hotStores.KeysReadStats[1], Equals, float64(keysRead)/statistics.StoreHeartBeatReportInterval)
 
 	// test hot region
-	statistics.Denoising = false
-	reportInterval := uint64(3) // need to be minHotRegionReportInterval < reportInterval < 3*RegionHeartBeatReportInterval
 	args = []string{"-u", pdAddr, "config", "set", "hot-region-cache-hits-threshold", "0"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
+
+	statistics.Denoising = false
+	hotStoreID := uint64(1)
+	count := 0
 
 	testHot := func(hotRegionID, hotStoreID uint64, hotType string) {
 		args = []string{"-u", pdAddr, "hot", hotType}
@@ -108,14 +112,28 @@ func (s *hotTestSuite) TestHot(c *C) {
 		c.Assert(e, IsNil)
 		c.Assert(json.Unmarshal(output, &hotRegion), IsNil)
 		c.Assert(hotRegion.AsLeader, HasKey, hotStoreID)
-		c.Assert(hotRegion.AsLeader[hotStoreID].Count, Equals, 1)
-		c.Assert(hotRegion.AsLeader[hotStoreID].Stats[0].RegionID, Equals, hotRegionID)
+		c.Assert(hotRegion.AsLeader[hotStoreID].Count, Equals, count)
+		if count > 0 {
+			c.Assert(hotRegion.AsLeader[hotStoreID].Stats[count-1].RegionID, Equals, hotRegionID)
+		}
 	}
-
-	hotReadRegionID, hotWriteRegionID, hotStoreID := uint64(3), uint64(2), uint64(1)
-	pdctl.MustPutRegion(c, cluster, hotReadRegionID, hotStoreID, []byte("b"), []byte("c"), core.SetReadBytes(1000000000), core.SetReportInterval(reportInterval))
-	pdctl.MustPutRegion(c, cluster, hotWriteRegionID, hotStoreID, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000), core.SetReportInterval(reportInterval))
-	time.Sleep(5000 * time.Millisecond)
-	testHot(hotReadRegionID, hotStoreID, "read")
-	testHot(hotWriteRegionID, hotStoreID, "write")
+	reportIntervals := []uint64{
+		statistics.HotRegionReportMinInterval,
+		statistics.HotRegionReportMinInterval + 1,
+		statistics.RegionHeartBeatReportInterval,
+		statistics.RegionHeartBeatReportInterval + 1,
+		statistics.RegionHeartBeatReportInterval * 2,
+		statistics.RegionHeartBeatReportInterval*2 + 1,
+	}
+	for _, reportInterval := range reportIntervals {
+		hotReadRegionID, hotWriteRegionID := reportInterval, reportInterval+100
+		pdctl.MustPutRegion(c, cluster, hotReadRegionID, hotStoreID, []byte("b"), []byte("c"), core.SetReadBytes(1000000000), core.SetReportInterval(reportInterval))
+		pdctl.MustPutRegion(c, cluster, hotWriteRegionID, hotStoreID, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000), core.SetReportInterval(reportInterval))
+		time.Sleep(5000 * time.Millisecond)
+		if reportInterval >= statistics.RegionHeartBeatReportInterval {
+			count++
+		}
+		testHot(hotReadRegionID, hotStoreID, "read")
+		testHot(hotWriteRegionID, hotStoreID, "write")
+	}
 }
