@@ -58,7 +58,7 @@ func (s *testLeadershipSuite) TestLeadership(c *C) {
 	// leadership1 starts first and get the leadership
 	err = leadership1.Campaign(defaultTestLeaderLease, "test_leader_1")
 	c.Assert(err, IsNil)
-	// leadership1 starts then and can not get the leadership
+	// leadership2 starts then and can not get the leadership
 	err = leadership2.Campaign(defaultTestLeaderLease, "test_leader_2")
 	c.Assert(err, NotNil)
 
