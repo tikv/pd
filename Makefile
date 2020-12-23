@@ -76,9 +76,6 @@ retool-setup:
 	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
 	@./scripts/retool sync
 
-<<<<<<< HEAD
-check: retool-setup check-all
-=======
 golangci-lint-setup:
 	@mkdir -p $(TOOL_BIN_PATH)
 	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(TOOL_BIN_PATH) v1.23.7
@@ -88,7 +85,6 @@ check: retool-setup golangci-lint-setup check-all check-plugin
 check-plugin:
 	@echo "checking plugin"
 	cd ./plugin/scheduler_example && make evictLeaderPlugin.so && rm evictLeaderPlugin.so
->>>>>>> 9c13e91d... tools: use golangci-lint in the officially recommended way (#2195)
 
 static: export GO111MODULE=on
 static:
@@ -96,15 +92,7 @@ static:
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	./scripts/retool do govet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
-<<<<<<< HEAD
-	CGO_ENABLED=0 ./scripts/retool do golangci-lint run --disable-all --deadline 120s \
-	  --enable misspell \
-	  --enable staticcheck \
-	  --enable ineffassign \
-	  $$($(PACKAGE_DIRECTORIES))
-=======
 	CGO_ENABLED=0 golangci-lint run $$($(PACKAGE_DIRECTORIES))
->>>>>>> 9c13e91d... tools: use golangci-lint in the officially recommended way (#2195)
 
 lint:
 	@echo "linting"

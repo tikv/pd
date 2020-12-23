@@ -11,8 +11,5 @@ vendor
 default*
 *.bak
 .vscode/
-<<<<<<< HEAD
-=======
 /.dashboard_asset_cache
 /.tools/bin
->>>>>>> 9c13e91d... tools: use golangci-lint in the officially recommended way (#2195)
