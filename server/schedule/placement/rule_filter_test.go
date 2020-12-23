@@ -37,7 +37,7 @@ func (s *testRuleSuite) TestRuleFilter(c *C) {
 							Value: "sh",
 						},
 					},
-				}, )
+				})
 				stores := []*core.StoreInfo{
 					store1,
 				}
@@ -71,7 +71,7 @@ func (s *testRuleSuite) TestRuleFilter(c *C) {
 							Value: "sh",
 						},
 					},
-				}, )
+				})
 				stores := []*core.StoreInfo{
 					store1,
 				}
