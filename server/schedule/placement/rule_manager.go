@@ -263,7 +263,21 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 // FitRegion fits a region to the rules it matches.
 func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *RegionFit {
 	rules := m.GetRulesForApplyRegion(region)
-	return FitRegion(stores, region, rules)
+	filteredRules := make([]*Rule, 0, len(rules))
+	filters := m.buildRuleFilters(stores.GetStores())
+	for _, rule := range rules {
+		pass := true
+		for _, filter := range filters {
+			if !filter.Filter(rule) {
+				pass = false
+				break
+			}
+		}
+		if pass {
+			filteredRules = append(filteredRules, rule)
+		}
+	}
+	return FitRegion(stores, region, filteredRules)
 }
 
 func (m *RuleManager) beginPatch() *ruleConfigPatch {
@@ -357,7 +371,7 @@ const (
 // distinguished by the field `Action`.
 type RuleOp struct {
 	*Rule                       // information of the placement rule to add/delete
-	Action           RuleOpType `json:"action"`              // the operation type
+	Action           RuleOpType `json:"action"` // the operation type
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
@@ -613,4 +627,10 @@ func (m *RuleManager) IsInitialized() bool {
 	m.RLock()
 	defer m.RUnlock()
 	return m.initialized
+}
+
+func (m *RuleManager) buildRuleFilters(stores []*core.StoreInfo) []RuleFilter {
+	var filters []RuleFilter
+	storeFilter := WithMatchStoreFilter(stores)
+	return append(filters, storeFilter)
 }
