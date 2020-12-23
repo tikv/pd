@@ -36,6 +36,10 @@ func (s *testRuleSuite) TestRuleFilter(c *C) {
 							Key:   "dc",
 							Value: "sh",
 						},
+						{
+							Key:   "Host",
+							Value: "host1",
+						},
 					},
 				})
 				stores := []*core.StoreInfo{
@@ -69,6 +73,10 @@ func (s *testRuleSuite) TestRuleFilter(c *C) {
 						{
 							Key:   "dc",
 							Value: "sh",
+						},
+						{
+							Key:   "Host",
+							Value: "host1",
 						},
 					},
 				})
