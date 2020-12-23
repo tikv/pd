@@ -15,15 +15,11 @@ package election
 
 import (
 	"context"
-	"fmt"
-	"io/ioutil"
-	"net/url"
-	"os"
 	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/tikv/pd/pkg/tempurl"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 )
@@ -36,38 +32,15 @@ var _ = Suite(&testLeadershipSuite{})
 
 type testLeadershipSuite struct{}
 
-func newTestSingleConfig() *embed.Config {
-	cfg := embed.NewConfig()
-	cfg.Name = "test_leadership"
-	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_leadership")
-	cfg.WalDir = ""
-	cfg.Logger = "zap"
-	cfg.LogOutputs = []string{"stdout"}
-
-	pu, _ := url.Parse(tempurl.Alloc())
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
-	cu, _ := url.Parse(tempurl.Alloc())
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
-
-	cfg.StrictReconfigCheck = false
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
-	cfg.ClusterState = embed.ClusterStateFlagNew
-	return cfg
-}
-
-func cleanConfig(cfg *embed.Config) {
-	// Clean data directory
-	os.RemoveAll(cfg.Dir)
-}
-
 const defaultTestLeaderLease = 3
 
 func (s *testLeadershipSuite) TestLeadership(c *C) {
-	cfg := newTestSingleConfig()
-	defer cleanConfig(cfg)
+	cfg := etcdutil.NewTestSingleConfig()
 	etcd, err := embed.StartEtcd(cfg)
+	defer func() {
+		etcd.Close()
+		etcdutil.CleanConfig(cfg)
+	}()
 	c.Assert(err, IsNil)
 
 	ep := cfg.LCUrls[0].String()
