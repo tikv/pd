@@ -80,11 +80,7 @@ golangci-lint-setup:
 	@mkdir -p $(TOOL_BIN_PATH)
 	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(TOOL_BIN_PATH) v1.23.7
 
-check: retool-setup golangci-lint-setup check-all check-plugin
-
-check-plugin:
-	@echo "checking plugin"
-	cd ./plugin/scheduler_example && make evictLeaderPlugin.so && rm evictLeaderPlugin.so
+check: retool-setup golangci-lint-setup check-all
 
 static: export GO111MODULE=on
 static:

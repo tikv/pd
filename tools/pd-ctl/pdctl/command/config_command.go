@@ -25,7 +25,6 @@ import (
 
 var (
 	configPrefix         = "pd/api/v1/config"
-	schedulePrefix       = "pd/api/v1/config/schedule"
 	replicationPrefix    = "pd/api/v1/config/replicate"
 	namespacePrefix      = "pd/api/v1/config/namespace"
 	labelPropertyPrefix  = "pd/api/v1/config/label-property"
