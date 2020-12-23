@@ -908,6 +908,21 @@ func waitOperator(c *C, co *coordinator, regionID uint64) {
 }
 
 var _ = Suite(&testOperatorControllerSuite{})
+var _ = SerialSuites(&testOperatorControllerSerialSuite{})
+
+type testOperatorControllerSerialSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testOperatorControllerSerialSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+}
+
+func (s *testOperatorControllerSerialSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
 
 type testOperatorControllerSuite struct {
 	ctx    context.Context
@@ -956,7 +971,7 @@ func (s *testOperatorControllerSuite) TestOperatorCount(c *C) {
 	}
 }
 
-func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
+func (s *testOperatorControllerSerialSuite) TestStoreOverloaded(c *C) {
 	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
