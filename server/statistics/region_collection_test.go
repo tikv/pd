@@ -83,6 +83,10 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[EmptyRegion]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[ExtraPeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[LearnerPeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[EmptyRegion]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[OfflinePeer]), Equals, 1)
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
@@ -96,6 +100,13 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[EmptyRegion]), Equals, 0)
+	c.Assert(len(regionStats.offlineStats[ExtraPeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[MissPeer]), Equals, 0)
+	c.Assert(len(regionStats.offlineStats[DownPeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[PendingPeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[LearnerPeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[EmptyRegion]), Equals, 0)
+	c.Assert(len(regionStats.offlineStats[OfflinePeer]), Equals, 1)
 
 	region2 = region2.Clone(core.WithDownPeers(downPeers[0:1]))
 	regionStats.Observe(region2, stores[0:2])
@@ -104,7 +115,12 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[DownPeer]), Equals, 2)
 	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[OfflinePeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[ExtraPeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[MissPeer]), Equals, 0)
+	c.Assert(len(regionStats.offlineStats[DownPeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[PendingPeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[LearnerPeer]), Equals, 1)
+	c.Assert(len(regionStats.offlineStats[OfflinePeer]), Equals, 1)
 
 	region1 = region1.Clone(core.WithRemoveStorePeer(7))
 	regionStats.Observe(region1, stores[0:3])
@@ -113,7 +129,12 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[DownPeer]), Equals, 2)
 	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 0)
-	c.Assert(len(regionStats.stats[OfflinePeer]), Equals, 0)
+	c.Assert(len(regionStats.offlineStats[ExtraPeer]), Equals, 0)
+	c.Assert(len(regionStats.offlineStats[MissPeer]), Equals, 0)
+	c.Assert(len(regionStats.offlineStats[DownPeer]), Equals, 0)
+	c.Assert(len(regionStats.offlineStats[PendingPeer]), Equals, 0)
+	c.Assert(len(regionStats.offlineStats[LearnerPeer]), Equals, 0)
+	c.Assert(len(regionStats.offlineStats[OfflinePeer]), Equals, 0)
 
 	store3 = stores[3].Clone(core.SetStoreState(metapb.StoreState_Up))
 	stores[3] = store3
