@@ -83,6 +83,6 @@ func NewTestOptions() *PersistOptions {
 		RegisterScheduler(d.Type)
 	}
 	c := NewConfig()
-	c.Adjust(nil)
+	c.Adjust(nil, false)
 	return NewPersistOptions(c)
 }

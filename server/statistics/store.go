@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
@@ -38,13 +39,6 @@ func NewStoresStats() *StoresStats {
 	return &StoresStats{
 		rollingStoresStats: make(map[uint64]*RollingStoreStats),
 	}
-}
-
-// CreateRollingStoreStats creates RollingStoreStats with a given store ID.
-func (s *StoresStats) CreateRollingStoreStats(storeID uint64) {
-	s.Lock()
-	defer s.Unlock()
-	s.rollingStoresStats[storeID] = newRollingStoreStats()
 }
 
 // RemoveRollingStoreStats removes RollingStoreStats with a given store ID.
@@ -286,16 +280,21 @@ func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
 	}
 }
 
+// UpdateStoreHeartbeatMetrics is used to update store heartbeat interval metrics
+func (s *StoresStats) UpdateStoreHeartbeatMetrics(store *core.StoreInfo) {
+	storeHeartbeatIntervalHist.Observe(time.Since(store.GetLastHeartbeatTS()).Seconds())
+}
+
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex
-	bytesWriteRate          *TimeMedian
-	bytesReadRate           *TimeMedian
-	keysWriteRate           *TimeMedian
-	keysReadRate            *TimeMedian
-	totalCPUUsage           MovingAvg
-	totalBytesDiskReadRate  MovingAvg
-	totalBytesDiskWriteRate MovingAvg
+	bytesWriteRate          *movingaverage.TimeMedian
+	bytesReadRate           *movingaverage.TimeMedian
+	keysWriteRate           *movingaverage.TimeMedian
+	keysReadRate            *movingaverage.TimeMedian
+	totalCPUUsage           movingaverage.MovingAvg
+	totalBytesDiskReadRate  movingaverage.MovingAvg
+	totalBytesDiskWriteRate movingaverage.MovingAvg
 }
 
 const (
@@ -310,14 +309,15 @@ const (
 
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
+	interval := StoreHeartBeatReportInterval * time.Second
 	return &RollingStoreStats{
-		bytesWriteRate:          NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
-		bytesReadRate:           NewTimeMedian(DefaultAotSize, DefaultReadMfSize),
-		keysWriteRate:           NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
-		keysReadRate:            NewTimeMedian(DefaultAotSize, DefaultReadMfSize),
-		totalCPUUsage:           NewMedianFilter(storeStatsRollingWindows),
-		totalBytesDiskReadRate:  NewMedianFilter(storeStatsRollingWindows),
-		totalBytesDiskWriteRate: NewMedianFilter(storeStatsRollingWindows),
+		bytesWriteRate:          movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval),
+		bytesReadRate:           movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, interval),
+		keysWriteRate:           movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval),
+		keysReadRate:            movingaverage.NewTimeMedian(DefaultAotSize, DefaultReadMfSize, interval),
+		totalCPUUsage:           movingaverage.NewMedianFilter(storeStatsRollingWindows),
+		totalBytesDiskReadRate:  movingaverage.NewMedianFilter(storeStatsRollingWindows),
+		totalBytesDiskWriteRate: movingaverage.NewMedianFilter(storeStatsRollingWindows),
 	}
 }
 
@@ -369,6 +369,13 @@ func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64)
 	return r.bytesWriteRate.Get(), r.bytesReadRate.Get()
 }
 
+// GetBytesRateInstantaneous returns the bytes write rate and the bytes read rate instantaneously.
+func (r *RollingStoreStats) GetBytesRateInstantaneous() (writeRate float64, readRate float64) {
+	r.RLock()
+	defer r.RUnlock()
+	return r.bytesWriteRate.GetInstantaneous(), r.bytesReadRate.GetInstantaneous()
+}
+
 // GetBytesWriteRate returns the bytes write rate.
 func (r *RollingStoreStats) GetBytesWriteRate() float64 {
 	r.RLock()
@@ -388,6 +395,13 @@ func (r *RollingStoreStats) GetKeysRate() (writeRate float64, readRate float64) 
 	r.RLock()
 	defer r.RUnlock()
 	return r.keysWriteRate.Get(), r.keysReadRate.Get()
+}
+
+// GetKeysRateInstantaneous returns the keys write rate and the keys read rate instantaneously.
+func (r *RollingStoreStats) GetKeysRateInstantaneous() (writeRate float64, readRate float64) {
+	r.RLock()
+	defer r.RUnlock()
+	return r.keysWriteRate.GetInstantaneous(), r.keysReadRate.GetInstantaneous()
 }
 
 // GetKeysWriteRate returns the keys write rate.

@@ -24,7 +24,6 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
-	"github.com/tikv/pd/server/member"
 	"go.uber.org/zap"
 )
 
@@ -32,6 +31,7 @@ import (
 // which is only used to allocate TSO in one DC each.
 // One PD server may hold multiple Local TSO Allocators.
 type LocalTSOAllocator struct {
+	allocatorManager *AllocatorManager
 	// leadership is used to campaign the corresponding DC's Local TSO Allocator.
 	leadership      *election.Leadership
 	timestampOracle *timestampOracle
@@ -40,23 +40,27 @@ type LocalTSOAllocator struct {
 	// election of Local TSO Allocator leader among several PD servers and
 	// Local TSO Allocator only use member's some etcd and pbpd.Member info.
 	// So it's not conflicted.
-	member          *member.Member
 	rootPath        string
 	dcLocation      string
 	allocatorLeader atomic.Value // stored as *pdpb.Member
 }
 
 // NewLocalTSOAllocator creates a new local TSO allocator.
-func NewLocalTSOAllocator(member *member.Member, leadership *election.Leadership, dcLocation string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
+func NewLocalTSOAllocator(
+	am *AllocatorManager,
+	leadership *election.Leadership,
+	dcLocation string,
+) Allocator {
 	return &LocalTSOAllocator{
-		leadership: leadership,
+		allocatorManager: am,
+		leadership:       leadership,
 		timestampOracle: &timestampOracle{
-			client:        leadership.GetClient(),
-			rootPath:      leadership.GetLeaderKey(),
-			saveInterval:  saveInterval,
-			maxResetTSGap: maxResetTSGap,
+			client:                 leadership.GetClient(),
+			rootPath:               leadership.GetLeaderKey(),
+			saveInterval:           am.saveInterval,
+			updatePhysicalInterval: am.updatePhysicalInterval,
+			maxResetTSGap:          am.maxResetTSGap,
 		},
-		member:     member,
 		rootPath:   leadership.GetLeaderKey(),
 		dcLocation: dcLocation,
 	}
@@ -68,7 +72,8 @@ func (lta *LocalTSOAllocator) GetDCLocation() string {
 }
 
 // Initialize will initialize the created local TSO allocator.
-func (lta *LocalTSOAllocator) Initialize() error {
+func (lta *LocalTSOAllocator) Initialize(suffix int) error {
+	lta.timestampOracle.suffix = suffix
 	return lta.timestampOracle.SyncTimestamp(lta.leadership)
 }
 
@@ -85,14 +90,13 @@ func (lta *LocalTSOAllocator) UpdateTSO() error {
 
 // SetTSO sets the physical part with given TSO.
 func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
-	return lta.timestampOracle.ResetUserTimestamp(lta.leadership, tso)
+	return lta.timestampOracle.resetUserTimestamp(lta.leadership, tso, false)
 }
 
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	// Todo: use the low bits of TSO's logical part to distinguish the different local TSO
-	return lta.timestampOracle.getTS(lta.leadership, count)
+	return lta.timestampOracle.getTS(lta.leadership, count, lta.allocatorManager.GetClusterDCLocationsNumber())
 }
 
 // Reset is used to reset the TSO allocator.
@@ -121,7 +125,7 @@ func (lta *LocalTSOAllocator) GetAllocatorLeader() *pdpb.Member {
 
 // GetMember returns the Local TSO Allocator's member value.
 func (lta *LocalTSOAllocator) GetMember() *pdpb.Member {
-	return lta.member.Member()
+	return lta.allocatorManager.member.Member()
 }
 
 // GetCurrentTSO returns current TSO in memory.
@@ -139,22 +143,21 @@ func (lta *LocalTSOAllocator) WriteTSO(maxTS *pdpb.Timestamp) error {
 	if err != nil {
 		return err
 	}
-	// If current local TSO has already been greater than
-	// maxTS, then do not update it.
-	if currentTSO.Physical >= maxTS.Physical {
+	// If current local TSO has already been greater or equal to maxTS, then do not update it.
+	if tsoutil.CompareTimestamp(&currentTSO, maxTS) >= 0 {
 		return nil
 	}
-	return lta.SetTSO(tsoutil.GenerateTS(maxTS))
+	return lta.timestampOracle.resetUserTimestamp(lta.leadership, tsoutil.GenerateTS(maxTS), true)
 }
 
 // EnableAllocatorLeader sets the Local TSO Allocator itself to a leader.
 func (lta *LocalTSOAllocator) EnableAllocatorLeader() {
-	lta.setAllocatorLeader(lta.member.Member())
+	lta.setAllocatorLeader(lta.allocatorManager.member.Member())
 }
 
 // CampaignAllocatorLeader is used to campaign a Local TSO Allocator's leadership.
 func (lta *LocalTSOAllocator) CampaignAllocatorLeader(leaseTimeout int64) error {
-	return lta.leadership.Campaign(leaseTimeout, lta.member.MemberValue())
+	return lta.leadership.Campaign(leaseTimeout, lta.allocatorManager.member.MemberValue())
 }
 
 // KeepAllocatorLeader is used to keep the PD leader's leadership.
@@ -162,20 +165,20 @@ func (lta *LocalTSOAllocator) KeepAllocatorLeader(ctx context.Context) {
 	lta.leadership.Keep(ctx)
 }
 
-// IsStillAllocatorLeader returns whether the allocator is still a
-// Local TSO Allocator leader by checking its leadership's lease.
-func (lta *LocalTSOAllocator) IsStillAllocatorLeader() bool {
-	return lta.leadership.Check()
+// IsAllocatorLeader returns whether the allocator is still a
+// Local TSO Allocator leader by checking its leadership's lease and leader info.
+func (lta *LocalTSOAllocator) IsAllocatorLeader() bool {
+	return lta.leadership.Check() && lta.GetAllocatorLeader().GetMemberId() == lta.GetMember().GetMemberId()
 }
 
 // isSameLeader checks whether a server is the leader itself.
 func (lta *LocalTSOAllocator) isSameAllocatorLeader(leader *pdpb.Member) bool {
-	return leader.GetMemberId() == lta.member.Member().MemberId
+	return leader.GetMemberId() == lta.allocatorManager.member.Member().MemberId
 }
 
 // CheckAllocatorLeader checks who is the current Local TSO Allocator leader, and returns true if it is needed to check later.
 func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool) {
-	if lta.member.GetEtcdLeader() == 0 {
+	if lta.allocatorManager.member.GetEtcdLeader() == 0 {
 		log.Error("no etcd leader, check local tso allocator leader later",
 			zap.String("dc-location", lta.dcLocation), errs.ZapError(errs.ErrEtcdLeaderNotFound))
 		time.Sleep(200 * time.Millisecond)

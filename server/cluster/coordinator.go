@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
@@ -61,6 +62,7 @@ type coordinator struct {
 	cluster         *RaftCluster
 	checkers        *schedule.CheckerController
 	regionScatterer *schedule.RegionScatterer
+	regionSplitter  *schedule.RegionSplitter
 	schedulers      map[string]*scheduleController
 	opController    *schedule.OperatorController
 	hbStreams       *hbstream.HeartbeatStreams
@@ -76,7 +78,8 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		cancel:          cancel,
 		cluster:         cluster,
 		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, opController),
-		regionScatterer: schedule.NewRegionScatterer(cluster),
+		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
+		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
 		hbStreams:       hbStreams,
@@ -106,28 +109,11 @@ func (c *coordinator) patrolRegions() {
 		}
 
 		// Check suspect regions first.
-		for _, id := range c.cluster.GetSuspectRegions() {
-			region := c.cluster.GetRegion(id)
-			if region == nil {
-				// the region could be recent split, continue to wait.
-				continue
-			}
-			if c.opController.GetOperator(id) != nil {
-				c.cluster.RemoveSuspectRegion(id)
-				continue
-			}
-			checkerIsBusy, ops := c.checkers.CheckRegion(region)
-			if checkerIsBusy {
-				continue
-			}
-			if len(ops) > 0 {
-				c.opController.AddWaitingOperator(ops...)
-			}
-			c.cluster.RemoveSuspectRegion(id)
-		}
-
+		c.checkSuspectRegions()
 		// Check suspect key ranges
 		c.checkSuspectKeyRanges()
+		// Check regions in the waiting list
+		c.checkWaitingRegions()
 
 		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
 		if len(regions) == 0 {
@@ -142,21 +128,52 @@ func (c *coordinator) patrolRegions() {
 				continue
 			}
 
-			checkerIsBusy, ops := c.checkers.CheckRegion(region)
-			if checkerIsBusy {
-				break
-			}
+			ops := c.checkers.CheckRegion(region)
 
 			key = region.GetEndKey()
-			if len(ops) > 0 {
+			if len(ops) == 0 {
+				continue
+			}
+
+			if !c.opController.ExceedStoreLimit(ops...) {
 				c.opController.AddWaitingOperator(ops...)
+				c.checkers.RemoveWaitingRegion(region.GetID())
+				c.cluster.RemoveSuspectRegion(region.GetID())
+			} else {
+				c.checkers.AddWaitingRegion(region)
 			}
 		}
 		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
-			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
+			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
+		}
+		failpoint.Inject("break-patrol", func() {
+			failpoint.Break()
+		})
+	}
+}
+
+func (c *coordinator) checkSuspectRegions() {
+	for _, id := range c.cluster.GetSuspectRegions() {
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			// the region could be recent split, continue to wait.
+			continue
+		}
+		if c.opController.GetOperator(id) != nil {
+			c.cluster.RemoveSuspectRegion(id)
+			continue
+		}
+		ops := c.checkers.CheckRegion(region)
+		if len(ops) == 0 {
+			continue
+		}
+
+		if !c.opController.ExceedStoreLimit(ops...) {
+			c.opController.AddWaitingOperator(ops...)
+			c.cluster.RemoveSuspectRegion(region.GetID())
 		}
 	}
 }
@@ -186,6 +203,32 @@ func (c *coordinator) checkSuspectKeyRanges() {
 		c.cluster.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
 	}
 	c.cluster.AddSuspectRegions(regionIDList...)
+}
+
+func (c *coordinator) checkWaitingRegions() {
+	items := c.checkers.GetWaitingRegions()
+	regionWaitingListGauge.Set(float64(len(items)))
+	for _, item := range items {
+		id := item.Key
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			// the region could be recent split, continue to wait.
+			continue
+		}
+		if c.opController.GetOperator(id) != nil {
+			c.checkers.RemoveWaitingRegion(id)
+			continue
+		}
+		ops := c.checkers.CheckRegion(region)
+		if len(ops) == 0 {
+			continue
+		}
+
+		if !c.opController.ExceedStoreLimit(ops...) {
+			c.opController.AddWaitingOperator(ops...)
+			c.checkers.RemoveWaitingRegion(region.GetID())
+		}
+	}
 }
 
 // drivePushOperator is used to push the unfinished operator to the executor.
@@ -614,7 +657,7 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	if c.cluster == nil {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	s := make([]*scheduleController, 0)
+	var s []*scheduleController
 	if name != "all" {
 		sc, ok := c.schedulers[name]
 		if !ok {
@@ -648,6 +691,26 @@ func (c *coordinator) isSchedulerPaused(name string) (bool, error) {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return s.IsPaused(), nil
+}
+
+func (c *coordinator) isSchedulerDisabled(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return false, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	t := s.GetType()
+	scheduleConfig := c.cluster.GetOpts().GetScheduleConfig()
+	for _, s := range scheduleConfig.Schedulers {
+		if t == s.Type {
+			return s.Disable, nil
+		}
+	}
+	return false, nil
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {

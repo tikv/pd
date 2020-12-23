@@ -15,7 +15,9 @@ package api
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -107,4 +109,20 @@ func doDelete(client *http.Client, url string) (*http.Response, error) {
 	}
 	res.Body.Close()
 	return res, nil
+}
+
+func parseKey(name string, input map[string]interface{}) ([]byte, string, error) {
+	k, ok := input[name]
+	if !ok {
+		return nil, "", fmt.Errorf("missing %s", name)
+	}
+	rawKey, ok := k.(string)
+	if !ok {
+		return nil, "", fmt.Errorf("bad format %s", name)
+	}
+	returned, err := hex.DecodeString(rawKey)
+	if err != nil {
+		return nil, "", fmt.Errorf("split key %s is not in hex format", name)
+	}
+	return returned, rawKey, nil
 }

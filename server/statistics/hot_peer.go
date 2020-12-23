@@ -13,13 +13,54 @@
 
 package statistics
 
-import "time"
+import (
+	"math"
+	"time"
+
+	"github.com/tikv/pd/pkg/movingaverage"
+)
 
 const (
 	byteDim int = iota
 	keyDim
 	dimLen
 )
+
+type dimStat struct {
+	typ         int
+	Rolling     *movingaverage.TimeMedian  // it's used to statistic hot degree and average speed.
+	LastAverage *movingaverage.AvgOverTime // it's used to obtain the average speed in last second as instantaneous speed.
+}
+
+func newDimStat(typ int) *dimStat {
+	reportInterval := RegionHeartBeatReportInterval * time.Second
+	return &dimStat{
+		typ:         typ,
+		Rolling:     movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
+		LastAverage: movingaverage.NewAvgOverTime(reportInterval),
+	}
+}
+
+func (d *dimStat) Add(delta float64, interval time.Duration) {
+	d.LastAverage.Add(delta, interval)
+	d.Rolling.Add(delta, interval)
+}
+
+func (d *dimStat) isHot(thresholds [dimLen]float64) bool {
+	return d.LastAverage.IsFull() && d.LastAverage.Get() >= thresholds[d.typ]
+}
+
+func (d *dimStat) isFull() bool {
+	return d.LastAverage.IsFull()
+}
+
+func (d *dimStat) clearLastAverage() {
+	d.LastAverage.Clear()
+}
+
+func (d *dimStat) Get() float64 {
+	return d.Rolling.Get()
+}
 
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
@@ -31,22 +72,24 @@ type HotPeerStat struct {
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int `json:"anti_count"`
 
-	Kind     FlowKind `json:"kind"`
+	Kind     FlowKind `json:"-"`
 	ByteRate float64  `json:"flow_bytes"`
 	KeyRate  float64  `json:"flow_keys"`
 
 	// rolling statistics, recording some recently added records.
-	rollingByteRate MovingAvg
-	rollingKeyRate  MovingAvg
+	rollingByteRate *dimStat
+	rollingKeyRate  *dimStat
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
-	// Version used to check the region split times
-	Version uint64 `json:"version"`
 
-	needDelete bool
-	isLeader   bool
-	isNew      bool
+	needDelete         bool
+	isLeader           bool
+	isNew              bool
+	justTransferLeader bool
+	interval           uint64
+	thresholds         [dimLen]float64
+	peers              []uint64
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -85,17 +128,22 @@ func (stat *HotPeerStat) IsNew() bool {
 // GetByteRate returns denoised BytesRate if possible.
 func (stat *HotPeerStat) GetByteRate() float64 {
 	if stat.rollingByteRate == nil {
-		return stat.ByteRate
+		return math.Round(stat.ByteRate)
 	}
-	return stat.rollingByteRate.Get()
+	return math.Round(stat.rollingByteRate.Get())
 }
 
 // GetKeyRate returns denoised KeysRate if possible.
 func (stat *HotPeerStat) GetKeyRate() float64 {
 	if stat.rollingKeyRate == nil {
-		return stat.KeyRate
+		return math.Round(stat.KeyRate)
 	}
-	return stat.rollingKeyRate.Get()
+	return math.Round(stat.rollingKeyRate.Get())
+}
+
+// GetThresholds returns thresholds
+func (stat *HotPeerStat) GetThresholds() [dimLen]float64 {
+	return stat.thresholds
 }
 
 // Clone clones the HotPeerStat
@@ -106,4 +154,13 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret.KeyRate = stat.GetKeyRate()
 	ret.rollingKeyRate = nil
 	return &ret
+}
+
+func (stat *HotPeerStat) isHot() bool {
+	return stat.rollingByteRate.isHot(stat.thresholds) || stat.rollingKeyRate.isHot(stat.thresholds)
+}
+
+func (stat *HotPeerStat) clearLastAverage() {
+	stat.rollingByteRate.clearLastAverage()
+	stat.rollingKeyRate.clearLastAverage()
 }

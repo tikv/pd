@@ -24,15 +24,22 @@ type OpKind uint32
 
 // Flags for operators.
 const (
-	OpLeader    OpKind = 1 << iota // Include leader transfer.
-	OpRegion                       // Include peer movement.
-	OpSplit                        // Include region split.
-	OpAdmin                        // Initiated by admin.
-	OpHotRegion                    // Initiated by hot region scheduler.
-	OpAdjacent                     // Initiated by adjacent region scheduler.
-	OpReplica                      // Initiated by replica checkers.
-	OpMerge                        // Initiated by merge checkers or merge schedulers.
-	OpRange                        // Initiated by range scheduler.
+	// Include leader transfer.
+	OpLeader OpKind = 1 << iota
+	// Include peer addition or removal. This means that this operator may take a long time.
+	OpRegion
+	// Include region split. Initiated by rule checker if `kind & OpAdmin == 0`.
+	OpSplit
+	// Initiated by admin.
+	OpAdmin
+	// Initiated by hot region scheduler.
+	OpHotRegion
+	// Initiated by replica checker.
+	OpReplica
+	// Initiated by merge checker or merge scheduler. Note that it may not include region merge.
+	OpMerge
+	// Initiated by range scheduler.
+	OpRange
 	opMax
 )
 
@@ -42,7 +49,6 @@ var flagToName = map[OpKind]string{
 	OpSplit:     "split",
 	OpAdmin:     "admin",
 	OpHotRegion: "hot-region",
-	OpAdjacent:  "adjacent",
 	OpReplica:   "replica",
 	OpMerge:     "merge",
 	OpRange:     "range",
@@ -54,7 +60,6 @@ var nameToFlag = map[string]OpKind{
 	"split":      OpSplit,
 	"admin":      OpAdmin,
 	"hot-region": OpHotRegion,
-	"adjacent":   OpAdjacent,
 	"replica":    OpReplica,
 	"merge":      OpMerge,
 	"range":      OpRange,
@@ -84,5 +89,4 @@ func ParseOperatorKind(str string) (OpKind, error) {
 		k |= flag
 	}
 	return k, nil
-
 }

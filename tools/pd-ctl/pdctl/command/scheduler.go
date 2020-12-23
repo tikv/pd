@@ -16,12 +16,14 @@ package command
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path"
 	"strconv"
 	"strings"
 
+	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -83,6 +85,7 @@ func NewShowSchedulerCommand() *cobra.Command {
 		Short: "show schedulers",
 		Run:   showSchedulerCommandFunc,
 	}
+	c.Flags().String("status", "", "the scheduler status")
 	return c
 }
 
@@ -102,7 +105,11 @@ func showSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	r, err := doRequest(cmd, schedulersPrefix, http.MethodGet)
+	url := schedulersPrefix
+	if flag := cmd.Flag("status"); flag != nil && flag.Value.String() != "" {
+		url = fmt.Sprintf("%s?status=%s", url, flag.Value.String())
+	}
+	r, err := doRequest(cmd, url, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -126,7 +133,6 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewBalanceRegionSchedulerCommand())
 	c.AddCommand(NewBalanceHotRegionSchedulerCommand())
 	c.AddCommand(NewRandomMergeSchedulerCommand())
-	c.AddCommand(NewBalanceAdjacentRegionSchedulerCommand())
 	c.AddCommand(NewLabelSchedulerCommand())
 	return c
 }
@@ -346,33 +352,6 @@ func addSchedulerForScatterRangeCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, schedulersPrefix, input)
 }
 
-// NewBalanceAdjacentRegionSchedulerCommand returns a command to add a balance-adjacent-region-scheduler.
-func NewBalanceAdjacentRegionSchedulerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "balance-adjacent-region-scheduler [leader_limit] [peer_limit]",
-		Short: "add a scheduler to disperse adjacent regions on each store",
-		Run:   addSchedulerForBalanceAdjacentRegionCommandFunc,
-	}
-	return c
-}
-
-func addSchedulerForBalanceAdjacentRegionCommandFunc(cmd *cobra.Command, args []string) {
-	l := len(args)
-	input := make(map[string]interface{})
-	if l > 2 {
-		cmd.Println(cmd.UsageString())
-		return
-	} else if l == 1 {
-		input["leader_limit"] = url.QueryEscape(args[0])
-	} else if l == 2 {
-		input["leader_limit"] = url.QueryEscape(args[0])
-		input["peer_limit"] = url.QueryEscape(args[1])
-	}
-	input["name"] = cmd.Name()
-
-	postJSON(cmd, schedulersPrefix, input)
-}
-
 // NewRemoveSchedulerCommand returns a command to remove scheduler.
 func NewRemoveSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
@@ -430,7 +409,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 func newConfigHotRegionCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "balance-hot-region-scheduler",
-		Short: "evict-leader-scheduler config",
+		Short: "balance-hot-region-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
 	c.AddCommand(&cobra.Command{
@@ -527,6 +506,9 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 	path := path.Join(schedulerConfigPrefix, p, "list")
 	r, err := doRequest(cmd, path, http.MethodGet)
 	if err != nil {
+		if strings.Contains(err.Error(), "404") {
+			err = errors.New("[404] scheduler not found")
+		}
 		cmd.Println(err)
 		return
 	}

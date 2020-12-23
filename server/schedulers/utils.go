@@ -45,9 +45,16 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	tolerantResource := getTolerantResource(cluster, region, kind)
 	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceProperty(kind)
 	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
+	sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
 	opts := cluster.GetOpts()
-	sourceScore = source.ResourceScore(kind, opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
-	targetScore = target.ResourceScore(kind, opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetInfluence+tolerantResource)
+	switch kind.Resource {
+	case core.LeaderKind:
+		sourceScore = source.LeaderScore(kind.Policy, sourceDelta)
+		targetScore = target.LeaderScore(kind.Policy, targetDelta)
+	case core.RegionKind:
+		sourceScore = source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta, -1)
+		targetScore = target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta, 1)
+	}
 	if opts.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(targetInfluence))
@@ -187,11 +194,6 @@ type storeLoad struct {
 	ByteRate float64
 	KeyRate  float64
 	Count    float64
-
-	// Exp means Expectation, it is calculated from the average value from summary of byte/key rate, count.
-	ExpByteRate float64
-	ExpKeyRate  float64
-	ExpCount    float64
 }
 
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
@@ -256,6 +258,7 @@ func rankCmp(a, b float64, rank func(value float64) int64) int {
 type storeLoadPred struct {
 	Current storeLoad
 	Future  storeLoad
+	Expect  storeLoad
 }
 
 func (lp *storeLoadPred) min() *storeLoad {
@@ -329,13 +332,18 @@ type storeLoadDetail struct {
 
 func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	peers := make([]statistics.HotPeerStat, 0, len(li.HotPeers))
+	var totalBytesRate, totalKeysRate float64
 	for _, peer := range li.HotPeers {
-		peers = append(peers, *peer.Clone())
+		if peer.HotDegree > 0 {
+			peers = append(peers, *peer.Clone())
+			totalBytesRate += peer.ByteRate
+			totalKeysRate += peer.KeyRate
+		}
 	}
 	return &statistics.HotPeersStat{
-		TotalBytesRate: li.LoadPred.Current.ByteRate,
-		TotalKeysRate:  li.LoadPred.Current.KeyRate,
-		Count:          len(li.HotPeers),
+		TotalBytesRate: math.Round(totalBytesRate),
+		TotalKeysRate:  math.Round(totalKeysRate),
+		Count:          len(peers),
 		Stats:          peers,
 	}
 }

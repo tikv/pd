@@ -61,7 +61,7 @@ func (s *RegionSyncer) reset() {
 func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 	s.reset()
 	ctx, cancel := context.WithCancel(s.server.LoopContext())
-	tlsCfg, err := s.securityConfig.ToTLSConfig()
+	tlsCfg, err := s.tlsConfig.ToTLSConfig()
 	if err != nil {
 		cancel()
 		return nil, err
@@ -72,9 +72,8 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 		tlsCfg,
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                keepaliveTime,
-			Timeout:             keepaliveTimeout,
-			PermitWithoutStream: true,
+			Time:    keepaliveTime,
+			Timeout: keepaliveTimeout,
 		}),
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff: backoff.Config{

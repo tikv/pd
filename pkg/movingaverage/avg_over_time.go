@@ -11,17 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
+package movingaverage
 
 import (
 	"time"
 
 	"github.com/phf/go-queue/queue"
-)
-
-const (
-	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
-	StoreHeartBeatReportInterval = 10
 )
 
 type deltaWithInterval struct {
@@ -35,16 +30,21 @@ type deltaWithInterval struct {
 // stores recent changes that happened in the last avgInterval,
 // then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
-	que         *queue.Queue
-	deltaSum    float64
-	intervalSum time.Duration
+	que         *queue.Queue      // The element is `deltaWithInterval`, sum of all elements' interval is less than `avgInterval`
+	margin      deltaWithInterval // The last element from `PopFront` in `que`
+	deltaSum    float64           // Including `margin` and all elements in `que`
+	intervalSum time.Duration     // Including `margin` and all elements in `que`
 	avgInterval time.Duration
 }
 
 // NewAvgOverTime returns an AvgOverTime with given interval.
 func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 	return &AvgOverTime{
-		que:         queue.New(),
+		que: queue.New(),
+		margin: deltaWithInterval{
+			delta:    0,
+			interval: 0,
+		},
 		deltaSum:    0,
 		intervalSum: 0,
 		avgInterval: interval,
@@ -53,68 +53,52 @@ func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 
 // Get returns change rate in the last interval.
 func (aot *AvgOverTime) Get() float64 {
-	return aot.deltaSum / aot.intervalSum.Seconds()
+	if aot.intervalSum < aot.avgInterval {
+		return 0
+	}
+	marginDelta := aot.margin.delta * (aot.intervalSum.Seconds() - aot.avgInterval.Seconds()) / aot.margin.interval.Seconds()
+	return (aot.deltaSum - marginDelta) / aot.avgInterval.Seconds()
 }
 
 // Clear clears the AvgOverTime.
 func (aot *AvgOverTime) Clear() {
-	aot.que = queue.New()
+	aot.que.Init()
+	aot.margin = deltaWithInterval{
+		delta:    0,
+		interval: 0,
+	}
 	aot.intervalSum = 0
 	aot.deltaSum = 0
 }
 
 // Add adds recent change to AvgOverTime.
 func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
+	if interval == 0 {
+		return
+	}
+
 	aot.que.PushBack(deltaWithInterval{delta, interval})
 	aot.deltaSum += delta
 	aot.intervalSum += interval
+
+	for aot.intervalSum-aot.margin.interval >= aot.avgInterval {
+		aot.deltaSum -= aot.margin.delta
+		aot.intervalSum -= aot.margin.interval
+		aot.margin = aot.que.PopFront().(deltaWithInterval)
+	}
 }
 
 // Set sets AvgOverTime to the given average.
 func (aot *AvgOverTime) Set(avg float64) {
 	aot.Clear()
-	aot.deltaSum = avg * aot.avgInterval.Seconds()
+	aot.margin.delta = avg * aot.avgInterval.Seconds()
+	aot.margin.interval = aot.avgInterval
+	aot.deltaSum = aot.margin.delta
 	aot.intervalSum = aot.avgInterval
 	aot.que.PushBack(deltaWithInterval{delta: aot.deltaSum, interval: aot.intervalSum})
 }
 
-// TimeMedian is AvgOverTime + MedianFilter
-// Size of MedianFilter should be larger than double size of AvgOverTime to denoisy.
-// Delay is aotSize * mfSize * StoreHeartBeatReportInterval /4
-type TimeMedian struct {
-	aotInterval time.Duration
-	aot         *AvgOverTime
-	mf          *MedianFilter
-}
-
-// NewTimeMedian returns a TimeMedian with given size.
-func NewTimeMedian(aotSize, mfSize int) *TimeMedian {
-	interval := time.Duration(aotSize*StoreHeartBeatReportInterval) * time.Second
-	return &TimeMedian{
-		aotInterval: interval,
-		aot:         NewAvgOverTime(interval),
-		mf:          NewMedianFilter(mfSize),
-	}
-}
-
-// Get returns change rate in the median of the several intervals.
-func (t *TimeMedian) Get() float64 {
-	return t.mf.Get()
-}
-
-// Add adds recent change to TimeMedian.
-func (t *TimeMedian) Add(delta float64, interval time.Duration) {
-	if interval < 1 {
-		return
-	}
-	t.aot.Add(delta, interval)
-	if t.aot.intervalSum >= t.aotInterval {
-		t.mf.Add(t.aot.Get())
-		t.aot.Clear()
-	}
-}
-
-// Set sets the given average.
-func (t *TimeMedian) Set(avg float64) {
-	t.mf.Set(avg)
+// IsFull returns whether AvgOverTime is full
+func (aot *AvgOverTime) IsFull() bool {
+	return aot.intervalSum >= aot.avgInterval
 }

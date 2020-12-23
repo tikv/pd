@@ -41,7 +41,7 @@ const (
 type transition [statusCount][statusCount]bool
 
 // Valid status transition
-var validTrans transition = transition{
+var validTrans = transition{
 	CREATED: {
 		STARTED:  true,
 		CANCELED: true,
@@ -60,7 +60,7 @@ var validTrans transition = transition{
 	TIMEOUT:  {},
 }
 
-var statusString [statusCount]string = [statusCount]string{
+var statusString = [statusCount]string{
 	CREATED:  "Created",
 	STARTED:  "Started",
 	SUCCESS:  "Success",
@@ -70,9 +70,9 @@ var statusString [statusCount]string = [statusCount]string{
 	TIMEOUT:  "Timeout",
 }
 
-const invalid pdpb.OperatorStatus = pdpb.OperatorStatus_RUNNING + 1
+const invalid = pdpb.OperatorStatus_RUNNING + 1
 
-var pdpbStatus [statusCount]pdpb.OperatorStatus = [statusCount]pdpb.OperatorStatus{
+var pdpbStatus = [statusCount]pdpb.OperatorStatus{
 	// FIXME: use a valid status
 	CREATED:  invalid,
 	STARTED:  pdpb.OperatorStatus_RUNNING,

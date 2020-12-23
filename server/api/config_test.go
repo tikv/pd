@@ -35,7 +35,9 @@ type testConfigSuite struct {
 }
 
 func (s *testConfigSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
+		cfg.Replication.EnablePlacementRules = false
+	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -274,4 +276,51 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	c.Assert(defaultCfg.Replication.LocationLabels, DeepEquals, typeutil.StringSlice([]string{}))
 	c.Assert(defaultCfg.Schedule.RegionScheduleLimit, Equals, uint64(2048))
 	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
+}
+
+var ttlConfig = map[string]interface{}{
+	"schedule.max-snapshot-count":             999,
+	"schedule.enable-location-replacement":    false,
+	"schedule.max-merge-region-size":          999,
+	"schedule.max-merge-region-keys":          999,
+	"schedule.scheduler-max-waiting-operator": 999,
+	"schedule.leader-schedule-limit":          999,
+	"schedule.region-schedule-limit":          999,
+	"schedule.hot-region-schedule-limit":      999,
+	"schedule.replica-schedule-limit":         999,
+	"schedule.merge-schedule-limit":           999,
+}
+
+var invalidTTLConfig = map[string]interface{}{
+	"schedule.invalid-ttl-config": 0,
+}
+
+func assertTTLConfig(c *C, options *config.PersistOptions, checker Checker) {
+	c.Assert(options.GetMaxSnapshotCount(), checker, uint64(999))
+	c.Assert(options.IsLocationReplacementEnabled(), checker, false)
+	c.Assert(options.GetMaxMergeRegionSize(), checker, uint64(999))
+	c.Assert(options.GetMaxMergeRegionKeys(), checker, uint64(999))
+	c.Assert(options.GetSchedulerMaxWaitingOperator(), checker, uint64(999))
+	c.Assert(options.GetLeaderScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetRegionScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetHotRegionScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetReplicaScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetMergeScheduleLimit(), checker, uint64(999))
+}
+
+func (s *testConfigSuite) TestConfigTTL(c *C) {
+	addr := fmt.Sprintf("%s/config?ttlSecond=1", s.urlPrefix)
+	postData, err := json.Marshal(ttlConfig)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
+	time.Sleep(2 * time.Second)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
+
+	postData, err = json.Marshal(invalidTTLConfig)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, Not(IsNil))
+	c.Assert(err.Error(), Equals, "\"unsupported ttl config schedule.invalid-ttl-config\"\n")
 }

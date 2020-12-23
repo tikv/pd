@@ -55,22 +55,23 @@ func (s *testCrypterSuite) TestKeyLength(c *C) {
 }
 
 func (s *testCrypterSuite) TestNewIv(c *C) {
-	ivCtr, err := NewIvCtr()
+	ivCtr, err := NewIvCTR()
 	c.Assert(err, IsNil)
 	c.Assert(len([]byte(ivCtr)), Equals, ivLengthCTR)
-	ivGcm, err := NewIvGcm()
+	ivGcm, err := NewIvGCM()
 	c.Assert(err, IsNil)
 	c.Assert(len([]byte(ivGcm)), Equals, ivLengthGCM)
 }
 
 func testNewDataKey(c *C, method encryptionpb.EncryptionMethod) {
-	_, key, err := NewDataKey(method)
+	_, key, err := NewDataKey(method, uint64(123))
 	c.Assert(err, IsNil)
 	length, err := KeyLength(method)
 	c.Assert(err, IsNil)
-	c.Assert(len(key.Key), Equals, length)
+	c.Assert(key.Key, HasLen, length)
 	c.Assert(key.Method, Equals, method)
 	c.Assert(key.WasExposed, IsFalse)
+	c.Assert(key.CreationTime, Equals, uint64(123))
 }
 
 func (s *testCrypterSuite) TestNewDataKey(c *C) {
@@ -88,7 +89,7 @@ func (s *testCrypterSuite) TestAesGcmCrypter(c *C) {
 	// encrypt
 	ivBytes, err := hex.DecodeString("ba432b70336c40c39ba14c1b")
 	c.Assert(err, IsNil)
-	iv := IvGcm(ivBytes)
+	iv := IvGCM(ivBytes)
 	ciphertext, err := aesGcmEncryptImpl(key, plaintext, iv)
 	c.Assert(err, IsNil)
 	c.Assert(len([]byte(iv)), Equals, ivLengthGCM)

@@ -45,62 +45,63 @@ type testBalanceSpeedCase struct {
 }
 
 func (s *testBalanceSuite) TestShouldBalance(c *C) {
+	// store size = 100GiB
+	// region size = 96MiB
+	const R = 96
 	tests := []testBalanceSpeedCase{
-		// all store capacity is 1024MB
-		// size = count * 10
-
 		// target size is zero
-		{2, 0, 1, true, core.BySize},
-		{2, 0, 10, false, core.BySize},
+		{2, 0, R / 10, true, core.BySize},
+		{2, 0, R, false, core.BySize},
 		// all in high space stage
-		{10, 5, 1, true, core.BySize},
-		{10, 5, 20, false, core.BySize},
-		{10, 10, 1, false, core.BySize},
-		{10, 10, 20, false, core.BySize},
+		{10, 5, R / 10, true, core.BySize},
+		{10, 5, 2 * R, false, core.BySize},
+		{10, 10, R / 10, false, core.BySize},
+		{10, 10, 2 * R, false, core.BySize},
 		// all in transition stage
-		{70, 50, 1, true, core.BySize},
-		{70, 50, 50, false, core.BySize},
-		{70, 70, 1, false, core.BySize},
+		{700, 680, R / 10, true, core.BySize},
+		{700, 680, 5 * R, false, core.BySize},
+		{700, 700, R / 10, false, core.BySize},
 		// all in low space stage
-		{90, 80, 1, true, core.BySize},
-		{90, 80, 50, false, core.BySize},
-		{90, 90, 1, false, core.BySize},
+		{900, 890, R / 10, true, core.BySize},
+		{900, 890, 5 * R, false, core.BySize},
+		{900, 900, R / 10, false, core.BySize},
 		// one in high space stage, other in transition stage
-		{65, 55, 5, true, core.BySize},
-		{65, 50, 50, false, core.BySize},
+		{650, 550, R, true, core.BySize},
+		{650, 500, 50 * R, false, core.BySize},
 		// one in transition space stage, other in low space stage
-		{80, 70, 5, true, core.BySize},
-		{80, 70, 50, false, core.BySize},
+		{800, 700, R, true, core.BySize},
+		{800, 700, 50 * R, false, core.BySize},
 
 		// default leader tolerant ratio is 5, when schedule by count
 		// target size is zero
-		{2, 0, 1, false, core.ByCount},
-		{2, 0, 10, false, core.ByCount},
+		{2, 0, R / 10, false, core.ByCount},
+		{2, 0, R, false, core.ByCount},
 		// all in high space stage
-		{10, 5, 1, true, core.ByCount},
-		{10, 5, 20, true, core.ByCount},
-		{10, 6, 20, false, core.ByCount},
-		{10, 10, 1, false, core.ByCount},
-		{10, 10, 20, false, core.ByCount},
+		{10, 5, R / 10, true, core.ByCount},
+		{10, 5, 2 * R, true, core.ByCount},
+		{10, 6, 2 * R, false, core.ByCount},
+		{10, 10, R / 10, false, core.ByCount},
+		{10, 10, 2 * R, false, core.ByCount},
 		// all in transition stage
-		{70, 50, 1, true, core.ByCount},
-		{70, 50, 50, true, core.ByCount},
-		{70, 70, 1, false, core.ByCount},
+		{70, 50, R / 10, true, core.ByCount},
+		{70, 50, 5 * R, true, core.ByCount},
+		{70, 70, R / 10, false, core.ByCount},
 		// all in low space stage
-		{90, 80, 1, true, core.ByCount},
-		{90, 80, 50, true, core.ByCount},
-		{90, 90, 1, false, core.ByCount},
+		{90, 80, R / 10, true, core.ByCount},
+		{90, 80, 5 * R, true, core.ByCount},
+		{90, 90, R / 10, false, core.ByCount},
 		// one in high space stage, other in transition stage
-		{65, 55, 5, true, core.ByCount},
-		{65, 50, 50, true, core.ByCount},
+		{65, 55, R / 2, true, core.ByCount},
+		{65, 50, 5 * R, true, core.ByCount},
 		// one in transition space stage, other in low space stage
-		{80, 70, 5, true, core.ByCount},
-		{80, 70, 50, true, core.ByCount},
+		{80, 70, R / 2, true, core.ByCount},
+		{80, 70, 5 * R, true, core.ByCount},
 	}
 
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.SetTolerantSizeRatio(2.5)
+	tc.SetRegionScoreFormulaVersion("v1")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	oc := schedule.NewOperatorController(ctx, nil, nil)
@@ -240,10 +241,10 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderSchedulePolicy(c *C) 
 	// Leader Count:    10      10      10      10
 	// Leader Size :    10000   100    	100    	100
 	// Region1:         L       F       F       F
-	s.tc.AddLeaderStore(1, 10, 10000)
-	s.tc.AddLeaderStore(2, 10, 100)
-	s.tc.AddLeaderStore(3, 10, 100)
-	s.tc.AddLeaderStore(4, 10, 100)
+	s.tc.AddLeaderStore(1, 10, 10000*MB)
+	s.tc.AddLeaderStore(2, 10, 100*MB)
+	s.tc.AddLeaderStore(3, 10, 100*MB)
+	s.tc.AddLeaderStore(4, 10, 100*MB)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
 	c.Assert(s.tc.GetScheduleConfig().LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), IsNil)
@@ -399,10 +400,10 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalancePolicy(c *C) {
 	// Stores:       1    2     3    4
 	// LeaderCount: 20   66     6   20
 	// LeaderSize:  66   20    20    6
-	s.tc.AddLeaderStore(1, 20, 60)
-	s.tc.AddLeaderStore(2, 66, 20)
-	s.tc.AddLeaderStore(3, 6, 20)
-	s.tc.AddLeaderStore(4, 20, 1)
+	s.tc.AddLeaderStore(1, 20, 600*MB)
+	s.tc.AddLeaderStore(2, 66, 200*MB)
+	s.tc.AddLeaderStore(3, 6, 20*MB)
+	s.tc.AddLeaderStore(4, 20, 1*MB)
 	s.tc.AddLeaderRegion(1, 2, 1, 3, 4)
 	s.tc.AddLeaderRegion(2, 1, 2, 3, 4)
 	s.tc.SetLeaderSchedulePolicy("count")
@@ -579,6 +580,8 @@ func (s *testBalanceRegionSchedulerSuite) TearDownSuite(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	opt := config.NewTestOptions()
+	// TODO: enable placementrules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
@@ -613,6 +616,8 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	opt := config.NewTestOptions()
+	//TODO: enable placementrules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
@@ -675,6 +680,8 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cl
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	opt := config.NewTestOptions()
+	//TODO: enable placementrules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMaxReplicas(5)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
@@ -738,10 +745,12 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica5(c *C, tc *mockcluster.Cl
 // the source region is more likely distributed in store[1, 2, 3].
 func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetTolerantSizeRatio(1)
 	tc.SetRegionScheduleLimit(1)
+	tc.SetRegionScoreFormulaVersion("v1")
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	source := core.NewRegionInfo(
@@ -814,6 +823,8 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	// TODO: enable placementrules
+	tc.SetPlacementRuleEnabled(false)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
@@ -856,6 +867,8 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	//TODO: enable placementrules
+	tc.SetEnablePlacementRules(false)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	stream := hbstream.NewTestHeartbeatStreams(s.ctx, tc.ID, tc, false /* no need to run */)
 	oc := schedule.NewOperatorController(s.ctx, tc, stream)
@@ -927,6 +940,8 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
+	//TODO: enable palcementrules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMergeScheduleLimit(1)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, true /* need to run */)
@@ -972,6 +987,8 @@ func (s *testScatterRangeLeaderSuite) TearDownSuite(c *C) {
 
 func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	opt := config.NewTestOptions()
+	// TODO: enable palcementrules
+	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetTolerantSizeRatio(2.5)

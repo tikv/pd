@@ -19,6 +19,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -41,7 +42,7 @@ func (s *testRuleCheckerSuite) SetUpTest(c *C) {
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.cluster.SetEnablePlacementRules(true)
 	s.ruleManager = s.cluster.RuleManager
-	s.rc = NewRuleChecker(s.cluster, s.ruleManager)
+	s.rc = NewRuleChecker(s.cluster, s.ruleManager, cache.NewDefaultCache(10))
 }
 
 func (s *testRuleCheckerSuite) TestFixRange(c *C) {
@@ -187,17 +188,17 @@ func (s *testRuleCheckerSuite) TestFixRole(c *C) {
 func (s *testRuleCheckerSuite) TestFixRoleLeader(c *C) {
 	s.cluster.AddLabelsStore(1, 1, map[string]string{"role": "follower"})
 	s.cluster.AddLabelsStore(2, 1, map[string]string{"role": "follower"})
-	s.cluster.AddLabelsStore(3, 1, map[string]string{"role": "leader"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"role": "voter"})
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
 	s.ruleManager.SetRule(&placement.Rule{
 		GroupID:  "pd",
 		ID:       "r1",
 		Index:    100,
 		Override: true,
-		Role:     placement.Leader,
+		Role:     placement.Voter,
 		Count:    1,
 		LabelConstraints: []placement.LabelConstraint{
-			{Key: "role", Op: "in", Values: []string{"leader"}},
+			{Key: "role", Op: "in", Values: []string{"voter"}},
 		},
 	})
 	s.ruleManager.SetRule(&placement.Rule{
@@ -212,8 +213,40 @@ func (s *testRuleCheckerSuite) TestFixRoleLeader(c *C) {
 	})
 	op := s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "fix-peer-role")
+	c.Assert(op.Desc(), Equals, "fix-follower-role")
 	c.Assert(op.Step(0).(operator.TransferLeader).ToStore, Equals, uint64(3))
+}
+
+func (s *testRuleCheckerSuite) TestFixRoleLeaderIssue3130(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"role": "follower"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"role": "leader"})
+	s.cluster.AddLeaderRegion(1, 1, 2)
+	s.ruleManager.SetRule(&placement.Rule{
+		GroupID:  "pd",
+		ID:       "r1",
+		Index:    100,
+		Override: true,
+		Role:     placement.Leader,
+		Count:    1,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "role", Op: "in", Values: []string{"leader"}},
+		},
+	})
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "fix-leader-role")
+	c.Assert(op.Step(0).(operator.TransferLeader).ToStore, Equals, uint64(2))
+
+	s.cluster.SetStoreBusy(2, true)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+	s.cluster.SetStoreBusy(2, false)
+
+	s.cluster.AddLeaderRegion(1, 2, 1)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+	c.Assert(op.Step(0).(operator.RemovePeer).FromStore, Equals, uint64(1))
 }
 
 func (s *testRuleCheckerSuite) TestBetterReplacement(c *C) {

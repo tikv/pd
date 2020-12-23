@@ -367,7 +367,7 @@ func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
 	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Offline, fmt.Sprintf("test/store%d", storeID))
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	err = rc.PutStore(store, false)
+	err = rc.PutStore(store)
 	c.Assert(err, IsNil)
 	c.Assert(tc, NotNil)
 
@@ -558,7 +558,8 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 }
 
 func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
-	tc, err := tests.NewTestCluster(s.ctx, 1)
+	// TODO: enable placementrules
+	tc, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config, svr string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
@@ -573,7 +574,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
-	err = cfg.Adjust(nil)
+	err = cfg.Adjust(nil, false)
 	c.Assert(err, IsNil)
 	opt := config.NewPersistOptions(cfg)
 	c.Assert(err, IsNil)
@@ -723,7 +724,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 }
 
 func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
-	tc, err := tests.NewTestCluster(s.ctx, 1)
+	tc, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config, name string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 	err = tc.RunInitialServers()
@@ -912,7 +913,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 			},
 			StartKey: []byte{byte(i + 1)},
 			EndKey:   []byte{byte(i + 2)},
-			Peers:    []*metapb.Peer{{Id: i + 10, StoreId: uint64(i)}},
+			Peers:    []*metapb.Peer{{Id: i + 10, StoreId: i}},
 		}
 		region := core.NewRegionInfo(r, r.Peers[0], core.SetApproximateSize(10))
 

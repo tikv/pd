@@ -14,7 +14,10 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"math"
 	"path/filepath"
 	"sort"
@@ -32,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 	"go.etcd.io/etcd/clientv3"
@@ -66,6 +70,7 @@ type client interface {
 	GetLeaderAddr() string
 	ScheduleCheckLeader()
 	GetURLs() []string
+	GetAllocatorLeaderURLs() map[string]string
 }
 
 func (s *clientTestSuite) TestClientLeaderChange(c *C) {
@@ -186,6 +191,162 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	}
 	close(quit)
 	wg.Wait()
+}
+
+func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	var (
+		endpoints    []string
+		endpointsMap = make(map[string]string)
+	)
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+		endpointsMap[s.GetServer().GetMemberInfo().GetName()] = s.GetConfig().AdvertiseClientUrls
+	}
+	var allocatorLeaderMap = make(map[string]string)
+	for _, dcLocation := range dcLocationConfig {
+		var pdName string
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdName = cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdName) > 0
+		})
+		allocatorLeaderMap[dcLocation] = pdName
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+
+	// Check allocator leaders URL map.
+	cli.Close()
+	for dcLocation, url := range cli.(client).GetAllocatorLeaderURLs() {
+		if dcLocation == config.GlobalDCLocation {
+			urls := cli.(client).GetURLs()
+			sort.Strings(urls)
+			sort.Strings(endpoints)
+			c.Assert(urls, DeepEquals, endpoints)
+			continue
+		}
+		pdName, exist := allocatorLeaderMap[dcLocation]
+		c.Assert(exist, IsTrue)
+		c.Assert(len(pdName), Greater, 0)
+		pdURL, exist := endpointsMap[pdName]
+		c.Assert(exist, IsTrue)
+		c.Assert(len(pdURL), Greater, 0)
+		c.Assert(url, Equals, pdURL)
+	}
+}
+
+func (s *clientTestSuite) TestLocalTSO(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	for _, dcLocation := range dcLocationConfig {
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdLeader) > 0
+		})
+	}
+
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+
+	wg := sync.WaitGroup{}
+	for _, dcLocation := range dcLocationConfig {
+		wg.Add(1)
+		go func(dc string) {
+			defer wg.Done()
+			var err error
+			var p1, l1 int64
+			testutil.WaitUntil(c, func(c *C) bool {
+				p1, l1, err = cli.GetLocalTS(context.TODO(), dc)
+				if err == nil {
+					return true
+				}
+				c.Log(err)
+				return false
+			})
+			time.Sleep(10 * time.Millisecond)
+			testutil.WaitUntil(c, func(c *C) bool {
+				p2, l2, err := cli.GetLocalTS(context.TODO(), dc)
+				if err != nil {
+					c.Log(err)
+					return false
+				}
+				c.Assert(p1<<18+l1, Less, p2<<18+l2)
+				return true
+			})
+		}(dcLocation)
+	}
+	wg.Wait()
+}
+
+func (s *clientTestSuite) TestNonexistentLocalTSO(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	for _, dcLocation := range dcLocationConfig {
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdLeader) > 0
+		})
+	}
+
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+
+	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
+	c.Assert(p, Equals, int64(0))
+	c.Assert(l, Equals, int64(0))
+	c.Assert(err, NotNil)
 }
 
 func (s *clientTestSuite) TestCustomTimeout(c *C) {
@@ -657,17 +818,24 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		TTL       int64
 		SafePoint uint64
 	}{
-		{"a", 1000, 1},
 		{"b", 1000, 2},
+		{"a", 1000, 1},
 		{"c", 1000, 3},
 	}
 	for _, ssp := range serviceSafePoints {
 		min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
 			ssp.ServiceID, 1000, ssp.SafePoint)
 		c.Assert(err, IsNil)
-		c.Assert(min, Equals, uint64(1))
+		// An service safepoint of ID "gc_worker" is automatically initialized as 0
+		c.Assert(min, Equals, uint64(0))
 	}
+
 	min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", math.MaxInt64, 10)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(1))
+
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", 1000, 4)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(2))
@@ -706,8 +874,43 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
-	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
 	c.Assert(minSsp.ExpiredAt, Less, oldMinSsp.ExpiredAt)
+
+	// TTL can be infinite (represented by math.MaxInt64)
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", math.MaxInt64, 3)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(3))
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.ServiceID, Equals, "c")
+	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
+
+	// Delete "a" and "c"
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", -1, 3)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(4))
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"a", -1, 4)
+	c.Assert(err, IsNil)
+	// Now gc_worker is the only remaining service safe point.
+	c.Assert(min, Equals, uint64(10))
+
+	// gc_worker cannot be deleted.
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", -1, 10)
+	c.Assert(err, NotNil)
+
+	// Cannot set non-infinity TTL for gc_worker
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", 10000000, 10)
+	c.Assert(err, NotNil)
+
+	// Service safepoint must have a non-empty ID
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"", 1000, 15)
+	c.Assert(err, NotNil)
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {
@@ -718,7 +921,9 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 			ConfVer: 1,
 			Version: 1,
 		},
-		Peers: peers,
+		Peers:    peers,
+		StartKey: []byte("fff"),
+		EndKey:   []byte("ggg"),
 	}
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newHeader(s.srv),
@@ -726,10 +931,14 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 		Leader: peers[0],
 	}
 	err := s.regionHeartbeat.Send(req)
+	regionsID := []uint64{regionID}
 	c.Assert(err, IsNil)
 	testutil.WaitUntil(c, func(c *C) bool {
-		err := s.client.ScatterRegion(context.Background(), regionID)
+		scatterResp, err := s.client.ScatterRegions(context.Background(), regionsID, pd.WithGroup("test"), pd.WithRetry(1))
 		if c.Check(err, NotNil) {
+			return false
+		}
+		if c.Check(scatterResp.FinishedPercentage, Not(Equals), uint64(100)) {
 			return false
 		}
 		resp, err := s.client.GetOperator(context.Background(), regionID)
@@ -737,37 +946,68 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 			return false
 		}
 		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
-	})
+	}, testutil.WithSleepInterval(1*time.Second))
 	c.Succeed()
 }
 
-func (s *testClientSuite) TestScatterRegionWithOption(c *C) {
-	regionID := regionIDAllocator.alloc()
-	region := &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers: peers,
-	}
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(s.srv),
-		Region: region,
-		Leader: peers[0],
-	}
-	err := s.regionHeartbeat.Send(req)
+type testConfigTTLSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testConfigTTLSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *testConfigTTLSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+var _ = SerialSuites(&testConfigTTLSuite{})
+
+var ttlConfig = map[string]interface{}{
+	"schedule.max-snapshot-count":             999,
+	"schedule.enable-location-replacement":    false,
+	"schedule.max-merge-region-size":          999,
+	"schedule.max-merge-region-keys":          999,
+	"schedule.scheduler-max-waiting-operator": 999,
+	"schedule.leader-schedule-limit":          999,
+	"schedule.region-schedule-limit":          999,
+	"schedule.hot-region-schedule-limit":      999,
+	"schedule.replica-schedule-limit":         999,
+	"schedule.merge-schedule-limit":           999,
+}
+
+func assertTTLConfig(c *C, options *config.PersistOptions, checker Checker) {
+	c.Assert(options.GetMaxSnapshotCount(), checker, uint64(999))
+	c.Assert(options.IsLocationReplacementEnabled(), checker, false)
+	c.Assert(options.GetMaxMergeRegionSize(), checker, uint64(999))
+	c.Assert(options.GetMaxMergeRegionKeys(), checker, uint64(999))
+	c.Assert(options.GetSchedulerMaxWaitingOperator(), checker, uint64(999))
+	c.Assert(options.GetLeaderScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetRegionScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetHotRegionScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetReplicaScheduleLimit(), checker, uint64(999))
+	c.Assert(options.GetMergeScheduleLimit(), checker, uint64(999))
+}
+
+func (s *testConfigTTLSuite) TestConfigTTLAfterTransferLeader(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
-	testutil.WaitUntil(c, func(c *C) bool {
-		err := s.client.ScatterRegionWithOption(context.Background(), regionID, pd.WithGroup("test-group"))
-		if c.Check(err, NotNil) {
-			return false
-		}
-		resp, err := s.client.GetOperator(context.Background(), regionID)
-		if c.Check(err, NotNil) {
-			return false
-		}
-		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
-	})
-	c.Succeed()
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	leader := cluster.GetServer(cluster.WaitLeader())
+	c.Assert(leader.BootstrapCluster(), IsNil)
+	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
+	postData, err := json.Marshal(ttlConfig)
+	c.Assert(err, IsNil)
+	_, err = leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
+	c.Assert(err, IsNil)
+	time.Sleep(2 * time.Second)
+	_ = leader.Destroy()
+	time.Sleep(2 * time.Second)
+	leader = cluster.GetServer(cluster.WaitLeader())
+	assertTTLConfig(c, leader.GetPersistOptions(), Equals)
 }

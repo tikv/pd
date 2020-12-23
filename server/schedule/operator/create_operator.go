@@ -21,8 +21,10 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
@@ -62,10 +64,17 @@ func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region 
 }
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
-func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, peers map[uint64]*metapb.Peer) (*Operator, error) {
-	return NewBuilder(desc, cluster, region).
-		SetPeers(peers).
-		Build(kind)
+func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, roles map[uint64]placement.PeerRoleType) (*Operator, error) {
+	// construct the peers from roles
+	peers := make(map[uint64]*metapb.Peer)
+	for storeID, role := range roles {
+		peers[storeID] = &metapb.Peer{
+			StoreId: storeID,
+			Role:    role.MetaPeerRole(),
+		}
+	}
+	builder := NewBuilder(desc, cluster, region).SetPeers(peers).SetExpectedRoles(roles)
+	return builder.Build(kind)
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
@@ -86,7 +95,11 @@ func CreateMoveLeaderOperator(desc string, cluster opt.Cluster, region *core.Reg
 }
 
 // CreateSplitRegionOperator creates an operator that splits a region.
-func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, keys [][]byte) *Operator {
+func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, keys [][]byte) (*Operator, error) {
+	if core.IsInJointState(region.GetPeers()...) {
+		return nil, errors.Errorf("cannot split region which is in joint state")
+	}
+
 	step := SplitRegion{
 		StartKey:  region.GetStartKey(),
 		EndKey:    region.GetEndKey(),
@@ -101,11 +114,15 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, step)
+	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, step), nil
 }
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
 func CreateMergeRegionOperator(desc string, cluster opt.Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OpKind) ([]*Operator, error) {
+	if core.IsInJointState(source.GetPeers()...) || core.IsInJointState(target.GetPeers()...) {
+		return nil, errors.Errorf("cannot merge regions which are in joint state")
+	}
+
 	var steps []OpStep
 	if !isRegionMatch(source, target) {
 		peers := make(map[uint64]*metapb.Peer)
@@ -215,7 +232,7 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 	brief := b.brief()
 
 	// buildStepsWithJointConsensus
-	kind := OpRegion
+	var kind OpKind
 
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {

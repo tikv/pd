@@ -27,6 +27,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -59,7 +60,16 @@ func (s *serverTestSuite) TearDownSuite(c *C) {
 }
 
 func (s *serverTestSuite) TestMemberDelete(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
@@ -114,6 +124,13 @@ func (s *serverTestSuite) TestMemberDelete(c *C) {
 			}
 			return true
 		})
+	}
+	// Check whether the dc-location info of the corresponding member is deleted.
+	for _, member := range members {
+		key := member.GetServer().GetMember().GetDCLocationPath(member.GetServerID())
+		resp, err := etcdutil.EtcdKVGet(leader.GetEtcdClient(), key)
+		c.Assert(err, IsNil)
+		c.Assert(len(resp.Kvs), Equals, 0)
 	}
 }
 

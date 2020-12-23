@@ -39,6 +39,7 @@ var (
 	concurrency  = flag.Int("c", 1000, "concurrency")
 	count        = flag.Int("count", 1, "the count number that the test will run")
 	duration     = flag.Duration("duration", 60*time.Second, "how many seconds the test will last")
+	dcLocation   = flag.String("dc", "global", "which dc-location this bench will request")
 	verbose      = flag.Bool("v", false, "output statistics info every interval and output metrics info at the end")
 	interval     = flag.Duration("interval", time.Second, "interval to output the statistics")
 	caPath       = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
@@ -82,7 +83,7 @@ func bench(mainCtx context.Context) {
 	promServer = httptest.NewServer(promhttp.Handler())
 
 	// Initialize all clients
-	fmt.Printf("Create %d client(s) for benchmark\n", *count)
+	fmt.Printf("Create %d client(s) for benchmark\n", *clientNumber)
 	pdClients := make([]pd.Client, *clientNumber)
 	for idx := range pdClients {
 		pdCli, err := pd.NewClient([]string{*pdAddrs}, pd.SecurityOption{
@@ -99,7 +100,7 @@ func bench(mainCtx context.Context) {
 	ctx, cancel := context.WithCancel(mainCtx)
 	// To avoid the first time high latency.
 	for idx, pdCli := range pdClients {
-		_, _, err := pdCli.GetTS(ctx)
+		_, _, err := pdCli.GetLocalTS(ctx, *dcLocation)
 		if err != nil {
 			log.Fatal("get first time tso failed", zap.Int("client-number", idx), zap.Error(err))
 		}
@@ -117,7 +118,13 @@ func bench(mainCtx context.Context) {
 	wg.Add(1)
 	go showStats(ctx, durCh)
 
-	time.Sleep(*duration)
+	timer := time.NewTimer(*duration)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
 	cancel()
 
 	wg.Wait()
@@ -177,6 +184,7 @@ const (
 type stats struct {
 	maxDur          time.Duration
 	minDur          time.Duration
+	totalDur        time.Duration
 	count           int
 	milliCnt        int
 	twoMilliCnt     int
@@ -200,6 +208,7 @@ func newStats() *stats {
 
 func (s *stats) update(dur time.Duration) {
 	s.count++
+	s.totalDur += dur
 
 	if dur > s.maxDur {
 		s.maxDur = dur
@@ -273,6 +282,7 @@ func (s *stats) merge(other *stats) {
 	}
 
 	s.count += other.count
+	s.totalDur += other.totalDur
 	s.milliCnt += other.milliCnt
 	s.twoMilliCnt += other.twoMilliCnt
 	s.fiveMilliCnt += other.fiveMilliCnt
@@ -288,8 +298,8 @@ func (s *stats) merge(other *stats) {
 
 func (s *stats) Counter() string {
 	return fmt.Sprintf(
-		"count:%d, max:%d, min:%d, >1ms:%d, >2ms:%d, >5ms:%d, >10ms:%d, >30ms:%d >50ms:%d >100ms:%d >200ms:%d >400ms:%d >800ms:%d >1s:%d",
-		s.count, s.maxDur.Nanoseconds()/int64(time.Millisecond), s.minDur.Nanoseconds()/int64(time.Millisecond),
+		"count:%d, max:%d, min:%d, avg:%d, >1ms:%d, >2ms:%d, >5ms:%d, >10ms:%d, >30ms:%d >50ms:%d >100ms:%d >200ms:%d >400ms:%d >800ms:%d >1s:%d",
+		s.count, s.maxDur.Nanoseconds()/int64(time.Millisecond), s.minDur.Nanoseconds()/int64(time.Millisecond), s.totalDur.Nanoseconds()/int64(s.count)/int64(time.Millisecond),
 		s.milliCnt, s.twoMilliCnt, s.fiveMilliCnt, s.tenMSCnt, s.thirtyCnt, s.fiftyCnt, s.oneHundredCnt, s.twoHundredCnt, s.fourHundredCnt,
 		s.eightHundredCnt, s.oneThousandCnt)
 }
@@ -313,7 +323,7 @@ func reqWorker(ctx context.Context, pdCli pd.Client, durCh chan time.Duration) {
 
 	for {
 		start := time.Now()
-		_, _, err := pdCli.GetTS(reqCtx)
+		_, _, err := pdCli.GetLocalTS(reqCtx, *dcLocation)
 		if errors.Cause(err) == context.Canceled {
 			return
 		}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/testutil"
 	"go.uber.org/goleak"
@@ -80,6 +81,13 @@ func (s *testClientCtxSuite) TestClientCtx(c *C) {
 	c.Assert(time.Since(start), Less, time.Second*4)
 }
 
+func (s *testClientCtxSuite) TestClientWithRetry(c *C) {
+	start := time.Now()
+	_, err := NewClientWithContext(context.TODO(), []string{"localhost:8080"}, SecurityOption{}, WithMaxErrorRetry(5))
+	c.Assert(err, NotNil)
+	c.Assert(time.Since(start), Less, time.Second*6)
+}
+
 var _ = Suite(&testClientDialOptionSuite{})
 
 type testClientDialOptionSuite struct{}
@@ -97,9 +105,38 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 		security:        SecurityOption{},
 		gRPCDialOptions: []grpc.DialOption{grpc.WithBlock()},
 	}
-	cli.connMu.clientConns = make(map[string]*grpc.ClientConn)
 
 	err := cli.updateLeader()
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Greater, 500*time.Millisecond)
+}
+
+var _ = Suite(&testTsoRequestSuite{})
+
+type testTsoRequestSuite struct{}
+
+func (s *testTsoRequestSuite) TestTsoRequestWait(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	req := &tsoRequest{
+		done:       make(chan error, 1),
+		physical:   0,
+		logical:    0,
+		requestCtx: context.TODO(),
+		clientCtx:  ctx,
+	}
+	cancel()
+	_, _, err := req.Wait()
+	c.Assert(errors.Cause(err), Equals, context.Canceled)
+
+	ctx, cancel = context.WithCancel(context.Background())
+	req = &tsoRequest{
+		done:       make(chan error, 1),
+		physical:   0,
+		logical:    0,
+		requestCtx: ctx,
+		clientCtx:  context.TODO(),
+	}
+	cancel()
+	_, _, err = req.Wait()
+	c.Assert(errors.Cause(err), Equals, context.Canceled)
 }

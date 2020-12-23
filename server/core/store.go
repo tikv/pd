@@ -20,7 +20,6 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -31,12 +30,13 @@ const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
 	storePersistInterval = 5 * time.Minute
 	mb                   = 1 << 20 // megabyte
+	gb                   = 1 << 30
 )
 
 // StoreInfo contains information about a store.
 type StoreInfo struct {
-	meta                *metapb.Store
-	stats               *pdpb.StoreStats
+	meta *metapb.Store
+	*storeStats
 	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
 	leaderCount         int
 	regionCount         int
@@ -53,7 +53,7 @@ type StoreInfo struct {
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{
 		meta:         store,
-		stats:        &pdpb.StoreStats{},
+		storeStats:   newStoreStats(),
 		leaderWeight: 1.0,
 		regionWeight: 1.0,
 	}
@@ -68,7 +68,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	meta := proto.Clone(s.meta).(*metapb.Store)
 	store := &StoreInfo{
 		meta:                meta,
-		stats:               s.stats,
+		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
@@ -91,7 +91,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
 		meta:                s.meta,
-		stats:               s.stats,
+		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
@@ -174,66 +174,6 @@ func (s *StoreInfo) GetID() uint64 {
 	return s.meta.GetId()
 }
 
-// GetStoreStats returns the statistics information of the store.
-func (s *StoreInfo) GetStoreStats() *pdpb.StoreStats {
-	return s.stats
-}
-
-// GetCapacity returns the capacity size of the store.
-func (s *StoreInfo) GetCapacity() uint64 {
-	return s.stats.GetCapacity()
-}
-
-// GetAvailable returns the available size of the store.
-func (s *StoreInfo) GetAvailable() uint64 {
-	return s.stats.GetAvailable()
-}
-
-// GetUsedSize returns the used size of the store.
-func (s *StoreInfo) GetUsedSize() uint64 {
-	return s.stats.GetUsedSize()
-}
-
-// GetBytesWritten returns the bytes written for the store during this period.
-func (s *StoreInfo) GetBytesWritten() uint64 {
-	return s.stats.GetBytesWritten()
-}
-
-// GetBytesRead returns the bytes read for the store during this period.
-func (s *StoreInfo) GetBytesRead() uint64 {
-	return s.stats.GetBytesRead()
-}
-
-// GetKeysWritten returns the keys written for the store during this period.
-func (s *StoreInfo) GetKeysWritten() uint64 {
-	return s.stats.GetKeysWritten()
-}
-
-// GetKeysRead returns the keys read for the store during this period.
-func (s *StoreInfo) GetKeysRead() uint64 {
-	return s.stats.GetKeysRead()
-}
-
-// IsBusy returns if the store is busy.
-func (s *StoreInfo) IsBusy() bool {
-	return s.stats.GetIsBusy()
-}
-
-// GetSendingSnapCount returns the current sending snapshot count of the store.
-func (s *StoreInfo) GetSendingSnapCount() uint32 {
-	return s.stats.GetSendingSnapCount()
-}
-
-// GetReceivingSnapCount returns the current receiving snapshot count of the store.
-func (s *StoreInfo) GetReceivingSnapCount() uint32 {
-	return s.stats.GetReceivingSnapCount()
-}
-
-// GetApplyingSnapCount returns the current applying snapshot count of the store.
-func (s *StoreInfo) GetApplyingSnapCount() uint32 {
-	return s.stats.GetApplyingSnapCount()
-}
-
 // GetLeaderCount returns the leader count of the store.
 func (s *StoreInfo) GetLeaderCount() int {
 	return s.leaderCount
@@ -295,7 +235,21 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 }
 
 // RegionScore returns the store's region score.
-func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+// Deviation It is used to control the direction of the deviation considered
+// when calculating the region score. It is set to -1 when it is the source
+// store of balance, 1 when it is the target, and 0 in the rest of cases.
+func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64, deviation int) float64 {
+	switch version {
+	case "v2":
+		return s.regionScoreV2(delta, deviation)
+	case "v1":
+		fallthrough
+	default:
+		return s.regionScoreV1(highSpaceRatio, lowSpaceRatio, delta)
+	}
+}
+
+func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	var score float64
 	var amplification float64
 	available := float64(s.GetAvailable()) / mb
@@ -340,6 +294,29 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	return score / math.Max(s.GetRegionWeight(), minWeight)
 }
 
+func (s *StoreInfo) regionScoreV2(delta int64, deviation int) float64 {
+	A := float64(float64(s.GetAvgAvailable())-float64(deviation)*float64(s.GetAvailableDeviation())) / gb
+	C := float64(s.GetCapacity()) / gb
+	R := float64(s.GetRegionSize() + delta)
+	var (
+		K, M float64 = 1, 256 // Experience value to control the weight of the available influence on score
+		F    float64 = 20     // Experience value to prevent some nodes from running out of disk space prematurely.
+	)
+
+	var score float64
+	if A >= C || C < 1 {
+		score = R
+	} else if A > F {
+		// As the amount of data increases (available becomes smaller), the weight of region size on total score
+		// increases. Ideally, all nodes converge at the position where remaining space is F (default 20GiB).
+		score = (K + M*(math.Log(C)-math.Log(A-F+1))/(C-A+F-1)) * R
+	} else {
+		// When remaining space is less then F, the score is mainly determined by available space.
+		score = (K+M*math.Log(C)/C)*R + (F-A)*(K+M*math.Log(F)/F)
+	}
+	return score / math.Max(s.GetRegionWeight(), minWeight)
+}
+
 // StorageSize returns store's used storage size reported from tikv.
 func (s *StoreInfo) StorageSize() uint64 {
 	return s.GetUsedSize()
@@ -377,18 +354,6 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 		return s.GetLeaderSize()
 	case RegionKind:
 		return s.GetRegionSize()
-	default:
-		return 0
-	}
-}
-
-// ResourceScore returns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
-	switch scheduleKind.Resource {
-	case LeaderKind:
-		return s.LeaderScore(scheduleKind.Policy, delta)
-	case RegionKind:
-		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
 	default:
 		return 0
 	}

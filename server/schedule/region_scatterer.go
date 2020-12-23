@@ -14,14 +14,20 @@
 package schedule
 
 import (
+	"context"
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -31,45 +37,69 @@ import (
 
 const regionScatterName = "region-scatter"
 
+var gcInterval = time.Minute
+var gcTTL = time.Minute * 3
+
 type selectedStores struct {
 	mu sync.Mutex
 	// If checkExist is true, after each putting operation, an entry with the key constructed by group and storeID would be put
 	// into "stores" map. And the entry with the same key (storeID, group) couldn't be put before "stores" being reset
 	checkExist bool
-	// TODO: support auto-gc for the stores
-	stores map[string]map[uint64]struct{} // group -> StoreID -> struct{}
-	// TODO: support auto-gc for the groupDistribution
-	groupDistribution map[string]map[uint64]uint64 // group -> StoreID -> count
+
+	stores            *cache.TTLString // value type: map[uint64]struct{}, group -> StoreID -> struct{}
+	groupDistribution *cache.TTLString // value type: map[uint64]uint64, group -> StoreID -> count
 }
 
-func newSelectedStores(checkExist bool) *selectedStores {
+func newSelectedStores(ctx context.Context, checkExist bool) *selectedStores {
 	return &selectedStores{
 		checkExist:        checkExist,
-		stores:            make(map[string]map[uint64]struct{}),
-		groupDistribution: make(map[string]map[uint64]uint64),
+		stores:            cache.NewStringTTL(ctx, gcInterval, gcTTL),
+		groupDistribution: cache.NewStringTTL(ctx, gcInterval, gcTTL),
 	}
+}
+
+func (s *selectedStores) getStore(group string) (map[uint64]struct{}, bool) {
+	if result, ok := s.stores.Get(group); ok {
+		return result.(map[uint64]struct{}), true
+	}
+	return nil, false
+}
+
+func (s *selectedStores) getGroupDistribution(group string) (map[uint64]uint64, bool) {
+	if result, ok := s.groupDistribution.Get(group); ok {
+		return result.(map[uint64]uint64), true
+	}
+	return nil, false
+}
+
+func (s *selectedStores) getStoreOrDefault(group string) map[uint64]struct{} {
+	if result, ok := s.getStore(group); ok {
+		return result
+	}
+	return make(map[uint64]struct{})
+}
+
+func (s *selectedStores) getGroupDistributionOrDefault(group string) map[uint64]uint64 {
+	if result, ok := s.getGroupDistribution(group); ok {
+		return result
+	}
+	return make(map[uint64]uint64)
 }
 
 func (s *selectedStores) put(id uint64, group string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.checkExist {
-		placed, ok := s.stores[group]
-		if !ok {
-			placed = map[uint64]struct{}{}
-		}
+		placed := s.getStoreOrDefault(group)
 		if _, ok := placed[id]; ok {
 			return false
 		}
 		placed[id] = struct{}{}
-		s.stores[group] = placed
+		s.stores.Put(group, placed)
 	}
-	distribution, ok := s.groupDistribution[group]
-	if !ok {
-		distribution = make(map[uint64]uint64)
-	}
+	distribution := s.getGroupDistributionOrDefault(group)
 	distribution[id] = distribution[id] + 1
-	s.groupDistribution[group] = distribution
+	s.groupDistribution.Put(group, distribution)
 	return true
 }
 
@@ -79,13 +109,13 @@ func (s *selectedStores) reset() {
 	if !s.checkExist {
 		return
 	}
-	s.stores = make(map[string]map[uint64]struct{})
+	s.stores.Clear()
 }
 
 func (s *selectedStores) get(id uint64, group string) uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	distribution, ok := s.groupDistribution[group]
+	distribution, ok := s.getGroupDistribution(group)
 	if !ok {
 		return 0
 	}
@@ -103,7 +133,7 @@ func (s *selectedStores) newFilters(scope, group string) []filter.Filter {
 		return nil
 	}
 	cloned := make(map[uint64]struct{})
-	if groupPlaced, ok := s.stores[group]; ok {
+	if groupPlaced, ok := s.getStore(group); ok {
 		for id := range groupPlaced {
 			cloned[id] = struct{}{}
 		}
@@ -113,6 +143,7 @@ func (s *selectedStores) newFilters(scope, group string) []filter.Filter {
 
 // RegionScatterer scatters regions.
 type RegionScatterer struct {
+	ctx            context.Context
 	name           string
 	cluster        opt.Cluster
 	ordinaryEngine engineContext
@@ -121,11 +152,12 @@ type RegionScatterer struct {
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(cluster opt.Cluster) *RegionScatterer {
+func NewRegionScatterer(ctx context.Context, cluster opt.Cluster) *RegionScatterer {
 	return &RegionScatterer{
+		ctx:            ctx,
 		name:           regionScatterName,
 		cluster:        cluster,
-		ordinaryEngine: newEngineContext(filter.NewOrdinaryEngineFilter(regionScatterName)),
+		ordinaryEngine: newEngineContext(ctx, filter.NewOrdinaryEngineFilter(regionScatterName)),
 		specialEngines: make(map[string]engineContext),
 	}
 }
@@ -136,13 +168,105 @@ type engineContext struct {
 	selectedLeader *selectedStores
 }
 
-func newEngineContext(filters ...filter.Filter) engineContext {
-	filters = append(filters, filter.StoreStateFilter{ActionScope: regionScatterName})
+func newEngineContext(ctx context.Context, filters ...filter.Filter) engineContext {
+	filters = append(filters, &filter.StoreStateFilter{ActionScope: regionScatterName})
 	return engineContext{
 		filters:        filters,
-		selectedPeer:   newSelectedStores(true),
-		selectedLeader: newSelectedStores(false),
+		selectedPeer:   newSelectedStores(ctx, true),
+		selectedLeader: newSelectedStores(ctx, false),
 	}
+}
+
+const maxSleepDuration = 1 * time.Minute
+const initialSleepDuration = 100 * time.Millisecond
+const maxRetryLimit = 30
+
+// ScatterRegionsByRange directly scatter regions by ScatterRegions
+func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group string, retryLimit int) ([]*operator.Operator, map[uint64]error, error) {
+	regions := r.cluster.ScanRegions(startKey, endKey, -1)
+	if len(regions) < 1 {
+		return nil, nil, errors.New("empty region")
+	}
+	failures := make(map[uint64]error, len(regions))
+	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
+	for _, region := range regions {
+		regionMap[region.GetID()] = region
+	}
+	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
+	ops, err := r.ScatterRegions(regionMap, failures, group, retryLimit)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ops, failures, nil
+}
+
+// ScatterRegionsByID directly scatter regions by ScatterRegions
+func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int) ([]*operator.Operator, map[uint64]error, error) {
+	if len(regionsID) < 1 {
+		return nil, nil, errors.New("empty region")
+	}
+	failures := make(map[uint64]error, len(regionsID))
+	var regions []*core.RegionInfo
+	for _, id := range regionsID {
+		region := r.cluster.GetRegion(id)
+		if region == nil {
+			failures[id] = errors.New(fmt.Sprintf("failed to find region %v", id))
+			continue
+		}
+		regions = append(regions, region)
+	}
+	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
+	for _, region := range regions {
+		regionMap[region.GetID()] = region
+	}
+	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
+	ops, err := r.ScatterRegions(regionMap, failures, group, retryLimit)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ops, failures, nil
+}
+
+// ScatterRegions relocates the regions. If the group is defined, the regions' leader with the same group would be scattered
+// in a group level instead of cluster level.
+// RetryTimes indicates the retry times if any of the regions failed to relocate during scattering. There will be
+// time.Sleep between each retry.
+// Failures indicates the regions which are failed to be relocated, the key of the failures indicates the regionID
+// and the value of the failures indicates the failure error.
+func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) ([]*operator.Operator, error) {
+	if len(regions) < 1 {
+		return nil, errors.New("empty region")
+	}
+	if retryLimit > maxRetryLimit {
+		retryLimit = maxRetryLimit
+	}
+	ops := make([]*operator.Operator, 0, len(regions))
+	for currentRetry := 0; currentRetry <= retryLimit; currentRetry++ {
+		for _, region := range regions {
+			op, err := r.Scatter(region, group)
+			failpoint.Inject("scatterFail", func() {
+				if region.GetID() == 1 {
+					err = errors.New("mock error")
+				}
+			})
+			if err != nil {
+				failures[region.GetID()] = err
+				continue
+			}
+			if op != nil {
+				ops = append(ops, op)
+			}
+			delete(regions, region.GetID())
+			delete(failures, region.GetID())
+		}
+		// all regions have been relocated, break the loop.
+		if len(regions) < 1 {
+			break
+		}
+		// Wait for a while if there are some regions failed to be relocated
+		time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(currentRetry)))*initialSleepDuration))
+	}
+	return ops, nil
 }
 
 // Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
@@ -155,6 +279,10 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*opera
 
 	if region.GetLeader() == nil {
 		return nil, errors.Errorf("region %d has no leader", region.GetID())
+	}
+
+	if r.cluster.IsRegionHot(region) {
+		return nil, errors.Errorf("region %d is hot", region.GetID())
 	}
 
 	return r.scatterRegion(region, group), nil
@@ -208,12 +336,12 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	targetLeader := r.selectAvailableLeaderStores(group, targetPeers, r.ordinaryEngine)
 
 	for engine, peers := range specialPeers {
-		context, ok := r.specialEngines[engine]
+		ctx, ok := r.specialEngines[engine]
 		if !ok {
-			context = newEngineContext(filter.NewEngineFilter(r.name, engine))
-			r.specialEngines[engine] = context
+			ctx = newEngineContext(r.ctx, filter.NewEngineFilter(r.name, engine))
+			r.specialEngines[engine] = ctx
 		}
-		scatterWithSameEngine(peers, context)
+		scatterWithSameEngine(peers, ctx)
 	}
 
 	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader)
@@ -273,7 +401,7 @@ func (r *RegionScatterer) selectPeerToReplace(group string, stores map[uint64]*c
 func (r *RegionScatterer) collectAvailableStores(group string, region *core.RegionInfo, context engineContext) map[uint64]*core.StoreInfo {
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
-		filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
+		&filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
 	}
 	filters = append(filters, context.filters...)
 	filters = append(filters, context.selectedPeer.newFilters(r.name, group)...)

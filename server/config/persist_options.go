@@ -14,22 +14,32 @@
 package config
 
 import (
+	"context"
+	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
+	"go.etcd.io/etcd/clientv3"
 )
 
 // PersistOptions wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistOptions struct {
+	// configuration -> ttl value
+	ttl             *cache.TTLString
 	schedule        atomic.Value
 	replication     atomic.Value
 	pdServerConfig  atomic.Value
@@ -47,6 +57,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
+	o.ttl = nil
 	return o
 }
 
@@ -154,24 +165,64 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 	o.SetReplicationConfig(v)
 }
 
+const (
+	maxSnapshotCountKey            = "schedule.max-snapshot-count"
+	maxMergeRegionSizeKey          = "schedule.max-merge-region-size"
+	maxPendingPeerCountKey         = "schedule.max-pending-peer-count"
+	maxMergeRegionKeysKey          = "schedule.max-merge-region-keys"
+	leaderScheduleLimitKey         = "schedule.leader-schedule-limit"
+	regionScheduleLimitKey         = "schedule.region-schedule-limit"
+	replicaRescheduleLimitKey      = "schedule.replica-schedule-limit"
+	mergeScheduleLimitKey          = "schedule.merge-schedule-limit"
+	hotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
+	schedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
+	enableLocationReplacement      = "schedule.enable-location-replacement"
+)
+
+var supportedTTLConfigs = []string{
+	maxSnapshotCountKey,
+	maxMergeRegionSizeKey,
+	maxPendingPeerCountKey,
+	maxMergeRegionKeysKey,
+	leaderScheduleLimitKey,
+	regionScheduleLimitKey,
+	replicaRescheduleLimitKey,
+	mergeScheduleLimitKey,
+	hotRegionScheduleLimitKey,
+	schedulerMaxWaitingOperatorKey,
+	enableLocationReplacement,
+	"default-add-peer",
+	"default-remove-peer",
+}
+
+// IsSupportedTTLConfig checks whether a key is a supported config item with ttl
+func IsSupportedTTLConfig(key string) bool {
+	for _, supportedConfig := range supportedTTLConfigs {
+		if key == supportedConfig {
+			return true
+		}
+	}
+	return strings.HasPrefix(key, "add-peer-") || strings.HasPrefix(key, "remove-peer-")
+}
+
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
 func (o *PersistOptions) GetMaxSnapshotCount() uint64 {
-	return o.GetScheduleConfig().MaxSnapshotCount
+	return o.getTTLUintOr(maxSnapshotCountKey, o.GetScheduleConfig().MaxSnapshotCount)
 }
 
 // GetMaxPendingPeerCount returns the number of the max pending peers.
 func (o *PersistOptions) GetMaxPendingPeerCount() uint64 {
-	return o.GetScheduleConfig().MaxPendingPeerCount
+	return o.getTTLUintOr(maxPendingPeerCountKey, o.GetScheduleConfig().MaxPendingPeerCount)
 }
 
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
-	return o.GetScheduleConfig().MaxMergeRegionSize
+	return o.getTTLUintOr(maxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
-	return o.GetScheduleConfig().MaxMergeRegionKeys
+	return o.getTTLUintOr(maxMergeRegionKeysKey, o.GetScheduleConfig().MaxMergeRegionKeys)
 }
 
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
@@ -254,31 +305,35 @@ func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
-	return o.GetScheduleConfig().LeaderScheduleLimit
+	return o.getTTLUintOr(leaderScheduleLimitKey, o.GetScheduleConfig().LeaderScheduleLimit)
 }
 
 // GetRegionScheduleLimit returns the limit for region schedule.
 func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
-	return o.GetScheduleConfig().RegionScheduleLimit
+	return o.getTTLUintOr(regionScheduleLimitKey, o.GetScheduleConfig().RegionScheduleLimit)
 }
 
 // GetReplicaScheduleLimit returns the limit for replica schedule.
 func (o *PersistOptions) GetReplicaScheduleLimit() uint64 {
-	return o.GetScheduleConfig().ReplicaScheduleLimit
+	return o.getTTLUintOr(replicaRescheduleLimitKey, o.GetScheduleConfig().ReplicaScheduleLimit)
 }
 
 // GetMergeScheduleLimit returns the limit for merge schedule.
 func (o *PersistOptions) GetMergeScheduleLimit() uint64 {
-	return o.GetScheduleConfig().MergeScheduleLimit
+	return o.getTTLUintOr(mergeScheduleLimitKey, o.GetScheduleConfig().MergeScheduleLimit)
 }
 
 // GetHotRegionScheduleLimit returns the limit for hot region schedule.
 func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
-	return o.GetScheduleConfig().HotRegionScheduleLimit
+	return o.getTTLUintOr(hotRegionScheduleLimitKey, o.GetScheduleConfig().HotRegionScheduleLimit)
 }
 
 // GetStoreLimit returns the limit of a store.
-func (o *PersistOptions) GetStoreLimit(storeID uint64) StoreLimitConfig {
+func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfig) {
+	defer func() {
+		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
+		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
+	}()
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
@@ -287,13 +342,41 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) StoreLimitConfig {
 		AddPeer:    DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
+	v, ok1, err := o.getTTLFloat("default-add-peer")
+	if err != nil {
+		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage")
+	}
+	canSetAddPeer := ok1 && err == nil
+	if canSetAddPeer {
+		returnSC.AddPeer = v
+	}
+
+	v, ok2, err := o.getTTLFloat("default-remove-peer")
+	if err != nil {
+		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage")
+	}
+	canSetRemovePeer := ok2 && err == nil
+	if canSetRemovePeer {
+		returnSC.RemovePeer = v
+	}
+
+	if canSetAddPeer || canSetRemovePeer {
+		return returnSC
+	}
 	cfg.StoreLimit[storeID] = sc
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
-func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
+	defer func() {
+		if typ == storelimit.RemovePeer {
+			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
+		} else if typ == storelimit.AddPeer {
+			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
+		}
+	}()
 	limit := o.GetStoreLimit(storeID)
 	switch typ {
 	case storelimit.AddPeer:
@@ -330,9 +413,14 @@ func (o *PersistOptions) GetHighSpaceRatio() float64 {
 	return o.GetScheduleConfig().HighSpaceRatio
 }
 
+// GetRegionScoreFormulaVersion returns the formula version config.
+func (o *PersistOptions) GetRegionScoreFormulaVersion() string {
+	return o.GetScheduleConfig().RegionScoreFormulaVersion
+}
+
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
 func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
-	return o.GetScheduleConfig().SchedulerMaxWaitingOperator
+	return o.getTTLUintOr(schedulerMaxWaitingOperatorKey, o.GetScheduleConfig().SchedulerMaxWaitingOperator)
 }
 
 // GetLeaderSchedulePolicy is to get leader schedule policy.
@@ -382,6 +470,13 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
+	if v, ok := o.getTTLData(enableLocationReplacement); ok {
+		result, err := strconv.ParseBool(v)
+		if err == nil {
+			return result
+		}
+		log.Warn("failed to parse " + enableLocationReplacement + " from PersistOptions's ttl storage")
+	}
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
 
@@ -473,7 +568,7 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 func (o *PersistOptions) Reload(storage *core.Storage) error {
 	cfg := &Config{}
 	// pass nil to initialize cfg to default values (all items undefined)
-	cfg.Adjust(nil)
+	cfg.Adjust(nil, true)
 
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
@@ -514,4 +609,101 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 		}
 	}
 	return false
+}
+
+const ttlConfigPrefix = "/config/ttl"
+
+// SetTTLData set temporary configuration
+func (o *PersistOptions) SetTTLData(parCtx context.Context, client *clientv3.Client, key string, value string, ttl time.Duration) error {
+	if o.ttl == nil {
+		o.ttl = cache.NewStringTTL(parCtx, time.Second*5, time.Minute*5)
+	}
+	_, err := etcdutil.EtcdKVPutWithTTL(parCtx, client, ttlConfigPrefix+"/"+key, value, int64(ttl.Seconds()))
+	if err != nil {
+		return err
+	}
+	o.ttl.PutWithTTL(key, value, ttl)
+	return nil
+}
+
+func (o *PersistOptions) getTTLUint(key string) (uint64, bool, error) {
+	stringForm, ok := o.getTTLData(key)
+	if !ok {
+		return 0, false, nil
+	}
+	r, err := strconv.ParseUint(stringForm, 10, 64)
+	return r, true, err
+}
+
+func (o *PersistOptions) getTTLUintOr(key string, defaultValue uint64) uint64 {
+	if v, ok, err := o.getTTLUint(key); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse " + key + " from PersistOptions's ttl storage")
+	}
+	return defaultValue
+}
+
+func (o *PersistOptions) getTTLFloat(key string) (float64, bool, error) {
+	stringForm, ok := o.getTTLData(key)
+	if !ok {
+		return 0, false, nil
+	}
+	r, err := strconv.ParseFloat(stringForm, 64)
+	return r, true, err
+}
+
+func (o *PersistOptions) getTTLFloatOr(key string, defaultValue float64) float64 {
+	if v, ok, err := o.getTTLFloat(key); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse " + key + " from PersistOptions's ttl storage")
+	}
+	return defaultValue
+}
+
+func (o *PersistOptions) getTTLData(key string) (string, bool) {
+	if o.ttl == nil {
+		return "", false
+	}
+	if result, ok := o.ttl.Get(key); ok {
+		return result.(string), ok
+	}
+	return "", false
+}
+
+// LoadTTLFromEtcd loads temporary configuration which was persisted into etcd
+func (o *PersistOptions) LoadTTLFromEtcd(ctx context.Context, client *clientv3.Client) error {
+	resps, err := etcdutil.EtcdKVGet(client, ttlConfigPrefix, clientv3.WithPrefix())
+	if err != nil {
+		return err
+	}
+	if o.ttl == nil {
+		o.ttl = cache.NewStringTTL(ctx, time.Second*5, time.Minute*5)
+	}
+	for _, resp := range resps.Kvs {
+		key := string(resp.Key)[len(ttlConfigPrefix)+1:]
+		value := string(resp.Value)
+		leaseID := resp.Lease
+		resp, err := client.TimeToLive(ctx, clientv3.LeaseID(leaseID))
+		if err != nil {
+			return err
+		}
+		o.ttl.PutWithTTL(key, value, time.Duration(resp.TTL)*time.Second)
+	}
+	return nil
+}
+
+// SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
+func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clientv3.Client, typ storelimit.Type, ratePerMin float64, ttl time.Duration) error {
+	var err error
+	switch typ {
+	case storelimit.AddPeer:
+		err = o.SetTTLData(ctx, client, "default-add-peer", fmt.Sprint(ratePerMin), ttl)
+	case storelimit.RemovePeer:
+		err = o.SetTTLData(ctx, client, "default-remove-peer", fmt.Sprint(ratePerMin), ttl)
+	}
+	return err
 }

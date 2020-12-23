@@ -192,6 +192,21 @@ func (s *TestServer) GetLeader() *pdpb.Member {
 	return s.server.GetLeader()
 }
 
+// GetAllocatorLeader returns current allocator leader
+// of PD cluster for given dc-location.
+func (s *TestServer) GetAllocatorLeader(dcLocation string) *pdpb.Member {
+	// For the leader of Global TSO Allocator, it's the PD leader
+	if dcLocation == config.GlobalDCLocation {
+		return s.GetLeader()
+	}
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	allocator, err := tsoAllocatorManager.GetAllocator(dcLocation)
+	if err != nil {
+		return nil
+	}
+	return allocator.(*tso.LocalTSOAllocator).GetAllocatorLeader()
+}
+
 // GetCluster returns PD cluster.
 func (s *TestServer) GetCluster() *metapb.Cluster {
 	s.RLock()
@@ -218,6 +233,19 @@ func (s *TestServer) IsLeader() bool {
 	s.RLock()
 	defer s.RUnlock()
 	return !s.server.IsClosed() && s.server.GetMember().IsLeader()
+}
+
+// IsAllocatorLeader returns whether the server is a TSO Allocator leader or not.
+func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
+	if dcLocation == config.GlobalDCLocation {
+		return s.IsLeader()
+	}
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	allocator, err := tsoAllocatorManager.GetAllocator(dcLocation)
+	if err != nil {
+		return false
+	}
+	return !s.server.IsClosed() && allocator.(*tso.LocalTSOAllocator).IsAllocatorLeader()
 }
 
 // GetEtcdLeader returns the builtin etcd leader.
@@ -335,7 +363,7 @@ func (s *TestServer) BootstrapCluster() error {
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
 	for i := 0; i < 100; i++ {
-		if s.server.GetMember().IsStillLeader() {
+		if s.server.GetMember().IsLeader() {
 			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)
@@ -486,6 +514,32 @@ func (c *TestCluster) ResignLeader() error {
 	return errors.New("no leader")
 }
 
+// WaitAllocatorLeader is used to get the Local TSO Allocator leader.
+// If it exceeds the maximum number of loops, it will return an empty string.
+func (c *TestCluster) WaitAllocatorLeader(dcLocation string) string {
+	for i := 0; i < 100; i++ {
+		counter := make(map[string]int)
+		running := 0
+		for _, s := range c.servers {
+			if s.state == Running {
+				running++
+			}
+			serverName := s.GetAllocatorLeader(dcLocation).GetName()
+			if serverName != "" {
+				counter[serverName]++
+			}
+		}
+		for serverName, num := range counter {
+			if num == running && c.GetServer(serverName).IsAllocatorLeader(dcLocation) {
+				time.Sleep(WaitLeaderReturnDelay)
+				return serverName
+			}
+		}
+		time.Sleep(WaitLeaderCheckInterval)
+	}
+	return ""
+}
+
 // GetCluster returns PD cluster.
 func (c *TestCluster) GetCluster() *metapb.Cluster {
 	leader := c.GetLeader()
@@ -523,8 +577,8 @@ func (c *TestCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 }
 
 // Join is used to add a new TestServer into the cluster.
-func (c *TestCluster) Join(ctx context.Context) (*TestServer, error) {
-	conf, err := c.config.Join().Generate()
+func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
+	conf, err := c.config.Join().Generate(opts...)
 	if err != nil {
 		return nil, err
 	}

@@ -14,6 +14,7 @@
 package autoscaling
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -34,7 +35,7 @@ import (
 
 const (
 	groupLabelKey                  = "group"
-	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling-"
+	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling"
 	resourceTypeLabelKey           = "resource-type"
 	milliCores                     = 1000
 )
@@ -120,12 +121,12 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	// TODO: add metrics to show why it triggers scale in/out.
 	if usage > maxThreshold {
 		scaleOutQuota := (totalCPUUseTime - totalCPUTime*maxThreshold) / MetricsTimeDuration.Seconds()
-		return calculateScaleOutPlan(rc, strategy, component, scaleOutQuota, currentQuota, instances, groups)
+		return calculateScaleOutPlan(strategy, component, scaleOutQuota, instances, groups)
 	}
 
 	if usage < minThreshold {
 		scaleInQuota := (totalCPUTime*minThreshold - totalCPUUseTime) / MetricsTimeDuration.Seconds()
-		return calculateScaleInPlan(rc, strategy, component, scaleInQuota, instances, groups)
+		return calculateScaleInPlan(strategy, component, scaleInQuota, instances, groups)
 	}
 
 	return groups
@@ -224,7 +225,7 @@ func getResourcesByComponent(strategy *Strategy, component ComponentType) []*Res
 	return resources
 }
 
-func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64, instances []instance, groups []*Plan) []*Plan {
+func calculateScaleOutPlan(strategy *Strategy, component ComponentType, scaleOutQuota float64, instances []instance, groups []*Plan) []*Plan {
 	group := findBestGroupToScaleOut(strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
@@ -237,7 +238,7 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 
 	// A new group created
 	if len(groups) == 0 {
-		if group.Count+scaleOutCount <= resCount {
+		if resCount == nil || group.Count+scaleOutCount <= *resCount {
 			group.Count += scaleOutCount
 			return []*Plan{&group}
 		}
@@ -246,15 +247,20 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 
 	// update the existed group
 	for i, g := range groups {
-		if g.ResourceType == group.ResourceType && group.Count+scaleOutCount <= resCount {
-			group.Count += scaleOutCount
-			groups[i] = &group
+		if g.ResourceType == group.ResourceType {
+			if resCount == nil || group.Count+scaleOutCount <= *resCount {
+				group.Count += scaleOutCount
+				groups[i] = &group
+			} else {
+				group.Count = *resCount
+				groups[i] = &group
+			}
 		}
 	}
 	return groups
 }
 
-func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleInQuota float64, instances []instance, groups []*Plan) []*Plan {
+func calculateScaleInPlan(strategy *Strategy, component ComponentType, scaleInQuota float64, instances []instance, groups []*Plan) []*Plan {
 	if len(groups) == 0 {
 		return nil
 	}
@@ -287,13 +293,14 @@ func getCPUByResourceType(strategy *Strategy, resourceType string) uint64 {
 	return 0
 }
 
-func getCountByResourceType(strategy *Strategy, resourceType string) uint64 {
+func getCountByResourceType(strategy *Strategy, resourceType string) *uint64 {
+	var zero uint64 = 0
 	for _, res := range strategy.Resources {
 		if res.ResourceType == resourceType {
 			return res.Count
 		}
 	}
-	return 0
+	return &zero
 }
 
 func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType, healthyInstances []instance) ([]*Plan, error) {
@@ -419,7 +426,7 @@ func findBestGroupToScaleOut(strategy *Strategy, scaleOutQuota float64, groups [
 		ResourceType: resources[0].ResourceType,
 		Labels: map[string]string{
 			// TODO: we need to make this label not duplicated when we implement the heterogeneous logic.
-			groupLabelKey:        autoScalingGroupLabelKeyPrefix + component.String(),
+			groupLabelKey:        fmt.Sprintf("%s-%s", autoScalingGroupLabelKeyPrefix, component.String()),
 			resourceTypeLabelKey: resources[0].ResourceType,
 		},
 	}

@@ -48,12 +48,14 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/urfave/negroni"
@@ -116,6 +118,8 @@ type Server struct {
 	// store, region and peer, because we just need
 	// a unique ID.
 	idAllocator *id.AllocatorImpl
+	// for encryption
+	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
 	storage *core.Storage
 	// for basicCluster operation.
@@ -351,19 +355,29 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration,
+		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
-	)
+		s.GetTLSConfig())
 	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
 		return err
 	}
-	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
-	path := filepath.Join(s.cfg.DataDir, "region-meta")
-	regionStorage, err := core.NewRegionStorage(ctx, path)
+	encryptionKeyManager, err := encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
-	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
+	s.encryptionKeyManager = encryptionKeyManager
+	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
+	path := filepath.Join(s.cfg.DataDir, "region-meta")
+	regionStorage, err := core.NewRegionStorage(ctx, path, encryptionKeyManager)
+	if err != nil {
+		return err
+	}
+
+	s.storage = core.NewStorage(
+		kvBase,
+		core.WithRegionStorage(regionStorage),
+		core.WithEncryptionKeyManager(encryptionKeyManager),
+	)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -453,7 +467,6 @@ func (s *Server) Run() error {
 	if err := s.startEtcd(s.ctx); err != nil {
 		return err
 	}
-
 	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}
@@ -475,11 +488,12 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(5)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.tsoAllocatorLoop()
+	go s.encryptionKeyManagerLoop()
 }
 
 func (s *Server) stopServerLoop() {
@@ -513,6 +527,17 @@ func (s *Server) tsoAllocatorLoop() {
 	defer cancel()
 	s.tsoAllocatorManager.AllocatorDaemon(ctx)
 	log.Info("server is closed, exit allocator loop")
+}
+
+// encryptionKeyManagerLoop is used to start monitor encryption key changes.
+func (s *Server) encryptionKeyManagerLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	s.encryptionKeyManager.StartBackgroundLoop(ctx)
+	log.Info("server is closed, exist encryption key manager loop")
 }
 
 func (s *Server) collectEtcdStateMetrics() {
@@ -716,9 +741,9 @@ func (s *Server) StartTimestamp() int64 {
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
-	cfg.Schedule = *s.persistOptions.GetScheduleConfig()
-	cfg.Replication = *s.persistOptions.GetReplicationConfig()
-	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig()
+	cfg.Schedule = *s.persistOptions.GetScheduleConfig().Clone()
+	cfg.Replication = *s.persistOptions.GetReplicationConfig().Clone()
+	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
@@ -809,19 +834,41 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			}
 		}
 	}
+
+	var rule *placement.Rule
 	if cfg.EnablePlacementRules {
-		// replication.MaxReplicas and replication.LocationLabels won't work when placement rule is enabled
+		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
 		if cfg.MaxReplicas != old.MaxReplicas {
-			return errors.New("cannot update MaxReplicas when placement rules feature is enabled, please update rule instead")
+			rules := s.GetRaftCluster().GetRuleManager().GetAllRules()
+			if !(len(rules) == 1 && len(rules[0].StartKey) == 0 && len(rules[0].EndKey) == 0) {
+				return errors.New("cannot update MaxReplicas when placement rules feature is enabled and not only default rule exists, please update rule instead")
+			}
+			rule = rules[0]
 		}
+		// replication.LocationLabels won't work when placement rule is enabled
 		if !reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels) {
 			return errors.New("cannot update LocationLabels when placement rules feature is enabled, please update rule instead")
+		}
+	}
+
+	if rule != nil {
+		rule.Count = int(cfg.MaxReplicas)
+		if err := s.GetRaftCluster().GetRuleManager().SetRule(rule); err != nil {
+			log.Error("failed to update rule count",
+				errs.ZapError(err))
+			return err
 		}
 	}
 
 	s.persistOptions.SetReplicationConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetReplicationConfig(old)
+		if rule != nil {
+			rule.Count = int(old.MaxReplicas)
+			if e := s.GetRaftCluster().GetRuleManager().SetRule(rule); e != nil {
+				log.Error("failed to roll back count of rule when update replication config", errs.ZapError(e))
+			}
+		}
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
@@ -894,8 +941,8 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 		s.persistOptions.DeleteLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to update label property config",
 			zap.String("typ", typ),
-			zap.String("labelKey", labelKey),
-			zap.String("labelValue", labelValue),
+			zap.String("label-key", labelKey),
+			zap.String("label-value", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
 			errs.ZapError(err))
 		return err
@@ -913,8 +960,8 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 		s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to delete label property config",
 			zap.String("typ", typ),
-			zap.String("labelKey", labelKey),
-			zap.String("labelValue", labelValue),
+			zap.String("label-key", labelKey),
+			zap.String("label-value", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
 			errs.ZapError(err))
 		return err
@@ -955,9 +1002,9 @@ func (s *Server) GetClusterVersion() semver.Version {
 	return *s.persistOptions.GetClusterVersion()
 }
 
-// GetSecurityConfig get the security config.
-func (s *Server) GetSecurityConfig() *grpcutil.SecurityConfig {
-	return &s.cfg.Security
+// GetTLSConfig get the security config.
+func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
+	return &s.cfg.Security.TLSConfig
 }
 
 // GetServerRootPath returns the server root path.
@@ -1102,6 +1149,8 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
+			// Check the cluster dc-location after the PD leader is elected
+			go s.tsoAllocatorManager.ClusterDCLocationChecker()
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
@@ -1151,18 +1200,29 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
 		return
 	}
+	// Check the cluster dc-location after the PD leader is elected
+	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
 	}
+
+	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
+		log.Error("failed to initialize encryption", errs.ZapError(err))
+		return
+	}
+
 	// Try to create raft cluster.
 	if err := s.createRaftCluster(); err != nil {
 		log.Error("failed to create raft cluster", errs.ZapError(err))
 		return
 	}
 	defer s.stopRaftCluster()
-
+	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
+		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
+		return
+	}
 	s.member.EnableLeader()
 
 	CheckPDVersion(s.persistOptions)
@@ -1174,7 +1234,7 @@ func (s *Server) campaignLeader() {
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !s.member.IsStillLeader() {
+			if !s.member.IsLeader() {
 				log.Info("no longer a leader because lease has expired, pd leader will step down")
 				return
 			}
@@ -1255,4 +1315,19 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
 	return ioutil.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
+}
+
+// SaveTTLConfig save ttl config
+func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) error {
+	for k := range data {
+		if !config.IsSupportedTTLConfig(k) {
+			return fmt.Errorf("unsupported ttl config %s", k)
+		}
+	}
+	for k, v := range data {
+		if err := s.persistOptions.SetTTLData(s.ctx, s.client, k, fmt.Sprint(v), ttl); err != nil {
+			return err
+		}
+	}
+	return nil
 }

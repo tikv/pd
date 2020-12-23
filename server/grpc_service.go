@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -66,11 +68,18 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 		}
 	}
 
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	if err != nil {
+		return nil, status.Errorf(codes.Unknown, err.Error())
+	}
+
 	return &pdpb.GetMembersResponse{
-		Header:     s.header(),
-		Members:    members,
-		Leader:     s.member.GetLeader(),
-		EtcdLeader: etcdLeader,
+		Header:              s.header(),
+		Members:             members,
+		Leader:              s.member.GetLeader(),
+		EtcdLeader:          etcdLeader,
+		TsoAllocatorLeaders: tsoAllocatorLeaders,
 	}, nil
 }
 
@@ -232,14 +241,12 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 
-	if err := rc.PutStore(store, false); err != nil {
+	if err := rc.PutStore(store); err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	rc.OnStoreVersionChange()
 	CheckPDVersion(s.persistOptions)
-	rc.AddStoreLimit(store)
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
@@ -410,11 +417,24 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		region := core.RegionFromHeartbeat(request)
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
+			msg := fmt.Sprintf("invalid request leader, %v", request)
+			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
 		if region.GetID() == 0 {
-			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-region").Inc()
 			msg := fmt.Sprintf("invalid request region, %v", request)
+			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
+			continue
+		}
+
+		// If the region peer count is 0, then we should not handle this.
+		if len(region.GetPeers()) == 0 {
+			log.Warn("invalid region, zero region peer count",
+				logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "no-peer").Inc()
+			msg := fmt.Sprintf("invalid region, zero region peer count: %v", logutil.RedactStringer(core.RegionToHexMeta(region.GetMeta())))
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
@@ -684,16 +704,41 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+	if len(request.GetRegionsId()) > 0 {
+		ops, failures, err := rc.GetRegionScatter().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
+		if err != nil {
+			return nil, err
+		}
+		for _, op := range ops {
+			if ok := rc.GetOperatorController().AddOperator(op); !ok {
+				failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
+			}
+		}
+		percentage := 100
+		if len(failures) > 0 {
+			percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+			log.Debug("scatter regions", zap.Errors("failures", func() []error {
+				r := make([]error, 0, len(failures))
+				for _, err := range failures {
+					r = append(r, err)
+				}
+				return r
+			}()))
+		}
+		return &pdpb.ScatterRegionResponse{
+			Header:             s.header(),
+			FinishedPercentage: uint64(percentage),
+		}, nil
+	}
+
+	//nolint
 	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
+			//nolint
 			return nil, errors.Errorf("region %d not found", request.GetRegionId())
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
-	}
-
-	if rc.IsRegionHot(region) {
-		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
 
 	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())
@@ -705,7 +750,8 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 	}
 
 	return &pdpb.ScatterRegionResponse{
-		Header: s.header(),
+		Header:             s.header(),
+		FinishedPercentage: 100,
 	}, nil
 }
 
@@ -812,11 +858,14 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			ExpiredAt: now.Unix() + request.TTL,
 			SafePoint: request.SafePoint,
 		}
+		if request.TTL == math.MaxInt64 {
+			ssp.ExpiredAt = math.MaxInt64
+		}
 		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
 			return nil, err
 		}
 		log.Info("update service GC safe point",
-			zap.String("service-id", string(ssp.ServiceID)),
+			zap.String("service-id", ssp.ServiceID),
 			zap.Int64("expire-at", ssp.ExpiredAt),
 			zap.Uint64("safepoint", ssp.SafePoint))
 		// If the min safepoint is updated, load the next one
@@ -825,10 +874,6 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			if err != nil {
 				return nil, err
 			}
-		}
-		// If ssp is the first safepoint, it is the min value now
-		if min.SafePoint == 0 {
-			min = ssp
 		}
 	}
 
@@ -918,31 +963,35 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 //    with its current TSO in memory to make sure their local TSOs are not less
 //    than MaxTS by writing MaxTS into memory to finish the global TSO synchronization.
 func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
 		return nil, err
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	// There is no dc-location found in this server, return err.
+	if len(tsoAllocatorManager.GetClusterDCLocations()) == 0 {
+		return nil, fmt.Errorf("empty cluster dc-Location found, checker may not work properly")
+	}
 	// Get all Local TSO Allocator leaders
-	allocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
 	if err != nil {
 		return nil, err
 	}
 	var processedDCs []string
-	if request.GetMaxTs() == nil || request.GetMaxTs().Physical == 0 {
+	if request.GetMaxTs() == nil || request.GetMaxTs().GetPhysical() == 0 {
 		// The first phase of synchronization: collect the max local ts
 		var maxLocalTS pdpb.Timestamp
 		for _, allocator := range allocatorLeaders {
 			// No longer leader, just skip here because
 			// the global allocator will check if all DCs are handled.
-			if !allocator.IsStillAllocatorLeader() {
+			if !allocator.IsAllocatorLeader() {
 				continue
 			}
 			currentLocalTSO, err := allocator.GetCurrentTSO()
 			if err != nil {
 				return nil, err
 			}
-			if currentLocalTSO.Physical > maxLocalTS.Physical {
-				maxLocalTS.Physical = currentLocalTSO.Physical
+			if tsoutil.CompareTimestamp(&currentLocalTSO, &maxLocalTS) > 0 {
+				maxLocalTS = currentLocalTSO
 			}
 			processedDCs = append(processedDCs, allocator.GetDCLocation())
 		}
@@ -954,7 +1003,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	}
 	// The second phase of synchronization: do the writing
 	for _, allocator := range allocatorLeaders {
-		if !allocator.IsStillAllocatorLeader() {
+		if !allocator.IsAllocatorLeader() {
 			continue
 		}
 		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
@@ -968,15 +1017,46 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	}, nil
 }
 
+// SplitRegions split regions by the given split keys
+func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+	finishedPercentage, newRegionIDs := s.cluster.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
+	return &pdpb.SplitRegionsResponse{
+		Header:             s.header(),
+		RegionsId:          newRegionIDs,
+		FinishedPercentage: uint64(finishedPercentage),
+	}, nil
+}
+
+// GetDCLocations will return the dcLocations which hold by the Global TSO Allocator.
+// If the receiving PD Member is not PD Leader, GetDCLocations will return error.
+func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocationsRequest) (*pdpb.GetDCLocationsResponse, error) {
+	if err := s.validateInternalRequest(request.GetHeader(), false); err != nil {
+		return nil, err
+	}
+	if !s.member.IsLeader() {
+		return nil, fmt.Errorf("receiving pd member[%v] is not pd leader", s.member.ID())
+	}
+	return &pdpb.GetDCLocationsResponse{
+		Header:      s.header(),
+		DcLocations: s.tsoAllocatorManager.GetSuffixDCLocations(),
+	}, nil
+}
+
 // validateInternalRequest checks if server is closed, which is used to validate
 // the gRPC communication between PD servers internally.
-func (s *Server) validateInternalRequest(header *pdpb.RequestHeader) error {
+func (s *Server) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
 	if s.IsClosed() {
 		return errors.WithStack(ErrNotStarted)
 	}
-	leaderID := s.GetLeader().GetMemberId()
-	if leaderID != header.GetSenderId() {
-		return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
+	// If onlyAllowLeader is true, check whether the sender is PD leader.
+	if onlyAllowLeader {
+		leaderID := s.GetLeader().GetMemberId()
+		if leaderID != header.GetSenderId() {
+			return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
+		}
 	}
 	return nil
 }

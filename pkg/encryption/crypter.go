@@ -19,7 +19,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"io"
-	"time"
+	"unsafe"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/tikv/pd/pkg/errs"
@@ -67,11 +67,11 @@ func KeyLength(method encryptionpb.EncryptionMethod) (int, error) {
 	}
 }
 
-// IvCtr represent IV bytes for CTR mode.
-type IvCtr []byte
+// IvCTR represent IV bytes for CTR mode.
+type IvCTR []byte
 
-// IvGcm represent IV bytes for GCM mode.
-type IvGcm []byte
+// IvGCM represent IV bytes for GCM mode.
+type IvGCM []byte
 
 func newIV(ivLength int) ([]byte, error) {
 	iv := make([]byte, ivLength)
@@ -86,32 +86,34 @@ func newIV(ivLength int) ([]byte, error) {
 	return iv, nil
 }
 
-// NewIvCtr randomly generate an IV for CTR mode.
-func NewIvCtr() (IvCtr, error) {
+// NewIvCTR randomly generate an IV for CTR mode.
+func NewIvCTR() (IvCTR, error) {
 	return newIV(ivLengthCTR)
 }
 
-// NewIvGcm randomly generate an IV for GCM mode.
-func NewIvGcm() (IvGcm, error) {
+// NewIvGCM randomly generate an IV for GCM mode.
+func NewIvGCM() (IvGCM, error) {
 	return newIV(ivLengthGCM)
 }
 
 // NewDataKey randomly generate a new data key.
 func NewDataKey(
 	method encryptionpb.EncryptionMethod,
+	creationTime uint64,
 ) (keyID uint64, key *encryptionpb.DataKey, err error) {
 	err = CheckEncryptionMethodSupported(method)
 	if err != nil {
 		return
 	}
-	keyIDBuf := make([]byte, 8)
+	keyIDBufSize := unsafe.Sizeof(uint64(0))
+	keyIDBuf := make([]byte, keyIDBufSize)
 	n, err := io.ReadFull(rand.Reader, keyIDBuf)
 	if err != nil {
 		err = errs.ErrEncryptionNewDataKey.Wrap(err).GenWithStack(
 			"fail to generate data key id")
 		return
 	}
-	if n != 8 {
+	if n != int(keyIDBufSize) {
 		err = errs.ErrEncryptionNewDataKey.GenWithStack(
 			"no enough random bytes to generate data key id, bytes %d", n)
 		return
@@ -136,7 +138,7 @@ func NewDataKey(
 	key = &encryptionpb.DataKey{
 		Key:          keyBuf,
 		Method:       method,
-		CreationTime: uint64(time.Now().Unix()),
+		CreationTime: creationTime,
 		WasExposed:   false,
 	}
 	return
@@ -145,7 +147,7 @@ func NewDataKey(
 func aesGcmEncryptImpl(
 	key []byte,
 	plaintext []byte,
-	iv IvGcm,
+	iv IvGCM,
 ) (ciphertext []byte, err error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -166,8 +168,8 @@ func aesGcmEncryptImpl(
 func AesGcmEncrypt(
 	key []byte,
 	plaintext []byte,
-) (ciphertext []byte, iv IvGcm, err error) {
-	iv, err = NewIvGcm()
+) (ciphertext []byte, iv IvGCM, err error) {
+	iv, err = NewIvGCM()
 	if err != nil {
 		return
 	}
@@ -180,7 +182,7 @@ func AesGcmEncrypt(
 func AesGcmDecrypt(
 	key []byte,
 	ciphertext []byte,
-	iv IvGcm,
+	iv IvGCM,
 ) (plaintext []byte, err error) {
 	if len(iv) != ivLengthGCM {
 		err = errs.ErrEncryptionGCMDecrypt.GenWithStack("unexpected gcm iv length %d", len(iv))

@@ -59,7 +59,7 @@ ifeq ("$(WITH_RACE)", "1")
 	BUILD_CGO_ENABLED := 1
 endif
 
-LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDReleaseVersion=$(shell git describe --tags --dirty)"
+LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDReleaseVersion=$(shell git describe --tags --dirty --always)"
 LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
@@ -69,7 +69,7 @@ ifneq ($(DASHBOARD), 0)
 	# Note: LDFLAGS must be evaluated lazily for these scripts to work correctly
 	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.InternalVersion=$(shell scripts/describe-dashboard.sh internal-version)"
 	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.Standalone=No"
-	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.PDVersion=$(shell git describe --tags --dirty)"
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.PDVersion=$(shell git describe --tags --dirty --always)"
 	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.BuildTime=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.BuildGitHash=$(shell scripts/describe-dashboard.sh git-hash)"
 endif
@@ -85,7 +85,7 @@ default: build
 
 all: dev
 
-dev: build tools check test
+dev: build check tools test
 
 ci: build check basic-test
 
@@ -119,6 +119,7 @@ swagger-spec: install-go-tools
 	go mod vendor
 	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
 	go mod tidy
+	rm -rf vendor
 
 dashboard-ui: export GO111MODULE=on
 dashboard-ui:
@@ -154,7 +155,17 @@ basic-test:
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-check: install-go-tools check-all check-plugin
+test-with-cover: install-go-tools dashboard-ui
+	# testing...
+	@$(FAILPOINT_ENABLE)
+	for PKG in $(TEST_PKGS); do\
+		set -euo pipefail;\
+		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG  2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
+		rm coverage.tmp;\
+	done
+	@$(FAILPOINT_DISABLE)
+
+check: install-go-tools check-all check-plugin errdoc check-missing-tests
 
 check-all: static lint tidy
 	@echo "checking"
@@ -178,15 +189,12 @@ tidy:
 	GO111MODULE=on go mod tidy
 	git diff --quiet go.mod go.sum
 
-travis_coverage: export GO111MODULE=on
-travis_coverage:
-ifeq ("$(TRAVIS_COVERAGE)", "1")
-	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 $(OVERALLS) -concurrency=8 -project=github.com/tikv/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
-	@$(FAILPOINT_DISABLE)
-else
-	@echo "coverage only runs in travis."
-endif
+errdoc: install-go-tools
+	@echo "generator errors.toml"
+	./scripts/check-errdoc.sh
+
+check-missing-tests:
+	./scripts/check-missing-tests.sh
 
 simulator: export GO111MODULE=on
 simulator:

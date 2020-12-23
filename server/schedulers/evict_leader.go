@@ -132,8 +132,7 @@ func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 	var res []string
 	ranges := conf.StoreIDWithRanges[id]
 	for index := range ranges {
-		res = append(res, (string)(ranges[index].StartKey))
-		res = append(res, (string)(ranges[index].EndKey))
+		res = append(res, (string)(ranges[index].StartKey), (string)(ranges[index].EndKey))
 	}
 	return res
 }
@@ -222,7 +221,7 @@ func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Ope
 		}
 
 		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
+			FilterTarget(cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
 			RandomPick()
 		if target == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
