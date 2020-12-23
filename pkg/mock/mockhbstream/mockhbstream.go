@@ -45,9 +45,7 @@ func (s HeartbeatStream) Send(m *pdpb.RegionHeartbeatResponse) error {
 }
 
 // SendMsg is used to send the message.
-func (s HeartbeatStream) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
-	return
-}
+func (s HeartbeatStream) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {}
 
 // Recv mocks method.
 func (s HeartbeatStream) Recv() *pdpb.RegionHeartbeatResponse {

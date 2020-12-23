@@ -28,8 +28,8 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(3, func(conf *server.Config) {
-		conf.TickInterval = typeutil.Duration{50 * time.Millisecond}
-		conf.ElectionInterval = typeutil.Duration{250 * time.Millisecond}
+		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
+		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
 	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()

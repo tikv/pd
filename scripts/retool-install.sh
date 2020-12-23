@@ -20,6 +20,5 @@ which retool >/dev/null || go get github.com/twitchtv/retool
 ./scripts/retool add github.com/kisielk/errcheck v1.1.0
 # linter
 ./scripts/retool add github.com/mgechev/revive 7773f47324c2bf1c8f7a5500aff2b6c01d3ed73b
-./scripts/retool add github.com/securego/gosec/cmd/gosec 1.0.0
 # go fail
 ./scripts/retool add github.com/pingcap/failpoint/failpoint-ctl master

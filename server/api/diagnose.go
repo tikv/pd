@@ -156,10 +156,6 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 	return nil
 }
 
-func (d *diagnoseHandler) tikvDiagnose(rdd *[]*Recommendation) error {
-	return nil
-}
-
 func (d *diagnoseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rdd := []*Recommendation{}
 	if err := d.membersDiagnose(&rdd); err != nil {

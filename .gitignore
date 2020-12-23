@@ -11,3 +11,5 @@ vendor
 default*
 *.bak
 .vscode/
+/.dashboard_asset_cache
+/.tools/bin
