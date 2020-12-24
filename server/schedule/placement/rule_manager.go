@@ -264,16 +264,8 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *RegionFit {
 	rules := m.GetRulesForApplyRegion(region)
 	filteredRules := make([]*Rule, 0, len(rules))
-	filters := m.buildRuleFilters(stores.GetStores())
 	for _, rule := range rules {
-		pass := true
-		for _, filter := range filters {
-			if !filter.Filter(rule) {
-				pass = false
-				break
-			}
-		}
-		if pass {
+		if filterRule(rule, stores.GetStores()) {
 			filteredRules = append(filteredRules, rule)
 		}
 	}
@@ -371,7 +363,7 @@ const (
 // distinguished by the field `Action`.
 type RuleOp struct {
 	*Rule                       // information of the placement rule to add/delete
-	Action           RuleOpType `json:"action"`              // the operation type
+	Action           RuleOpType `json:"action"` // the operation type
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
@@ -629,8 +621,13 @@ func (m *RuleManager) IsInitialized() bool {
 	return m.initialized
 }
 
-func (m *RuleManager) buildRuleFilters(stores []*core.StoreInfo) []RuleFilter {
-	var filters []RuleFilter
-	storeFilter := WithMatchStoreFilter(stores)
-	return append(filters, storeFilter)
+// filterRule filter the rule which won't have RuleFit after FitRegion
+// in order to reduce the calculation.
+func filterRule(rule *Rule, stores []*core.StoreInfo) bool {
+	for _, store := range stores {
+		if MatchLabelConstraints(store, rule.LabelConstraints) {
+			return true
+		}
+	}
+	return false
 }
