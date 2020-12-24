@@ -368,7 +368,8 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, d
 
 // CalSuffixBits calculates the bits of suffix by the number of dc-locations.
 func CalSuffixBits(dcLocationNum int) int {
-	return int(math.Ceil(math.Log2(float64(dcLocationNum))))
+	// dcLocationNum + 1 because we have the Global TSO holds 0 as the suffix sign
+	return int(math.Ceil(math.Log2(float64(dcLocationNum + 1))))
 }
 
 // ResetTimestamp is used to reset the timestamp in memory.
