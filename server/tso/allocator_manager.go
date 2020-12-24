@@ -291,18 +291,12 @@ func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
 
 // similar logic with leaderLoop in server/server.go
 func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *LocalTSOAllocator) {
-	var checkTicker *time.Ticker
-	defer func() {
-		if checkTicker != nil {
-			checkTicker.Stop()
-		}
-	}()
+	defer log.Info("server is closed, return local tso allocator leader loop",
+		zap.String("dc-location", allocator.dcLocation),
+		zap.String("local-tso-allocator-name", am.member.Member().Name))
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("server is closed, return local tso allocator leader loop",
-				zap.String("dc-location", allocator.dcLocation),
-				zap.String("local-tso-allocator-name", am.member.Member().Name))
 			return
 		default:
 		}
@@ -348,7 +342,10 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 				zap.String("dc-location", allocator.dcLocation),
 				zap.Int("suffix", suffix),
 				errs.ZapError(err))
-			time.Sleep(200 * time.Millisecond)
+			// PD leader hasn't been elected out, wait for the campaign
+			if !longSleep(ctx, time.Second) {
+				return
+			}
 			continue
 		}
 		if !ok || suffix <= 0 {
@@ -358,21 +355,27 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 				zap.String("wait-duration", checkStep.String()))
 			// Because the checkStep is long, we use select here to check whether the ctx is done
 			// to prevent the leak of goroutine.
-			if checkTicker == nil {
-				checkTicker = time.NewTicker(checkStep)
-			}
-			select {
-			case <-ctx.Done():
-				log.Info("server is closed, return local tso allocator leader loop",
-					zap.String("dc-location", allocator.dcLocation),
-					zap.String("local-tso-allocator-name", am.member.Member().Name))
+			if !longSleep(ctx, checkStep) {
 				return
-			case <-checkTicker.C:
-				continue
 			}
+			continue
 		}
 
 		am.campaignAllocatorLeader(ctx, allocator, suffix)
+	}
+}
+
+// longSleep is used to sleep the long wait duration while also watching the
+// ctx.Done() to prevent the goroutine from leaking. This function returns
+// true if the sleep is over, false if the ctx is done.
+func longSleep(ctx context.Context, waitStep time.Duration) bool {
+	waitTicker := time.NewTicker(waitStep)
+	defer waitTicker.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-waitTicker.C:
+		return true
 	}
 }
 
@@ -531,8 +534,8 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 	}
 }
 
-// ClusterDCLocationChecker collect all dc-locations of a cluster and transform it into a map
-// which satisfies dcLocation -> []serverID.
+// ClusterDCLocationChecker collects all dc-locations of a cluster, computes some related info
+// and stores them into the dcLocationInfo, then finally writes them into am.mu.clusterDCLocations.
 func (am *AllocatorManager) ClusterDCLocationChecker() {
 	// Wait for the PD leader to be elected out.
 	if am.member.GetLeader() == nil {
@@ -771,7 +774,7 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.
 func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
-	if len(dcLocation) == 0 {
+	if dcLocation == "" {
 		dcLocation = config.GlobalDCLocation
 	}
 	allocatorGroup, exist := am.getAllocatorGroup(dcLocation)
