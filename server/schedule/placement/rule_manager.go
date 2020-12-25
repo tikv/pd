@@ -263,13 +263,7 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 // FitRegion fits a region to the rules it matches.
 func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *RegionFit {
 	rules := m.GetRulesForApplyRegion(region)
-	filteredRules := make([]*Rule, 0, len(rules))
-	for _, rule := range rules {
-		if filterRule(rule, stores.GetStores()) {
-			filteredRules = append(filteredRules, rule)
-		}
-	}
-	return FitRegion(stores, region, filteredRules)
+	return FitRegion(stores, region, rules)
 }
 
 func (m *RuleManager) beginPatch() *ruleConfigPatch {
@@ -621,9 +615,9 @@ func (m *RuleManager) IsInitialized() bool {
 	return m.initialized
 }
 
-// filterRule filter the rule which won't have RuleFit after FitRegion
+// checkRule check the rule whether will have RuleFit after FitRegion
 // in order to reduce the calculation.
-func filterRule(rule *Rule, stores []*core.StoreInfo) bool {
+func checkRule(rule *Rule, stores []*core.StoreInfo) bool {
 	for _, store := range stores {
 		if MatchLabelConstraints(store, rule.LabelConstraints) {
 			return true
