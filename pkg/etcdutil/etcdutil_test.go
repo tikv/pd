@@ -17,14 +17,10 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io/ioutil"
-	"net/url"
-	"os"
 	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/tikv/pd/pkg/tempurl"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
@@ -38,35 +34,13 @@ var _ = Suite(&testEtcdutilSuite{})
 
 type testEtcdutilSuite struct{}
 
-func newTestSingleConfig() *embed.Config {
-	cfg := embed.NewConfig()
-	cfg.Name = "test_etcd"
-	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_etcd")
-	cfg.WalDir = ""
-	cfg.Logger = "zap"
-	cfg.LogOutputs = []string{"stdout"}
-
-	pu, _ := url.Parse(tempurl.Alloc())
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
-	cu, _ := url.Parse(tempurl.Alloc())
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
-
-	cfg.StrictReconfigCheck = false
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
-	cfg.ClusterState = embed.ClusterStateFlagNew
-	return cfg
-}
-
-func cleanConfig(cfg *embed.Config) {
-	// Clean data directory
-	os.RemoveAll(cfg.Dir)
-}
-
 func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
-	cfg1 := newTestSingleConfig()
+	cfg1 := NewTestSingleConfig()
 	etcd1, err := embed.StartEtcd(cfg1)
+	defer func() {
+		etcd1.Close()
+		CleanConfig(cfg1)
+	}()
 	c.Assert(err, IsNil)
 
 	ep1 := cfg1.LCUrls[0].String()
@@ -86,7 +60,7 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 
 	// Test AddEtcdMember
 	// Make a new etcd config.
-	cfg2 := newTestSingleConfig()
+	cfg2 := NewTestSingleConfig()
 	cfg2.Name = "etcd2"
 	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
 	cfg2.ClusterState = embed.ClusterStateFlagExisting
@@ -97,6 +71,10 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 	c.Assert(err, IsNil)
 
 	etcd2, err := embed.StartEtcd(cfg2)
+	defer func() {
+		etcd2.Close()
+		CleanConfig(cfg2)
+	}()
 	c.Assert(err, IsNil)
 	c.Assert(addResp.Member.ID, Equals, uint64(etcd2.Server.ID()))
 
@@ -135,16 +113,15 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(len(listResp3.Members), Equals, 1)
 	c.Assert(listResp3.Members[0].ID, Equals, uint64(etcd1.Server.ID()))
-
-	etcd1.Close()
-	etcd2.Close()
-	cleanConfig(cfg1)
-	cleanConfig(cfg2)
 }
 
 func (s *testEtcdutilSuite) TestEtcdKVGet(c *C) {
-	cfg := newTestSingleConfig()
+	cfg := NewTestSingleConfig()
 	etcd, err := embed.StartEtcd(cfg)
+	defer func() {
+		etcd.Close()
+		CleanConfig(cfg)
+	}()
 	c.Assert(err, IsNil)
 
 	ep := cfg.LCUrls[0].String()
@@ -186,12 +163,15 @@ func (s *testEtcdutilSuite) TestEtcdKVGet(c *C) {
 	resp, err = EtcdKVGet(client, next, withRange, withLimit, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	c.Assert(err, IsNil)
 	c.Assert(len(resp.Kvs), Equals, 2)
-	cleanConfig(cfg)
 }
 
 func (s *testEtcdutilSuite) TestEtcdKVPutWithTTL(c *C) {
-	cfg := newTestSingleConfig()
+	cfg := NewTestSingleConfig()
 	etcd, err := embed.StartEtcd(cfg)
+	defer func() {
+		etcd.Close()
+		CleanConfig(cfg)
+	}()
 	c.Assert(err, IsNil)
 
 	ep := cfg.LCUrls[0].String()
@@ -223,6 +203,4 @@ func (s *testEtcdutilSuite) TestEtcdKVPutWithTTL(c *C) {
 	resp, err = EtcdKVGet(client, "test/ttl2")
 	c.Assert(err, IsNil)
 	c.Assert(resp.Count, Equals, int64(0))
-
-	cleanConfig(cfg)
 }

@@ -15,13 +15,13 @@ package tso_test
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -30,12 +30,15 @@ import (
 var _ = Suite(&testLocalTSOSuite{})
 
 type testLocalTSOSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx         context.Context
+	cancel      context.CancelFunc
+	tsPoolMutex sync.Mutex
+	tsPool      map[uint64]struct{}
 }
 
 func (s *testLocalTSOSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.tsPool = make(map[uint64]struct{})
 	server.EnableZap = true
 }
 
@@ -61,26 +64,14 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	cluster.WaitLeader()
+	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+
 	dcClientMap := make(map[string]pdpb.PDClient)
 	for _, dcLocation := range dcLocationConfig {
-		var pdName string
-		testutil.WaitUntil(c, func(c *C) bool {
-			pdName = cluster.WaitAllocatorLeader(dcLocation)
-			return len(pdName) > 0
-		})
+		pdName := cluster.WaitAllocatorLeader(dcLocation)
 		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
 	}
-
-	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.testGetDcLocations(c, dcClientMap[leaderServer.GetConfig().LocalTSO.DCLocation],
-		&pdpb.GetDCLocationsRequest{
-			Header: &pdpb.RequestHeader{
-				SenderId: leaderServer.GetServer().GetMember().ID(),
-			},
-		},
-		[]string{"dc-1", "dc-2", "dc-3"})
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -101,13 +92,13 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 						Count:      tsoCount,
 						DcLocation: dcLocation,
 					}
-					ts := s.testGetLocalTimestamp(c, dcClientMap[dcLocation], req)
+					ts := testGetLocalTimestamp(c, dcClientMap[dcLocation], req)
 					lastTS := lastList[dcLocation]
-					c.Assert(ts.GetPhysical(), Not(Less), lastTS.GetPhysical())
-					if ts.GetPhysical() == lastTS.GetPhysical() {
-						c.Assert(ts.GetLogical(), Greater, lastTS.GetLogical())
-					}
+					// Check whether the TSO fallbacks
+					c.Assert(tsoutil.CompareTimestamp(ts, lastTS), Equals, 1)
 					lastList[dcLocation] = ts
+					// Check whether the TSO is not unique
+					c.Assert(s.checkTSOUnique(ts), IsTrue)
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
@@ -116,7 +107,7 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 	wg.Wait()
 }
 
-func (s *testLocalTSOSuite) testGetLocalTimestamp(c *C, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdpb.Timestamp {
+func testGetLocalTimestamp(c *C, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdpb.Timestamp {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tsoClient, err := pdCli.Tso(ctx)
@@ -132,16 +123,13 @@ func (s *testLocalTSOSuite) testGetLocalTimestamp(c *C, pdCli pdpb.PDClient, req
 	return res
 }
 
-func (s *testLocalTSOSuite) testGetDcLocations(c *C, pdCli pdpb.PDClient, req *pdpb.GetDCLocationsRequest, dcLocations []string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	resp, err := pdCli.GetDCLocations(ctx, req)
-	c.Assert(err, IsNil)
-	sort.Strings(dcLocations)
-	respDCLocations := make([]string, 0, len(resp.DcLocations))
-	for dcLocation := range resp.DcLocations {
-		respDCLocations = append(respDCLocations, dcLocation)
+func (s *testLocalTSOSuite) checkTSOUnique(tso *pdpb.Timestamp) bool {
+	s.tsPoolMutex.Lock()
+	defer s.tsPoolMutex.Unlock()
+	ts := tsoutil.GenerateTS(tso)
+	if _, exist := s.tsPool[ts]; exist {
+		return false
 	}
-	sort.Strings(respDCLocations)
-	c.Assert(respDCLocations, DeepEquals, dcLocations)
+	s.tsPool[ts] = struct{}{}
+	return true
 }
