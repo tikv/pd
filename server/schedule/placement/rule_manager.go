@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
