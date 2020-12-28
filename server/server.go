@@ -495,6 +495,11 @@ func (s *Server) GetClassifier() namespace.Classifier {
 	return s.classifier
 }
 
+// GetAllocator returns the id allocator of this server.
+func (s *Server) GetAllocator() core.IDAllocator {
+	return s.idAlloc
+}
+
 // txn returns an etcd client transaction wrapper.
 // The wrapper will set a request timeout to the context and log slow transactions.
 func (s *Server) txn() clientv3.Txn {

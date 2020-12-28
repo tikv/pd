@@ -275,6 +275,11 @@ func (s *Server) campaignLeader() error {
 	}
 	defer s.stopRaftCluster()
 
+	log.Info("sync id from etcd")
+	if err = s.idAlloc.Generate(); err != nil {
+		return err
+	}
+
 	s.enableLeader()
 	defer s.disableLeader()
 
