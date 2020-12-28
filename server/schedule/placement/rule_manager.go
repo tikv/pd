@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -41,6 +42,7 @@ type RuleManager struct {
 
 	// used for rule validation
 	keyType string
+	stores  []*core.StoreInfo
 }
 
 // NewRuleManager creates a RuleManager instance.
@@ -197,6 +199,10 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 		if !validateOp(c.Op) {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
 		}
+	}
+
+	if !checkRule(r, m.stores) {
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("rule '%s' from rule group '%s' can not match any store", r.ID, r.GroupID))
 	}
 
 	return nil
@@ -656,5 +662,13 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	m.Lock()
 	defer m.Unlock()
 	m.keyType = h
+	return m
+}
+
+// SetStores will update stores info for adjustRule()
+func (m *RuleManager) SetStores(h []*core.StoreInfo) *RuleManager {
+	m.Lock()
+	defer m.Unlock()
+	m.stores = h
 	return m
 }
