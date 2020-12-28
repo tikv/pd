@@ -100,7 +100,7 @@ func (m *RuleManager) loadRules() error {
 			toDelete = append(toDelete, k)
 			return
 		}
-		if err := m.adjustRule(&r); err != nil {
+		if err := m.adjustRule(&r, ""); err != nil {
 			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
 			toDelete = append(toDelete, k)
 			return
@@ -145,7 +145,7 @@ func (m *RuleManager) loadGroups() error {
 }
 
 // check and adjust rule from client or storage.
-func (m *RuleManager) adjustRule(r *Rule) (err error) {
+func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
 		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
@@ -171,6 +171,13 @@ func (m *RuleManager) adjustRule(r *Rule) (err error) {
 		}
 	}
 
+	if groupID != "" {
+		if r.GroupID == "" {
+			r.GroupID = groupID
+		} else if groupID != r.GroupID {
+			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("rule group %s does not match group ID %s", r.GroupID, groupID))
+		}
+	}
 	if r.GroupID == "" {
 		return errs.ErrRuleContent.FastGenByArgs("group ID should not be empty")
 	}
@@ -204,7 +211,7 @@ func (m *RuleManager) GetRule(group, id string) *Rule {
 
 // SetRule inserts or updates a Rule.
 func (m *RuleManager) SetRule(rule *Rule) error {
-	if err := m.adjustRule(rule); err != nil {
+	if err := m.adjustRule(rule, ""); err != nil {
 		return err
 	}
 	m.Lock()
@@ -348,7 +355,7 @@ func (m *RuleManager) SetRules(rules []*Rule) error {
 	defer m.Unlock()
 	p := m.beginPatch()
 	for _, r := range rules {
-		if err := m.adjustRule(r); err != nil {
+		if err := m.adjustRule(r, ""); err != nil {
 			return err
 		}
 		p.setRule(r)
@@ -389,7 +396,7 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 	for _, t := range todo {
 		switch t.Action {
 		case RuleOpAdd:
-			err := m.adjustRule(t.Rule)
+			err := m.adjustRule(t.Rule, "")
 			if err != nil {
 				return err
 			}
@@ -550,7 +557,7 @@ func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle, override bool) er
 			Override: g.Override,
 		})
 		for _, r := range g.Rules {
-			if err := m.adjustRule(r); err != nil {
+			if err := m.adjustRule(r, g.ID); err != nil {
 				return err
 			}
 			p.setRule(r)
@@ -582,7 +589,7 @@ func (m *RuleManager) SetGroupBundle(group GroupBundle) error {
 		Override: group.Override,
 	})
 	for _, r := range group.Rules {
-		if err := m.adjustRule(r); err != nil {
+		if err := m.adjustRule(r, group.ID); err != nil {
 			return err
 		}
 		p.setRule(r)

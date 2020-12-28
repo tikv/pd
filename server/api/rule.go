@@ -412,17 +412,6 @@ func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &groups); err != nil {
 		return
 	}
-	for _, g := range groups {
-		for _, rule := range g.Rules {
-			if len(rule.GroupID) == 0 {
-				rule.GroupID = g.ID
-			}
-			if rule.GroupID != g.ID {
-				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule group %s does not match group ID %s", rule.GroupID, g.ID))
-				return
-			}
-		}
-	}
 	_, partial := r.URL.Query()["partial"]
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
 		SetAllGroupBundles(groups, !partial); err != nil {
@@ -507,15 +496,6 @@ func (h *ruleHandler) SetGroupBundle(w http.ResponseWriter, r *http.Request) {
 	if group.ID != groupID {
 		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("group id %s does not match request URI %s", group.ID, groupID))
 		return
-	}
-	for _, rule := range group.Rules {
-		if len(rule.GroupID) == 0 {
-			rule.GroupID = groupID
-		}
-		if rule.GroupID != groupID {
-			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule group %s does not match group ID %s", rule.GroupID, groupID))
-			return
-		}
 	}
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
 		SetGroupBundle(group); err != nil {
