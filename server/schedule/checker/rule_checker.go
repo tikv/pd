@@ -62,7 +62,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
 			log.Debug("fail to fix rule peer", zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID), errs.ZapError(err))
-			break
+			continue
 		}
 		if op != nil {
 			return op
