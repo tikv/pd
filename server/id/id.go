@@ -55,8 +55,7 @@ func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 	defer alloc.mu.Unlock()
 
 	if alloc.base == alloc.end {
-		err := alloc.Generate()
-		if err != nil {
+		if err := alloc.generateLocked(); err != nil {
 			return 0, err
 		}
 
@@ -70,6 +69,13 @@ func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 
 // Generate synchronizes and generates id range.
 func (alloc *AllocatorImpl) Generate() error {
+	alloc.mu.Lock()
+	defer alloc.mu.Unlock()
+
+	return alloc.generateLocked()
+}
+
+func (alloc *AllocatorImpl) generateLocked() error {
 	key := alloc.getAllocIDPath()
 	value, err := etcdutil.GetValue(alloc.client, key)
 	if err != nil {
