@@ -76,12 +76,12 @@ func (s *testManagerSuite) TestAdjustRule(c *C) {
 	s.manager.SetKeyType(core.Txn.String())
 	c.Assert(s.manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"), NotNil)
 	c.Assert(s.manager.adjustRule(&Rule{
-		GroupID: "group",
-		ID: "id",
+		GroupID:     "group",
+		ID:          "id",
 		StartKeyHex: hex.EncodeToString(codec.EncodeBytes([]byte{0})),
-		EndKeyHex: "123abf",
-		Role: "voter",
-		Count: 3,
+		EndKeyHex:   "123abf",
+		Role:        "voter",
+		Count:       3,
 	}, "group"), NotNil)
 }
 
