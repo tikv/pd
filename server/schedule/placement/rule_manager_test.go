@@ -69,6 +69,11 @@ func (s *testManagerSuite) TestAdjustRule(c *C) {
 	for i := 2; i < len(rules); i++ {
 		c.Assert(s.manager.adjustRule(&rules[i], "group"), NotNil)
 	}
+
+	s.manager.SetKeyType(core.Table.String())
+	c.Assert(s.manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"), NotNil)
+	s.manager.SetKeyType(core.Txn.String())
+	c.Assert(s.manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"), NotNil)
 }
 
 func (s *testManagerSuite) TestLeaderCheck(c *C) {
