@@ -23,9 +23,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -37,6 +38,9 @@ type RuleManager struct {
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
+
+	// used for rule validation
+	keyType string
 }
 
 // NewRuleManager creates a RuleManager instance.
@@ -141,8 +145,7 @@ func (m *RuleManager) loadGroups() error {
 }
 
 // check and adjust rule from client or storage.
-func (m *RuleManager) adjustRule(r *Rule) error {
-	var err error
+func (m *RuleManager) adjustRule(r *Rule) (err error) {
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
 		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
@@ -154,6 +157,20 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 	if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
 		return errs.ErrRuleContent.FastGenByArgs("endKey should be greater than startKey")
 	}
+
+	if m.keyType == core.Table.String() || m.keyType == core.Txn.String() {
+		if len(r.StartKey) > 0 {
+			if _, _, err = codec.DecodeBytes(r.StartKey); err != nil {
+				return errs.ErrRuleContent.FastGenByArgs(errors.Wrapf(err, "start key should be encoded in %s mode", m.keyType).Error())
+			}
+		}
+		if len(r.EndKey) > 0 {
+			if _, _, err = codec.DecodeBytes(r.EndKey); err != nil {
+				return errs.ErrRuleContent.FastGenByArgs(errors.Wrapf(err, "end key should be encoded in %s mode", m.keyType).Error())
+			}
+		}
+	}
+
 	if r.GroupID == "" {
 		return errs.ErrRuleContent.FastGenByArgs("group ID should not be empty")
 	}
@@ -174,6 +191,7 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
 		}
 	}
+
 	return nil
 }
 
@@ -624,4 +642,12 @@ func checkRule(rule *Rule, stores []*core.StoreInfo) bool {
 		}
 	}
 	return false
+}
+
+// SetKeyType will update keyType for adjustRule()
+func (m *RuleManager) SetKeyType(h string) *RuleManager {
+	m.Lock()
+	defer m.Unlock()
+	m.keyType = h
+	return m
 }

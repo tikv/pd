@@ -14,7 +14,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -24,9 +23,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/apiutil"
-	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/unrolled/render"
 )
