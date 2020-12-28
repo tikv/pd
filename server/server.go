@@ -626,6 +626,11 @@ func (s *Server) GetSecurityConfig() *SecurityConfig {
 	return &s.cfg.Security
 }
 
+// GetAllocator returns the id allocator of this server.
+func (s *Server) GetAllocator() core.IDAllocator {
+	return s.idAlloc
+}
+
 // IsNamespaceExist returns whether the namespace exists.
 func (s *Server) IsNamespaceExist(name string) bool {
 	return s.classifier.IsNamespaceExist(name)

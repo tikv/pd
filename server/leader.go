@@ -274,6 +274,11 @@ func (s *Server) campaignLeader() error {
 		physical: zeroTime,
 	})
 
+	log.Info("sync id from etcd")
+	if err = s.idAlloc.Generate(); err != nil {
+		return err
+	}
+
 	s.enableLeader()
 	defer s.disableLeader()
 

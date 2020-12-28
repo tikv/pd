@@ -39,13 +39,9 @@ func (alloc *idAllocator) Alloc() (uint64, error) {
 	defer alloc.mu.Unlock()
 
 	if alloc.base == alloc.end {
-		end, err := alloc.generate()
-		if err != nil {
+		if err := alloc.generateLocked(); err != nil {
 			return 0, err
 		}
-
-		alloc.end = end
-		alloc.base = alloc.end - allocStep
 	}
 
 	alloc.base++
@@ -53,11 +49,19 @@ func (alloc *idAllocator) Alloc() (uint64, error) {
 	return alloc.base, nil
 }
 
-func (alloc *idAllocator) generate() (uint64, error) {
+// Generate synchronizes and generates id range.
+func (alloc *idAllocator) Generate() error {
+	alloc.mu.Lock()
+	defer alloc.mu.Unlock()
+
+	return alloc.generateLocked()
+}
+
+func (alloc *idAllocator) generateLocked() error {
 	key := alloc.s.getAllocIDPath()
 	value, err := getValue(alloc.s.client, key)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	var (
@@ -72,7 +76,7 @@ func (alloc *idAllocator) generate() (uint64, error) {
 		// update the key
 		end, err = bytesToUint64(value)
 		if err != nil {
-			return 0, err
+			return err
 		}
 
 		cmp = clientv3.Compare(clientv3.Value(key), "=", string(value))
@@ -82,13 +86,15 @@ func (alloc *idAllocator) generate() (uint64, error) {
 	value = uint64ToBytes(end)
 	resp, err := alloc.s.leaderTxn(cmp).Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if !resp.Succeeded {
-		return 0, errors.New("generate id failed, we may not leader")
+		return errors.New("generate id failed, we may not leader")
 	}
 
 	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
 	metadataGauge.WithLabelValues("idalloc").Set(float64(end))
-	return end, nil
+	alloc.end = end
+	alloc.base = end - allocStep
+	return nil
 }

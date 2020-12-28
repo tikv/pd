@@ -14,6 +14,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -120,4 +121,80 @@ func (s *integrationTestSuite) TestLeader(c *C) {
 		leader := cluster.GetLeader()
 		return leader != leader1
 	})
+}
+
+func (s *integrationTestSuite) TestMonotonicID(c *C) {
+	var err error
+	cluster, err := newTestCluster(2)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	leaderServer := cluster.GetServer(cluster.GetLeader()).GetServer()
+	var last1 uint64
+	for i := uint64(0); i < 10; i++ {
+		id, err := leaderServer.GetAllocator().Alloc()
+		c.Assert(err, IsNil)
+		c.Assert(id, Greater, last1)
+		last1 = id
+	}
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer = cluster.GetServer(cluster.GetLeader()).GetServer()
+	var last2 uint64
+	for i := uint64(0); i < 10; i++ {
+		id, err := leaderServer.GetAllocator().Alloc()
+		c.Assert(err, IsNil)
+		c.Assert(id, Greater, last2)
+		last2 = id
+	}
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer = cluster.GetServer(cluster.GetLeader()).GetServer()
+	id, err := leaderServer.GetAllocator().Alloc()
+	c.Assert(err, IsNil)
+	c.Assert(id, Greater, last2)
+	var last3 uint64
+	for i := uint64(0); i < 1000; i++ {
+		id, err := leaderServer.GetAllocator().Alloc()
+		c.Assert(err, IsNil)
+		c.Assert(id, Greater, last3)
+		last3 = id
+	}
+}
+
+func (s *integrationTestSuite) TestPDRestart(c *C) {
+	cluster, err := newTestCluster(1)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leader := leaderServer.GetServer()
+
+	var last uint64
+	for i := uint64(0); i < 10; i++ {
+		id, err := leader.GetAllocator().Alloc()
+		c.Assert(err, IsNil)
+		c.Assert(id, Greater, last)
+		last = id
+	}
+
+	c.Assert(leaderServer.Stop(), IsNil)
+	c.Assert(leaderServer.Run(context.TODO()), IsNil)
+	cluster.WaitLeader()
+
+	for i := uint64(0); i < 10; i++ {
+		id, err := leader.GetAllocator().Alloc()
+		c.Assert(err, IsNil)
+		c.Assert(id, Greater, last)
+		last = id
+	}
 }
