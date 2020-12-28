@@ -16,14 +16,20 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
+	"io/ioutil"
 	"net/http"
+	"net/url"
+	"os"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/tempurl"
 	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/etcdserver"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
@@ -170,4 +176,32 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 		return nil, err
 	}
 	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
+}
+
+// NewTestSingleConfig is used to create a etcd config for the unit test purpose.
+func NewTestSingleConfig() *embed.Config {
+	cfg := embed.NewConfig()
+	cfg.Name = "test_etcd"
+	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_etcd")
+	cfg.WalDir = ""
+	cfg.Logger = "zap"
+	cfg.LogOutputs = []string{"stdout"}
+
+	pu, _ := url.Parse(tempurl.Alloc())
+	cfg.LPUrls = []url.URL{*pu}
+	cfg.APUrls = cfg.LPUrls
+	cu, _ := url.Parse(tempurl.Alloc())
+	cfg.LCUrls = []url.URL{*cu}
+	cfg.ACUrls = cfg.LCUrls
+
+	cfg.StrictReconfigCheck = false
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
+	cfg.ClusterState = embed.ClusterStateFlagNew
+	return cfg
+}
+
+// CleanConfig is used to clean the etcd data for the unit test purpose.
+func CleanConfig(cfg *embed.Config) {
+	// Clean data directory
+	os.RemoveAll(cfg.Dir)
 }

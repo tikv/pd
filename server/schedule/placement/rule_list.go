@@ -200,7 +200,7 @@ func (rl ruleList) getRulesForApplyRegion(start, end []byte) []*Rule {
 	i := sort.Search(len(rl.ranges), func(i int) bool {
 		return bytes.Compare(rl.ranges[i].startKey, start) > 0
 	})
-	if i != len(rl.ranges) && (len(end) == 0 || bytes.Compare(end, rl.ranges[i].startKey) > 0) {
+	if i == 0 || i != len(rl.ranges) && (len(end) == 0 || bytes.Compare(end, rl.ranges[i].startKey) > 0) {
 		return nil
 	}
 	return rl.ranges[i-1].applyRules

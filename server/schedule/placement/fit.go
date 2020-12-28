@@ -128,6 +128,7 @@ func FitRegion(stores StoreSet, region *core.RegionInfo, rules []*Rule) *RegionF
 }
 
 type fitWorker struct {
+	stores  []*core.StoreInfo
 	bestFit RegionFit  // update during execution
 	peers   []*fitPeer // p.selected is updated during execution.
 	rules   []*Rule
@@ -146,6 +147,7 @@ func newFitWorker(stores StoreSet, region *core.RegionInfo, rules []*Rule) *fitW
 	sort.Slice(peers, func(i, j int) bool { return peers[i].GetId() < peers[j].GetId() })
 
 	return &fitWorker{
+		stores:  stores.GetStores(),
 		bestFit: RegionFit{RuleFits: make([]*RuleFit, len(rules))},
 		peers:   peers,
 		rules:   rules,
@@ -164,16 +166,19 @@ func (w *fitWorker) fitRule(index int) bool {
 	if index >= len(w.rules) {
 		return false
 	}
-	// Only consider stores:
-	// 1. Match label constraints
-	// 2. Role match, or can match after transformed.
-	// 3. Not selected by other rules.
+
 	var candidates []*fitPeer
-	for _, p := range w.peers {
-		if MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) &&
-			p.matchRoleLoose(w.rules[index].Role) &&
-			!p.selected {
-			candidates = append(candidates, p)
+	if checkRule(w.rules[index], w.stores) {
+		// Only consider stores:
+		// 1. Match label constraints
+		// 2. Role match, or can match after transformed.
+		// 3. Not selected by other rules.
+		for _, p := range w.peers {
+			if MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) &&
+				p.matchRoleLoose(w.rules[index].Role) &&
+				!p.selected {
+				candidates = append(candidates, p)
+			}
 		}
 	}
 
