@@ -62,7 +62,7 @@ func (s *testManagerSuite) TestAdjustRule(c *C) {
 		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: -1},
 		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3, LabelConstraints: []LabelConstraint{{Op: "foo"}}},
 	}
-	c.Assert(s.manager.adjustRule(&rules[0], "group"), NotNil)
+	c.Assert(s.manager.adjustRule(&rules[0], "group"), IsNil)
 	c.Assert(rules[0].StartKey, DeepEquals, []byte{0x12, 0x3a, 0xbc})
 	c.Assert(rules[0].EndKey, DeepEquals, []byte{0x12, 0x3a, 0xbf})
 	c.Assert(s.manager.adjustRule(&rules[1], ""), NotNil)
