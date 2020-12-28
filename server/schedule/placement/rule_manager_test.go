@@ -18,6 +18,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
 )
@@ -74,6 +75,14 @@ func (s *testManagerSuite) TestAdjustRule(c *C) {
 	c.Assert(s.manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"), NotNil)
 	s.manager.SetKeyType(core.Txn.String())
 	c.Assert(s.manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"), NotNil)
+	c.Assert(s.manager.adjustRule(&Rule{
+		GroupID: "group",
+		ID: "id",
+		StartKeyHex: hex.EncodeToString(codec.EncodeBytes([]byte{0})),
+		EndKeyHex: "123abf",
+		Role: "voter",
+		Count: 3,
+	}, "group"), NotNil)
 }
 
 func (s *testManagerSuite) TestLeaderCheck(c *C) {
