@@ -321,11 +321,6 @@ error = '''
 security config error: %s
 '''
 
-["PD:hex:ErrHexDecodingString"]
-error = '''
-decode string %s error
-'''
-
 ["PD:http:ErrNewHTTPRequest"]
 error = '''
 new HTTP request failed

@@ -149,11 +149,11 @@ func (m *RuleManager) loadGroups() error {
 func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
-		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("decode hex string '%s' error", r.StartKeyHex))
 	}
 	r.EndKey, err = hex.DecodeString(r.EndKeyHex)
 	if err != nil {
-		return errs.ErrHexDecodingString.FastGenByArgs(r.EndKeyHex)
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("decode hex string '%s' error", r.EndKeyHex))
 	}
 	if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
 		return errs.ErrRuleContent.FastGenByArgs("endKey should be greater than startKey")
