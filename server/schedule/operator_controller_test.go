@@ -573,6 +573,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 
 func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 	cfg := config.NewTestOptions()
+	cfg.SetEnableJointConsensus(true)
 	tc := mockcluster.NewCluster(cfg)
 	tc.SetMaxMergeRegionSize(2)
 	tc.SetMaxMergeRegionKeys(2)
