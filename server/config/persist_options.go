@@ -490,6 +490,7 @@ func (o *PersistOptions) IsUseJointConsensus() bool {
 	return o.GetScheduleConfig().EnableJointConsensus
 }
 
+// SetEnableJointConsensus sets whether to enable joint-consensus. It's only used to test.
 func (o *PersistOptions) SetEnableJointConsensus(enableJointConsensus bool) {
 	v := o.GetScheduleConfig().Clone()
 	v.EnableJointConsensus = enableJointConsensus
