@@ -490,6 +490,12 @@ func (o *PersistOptions) IsUseJointConsensus() bool {
 	return o.GetScheduleConfig().EnableJointConsensus
 }
 
+func (o *PersistOptions) SetEnableJointConsensus(enableJointConsensus bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableJointConsensus = enableJointConsensus
+	o.SetScheduleConfig(v)
+}
+
 // GetHotRegionCacheHitsThreshold is a threshold to decide if a region is hot.
 func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
