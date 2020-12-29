@@ -753,7 +753,7 @@ const (
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
-	defaultEnableJointConsensus        = true
+	defaultEnableJointConsensus        = false
 	defaultEnableCrossTableMerge       = true
 )
 
