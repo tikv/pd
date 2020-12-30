@@ -37,10 +37,18 @@ type HotPeerStat struct {
 	KeyRate  float64  `json:"flow_keys"`
 	Ops      float64  `json:"flow_ops"`
 
+	OtherByteRate float64  `json:"other_flow_bytes"`
+	OtherKeyRate  float64  `json:"other_flow_keys"`
+	OtherOps      float64  `json:"other_flow_ops"`
+
 	// rolling statistics, recording some recently added records.
 	rollingByteRate MovingAvg
 	rollingKeyRate  MovingAvg
 	rollingOps      MovingAvg
+
+	rollingOtherByteRate MovingAvg
+	rollingOtherKeyRate  MovingAvg
+	rollingOtherOps      MovingAvg
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
@@ -111,6 +119,30 @@ func (stat *HotPeerStat) GetOps() float64 {
 	return stat.rollingOps.Get()
 }
 
+// GetOtherByteRate returns denoised BytesRate if possible.
+func (stat *HotPeerStat) GetOtherByteRate() float64 {
+	if stat.rollingOtherByteRate == nil {
+		return stat.OtherByteRate
+	}
+	return stat.rollingOtherByteRate.Get()
+}
+
+// GetOtherKeyRate returns denoised KeysRate if possible.
+func (stat *HotPeerStat) GetOtherKeyRate() float64 {
+	if stat.rollingOtherKeyRate == nil {
+		return stat.OtherKeyRate
+	}
+	return stat.rollingOtherKeyRate.Get()
+}
+
+// GetOtherOps returns denoised ops if possible.
+func (stat *HotPeerStat) GetOtherOps() float64 {
+	if stat.rollingOtherOps == nil {
+		return stat.OtherOps
+	}
+	return stat.rollingOtherOps.Get()
+}
+
 // Clone clones the HotPeerStat
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
@@ -120,5 +152,12 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret.rollingKeyRate = nil
 	ret.Ops = stat.GetOps()
 	ret.rollingOps = nil
+
+	ret.OtherByteRate = stat.GetOtherByteRate()
+	ret.rollingOtherByteRate = nil
+	ret.OtherKeyRate = stat.GetOtherKeyRate()
+	ret.rollingOtherKeyRate = nil
+	ret.OtherOps = stat.GetOtherOps()
+	ret.rollingOtherOps = nil
 	return &ret
 }

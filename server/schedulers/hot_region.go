@@ -195,14 +195,22 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 
 	mode := cluster.GetOpts().GetHotSchedulerMode()
 	h.balanceRatio = cluster.GetOpts().GetHotBalanceRatio()
-	if mode >= 10 {
-		return nil
-	}
-	switch typ {
-	case read:
-		return h.balanceHotReadRegionsMulti(cluster)
-	case write:
-		return h.balanceHotWriteRegionsMulti(cluster)
+
+	switch mode {
+	case 0:
+		switch typ {
+		case read:
+			return h.balanceHotReadRegions(cluster)
+		case write:
+			return h.balanceHotWriteRegions(cluster)
+		}
+	case 1, 2, 3:
+		switch typ {
+		case read:
+			return h.balanceHotReadRegionsMulti(cluster)
+		case write:
+			return h.balanceHotWriteRegionsMulti(cluster)
+		}
 	}
 	return nil
 }
@@ -641,21 +649,36 @@ func (bs *balanceSolver) init() {
 
 func (bs *balanceSolver) initLoadInfo() {
 	bs.storeInfos = make([]*storeInfo, 0)
+	mode := bs.cluster.GetOpts().GetHotSchedulerMode()
 
 	peerID := uint64(1)
 	// create RegionInfo and StoreInfo to normalize flow data
 	for storeID, loadDetail := range bs.stLoadDetail {
 		hotRegions := make(map[uint64]*regionInfo)
 		for _, peer := range loadDetail.HotPeers {
-			hotRegions[peerID] = newRegionInfo(peerID, peer.RegionID, storeID,
-				peer.GetByteRate()/loadDetail.LoadPred.Future.ExpByteRate,
-				peer.GetKeyRate()/loadDetail.LoadPred.Future.ExpKeyRate)
+			byteLoad := peer.GetByteRate()/loadDetail.LoadPred.Future.ExpByteRate
+			keyLoad := peer.GetKeyRate()/loadDetail.LoadPred.Future.ExpKeyRate
+			switch mode {
+			case 2:
+				keyLoad = byteLoad
+			case 3:
+				byteLoad = keyLoad
+			}
+			hotRegions[peerID] = newRegionInfo(peerID, peer.RegionID, storeID, byteLoad, keyLoad)
 			hotRegions[peerID].peerStat = peer
 			peerID++
 		}
+		
+		byteLoad := loadDetail.LoadPred.Future.ByteRate / loadDetail.LoadPred.Future.ExpByteRate
+		keyLoad := loadDetail.LoadPred.Future.KeyRate / loadDetail.LoadPred.Future.ExpKeyRate
+		switch mode {
+		case 2:
+			keyLoad = byteLoad
+		case 3:
+			byteLoad = keyLoad
+		}
 		si := newStoreInfo(storeID,
-			[]float64{loadDetail.LoadPred.Future.ByteRate / loadDetail.LoadPred.Future.ExpByteRate,
-				loadDetail.LoadPred.Future.KeyRate / loadDetail.LoadPred.Future.ExpKeyRate},
+			[]float64{byteLoad, keyLoad},
 			hotRegions)
 		bs.storeInfos = append(bs.storeInfos, si)
 

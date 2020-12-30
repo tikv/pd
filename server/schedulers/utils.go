@@ -414,6 +414,58 @@ func (d *stableAnalysis) toString() string {
 	return fmt.Sprintf("stableAnalysis, len %d, cur_val %lf, cv %lf", len(d.datas), d.last(), calcCV(d.datas))
 }
 
+// DimensionNum defines the number of dimensions
+const DimensionNum = 4
+
+type peerInfo struct {
+	id              uint64
+	regionID        uint64
+	srcStoreID      uint64
+	dstStoreID      uint64
+	loads           [DimensionNum]float64
+	peerStat *statistics.HotPeerStat
+}
+
+func newPeerInfo(id uint64, regionID uint64, srcStoreID uint64) *peerInfo {
+	return &peerInfo{
+		id:         id,
+		regionID:   regionID,
+		srcStoreID: srcStoreID,
+		dstStoreID: srcStoreID,
+		loads:      [DimensionNum]float64{},
+	}
+}
+
+type storeInfoSpec struct {
+	id            uint64
+	loads         [DimensionNum]float64
+	peers       map[uint64]*peerInfo
+	sortedPeers [DimensionNum][]*peerInfo
+}
+
+func newStoreInfoSpec(id uint64, peers map[uint64]*peerInfo) *storeInfoSpec {
+	ret := &storeInfoSpec{
+		id:           id,
+		loads:        [DimensionNum]float64{},
+		peers:      peers,
+		sortedPeers: [DimensionNum][]*peerInfo{},
+	}
+	return ret
+}
+
+func (s *storeInfoSpec) sortAll() {
+	for i := uint64(0); i < DimensionNum; i++ {
+		for _, peer := range s.peers {
+			s.sortedPeers[i] = append(s.sortedPeers[i], peer)
+		}
+	}
+	for dimID := uint64(0); dimID < DimensionNum; dimID++ {
+		sort.Slice(s.sortedPeers[dimID], func(i, j int) bool {
+			return s.sortedPeers[dimID][i].loads[dimID] < s.sortedPeers[dimID][j].loads[dimID]
+		})
+	}
+}
+
 // DimensionCount defines the number of dimensions
 const DimensionCount = 2
 

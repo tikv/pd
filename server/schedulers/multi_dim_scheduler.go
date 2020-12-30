@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	// "sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -115,6 +116,7 @@ type multiDimensionScheduler struct {
 	lastCheckLoadTime time.Time
 	opCompleteTime    time.Time
 	storeInfos        []*storeInfo
+	storeInfoSpec        []*storeInfoSpec
 	candidateRegions  *regionContainer
 	regionOpRecord    map[uint64]*opRecord
 
@@ -123,6 +125,7 @@ type multiDimensionScheduler struct {
 	hotRegionLoadRateHistory []*stableAnalysis
 	mode                     int
 	balanceRatio			 float64
+	skipSchedule             bool
 }
 
 func newMultiDimensionScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *multiDimensionScheduler {
@@ -181,6 +184,14 @@ func (h *multiDimensionScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
 func (h *multiDimensionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	return h.dispatch(h.types[1], cluster)
+}
+
+func (h *multiDimensionScheduler) dispatchMulti(typ rwType, cluster opt.Cluster) []*operator.Operator {
+	h.Lock()
+	defer h.Unlock()
+
+	h.initHotPeerInfo(cluster)
+	return h.solveMultiLoads()
 }
 
 func (h *multiDimensionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
@@ -305,6 +316,265 @@ func (h *multiDimensionScheduler) checkStoreLoad(bs *balanceSolver) bool {
 	}
 
 	return false
+}
+
+func (h *multiDimensionScheduler) initHotPeerInfo(
+	cluster opt.Cluster,
+	// storePendings map[uint64]Influence,
+) {
+	minHotDegree := cluster.GetOpts().GetHotRegionCacheHitsThreshold()
+	storesStat := cluster.GetStoresStats()
+	storeHotPeers := cluster.RegionWriteStats()
+
+	storeReadByte := storesStat.GetStoresBytesReadStat()
+	storeReadKey := storesStat.GetStoresKeysReadStat()
+	storeReadOps := storesStat.GetStoresOpsReadStat()
+	storeWriteByte := storesStat.GetStoresBytesWriteStat()
+	storeWriteKey := storesStat.GetStoresKeysWriteStat()
+	storeWriteOps := storesStat.GetStoresOpsWriteStat()
+
+	expReadByteSum := 0.0
+	expReadKeySum := 0.0
+	expReadOpsSum := 0.0
+	expWriteByteSum := 0.0
+	expWriteKeySum := 0.0
+	expWriteOpsSum := 0.0
+
+	kind := core.RegionKind
+	hotRegionThreshold := getHotRegionThreshold(storesStat, write)
+	hotPeerFilterTy := mixed
+
+	filteredStoreHotPeers := make(map[uint64][]*statistics.HotPeerStat)
+	// Stores without byte rate statistics is not available to schedule.
+	for id, readByte := range storeReadByte {
+		readKey := storeReadKey[id]
+		readOps := storeReadOps[id]
+
+		writeByte := storeWriteByte[id]
+		writeKey := storeWriteKey[id]
+		writeOps := storeWriteOps[id]
+
+		// Find all hot peers first
+		hotPeers := make([]*statistics.HotPeerStat, 0)
+		{
+			// byteSum := 0.0
+			// keySum := 0.0
+			// opsSum := 0.0
+			for _, peer := range filterHotPeers(kind, minHotDegree, hotRegionThreshold, storeHotPeers[id], hotPeerFilterTy) {
+				// byteSum += peer.GetByteRate()
+				// keySum += peer.GetKeyRate()
+				// opsSum += peer.GetOps()
+				hotPeers = append(hotPeers, peer.Clone())
+			}
+			// // Use sum of hot peers to estimate leader-only byte rate.
+			// if kind == core.LeaderKind && rwTy == write {
+			// 	byteRate = byteSum
+			// 	keyRate = keySum
+			// 	ops = opsSum
+			// }
+
+		}
+		expReadByteSum += readByte
+		expReadKeySum += readKey
+		expReadOpsSum += readOps
+		expWriteByteSum += writeByte
+		expWriteKeySum += writeKey
+		expWriteOpsSum += writeOps
+
+		filteredStoreHotPeers[id] = hotPeers
+	}
+	storeLen := float64(len(storeReadByte))
+
+	expReadByteSum /= storeLen
+	expReadKeySum /= storeLen
+	expReadOpsSum /= storeLen
+	expWriteByteSum /= storeLen
+	expWriteKeySum /= storeLen
+	expWriteOpsSum /= storeLen
+
+	if expWriteByteSum < hotWriteRegionMinFlowRate && expWriteKeySum < hotWriteRegionMinKeyRate && 
+		expReadByteSum < hotReadRegionMinFlowRate && expReadKeySum < hotReadRegionMinKeyRate {
+		h.skipSchedule = true
+		return
+	}
+	h.skipSchedule = false
+
+	peerID := uint64(1)
+	h.storeInfoSpec = make([]*storeInfoSpec, 0)
+	for storeID, originHotPeers := range filteredStoreHotPeers {
+		hotPeers := make(map[uint64]*peerInfo)
+		for _, orginPeer := range originHotPeers {
+			peer := newPeerInfo(peerID, orginPeer.RegionID, storeID)
+			peer.loads[0] = orginPeer.GetByteRate() / expWriteByteSum
+			peer.loads[1] = orginPeer.GetKeyRate() / expWriteKeySum
+			peer.loads[2] = orginPeer.GetOtherByteRate() / expReadByteSum
+			peer.loads[3] = orginPeer.GetOtherKeyRate() / expReadKeySum
+			hotPeers[peerID] = peer
+			peerID++
+		}
+		si := newStoreInfoSpec(storeID, hotPeers)
+		si.loads[0] = storeWriteByte[storeID] / expWriteByteSum
+		si.loads[1] = storeWriteKey[storeID] / expWriteByteSum
+		si.loads[2] = storeReadByte[storeID] / expReadByteSum
+		si.loads[3] = storeReadKey[storeID] / expReadByteSum
+		h.storeInfoSpec = append(h.storeInfoSpec, si)
+	}
+}
+
+// func (h *multiDimensionScheduler) pickBestDstStore(dimID uint64, region *regionInfo) *storeInfoSpec {
+// 	var dstStore *storeInfoSpec
+// 	filters, candiStores := bs.getFilterAnadCandidateStores()
+
+// 	var selectedStoreIDs []uint64
+// 	selectedStores := make(map[uint64]*core.StoreInfo)
+// 	for _, store := range candiStores {
+// 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
+// 			selectedStores[store.GetID()] = store
+// 			selectedStoreIDs = append(selectedStoreIDs, store.GetID())
+// 		}
+// 	}
+
+// 	minLoad := 1000.0
+// 	for _, store := range h.storeInfoSpec {
+// 		if _, ok := selectedStores[store.id]; !ok {
+// 			continue
+// 		}
+// 		afterLoad := store.loads[dimID] + region.loads[dimID]
+// 		if afterLoad <= 1 + h.balanceRatio {
+// 			if afterLoad < minLoad {
+// 				dstStore = store
+// 				minLoad = afterLoad
+// 			}
+// 		}
+// 	}
+// 	log.Info("pickBestDstStore",
+// 		zap.Uint64("regionID", region.regionID),
+// 		zap.String("selectedStores", fmt.Sprintf("%+v", selectedStoreIDs)),
+// 	)
+// 	return dstStore
+// }
+
+func (h *multiDimensionScheduler) solveMultiLoads() []*operator.Operator {
+	if h.skipSchedule {
+		return nil
+	}
+
+	// maxIDAndLoad := func(store *storeInfoSpec) (id uint64, load float64) {
+	// 	for i := uint64(0); i < DimensionNum; i++ {
+	// 		if store.loads[i] > load {
+	// 			load = store.loads[i]
+	// 			id = i
+	// 		}
+	// 	}
+	// 	return
+	// }
+
+	// // prefer IO
+	// sort.Slice(h.storeInfoSpec, func(i, j int) bool {
+	// 	return h.storeInfoSpec[i].loads[0] > h.storeInfoSpec[j].loads[0]
+	// })
+
+	// log.Info("run mult-dim solve", 
+	// )
+
+	// for _, store := range h.storeInfoSpec {
+	// 	log.Info("store load",
+	// 		zap.Uint64("id", store.id),
+	// 		zap.String("storeLoad", fmt.Sprintf("%+v", store.loads)),
+	// 	)
+	// }
+
+	// bs.cur = &solution{}
+
+	// hasFound := true
+	// for hasFound {
+	// 	hasFound = false
+	// 	for _, store := range h.storeInfoSpec {
+	// 		store.sortAll()
+	// 		for {
+	// 			maxID, maxLoad := maxIDAndLoad(store)
+	// 			if maxLoad <= 1 + h.balanceRatio {
+	// 				break
+	// 			} else {
+	// 				var selectedRegion *peerInfo
+	// 				for {
+	// 					if len(store.sortedPeers[maxID]) == 0 {
+	// 						log.Info("no candi region",
+	// 							zap.Uint64("storeID", store.id),
+	// 							zap.String("storeLoad", fmt.Sprintf("%+v", store.loads)),
+	// 						)
+	// 						break
+	// 					}
+	// 					length := len(store.sortedPeers[maxID])
+	// 					selectedRegion = store.sortedPeers[maxID][length-1]
+	// 					store.sortedPeers[maxID] = store.sortedPeers[maxID][:length-1]
+						
+	// 					if _, ok := bs.sche.regionPendings[selectedRegion.regionID]; !ok {
+	// 						break
+	// 					} else {
+	// 						log.Info("filter pending region",
+	// 							zap.Uint64("storeID", store.id),
+	// 							zap.Uint64("regionID", selectedRegion.regionID),
+	// 							zap.String("storeLoad", fmt.Sprintf("%+v", store.loads)),
+	// 						)
+	// 						selectedRegion = nil
+	// 					}
+	// 				}
+	// 				if selectedRegion == nil { // no suitable region
+	// 					break
+	// 				}
+	// 				if maxLoad - selectedRegion.loads[maxID] >= 1 - h.balanceRatio {
+	// 					bs.cur.srcStoreID = store.id
+	// 					bs.cur.srcPeerStat = selectedRegion.peerStat
+	// 					bs.cur.region = bs.getRegion()
+	// 					if bs.cur.region == nil {
+	// 						log.Info("no region",
+	// 							zap.Uint64("regionID", selectedRegion.regionID),
+	// 						)
+	// 						continue
+	// 					}
+
+	// 					dstStore := h.pickBestDstStore(maxID, selectedRegion)
+	// 					if dstStore == nil { // there is no suitable place,  consider next region
+	// 						log.Info("no suitable store",
+	// 							zap.Uint64("regionID", selectedRegion.regionID),
+	// 						)
+	// 						continue
+	// 					}
+	// 					bs.cur.dstStoreID = dstStore.id
+
+	// 					hasFound = true
+	// 					log.Info("find placement",
+	// 						zap.Uint64("regionID", selectedRegion.regionID),
+	// 						zap.Uint64("srcStoreID", store.id),
+	// 						zap.Uint64("dstStoreID", dstStore.id),
+	// 						zap.String("regionLoad", fmt.Sprintf("%+v", selectedRegion.loads)),
+	// 						zap.String("srdStoreLoad", fmt.Sprintf("%+v", store.loads)),
+	// 						zap.String("dstStoreLoad", fmt.Sprintf("%+v", dstStore.loads)),
+	// 						zap.Uint64("balanceWhichLoad", maxID),
+	// 					)
+						
+	// 					ops, infls := bs.buildOperators()
+	// 					if ops == nil {
+	// 						log.Info("build operation failed",
+	// 							zap.Uint64("regionID", selectedRegion.regionID),
+	// 						)
+	// 					}
+
+	// 					for i := 0; i < len(ops); i++ {
+	// 						// TODO: multiple operators need to be atomic.
+	// 						if !bs.sche.addPendingInfluence(ops[i], bs.cur.srcStoreID, bs.cur.dstStoreID, infls[i], bs.rwTy, bs.opTy) {
+	// 							return nil
+	// 						}
+	// 					}
+	// 					return ops
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
+
+	return nil
 }
 
 func (h *multiDimensionScheduler) initLoadInfo(bs *balanceSolver) {

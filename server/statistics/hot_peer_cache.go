@@ -31,6 +31,8 @@ const (
 	hotRegionReportMinInterval = 3
 
 	hotRegionAntiCount = 2
+
+	updateWithOtherStats = true
 )
 
 var (
@@ -111,12 +113,20 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 	totalKeys := float64(f.getTotalKeys(region))
 	totalOps := float64(f.getTotalOps(region))
 
+	totalOtherBytes := float64(f.getTotalOtherBytes(region))
+	totalOtherKeys := float64(f.getTotalOtherKeys(region))
+	totalOtherOps := float64(f.getTotalOtherOps(region))
+
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
 	byteRate := totalBytes / float64(interval)
 	keyRate := totalKeys / float64(interval)
 	ops := totalOps / float64(interval)
+
+	otherByteRate := totalOtherBytes / float64(interval)
+	otherKeyRate := totalOtherKeys / float64(interval)
+	otherOps := totalOtherOps / float64(interval)
 
 	// old region is in the front and new region is in the back
 	// which ensures it will hit the cache if moving peer or transfer leader occurs with the same replica number
@@ -142,6 +152,9 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 			ByteRate:       byteRate,
 			KeyRate:        keyRate,
 			Ops:            ops,
+			OtherByteRate:  otherByteRate,
+			OtherKeyRate:   otherKeyRate,
+			OtherOps:       otherOps,
 			LastUpdateTime: time.Now(),
 			Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
 			needDelete:     isExpired,
@@ -217,6 +230,36 @@ func (f *hotPeerCache) getTotalOps(region *core.RegionInfo) uint64 {
 	case WriteFlow:
 		return region.GetOpsWrite()
 	case ReadFlow:
+		return region.GetOpsRead()
+	}
+	return 0
+}
+
+func (f *hotPeerCache) getTotalOtherBytes(region *core.RegionInfo) uint64 {
+	switch f.kind {
+	case ReadFlow:
+		return region.GetBytesWritten()
+	case WriteFlow:
+		return region.GetBytesRead()
+	}
+	return 0
+}
+
+func (f *hotPeerCache) getTotalOtherKeys(region *core.RegionInfo) uint64 {
+	switch f.kind {
+	case ReadFlow:
+		return region.GetKeysWritten()
+	case WriteFlow:
+		return region.GetKeysRead()
+	}
+	return 0
+}
+
+func (f *hotPeerCache) getTotalOtherOps(region *core.RegionInfo) uint64 {
+	switch f.kind {
+	case ReadFlow:
+		return region.GetOpsWrite()
+	case WriteFlow:
 		return region.GetOpsRead()
 	}
 	return 0
@@ -313,6 +356,12 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 	isHot := newItem.ByteRate >= thresholds[byteDim] ||
 		newItem.KeyRate >= thresholds[keyDim] ||
 		newItem.Ops >= thresholds[opsDim]
+
+	if updateWithOtherStats {
+		isHot = isHot || newItem.OtherByteRate >= thresholds[byteDim] ||
+			newItem.OtherKeyRate >= thresholds[keyDim] ||
+			newItem.OtherOps >= thresholds[opsDim]
+	}
 
 	if newItem.needDelete {
 		return newItem
