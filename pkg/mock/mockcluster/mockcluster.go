@@ -324,25 +324,19 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(
 	regionID uint64, leaderID uint64,
 	readBytes, readKeys uint64,
 	reportInterval uint64,
-	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	followerIds []uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
-	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
-	if len(filledNums) > 0 {
-		filledNum = filledNums[0]
-	}
-
-	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	num := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
+	for i := 0; i < num; i++ {
 		items := mc.HotCache.CheckRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
 	}
 	mc.PutRegion(r)
-	return items
 }
 
 // AddLeaderRegionWithWriteInfo adds region with specified leader, followers and write info.
@@ -350,26 +344,19 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	regionID uint64, leaderID uint64,
 	writtenBytes, writtenKeys uint64,
 	reportInterval uint64,
-	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	followerIds []uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	r = r.Clone(core.SetWrittenKeys(writtenKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
-
-	filledNum := mc.HotCache.GetFilledPeriod(statistics.WriteFlow)
-	if len(filledNums) > 0 {
-		filledNum = filledNums[0]
-	}
-
-	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckWrite(r)
+	num := mc.HotCache.GetFilledPeriod(statistics.WriteFlow)
+	for i := 0; i < num; i++ {
+		items := mc.HotCache.CheckWrite(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
 	}
 	mc.PutRegion(r)
-	return items
 }
 
 // UpdateStoreLeaderWeight updates store leader weight.

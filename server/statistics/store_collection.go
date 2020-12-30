@@ -108,7 +108,6 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	if storeFlowStats == nil {
 		return
 	}
-
 	collect := func(getBytesRate, getKeysRate func() (float64, float64), tail string) {
 		storeWriteRateByte, storeReadRateByte := getBytesRate()
 		storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes"+tail).Set(storeWriteRateByte) // store_write_rate_bytes or store_write_rate_bytes_instant
@@ -119,7 +118,6 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	}
 	collect(storeFlowStats.GetBytesRate, storeFlowStats.GetKeysRate, "")
 	collect(storeFlowStats.GetBytesRateInstantaneous, storeFlowStats.GetKeysRateInstantaneous, "_instant")
-
 	// Store's threads statistics.
 	storeCPUUsage := stats.GetStoreCPUUsage(store.GetID())
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_cpu_usage").Set(storeCPUUsage)
