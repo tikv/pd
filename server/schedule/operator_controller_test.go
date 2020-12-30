@@ -663,7 +663,9 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	cluster := mockcluster.NewCluster(config.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
-
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 	addPeerOp := func(i uint64) *operator.Operator {
 		start := fmt.Sprintf("%da", i)
 		end := fmt.Sprintf("%db", i)
