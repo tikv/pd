@@ -115,7 +115,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		readBytes:         heartbeat.GetBytesRead(),
 		readKeys:          heartbeat.GetKeysRead(),
 		opsRead:           heartbeat.GetOps(),
-		opsWrite:          heartbeat.GetOps(),
+		opsWrite:          heartbeat.GetOpsW(),
 		approximateSize:   int64(regionSize),
 		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
 		interval:          heartbeat.GetInterval(),

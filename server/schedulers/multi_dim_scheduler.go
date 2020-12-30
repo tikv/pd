@@ -775,7 +775,7 @@ func (h *multiDimensionScheduler) generateOperator(bs *balanceSolver, ri *region
 	}
 
 	if ri.NeedSplit() {
-		opts := []float64{float64(ri.splitDimID), ri.splitRatio}
+		opts := []float64{float64(ri.splitDimID), ri.splitRatio, 0}
 		op := operator.CreateSplitRegionOperator("hotspot-split-region", region, operator.OpAdmin, pdpb.CheckPolicy_RATIO, nil, opts)
 		return op
 	}

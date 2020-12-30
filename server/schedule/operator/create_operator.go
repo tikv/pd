@@ -85,7 +85,7 @@ func CreateMoveLeaderOperator(desc string, cluster opt.Cluster, region *core.Reg
 		Build(kind)
 }
 
-// CreateSplitRegionOperator creates an operator that splits a region.
+// CreateSplitRegionOperator creates an operator that splits a region by loads.
 func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, keys [][]byte, opts []float64) *Operator {
 	step := SplitRegion{
 		StartKey:  region.GetStartKey(),
@@ -102,8 +102,8 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
-	if len(opts) == 2 {
-		brief += fmt.Sprintf(", with options: split into %f parts under %d-th dimension", opts[1], uint64(opts[0]))
+	if len(opts) == 3 {
+		brief += fmt.Sprintf(", with options: split into %f parts under %d-th dimension, rw-type: %d", opts[1], uint64(opts[0]), uint64(opts[2]))
 	}
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, step)
 }
