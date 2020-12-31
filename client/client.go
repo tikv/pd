@@ -122,11 +122,12 @@ func WithGroup(group string) ScatterRegionOption {
 }
 
 type tsoRequest struct {
-	start    time.Time
-	ctx      context.Context
-	done     chan error
-	physical int64
-	logical  int64
+	start      time.Time
+	clientCtx  context.Context
+	requestCtx context.Context
+	done       chan error
+	physical   int64
+	logical    int64
 }
 
 const (
@@ -325,7 +326,7 @@ func (c *client) tsLoop() {
 
 func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
 	for _, req := range requests {
-		if span := opentracing.SpanFromContext(req.ctx); span != nil {
+		if span := opentracing.SpanFromContext(req.requestCtx); span != nil {
 			opts = append(opts, opentracing.ChildOf(span.Context()))
 		}
 	}
@@ -386,7 +387,7 @@ func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
 
 func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, err error) {
 	for i := 0; i < len(requests); i++ {
-		if span := opentracing.SpanFromContext(requests[i].ctx); span != nil {
+		if span := opentracing.SpanFromContext(requests[i].requestCtx); span != nil {
 			span.Finish()
 		}
 		requests[i].physical, requests[i].logical = physical, firstLogical+int64(i)
@@ -439,8 +440,9 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 		ctx = opentracing.ContextWithSpan(ctx, span)
 	}
 	req := tsoReqPool.Get().(*tsoRequest)
+	req.requestCtx = ctx
+	req.clientCtx = c.ctx
 	req.start = time.Now()
-	req.ctx = ctx
 	req.physical = 0
 	req.logical = 0
 	c.tsoRequests <- req
@@ -472,8 +474,10 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 		cmdDurationWait.Observe(now.Sub(start).Seconds())
 		cmdDurationTSO.Observe(now.Sub(req.start).Seconds())
 		return
-	case <-req.ctx.Done():
-		return 0, 0, errors.WithStack(req.ctx.Err())
+	case <-req.requestCtx.Done():
+		return 0, 0, errors.WithStack(req.requestCtx.Err())
+	case <-req.clientCtx.Done():
+		return 0, 0, errors.WithStack(req.clientCtx.Err())
 	}
 }
 
