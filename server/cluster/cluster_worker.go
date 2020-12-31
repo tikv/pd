@@ -34,8 +34,6 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 
-<<<<<<< HEAD
-=======
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warn("invalid region, zero region peer count",
@@ -43,7 +41,6 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return errors.Errorf("invalid region, zero region peer count: %v", logutil.RedactStringer(core.RegionToHexMeta(region.GetMeta())))
 	}
 
->>>>>>> 941b5fef... logutil, *: implement log desensitization  (#3011)
 	c.RLock()
 	co := c.coordinator
 	c.RUnlock()

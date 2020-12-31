@@ -22,11 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
-<<<<<<< HEAD
-=======
 	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/server/config"
->>>>>>> 941b5fef... logutil, *: implement log desensitization  (#3011)
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"

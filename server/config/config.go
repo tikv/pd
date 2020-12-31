@@ -221,11 +221,8 @@ const (
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
-<<<<<<< HEAD
-=======
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
 	defaultEnableRedactLog    = false
->>>>>>> 941b5fef... logutil, *: implement log desensitization  (#3011)
 )
 
 var (
