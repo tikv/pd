@@ -221,7 +221,6 @@ const (
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
-	defaultDRWaitAsyncTimeout = 2 * time.Minute
 	defaultEnableRedactLog    = false
 )
 
