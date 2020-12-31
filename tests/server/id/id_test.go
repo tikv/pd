@@ -119,3 +119,48 @@ func (s *testAllocIDSuite) TestCommand(c *C) {
 		last = resp.GetId()
 	}
 }
+
+func (s *testAllocIDSuite) TestMonotonicID(c *C) {
+	var err error
+	cluster, err := tests.NewTestCluster(s.ctx, 2)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	var last1 uint64
+	for i := uint64(0); i < 10; i++ {
+		id, err := leaderServer.GetAllocator().Alloc()
+		c.Assert(err, IsNil)
+		c.Assert(id, Greater, last1)
+		last1 = id
+	}
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer = cluster.GetServer(cluster.GetLeader())
+	var last2 uint64
+	for i := uint64(0); i < 10; i++ {
+		id, err := leaderServer.GetAllocator().Alloc()
+		c.Assert(err, IsNil)
+		c.Assert(id, Greater, last2)
+		last2 = id
+	}
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer = cluster.GetServer(cluster.GetLeader())
+	id, err := leaderServer.GetAllocator().Alloc()
+	c.Assert(err, IsNil)
+	c.Assert(id, Greater, last2)
+	var last3 uint64
+	for i := uint64(0); i < 1000; i++ {
+		id, err := leaderServer.GetAllocator().Alloc()
+		c.Assert(err, IsNil)
+		c.Assert(id, Greater, last3)
+		last3 = id
+	}
+}

@@ -970,21 +970,26 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	c.Assert(tc.addLeaderRegion(1, 2, 3, 4), IsNil)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(60))
 	tc.putRegion(region)
+	start := time.Now()
 	{
 		op1 := lb.Schedule(tc)[0]
 		c.Assert(op1, NotNil)
 		c.Assert(oc.AddOperator(op1), IsTrue)
 		c.Assert(oc.RemoveOperator(op1), IsTrue)
 	}
-	for i := 0; i < 10; i++ {
-		c.Assert(lb.Schedule(tc), IsNil)
+	for {
+		time.Sleep(time.Millisecond * 10)
+		ops := lb.Schedule(tc)
+		if time.Since(start) > time.Second {
+			break
+		}
+		c.Assert(ops, IsNil)
 	}
 
 	// reset all stores' limit
 	// scheduling one time needs 1/10 seconds
 	opt.SetAllStoresLimit(storelimit.AddPeer, 600)
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
-	time.Sleep(1 * time.Second)
 	for i := 0; i < 10; i++ {
 		op1 := lb.Schedule(tc)[0]
 		c.Assert(op1, NotNil)
