@@ -44,7 +44,7 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 // @Failure 400 {string} string "The input is invalid."
 // @Router /admin/cache/region/{id} [delete]
 func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Request) {
-	rc := getCluster(r.Context())
+	rc := h.svr.GetRaftCluster()
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)

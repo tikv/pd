@@ -40,7 +40,6 @@ func (m clusterMiddleware) Middleware(h http.Handler) http.Handler {
 			m.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 			return
 		}
-		ctx := withClusterCtx(r.Context(), rc)
-		h.ServeHTTP(w, r.WithContext(ctx))
+		h.ServeHTTP(w, r)
 	})
 }
