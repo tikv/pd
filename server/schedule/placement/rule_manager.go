@@ -614,3 +614,14 @@ func (m *RuleManager) IsInitialized() bool {
 	defer m.RUnlock()
 	return m.initialized
 }
+
+// checkRule check the rule whether will have RuleFit after FitRegion
+// in order to reduce the calculation.
+func checkRule(rule *Rule, stores []*core.StoreInfo) bool {
+	for _, store := range stores {
+		if MatchLabelConstraints(store, rule.LabelConstraints) {
+			return true
+		}
+	}
+	return false
+}
