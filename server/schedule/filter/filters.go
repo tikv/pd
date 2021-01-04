@@ -76,6 +76,13 @@ type Filter interface {
 	Target(opt *config.PersistOptions, store *core.StoreInfo) bool
 }
 
+// ComparingFilter is an interface to filter target store by comparing source and target stores
+type ComparingFilter interface {
+	Filter
+	// GetTargetSourceStore returns the source store when comparing.
+	GetTargetSourceStore() *core.StoreInfo
+}
+
 // Source checks if store can pass all Filters as source store.
 func Source(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter) bool {
 	storeAddress := store.GetAddress()
@@ -95,7 +102,13 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
 		if !filter.Target(opt, store) {
-			filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
+			cfilter, ok := filter.(ComparingFilter)
+			if ok {
+				targetSourceID := fmt.Sprintf("%d", cfilter.GetTargetSourceStore().GetID())
+				filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type(), targetSourceID).Inc()
+			} else {
+				filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
+			}
 			return false
 		}
 	}
@@ -166,6 +179,7 @@ type distinctScoreFilter struct {
 	stores    []*core.StoreInfo
 	policy    string
 	safeScore float64
+	source    *core.StoreInfo
 }
 
 const (
@@ -203,6 +217,7 @@ func newDistinctScoreFilter(scope string, labels []string, stores []*core.StoreI
 		stores:    newStores,
 		safeScore: core.DistinctScore(labels, newStores, source),
 		policy:    policy,
+		source:    source,
 	}
 }
 
@@ -228,6 +243,11 @@ func (f *distinctScoreFilter) Target(opt *config.PersistOptions, store *core.Sto
 	default:
 		return false
 	}
+}
+
+// GetTargetSourceStore implements the ComparingFilter
+func (f *distinctScoreFilter) GetTargetSourceStore() *core.StoreInfo {
+	return f.source
 }
 
 // StoreStateFilter is used to determine whether a store can be selected as the
