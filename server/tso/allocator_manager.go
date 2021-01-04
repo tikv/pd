@@ -70,9 +70,6 @@ type DCLocationInfo struct {
 	ServerIDs []uint64
 	// dc-location (string) -> Suffix sign. It is collected and maintained by the PD leader.
 	Suffix int32
-	// Indicate the allocator of this dc-location needs to have a max local TSO sync before it
-	// becomes the Local TSO Allocator leader.
-	NeedSyncMaxTSO bool
 }
 
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
@@ -258,25 +255,19 @@ func (am *AllocatorManager) compareAndSetMaxSuffix(suffix int32) {
 	}
 }
 
-// GetMaxSuffix returns the max suffix sign we have so far,
-// we will use it to calculate the number of suffix bits
-// we need in the TSO logical part.
-func (am *AllocatorManager) GetMaxSuffix() int32 {
+// GetSuffixBits calculates the bits of suffix sign
+// by the max number of suffix so far,
+// which will be used in the TSO logical part.
+func (am *AllocatorManager) GetSuffixBits() int {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	return am.mu.maxSuffix
+	return CalSuffixBits(am.mu.maxSuffix)
 }
 
-func (am *AllocatorManager) setNeedSyncMaxTSO(dcLocation string, needSyncMaxTSO bool) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	info, ok := am.mu.clusterDCLocations[dcLocation]
-	if !ok {
-		return
-	}
-	if info != nil {
-		info.NeedSyncMaxTSO = needSyncMaxTSO
-	}
+// CalSuffixBits calculates the bits of suffix by the max suffix sign.
+func CalSuffixBits(maxSuffix int32) int {
+	// maxSuffix + 1 because we have the Global TSO holds 0 as the suffix sign
+	return int(math.Ceil(math.Log2(float64(maxSuffix + 1))))
 }
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
@@ -459,7 +450,6 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 				errs.ZapError(err))
 			return
 		}
-		am.setNeedSyncMaxTSO(allocator.dcLocation, false)
 	}
 	am.compareAndSetMaxSuffix(dcLocationInfo.Suffix)
 	allocator.EnableAllocatorLeader()
@@ -628,15 +618,6 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 				continue
 			}
 			if suffix > am.mu.maxSuffix {
-				// Because the number of suffix bits is changing dynamically according to the dc-location number,
-				// there is a corner case may cause the Local TSO is not unique while member changing.
-				// Example:
-				//     t1: xxxxxxxxxxxxxxx1 | 11
-				//     t2: xxxxxxxxxxxxxxx | 111
-				// Please take a look at https://github.com/tikv/pd/issues/3260 for more details.
-				if CalSuffixBits(suffix) != CalSuffixBits(am.mu.maxSuffix) {
-					info.NeedSyncMaxTSO = true
-				}
 				am.mu.maxSuffix = suffix
 			}
 			am.mu.clusterDCLocations[dcLocation].Suffix = suffix
@@ -998,11 +979,9 @@ func (am *AllocatorManager) getDCLocationInfoFromLeader(ctx context.Context, dcL
 			return false, &pdpb.GetDCLocationInfoResponse{}, nil
 		}
 		dcLocationInfo := &pdpb.GetDCLocationInfoResponse{Suffix: info.Suffix}
-		if info.NeedSyncMaxTSO {
-			var err error
-			if dcLocationInfo.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
-				return false, &pdpb.GetDCLocationInfoResponse{}, err
-			}
+		var err error
+		if dcLocationInfo.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
+			return false, &pdpb.GetDCLocationInfoResponse{}, err
 		}
 		return ok, dcLocationInfo, nil
 	}
@@ -1038,11 +1017,6 @@ func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp
 	}
 	// Sync the max local TSO from the other Local TSO Allocators who has been initialized
 	clusterDCLocations := am.GetClusterDCLocations()
-	for dcLocation, info := range clusterDCLocations {
-		if info.NeedSyncMaxTSO {
-			delete(clusterDCLocations, dcLocation)
-		}
-	}
 	maxTSO := &pdpb.Timestamp{}
 	if err := globalAllocator.(*GlobalTSOAllocator).SyncMaxTS(ctx, clusterDCLocations, maxTSO); err != nil {
 		return &pdpb.Timestamp{}, err

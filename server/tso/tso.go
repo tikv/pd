@@ -14,7 +14,6 @@
 package tso
 
 import (
-	"math"
 	"path"
 	"sync"
 	"sync/atomic"
@@ -323,7 +322,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 }
 
 // getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, maxSuffix int32) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
 	var resp pdpb.Timestamp
 
 	if count == 0 {
@@ -351,7 +350,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, m
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical = t.generateTSO(int64(count), CalSuffixBits(maxSuffix))
+		resp.Physical, resp.Logical = t.generateTSO(int64(count), suffixBits)
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
@@ -370,12 +369,6 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, m
 		return resp, nil
 	}
 	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
-}
-
-// CalSuffixBits calculates the bits of suffix by the number of dc-locations.
-func CalSuffixBits(maxSuffix int32) int {
-	// maxSuffix + 1 because we have the Global TSO holds 0 as the suffix sign
-	return int(math.Ceil(math.Log2(float64(maxSuffix + 1))))
 }
 
 // ResetTimestamp is used to reset the timestamp in memory.

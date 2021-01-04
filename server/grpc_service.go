@@ -1041,7 +1041,8 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager, and will collect current max
 // Local TSO if the NeedSyncMaxTSO flag in dc-location info is true.
 func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader(), false); err != nil {
+	var err error
+	if err = s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
 	}
 	if !s.member.IsLeader() {
@@ -1057,11 +1058,16 @@ func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocat
 		Header: s.header(),
 		Suffix: info.Suffix,
 	}
-	if info.NeedSyncMaxTSO {
-		var err error
-		if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
-			return nil, err
-		}
+	// Because the number of suffix bits is changing dynamically according to the dc-location number,
+	// there is a corner case may cause the Local TSO is not unique while member changing.
+	// Example:
+	//     t1: xxxxxxxxxxxxxxx1 | 11
+	//     t2: xxxxxxxxxxxxxxx | 111
+	// So we will force the newly added Local TSO Allocator to have a Global TSO synchronization
+	// when it becomes the Local TSO Allocator leader.
+	// Please take a look at https://github.com/tikv/pd/issues/3260 for more details.
+	if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
