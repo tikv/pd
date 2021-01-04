@@ -164,7 +164,7 @@ test-with-cover: install-go-tools dashboard-ui
 	done
 	@$(FAILPOINT_DISABLE)
 
-check: install-go-tools check-all check-plugin errdoc
+check: install-go-tools check-all errdoc check-plugin
 
 check-all: static lint tidy
 	@echo "checking"
