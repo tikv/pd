@@ -395,7 +395,7 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 		h.regionPendings[regionID] = tmp
 	}
 
-	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
+	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_create").Inc()
 	return true
 }
 
@@ -806,13 +806,13 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
 		switch {
 		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
+			// Both byte rate and key rate are balanced, the best choice.
 			rank = -3
 		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
+			// Byte rate is not worsened, key rate is balanced.
 			rank = -2
 		case byteHot && byteDecRatio <= greatDecRatio:
-			// If belong to the case, byte rate will be more balanced, ignore the key rate.
+			// Byte rate is balanced, ignore the key rate.
 			rank = -1
 		}
 	}

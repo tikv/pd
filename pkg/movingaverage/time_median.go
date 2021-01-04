@@ -29,10 +29,11 @@ type TimeMedian struct {
 }
 
 // NewTimeMedian returns a TimeMedian with given size.
-func NewTimeMedian(aotSize, mfSize int, reportInterval time.Duration) *TimeMedian {
+func NewTimeMedian(aotSize, mfSize, reportInterval int) *TimeMedian {
+	interval := time.Duration(aotSize*reportInterval) * time.Second
 	return &TimeMedian{
-		aotInterval: reportInterval,
-		aot:         NewAvgOverTime(time.Duration(aotSize) * reportInterval),
+		aotInterval: interval,
+		aot:         NewAvgOverTime(interval),
 		mf:          NewMedianFilter(mfSize),
 		aotSize:     aotSize,
 		mfSize:      mfSize,

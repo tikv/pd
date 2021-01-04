@@ -37,6 +37,7 @@ type testCreateOperatorSuite struct {
 
 func (s *testCreateOperatorSuite) SetUpTest(c *C) {
 	opts := config.NewTestOptions()
+	opts.SetEnableJointConsensus(true)
 	s.cluster = mockcluster.NewCluster(opts)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		opt.RejectLeader: {{Key: "noleader", Value: "true"}},

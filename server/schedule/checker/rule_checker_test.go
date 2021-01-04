@@ -337,3 +337,40 @@ func (s *testRuleCheckerSuite) TestIssue2419(c *C) {
 	c.Assert(op.Step(1).(operator.PromoteLearner).ToStore, Equals, uint64(4))
 	c.Assert(op.Step(2).(operator.RemovePeer).FromStore, Equals, uint64(3))
 }
+
+func (s *testRuleCheckerSuite) TestIssue3293(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	err := s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "TiDB_DDL_51",
+		ID:      "0",
+		Role:    placement.Follower,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key: "dc",
+				Values: []string{
+					"sh",
+				},
+				Op: placement.In,
+			},
+		},
+	})
+	c.Assert(err, IsNil)
+	err = s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "TiDB_DDL_51",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	c.Assert(err, IsNil)
+	err = s.ruleManager.DeleteRule("pd", "default")
+	c.Assert(err, IsNil)
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "add-rule-peer")
+}
