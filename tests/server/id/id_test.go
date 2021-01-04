@@ -183,6 +183,7 @@ func (s *testAllocIDSuite) TestPDRestart(c *C) {
 
 	c.Assert(leaderServer.Stop(), IsNil)
 	c.Assert(leaderServer.Run(), IsNil)
+	cluster.WaitLeader()
 
 	for i := uint64(0); i < 10; i++ {
 		id, err := leaderServer.GetAllocator().Alloc()
