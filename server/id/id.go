@@ -59,9 +59,12 @@ func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
+<<<<<<< HEAD
 
 		alloc.end = end
 		alloc.base = alloc.end - allocStep
+=======
+>>>>>>> 78842590... id: fix the bug that id may be duplicated (#3322)
 	}
 
 	alloc.base++
@@ -109,7 +112,13 @@ func (alloc *AllocatorImpl) generate() (uint64, error) {
 
 	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
 	idGauge.WithLabelValues("idalloc").Set(float64(end))
+<<<<<<< HEAD
 	return end, nil
+=======
+	alloc.end = end
+	alloc.base = end - allocStep
+	return nil
+>>>>>>> 78842590... id: fix the bug that id may be duplicated (#3322)
 }
 
 func (alloc *AllocatorImpl) getAllocIDPath() string {
