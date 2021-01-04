@@ -58,8 +58,6 @@ func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 		if err := alloc.generateLocked(); err != nil {
 			return 0, err
 		}
-
-		alloc.base = alloc.end - allocStep
 	}
 
 	alloc.base++
@@ -116,6 +114,7 @@ func (alloc *AllocatorImpl) generateLocked() error {
 	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
 	idGauge.WithLabelValues("idalloc").Set(float64(end))
 	alloc.end = end
+	alloc.base = end - allocStep
 	return nil
 }
 
