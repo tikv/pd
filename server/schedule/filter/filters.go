@@ -35,7 +35,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			if !filters[i].Source(opt, s) {
-				filterCounter.WithLabelValues("filter-source", s.GetAddress(), fmt.Sprintf("%d", s.GetID()), filters[i].Scope(), filters[i].Type()).Inc()
+				filterCounter.WithLabelValues("filter-source", s.GetAddress(), fmt.Sprintf("%d", s.GetID()), filters[i].Scope(), filters[i].Type(), "").Inc()
 				return false
 			}
 			return true
@@ -47,8 +47,17 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
-			if !filters[i].Target(opt, s) {
-				filterCounter.WithLabelValues("filter-target", s.GetAddress(), fmt.Sprintf("%d", s.GetID()), filters[i].Scope(), filters[i].Type()).Inc()
+			filter := filters[i]
+			if !filter.Target(opt, s) {
+				cfilter, ok := filter.(ComparingFilter)
+				if ok {
+					targetSourceID := fmt.Sprintf("%d", cfilter.GetTargetSourceStore().GetID())
+					filterCounter.WithLabelValues("filter-target", s.GetAddress(),
+						fmt.Sprintf("%d", s.GetID()), filters[i].Scope(), filters[i].Type(), targetSourceID).Inc()
+				} else {
+					filterCounter.WithLabelValues("filter-target", s.GetAddress(),
+						fmt.Sprintf("%d", s.GetID()), filters[i].Scope(), filters[i].Type(), "").Inc()
+				}
 				return false
 			}
 			return true
@@ -89,7 +98,7 @@ func Source(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
 		if !filter.Source(opt, store) {
-			filterCounter.WithLabelValues("filter-source", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
+			filterCounter.WithLabelValues("filter-source", storeAddress, storeID, filter.Scope(), filter.Type(), "").Inc()
 			return false
 		}
 	}
@@ -107,7 +116,7 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 				targetSourceID := fmt.Sprintf("%d", cfilter.GetTargetSourceStore().GetID())
 				filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type(), targetSourceID).Inc()
 			} else {
-				filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
+				filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type(), "").Inc()
 			}
 			return false
 		}
