@@ -80,7 +80,7 @@ func (h *ruleHandler) SetAll(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
 		SetRules(rules); err != nil {
-		if errs.ErrRuleContent.Equal(err) && errs.ErrHexDecodingString.Equal(err) {
+		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		} else {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -209,7 +209,7 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 	oldRule := cluster.GetRuleManager().GetRule(rule.GroupID, rule.ID)
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
 		SetRule(&rule); err != nil {
-		if errs.ErrRuleContent.Equal(err) && errs.ErrHexDecodingString.Equal(err) {
+		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		} else {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -272,7 +272,7 @@ func (h *ruleHandler) Batch(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
 		Batch(opts); err != nil {
-		if errs.ErrRuleContent.Equal(err) && errs.ErrHexDecodingString.Equal(err) {
+		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		} else {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -415,7 +415,7 @@ func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 	_, partial := r.URL.Query()["partial"]
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
 		SetAllGroupBundles(groups, !partial); err != nil {
-		if errs.ErrRuleContent.Equal(err) && errs.ErrHexDecodingString.Equal(err) {
+		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		} else {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -499,7 +499,7 @@ func (h *ruleHandler) SetGroupBundle(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
 		SetGroupBundle(group); err != nil {
-		if errs.ErrRuleContent.Equal(err) && errs.ErrHexDecodingString.Equal(err) {
+		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		} else {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
