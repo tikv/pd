@@ -135,7 +135,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 			name:    "Check rule failed",
 			rawData: checkErrData,
 			success: false,
-			response: `"[PD:placement:ErrRuleContent]invalid rule content, decode hex string 'XXXX' error"
+			response: `"[PD:hex:ErrHexDecodingString]decode string XXXX error"
 `,
 		},
 		{
@@ -273,7 +273,7 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 			name:    "Check rule failed",
 			rawData: checkErrData,
 			success: false,
-			response: `"[PD:placement:ErrRuleContent]invalid rule content, decode hex string 'XXXX' error"
+			response: `"[PD:hex:ErrHexDecodingString]decode string XXXX error"
 `,
 		},
 		{
@@ -606,7 +606,7 @@ func (s *testRuleSuite) TestBatch(c *C) {
 			name:    "Check rule failed",
 			rawData: checkErrData,
 			success: false,
-			response: `"[PD:placement:ErrRuleContent]invalid rule content, decode hex string 'XXXX' error"
+			response: `"[PD:hex:ErrHexDecodingString]decode string XXXX error"
 `,
 		},
 		{
