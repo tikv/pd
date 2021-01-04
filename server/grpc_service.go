@@ -59,7 +59,7 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
-	var etcdLeader *pdpb.Member
+	var etcdLeader, pdLeader *pdpb.Member
 	leadID := s.member.GetEtcdLeader()
 	for _, m := range members {
 		if m.MemberId == leadID {
@@ -74,10 +74,18 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
+	leader := s.member.GetLeader()
+	for _, m := range members {
+		if m.MemberId == leader.GetMemberId() {
+			pdLeader = m
+			break
+		}
+	}
+
 	return &pdpb.GetMembersResponse{
 		Header:              s.header(),
 		Members:             members,
-		Leader:              s.member.GetLeader(),
+		Leader:              pdLeader,
 		EtcdLeader:          etcdLeader,
 		TsoAllocatorLeaders: tsoAllocatorLeaders,
 	}, nil
