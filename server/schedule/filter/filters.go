@@ -51,7 +51,7 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 			if !filter.Target(opt, s) {
 				cfilter, ok := filter.(ComparingFilter)
 				if ok {
-					targetSourceID := fmt.Sprintf("%d", cfilter.GetTargetSourceStore().GetID())
+					targetSourceID := fmt.Sprintf("%d", cfilter.GetOldStoreID())
 					filterCounter.WithLabelValues("filter-target", s.GetAddress(),
 						fmt.Sprintf("%d", s.GetID()), filters[i].Scope(), filters[i].Type(), targetSourceID).Inc()
 				} else {
@@ -88,8 +88,8 @@ type Filter interface {
 // ComparingFilter is an interface to filter target store by comparing source and target stores
 type ComparingFilter interface {
 	Filter
-	// GetTargetSourceStore returns the source store when comparing.
-	GetTargetSourceStore() *core.StoreInfo
+	// GetOldStoreID returns the source store when comparing.
+	GetOldStoreID() uint64
 }
 
 // Source checks if store can pass all Filters as source store.
@@ -113,7 +113,7 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 		if !filter.Target(opt, store) {
 			cfilter, ok := filter.(ComparingFilter)
 			if ok {
-				targetSourceID := fmt.Sprintf("%d", cfilter.GetTargetSourceStore().GetID())
+				targetSourceID := fmt.Sprintf("%d", cfilter.GetOldStoreID())
 				filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type(), targetSourceID).Inc()
 			} else {
 				filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type(), "").Inc()
@@ -188,7 +188,7 @@ type distinctScoreFilter struct {
 	stores    []*core.StoreInfo
 	policy    string
 	safeScore float64
-	source    *core.StoreInfo
+	oldStore  uint64
 }
 
 const (
@@ -226,7 +226,7 @@ func newDistinctScoreFilter(scope string, labels []string, stores []*core.StoreI
 		stores:    newStores,
 		safeScore: core.DistinctScore(labels, newStores, source),
 		policy:    policy,
-		source:    source,
+		oldStore:  source.GetID(),
 	}
 }
 
@@ -254,9 +254,9 @@ func (f *distinctScoreFilter) Target(opt *config.PersistOptions, store *core.Sto
 	}
 }
 
-// GetTargetSourceStore implements the ComparingFilter
-func (f *distinctScoreFilter) GetTargetSourceStore() *core.StoreInfo {
-	return f.source
+// GetOldStoreID implements the ComparingFilter
+func (f *distinctScoreFilter) GetOldStoreID() uint64 {
+	return f.oldStore
 }
 
 // StoreStateFilter is used to determine whether a store can be selected as the
@@ -489,6 +489,11 @@ func (f *ruleFitFilter) Target(opt *config.PersistOptions, store *core.StoreInfo
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
+// GetOldStoreID implements the ComparingFilter
+func (f *ruleFitFilter) GetOldStoreID() uint64 {
+	return f.oldStore
+}
+
 type ruleLeaderFitFilter struct {
 	scope            string
 	fitter           RegionFitter
@@ -532,6 +537,10 @@ func (f *ruleLeaderFitFilter) Target(opt *config.PersistOptions, store *core.Sto
 		core.WithLeader(targetPeer))
 	newFit := f.fitter.FitRegion(copyRegion)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
+}
+
+func (f *ruleLeaderFitFilter) GetOldStoreID() uint64 {
+	return f.oldLeaderStoreID
 }
 
 // NewPlacementSafeguard creates a filter that ensures after replace a peer with new
