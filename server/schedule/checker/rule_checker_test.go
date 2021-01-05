@@ -49,6 +49,7 @@ func (s *testRuleCheckerSuite) TestFixRange(c *C) {
 	s.cluster.AddLeaderStore(1, 1)
 	s.cluster.AddLeaderStore(2, 1)
 	s.cluster.AddLeaderStore(3, 1)
+	s.ruleManager.SetStores(s.cluster.GetStores())
 	s.ruleManager.SetRule(&placement.Rule{
 		GroupID:     "test",
 		ID:          "test",
@@ -83,6 +84,7 @@ func (s *testRuleCheckerSuite) TestAddRulePeerWithIsolationLevel(c *C) {
 	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
 	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z1", "rack": "r3", "host": "h1"})
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	s.ruleManager.SetStores(s.cluster.GetStores())
 	s.ruleManager.SetRule(&placement.Rule{
 		GroupID:        "pd",
 		ID:             "test",
@@ -154,6 +156,7 @@ func (s *testRuleCheckerSuite) TestFixOrphanPeers2(c *C) {
 	s.cluster.AddLabelsStore(2, 1, map[string]string{"foo": "bar"})
 	s.cluster.AddLabelsStore(3, 1, map[string]string{"foo": "baz"})
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3)
+	s.ruleManager.SetStores(s.cluster.GetStores())
 	s.ruleManager.SetRule(&placement.Rule{
 		GroupID:  "pd",
 		ID:       "r1",
@@ -190,6 +193,7 @@ func (s *testRuleCheckerSuite) TestFixRoleLeader(c *C) {
 	s.cluster.AddLabelsStore(2, 1, map[string]string{"role": "follower"})
 	s.cluster.AddLabelsStore(3, 1, map[string]string{"role": "voter"})
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	s.ruleManager.SetStores(s.cluster.GetStores())
 	s.ruleManager.SetRule(&placement.Rule{
 		GroupID:  "pd",
 		ID:       "r1",
@@ -221,6 +225,7 @@ func (s *testRuleCheckerSuite) TestFixRoleLeaderIssue3130(c *C) {
 	s.cluster.AddLabelsStore(1, 1, map[string]string{"role": "follower"})
 	s.cluster.AddLabelsStore(2, 1, map[string]string{"role": "leader"})
 	s.cluster.AddLeaderRegion(1, 1, 2)
+	s.ruleManager.SetStores(s.cluster.GetStores())
 	s.ruleManager.SetRule(&placement.Rule{
 		GroupID:  "pd",
 		ID:       "r1",
@@ -255,6 +260,7 @@ func (s *testRuleCheckerSuite) TestBetterReplacement(c *C) {
 	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
 	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host3"})
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	s.ruleManager.SetStores(s.cluster.GetStores())
 	s.ruleManager.SetRule(&placement.Rule{
 		GroupID:        "pd",
 		ID:             "test",
@@ -279,6 +285,7 @@ func (s *testRuleCheckerSuite) TestBetterReplacement2(c *C) {
 	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "host": "host3"})
 	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "host1"})
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	s.ruleManager.SetStores(s.cluster.GetStores())
 	s.ruleManager.SetRule(&placement.Rule{
 		GroupID:        "pd",
 		ID:             "test",
@@ -302,6 +309,7 @@ func (s *testRuleCheckerSuite) TestNoBetterReplacement(c *C) {
 	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
 	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	s.ruleManager.SetStores(s.cluster.GetStores())
 	s.ruleManager.SetRule(&placement.Rule{
 		GroupID:        "pd",
 		ID:             "test",
@@ -345,6 +353,7 @@ func (s *testRuleCheckerSuite) TestIssue3293(c *C) {
 	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
 	s.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	s.ruleManager.SetStores(s.cluster.GetStores())
 	err := s.ruleManager.SetRule(&placement.Rule{
 		GroupID: "TiDB_DDL_51",
 		ID:      "0",
@@ -352,15 +361,16 @@ func (s *testRuleCheckerSuite) TestIssue3293(c *C) {
 		Count:   1,
 		LabelConstraints: []placement.LabelConstraint{
 			{
-				Key: "dc",
+				Key: "host",
 				Values: []string{
-					"sh",
+					"host5",
 				},
 				Op: placement.In,
 			},
 		},
 	})
 	c.Assert(err, IsNil)
+	s.cluster.DeleteStore(s.cluster.TakeStore(5))
 	err = s.ruleManager.SetRule(&placement.Rule{
 		GroupID: "TiDB_DDL_51",
 		ID:      "default",
@@ -373,4 +383,117 @@ func (s *testRuleCheckerSuite) TestIssue3293(c *C) {
 	op := s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "add-rule-peer")
+}
+
+func (s *testRuleCheckerSuite) TestIssue3299(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"dc": "sh"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	s.ruleManager.SetStores(s.cluster.GetStores())
+
+	err := s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "p",
+		ID:      "0",
+		Role:    placement.Follower,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key: "host",
+				Values: []string{
+					"host5",
+				},
+				Op: placement.In,
+			},
+		},
+	})
+	c.Assert(err, NotNil)
+
+	err = s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "p",
+		ID:      "0",
+		Role:    placement.Follower,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key: "ho",
+				Values: []string{
+					"sh",
+				},
+				Op: placement.In,
+			},
+		},
+	})
+	c.Assert(err, NotNil)
+
+	err = s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "p",
+		ID:      "0",
+		Role:    placement.Follower,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key: "host",
+				Values: []string{
+					"host1",
+				},
+				Op: placement.In,
+			},
+			{
+				Key: "host",
+				Values: []string{
+					"host1",
+				},
+				Op: placement.NotIn,
+			},
+		},
+	})
+	c.Assert(err, NotNil)
+
+	err = s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "p",
+		ID:      "0",
+		Role:    placement.Follower,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key: "host",
+				Values: []string{
+					"host1",
+				},
+				Op: placement.In,
+			},
+			{
+				Key: "host",
+				Values: []string{
+					"host3",
+				},
+				Op: placement.In,
+			},
+		},
+	})
+	c.Assert(err, NotNil)
+
+	err = s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "p",
+		ID:      "0",
+		Role:    placement.Follower,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key: "host",
+				Values: []string{
+					"host1",
+				},
+				Op: placement.In,
+			},
+			{
+				Key: "host",
+				Values: []string{
+					"host1",
+				},
+				Op: placement.In,
+			},
+		},
+	})
+	c.Assert(err, IsNil)
 }
