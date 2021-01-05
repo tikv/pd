@@ -78,12 +78,8 @@ func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*Ho
 
 // RandHotRegionFromStore random picks a hot region in specify store.
 func (w *HotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, minHotDegree int) *HotPeerStat {
-	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok {
-		for _, i := range rand.Perm(len(stats)) {
-			if stats[i].HotDegree >= minHotDegree {
-				return stats[i]
-			}
-		}
+	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
+		return stats[rand.Intn(len(stats))]
 	}
 	return nil
 }
