@@ -48,4 +48,7 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
-replace github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
+replace (
+	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
+	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
+)
