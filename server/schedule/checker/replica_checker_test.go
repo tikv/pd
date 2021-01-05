@@ -148,7 +148,19 @@ func (s *testReplicaCheckerSuite) TestOfflineWithOneReplica(c *C) {
 	c.Assert(op.Desc(), Equals, "replace-offline-replica")
 }
 
-func (s *testReplicaCheckerSuite) testDownPeer(c *C, aliveRole metapb.PeerRole) *operator.Operator {
+func (s *testReplicaCheckerSuite) TestDownPeer(c *C) {
+	// down a peer, the number of normal peers(except learner) is enough.
+	op := s.downPeerAndCheck(c, metapb.PeerRole_Voter)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "remove-extra-down-replica")
+
+	// down a peer,the number of peers(except learner) is not enough.
+	op = s.downPeerAndCheck(c, metapb.PeerRole_Learner)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "replace-down-replica")
+}
+
+func (s *testReplicaCheckerSuite) downPeerAndCheck(c *C, aliveRole metapb.PeerRole) *operator.Operator {
 	s.cluster.SetMaxReplicas(2)
 	s.cluster.SetStoreUp(1)
 	downStoreID := uint64(3)
@@ -180,18 +192,6 @@ func (s *testReplicaCheckerSuite) testDownPeer(c *C, aliveRole metapb.PeerRole) 
 	r = r.Clone(core.WithDownPeers(append(r.GetDownPeers(), downPeer)))
 	c.Assert(len(r.GetDownPeers()), Equals, 1)
 	return s.rc.Check(r)
-}
-
-func (s *testReplicaCheckerSuite) TestDownPeer(c *C) {
-	// down a peer, the number of normal peers(except learner) is enough.
-	op := s.testDownPeer(c, metapb.PeerRole_Voter)
-	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "remove-extra-down-replica")
-
-	// down a peer,the number of peers(except learner) is not enough.
-	op = s.testDownPeer(c, metapb.PeerRole_Learner)
-	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "replace-down-replica")
 }
 
 func (s *testReplicaCheckerSuite) TestBasic(c *C) {
