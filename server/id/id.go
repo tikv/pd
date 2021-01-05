@@ -55,13 +55,9 @@ func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 	defer alloc.mu.Unlock()
 
 	if alloc.base == alloc.end {
-		end, err := alloc.generate()
-		if err != nil {
+		if err := alloc.generateLocked(); err != nil {
 			return 0, err
 		}
-
-		alloc.end = end
-		alloc.base = alloc.end - allocStep
 	}
 
 	alloc.base++
@@ -69,11 +65,19 @@ func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 	return alloc.base, nil
 }
 
-func (alloc *AllocatorImpl) generate() (uint64, error) {
+// Generate synchronizes and generates id range.
+func (alloc *AllocatorImpl) Generate() error {
+	alloc.mu.Lock()
+	defer alloc.mu.Unlock()
+
+	return alloc.generateLocked()
+}
+
+func (alloc *AllocatorImpl) generateLocked() error {
 	key := alloc.getAllocIDPath()
 	value, err := etcdutil.GetValue(alloc.client, key)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	var (
@@ -88,7 +92,7 @@ func (alloc *AllocatorImpl) generate() (uint64, error) {
 		// update the key
 		end, err = typeutil.BytesToUint64(value)
 		if err != nil {
-			return 0, err
+			return err
 		}
 
 		cmp = clientv3.Compare(clientv3.Value(key), "=", string(value))
@@ -101,15 +105,17 @@ func (alloc *AllocatorImpl) generate() (uint64, error) {
 	t := txn.If(append([]clientv3.Cmp{cmp}, clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member))...)
 	resp, err := t.Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
-		return 0, errs.ErrEtcdTxn.Wrap(err).GenWithStackByArgs()
+		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByArgs()
 	}
 	if !resp.Succeeded {
-		return 0, errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
 	idGauge.WithLabelValues("idalloc").Set(float64(end))
-	return end, nil
+	alloc.end = end
+	alloc.base = end - allocStep
+	return nil
 }
 
 func (alloc *AllocatorImpl) getAllocIDPath() string {

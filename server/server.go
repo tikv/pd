@@ -1152,6 +1152,10 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
 		return
 	}
+	if err := s.idAllocator.Generate(); err != nil {
+		log.Error("failed to sync id from etcd", errs.ZapError(err))
+		return
+	}
 	s.member.EnableLeader()
 	defer s.member.DisableLeader()
 

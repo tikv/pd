@@ -24,6 +24,7 @@ import (
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -389,7 +390,8 @@ func (m *ModeManager) updateProgress() {
 	for len(m.drRecoverKey) > 0 || m.drRecoverCount == 0 {
 		regions := m.cluster.ScanRegions(m.drRecoverKey, nil, regionScanBatchSize)
 		if len(regions) == 0 {
-			log.Warn("scan empty regions", zap.ByteString("recover-key", m.drRecoverKey))
+			log.Warn("scan empty regions",
+				logutil.ZapRedactByteString("recover-key", m.drRecoverKey))
 			return
 		}
 		for i, r := range regions {
@@ -440,7 +442,10 @@ func (m *ModeManager) estimateProgress() float32 {
 
 func (m *ModeManager) checkRegionRecover(region *core.RegionInfo, startKey []byte) bool {
 	if !bytes.Equal(startKey, region.GetStartKey()) {
-		log.Warn("found region gap", zap.ByteString("key", startKey), zap.ByteString("region-start-key", region.GetStartKey()), zap.Uint64("region-id", region.GetID()))
+		log.Warn("found region gap",
+			logutil.ZapRedactByteString("key", startKey),
+			logutil.ZapRedactByteString("region-start-key", region.GetStartKey()),
+			zap.Uint64("region-id", region.GetID()))
 		return false
 	}
 	return region.GetReplicationStatus().GetStateId() == m.drAutoSync.StateID &&

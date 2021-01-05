@@ -28,6 +28,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/schedule"
@@ -142,6 +143,8 @@ type Config struct {
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
+	// EnableRedactLog indicates that whether redact log, 0 is disable. 1 is enable.
+	EnableRedactLog bool `toml:"enable-redact-log" json:"enable-redact-log"`
 }
 
 // NewConfig creates a new config.
@@ -218,6 +221,7 @@ const (
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
+	defaultEnableRedactLog    = false
 )
 
 var (
@@ -535,6 +539,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	c.Dashboard.adjust(configMetaData.Child("dashboard"))
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
+
+	if !configMetaData.IsDefined("enable-redact-log") {
+		c.EnableRedactLog = defaultEnableRedactLog
+	}
 
 	return nil
 }
@@ -1073,6 +1081,7 @@ func (c *Config) SetupLogger() error {
 	}
 	c.logger = lg
 	c.logProps = p
+	logutil.SetRedactLog(c.EnableRedactLog)
 	return nil
 }
 

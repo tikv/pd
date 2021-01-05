@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"go.uber.org/zap"
@@ -31,6 +32,13 @@ import (
 func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if err := c.processRegionHeartbeat(region); err != nil {
 		return err
+	}
+
+	// If the region peer count is 0, then we should not handle this.
+	if len(region.GetPeers()) == 0 {
+		log.Warn("invalid region, zero region peer count",
+			logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
+		return errors.Errorf("invalid region, zero region peer count: %v", logutil.RedactStringer(core.RegionToHexMeta(region.GetMeta())))
 	}
 
 	c.RLock()
@@ -80,7 +88,7 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
 	region := c.GetRegionByKey(startKey)
 	if region == nil {
-		return errors.Errorf("region not found, request region: %v", core.RegionToHexMeta(reqRegion))
+		return errors.Errorf("region not found, request region: %v", logutil.RedactStringer(core.RegionToHexMeta(reqRegion)))
 	}
 	// If the request epoch is less than current region epoch, then returns an error.
 	reqRegionEpoch := reqRegion.GetRegionEpoch()
@@ -183,8 +191,8 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	err := c.checkSplitRegion(left, right)
 	if err != nil {
 		log.Warn("report split region is invalid",
-			zap.Stringer("left-region", core.RegionToHexMeta(left)),
-			zap.Stringer("right-region", core.RegionToHexMeta(right)),
+			logutil.ZapRedactStringer("left-region", core.RegionToHexMeta(left)),
+			logutil.ZapRedactStringer("right-region", core.RegionToHexMeta(right)),
 			errs.ZapError(err))
 		return nil, err
 	}
@@ -195,7 +203,7 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	originRegion.StartKey = left.GetStartKey()
 	log.Info("region split, generate new region",
 		zap.Uint64("region-id", originRegion.GetId()),
-		zap.Stringer("region-meta", core.RegionToHexMeta(left)))
+		logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(left)))
 	return &pdpb.ReportSplitResponse{}, nil
 }
 
