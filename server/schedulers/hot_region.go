@@ -197,14 +197,12 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 
 	storesLoads := cluster.GetStoresLoads()
 
-	minHotDegree := cluster.GetOpts().GetHotRegionCacheHitsThreshold()
 	{ // update read statistics
 		regionRead := cluster.RegionReadStats()
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
 			storesLoads,
 			h.pendingSums[readLeader],
 			regionRead,
-			minHotDegree,
 			read, core.LeaderKind)
 	}
 
@@ -214,14 +212,12 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			storesLoads,
 			h.pendingSums[writeLeader],
 			regionWrite,
-			minHotDegree,
 			write, core.LeaderKind)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storesLoads,
 			h.pendingSums[writePeer],
 			regionWrite,
-			minHotDegree,
 			write, core.RegionKind)
 	}
 }
@@ -265,7 +261,6 @@ func summaryStoresLoad(
 	storesLoads map[uint64][]float64,
 	storePendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
-	minHotDegree int,
 	rwTy rwType,
 	kind core.ResourceKind,
 ) map[uint64]*storeLoadDetail {
@@ -289,7 +284,7 @@ func summaryStoresLoad(
 		{
 			byteSum := 0.0
 			keySum := 0.0
-			for _, peer := range filterHotPeers(kind, minHotDegree, storeHotPeers[id]) {
+			for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
 				byteSum += peer.GetByteRate()
 				keySum += peer.GetKeyRate()
 				hotPeers = append(hotPeers, peer.Clone())
@@ -359,13 +354,11 @@ func summaryStoresLoad(
 // filterHotPeers filter the peer whose hot degree is less than minHotDegress
 func filterHotPeers(
 	kind core.ResourceKind,
-	minHotDegree int,
 	peers []*statistics.HotPeerStat,
 ) []*statistics.HotPeerStat {
 	var ret []*statistics.HotPeerStat
 	for _, peer := range peers {
-		if (kind == core.LeaderKind && !peer.IsLeader()) ||
-			peer.HotDegree < minHotDegree {
+		if kind == core.LeaderKind && !peer.IsLeader() {
 			continue
 		}
 		ret = append(ret, peer)

@@ -66,21 +66,21 @@ func (w *HotCache) Update(item *HotPeerStat) {
 }
 
 // RegionStats returns hot items according to kind
-func (w *HotCache) RegionStats(kind FlowKind) map[uint64][]*HotPeerStat {
+func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*HotPeerStat {
 	switch kind {
 	case WriteFlow:
-		return w.writeFlow.RegionStats()
+		return w.writeFlow.RegionStats(minHotDegree)
 	case ReadFlow:
-		return w.readFlow.RegionStats()
+		return w.readFlow.RegionStats(minHotDegree)
 	}
 	return nil
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.
-func (w *HotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotDegree int) *HotPeerStat {
-	if stats, ok := w.RegionStats(kind)[storeID]; ok {
+func (w *HotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, minHotDegree int) *HotPeerStat {
+	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok {
 		for _, i := range rand.Perm(len(stats)) {
-			if stats[i].HotDegree >= hotDegree {
+			if stats[i].HotDegree >= minHotDegree {
 				return stats[i]
 			}
 		}
@@ -89,9 +89,9 @@ func (w *HotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotDegr
 }
 
 // IsRegionHot checks if the region is hot.
-func (w *HotCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
-	return w.writeFlow.IsRegionHot(region, hotDegree) ||
-		w.readFlow.IsRegionHot(region, hotDegree)
+func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
+	return w.writeFlow.IsRegionHot(region, minHotDegree) ||
+		w.readFlow.IsRegionHot(region, minHotDegree)
 }
 
 // CollectMetrics collects the hot cache metrics.
