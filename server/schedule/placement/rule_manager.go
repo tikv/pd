@@ -201,7 +201,7 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 		}
 	}
 
-	if !checkRule(r, m.stores) {
+	if len(m.stores) > 0 && !checkRule(r, m.stores) {
 		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("rule '%s' from rule group '%s' can not match any store", r.ID, r.GroupID))
 	}
 
