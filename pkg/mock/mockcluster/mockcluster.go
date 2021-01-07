@@ -109,11 +109,13 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 }
 
 // RegionReadStats returns hot region's read stats.
+// The result only includes peers that are hot enough.
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	return mc.HotCache.RegionStats(statistics.ReadFlow, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // RegionWriteStats returns hot region's write stats.
+// The result only includes peers that are hot enough.
 func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	return mc.HotCache.RegionStats(statistics.WriteFlow, mc.GetHotRegionCacheHitsThreshold())
 }
