@@ -391,109 +391,89 @@ func (s *testRuleCheckerSuite) TestIssue3299(c *C) {
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
 	s.ruleManager.SetStores(s.cluster.GetStores())
 
-	err := s.ruleManager.SetRule(&placement.Rule{
-		GroupID: "p",
-		ID:      "0",
-		Role:    placement.Follower,
-		Count:   1,
-		LabelConstraints: []placement.LabelConstraint{
-			{
-				Key: "host",
-				Values: []string{
-					"host5",
+	testCases := []struct {
+		constraints []placement.LabelConstraint
+		err         string
+	}{
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host5"},
+					Op:     placement.In,
 				},
-				Op: placement.In,
 			},
+			err: ".*can not match any store",
 		},
-	})
-	c.Assert(err, NotNil)
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "ho",
+					Values: []string{"sh"},
+					Op:     placement.In,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.NotIn,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+				{
+					Key:    "host",
+					Values: []string{"host3"},
+					Op:     placement.In,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+			},
+			err: "",
+		},
+	}
 
-	err = s.ruleManager.SetRule(&placement.Rule{
-		GroupID: "p",
-		ID:      "0",
-		Role:    placement.Follower,
-		Count:   1,
-		LabelConstraints: []placement.LabelConstraint{
-			{
-				Key: "ho",
-				Values: []string{
-					"sh",
-				},
-				Op: placement.In,
-			},
-		},
-	})
-	c.Assert(err, NotNil)
-
-	err = s.ruleManager.SetRule(&placement.Rule{
-		GroupID: "p",
-		ID:      "0",
-		Role:    placement.Follower,
-		Count:   1,
-		LabelConstraints: []placement.LabelConstraint{
-			{
-				Key: "host",
-				Values: []string{
-					"host1",
-				},
-				Op: placement.In,
-			},
-			{
-				Key: "host",
-				Values: []string{
-					"host1",
-				},
-				Op: placement.NotIn,
-			},
-		},
-	})
-	c.Assert(err, NotNil)
-
-	err = s.ruleManager.SetRule(&placement.Rule{
-		GroupID: "p",
-		ID:      "0",
-		Role:    placement.Follower,
-		Count:   1,
-		LabelConstraints: []placement.LabelConstraint{
-			{
-				Key: "host",
-				Values: []string{
-					"host1",
-				},
-				Op: placement.In,
-			},
-			{
-				Key: "host",
-				Values: []string{
-					"host3",
-				},
-				Op: placement.In,
-			},
-		},
-	})
-	c.Assert(err, NotNil)
-
-	err = s.ruleManager.SetRule(&placement.Rule{
-		GroupID: "p",
-		ID:      "0",
-		Role:    placement.Follower,
-		Count:   1,
-		LabelConstraints: []placement.LabelConstraint{
-			{
-				Key: "host",
-				Values: []string{
-					"host1",
-				},
-				Op: placement.In,
-			},
-			{
-				Key: "host",
-				Values: []string{
-					"host1",
-				},
-				Op: placement.In,
-			},
-		},
-	})
-	c.Assert(err, IsNil)
+	for _, t := range testCases {
+		err := s.ruleManager.SetRule(&placement.Rule{
+			GroupID:          "p",
+			ID:               "0",
+			Role:             placement.Follower,
+			Count:            1,
+			LabelConstraints: t.constraints,
+		})
+		if t.err != "" {
+			c.Assert(err, ErrorMatches, t.err)
+		} else {
+			c.Assert(err, IsNil)
+		}
+	}
 }
