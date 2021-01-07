@@ -220,7 +220,7 @@ func (r *ReplicaChecker) checkLocationReplacement(region *core.RegionInfo) *oper
 
 func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status string) *operator.Operator {
 	// Check the number of replicas first.
-	if len(region.GetPeers()) > r.opts.GetMaxReplicas() {
+	if len(region.GetVoters()) > r.opts.GetMaxReplicas() {
 		removeExtra := fmt.Sprintf("remove-extra-%s-replica", status)
 		op, err := operator.CreateRemovePeerOperator(removeExtra, r.cluster, operator.OpReplica, region, storeID)
 		if err != nil {

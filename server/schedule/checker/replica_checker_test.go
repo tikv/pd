@@ -148,6 +148,52 @@ func (s *testReplicaCheckerSuite) TestOfflineWithOneReplica(c *C) {
 	c.Assert(op.Desc(), Equals, "replace-offline-replica")
 }
 
+func (s *testReplicaCheckerSuite) TestDownPeer(c *C) {
+	// down a peer, the number of normal peers(except learner) is enough.
+	op := s.downPeerAndCheck(c, metapb.PeerRole_Voter)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "remove-extra-down-replica")
+
+	// down a peer,the number of peers(except learner) is not enough.
+	op = s.downPeerAndCheck(c, metapb.PeerRole_Learner)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "replace-down-replica")
+}
+
+func (s *testReplicaCheckerSuite) downPeerAndCheck(c *C, aliveRole metapb.PeerRole) *operator.Operator {
+	s.cluster.SetMaxReplicas(2)
+	s.cluster.SetStoreUp(1)
+	downStoreID := uint64(3)
+	peers := []*metapb.Peer{
+		{
+			Id:      4,
+			StoreId: 1,
+			Role:    aliveRole,
+		},
+		{
+			Id:      14,
+			StoreId: downStoreID,
+		},
+		{
+			Id:      15,
+			StoreId: 4,
+		},
+	}
+	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers}, peers[0])
+	s.cluster.PutRegion(r)
+	s.cluster.SetStoreDown(downStoreID)
+	downPeer := &pdpb.PeerStats{
+		Peer: &metapb.Peer{
+			Id:      14,
+			StoreId: downStoreID,
+		},
+		DownSeconds: 24 * 60 * 60,
+	}
+	r = r.Clone(core.WithDownPeers(append(r.GetDownPeers(), downPeer)))
+	c.Assert(len(r.GetDownPeers()), Equals, 1)
+	return s.rc.Check(r)
+}
+
 func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
