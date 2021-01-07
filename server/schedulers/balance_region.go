@@ -171,6 +171,13 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			}
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 
+			// Skip the empty region
+			if region.GetApproximateSize() <= core.EmptyRegionApproximateSize {
+				log.Debug("region is empty", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
+				schedulerCounter.WithLabelValues(s.GetName(), "empty-region").Inc()
+				continue
+			}
+
 			// Skip hot regions.
 			if cluster.IsRegionHot(region) {
 				log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
