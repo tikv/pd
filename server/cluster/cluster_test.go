@@ -125,6 +125,23 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestUpStore(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	// Put 1 stores.
+	for _, store := range newTestStores(1, "2.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+
+	cluster.RemoveStore(1)
+	c.Assert(cluster.UpStore(1), IsNil)
+	cluster.BuryStore(1, true)
+	c.Assert(cluster.UpStore(1), NotNil) // tombstone
+	c.Assert(cluster.UpStore(5), NotNil) // not found
+}
+
 func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)

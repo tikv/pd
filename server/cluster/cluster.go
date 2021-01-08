@@ -1009,6 +1009,28 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 	return nil
 }
 
+// UpStore sets up a store's state to Up.
+// State transition: Offline -> Up
+func (c *RaftCluster) UpStore(storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	if store.GetState() == metapb.StoreState_Tombstone {
+		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
+	}
+
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Up))
+	log.Warn("up store",
+		zap.Uint64("store-id", storeID),
+		zap.Stringer("old-state", store.GetState()))
+	return c.putStoreLocked(newStore)
+}
+
 // RemoveStore marks a store as offline in cluster.
 // State transition: Up -> Offline.
 func (c *RaftCluster) RemoveStore(storeID uint64) error {

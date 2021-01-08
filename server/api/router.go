@@ -118,6 +118,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	storeHandler := newStoreHandler(handler, rd)
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Get).Methods("GET")
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Delete).Methods("DELETE")
+	clusterRouter.HandleFunc("/store/{id}", storeHandler.UpStore).Methods("POST")
 	clusterRouter.HandleFunc("/store/{id}/state", storeHandler.SetState).Methods("POST")
 	clusterRouter.HandleFunc("/store/{id}/label", storeHandler.SetLabels).Methods("POST")
 	clusterRouter.HandleFunc("/store/{id}/weight", storeHandler.SetWeight).Methods("POST")

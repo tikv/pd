@@ -256,6 +256,31 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	}
 }
 
+func (s *testStoreSuite) TestStoreUp(c *C) {
+	table := []struct {
+		id     int
+		status int
+	}{
+		{
+			id:     4, //up
+			status: http.StatusOK,
+		},
+		{
+			id:     6, // offline
+			status: http.StatusOK,
+		},
+		{
+			id:     7, // tombstone
+			status: http.StatusGone,
+		},
+	}
+	for _, t := range table {
+		url := fmt.Sprintf("%s/store/%d", s.urlPrefix, t.id)
+		status, _ := requestStatusBody(c, testDialClient, http.MethodPost, url)
+		c.Assert(status, Equals, t.status)
+	}
+}
+
 func (s *testStoreSuite) TestStoreSetState(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
 	info := StoreInfo{}

@@ -207,6 +207,40 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags store
+// @Summary Take down a store from the cluster.
+// @Param id path integer true "Store Id"
+// @Produce json
+// @Success 200 {string} string "The store is set as Up."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The store does not exist."
+// @Failure 410 {string} string "The store has already been removed."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /store/{id} [post]
+func (h *storeHandler) UpStore(w http.ResponseWriter, r *http.Request) {
+	rc, _ := h.GetRaftCluster()
+	vars := mux.Vars(r)
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		return
+	}
+
+	err := rc.UpStore(storeID)
+
+	if errors.ErrorEqual(err, errs.ErrStoreTombstone.FastGenByArgs(storeID)) {
+		h.rd.JSON(w, http.StatusGone, err.Error())
+		return
+	}
+
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, "The store is set as Up.")
+}
+
+// @Tags store
 // @Summary Set the store's state.
 // @Param id path integer true "Store Id"
 // @Param state query string true "state" Enums(Up, Offline, Tombstone)
