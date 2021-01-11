@@ -66,10 +66,20 @@ type allocatorGroup struct {
 // DCLocationInfo is used to record some dc-location related info,
 // such as suffix sign and server IDs in this dc-location.
 type DCLocationInfo struct {
-	// dc-location/global (string) -> Member ID
+	// dc-location/global (string) -> Member IDs
 	ServerIDs []uint64
 	// dc-location (string) -> Suffix sign. It is collected and maintained by the PD leader.
 	Suffix int32
+}
+
+func (info *DCLocationInfo) clone() DCLocationInfo {
+	copiedInfo := DCLocationInfo{
+		Suffix: info.Suffix,
+	}
+	// Make a deep copy here for the slice
+	copiedInfo.ServerIDs = make([]uint64, len(info.ServerIDs))
+	copy(copiedInfo.ServerIDs, info.ServerIDs)
+	return copiedInfo
 }
 
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
@@ -224,7 +234,7 @@ func (am *AllocatorManager) GetDCLocationInfo(dcLocation string) (DCLocationInfo
 	if !ok {
 		return DCLocationInfo{}, false
 	}
-	return *infoPtr, true
+	return infoPtr.clone(), true
 }
 
 // GetClusterDCLocations returns all dc-locations of a cluster with a copy of map,
@@ -234,7 +244,7 @@ func (am *AllocatorManager) GetClusterDCLocations() map[string]DCLocationInfo {
 	defer am.mu.RUnlock()
 	dcLocationMap := make(map[string]DCLocationInfo)
 	for dcLocation, info := range am.mu.clusterDCLocations {
-		dcLocationMap[dcLocation] = *info
+		dcLocationMap[dcLocation] = info.clone()
 	}
 	return dcLocationMap
 }
