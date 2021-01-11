@@ -207,7 +207,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags store
-// @Summary Take down a store from the cluster.
+// @Summary Take up a store from offline.
 // @Param id path integer true "Store Id"
 // @Produce json
 // @Success 200 {string} string "The store is set as Up."

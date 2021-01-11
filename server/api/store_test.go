@@ -257,6 +257,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 }
 
 func (s *testStoreSuite) TestStoreUp(c *C) {
+	// s.TestStoresList(c)
 	table := []struct {
 		id     int
 		status int
@@ -279,6 +280,13 @@ func (s *testStoreSuite) TestStoreUp(c *C) {
 		status, _ := requestStatusBody(c, testDialClient, http.MethodPost, url)
 		c.Assert(status, Equals, t.status)
 	}
+
+	// offline store 6 back
+	url := fmt.Sprintf("%s/store/%d", s.urlPrefix, 6)
+	status, _ := requestStatusBody(c, testDialClient, http.MethodDelete, url)
+	c.Assert(status, Equals, http.StatusOK)
+	// make sure the status are back
+	s.TestStoresList(c)
 }
 
 func (s *testStoreSuite) TestStoreSetState(c *C) {
