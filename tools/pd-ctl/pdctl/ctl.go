@@ -40,7 +40,6 @@ var (
 		URL: "http://127.0.0.1:2379",
 	}
 
-	detach            bool
 	interact          bool
 	version           bool
 	readlineCompleter *readline.PrefixCompleter
@@ -113,7 +112,6 @@ func getInteractCmd(args []string) *cobra.Command {
 func getMainCmd(args []string) *cobra.Command {
 	rootCmd := getBasicCmd()
 
-	rootCmd.Flags().BoolVarP(&detach, "detach", "d", true, "Run pdctl without readline.")
 	rootCmd.Flags().BoolVarP(&interact, "interact", "i", false, "Run pdctl with readline.")
 	rootCmd.Flags().BoolVarP(&version, "version", "V", false, "Print version information and exit.")
 	rootCmd.Run = pdctlRun
