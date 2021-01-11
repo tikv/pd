@@ -136,26 +136,30 @@ func hiddenFlag(cmd *cobra.Command) {
 
 // MainStart start main command
 func MainStart(args []string) {
-	startCmd(getMainCmd, args)
+	if err := startCmd(getMainCmd, args); err != nil {
+		os.Exit(1)
+	}
 }
 
 // Start start interact command
 func Start(args []string) {
-	startCmd(getInteractCmd, args)
+	_ = startCmd(getInteractCmd, args)
 }
 
-func startCmd(getCmd func([]string) *cobra.Command, args []string) {
+func startCmd(getCmd func([]string) *cobra.Command, args []string) error {
 	rootCmd := getCmd(args)
 	if len(commandFlags.CAPath) != 0 {
 		if err := command.InitHTTPSClient(commandFlags.CAPath, commandFlags.CertPath, commandFlags.KeyPath); err != nil {
 			rootCmd.Println(err)
-			return
+			return err
 		}
 	}
 
 	if err := rootCmd.Execute(); err != nil {
 		rootCmd.Println(err)
+		return err
 	}
+	return nil
 }
 
 func loop() {
