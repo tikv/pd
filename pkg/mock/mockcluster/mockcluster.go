@@ -88,9 +88,9 @@ func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 	mc.PutRegion(r)
 }
 
-// GetStoresStats gets stores statistics.
-func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
-	return mc.HotStat.StoresStats
+// GetStoresLoads gets stores load statistics.
+func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
+	return mc.HotStat.GetStoresLoads()
 }
 
 // GetStoreRegionCount gets region count with a given store.
@@ -109,13 +109,15 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 }
 
 // RegionReadStats returns hot region's read stats.
+// The result only includes peers that are hot enough.
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
-	return mc.HotCache.RegionStats(statistics.ReadFlow)
+	return mc.HotCache.RegionStats(statistics.ReadFlow, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // RegionWriteStats returns hot region's write stats.
+// The result only includes peers that are hot enough.
 func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
-	return mc.HotCache.RegionStats(statistics.WriteFlow)
+	return mc.HotCache.RegionStats(statistics.WriteFlow, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.

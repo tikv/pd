@@ -135,7 +135,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 			name:    "Check rule failed",
 			rawData: checkErrData,
 			success: false,
-			response: `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
+			response: `"[PD:hex:ErrHexDecodingString]decode string XXXX error"
 `,
 		},
 		{
@@ -273,7 +273,7 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 			name:    "Check rule failed",
 			rawData: checkErrData,
 			success: false,
-			response: `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
+			response: `"[PD:hex:ErrHexDecodingString]decode string XXXX error"
 `,
 		},
 		{
@@ -606,7 +606,7 @@ func (s *testRuleSuite) TestBatch(c *C) {
 			name:    "Check rule failed",
 			rawData: checkErrData,
 			success: false,
-			response: `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
+			response: `"[PD:hex:ErrHexDecodingString]decode string XXXX error"
 `,
 		},
 		{

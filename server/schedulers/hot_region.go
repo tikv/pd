@@ -195,40 +195,29 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	h.summaryPendingInfluence()
 
-	storesStat := cluster.GetStoresStats()
+	storesLoads := cluster.GetStoresLoads()
 
-	minHotDegree := cluster.GetOpts().GetHotRegionCacheHitsThreshold()
 	{ // update read statistics
 		regionRead := cluster.RegionReadStats()
-		storeByte := storesStat.GetStoresBytesReadStat()
-		storeKey := storesStat.GetStoresKeysReadStat()
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
-			storeByte,
-			storeKey,
+			storesLoads,
 			h.pendingSums[readLeader],
 			regionRead,
-			minHotDegree,
 			read, core.LeaderKind)
 	}
 
 	{ // update write statistics
 		regionWrite := cluster.RegionWriteStats()
-		storeByte := storesStat.GetStoresBytesWriteStat()
-		storeKey := storesStat.GetStoresKeysWriteStat()
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
-			storeByte,
-			storeKey,
+			storesLoads,
 			h.pendingSums[writeLeader],
 			regionWrite,
-			minHotDegree,
 			write, core.LeaderKind)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
-			storeByte,
-			storeKey,
+			storesLoads,
 			h.pendingSums[writePeer],
 			regionWrite,
-			minHotDegree,
 			write, core.RegionKind)
 	}
 }
@@ -269,30 +258,33 @@ func (h *hotScheduler) gcRegionPendings() {
 // summaryStoresLoad Load information of all available stores.
 // it will filtered the hot peer and calculate the current and future stat(byte/key rate,count) for each store
 func summaryStoresLoad(
-	storeByteRate map[uint64]float64,
-	storeKeyRate map[uint64]float64,
+	storesLoads map[uint64][]float64,
 	storePendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
-	minHotDegree int,
 	rwTy rwType,
 	kind core.ResourceKind,
 ) map[uint64]*storeLoadDetail {
 	// loadDetail stores the storeID -> hotPeers stat and its current and future stat(key/byte rate,count)
-	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
+	loadDetail := make(map[uint64]*storeLoadDetail, len(storesLoads))
 	allByteSum := 0.0
 	allKeySum := 0.0
 	allCount := 0.0
 
-	// Stores without byte rate statistics is not available to schedule.
-	for id, byteRate := range storeByteRate {
-		keyRate := storeKeyRate[id]
+	for id, loads := range storesLoads {
+		var byteRate, keyRate float64
+		switch rwTy {
+		case read:
+			byteRate, keyRate = loads[statistics.StoreReadBytes], loads[statistics.StoreReadKeys]
+		case write:
+			byteRate, keyRate = loads[statistics.StoreWriteBytes], loads[statistics.StoreWriteKeys]
+		}
 
 		// Find all hot peers first
 		var hotPeers []*statistics.HotPeerStat
 		{
 			byteSum := 0.0
 			keySum := 0.0
-			for _, peer := range filterHotPeers(kind, minHotDegree, storeHotPeers[id]) {
+			for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
 				byteSum += peer.GetByteRate()
 				keySum += peer.GetKeyRate()
 				hotPeers = append(hotPeers, peer.Clone())
@@ -332,8 +324,8 @@ func summaryStoresLoad(
 			HotPeers: hotPeers,
 		}
 	}
-	storeLen := float64(len(storeByteRate))
 
+	storeLen := float64(len(storesLoads))
 	// store expectation byte/key rate and count for each store-load detail.
 	for id, detail := range loadDetail {
 		byteExp := allByteSum / storeLen
@@ -362,13 +354,11 @@ func summaryStoresLoad(
 // filterHotPeers filter the peer whose hot degree is less than minHotDegress
 func filterHotPeers(
 	kind core.ResourceKind,
-	minHotDegree int,
 	peers []*statistics.HotPeerStat,
 ) []*statistics.HotPeerStat {
 	var ret []*statistics.HotPeerStat
 	for _, peer := range peers {
-		if (kind == core.LeaderKind && !peer.IsLeader()) ||
-			peer.HotDegree < minHotDegree {
+		if kind == core.LeaderKind && !peer.IsLeader() {
 			continue
 		}
 		ret = append(ret, peer)
