@@ -25,6 +25,7 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
 		}, []string{"type"})
 
+	// OperatorLimitCounter exposes the counter when meeting limit.
 	OperatorLimitCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
