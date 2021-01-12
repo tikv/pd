@@ -19,13 +19,11 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
-	"go.uber.org/zap"
 )
 
 // Builder is used to create operators. Usage:
@@ -520,7 +518,6 @@ func (b *Builder) preferOldPeerAsLeader(targetLeaderStoreID uint64) int {
 func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 	b.initStepPlanPreferFuncs()
 
-	var dstStoreID uint64
 	for len(b.toAdd) > 0 || len(b.toRemove) > 0 || len(b.toPromote) > 0 || len(b.toDemote) > 0 {
 		plan := b.peerPlan()
 		if plan.Empty() {
@@ -531,9 +528,6 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			kind |= OpLeader
 		}
 		if plan.add != nil {
-			if kind&OpHotRegion == OpHotRegion {
-				dstStoreID = plan.add.GetStoreId()
-			}
 			b.execAddPeer(plan.add)
 			kind |= OpRegion
 		}
@@ -541,15 +535,7 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			b.execPromoteLearner(plan.promote)
 		}
 		if plan.leaderBeforeRemove != 0 && plan.leaderBeforeRemove != b.currentLeaderStoreID {
-			if kind&OpHotRegion == OpHotRegion && dstStoreID != 0 {
-				log.Info("directly transfer leader to target store",
-					zap.Uint64("regionID", b.regionID),
-					zap.Uint64("oldLeaderStore", plan.leaderBeforeRemove),
-					zap.Uint64("newLeaderStore", dstStoreID))
-				b.execTransferLeader(dstStoreID)
-			} else {
-				b.execTransferLeader(plan.leaderBeforeRemove)
-			}
+			b.execTransferLeader(plan.leaderBeforeRemove)
 			kind |= OpLeader
 		}
 		if plan.demote != nil {

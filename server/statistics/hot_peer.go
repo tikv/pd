@@ -19,6 +19,9 @@ const (
 	byteDim int = iota
 	keyDim
 	opsDim
+	otherByteDim
+	otherKeyDim
+	otherOpsDim
 	dimLen
 )
 
@@ -141,6 +144,15 @@ func (stat *HotPeerStat) GetOtherOps() float64 {
 		return stat.OtherOps
 	}
 	return stat.rollingOtherOps.Get()
+}
+
+// GetLoads returns all of the loads if possible.
+func (stat *HotPeerStat) GetLoads() (loads []float64) {
+	loads = append(loads,
+		stat.GetByteRate(), stat.GetKeyRate(), stat.GetOps(),
+		stat.GetOtherByteRate(), stat.GetOtherKeyRate(), stat.GetOtherOps(),
+	)
+	return
 }
 
 // Clone clones the HotPeerStat

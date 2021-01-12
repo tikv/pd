@@ -14,7 +14,6 @@
 package statistics
 
 import (
-	"math"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -41,11 +40,17 @@ var (
 			byteDim: 256,
 			keyDim:  16,
 			opsDim:  16,
+			otherByteDim: 256,
+			otherKeyDim:  16,
+			otherOpsDim:  16,
 		},
 		ReadFlow: {
 			byteDim: 256,
 			keyDim:  16,
 			opsDim:  16,
+			otherByteDim: 256,
+			otherKeyDim:  16,
+			otherOpsDim:  16,
 		},
 	}
 )
@@ -294,11 +299,22 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) [dimLen]float64 {
 		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate,
 		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).KeyRate,
 		opsDim:  tn.GetTopNMin(opsDim).(*HotPeerStat).Ops,
+		otherByteDim: tn.GetTopNMin(otherByteDim).(*HotPeerStat).OtherByteRate,
+		otherKeyDim:  tn.GetTopNMin(otherKeyDim).(*HotPeerStat).OtherKeyRate,
+		otherOpsDim:  tn.GetTopNMin(otherOpsDim).(*HotPeerStat).OtherOps,
 	}
 	for k := 0; k < dimLen; k++ {
-		ret[k] = math.Max(ret[k]*hotThresholdRatio, minThresholds[k])
+		// ret[k] = math.Max(ret[k]*hotThresholdRatio, minThresholds[k])
+		ret[k] = minThresholds[k]
 	}
 	return ret
+}
+
+func (f *hotPeerCache) ReduceHotThresholds() {
+	minThresholds := minHotThresholds[f.kind]
+	for k := 0; k < dimLen; k++ {
+		minThresholds[k] /= 2
+	}
 }
 
 // gets the storeIDs, including old region and new region
@@ -358,9 +374,9 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 		newItem.Ops >= thresholds[opsDim]
 
 	if updateWithOtherStats {
-		isHot = isHot || newItem.OtherByteRate >= thresholds[byteDim] ||
-			newItem.OtherKeyRate >= thresholds[keyDim] ||
-			newItem.OtherOps >= thresholds[opsDim]
+		isHot = isHot || newItem.OtherByteRate >= thresholds[otherByteDim] ||
+			newItem.OtherKeyRate >= thresholds[otherKeyDim] ||
+			newItem.OtherOps >= thresholds[otherOpsDim]
 	}
 
 	if newItem.needDelete {
@@ -371,6 +387,9 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 		newItem.rollingByteRate = oldItem.rollingByteRate
 		newItem.rollingKeyRate = oldItem.rollingKeyRate
 		newItem.rollingOps = oldItem.rollingOps
+		newItem.rollingOtherByteRate = oldItem.rollingOtherByteRate
+		newItem.rollingOtherKeyRate = oldItem.rollingOtherKeyRate
+		newItem.rollingOtherOps = oldItem.rollingOtherOps
 		if isHot {
 			newItem.HotDegree = oldItem.HotDegree + 1
 			newItem.AntiCount = hotRegionAntiCount
@@ -388,6 +407,9 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 		newItem.rollingByteRate = NewMedianFilter(rollingWindowsSize)
 		newItem.rollingKeyRate = NewMedianFilter(rollingWindowsSize)
 		newItem.rollingOps = NewMedianFilter(rollingWindowsSize)
+		newItem.rollingOtherByteRate = NewMedianFilter(rollingWindowsSize)
+		newItem.rollingOtherKeyRate = NewMedianFilter(rollingWindowsSize)
+		newItem.rollingOtherOps = NewMedianFilter(rollingWindowsSize)
 		newItem.AntiCount = hotRegionAntiCount
 		newItem.isNew = true
 	}
@@ -395,6 +417,9 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 	newItem.rollingByteRate.Add(newItem.ByteRate)
 	newItem.rollingKeyRate.Add(newItem.KeyRate)
 	newItem.rollingOps.Add(newItem.Ops)
+	newItem.rollingOtherByteRate.Add(newItem.OtherByteRate)
+	newItem.rollingOtherKeyRate.Add(newItem.OtherKeyRate)
+	newItem.rollingOtherOps.Add(newItem.OtherOps)
 
 	return newItem
 }

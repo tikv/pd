@@ -76,7 +76,7 @@ func (o *Operator) String() string {
 	for i := range o.steps {
 		stepStrs[i] = o.steps[i].String()
 	}
-	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, steps:[%s])", o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(), o.GetStartTime(), atomic.LoadInt32(&o.currentStep), strings.Join(stepStrs, ", "))
+	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, endAt:%s, steps:[%s])", o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(), o.GetStartTime(), atomic.LoadInt32(&o.currentStep), o.GetEndTime(), strings.Join(stepStrs, ", "))
 	if o.CheckSuccess() {
 		s = s + " finished"
 	}
@@ -154,6 +154,11 @@ func (o *Operator) HasStarted() bool {
 // GetStartTime gets the start time of operator.
 func (o *Operator) GetStartTime() time.Time {
 	return o.status.ReachTimeOf(STARTED)
+}
+
+// GetEndTime gets the end time of operator.
+func (o *Operator) GetEndTime() time.Time {
+	return o.status.ReachTimeOf(o.status.current)
 }
 
 // RunningTime returns duration since it started.

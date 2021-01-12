@@ -84,6 +84,12 @@ func (w *HotCache) RegionStats(kind FlowKind) map[uint64][]*HotPeerStat {
 	return nil
 }
 
+// ReduceHotThresholds reduces hot thresholds.
+func (w *HotCache) ReduceHotThresholds() {
+	w.writeFlow.ReduceHotThresholds()
+	w.readFlow.ReduceHotThresholds()
+}
+
 // RandHotRegionFromStore random picks a hot region in specify store.
 func (w *HotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotDegree int) *HotPeerStat {
 	if stats, ok := w.RegionStats(kind)[storeID]; ok {

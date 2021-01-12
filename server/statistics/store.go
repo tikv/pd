@@ -310,6 +310,19 @@ func (s *StoresStats) GetStoresOpsWriteStat() map[uint64]float64 {
 	})
 }
 
+// GetStoresLoadsStat returns the all of the load stats of all StoreInfo.
+func (s *StoresStats) GetStoresLoadsStat() (ret []map[uint64]float64) {
+	ret = append(ret,
+		s.GetStoresBytesWriteStat(),
+		s.GetStoresKeysWriteStat(),
+		s.GetStoresOpsWriteStat(),
+		s.GetStoresBytesReadStat(),
+		s.GetStoresKeysReadStat(),
+		s.GetStoresOpsReadStat(),
+	)
+	return
+}
+
 func (s *StoresStats) getStat(getRate func(*RollingStoreStats) float64) map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()

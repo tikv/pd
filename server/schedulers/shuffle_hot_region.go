@@ -122,7 +122,7 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	i := s.r.Int() % len(s.types)
 	return s.dispatchStatic(s.types[i], cluster)
-	// return s.runSch(write, cluster)
+	// return s.dispatch(s.types[i], cluster)
 }
 
 func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
@@ -134,7 +134,6 @@ func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []
 		s.stLoadInfos[readLeader] = summaryStoresLoad(
 			storesStats.GetStoresBytesReadStat(),
 			storesStats.GetStoresKeysReadStat(),
-			storesStats.GetStoresOpsReadStat(),
 			map[uint64]Influence{},
 			cluster.RegionReadStats(),
 			minHotDegree,
@@ -146,7 +145,6 @@ func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []
 		s.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storesStats.GetStoresBytesWriteStat(),
 			storesStats.GetStoresKeysWriteStat(),
-			storesStats.GetStoresOpsWriteStat(),
 			map[uint64]Influence{},
 			cluster.RegionWriteStats(),
 			minHotDegree,
@@ -224,7 +222,6 @@ func (s *shuffleHotRegionScheduler) dispatchStatic(typ rwType, cluster opt.Clust
 			s.stLoadInfos[readLeader] = summaryStoresLoad(
 				storesStats.GetStoresBytesReadStat(),
 				storesStats.GetStoresKeysReadStat(),
-				storesStats.GetStoresOpsReadStat(),
 				map[uint64]Influence{},
 				cluster.RegionReadStats(),
 				minHotDegree,
@@ -238,7 +235,6 @@ func (s *shuffleHotRegionScheduler) dispatchStatic(typ rwType, cluster opt.Clust
 			s.stLoadInfos[writePeer] = summaryStoresLoad(
 				storesStats.GetStoresBytesWriteStat(),
 				storesStats.GetStoresKeysWriteStat(),
-				storesStats.GetStoresOpsWriteStat(),
 				map[uint64]Influence{},
 				cluster.RegionWriteStats(),
 				minHotDegree,
