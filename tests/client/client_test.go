@@ -735,7 +735,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(stores, DeepEquals, stores)
 
 	// Mark the store as offline.
-	err = cluster.RemoveStore(store.GetId())
+	err = cluster.RemoveStore(store.GetId(), false)
 	c.Assert(err, IsNil)
 	offlineStore := proto.Clone(store).(*metapb.Store)
 	offlineStore.State = metapb.StoreState_Offline
@@ -758,7 +758,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(contains, IsTrue)
 
 	// Mark the store as tombstone.
-	err = cluster.BuryStore(store.GetId(), true)
+	err = cluster.SetStoreState(store.GetId(), metapb.StoreState_Tombstone)
 	c.Assert(err, IsNil)
 	tombstoneStore := proto.Clone(store).(*metapb.Store)
 	tombstoneStore.State = metapb.StoreState_Tombstone

@@ -187,11 +187,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_, force := r.URL.Query()["force"]
-	if force {
-		err = rc.BuryStore(storeID, force)
-	} else {
-		err = rc.RemoveStore(storeID)
-	}
+	err = rc.RemoveStore(storeID, force)
 
 	if errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(storeID)) {
 		h.rd.JSON(w, http.StatusNotFound, err.Error())

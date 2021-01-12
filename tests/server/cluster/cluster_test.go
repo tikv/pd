@@ -269,37 +269,33 @@ func testRemoveStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClie
 		beforeState := metapb.StoreState_Up // When store is up
 		// Case 1: RemoveStore should be OK;
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
-			return cluster.RemoveStore(store.GetId())
+			return cluster.RemoveStore(store.GetId(), false)
 		}, metapb.StoreState_Offline)
 		// Case 2: BuryStore w/ force should be OK;
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
-			return cluster.BuryStore(store.GetId(), true)
+			return cluster.SetStoreState(store.GetId(), metapb.StoreState_Tombstone)
 		}, metapb.StoreState_Tombstone)
-		// Case 3: BuryStore w/o force should fail.
-		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
-			return cluster.BuryStore(store.GetId(), false)
-		})
 	}
 	{
 		beforeState := metapb.StoreState_Offline // When store is offline
 		// Case 1: RemoveStore should be OK;
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
-			return cluster.RemoveStore(store.GetId())
+			return cluster.RemoveStore(store.GetId(), false)
 		}, metapb.StoreState_Offline)
 		// Case 2: BuryStore w/ or w/o force should be OK.
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
-			return cluster.BuryStore(store.GetId(), false)
+			return cluster.SetStoreState(store.GetId(), metapb.StoreState_Tombstone)
 		}, metapb.StoreState_Tombstone)
 	}
 	{
 		beforeState := metapb.StoreState_Tombstone // When store is tombstone
 		// Case 1: RemoveStore should should fail;
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
-			return cluster.RemoveStore(store.GetId())
+			return cluster.RemoveStore(store.GetId(), false)
 		})
 		// Case 2: BuryStore w/ or w/o force should be OK.
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
-			return cluster.BuryStore(store.GetId(), false)
+			return cluster.SetStoreState(store.GetId(), metapb.StoreState_Tombstone)
 		}, metapb.StoreState_Tombstone)
 	}
 	{
@@ -760,7 +756,7 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 	rep.EnablePlacementRules = false
 	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, NotNil)
-	err = svr.GetRaftCluster().BuryStore(11, true)
+	err = svr.GetRaftCluster().SetStoreState(11, metapb.StoreState_Tombstone)
 	c.Assert(err, IsNil)
 	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, IsNil)
@@ -959,7 +955,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 
 	// offline store 1
 	rc.SetStoreLimit(1, storelimit.RemovePeer, storelimit.Unlimited)
-	rc.RemoveStore(1)
+	rc.RemoveStore(1, false)
 
 	// can add unlimited remove peer operators on store 1
 	for i := uint64(1); i <= 30; i++ {

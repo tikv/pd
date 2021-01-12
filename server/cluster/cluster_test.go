@@ -136,8 +136,7 @@ func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
 	}
 	// Store 3 and 4 offline normally.
 	for _, id := range []uint64{3, 4} {
-		c.Assert(cluster.RemoveStore(id), IsNil)
-		c.Assert(cluster.BuryStore(id, false), IsNil)
+		c.Assert(cluster.SetStoreState(id, metapb.StoreState_Tombstone), IsNil)
 	}
 	// Change the status of 3 directly back to Up.
 	c.Assert(cluster.SetStoreState(3, metapb.StoreState_Up), IsNil)
@@ -165,11 +164,6 @@ func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	c.Assert(cluster.GetClusterVersion(), Equals, "4.0.9")
-
-	// Bury the other store.
-	c.Assert(cluster.RemoveStore(3), IsNil)
-	c.Assert(cluster.BuryStore(3, false), IsNil)
-	c.Assert(cluster.GetClusterVersion(), Equals, "5.0.0")
 }
 
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {

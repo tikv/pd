@@ -47,6 +47,7 @@ type StoreInfo struct {
 	leaderWeight        float64
 	regionWeight        float64
 	available           map[storelimit.Type]func() bool
+	physicallyDestroyed bool // true means this store is physicall destroyed, which can not restart or be connected
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -132,6 +133,11 @@ func (s *StoreInfo) IsUp() bool {
 // IsOffline checks if the store's state is Offline.
 func (s *StoreInfo) IsOffline() bool {
 	return s.GetState() == metapb.StoreState_Offline
+}
+
+// IsPhysicallyDestoryAndOffline checks if the store is offline and physically destroyed
+func (s *StoreInfo) IsPhysicallyDestoryAndOffline() bool {
+	return s.GetState() == metapb.StoreState_Offline && s.physicallyDestroyed
 }
 
 // IsTombstone checks if the store's state is Tombstone.
