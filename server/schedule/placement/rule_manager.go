@@ -41,14 +41,15 @@ type RuleManager struct {
 	ruleList    ruleList
 
 	// used for rule validation
-	keyType string
-	stores  []*core.StoreInfo
+	keyType   string
+	getStores func() []*core.StoreInfo
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(store *core.Storage) *RuleManager {
+func NewRuleManager(store *core.Storage, getStores func() []*core.StoreInfo) *RuleManager {
 	return &RuleManager{
 		store:      store,
+		getStores:  getStores,
 		ruleConfig: newRuleConfig(),
 	}
 }
@@ -201,8 +202,11 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 		}
 	}
 
-	if len(m.stores) > 0 && !checkRule(r, m.stores) {
-		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("rule '%s' from rule group '%s' can not match any store", r.ID, r.GroupID))
+	if m.getStores() != nil {
+		stores := m.getStores()
+		if len(stores) > 0 && !checkRule(r, stores) {
+			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("rule '%s' from rule group '%s' can not match any store", r.ID, r.GroupID))
+		}
 	}
 
 	return nil
@@ -662,13 +666,5 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	m.Lock()
 	defer m.Unlock()
 	m.keyType = h
-	return m
-}
-
-// SetStores will update stores info for adjustRule()
-func (m *RuleManager) SetStores(h []*core.StoreInfo) *RuleManager {
-	m.Lock()
-	defer m.Unlock()
-	m.stores = h
 	return m
 }

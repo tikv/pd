@@ -477,7 +477,6 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 	s.tc.SetStoreLabel(3, map[string]string{
 		"host": "c",
 	})
-	s.tc.SetStores(s.tc.GetStores())
 
 	// Stores:     1    2    3
 	// Leaders:    16   0    0

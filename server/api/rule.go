@@ -79,7 +79,7 @@ func (h *ruleHandler) SetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
-		SetStores(cluster.GetStores()).SetRules(rules); err != nil {
+		SetRules(rules); err != nil {
 		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		} else {
@@ -208,7 +208,7 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 	}
 	oldRule := cluster.GetRuleManager().GetRule(rule.GroupID, rule.ID)
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
-		SetStores(cluster.GetStores()).SetRule(&rule); err != nil {
+		SetRule(&rule); err != nil {
 		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		} else {
@@ -271,7 +271,7 @@ func (h *ruleHandler) Batch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
-		SetStores(cluster.GetStores()).Batch(opts); err != nil {
+		Batch(opts); err != nil {
 		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		} else {
@@ -414,7 +414,7 @@ func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 	}
 	_, partial := r.URL.Query()["partial"]
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
-		SetStores(cluster.GetStores()).SetAllGroupBundles(groups, !partial); err != nil {
+		SetAllGroupBundles(groups, !partial); err != nil {
 		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		} else {
@@ -498,7 +498,7 @@ func (h *ruleHandler) SetGroupBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
-		SetStores(cluster.GetStores()).SetGroupBundle(group); err != nil {
+		SetGroupBundle(group); err != nil {
 		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		} else {

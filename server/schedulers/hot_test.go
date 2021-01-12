@@ -551,7 +551,6 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithRuleEnabled(c *C) {
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
 
-	tc.SetStores(tc.GetStores())
 	err = tc.SetRule(&placement.Rule{
 		GroupID:  "pd",
 		ID:       "leader",
