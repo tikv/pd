@@ -202,7 +202,7 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 		}
 	}
 
-	if m.getStores() != nil {
+	if m.getStores != nil {
 		stores := m.getStores()
 		if len(stores) > 0 && !checkRule(r, stores) {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("rule '%s' from rule group '%s' can not match any store", r.ID, r.GroupID))
