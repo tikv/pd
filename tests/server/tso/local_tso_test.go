@@ -19,6 +19,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
@@ -132,4 +133,96 @@ func (s *testLocalTSOSuite) checkTSOUnique(tso *pdpb.Timestamp) bool {
 	}
 	s.tsPool[ts] = struct{}{}
 	return true
+}
+
+func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+
+	leaderCli := testutil.MustNewGrpcClient(c, cluster.GetServer(cluster.GetLeader()).GetAddr())
+	req := &pdpb.TsoRequest{
+		Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId()),
+		Count:      tsoCount,
+		DcLocation: config.GlobalDCLocation,
+	}
+	globalTS := testGetLocalTimestamp(c, leaderCli, req)
+
+	// Wait for all nodes becoming healthy.
+	time.Sleep(time.Second * 5)
+
+	// Mock the situation that the system time of PD nodes in dc-4 is slower than others.
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/systemTimeSlow", `return(true)`), IsNil)
+
+	// Join a new dc-location
+	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = "dc-4"
+	})
+	c.Assert(err, IsNil)
+	err = pd4.Run()
+	c.Assert(err, IsNil)
+	dcLocationConfig["pd4"] = "dc-4"
+	var pdName string
+	testutil.WaitUntil(c, func(c *C) bool {
+		pdName = cluster.WaitAllocatorLeader("dc-4")
+		return len(pdName) > 0
+	})
+
+	dcClientMap := make(map[string]pdpb.PDClient)
+	for _, dcLocation := range dcLocationConfig {
+		pdName := cluster.WaitAllocatorLeader(dcLocation)
+		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			lastList := make(map[string]*pdpb.Timestamp)
+			for _, dcLocation := range dcLocationConfig {
+				lastList[dcLocation] = &pdpb.Timestamp{
+					Physical: 0,
+					Logical:  0,
+				}
+			}
+			for j := 0; j < 30; j++ {
+				for _, dcLocation := range dcLocationConfig {
+					req := &pdpb.TsoRequest{
+						Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId()),
+						Count:      tsoCount,
+						DcLocation: dcLocation,
+					}
+					ts := testGetLocalTimestamp(c, dcClientMap[dcLocation], req)
+					lastTS := lastList[dcLocation]
+					// Check whether the TSO fallbacks
+					c.Assert(tsoutil.CompareTimestamp(ts, lastTS), Equals, 1)
+					// Because we have a Global TSO synchronization, even though the system time
+					// of the PD nodes in dc-4 is slower, its TSO will still be big enough.
+					c.Assert(tsoutil.CompareTimestamp(ts, globalTS), Equals, 1)
+					lastList[dcLocation] = ts
+					// Check whether the TSO is not unique
+					c.Assert(s.checkTSOUnique(ts), IsTrue)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+	}
+	wg.Wait()
+
+	failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow")
 }

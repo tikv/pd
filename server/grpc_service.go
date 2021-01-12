@@ -977,12 +977,12 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
 	// There is no dc-location found in this server, return err.
 	if len(tsoAllocatorManager.GetClusterDCLocations()) == 0 {
-		return nil, fmt.Errorf("empty cluster dc-Location found, checker may not work properly")
+		return nil, status.Errorf(codes.Unknown, "empty cluster dc-Location found, checker may not work properly")
 	}
 	// Get all Local TSO Allocator leaders
 	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 	var processedDCs []string
 	if request.GetMaxTs() == nil || request.GetMaxTs().GetPhysical() == 0 {
@@ -996,7 +996,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			}
 			currentLocalTSO, err := allocator.GetCurrentTSO()
 			if err != nil {
-				return nil, err
+				return nil, status.Errorf(codes.Unknown, err.Error())
 			}
 			if tsoutil.CompareTimestamp(&currentLocalTSO, &maxLocalTS) > 0 {
 				maxLocalTS = currentLocalTSO
@@ -1015,7 +1015,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			continue
 		}
 		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Unknown, err.Error())
 		}
 		processedDCs = append(processedDCs, allocator.GetDCLocation())
 	}
@@ -1038,19 +1038,38 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 	}, nil
 }
 
-// GetDCLocations will return the dcLocations which hold by the Global TSO Allocator.
-// If the receiving PD Member is not PD Leader, GetDCLocations will return error.
-func (s *Server) GetDCLocations(ctx context.Context, request *pdpb.GetDCLocationsRequest) (*pdpb.GetDCLocationsResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader(), false); err != nil {
+// GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager, and will collect current max
+// Local TSO if the NeedSyncMaxTSO flag in dc-location info is true.
+func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
+	var err error
+	if err = s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
 	}
 	if !s.member.IsLeader() {
-		return nil, fmt.Errorf("receiving pd member[%v] is not pd leader", s.member.ID())
+		return nil, ErrNotLeader
 	}
-	return &pdpb.GetDCLocationsResponse{
-		Header:      s.header(),
-		DcLocations: s.tsoAllocatorManager.GetSuffixDCLocations(),
-	}, nil
+	am := s.tsoAllocatorManager
+	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
+	if !ok {
+		am.ClusterDCLocationChecker()
+		return nil, status.Errorf(codes.Unknown, "dc-location %s is not found", request.GetDcLocation())
+	}
+	resp := &pdpb.GetDCLocationInfoResponse{
+		Header: s.header(),
+		Suffix: info.Suffix,
+	}
+	// Because the number of suffix bits is changing dynamically according to the dc-location number,
+	// there is a corner case may cause the Local TSO is not unique while member changing.
+	// Example:
+	//     t1: xxxxxxxxxxxxxxx1 | 11
+	//     t2: xxxxxxxxxxxxxxx | 111
+	// So we will force the newly added Local TSO Allocator to have a Global TSO synchronization
+	// when it becomes the Local TSO Allocator leader.
+	// Please take a look at https://github.com/tikv/pd/issues/3260 for more details.
+	if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
+		return nil, status.Errorf(codes.Unknown, err.Error())
+	}
+	return resp, nil
 }
 
 // validateInternalRequest checks if server is closed, which is used to validate
