@@ -63,8 +63,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 1,
-  "id": 21,
-  "iteration": 1604903857894,
+  "id": 11,
+  "iteration": 1608795246154,
   "links": [],
   "panels": [
     {
@@ -778,6 +778,13 @@
           "intervalFactor": 2,
           "legendFormat": "{{type}}",
           "refId": "B"
+        },
+        {
+          "expr": "pd_regions_offline_status{type=\"offline-peer-region-count\", instance=\"$instance\"}",
+          "format": "time_series",
+          "intervalFactor": 1,
+          "legendFormat": "{{type}}",
+          "refId": "C"
         }
       ],
       "thresholds": [
@@ -1418,7 +1425,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 22
+            "y": 15
           },
           "id": 45,
           "legend": {
@@ -1511,7 +1518,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 22
+            "y": 15
           },
           "id": 79,
           "legend": {
@@ -1604,7 +1611,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 29
+            "y": 22
           },
           "id": 77,
           "legend": {
@@ -1696,7 +1703,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 29
+            "y": 22
           },
           "id": 78,
           "legend": {
@@ -1789,7 +1796,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 36
+            "y": 29
           },
           "id": 80,
           "legend": {
@@ -1889,7 +1896,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 36
+            "y": 29
           },
           "id": 47,
           "legend": {
@@ -1983,7 +1990,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 43
+            "y": 36
           },
           "id": 67,
           "legend": {
@@ -2083,7 +2090,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 43
+            "y": 36
           },
           "id": 81,
           "legend": {
