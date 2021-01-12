@@ -2216,7 +2216,7 @@
               "expr": "sum(delta(pd_schedule_operator_limit{instance=\"$instance\"}[1m])) by (type,name)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{type}}-{{name}-limit",
+              "legendFormat": "{{type}}-{{name}}",
               "refId": "A"
             }
           ],
