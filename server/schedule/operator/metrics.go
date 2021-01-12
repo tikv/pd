@@ -28,9 +28,9 @@ var (
 	OperatorLimitCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
-			Subsystem: "scheduler",
+			Subsystem: "schedule",
 			Name:      "operator_limit",
-			Help:      "Counter of scheduler meeting limit",
+			Help:      "Counter of operator meeting limit",
 		}, []string{"type", "name"})
 )
 
