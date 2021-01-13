@@ -56,7 +56,7 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				targetID := fmt.Sprintf("%d", s.GetID())
 				sourceID := ""
 				if ok {
-					sourceID = fmt.Sprintf("%d", cfilter.GetOldStoreID())
+					sourceID = fmt.Sprintf("%d", cfilter.GetSourceStoreID())
 				}
 				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
 					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
@@ -90,8 +90,8 @@ type Filter interface {
 // ComparingFilter is an interface to filter target store by comparing source and target stores
 type ComparingFilter interface {
 	Filter
-	// GetOldStoreID returns the source store when comparing.
-	GetOldStoreID() uint64
+	// GetSourceStoreID returns the source store when comparing.
+	GetSourceStoreID() uint64
 }
 
 // Source checks if store can pass all Filters as source store.
@@ -120,7 +120,7 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 			targetID := storeID
 			sourceID := ""
 			if ok {
-				sourceID = fmt.Sprintf("%d", cfilter.GetOldStoreID())
+				sourceID = fmt.Sprintf("%d", cfilter.GetSourceStoreID())
 			}
 			filterCounter.WithLabelValues("filter-target", storeAddress,
 				targetID, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
@@ -260,8 +260,8 @@ func (f *distinctScoreFilter) Target(opt *config.PersistOptions, store *core.Sto
 	}
 }
 
-// GetOldStoreID implements the ComparingFilter
-func (f *distinctScoreFilter) GetOldStoreID() uint64 {
+// GetSourceStoreID implements the ComparingFilter
+func (f *distinctScoreFilter) GetSourceStoreID() uint64 {
 	return f.oldStore
 }
 
@@ -495,8 +495,8 @@ func (f *ruleFitFilter) Target(opt *config.PersistOptions, store *core.StoreInfo
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
-// GetOldStoreID implements the ComparingFilter
-func (f *ruleFitFilter) GetOldStoreID() uint64 {
+// GetSourceStoreID implements the ComparingFilter
+func (f *ruleFitFilter) GetSourceStoreID() uint64 {
 	return f.oldStore
 }
 
@@ -545,7 +545,7 @@ func (f *ruleLeaderFitFilter) Target(opt *config.PersistOptions, store *core.Sto
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
-func (f *ruleLeaderFitFilter) GetOldStoreID() uint64 {
+func (f *ruleLeaderFitFilter) GetSourceStoreID() uint64 {
 	return f.oldLeaderStoreID
 }
 
