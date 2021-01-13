@@ -41,16 +41,16 @@ type RuleManager struct {
 	ruleList    ruleList
 
 	// used for rule validation
-	keyType   string
-	getStores func() []*core.StoreInfo
+	keyType          string
+	storeSetInformer core.StoreSetInformer
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(storage *core.Storage, getStores func() []*core.StoreInfo) *RuleManager {
+func NewRuleManager(storage *core.Storage, storeSetInformer core.StoreSetInformer) *RuleManager {
 	return &RuleManager{
-		storage:    storage,
-		getStores:  getStores,
-		ruleConfig: newRuleConfig(),
+		storage:          storage,
+		storeSetInformer: storeSetInformer,
+		ruleConfig:       newRuleConfig(),
 	}
 }
 
@@ -202,8 +202,8 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 		}
 	}
 
-	if m.getStores != nil {
-		stores := m.getStores()
+	if m.storeSetInformer != nil {
+		stores := m.storeSetInformer.GetStores()
 		if len(stores) > 0 && !checkRule(r, stores) {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("rule '%s' from rule group '%s' can not match any store", r.ID, r.GroupID))
 		}
