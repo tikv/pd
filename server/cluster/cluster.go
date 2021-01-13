@@ -1028,23 +1028,15 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 
 	if !physicallyDestroyed {
 		if store.IsPhysicallyDestoryAndOffline() {
-			return errors.Errorf("The store is already physically destroyed")
+			return errors.Errorf("The store is already physically destroyed and offline")
 		}
 		// Remove an offline store should be OK, nothing to do.
 		if store.IsOffline() {
 			return nil
 		}
-	}
-
-	if store.IsPhysicallyDestoryAndOffline() {
+	} else if store.IsPhysicallyDestoryAndOffline() {
 		return nil
 	}
-
-	if c.curPhysicallyDestroyedAndOfflineStoreID != 0 {
-		return errors.Errorf("Somestore(store ID:%v) is offline and pyhically destroyed, please wait unitil the previous store comes to Tombstone", c.curPhysicallyDestroyedAndOfflineStoreID)
-	}
-	c.curPhysicallyDestroyedAndOfflineStoreID = storeID
-
 	newStore := store.Clone(core.OfflineStore(physicallyDestroyed))
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", newStore.GetID()),
@@ -1058,6 +1050,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 }
 
 // buryStore marks a offline store as tombstone in cluster.
+// The store should be empty before calling this func
 // State transition: Offline -> Tombstone.
 func (c *RaftCluster) buryStore(storeID uint64) error {
 	c.Lock()
@@ -1113,27 +1106,24 @@ func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.T
 	c.core.AttachAvailableFunc(storeID, limitType, f)
 }
 
-// SetStoreState sets up a store's state.
-func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) error {
+// UpStore up a store from offline
+func (c *RaftCluster) UpStore(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
-
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-
-	if store.GetState() == metapb.StoreState_Tombstone && state != metapb.StoreState_Tombstone {
-		if err := c.checkStoreVersion(store.GetMeta()); err != nil {
-			return err
-		}
+	if store.IsTombstone() || store.IsPhysicallyDestoryAndOffline() {
+		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
 	}
 
-	newStore := store.Clone(core.SetStoreState(state))
-	log.Warn("store update state",
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Up))
+	log.Warn("up store",
 		zap.Uint64("store-id", storeID),
-		zap.Stringer("new-state", state))
+		zap.Stringer("old-state", store.GetState()))
 	return c.putStoreLocked(newStore)
+
 }
 
 // SetStoreWeight sets up a store's leader/region balance weight.
@@ -1159,6 +1149,13 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 }
 
 func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
+	if store.IsPhysicallyDestoryAndOffline() && c.curPhysicallyDestroyedAndOfflineStoreID == 0 {
+		c.curPhysicallyDestroyedAndOfflineStoreID = store.GetID()
+	}
+
+	if store.IsPhysicallyDestoryAndOffline() && c.curPhysicallyDestroyedAndOfflineStoreID != store.GetID() {
+		return errors.Errorf("Somestore(store ID:%v) is offline and pyhically destroyed, please wait unitil the previous store comes to Tombstone", c.curPhysicallyDestroyedAndOfflineStoreID)
+	}
 	if c.storage != nil {
 		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
 			return err

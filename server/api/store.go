@@ -170,7 +170,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Summary Take down a store from the cluster.
 // @Param id path integer true "Store Id"
 // @Produce json
-// @Success 200 {string} string "The store is set as Offline or Tombstone."
+// @Success 200 {string} string "The store is set as Offline."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 404 {string} string "The store does not exist."
 // @Failure 410 {string} string "The store has already been removed."
@@ -189,13 +189,8 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	_, force := r.URL.Query()["force"]
 	err = rc.RemoveStore(storeID, force)
 
-	if errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(storeID)) {
-		h.rd.JSON(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	if errors.ErrorEqual(err, errs.ErrStoreTombstone.FastGenByArgs(storeID)) {
-		h.rd.JSON(w, http.StatusGone, err.Error())
+	if err != nil {
+		h.responseStoreErr(w, err, storeID)
 		return
 	}
 
@@ -227,14 +222,36 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "invalid state")
 		return
 	}
-
-	err := rc.SetStoreState(storeID, metapb.StoreState(state))
+	var err error
+	switch metapb.StoreState(state) {
+	case metapb.StoreState_Up:
+		err = rc.UpStore(storeID)
+	case metapb.StoreState_Offline:
+		err = rc.RemoveStore(storeID, false)
+	default:
+		h.rd.JSON(w, http.StatusBadRequest, "invalid state")
+		return
+	}
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.responseStoreErr(w, err, storeID)
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "The store's state is updated.")
+}
+
+func (h *storeHandler) responseStoreErr(w http.ResponseWriter, err error, storeID uint64) {
+	if errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(storeID)) {
+		h.rd.JSON(w, http.StatusNotFound, err.Error())
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, "The store's state is updated.")
+	if errors.ErrorEqual(err, errs.ErrStoreTombstone.FastGenByArgs(storeID)) {
+		h.rd.JSON(w, http.StatusGone, err.Error())
+		return
+	}
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	}
 }
 
 // FIXME: details of input json body params

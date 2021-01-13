@@ -136,16 +136,21 @@ func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
 	}
 	// Store 3 and 4 offline normally.
 	for _, id := range []uint64{3, 4} {
-		c.Assert(cluster.SetStoreState(id, metapb.StoreState_Tombstone), IsNil)
+		c.Assert(cluster.RemoveStore(id, false), IsNil)
 	}
 	// Change the status of 3 directly back to Up.
-	c.Assert(cluster.SetStoreState(3, metapb.StoreState_Up), IsNil)
+	c.Assert(cluster.UpStore(3), IsNil)
 	// Update store 1 2 3
 	for _, store := range newTestStores(3, "3.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
-	// Since the store 4 version is too low, setting it to Up should fail.
-	c.Assert(cluster.SetStoreState(4, metapb.StoreState_Up), NotNil)
+	c.Assert(cluster.GetClusterVersion(), Equals, "2.0.0")
+	c.Assert(cluster.RemoveStore(3, false), IsNil)
+	c.Assert(cluster.RemoveStore(3, true), IsNil)
+	c.Assert(cluster.UpStore(3), NotNil)
+	c.Assert(cluster.RemoveStore(3, false), NotNil)
+	cluster.checkStores()
+	c.Assert(cluster.GetClusterVersion(), Equals, "3.0.0")
 }
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {

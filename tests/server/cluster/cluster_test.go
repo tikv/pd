@@ -271,10 +271,10 @@ func testRemoveStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClie
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
 			return cluster.RemoveStore(store.GetId(), false)
 		}, metapb.StoreState_Offline)
-		// Case 2: BuryStore w/ force should be OK;
+		// Case 2: RemoveStore with physically destroyed should be OK;
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
-			return cluster.SetStoreState(store.GetId(), metapb.StoreState_Tombstone)
-		}, metapb.StoreState_Tombstone)
+			return cluster.RemoveStore(store.GetId(), true)
+		}, metapb.StoreState_Offline)
 	}
 	{
 		beforeState := metapb.StoreState_Offline // When store is offline
@@ -282,10 +282,10 @@ func testRemoveStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClie
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
 			return cluster.RemoveStore(store.GetId(), false)
 		}, metapb.StoreState_Offline)
-		// Case 2: BuryStore w/ or w/o force should be OK.
+		// Case 2: remove store with physically destroyed should be falied because there is a physically destroyed and offline store already.
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
-			return cluster.SetStoreState(store.GetId(), metapb.StoreState_Tombstone)
-		}, metapb.StoreState_Tombstone)
+			return cluster.RemoveStore(store.GetId(), true)
+		})
 	}
 	{
 		beforeState := metapb.StoreState_Tombstone // When store is tombstone
@@ -293,10 +293,10 @@ func testRemoveStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClie
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
 			return cluster.RemoveStore(store.GetId(), false)
 		})
-		// Case 2: BuryStore w/ or w/o force should be OK.
+		// Case 2: RemoveStore with physically destroyed should fail;
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
-			return cluster.SetStoreState(store.GetId(), metapb.StoreState_Tombstone)
-		}, metapb.StoreState_Tombstone)
+			return cluster.RemoveStore(store.GetId(), true)
+		})
 	}
 	{
 		// Put after removed should return tombstone error.
@@ -756,11 +756,10 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 	rep.EnablePlacementRules = false
 	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, NotNil)
-	err = svr.GetRaftCluster().SetStoreState(11, metapb.StoreState_Tombstone)
+	err = svr.GetRaftCluster().RemoveStore(11, true)
 	c.Assert(err, IsNil)
 	err = svr.SetReplicationConfig(rep)
-	c.Assert(err, IsNil)
-	c.Assert(len(svr.GetScheduleConfig().StoreLimit), Equals, 0)
+	c.Assert(err, NotNil)
 }
 
 func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {
