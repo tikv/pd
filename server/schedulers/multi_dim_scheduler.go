@@ -260,7 +260,7 @@ func newMultiBalancer(sche *multiDimensionScheduler, cluster opt.Cluster) *multi
 		scheduledRegions: make(map[uint64]struct{}),
 	}
 
-	balancer.initHotPeerInfo()
+	balancer.init()
 
 	return balancer
 }
@@ -285,7 +285,7 @@ func (balancer *multiBalancer) needSkipSchedule(expLoads []float64) bool {
 	return balancer.skipSchedule
 }
 
-func (balancer *multiBalancer) checkPendingLoads(storeLoads []map[uint64]float64) {
+func (balancer *multiBalancer) collectPendingLoadInfo(storeLoads []map[uint64]float64) {
 	storePendings := balancer.sche.pendingSums
 
 	tyStrs := []string{
@@ -310,7 +310,7 @@ func (balancer *multiBalancer) checkPendingLoads(storeLoads []map[uint64]float64
 	}
 }
 
-func (balancer *multiBalancer) initHotPeerInfo() {
+func (balancer *multiBalancer) init() {
 	minHotDegree := balancer.cluster.GetOpts().GetHotRegionCacheHitsThreshold()
 	storesStat := balancer.cluster.GetStoresStats()
 	storeHotPeers := balancer.cluster.RegionWriteStats()
@@ -352,9 +352,21 @@ func (balancer *multiBalancer) initHotPeerInfo() {
 	if balancer.needSkipSchedule(expLoads) {
 		return
 	}
-	balancer.checkPendingLoads(storeLoads)
+	balancer.collectPendingLoadInfo(storeLoads)
 
-	maxLoadDiffRatio := 0.0
+	maxLoadDiffRatio := balancer.initPeerInfos(expLoads, filteredStoreHotPeers, storeLoads)
+
+	if maxLoadDiffRatio > loadStableThresholdConst {
+		log.Info("load not stable",
+			zap.Float64("maxLoadDiffRatio", maxLoadDiffRatio),
+		)
+		balancer.skipSchedule = true
+		balancer.sche.needInit = true
+	}
+}
+
+func (balancer *multiBalancer) initPeerInfos(expLoads []float64, filteredStoreHotPeers map[uint64][]*statistics.HotPeerStat, storeLoads []map[uint64]float64) (maxLoadDiffRatio float64) {
+	storeLen := len(storeLoads[0])
 	balancer.storeInfos = make([]*storeInfo, 0, storeLen)
 	for storeID, originHotPeers := range filteredStoreHotPeers {
 		hotPeers := make(map[uint64]*peerInfo)
@@ -363,11 +375,12 @@ func (balancer *multiBalancer) initHotPeerInfo() {
 			peer := newPeerInfo(originPeer.RegionID, storeID)
 			originLoads := originPeer.GetLoads()
 			for i := range expLoads {
-				peer.loads[i] = originLoads[i] / expLoads[i]
+				peer.loads[i] = originLoads[i]
 				if !originPeer.IsLeader() && i >= 3 {
 					peer.loads[i] = 0
 				}
-				hotPeersTotalLoads[i] += peer.loads[i] * expLoads[i] / 1024.0
+
+				hotPeersTotalLoads[i] += peer.loads[i]				
 			}
 			peer.peerStat = originPeer
 			peer.isLeader = originPeer.IsLeader()
@@ -377,8 +390,9 @@ func (balancer *multiBalancer) initHotPeerInfo() {
 		si := newStoreInfo(storeID, hotPeers)
 		storeTotalLoads := make([]float64, len(expLoads))
 		for i := range expLoads {
-			si.loads[i] = storeLoads[i][storeID] / expLoads[i]
-			storeTotalLoads[i] = storeLoads[i][storeID] / 1024.0
+			storeTotalLoads[i] = storeLoads[i][storeID]
+
+			si.loads[i] = hotPeersTotalLoads[i]
 
 			if _, ok := balancer.allowedMap[uint64(i)]; ok {
 				ratio := math.Abs((storeTotalLoads[i]-hotPeersTotalLoads[i])/storeTotalLoads[i])
@@ -389,18 +403,14 @@ func (balancer *multiBalancer) initHotPeerInfo() {
 
 		log.Info("load info",
 			zap.Uint64("storeID", storeID),
-			zap.String("total(K)", fmt.Sprintf("%+v", storeTotalLoads)),
-			zap.String("approximate(K)", fmt.Sprintf("%+v", hotPeersTotalLoads)),
+			zap.String("total", fmt.Sprintf("%+v", storeTotalLoads)),
+			zap.String("approximate", fmt.Sprintf("%+v", hotPeersTotalLoads)),
+			zap.Int("hotPeerNum", len(originHotPeers)),
 		)
 	}
 
-	if maxLoadDiffRatio > loadStableThresholdConst {
-		log.Info("load not stable",
-			zap.Float64("maxLoadDiffRatio", maxLoadDiffRatio),
-		)
-		balancer.skipSchedule = true
-		balancer.sche.needInit = true
-	}
+	normStoreLoads(balancer.storeInfos)
+	return
 }
 
 // filterDstStores select the candidate store by filters
@@ -584,7 +594,7 @@ func (balancer *multiBalancer) solveMultiLoads() []*operator.Operator {
 
 			remainLoad := selectedPeer.loads[maxID] + sortedPeers.remainLoads
 			// skip useless scheduling
-			if remainLoad < balancer.sche.balanceRatio || remainLoad < (maxLoad - 1) * 0.8 {
+			if remainLoad < balancer.sche.balanceRatio || remainLoad < (maxLoad - 1) {
 				log.Info("skip useless scheduling",
 					zap.String("regionLoad", fmt.Sprintf("%+v", selectedPeer.loads)),
 					zap.Float64("remainLoad", sortedPeers.remainLoads),

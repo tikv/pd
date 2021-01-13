@@ -489,6 +489,37 @@ func migratePeer(srcStore, dstStore *storeInfo, srcPeer *peerInfo, opTy opType) 
 	}
 }
 
+func normStoreLoads(sis []*storeInfo) {
+	storeLen := len(sis)
+	if storeLen == 0 {
+		return
+	}
+	expLoads := make([]float64, len(sis[0].loads))
+	for _, si := range sis {
+		for i, load := range si.loads {
+			expLoads[i] += load
+		}
+	}
+	for i := range expLoads {
+		expLoads[i] /= float64(storeLen)
+	}
+	
+	for _, si := range sis {
+		for i := range si.loads {
+			if expLoads[i] > 0 {
+				si.loads[i] /= expLoads[i]
+			}
+		}
+		for _, peer := range si.peers {
+			for i := range peer.loads {
+				if expLoads[i] > 0 {
+					peer.loads[i] /= expLoads[i]
+				}
+			}
+		}
+	}
+}
+
 type sortedPeerInfos struct {
 	sortedPeers []*peerInfo
 	remainLoads         float64
