@@ -282,10 +282,10 @@ func testRemoveStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClie
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
 			return cluster.RemoveStore(store.GetId(), false)
 		}, metapb.StoreState_Offline)
-		// Case 2: remove store with physically destroyed should be falied because there is a physically destroyed and offline store already.
+		// Case 2: remove store with physically destroyed should be success
 		testStateAndLimit(c, clusterID, rc, grpcPDClient, store, beforeState, func(cluster *cluster.RaftCluster) error {
 			return cluster.RemoveStore(store.GetId(), true)
-		})
+		}, metapb.StoreState_Offline)
 	}
 	{
 		beforeState := metapb.StoreState_Tombstone // When store is tombstone
