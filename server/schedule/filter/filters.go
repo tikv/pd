@@ -194,7 +194,7 @@ type distinctScoreFilter struct {
 	stores    []*core.StoreInfo
 	policy    string
 	safeScore float64
-	oldStore  uint64
+	srcStore  uint64
 }
 
 const (
@@ -232,7 +232,7 @@ func newDistinctScoreFilter(scope string, labels []string, stores []*core.StoreI
 		stores:    newStores,
 		safeScore: core.DistinctScore(labels, newStores, source),
 		policy:    policy,
-		oldStore:  source.GetID(),
+		srcStore:  source.GetID(),
 	}
 }
 
@@ -262,7 +262,7 @@ func (f *distinctScoreFilter) Target(opt *config.PersistOptions, store *core.Sto
 
 // GetSourceStoreID implements the ComparingFilter
 func (f *distinctScoreFilter) GetSourceStoreID() uint64 {
-	return f.oldStore
+	return f.srcStore
 }
 
 // StoreStateFilter is used to determine whether a store can be selected as the
@@ -459,7 +459,7 @@ type ruleFitFilter struct {
 	fitter   RegionFitter
 	region   *core.RegionInfo
 	oldFit   *placement.RegionFit
-	oldStore uint64
+	srcStore uint64
 }
 
 // newRuleFitFilter creates a filter that ensures after replace a peer with new
@@ -471,7 +471,7 @@ func newRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo
 		fitter:   fitter,
 		region:   region,
 		oldFit:   fitter.FitRegion(region),
-		oldStore: oldStoreID,
+		srcStore: oldStoreID,
 	}
 }
 
@@ -490,33 +490,33 @@ func (f *ruleFitFilter) Source(opt *config.PersistOptions, store *core.StoreInfo
 func (f *ruleFitFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
 		f.region.GetPeers(), f.region.GetLeader(),
-		core.WithReplacePeerStore(f.oldStore, store.GetID()))
+		core.WithReplacePeerStore(f.srcStore, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
 // GetSourceStoreID implements the ComparingFilter
 func (f *ruleFitFilter) GetSourceStoreID() uint64 {
-	return f.oldStore
+	return f.srcStore
 }
 
 type ruleLeaderFitFilter struct {
-	scope            string
-	fitter           RegionFitter
-	region           *core.RegionInfo
-	oldFit           *placement.RegionFit
-	oldLeaderStoreID uint64
+	scope          string
+	fitter         RegionFitter
+	region         *core.RegionInfo
+	oldFit         *placement.RegionFit
+	srcLeaderStore uint64
 }
 
 // newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
 // the isolation level will not decrease.
 func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldLeaderStoreID uint64) Filter {
 	return &ruleLeaderFitFilter{
-		scope:            scope,
-		fitter:           fitter,
-		region:           region,
-		oldFit:           fitter.FitRegion(region),
-		oldLeaderStoreID: oldLeaderStoreID,
+		scope:          scope,
+		fitter:         fitter,
+		region:         region,
+		oldFit:         fitter.FitRegion(region),
+		srcLeaderStore: oldLeaderStoreID,
 	}
 }
 
@@ -546,7 +546,7 @@ func (f *ruleLeaderFitFilter) Target(opt *config.PersistOptions, store *core.Sto
 }
 
 func (f *ruleLeaderFitFilter) GetSourceStoreID() uint64 {
-	return f.oldLeaderStoreID
+	return f.srcLeaderStore
 }
 
 // NewPlacementSafeguard creates a filter that ensures after replace a peer with new
