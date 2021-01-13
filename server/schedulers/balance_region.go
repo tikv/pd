@@ -57,6 +57,8 @@ func init() {
 const (
 	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
 	balanceRegionRetryLimit = 10
+	// BalanceEmptyRegionThreshold is a threshold which allow balance the empty region if the region number is less than this threshold.
+	balanceEmptyRegionThreshold = 50
 	// BalanceRegionName is balance region scheduler name.
 	BalanceRegionName = "balance-region-scheduler"
 	// BalanceRegionType is balance region scheduler type.
@@ -146,6 +148,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return stores[i].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp, -1) >
 			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp, -1)
 	})
+	regionCount := cluster.GetRegionCount()
 	for _, source := range stores {
 		sourceID := source.GetID()
 
@@ -172,7 +175,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 
 			// Skip the empty region
-			if region.GetApproximateSize() <= core.EmptyRegionApproximateSize {
+			if region.GetApproximateSize() <= core.EmptyRegionApproximateSize && regionCount > balanceEmptyRegionThreshold {
 				log.Debug("region is empty", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 				schedulerCounter.WithLabelValues(s.GetName(), "empty-region").Inc()
 				continue

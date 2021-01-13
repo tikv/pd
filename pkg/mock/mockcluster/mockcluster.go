@@ -15,6 +15,7 @@ package mockcluster
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -585,7 +586,11 @@ func (mc *Cluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) b
 
 // PutRegionStores mocks method.
 func (mc *Cluster) PutRegionStores(id uint64, stores ...uint64) {
-	meta := &metapb.Region{Id: id}
+	meta := &metapb.Region{
+		Id:       id,
+		StartKey: []byte(strconv.FormatUint(id, 10)),
+		EndKey:   []byte(strconv.FormatUint(id+1, 10)),
+	}
 	for _, s := range stores {
 		meta.Peers = append(meta.Peers, &metapb.Peer{StoreId: s})
 	}

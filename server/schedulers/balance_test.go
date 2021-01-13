@@ -960,6 +960,12 @@ func (s *testBalanceRegionSchedulerSuite) TestEmptyRegion(c *C) {
 	)
 	tc.PutRegion(region)
 	operators := sb.Schedule(tc)
+	c.Assert(operators, NotNil)
+
+	for i := uint64(10); i < 60; i++ {
+		tc.PutRegionStores(i, 1, 3, 4)
+	}
+	operators = sb.Schedule(tc)
 	c.Assert(operators, IsNil)
 }
 
