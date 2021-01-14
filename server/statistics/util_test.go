@@ -16,7 +16,18 @@ package statistics
 import (
 	"testing"
 
+<<<<<<< HEAD:server/statistics/util_test.go
 	. "github.com/pingcap/check"
+=======
+var (
+	filterCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "filter",
+			Help:      "Counter of the filter",
+		}, []string{"action", "address", "store", "scope", "type", "source", "target"})
+>>>>>>> 5f447aee... filter: add label for filterCounter (#3320):server/schedule/filter/metrics.go
 )
 
 func Test(t *testing.T) {
