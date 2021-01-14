@@ -757,25 +757,28 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	}
 	c.Assert(contains, IsTrue)
 
-	// Mark the store as tombstone.
+	// Mark the store as physically destroyed and offline.
 	err = cluster.RemoveStore(store.GetId(), true)
 	c.Assert(err, IsNil)
-	tombstoneStore := proto.Clone(store).(*metapb.Store)
-	tombstoneStore.State = metapb.StoreState_Tombstone
+	physicallyDestroyedStoreID := store.GetId()
+	// tombstoneStore := proto.Clone(store).(*metapb.Store)
+	// tombstoneStore.State = metapb.StoreState_Tombstone
 
-	// Get a tombstone store should fail.
-	n, err = s.client.GetStore(context.Background(), store.GetId())
+	// Get a physically destroyed and offline store
+	// It should be Tombstone(become Tombstone automically) or Offline
+	n, err = s.client.GetStore(context.Background(), physicallyDestroyedStoreID)
 	c.Assert(err, IsNil)
-	c.Assert(n, IsNil)
-
+	if n != nil { // store is still offline and physically destroyed
+		c.Assert(n.GetState(), Equals, metapb.StoreState_Offline)
+	}
 	// Should return tombstone stores.
 	contains = false
 	stores, err = s.client.GetAllStores(context.Background())
 	c.Assert(err, IsNil)
 	for _, store := range stores {
-		if store.GetId() == tombstoneStore.GetId() {
+		if store.GetId() == physicallyDestroyedStoreID {
 			contains = true
-			c.Assert(store, DeepEquals, tombstoneStore)
+			c.Assert(store.GetState(), Not(Equals), metapb.StoreState_Up)
 		}
 	}
 	c.Assert(contains, IsTrue)
@@ -784,7 +787,9 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	stores, err = s.client.GetAllStores(context.Background(), pd.WithExcludeTombstone())
 	c.Assert(err, IsNil)
 	for _, store := range stores {
-		c.Assert(store, Not(Equals), tombstoneStore)
+		if store.GetId() == physicallyDestroyedStoreID {
+			c.Assert(store.GetState(), Equals, metapb.StoreState_Offline)
+		}
 	}
 }
 
