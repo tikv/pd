@@ -52,7 +52,7 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 		return slice.AllOf(filters, func(i int) bool {
 			filter := filters[i]
 			if !filter.Target(opt, s) {
-				cfilter, ok := filter.(ComparingFilter)
+				cfilter, ok := filter.(comparingFilter)
 				targetID := fmt.Sprintf("%d", s.GetID())
 				sourceID := ""
 				if ok {
@@ -87,8 +87,8 @@ type Filter interface {
 	Target(opt *config.PersistOptions, store *core.StoreInfo) bool
 }
 
-// ComparingFilter is an interface to filter target store by comparing source and target stores
-type ComparingFilter interface {
+// comparingFilter is an interface to filter target store by comparing source and target stores
+type comparingFilter interface {
 	Filter
 	// GetSourceStoreID returns the source store when comparing.
 	GetSourceStoreID() uint64
@@ -116,7 +116,7 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
 		if !filter.Target(opt, store) {
-			cfilter, ok := filter.(ComparingFilter)
+			cfilter, ok := filter.(comparingFilter)
 			targetID := storeID
 			sourceID := ""
 			if ok {
