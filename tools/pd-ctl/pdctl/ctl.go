@@ -33,6 +33,9 @@ type CommandFlags struct {
 	CertPath string
 	KeyPath  string
 	Help     bool
+	Detach   bool
+	Interact bool
+	Version  bool
 }
 
 var (
@@ -40,8 +43,6 @@ var (
 		URL: "http://127.0.0.1:2379",
 	}
 
-	interact          bool
-	version           bool
 	readlineCompleter *readline.PrefixCompleter
 )
 
@@ -50,11 +51,11 @@ func init() {
 }
 
 func pdctlRun(cmd *cobra.Command, args []string) {
-	if version {
+	if commandFlags.Version {
 		server.PrintPDInfo()
 		return
 	}
-	if interact {
+	if commandFlags.Interact {
 		loop()
 	}
 }
@@ -65,6 +66,9 @@ func getBasicCmd() *cobra.Command {
 		Short: "Placement Driver control",
 	}
 
+	rootCmd.PersistentFlags().BoolVarP(&commandFlags.Detach, "detach", "d", true, "Run pdctl without readline.")
+	rootCmd.PersistentFlags().BoolVarP(&commandFlags.Interact, "interact", "i", false, "Run pdctl with readline.")
+	rootCmd.PersistentFlags().BoolVarP(&commandFlags.Version, "version", "V", false, "Print version information and exit.")
 	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", commandFlags.URL, "address of pd")
 	rootCmd.PersistentFlags().StringVar(&commandFlags.CAPath, "cacert", commandFlags.CAPath, "path of file that contains list of trusted SSL CAs")
 	rootCmd.PersistentFlags().StringVar(&commandFlags.CertPath, "cert", commandFlags.CertPath, "path of file that contains X509 certificate in PEM format")
@@ -111,9 +115,6 @@ func getInteractCmd(args []string) *cobra.Command {
 
 func getMainCmd(args []string) *cobra.Command {
 	rootCmd := getBasicCmd()
-
-	rootCmd.Flags().BoolVarP(&interact, "interact", "i", false, "Run pdctl with readline.")
-	rootCmd.Flags().BoolVarP(&version, "version", "V", false, "Print version information and exit.")
 	rootCmd.Run = pdctlRun
 
 	rootCmd.SetArgs(args)
@@ -130,6 +131,9 @@ func hiddenFlag(cmd *cobra.Command) {
 	cmd.LocalFlags().MarkHidden("cacert")
 	cmd.LocalFlags().MarkHidden("cert")
 	cmd.LocalFlags().MarkHidden("key")
+	cmd.LocalFlags().MarkHidden("detach")
+	cmd.LocalFlags().MarkHidden("interact")
+	cmd.LocalFlags().MarkHidden("version")
 }
 
 // MainStart start main command
