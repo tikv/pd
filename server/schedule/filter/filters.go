@@ -501,22 +501,22 @@ func (f *ruleFitFilter) GetSourceStoreID() uint64 {
 }
 
 type ruleLeaderFitFilter struct {
-	scope          string
-	fitter         RegionFitter
-	region         *core.RegionInfo
-	oldFit         *placement.RegionFit
-	srcLeaderStore uint64
+	scope            string
+	fitter           RegionFitter
+	region           *core.RegionInfo
+	oldFit           *placement.RegionFit
+	srcLeaderStoreID uint64
 }
 
 // newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
 // the isolation level will not decrease.
-func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, srcLeaderStore uint64) Filter {
+func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, srcLeaderStoreID uint64) Filter {
 	return &ruleLeaderFitFilter{
-		scope:          scope,
-		fitter:         fitter,
-		region:         region,
-		oldFit:         fitter.FitRegion(region),
-		srcLeaderStore: srcLeaderStore,
+		scope:            scope,
+		fitter:           fitter,
+		region:           region,
+		oldFit:           fitter.FitRegion(region),
+		srcLeaderStoreID: srcLeaderStoreID,
 	}
 }
 
@@ -546,7 +546,7 @@ func (f *ruleLeaderFitFilter) Target(opt *config.PersistOptions, store *core.Sto
 }
 
 func (f *ruleLeaderFitFilter) GetSourceStoreID() uint64 {
-	return f.srcLeaderStore
+	return f.srcLeaderStoreID
 }
 
 // NewPlacementSafeguard creates a filter that ensures after replace a peer with new
