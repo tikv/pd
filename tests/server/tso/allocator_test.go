@@ -167,7 +167,7 @@ func (s *testAllocatorSuite) TestDifferentLocalTSO(c *C) {
 }
 
 func (s *testAllocatorSuite) testTSOSuffix(c *C, cluster *tests.TestCluster, am *tso.AllocatorManager, dcLocation string) {
-	suffixBits := tso.CalSuffixBits(am.GetClusterDCLocationsNumber())
+	suffixBits := am.GetSuffixBits()
 	c.Assert(suffixBits, Greater, 0)
 	var suffix int64
 	// The suffix of a Global TSO will always be 0
@@ -179,7 +179,7 @@ func (s *testAllocatorSuite) testTSOSuffix(c *C, cluster *tests.TestCluster, am 
 		c.Assert(len(suffixResp.Kvs), Equals, 1)
 		suffix, err = strconv.ParseInt(string(suffixResp.Kvs[0].Value), 10, 64)
 		c.Assert(err, IsNil)
-		c.Assert(suffixBits, GreaterEqual, tso.CalSuffixBits(int(suffix)))
+		c.Assert(suffixBits, GreaterEqual, tso.CalSuffixBits(int32(suffix)))
 	}
 	allocator, err := am.GetAllocator(dcLocation)
 	c.Assert(err, IsNil)

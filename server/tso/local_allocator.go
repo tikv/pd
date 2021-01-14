@@ -96,7 +96,7 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	return lta.timestampOracle.getTS(lta.leadership, count, lta.allocatorManager.GetClusterDCLocationsNumber())
+	return lta.timestampOracle.getTS(lta.leadership, count, lta.allocatorManager.GetSuffixBits())
 }
 
 // Reset is used to reset the TSO allocator.
@@ -216,6 +216,8 @@ func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool)
 // WatchAllocatorLeader is used to watch the changes of the Local TSO Allocator leader.
 func (lta *LocalTSOAllocator) WatchAllocatorLeader(serverCtx context.Context, allocatorLeader *pdpb.Member, revision int64) {
 	lta.setAllocatorLeader(allocatorLeader)
+	// Check the cluster dc-locations to update the max suffix bits
+	go lta.allocatorManager.ClusterDCLocationChecker()
 	lta.leadership.Watch(serverCtx, revision)
 	lta.unsetAllocatorLeader()
 }

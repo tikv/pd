@@ -23,7 +23,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
@@ -32,18 +34,23 @@ import (
 // RuleManager is responsible for the lifecycle of all placement Rules.
 // It is thread safe.
 type RuleManager struct {
-	store *core.Storage
+	storage *core.Storage
 	sync.RWMutex
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
+
+	// used for rule validation
+	keyType          string
+	storeSetInformer core.StoreSetInformer
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(store *core.Storage) *RuleManager {
+func NewRuleManager(storage *core.Storage, storeSetInformer core.StoreSetInformer) *RuleManager {
 	return &RuleManager{
-		store:      store,
-		ruleConfig: newRuleConfig(),
+		storage:          storage,
+		storeSetInformer: storeSetInformer,
+		ruleConfig:       newRuleConfig(),
 	}
 }
 
@@ -71,7 +78,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 			Count:          maxReplica,
 			LocationLabels: locationLabels,
 		}
-		if err := m.store.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
+		if err := m.storage.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
 			return err
 		}
 		m.ruleConfig.setRule(defaultRule)
@@ -89,14 +96,14 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 func (m *RuleManager) loadRules() error {
 	var toSave []*Rule
 	var toDelete []string
-	err := m.store.LoadRules(func(k, v string) {
+	err := m.storage.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
 			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
 		}
-		if err := m.adjustRule(&r); err != nil {
+		if err := m.adjustRule(&r, ""); err != nil {
 			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
 			toDelete = append(toDelete, k)
 			return
@@ -117,12 +124,12 @@ func (m *RuleManager) loadRules() error {
 		return err
 	}
 	for _, s := range toSave {
-		if err = m.store.SaveRule(s.StoreKey(), s); err != nil {
+		if err = m.storage.SaveRule(s.StoreKey(), s); err != nil {
 			return err
 		}
 	}
 	for _, d := range toDelete {
-		if err = m.store.DeleteRule(d); err != nil {
+		if err = m.storage.DeleteRule(d); err != nil {
 			return err
 		}
 	}
@@ -130,7 +137,7 @@ func (m *RuleManager) loadRules() error {
 }
 
 func (m *RuleManager) loadGroups() error {
-	return m.store.LoadRuleGroups(func(k, v string) {
+	return m.storage.LoadRuleGroups(func(k, v string) {
 		var g RuleGroup
 		if err := json.Unmarshal([]byte(v), &g); err != nil {
 			log.Error("failed to unmarshal rule group", zap.String("group-id", k), errs.ZapError(errs.ErrLoadRuleGroup, err))
@@ -141,8 +148,7 @@ func (m *RuleManager) loadGroups() error {
 }
 
 // check and adjust rule from client or storage.
-func (m *RuleManager) adjustRule(r *Rule) error {
-	var err error
+func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
 		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
@@ -153,6 +159,27 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 	}
 	if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
 		return errs.ErrRuleContent.FastGenByArgs("endKey should be greater than startKey")
+	}
+
+	if m.keyType == core.Table.String() || m.keyType == core.Txn.String() {
+		if len(r.StartKey) > 0 {
+			if _, _, err = codec.DecodeBytes(r.StartKey); err != nil {
+				return errs.ErrRuleContent.FastGenByArgs(errors.Wrapf(err, "start key should be encoded in %s mode", m.keyType).Error())
+			}
+		}
+		if len(r.EndKey) > 0 {
+			if _, _, err = codec.DecodeBytes(r.EndKey); err != nil {
+				return errs.ErrRuleContent.FastGenByArgs(errors.Wrapf(err, "end key should be encoded in %s mode", m.keyType).Error())
+			}
+		}
+	}
+
+	if groupID != "" {
+		if r.GroupID == "" {
+			r.GroupID = groupID
+		} else if groupID != r.GroupID {
+			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("rule group %s does not match group ID %s", r.GroupID, groupID))
+		}
 	}
 	if r.GroupID == "" {
 		return errs.ErrRuleContent.FastGenByArgs("group ID should not be empty")
@@ -174,6 +201,14 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
 		}
 	}
+
+	if m.storeSetInformer != nil {
+		stores := m.storeSetInformer.GetStores()
+		if len(stores) > 0 && !checkRule(r, stores) {
+			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("rule '%s' from rule group '%s' can not match any store", r.ID, r.GroupID))
+		}
+	}
+
 	return nil
 }
 
@@ -186,7 +221,7 @@ func (m *RuleManager) GetRule(group, id string) *Rule {
 
 // SetRule inserts or updates a Rule.
 func (m *RuleManager) SetRule(rule *Rule) error {
-	if err := m.adjustRule(rule); err != nil {
+	if err := m.adjustRule(rule, ""); err != nil {
 		return err
 	}
 	m.Lock()
@@ -303,9 +338,9 @@ func (m *RuleManager) savePatch(p *ruleConfig) error {
 	for key, r := range p.rules {
 		if r == nil {
 			r = &Rule{GroupID: key[0], ID: key[1]}
-			err = m.store.DeleteRule(r.StoreKey())
+			err = m.storage.DeleteRule(r.StoreKey())
 		} else {
-			err = m.store.SaveRule(r.StoreKey(), r)
+			err = m.storage.SaveRule(r.StoreKey(), r)
 		}
 		if err != nil {
 			return err
@@ -313,9 +348,9 @@ func (m *RuleManager) savePatch(p *ruleConfig) error {
 	}
 	for id, g := range p.groups {
 		if g.isDefault() {
-			err = m.store.DeleteRuleGroup(id)
+			err = m.storage.DeleteRuleGroup(id)
 		} else {
-			err = m.store.SaveRuleGroup(id, g)
+			err = m.storage.SaveRuleGroup(id, g)
 		}
 		if err != nil {
 			return err
@@ -330,7 +365,7 @@ func (m *RuleManager) SetRules(rules []*Rule) error {
 	defer m.Unlock()
 	p := m.beginPatch()
 	for _, r := range rules {
-		if err := m.adjustRule(r); err != nil {
+		if err := m.adjustRule(r, ""); err != nil {
 			return err
 		}
 		p.setRule(r)
@@ -371,7 +406,7 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 	for _, t := range todo {
 		switch t.Action {
 		case RuleOpAdd:
-			err := m.adjustRule(t.Rule)
+			err := m.adjustRule(t.Rule, "")
 			if err != nil {
 				return err
 			}
@@ -532,7 +567,7 @@ func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle, override bool) er
 			Override: g.Override,
 		})
 		for _, r := range g.Rules {
-			if err := m.adjustRule(r); err != nil {
+			if err := m.adjustRule(r, g.ID); err != nil {
 				return err
 			}
 			p.setRule(r)
@@ -564,7 +599,7 @@ func (m *RuleManager) SetGroupBundle(group GroupBundle) error {
 		Override: group.Override,
 	})
 	for _, r := range group.Rules {
-		if err := m.adjustRule(r); err != nil {
+		if err := m.adjustRule(r, group.ID); err != nil {
 			return err
 		}
 		p.setRule(r)
@@ -624,4 +659,12 @@ func checkRule(rule *Rule, stores []*core.StoreInfo) bool {
 		}
 	}
 	return false
+}
+
+// SetKeyType will update keyType for adjustRule()
+func (m *RuleManager) SetKeyType(h string) *RuleManager {
+	m.Lock()
+	defer m.Unlock()
+	m.keyType = h
+	return m
 }

@@ -14,7 +14,6 @@
 package tso
 
 import (
-	"math"
 	"path"
 	"sync"
 	"sync/atomic"
@@ -168,6 +167,9 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	failpoint.Inject("fallBackSync", func() {
 		next = next.Add(time.Hour)
 	})
+	failpoint.Inject("systemTimeSlow", func() {
+		next = next.Add(-time.Hour)
+	})
 
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
@@ -272,6 +274,9 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	failpoint.Inject("fallBackUpdate", func() {
 		now = now.Add(time.Hour)
 	})
+	failpoint.Inject("systemTimeSlow", func() {
+		now = now.Add(-time.Hour)
+	})
 
 	tsoCounter.WithLabelValues("save").Inc()
 
@@ -317,7 +322,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 }
 
 // getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, dcLocationNum int) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
 	var resp pdpb.Timestamp
 
 	if count == 0 {
@@ -345,7 +350,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, d
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical = t.generateTSO(int64(count), CalSuffixBits(dcLocationNum))
+		resp.Physical, resp.Logical = t.generateTSO(int64(count), suffixBits)
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
@@ -364,12 +369,6 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, d
 		return resp, nil
 	}
 	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
-}
-
-// CalSuffixBits calculates the bits of suffix by the number of dc-locations.
-func CalSuffixBits(dcLocationNum int) int {
-	// dcLocationNum + 1 because we have the Global TSO holds 0 as the suffix sign
-	return int(math.Ceil(math.Log2(float64(dcLocationNum + 1))))
 }
 
 // ResetTimestamp is used to reset the timestamp in memory.

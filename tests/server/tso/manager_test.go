@@ -16,6 +16,7 @@ package tso_test
 import (
 	"context"
 	"strconv"
+	"sync"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -84,9 +85,9 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 		dcLocationMap := server.GetTSOAllocatorManager().GetClusterDCLocations()
 		c.Assert(err, IsNil)
 		c.Assert(len(dcLocationMap), Equals, testCase.dcLocationNumber)
-		for obtainedDCLocation, serverIDs := range dcLocationMap {
-			obtainedServerNumber += len(serverIDs)
-			for _, serverID := range serverIDs {
+		for obtainedDCLocation, info := range dcLocationMap {
+			obtainedServerNumber += len(info.ServerIDs)
+			for _, serverID := range info.ServerIDs {
 				expectedDCLocation, exist := testCase.dcLocationConfig[serverNameMap[serverID]]
 				c.Assert(exist, IsTrue)
 				c.Assert(obtainedDCLocation, Equals, expectedDCLocation)
@@ -100,9 +101,15 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 func waitAllLeaders(ctx context.Context, c *C, cluster *tests.TestCluster, dcLocations map[string]string) {
 	cluster.WaitLeader()
 	// To speed up the test, we force to do the check
+	wg := sync.WaitGroup{}
 	for _, server := range cluster.GetServers() {
-		server.GetTSOAllocatorManager().ClusterDCLocationChecker()
+		wg.Add(1)
+		go func(ser *tests.TestServer) {
+			ser.GetTSOAllocatorManager().ClusterDCLocationChecker()
+			wg.Done()
+		}(server)
 	}
+	wg.Wait()
 	// Wait for each DC's Local TSO Allocator leader
 	for _, dcLocation := range dcLocations {
 		testutil.WaitUntil(c, func(c *C) bool {
@@ -165,7 +172,7 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 	}
 }
 
-const waitAllocatorPriorityCheckInterval = 2 * time.Minute
+const waitAllocatorPriorityCheckInterval = 90 * time.Second
 
 var _ = Suite(&testPrioritySuite{})
 
@@ -219,9 +226,15 @@ func (s *testPrioritySuite) TestAllocatorPriority(c *C) {
 }
 
 func waitAllocatorPriorityCheck(cluster *tests.TestCluster) {
+	wg := sync.WaitGroup{}
 	for _, server := range cluster.GetServers() {
-		server.GetTSOAllocatorManager().PriorityChecker()
+		wg.Add(1)
+		go func(ser *tests.TestServer) {
+			ser.GetTSOAllocatorManager().PriorityChecker()
+			wg.Done()
+		}(server)
 	}
+	wg.Wait()
 	// Because the leader changing may take quite a long period,
 	// so we sleep longer here to wait.
 	time.Sleep(waitAllocatorPriorityCheckInterval)

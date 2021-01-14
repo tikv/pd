@@ -18,6 +18,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
 )
@@ -32,7 +33,7 @@ type testManagerSuite struct {
 func (s *testManagerSuite) SetUpTest(c *C) {
 	s.store = core.NewStorage(kv.NewMemoryKV())
 	var err error
-	s.manager = NewRuleManager(s.store)
+	s.manager = NewRuleManager(s.store, nil)
 	err = s.manager.Initialize(3, []string{"zone", "rack", "host"})
 	c.Assert(err, IsNil)
 }
@@ -62,12 +63,26 @@ func (s *testManagerSuite) TestAdjustRule(c *C) {
 		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: -1},
 		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3, LabelConstraints: []LabelConstraint{{Op: "foo"}}},
 	}
-	c.Assert(s.manager.adjustRule(&rules[0]), IsNil)
+	c.Assert(s.manager.adjustRule(&rules[0], "group"), IsNil)
 	c.Assert(rules[0].StartKey, DeepEquals, []byte{0x12, 0x3a, 0xbc})
 	c.Assert(rules[0].EndKey, DeepEquals, []byte{0x12, 0x3a, 0xbf})
-	for i := 1; i < len(rules); i++ {
-		c.Assert(s.manager.adjustRule(&rules[i]), NotNil)
+	c.Assert(s.manager.adjustRule(&rules[1], ""), NotNil)
+	for i := 2; i < len(rules); i++ {
+		c.Assert(s.manager.adjustRule(&rules[i], "group"), NotNil)
 	}
+
+	s.manager.SetKeyType(core.Table.String())
+	c.Assert(s.manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"), NotNil)
+	s.manager.SetKeyType(core.Txn.String())
+	c.Assert(s.manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"), NotNil)
+	c.Assert(s.manager.adjustRule(&Rule{
+		GroupID:     "group",
+		ID:          "id",
+		StartKeyHex: hex.EncodeToString(codec.EncodeBytes([]byte{0})),
+		EndKeyHex:   "123abf",
+		Role:        "voter",
+		Count:       3,
+	}, "group"), NotNil)
 }
 
 func (s *testManagerSuite) TestLeaderCheck(c *C) {
@@ -95,7 +110,7 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 		c.Assert(s.manager.SetRule(r), IsNil)
 	}
 
-	m2 := NewRuleManager(s.store)
+	m2 := NewRuleManager(s.store, nil)
 	err := m2.Initialize(3, []string{"no", "labels"})
 	c.Assert(err, IsNil)
 	c.Assert(m2.GetAllRules(), HasLen, 3)
