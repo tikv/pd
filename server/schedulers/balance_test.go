@@ -1075,20 +1075,30 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	}
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
+	// test not allow schedule leader
+	tc.SetLeaderScheduleLimit(0)
 	hb, err := schedule.CreateScheduler(ScatterRangeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_50", "t"}))
 	c.Assert(err, IsNil)
-	limit := 0
-	for {
-		if limit > 100 {
-			break
+
+	scheduleAndApplyOperator(tc, hb, 100)
+	maxLeaderCount := 0
+	minLeaderCount := 99
+	for i := 1; i <= 5; i++ {
+		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
+		if leaderCount < minLeaderCount {
+			minLeaderCount = leaderCount
 		}
-		ops := hb.Schedule(tc)
-		if ops == nil {
-			limit++
-			continue
+		if leaderCount > maxLeaderCount {
+			maxLeaderCount = leaderCount
 		}
-		schedule.ApplyOperator(tc, ops[0])
+		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
+		c.Check(regionCount, LessEqual, 32)
 	}
+	c.Check(maxLeaderCount-minLeaderCount, Greater, 10)
+
+	// test allow schedule leader
+	tc.SetLeaderScheduleLimit(4)
+	scheduleAndApplyOperator(tc, hb, 100)
 	for i := 1; i <= 5; i++ {
 		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
 		c.Check(leaderCount, LessEqual, 12)
@@ -1176,9 +1186,14 @@ func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 	hb, err := schedule.CreateScheduler(ScatterRangeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_09", "t"}))
 	c.Assert(err, IsNil)
 
+	scheduleAndApplyOperator(tc, hb, 100)
+}
+
+// scheduleAndApplyOperator will try to schedule for `count` times and apply the operator if the operator is created.
+func scheduleAndApplyOperator(tc *mockcluster.Cluster, hb schedule.Scheduler, count int) {
 	limit := 0
 	for {
-		if limit > 100 {
+		if limit > count {
 			break
 		}
 		ops := hb.Schedule(tc)
