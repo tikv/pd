@@ -99,7 +99,7 @@ docker build -t tikv/pd .
 Or you can also use following command to get PD from Docker hub:
 
 ```bash
-docker pull tikv/pd
+docker pull pingcap/pd
 ```
 
 Run a single node with Docker:
