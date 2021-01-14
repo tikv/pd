@@ -6232,7 +6232,7 @@
               "format": "time_series",
               "hide": true,
               "intervalFactor": 2,
-              "legendFormat": "{{scope}}-store-{{source}}-{{type}}-target-{{target}}",
+              "legendFormat": "{{scope}}-{{type}}-{{source}}-{{target}}",
               "refId": "B"
             },
             {
@@ -6240,7 +6240,7 @@
               "format": "time_series",
               "hide": true,
               "intervalFactor": 2,
-              "legendFormat": "{{scope}}-store-{{source}}-{{type}}-target-{{target}}",
+              "legendFormat": "{{scope}}-{{type}}-{{source}}-{{target}}",
               "refId": "C"
             },
             {
@@ -6248,7 +6248,7 @@
               "format": "time_series",
               "hide": true,
               "intervalFactor": 2,
-              "legendFormat": "{{scope}}-store-{{source}}-{{type}}-target-{{target}}",
+              "legendFormat": "{{scope}}-{{type}}-{{source}}-{{target}}",
               "refId": "D"
             }
           ],

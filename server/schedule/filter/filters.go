@@ -510,13 +510,13 @@ type ruleLeaderFitFilter struct {
 
 // newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
 // the isolation level will not decrease.
-func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldLeaderStoreID uint64) Filter {
+func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, srcLeaderStore uint64) Filter {
 	return &ruleLeaderFitFilter{
 		scope:          scope,
 		fitter:         fitter,
 		region:         region,
 		oldFit:         fitter.FitRegion(region),
-		srcLeaderStore: oldLeaderStoreID,
+		srcLeaderStore: srcLeaderStore,
 	}
 }
 
