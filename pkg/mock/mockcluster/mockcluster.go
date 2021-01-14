@@ -109,13 +109,15 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 }
 
 // RegionReadStats returns hot region's read stats.
+// The result only includes peers that are hot enough.
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
-	return mc.HotCache.RegionStats(statistics.ReadFlow)
+	return mc.HotCache.RegionStats(statistics.ReadFlow, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // RegionWriteStats returns hot region's write stats.
+// The result only includes peers that are hot enough.
 func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
-	return mc.HotCache.RegionStats(statistics.WriteFlow)
+	return mc.HotCache.RegionStats(statistics.WriteFlow, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.
@@ -143,7 +145,7 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
-		mc.RuleManager = placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()))
+		mc.RuleManager = placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()), mc)
 		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels)
 	}
 }

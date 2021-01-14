@@ -227,7 +227,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.ruleManager = placement.NewRuleManager(c.storage)
+	c.ruleManager = placement.NewRuleManager(c.storage, c)
 	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
 		if err != nil {
@@ -1200,6 +1200,10 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 
 	for _, store := range c.GetStores() {
 		if store.IsTombstone() {
+			if store.GetRegionCount() > 0 {
+				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
+				continue
+			}
 			// the store has already been tombstone
 			err := c.deleteStoreLocked(store)
 			if err != nil {
@@ -1442,15 +1446,17 @@ func (c *RaftCluster) GetStoresLoads() map[uint64][]float64 {
 }
 
 // RegionReadStats returns hot region's read stats.
+// The result only includes peers that are hot enough.
 func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
-	return c.hotStat.RegionStats(statistics.ReadFlow)
+	return c.hotStat.RegionStats(statistics.ReadFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
 }
 
 // RegionWriteStats returns hot region's write stats.
+// The result only includes peers that are hot enough.
 func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
-	return c.hotStat.RegionStats(statistics.WriteFlow)
+	return c.hotStat.RegionStats(statistics.WriteFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
 }
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.

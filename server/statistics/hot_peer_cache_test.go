@@ -52,7 +52,7 @@ func (t *testHotPeerCache) TestStoreTimeUnsync(c *C) {
 
 		checkAndUpdate(c, cache, region, 3)
 		{
-			stats := cache.RegionStats()
+			stats := cache.RegionStats(0)
 			c.Assert(stats, HasLen, 3)
 			for _, s := range stats {
 				c.Assert(s, HasLen, 1)
