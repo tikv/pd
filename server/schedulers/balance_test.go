@@ -1075,6 +1075,72 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	}
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
+	hb, err := schedule.CreateScheduler(ScatterRangeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_50", "t"}))
+	c.Assert(err, IsNil)
+
+	scheduleAndApplyOperator(tc, hb, 100)
+	for i := 1; i <= 5; i++ {
+		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
+		c.Check(leaderCount, LessEqual, 12)
+		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
+		c.Check(regionCount, LessEqual, 32)
+	}
+}
+
+func (s *testScatterRangeLeaderSuite) TestBalanceLeaderLimit(c *C) {
+	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
+	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetTolerantSizeRatio(2.5)
+	// Add stores 1,2,3,4,5.
+	tc.AddRegionStore(1, 0)
+	tc.AddRegionStore(2, 0)
+	tc.AddRegionStore(3, 0)
+	tc.AddRegionStore(4, 0)
+	tc.AddRegionStore(5, 0)
+	var (
+		id      uint64
+		regions []*metapb.Region
+	)
+	for i := 0; i < 50; i++ {
+		peers := []*metapb.Peer{
+			{Id: id + 1, StoreId: 1},
+			{Id: id + 2, StoreId: 2},
+			{Id: id + 3, StoreId: 3},
+		}
+		regions = append(regions, &metapb.Region{
+			Id:       id + 4,
+			Peers:    peers,
+			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
+			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
+		})
+		id += 4
+	}
+
+	// empty case
+	regions[49].EndKey = []byte("")
+	for _, meta := range regions {
+		leader := rand.Intn(4) % 3
+		regionInfo := core.NewRegionInfo(
+			meta,
+			meta.Peers[leader],
+			core.SetApproximateKeys(96),
+			core.SetApproximateSize(96),
+		)
+
+		tc.Regions.SetRegion(regionInfo)
+	}
+
+	for i := 0; i < 100; i++ {
+		_, err := tc.AllocPeer(1)
+		c.Assert(err, IsNil)
+	}
+	for i := 1; i <= 5; i++ {
+		tc.UpdateStoreStatus(uint64(i))
+	}
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
+
 	// test not allow schedule leader
 	tc.SetLeaderScheduleLimit(0)
 	hb, err := schedule.CreateScheduler(ScatterRangeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_50", "t"}))
@@ -1095,16 +1161,6 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		c.Check(regionCount, LessEqual, 32)
 	}
 	c.Check(maxLeaderCount-minLeaderCount, Greater, 10)
-
-	// test allow schedule leader
-	tc.SetLeaderScheduleLimit(4)
-	scheduleAndApplyOperator(tc, hb, 100)
-	for i := 1; i <= 5; i++ {
-		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
-		c.Check(leaderCount, LessEqual, 12)
-		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
-		c.Check(regionCount, LessEqual, 32)
-	}
 }
 
 func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
