@@ -140,15 +140,32 @@ func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
 	}
 	// Change the status of 3 directly back to Up.
 	c.Assert(cluster.UpStore(3), IsNil)
+	stores := newTestStores(3, "3.0.0")
 	// Update store 1 2 3
-	for _, store := range newTestStores(3, "3.0.0") {
+	for _, store := range stores {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	c.Assert(cluster.GetClusterVersion(), Equals, "2.0.0")
 	c.Assert(cluster.RemoveStore(3, false), IsNil)
 	c.Assert(cluster.RemoveStore(3, true), IsNil)
+	c.Assert(cluster.RemoveStore(3, true), IsNil)
 	c.Assert(cluster.UpStore(3), NotNil)
+	// try to make store 4 physically destroyed and offline failed because store 3 is still offline and physically destroyed.
+	c.Assert(cluster.RemoveStore(4, true), NotNil)
+	// try to make store 3 from physically destroyed to normall should be failed.
 	c.Assert(cluster.RemoveStore(3, false), NotNil)
+
+	for _, store := range stores {
+		newStore := store.GetMeta()
+		if store.GetID() == cluster.curPhysicallyDestroyedAndOfflineStoreID {
+			// try to start a new store with the same address with store 3 should be success
+			newStore.Id = store.GetID() + 1000
+			c.Assert(cluster.PutStore(newStore), IsNil)
+		} else {
+			newStore.Id = store.GetID() + 1000
+			c.Assert(cluster.PutStore(newStore), NotNil)
+		}
+	}
 	cluster.checkStores()
 	c.Assert(cluster.GetClusterVersion(), Equals, "3.0.0")
 }

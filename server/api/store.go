@@ -171,6 +171,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Tags store
 // @Summary Take down a store from the cluster.
 // @Param id path integer true "Store Id"
+// @Param force query string true "force" Enums(true, false), when force is true it means the store is physically destroyed and can never up gain
 // @Produce json
 // @Success 200 {string} string "The store is set as Offline."
 // @Failure 400 {string} string "The input is invalid."
@@ -196,13 +197,13 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, "The store is set as Offline or Tombstone.")
+	h.rd.JSON(w, http.StatusOK, "The store is set as Offline.")
 }
 
 // @Tags store
 // @Summary Set the store's state.
 // @Param id path integer true "Store Id"
-// @Param state query string true "state" Enums(Up, Offline, Tombstone)
+// @Param state query string true "state" Enums(Up, Offline)
 // @Produce json
 // @Success 200 {string} string "The store's state is updated."
 // @Failure 400 {string} string "The input is invalid."

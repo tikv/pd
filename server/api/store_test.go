@@ -307,6 +307,9 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	info = StoreInfo{}
 	err = postJSON(testDialClient, url+"/state?state=Foo", nil)
 	c.Assert(err, NotNil)
+	err = postJSON(testDialClient, url+"/state?state=Tombstone", nil)
+	c.Assert(err, NotNil)
+
 	err = readJSON(testDialClient, url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
@@ -318,6 +321,11 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	err = readJSON(testDialClient, url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
+
+	// store not found
+	info = StoreInfo{}
+	err = postJSON(testDialClient, s.urlPrefix+"/store/10086"+"/state?state=Offline", nil)
+	c.Assert(err, NotNil)
 }
 
 func (s *testStoreSuite) TestUrlStoreFilter(c *C) {

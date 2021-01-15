@@ -1154,7 +1154,7 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 	}
 
 	if store.IsPhysicallyDestoryAndOffline() && c.curPhysicallyDestroyedAndOfflineStoreID != store.GetID() {
-		return errors.Errorf("Somestore(store ID:%v) is offline and pyhically destroyed, please wait unitil the previous store comes to Tombstone", c.curPhysicallyDestroyedAndOfflineStoreID)
+		return errors.Errorf("Somestore(store ID:%v) is offline and pyhically destroyed, please wait until the previous store comes to Tombstone", c.curPhysicallyDestroyedAndOfflineStoreID)
 	}
 	if c.storage != nil {
 		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
