@@ -57,8 +57,6 @@ func init() {
 const (
 	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
 	balanceRegionRetryLimit = 10
-	// BalanceEmptyRegionThreshold is a threshold which allow balance the empty region if the region number is less than this threshold.
-	balanceEmptyRegionThreshold = 50
 	// BalanceRegionName is balance region scheduler name.
 	BalanceRegionName = "balance-region-scheduler"
 	// BalanceRegionType is balance region scheduler type.
@@ -148,38 +146,30 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return stores[i].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp, -1) >
 			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp, -1)
 	})
-	regionCount := cluster.GetRegionCount()
 	for _, source := range stores {
 		sourceID := source.GetID()
 
 		for i := 0; i < balanceRegionRetryLimit; i++ {
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
-			region := cluster.RandPendingRegion(sourceID, s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster))
+			region := cluster.RandPendingRegion(sourceID, s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
 			if region == nil {
 				// Then pick the region that has a follower in the source store.
-				region = cluster.RandFollowerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+				region = cluster.RandFollowerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
 			}
 			if region == nil {
 				// Then pick the region has the leader in the source store.
-				region = cluster.RandLeaderRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+				region = cluster.RandLeaderRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
 			}
 			if region == nil {
 				// Finally pick learner.
-				region = cluster.RandLearnerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+				region = cluster.RandLearnerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
 			}
 			if region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 				continue
 			}
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
-
-			// Skip the empty region
-			if region.GetApproximateSize() <= core.EmptyRegionApproximateSize && regionCount > balanceEmptyRegionThreshold {
-				log.Debug("region is empty", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "empty-region").Inc()
-				continue
-			}
 
 			// Skip hot regions.
 			if cluster.IsRegionHot(region) {
