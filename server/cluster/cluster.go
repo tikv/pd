@@ -1040,7 +1040,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	newStore := store.Clone(core.OfflineStore(physicallyDestroyed))
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", newStore.GetID()),
-		zap.Bool("physicalDestroyed", physicallyDestroyed),
+		zap.Bool("physical-destroyed", physicallyDestroyed),
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
@@ -1073,7 +1073,7 @@ func (c *RaftCluster) buryStore(storeID uint64) error {
 	if store.IsPhysicallyDestoryAndOffline() {
 		log.Warn("physically destroyed and offline store has been tombstone",
 			zap.Uint64("store-id", storeID),
-			zap.Uint64("should equal to store-id", c.curPhysicallyDestroyedAndOfflineStoreID))
+			zap.Uint64("expect-store-id", c.curPhysicallyDestroyedAndOfflineStoreID))
 		c.curPhysicallyDestroyedAndOfflineStoreID = 0
 	}
 
@@ -1114,6 +1114,10 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
+	if store.IsUp() {
+		return nil
+	}
+
 	if store.IsTombstone() || store.IsPhysicallyDestoryAndOffline() {
 		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
 	}
@@ -1121,7 +1125,8 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Up))
 	log.Warn("up store",
 		zap.Uint64("store-id", storeID),
-		zap.Stringer("old-state", store.GetState()))
+		zap.Stringer("old-state", store.GetState()),
+		zap.Stringer("cur-state", newStore.GetState()))
 	return c.putStoreLocked(newStore)
 }
 
