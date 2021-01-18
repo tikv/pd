@@ -223,7 +223,9 @@ func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient 
 func resetStoreState(c *C, rc *cluster.RaftCluster, storeID uint64, state metapb.StoreState) {
 	store := rc.GetStore(storeID)
 	c.Assert(store, NotNil)
-	newStore := store.Clone(core.SetStoreState(state))
+	newStore := store.Clone(core.OfflineStore(false))
+	newStore = newStore.Clone(core.SetStoreState(state))
+
 	rc.GetCacheCluster().PutStore(newStore)
 	if state == metapb.StoreState_Offline {
 		rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
