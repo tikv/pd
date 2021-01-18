@@ -1123,7 +1123,6 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		zap.Uint64("store-id", storeID),
 		zap.Stringer("old-state", store.GetState()))
 	return c.putStoreLocked(newStore)
-
 }
 
 // SetStoreWeight sets up a store's leader/region balance weight.
