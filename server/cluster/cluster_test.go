@@ -779,7 +779,7 @@ func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, er
 func newTestCluster(opt *config.PersistOptions) *testCluster {
 	storage := core.NewStorage(kv.NewMemoryKV())
 	rc := newTestRaftCluster(mockid.NewIDAllocator(), opt, storage, core.NewBasicCluster())
-	rc.ruleManager = placement.NewRuleManager(storage)
+	rc.ruleManager = placement.NewRuleManager(storage, rc)
 	if opt.IsPlacementRulesEnabled() {
 		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
 		if err != nil {

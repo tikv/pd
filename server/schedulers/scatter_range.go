@@ -193,7 +193,11 @@ func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetRegionScheduleLimit()
+	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetRegionScheduleLimit()
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpRegion.String()).Inc()
+	}
+	return allowed
 }
 
 func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
