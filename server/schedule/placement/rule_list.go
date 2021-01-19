@@ -125,7 +125,7 @@ func (rl ruleList) getRulesByKey(key []byte) []*Rule {
 
 func (rl ruleList) getRulesForApplyRegion(start, end []byte) []*Rule {
 	i, data := rl.rangeList.GetData(start, end)
-	if len(data) == 0 {
+	if i < 0 || len(data) == 0 {
 		return nil
 	}
 	return rl.ranges[i].applyRules
