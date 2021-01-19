@@ -72,9 +72,8 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 		if op := c.ruleChecker.Check(region); op != nil {
 			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
-			} else {
-				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
 			}
+			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	} else {
@@ -84,9 +83,8 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 		if op := c.replicaChecker.Check(region); op != nil {
 			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
-			} else {
-				operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
 			}
+			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	}
