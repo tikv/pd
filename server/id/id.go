@@ -28,7 +28,12 @@ import (
 
 // Allocator is the allocator to generate unique ID.
 type Allocator interface {
+	// Alloc allocs a unique id.
 	Alloc() (uint64, error)
+	// Rebase resets the base for the allocator from the persistent window boundary,
+	// which also resets the end of the allocator. (base, end) is the range that can
+	// be allocated in memory.
+	Rebase() error
 }
 
 const allocStep = uint64(1000)
@@ -44,8 +49,8 @@ type AllocatorImpl struct {
 	member   string
 }
 
-// NewAllocatorImpl creates a new IDAllocator.
-func NewAllocatorImpl(client *clientv3.Client, rootPath string, member string) *AllocatorImpl {
+// NewAllocator creates a new IDAllocator.
+func NewAllocator(client *clientv3.Client, rootPath string, member string) Allocator {
 	return &AllocatorImpl{client: client, rootPath: rootPath, member: member}
 }
 
@@ -55,7 +60,7 @@ func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 	defer alloc.mu.Unlock()
 
 	if alloc.base == alloc.end {
-		if err := alloc.generateLocked(); err != nil {
+		if err := alloc.rebaseLocked(); err != nil {
 			return 0, err
 		}
 	}
@@ -65,15 +70,17 @@ func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 	return alloc.base, nil
 }
 
-// Generate synchronizes and generates id range.
-func (alloc *AllocatorImpl) Generate() error {
+// Rebase resets the base for the allocator from the persistent window boundary,
+// which also resets the end of the allocator. (base, end) is the range that can
+// be allocated in memory.
+func (alloc *AllocatorImpl) Rebase() error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
-	return alloc.generateLocked()
+	return alloc.rebaseLocked()
 }
 
-func (alloc *AllocatorImpl) generateLocked() error {
+func (alloc *AllocatorImpl) rebaseLocked() error {
 	key := alloc.getAllocIDPath()
 	value, err := etcdutil.GetValue(alloc.client, key)
 	if err != nil {

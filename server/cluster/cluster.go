@@ -60,7 +60,7 @@ const (
 
 // Server is the interface for cluster.
 type Server interface {
-	GetAllocator() *id.AllocatorImpl
+	GetAllocator() id.Allocator
 	GetConfig() *config.Config
 	GetPersistOptions() *config.PersistOptions
 	GetStorage() *core.Storage
