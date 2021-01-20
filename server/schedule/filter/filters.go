@@ -373,30 +373,44 @@ type StoreStateFilter struct {
 	TransferLeader bool
 	// Set true if the schedule involves any move region operation.
 	MoveRegion bool
+	// Reason is used to distinguish the reason of store state filter
+	Reason string
 }
 
 // Scope returns the scheduler or the checker which the filter acts on.
-func (f StoreStateFilter) Scope() string {
+func (f *StoreStateFilter) Scope() string {
 	return f.ActionScope
 }
 
 // Type returns the type of the Filter.
-func (f StoreStateFilter) Type() string {
-	return "store-state-filter"
+func (f *StoreStateFilter) Type() string {
+	return fmt.Sprintf("store-state-%s-filter", f.Reason)
 }
 
 // Source returns true when the store can be selected as the schedule
 // source.
-func (f StoreStateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	if store.IsTombstone() ||
-		store.DownTime() > opt.GetMaxStoreDownTime() {
-		return false
-	}
-	if f.TransferLeader && (store.IsDisconnected() || store.IsBlocked()) {
+func (f *StoreStateFilter) Source(opts opt.Options, store *core.StoreInfo) bool {
+	if store.IsTombstone() {
+		f.Reason = "tombstone"
 		return false
 	}
 
-	if f.MoveRegion && !f.filterMoveRegion(opt, true, store) {
+	if store.DownTime() > opts.GetMaxStoreDownTime() {
+		f.Reason = "down"
+		return false
+	}
+	if f.TransferLeader {
+		if store.IsDisconnected() {
+			f.Reason = "disconnected"
+			return false
+		}
+		if store.IsBlocked() {
+			f.Reason = "blocked"
+			return false
+		}
+	}
+
+	if f.MoveRegion && !f.filterMoveRegion(opts, true, store) {
 		return false
 	}
 	return true
@@ -405,22 +419,43 @@ func (f StoreStateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 // Target returns true when the store can be selected as the schedule
 // target.
 func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
-	if store.IsTombstone() ||
-		store.IsOffline() ||
-		store.DownTime() > opts.GetMaxStoreDownTime() {
+	if store.IsTombstone() {
+		f.Reason = "tombstone"
 		return false
 	}
-	if f.TransferLeader &&
-		(store.IsDisconnected() ||
-			store.IsBlocked() ||
-			store.IsBusy() ||
-			opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())) {
+
+	if store.DownTime() > opts.GetMaxStoreDownTime() {
+		f.Reason = "down"
 		return false
+	}
+
+	if store.IsOffline() {
+		f.Reason = "offline"
+		return false
+	}
+	if f.TransferLeader {
+		if store.IsDisconnected() {
+			f.Reason = "disconnected"
+			return false
+		}
+		if store.IsBlocked() {
+			f.Reason = "blocked"
+			return false
+		}
+		if store.IsBusy() {
+			f.Reason = "busy"
+			return false
+		}
+		if opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels()) {
+			f.Reason = "reject-leader"
+			return false
+		}
 	}
 
 	if f.MoveRegion {
 		// only target consider the pending peers because pending more means the disk is slower.
 		if opts.GetMaxPendingPeerCount() > 0 && store.GetPendingPeerCount() > int(opts.GetMaxPendingPeerCount()) {
+			f.Reason = "too-many-pending-peer"
 			return false
 		}
 
@@ -431,18 +466,26 @@ func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
 	return true
 }
 
-func (f StoreStateFilter) filterMoveRegion(opt opt.Options, isSource bool, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) filterMoveRegion(opt opt.Options, isSource bool, store *core.StoreInfo) bool {
 	if store.IsBusy() {
+		f.Reason = "busy"
 		return false
 	}
 
-	if (isSource && !store.IsAvailable(storelimit.RemovePeer)) || (!isSource && !store.IsAvailable(storelimit.AddPeer)) {
+	if isSource && !store.IsAvailable(storelimit.RemovePeer) {
+		f.Reason = "exceed-remove-limit"
+		return false
+	}
+
+	if !isSource && !store.IsAvailable(storelimit.AddPeer) {
+		f.Reason = "exceed-add-limit"
 		return false
 	}
 
 	if uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount() {
+		f.Reason = "too-many-snapshot"
 		return false
 	}
 	return true

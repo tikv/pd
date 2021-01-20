@@ -166,7 +166,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	if s == nil {
 		return false
 	}
-	stateFilter := filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
+	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
 	if !stateFilter.Target(c.cluster, s) {
 		return false
 	}
@@ -184,7 +184,7 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.
 		return nil, nil
 	}
 	stores := getRuleFitStores(c.cluster, rf)
-	s := selector.NewReplicaSelector(stores, rf.Rule.LocationLabels, filter.StoreStateFilter{ActionScope: "rule-checker", MoveRegion: true})
+	s := selector.NewReplicaSelector(stores, rf.Rule.LocationLabels, &filter.StoreStateFilter{ActionScope: "rule-checker", MoveRegion: true})
 	oldPeerStore := s.SelectSource(c.cluster, stores)
 	if oldPeerStore == nil {
 		return nil, nil
@@ -257,7 +257,7 @@ func (c *RuleChecker) isOfflinePeer(region *core.RegionInfo, peer *metapb.Peer) 
 // SelectStoreToAddPeerByRule selects a store to add peer in order to fit the placement rule.
 func SelectStoreToAddPeerByRule(scope string, cluster opt.Cluster, region *core.RegionInfo, rf *placement.RuleFit, filters ...filter.Filter) *core.StoreInfo {
 	fs := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: scope, MoveRegion: true},
+		&filter.StoreStateFilter{ActionScope: scope, MoveRegion: true},
 		filter.NewStorageThresholdFilter(scope),
 		filter.NewLabelConstaintFilter(scope, rf.Rule.LabelConstraints),
 		filter.NewExcludedFilter(scope, nil, region.GetStoreIds()),
