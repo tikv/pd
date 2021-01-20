@@ -866,7 +866,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			ExpiredAt: now.Unix() + request.TTL,
 			SafePoint: request.SafePoint,
 		}
-		if request.TTL == math.MaxInt64 {
+		if math.MaxInt64-now.Unix() <= request.TTL {
 			ssp.ExpiredAt = math.MaxInt64
 		}
 		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
