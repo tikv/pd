@@ -121,7 +121,7 @@ func (s *testNormalGlobalTSOSuite) testGetNormalGlobalTimestamp(c *C, pdCli pdpb
 	c.Assert(err, IsNil)
 	c.Assert(resp.GetCount(), Equals, req.GetCount())
 	res := resp.GetTimestamp()
-	c.Assert(res.GetLogical(), Greater, int64(req.GetCount()))
+	c.Assert(res.GetLogical(), GreaterEqual, int64(req.GetCount()))
 	return res
 }
 
@@ -519,7 +519,7 @@ func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, 
 	c.Assert(resp.GetCount(), Equals, uint32(n))
 	res := resp.GetTimestamp()
 	c.Assert(res.GetPhysical(), Greater, int64(0))
-	c.Assert(res.GetLogical(), Greater, int64(req.GetCount()))
+	c.Assert(res.GetLogical(), GreaterEqual, int64(req.GetCount()))
 	return res
 }
 
