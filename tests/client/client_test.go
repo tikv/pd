@@ -919,7 +919,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(err, IsNil)
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"b", 1000, 12)
-	c.Assert(err,  IsNil)
+	c.Assert(err, IsNil)
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", 1000, 13)
 	c.Assert(err, IsNil)
@@ -946,7 +946,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "gc_worker")
-	c.Assert(minSsp.SafePoint, Equals,  uint64(10))
+	c.Assert(minSsp.SafePoint, Equals, uint64(10))
 	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
 
 	// Force delete gc_worker, then the min service safepoint is 11 of "a".
