@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -120,6 +121,11 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	if err := gta.SyncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
+
+	failpoint.Inject("globalTSOOverflow", func() {
+		maxTSO.Logical = maxLogical
+	})
+
 	maxTSO.Logical += int64(count)
 	if maxTSO.GetLogical() > maxLogical {
 		maxTSO.Physical += updateTimestampGuard.Milliseconds()

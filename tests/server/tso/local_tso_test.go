@@ -120,7 +120,8 @@ func testGetLocalTimestamp(c *C, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdp
 	c.Assert(err, IsNil)
 	c.Assert(resp.GetCount(), Equals, req.GetCount())
 	res := resp.GetTimestamp()
-	c.Assert(res.GetLogical(), Greater, int64(0))
+	c.Assert(res.GetPhysical(), Greater, int64(0))
+	c.Assert(res.GetLogical(), Greater, int64(req.GetCount()))
 	return res
 }
 
