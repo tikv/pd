@@ -49,7 +49,7 @@ type AllocatorImpl struct {
 	member   string
 }
 
-// NewAllocator creates a new IDAllocator.
+// NewAllocator creates a new ID Allocator.
 func NewAllocator(client *clientv3.Client, rootPath string, member string) Allocator {
 	return &AllocatorImpl{client: client, rootPath: rootPath, member: member}
 }
