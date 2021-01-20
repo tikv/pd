@@ -1258,19 +1258,11 @@ func (c *RaftCluster) collectHealthStatus() {
 	if err != nil {
 		log.Error("get members error", errs.ZapError(err))
 	}
-<<<<<<< HEAD
-	unhealth := CheckHealth(c.httpClient, members)
-	for _, member := range members {
-		if _, ok := unhealth[member.GetMemberId()]; ok {
-			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
-			continue
-=======
 	healthy := CheckHealth(c.httpClient, members)
 	for _, member := range members {
 		var v float64
 		if _, ok := healthy[member.GetMemberId()]; ok {
 			v = 1
->>>>>>> 66c26169... cluster: fix health metrics (#2987)
 		}
 		healthStatusGauge.WithLabelValues(member.GetName()).Set(v)
 	}
