@@ -136,6 +136,7 @@ var (
 func init() {
 	prometheus.MustRegister(txnCounter)
 	prometheus.MustRegister(txnDuration)
+	prometheus.MustRegister(healthStatusGauge)
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(regionHeartbeatCounter)
