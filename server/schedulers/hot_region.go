@@ -164,7 +164,7 @@ func (h *hotScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (h *hotScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
 	hotRegionAllowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetOpts().GetHotRegionScheduleLimit()
 	leaderAllowed := h.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
-	if hotRegionAllowed {
+	if !hotRegionAllowed {
 		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
 	}
 	if !leaderAllowed {
