@@ -38,8 +38,8 @@ type Allocator interface {
 
 const allocStep = uint64(1000)
 
-// AllocatorImpl is used to allocate ID.
-type AllocatorImpl struct {
+// allocatorImpl is used to allocate ID.
+type allocatorImpl struct {
 	mu   sync.Mutex
 	base uint64
 	end  uint64
@@ -51,11 +51,11 @@ type AllocatorImpl struct {
 
 // NewAllocator creates a new ID Allocator.
 func NewAllocator(client *clientv3.Client, rootPath string, member string) Allocator {
-	return &AllocatorImpl{client: client, rootPath: rootPath, member: member}
+	return &allocatorImpl{client: client, rootPath: rootPath, member: member}
 }
 
 // Alloc returns a new id.
-func (alloc *AllocatorImpl) Alloc() (uint64, error) {
+func (alloc *allocatorImpl) Alloc() (uint64, error) {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
@@ -73,14 +73,14 @@ func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 // Rebase resets the base for the allocator from the persistent window boundary,
 // which also resets the end of the allocator. (base, end) is the range that can
 // be allocated in memory.
-func (alloc *AllocatorImpl) Rebase() error {
+func (alloc *allocatorImpl) Rebase() error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
 	return alloc.rebaseLocked()
 }
 
-func (alloc *AllocatorImpl) rebaseLocked() error {
+func (alloc *allocatorImpl) rebaseLocked() error {
 	key := alloc.getAllocIDPath()
 	value, err := etcdutil.GetValue(alloc.client, key)
 	if err != nil {
@@ -125,6 +125,6 @@ func (alloc *AllocatorImpl) rebaseLocked() error {
 	return nil
 }
 
-func (alloc *AllocatorImpl) getAllocIDPath() string {
+func (alloc *allocatorImpl) getAllocIDPath() string {
 	return path.Join(alloc.rootPath, "alloc_id")
 }
