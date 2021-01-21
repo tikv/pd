@@ -45,7 +45,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
 	reqRegion := request.GetRegion()
-	err := c.ValidRequestRegion(reqRegion)
+	err := c.ValidRequestSplitRegion(reqRegion)
 	if err != nil {
 		return nil, err
 	}
@@ -77,12 +77,16 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	return split, nil
 }
 
-// ValidRequestRegion is used to decide if the region is valid.
-func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
+// ValidRequestSplitRegion is used to decide if the region is valid.
+func (c *RaftCluster) ValidRequestSplitRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
 	region := c.GetRegionByKey(startKey)
 	if region == nil {
 		return errors.Errorf("region not found, request region: %v", logutil.RedactStringer(core.RegionToHexMeta(reqRegion)))
+	}
+	// If the region is in joint state, then returns an error.
+	if core.IsInJointState(reqRegion.Peers...) {
+		return errors.Errorf("region is in joint state, request region: %v", logutil.RedactStringer(core.RegionToHexMeta(reqRegion)))
 	}
 	// If the request epoch is less than current region epoch, then returns an error.
 	reqRegionEpoch := reqRegion.GetRegionEpoch()
@@ -98,7 +102,7 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
 	reqRegion := request.GetRegion()
 	splitCount := request.GetSplitCount()
-	err := c.ValidRequestRegion(reqRegion)
+	err := c.ValidRequestSplitRegion(reqRegion)
 	if err != nil {
 		return nil, err
 	}

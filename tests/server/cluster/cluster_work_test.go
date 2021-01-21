@@ -43,11 +43,10 @@ func (s *clusterWorkerTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
 
-func (s *clusterWorkerTestSuite) TestValidRequestRegion(c *C) {
+func (s *clusterWorkerTestSuite) TestValidRequestSplitRegion(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 1)
-	defer cluster.Destroy()
 	c.Assert(err, IsNil)
-
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
@@ -57,38 +56,91 @@ func (s *clusterWorkerTestSuite) TestValidRequestRegion(c *C) {
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
 	rc := leaderServer.GetRaftCluster()
+	defer rc.Stop()
 
-	r1 := core.NewRegionInfo(&metapb.Region{
-		Id:       1,
-		StartKey: []byte(""),
-		EndKey:   []byte("a"),
-		Peers: []*metapb.Peer{{
-			Id:      1,
-			StoreId: 1,
-		}},
+	peers := []*metapb.Peer{{
+		Id:      2,
+		StoreId: 10,
+		Role:    metapb.PeerRole_Voter,
+	}, {
+		Id:      3,
+		StoreId: 10,
+		Role:    metapb.PeerRole_Voter,
+	}, {
+		Id:      4,
+		StoreId: 10,
+		Role:    metapb.PeerRole_Voter,
+	}}
+	r := core.NewRegionInfo(&metapb.Region{
+		Id:          1,
+		StartKey:    []byte(""),
+		EndKey:      []byte("a"),
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
-	}, &metapb.Peer{
-		Id:      1,
-		StoreId: 1,
-	})
-	err = rc.HandleRegionHeartbeat(r1)
+		Peers:       peers,
+	}, peers[0])
+	err = rc.HandleRegionHeartbeat(r)
 	c.Assert(err, IsNil)
-	r2 := &metapb.Region{Id: 2, StartKey: []byte("a"), EndKey: []byte("b")}
-	c.Assert(rc.ValidRequestRegion(r2), NotNil)
-	r3 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 2}}
-	c.Assert(rc.ValidRequestRegion(r3), NotNil)
-	r4 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1}}
-	c.Assert(rc.ValidRequestRegion(r4), NotNil)
-	r5 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}
-	c.Assert(rc.ValidRequestRegion(r5), IsNil)
-	rc.Stop()
+
+	testcases := []struct {
+		region  *metapb.Region
+		checker Checker
+	}{{
+		&metapb.Region{Id: 2, StartKey: []byte("a"), EndKey: []byte("b"), Peers: peers},
+		NotNil,
+	}, {
+		&metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), Peers: peers, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 2}},
+		NotNil,
+	}, {
+		&metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), Peers: peers, RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1}},
+		NotNil,
+	}, {
+		&metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), Peers: peers, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 3}},
+		NotNil,
+	}, {
+		&metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), Peers: peers, RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 1}},
+		NotNil,
+	}, {
+		&metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), Peers: peers, RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}},
+		IsNil,
+	}, {
+		&metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), Peers: peers, RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 3}},
+		IsNil,
+	}, {
+		&metapb.Region{
+			Id:          1,
+			StartKey:    []byte(""),
+			EndKey:      []byte("a"),
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 3},
+			Peers: []*metapb.Peer{{
+				Id:      2,
+				StoreId: 10,
+				Role:    metapb.PeerRole_Voter,
+			}, {
+				Id:      3,
+				StoreId: 10,
+				Role:    metapb.PeerRole_Voter,
+			}, {
+				Id:      4,
+				StoreId: 10,
+				Role:    metapb.PeerRole_DemotingVoter,
+			}, {
+				Id:      5,
+				StoreId: 10,
+				Role:    metapb.PeerRole_IncomingVoter,
+			}},
+		},
+		NotNil,
+	}}
+
+	for _, testcase := range testcases {
+		c.Assert(rc.ValidRequestSplitRegion(testcase.region), testcase.checker)
+	}
 }
 
 func (s *clusterWorkerTestSuite) TestAskSplit(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 1)
-	defer cluster.Destroy()
 	c.Assert(err, IsNil)
-
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
@@ -131,9 +183,8 @@ func (s *clusterWorkerTestSuite) TestAskSplit(c *C) {
 
 func (s *clusterWorkerTestSuite) TestSuspectRegions(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 1)
-	defer cluster.Destroy()
 	c.Assert(err, IsNil)
-
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
