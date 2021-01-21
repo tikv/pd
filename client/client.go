@@ -372,10 +372,10 @@ func (c *client) tsLoop() {
 								cancel: cancel,
 							}
 							tsDeadlineCh, ok := c.tsDeadline.Load(dc)
-							if !ok || tsDeadlineCh == nil {
+							for !ok || tsDeadlineCh == nil {
 								c.scheduleCheckTSDeadline()
 								time.Sleep(time.Millisecond * 100)
-								tsDeadlineCh, _ = c.tsDeadline.Load(dc)
+								tsDeadlineCh, ok = c.tsDeadline.Load(dc)
 							}
 							select {
 							case tsDeadlineCh.(chan deadline) <- dl:
@@ -527,7 +527,9 @@ func (c *client) Close() {
 	c.wg.Wait()
 
 	c.tsoDispatcher.Range(func(_, dispatcher interface{}) bool {
-		c.revokeTSORequest(errors.WithStack(errClosing), dispatcher.(chan *tsoRequest))
+		if dispatcher != nil {
+			c.revokeTSORequest(errors.WithStack(errClosing), dispatcher.(chan *tsoRequest))
+		}
 		return true
 	})
 
