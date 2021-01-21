@@ -37,8 +37,7 @@ import (
 // MetaStore contains meta information about a store.
 type MetaStore struct {
 	*metapb.Store
-	StateName           string `json:"state_name"`
-	PhysicallyDestoryed bool   `json:"physically_destroyed"`
+	StateName string `json:"state_name"`
 }
 
 // StoreStatus contains status about a store.
@@ -77,9 +76,8 @@ const (
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 	s := &StoreInfo{
 		Store: &MetaStore{
-			Store:               store.GetMeta(),
-			StateName:           store.GetState().String(),
-			PhysicallyDestoryed: store.IsPhysicallyDestoryAndOffline(),
+			Store:     store.GetMeta(),
+			StateName: store.GetState().String(),
 		},
 		Status: &StoreStatus{
 			Capacity:           typeutil.ByteSize(store.GetCapacity()),
