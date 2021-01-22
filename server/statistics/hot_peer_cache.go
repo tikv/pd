@@ -226,7 +226,7 @@ func (f *hotPeerCache) CollectMetrics() {
 		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, f.kind.String()).Set(thresholds[keyDim])
 		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, f.kind.String()).Set(thresholds[byteDim])
 
-		// TODO: remove it. For backward compatiblity now.
+		// TODO: remove it. For backward compatibility now.
 		oldType := "read"
 		if f.kind == PeerCache {
 			oldType = "write"
