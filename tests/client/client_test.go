@@ -251,6 +251,69 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	}
 }
 
+func (s *clientTestSuite) TestNewLocalTSOAllocator(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	for _, dcLocation := range dcLocationConfig {
+		testutil.WaitUntil(c, func(c *C) bool {
+			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
+			return len(pdLeader) > 0
+		})
+	}
+
+	// Wait for all nodes becoming healthy.
+	time.Sleep(time.Second * 5)
+
+	// Join a new dc-location
+	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = "dc-4"
+	})
+	c.Assert(err, IsNil)
+	err = pd4.Run()
+	c.Assert(err, IsNil)
+	dcLocationConfig["pd4"] = "dc-4"
+	testutil.WaitUntil(c, func(c *C) bool {
+		leaderName := cluster.WaitAllocatorLeader("dc-4")
+		return len(leaderName) > 0
+	})
+
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+
+	var lastTS uint64
+	for i := 0; i < 100; i++ {
+		physical, logical, err := cli.GetLocalTS(context.Background(), "dc-4")
+		if err != nil {
+			c.Assert(err, ErrorMatches, ".*unknown dc-location dc-4.*")
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		ts := s.makeTS(physical, logical)
+		c.Assert(lastTS, Less, ts)
+		lastTS = ts
+	}
+	c.Assert(lastTS, Not(Equals), uint64(0))
+}
+
 func (s *clientTestSuite) TestLocalTSO(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",

@@ -602,6 +602,7 @@ func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) *tsoReq
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
 		log.Error("[pd] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
 		request.done <- err
+		c.ScheduleCheckLeader()
 		return request
 	}
 	dispatcher.(chan *tsoRequest) <- request
