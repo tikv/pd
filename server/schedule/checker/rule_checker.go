@@ -44,6 +44,11 @@ func NewRuleChecker(cluster opt.Cluster, ruleManager *placement.RuleManager) *Ru
 	}
 }
 
+// GetType returns RuleChecker's Type
+func (c *RuleChecker) GetType() string {
+	return "rule-checker"
+}
+
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {

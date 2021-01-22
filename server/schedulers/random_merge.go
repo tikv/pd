@@ -97,7 +97,15 @@ func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *randomMergeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+<<<<<<< HEAD
 	return s.OpController.OperatorCount(operator.OpMerge) < cluster.GetMergeScheduleLimit()
+=======
+	allowed := s.OpController.OperatorCount(operator.OpMerge) < cluster.GetOpts().GetMergeScheduleLimit()
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpMerge.String()).Inc()
+	}
+	return allowed
+>>>>>>> c7aac753... scheduler: add operatorLimitCounter metrics for each scheduler (#3367)
 }
 
 func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

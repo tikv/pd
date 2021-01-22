@@ -127,7 +127,15 @@ func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+<<<<<<< HEAD
 	return l.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+=======
+	allowed := l.opController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
+	}
+	return allowed
+>>>>>>> c7aac753... scheduler: add operatorLimitCounter metrics for each scheduler (#3367)
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

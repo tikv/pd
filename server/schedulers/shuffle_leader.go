@@ -96,7 +96,15 @@ func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+<<<<<<< HEAD
 	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+=======
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+	}
+	return allowed
+>>>>>>> c7aac753... scheduler: add operatorLimitCounter metrics for each scheduler (#3367)
 }
 
 func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
