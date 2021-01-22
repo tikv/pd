@@ -925,11 +925,6 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(err, IsNil)
 
 	// Force set invalid ttl to gc_worker
-	//err = s.srv.GetStorage().SaveServiceGCSafePoint(&core.ServiceSafePoint{
-	//	ServiceID: "gc_worker",
-	//	ExpiredAt: -12345,
-	//	SafePoint: 10,
-	//})
 	gcWorkerKey := path.Join("gc", "safe_point", "service", "gc_worker")
 	{
 		gcWorkerSsp := &core.ServiceSafePoint{
