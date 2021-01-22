@@ -62,6 +62,7 @@ func InitCommand() *cobra.Command {
 		command.NewLogCommand(),
 		command.NewPluginCommand(),
 		command.NewCompletionCommand(),
+		command.NewLocationCommand(),
 	)
 	return rootCmd
 }

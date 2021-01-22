@@ -59,10 +59,11 @@ type AllocatorGroupFilter func(ag *allocatorGroup) bool
 
 type allocatorGroup struct {
 	dcLocation string
-	// Because an allocator may be set up with different context,
-	// we need to store the parent context for each allocator in
-	// order to receive the Done() signal correctly.
-	parentCtx context.Context
+	// ctx is built with cancel from a parent context when set up which can be different
+	// in order to receive Done() signal correctly.
+	// cancel would be call when allocatorGroup is deleted to stop background loop.
+	ctx    context.Context
+	cancel context.CancelFunc
 	// For the Global TSO Allocator, leadership is a PD leader's
 	// leadership, and for the Local TSO Allocator, leadership
 	// is a DC-level certificate to allow an allocator to generate
@@ -293,6 +294,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 	if _, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		return
 	}
+	log.Info("setup a tso allocator", zap.String("dc-location", dcLocation))
 	var allocator Allocator
 	if dcLocation == GlobalDCLocation {
 		allocator = NewGlobalTSOAllocator(am, leadership)
@@ -300,9 +302,11 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 		allocator = NewLocalTSOAllocator(am, leadership, dcLocation)
 	}
 	// Create a new allocatorGroup
+	ctx, cancel := context.WithCancel(parentCtx)
 	am.mu.allocatorGroups[dcLocation] = &allocatorGroup{
 		dcLocation: dcLocation,
-		parentCtx:  parentCtx,
+		ctx:        ctx,
+		cancel:     cancel,
 		leadership: leadership,
 		allocator:  allocator,
 	}
@@ -568,7 +572,7 @@ func (am *AllocatorManager) allocatorUpdater() {
 func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 	defer am.wg.Done()
 	select {
-	case <-ag.parentCtx.Done():
+	case <-ag.ctx.Done():
 		// Resetting the allocator will clear TSO in memory
 		ag.allocator.Reset()
 		return
@@ -901,9 +905,11 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
+		log.Info("delete a tso allocator group", zap.String("dc-location", dcLocation), zap.String("member", am.member.Member().Name))
 		allocatorGroup.allocator.Reset()
 		allocatorGroup.leadership.Reset()
 		delete(am.mu.allocatorGroups, dcLocation)
+		allocatorGroup.cancel()
 	}
 }
 
@@ -1133,4 +1139,33 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID u
 
 func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
 	return path.Join(am.rootPath, dcLocation, "next-leader")
+}
+
+// UpdateMemberDCLocationInfo updates dc location of member by id.
+func (am *AllocatorManager) UpdateMemberDCLocationInfo(id uint64, dcLocation string) error {
+	key := am.member.GetDCLocationPath(id)
+	res, err := etcdutil.EtcdKVGet(am.member.Client(), key)
+	if err != nil {
+		return err
+	}
+	if len(res.Kvs) == 0 {
+		return fmt.Errorf("member %v does not exist or local tso disabled", id)
+	}
+
+	if err := am.checkDCLocationUpperLimit(dcLocation); err != nil {
+		return err
+	}
+
+	// Simplely overwrite dcLocationPath in etcd, leave the rest work to backgroup loop in AllocatorDaemon.
+	resp, err := kv.
+		NewSlowLogTxn(am.member.Client()).
+		Then(clientv3.OpPut(key, dcLocation)).
+		Commit()
+	if err != nil {
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
+	}
+	if !resp.Succeeded {
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
+	}
+	return nil
 }
