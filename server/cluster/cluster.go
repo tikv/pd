@@ -1641,6 +1641,9 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 
 	cfg.StoreLimit[storeID] = sc
 	c.opt.SetScheduleConfig(cfg)
+	if err := c.opt.Persist(c.storage); err != nil {
+		log.Error("persist store limit meet error", errs.ZapError(err))
+	}
 }
 
 // RemoveStoreLimit remove a store limit for a given store ID.
@@ -1651,16 +1654,35 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	}
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)
+	if err := c.opt.Persist(c.storage); err != nil {
+		log.Error("persist store limit meet error", errs.ZapError(err))
+	}
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
+	old := c.opt.GetScheduleConfig().Clone()
 	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
+	if err := c.opt.Persist(c.storage); err != nil {
+		// roll back the store limit
+		c.opt.SetScheduleConfig(old)
+		log.Error("persist store limit meet error", errs.ZapError(err))
+	}
 }
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
+	old := c.opt.GetScheduleConfig().Clone()
+	oldAdd := config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemove := config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
 	c.opt.SetAllStoresLimit(typ, ratePerMin)
+	if err := c.opt.Persist(c.storage); err != nil {
+		// roll back the store limit
+		c.opt.SetScheduleConfig(old)
+		config.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAdd)
+		config.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemove)
+		log.Error("persist store limit meet error", errs.ZapError(err))
+	}
 }
 
 // SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
