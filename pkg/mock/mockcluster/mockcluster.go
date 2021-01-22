@@ -109,20 +109,20 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return mc.HotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
 }
 
-// RegionReadStats returns hot region's read stats.
-// The result only includes peers that are hot enough.
-func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
-	return mc.HotCache.RegionStats(statistics.ReadFlow, mc.GetHotRegionCacheHitsThreshold())
+// HotLeaderStats returns hot region's leader stats.
+// The result only includes leaders that are hot enough.
+func (mc *Cluster) HotLeaderStats() map[uint64][]*statistics.HotPeerStat {
+	return mc.HotCache.RegionStats(statistics.LeaderCache, mc.GetHotRegionCacheHitsThreshold())
 }
 
-// RegionWriteStats returns hot region's write stats.
+// HotPeerStats returns hot region's peer stats.
 // The result only includes peers that are hot enough.
-func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
-	return mc.HotCache.RegionStats(statistics.WriteFlow, mc.GetHotRegionCacheHitsThreshold())
+func (mc *Cluster) HotPeerStats() map[uint64][]*statistics.HotPeerStat {
+	return mc.HotCache.RegionStats(statistics.PeerCache, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.
-func (mc *Cluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo {
+func (mc *Cluster) RandHotRegionFromStore(store uint64, kind statistics.HotCacheKind) *core.RegionInfo {
 	r := mc.HotCache.RandHotRegionFromStore(store, kind, mc.GetHotRegionCacheHitsThreshold())
 	if r == nil {
 		return nil
@@ -332,14 +332,14 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
-	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
+	filledNum := mc.HotCache.GetFilledPeriod(statistics.LeaderCache)
 	if len(filledNums) > 0 {
 		filledNum = filledNums[0]
 	}
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items := mc.HotCache.CheckRead(r)
+		items := mc.HotCache.CheckRegion(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
@@ -359,14 +359,14 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	r = r.Clone(core.SetWrittenKeys(writtenKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
 
-	filledNum := mc.HotCache.GetFilledPeriod(statistics.WriteFlow)
+	filledNum := mc.HotCache.GetFilledPeriod(statistics.PeerCache)
 	if len(filledNums) > 0 {
 		filledNum = filledNums[0]
 	}
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckWrite(r)
+		items = mc.HotCache.CheckRegion(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}

@@ -13,6 +13,27 @@
 
 package statistics
 
+// HotCacheKind identifies HotCache types.
+type HotCacheKind int
+
+// Different hot cache kinds.
+const (
+	PeerCache HotCacheKind = iota
+	LeaderCache
+
+	CacheKindCount
+)
+
+func (k HotCacheKind) String() string {
+	switch k {
+	case PeerCache:
+		return "peer"
+	case LeaderCache:
+		return "leader"
+	}
+	return "unknown-cache-kind"
+}
+
 // StoreStatKind represents the statistics type of store.
 type StoreStatKind int
 

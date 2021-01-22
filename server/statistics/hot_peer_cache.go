@@ -41,11 +41,11 @@ const (
 
 var (
 	minHotThresholds = [2][dimLen]float64{
-		WriteFlow: {
+		PeerCache: {
 			byteDim: 1 * 1024,
 			keyDim:  32,
 		},
-		ReadFlow: {
+		LeaderCache: {
 			byteDim: 8 * 1024,
 			keyDim:  128,
 		},
@@ -54,13 +54,13 @@ var (
 
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
-	kind           FlowKind
+	kind           HotCacheKind
 	peersOfStore   map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
 }
 
 // NewHotStoresStats creates a HotStoresStats
-func NewHotStoresStats(kind FlowKind) *hotPeerCache {
+func NewHotStoresStats(kind HotCacheKind) *hotPeerCache {
 	return &hotPeerCache{
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
@@ -116,18 +116,18 @@ func (f *hotPeerCache) collectRegionMetrics(byteRate, keyRate float64, interval 
 	if interval == 0 {
 		return
 	}
-	if f.kind == ReadFlow {
+	if f.kind == LeaderCache {
 		readByteHist.Observe(byteRate)
 		readKeyHist.Observe(keyRate)
 	}
-	if f.kind == WriteFlow {
+	if f.kind == PeerCache {
 		writeByteHist.Observe(byteRate)
 		writeKeyHist.Observe(keyRate)
 	}
 }
 
-// CheckRegionFlow checks the flow information of region.
-func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
+// CheckRegion checks the flow information of region.
+func (f *hotPeerCache) CheckRegion(region *core.RegionInfo) (ret []*HotPeerStat) {
 
 	bytes := float64(f.getRegionBytes(region))
 	keys := float64(f.getRegionKeys(region))
@@ -209,31 +209,40 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 
 func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
 	switch f.kind {
-	case WriteFlow:
+	case PeerCache:
 		return f.isRegionHotWithAnyPeers(region, hotDegree)
-	case ReadFlow:
+	case LeaderCache:
 		return f.isRegionHotWithPeer(region, region.GetLeader(), hotDegree)
 	}
 	return false
 }
 
-func (f *hotPeerCache) CollectMetrics(typ string) {
+func (f *hotPeerCache) CollectMetrics() {
 	for storeID, peers := range f.peersOfStore {
 		store := storeTag(storeID)
 		thresholds := f.calcHotThresholds(storeID)
-		hotCacheStatusGauge.WithLabelValues("total_length", store, typ).Set(float64(peers.Len()))
-		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[byteDim])
-		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[keyDim])
-		// for compatibility
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[byteDim])
+		hotCacheStatusGauge.WithLabelValues("total_length", store, f.kind.String()).Set(float64(peers.Len()))
+		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, f.kind.String()).Set(thresholds[byteDim])
+		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, f.kind.String()).Set(thresholds[keyDim])
+		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, f.kind.String()).Set(thresholds[byteDim])
+
+		// TODO: remove it. For backward compatiblity now.
+		oldType := "read"
+		if f.kind == PeerCache {
+			oldType = "write"
+		}
+		hotCacheStatusGauge.WithLabelValues("total_length", store, oldType).Set(float64(peers.Len()))
+		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, oldType).Set(thresholds[byteDim])
+		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, oldType).Set(thresholds[keyDim])
+		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, oldType).Set(thresholds[byteDim])
 	}
 }
 
 func (f *hotPeerCache) getRegionBytes(region *core.RegionInfo) uint64 {
 	switch f.kind {
-	case WriteFlow:
+	case PeerCache:
 		return region.GetBytesWritten()
-	case ReadFlow:
+	case LeaderCache:
 		return region.GetBytesRead()
 	}
 	return 0
@@ -241,9 +250,9 @@ func (f *hotPeerCache) getRegionBytes(region *core.RegionInfo) uint64 {
 
 func (f *hotPeerCache) getRegionKeys(region *core.RegionInfo) uint64 {
 	switch f.kind {
-	case WriteFlow:
+	case PeerCache:
 		return region.GetKeysWritten()
-	case ReadFlow:
+	case LeaderCache:
 		return region.GetKeysRead()
 	}
 	return 0
@@ -260,9 +269,9 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 
 func (f *hotPeerCache) isRegionExpired(region *core.RegionInfo, storeID uint64) bool {
 	switch f.kind {
-	case WriteFlow:
+	case PeerCache:
 		return region.GetStorePeer(storeID) == nil
-	case ReadFlow:
+	case LeaderCache:
 		return region.GetLeader().GetStoreId() != storeID
 	}
 	return false
@@ -299,8 +308,8 @@ func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 
 	// new stores
 	for _, peer := range region.GetPeers() {
-		// ReadFlow no need consider the followers.
-		if f.kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
+		// LeaderCache no need consider the followers.
+		if f.kind == LeaderCache && peer.GetStoreId() != region.GetLeader().GetStoreId() {
 			continue
 		}
 		if _, ok := storeIDs[peer.GetStoreId()]; !ok {

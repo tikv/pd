@@ -18,11 +18,11 @@ import "github.com/tikv/pd/server/core"
 // RegionStatInformer provides access to a shared informer of statistics.
 type RegionStatInformer interface {
 	IsRegionHot(region *core.RegionInfo) bool
-	// RegionWriteStats return the storeID -> write stat of peers on this store.
+	// HotPeerStats return the storeID -> peer stat of regions on this store.
 	// The result only includes peers that are hot enough.
-	RegionWriteStats() map[uint64][]*HotPeerStat
-	// RegionReadStats return the storeID -> read stat of peers on this store.
-	// The result only includes peers that are hot enough.
-	RegionReadStats() map[uint64][]*HotPeerStat
-	RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo
+	HotPeerStats() map[uint64][]*HotPeerStat
+	// HotLeaderStats return the storeID -> leader stat of regions on this store.
+	// The result only includes leaders that are hot enough.
+	HotLeaderStats() map[uint64][]*HotPeerStat
+	RandHotRegionFromStore(store uint64, kind HotCacheKind) *core.RegionInfo
 }

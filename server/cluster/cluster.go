@@ -541,8 +541,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.RUnlock()
 		return err
 	}
-	writeItems := c.CheckWriteStatus(region)
-	readItems := c.CheckReadStatus(region)
+	hotItems := c.CheckRegionStatus(region)
 	c.RUnlock()
 
 	// Save to storage if meta is updated.
@@ -616,7 +615,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	if len(writeItems) == 0 && len(readItems) == 0 && !saveKV && !saveCache && !isNew {
+	if len(hotItems) == 0 && !saveKV && !saveCache && !isNew {
 		return nil
 	}
 
@@ -676,11 +675,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
 	}
 
-	for _, writeItem := range writeItems {
-		c.hotStat.Update(writeItem)
-	}
-	for _, readItem := range readItems {
-		c.hotStat.Update(readItem)
+	for _, item := range hotItems {
+		c.hotStat.Update(item)
 	}
 	c.Unlock()
 
@@ -795,7 +791,7 @@ func (c *RaftCluster) RandLearnerRegion(storeID uint64, ranges []core.KeyRange, 
 }
 
 // RandHotRegionFromStore randomly picks a hot region in specified store.
-func (c *RaftCluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo {
+func (c *RaftCluster) RandHotRegionFromStore(store uint64, kind statistics.HotCacheKind) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	r := c.hotStat.RandHotRegionFromStore(store, kind, c.opt.GetHotRegionCacheHitsThreshold())
@@ -1445,28 +1441,23 @@ func (c *RaftCluster) GetStoresLoads() map[uint64][]float64 {
 	return c.hotStat.GetStoresLoads()
 }
 
-// RegionReadStats returns hot region's read stats.
+// HotLeaderStats returns hot region's leader stats.
 // The result only includes peers that are hot enough.
-func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
+func (c *RaftCluster) HotLeaderStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
-	return c.hotStat.RegionStats(statistics.ReadFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
+	return c.hotStat.RegionStats(statistics.LeaderCache, c.GetOpts().GetHotRegionCacheHitsThreshold())
 }
 
-// RegionWriteStats returns hot region's write stats.
+// HotPeerStats returns hot region's peer stats.
 // The result only includes peers that are hot enough.
-func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
+func (c *RaftCluster) HotPeerStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
-	return c.hotStat.RegionStats(statistics.WriteFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
+	return c.hotStat.RegionStats(statistics.PeerCache, c.GetOpts().GetHotRegionCacheHitsThreshold())
 }
 
-// CheckWriteStatus checks the write status, returns whether need update statistics and item.
-func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotStat.CheckWrite(region)
-}
-
-// CheckReadStatus checks the read status, returns whether need update statistics and item.
-func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotStat.CheckRead(region)
+// CheckRegionStatus checks the region's status, returns whether need update statistics and item.
+func (c *RaftCluster) CheckRegionStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
+	return c.hotStat.CheckRegion(region)
 }
 
 // TODO: remove me.

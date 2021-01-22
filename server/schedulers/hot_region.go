@@ -198,26 +198,26 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	storesLoads := cluster.GetStoresLoads()
 
 	{ // update read statistics
-		regionRead := cluster.RegionReadStats()
+		hotLeaders := cluster.HotLeaderStats()
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
 			storesLoads,
 			h.pendingSums[readLeader],
-			regionRead,
+			hotLeaders,
 			read, core.LeaderKind)
 	}
 
 	{ // update write statistics
-		regionWrite := cluster.RegionWriteStats()
+		hotPeers := cluster.HotPeerStats()
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storesLoads,
 			h.pendingSums[writeLeader],
-			regionWrite,
+			hotPeers,
 			write, core.LeaderKind)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storesLoads,
 			h.pendingSums[writePeer],
-			regionWrite,
+			hotPeers,
 			write, core.RegionKind)
 	}
 }
