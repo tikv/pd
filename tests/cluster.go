@@ -158,7 +158,7 @@ func (s *TestServer) GetPersistOptions() *config.PersistOptions {
 }
 
 // GetAllocator returns the current TestServer's ID allocator.
-func (s *TestServer) GetAllocator() *id.AllocatorImpl {
+func (s *TestServer) GetAllocator() id.Allocator {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetAllocator()
