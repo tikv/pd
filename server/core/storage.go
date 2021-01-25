@@ -27,6 +27,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/encryptionkm"
@@ -522,13 +523,14 @@ func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, e
 		return nil, err
 	}
 	if len(keys) == 0 {
-		// There's no service safepoint. Store an initial value for GC worker.
+		// There's no service safepoint. It may be a new cluster, or upgraded from an older version where all service
+		// safepoints are missing. For the second case, we have no way to recover it. Store an initial value 0 for
+		// gc_worker.
 		return s.initServiceGCSafePointForGCWorker(0)
 	}
 
-	var min uint64 = math.MaxUint64
 	hasGCWorker := false
-	validMin := &ServiceSafePoint{SafePoint: math.MaxUint64}
+	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
 	for i, key := range keys {
 		ssp := &ServiceSafePoint{}
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
@@ -546,26 +548,28 @@ func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, e
 			}
 		}
 
-		if ssp.SafePoint < min {
-			min = ssp.SafePoint
-		}
-
 		if ssp.ExpiredAt < now.Unix() {
 			s.Remove(key)
 			continue
 		}
-		if ssp.SafePoint < validMin.SafePoint {
-			validMin = ssp
+		if ssp.SafePoint < min.SafePoint {
+			min = ssp
 		}
+	}
+
+	if min.SafePoint == math.MaxUint64 {
+		// There's no valid safepoints and we have no way to recover it. Just set gc_worker to 0.
+		log.Info("there are no valid service safepoints. init gc_worker's service safepoint to 0")
+		return s.initServiceGCSafePointForGCWorker(0)
 	}
 
 	if !hasGCWorker {
 		// If there exists some service safepoints but gc_worker is missing, init it with the min value among all
 		// safepoints (including expired ones)
-		return s.initServiceGCSafePointForGCWorker(min)
+		return s.initServiceGCSafePointForGCWorker(min.SafePoint)
 	}
 
-	return validMin, nil
+	return min, nil
 }
 
 // GetAllServiceGCSafePoints returns all services GC safepoints
