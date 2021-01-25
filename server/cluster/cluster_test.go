@@ -146,19 +146,19 @@ func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	c.Assert(cluster.GetClusterVersion(), Equals, "2.0.0")
-	c.Assert(cluster.RemoveStore(3, false), IsNil)
-	c.Assert(cluster.RemoveStore(3, true), IsNil)
-	c.Assert(cluster.RemoveStore(3, true), IsNil)
-	c.Assert(cluster.UpStore(3), NotNil)
-	// try to make store 4 physically destroyed and offline failed because store 3 is still offline and physically destroyed.
-	c.Assert(cluster.RemoveStore(4, true), NotNil)
-	// try to make store 3 from physically destroyed to normall should be failed.
-	c.Assert(cluster.RemoveStore(3, false), NotNil)
+	for _, storeID := range []uint64{3, 4} {
+		c.Assert(cluster.RemoveStore(storeID, false), IsNil)
+		c.Assert(cluster.RemoveStore(storeID, true), IsNil)
+		c.Assert(cluster.RemoveStore(storeID, true), IsNil)
+		c.Assert(cluster.UpStore(storeID), NotNil)
+		// try to make store from physically destroyed to normall should be failed.
+		c.Assert(cluster.RemoveStore(storeID, false), NotNil)
+	}
 
 	for _, store := range stores {
 		newStore := store.GetMeta()
-		if store.GetID() == cluster.curPhysicallyDestroyedAndOfflineStoreID {
-			// try to start a new store with the same address with store 3 should be success
+		if cluster.GetStore(newStore.Id).IsPhysicallyDestoryAndOffline() {
+			// try to start a new store with the same address with store which is physically destryed should be success
 			newStore.Id = store.GetID() + 1000
 			c.Assert(cluster.PutStore(newStore), IsNil)
 		} else {

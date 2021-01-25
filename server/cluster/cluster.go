@@ -83,10 +83,8 @@ type RaftCluster struct {
 
 	running bool
 
-	clusterID                               uint64
-	clusterRoot                             string
-	curPhysicallyDestroyedAndOfflineStoreID uint64
-
+	clusterID   uint64
+	clusterRoot string
 	// cached cluster info
 	core    *core.BasicCluster
 	meta    *metapb.Cluster
@@ -131,14 +129,13 @@ type Status struct {
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		ctx:                                     ctx,
-		running:                                 false,
-		clusterID:                               clusterID,
-		clusterRoot:                             root,
-		regionSyncer:                            regionSyncer,
-		httpClient:                              httpClient,
-		etcdClient:                              etcdClient,
-		curPhysicallyDestroyedAndOfflineStoreID: 0,
+		ctx:          ctx,
+		running:      false,
+		clusterID:    clusterID,
+		clusterRoot:  root,
+		regionSyncer: regionSyncer,
+		httpClient:   httpClient,
+		etcdClient:   etcdClient,
 	}
 }
 
@@ -1072,9 +1069,7 @@ func (c *RaftCluster) buryStore(storeID uint64) error {
 
 	if store.IsPhysicallyDestoryAndOffline() {
 		log.Warn("physically destroyed and offline store has been tombstone",
-			zap.Uint64("store-id", storeID),
-			zap.Uint64("expect-store-id", c.curPhysicallyDestroyedAndOfflineStoreID))
-		c.curPhysicallyDestroyedAndOfflineStoreID = 0
+			zap.Uint64("store-id", storeID))
 	}
 
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
@@ -1153,13 +1148,6 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 }
 
 func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
-	if store.IsPhysicallyDestoryAndOffline() && c.curPhysicallyDestroyedAndOfflineStoreID == 0 {
-		c.curPhysicallyDestroyedAndOfflineStoreID = store.GetID()
-	}
-
-	if store.IsPhysicallyDestoryAndOffline() && c.curPhysicallyDestroyedAndOfflineStoreID != store.GetID() {
-		return errors.Errorf("Somestore(store ID:%v) is offline and pyhically destroyed, please wait until the previous store comes to Tombstone", c.curPhysicallyDestroyedAndOfflineStoreID)
-	}
 	if c.storage != nil {
 		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
 			return err
