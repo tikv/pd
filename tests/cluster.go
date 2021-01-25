@@ -607,6 +607,19 @@ func (c *TestCluster) Destroy() {
 	}
 }
 
+// CheckClusterDCLocation will force the cluster to do the dc-location check in order to speed up the test.
+func (c *TestCluster) CheckClusterDCLocation() {
+	wg := sync.WaitGroup{}
+	for _, server := range c.GetServers() {
+		wg.Add(1)
+		go func(ser *TestServer) {
+			ser.GetTSOAllocatorManager().ClusterDCLocationChecker()
+			wg.Done()
+		}(server)
+	}
+	wg.Wait()
+}
+
 // WaitOp represent the wait configuration
 type WaitOp struct {
 	retryTimes   int
