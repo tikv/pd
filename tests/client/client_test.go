@@ -34,6 +34,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -41,6 +42,8 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 )
+
+const tsoRequestConcurrentNumber = 10
 
 func Test(t *testing.T) {
 	TestingT(t)
@@ -89,10 +92,11 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
-	var p1, l1 int64
+	var ts1, ts2 uint64
 	testutil.WaitUntil(c, func(c *C) bool {
-		p1, l1, err = cli.GetTS(context.TODO())
+		p1, l1, err := cli.GetTS(context.TODO())
 		if err == nil {
+			ts1 = tsoutil.ComposeTS(p1, l1)
 			return true
 		}
 		c.Log(err)
@@ -111,13 +115,14 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	// Check TS won't fall back after leader changed.
 	testutil.WaitUntil(c, func(c *C) bool {
 		p2, l2, err := cli.GetTS(context.TODO())
-		if err != nil {
-			c.Log(err)
-			return false
+		if err == nil {
+			ts2 = tsoutil.ComposeTS(p2, l2)
+			return true
 		}
-		c.Assert(p1<<18+l1, Less, p2<<18+l2)
-		return true
+		c.Log(err)
+		return false
 	})
+	c.Assert(ts1, Less, ts2)
 
 	// Check URL list.
 	cli.Close()
@@ -143,16 +148,17 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
-	var physical, logical int64
+	var lastTS uint64
 	testutil.WaitUntil(c, func(c *C) bool {
-		physical, logical, err = cli.GetTS(context.TODO())
+		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
 			return true
 		}
 		c.Log(err)
 		return false
 	})
-	lastTS := s.makeTS(physical, logical)
+
 	// Start a goroutine the make sure TS won't fall back.
 	quit := make(chan struct{})
 	var wg sync.WaitGroup
@@ -166,15 +172,16 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 			default:
 			}
 
-			physical, logical, err1 := cli.GetTS(context.TODO())
-			if err1 == nil {
-				ts := s.makeTS(physical, logical)
+			physical, logical, err := cli.GetTS(context.TODO())
+			if err == nil {
+				ts := tsoutil.ComposeTS(physical, logical)
 				c.Assert(lastTS, Less, ts)
 				lastTS = ts
 			}
 			time.Sleep(time.Millisecond)
 		}
 	}()
+
 	// Transfer leader.
 	etcdCli, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -251,70 +258,7 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	}
 }
 
-func (s *clientTestSuite) TestNewLocalTSOAllocator(c *C) {
-	dcLocationConfig := map[string]string{
-		"pd1": "dc-1",
-		"pd2": "dc-2",
-		"pd3": "dc-3",
-	}
-	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
-	})
-	defer cluster.Destroy()
-	c.Assert(err, IsNil)
-
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	for _, dcLocation := range dcLocationConfig {
-		testutil.WaitUntil(c, func(c *C) bool {
-			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
-			return len(pdLeader) > 0
-		})
-	}
-
-	// Wait for all nodes becoming healthy.
-	time.Sleep(time.Second * 5)
-
-	// Join a new dc-location
-	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = "dc-4"
-	})
-	c.Assert(err, IsNil)
-	err = pd4.Run()
-	c.Assert(err, IsNil)
-	dcLocationConfig["pd4"] = "dc-4"
-	testutil.WaitUntil(c, func(c *C) bool {
-		leaderName := cluster.WaitAllocatorLeader("dc-4")
-		return len(leaderName) > 0
-	})
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
-	c.Assert(err, IsNil)
-
-	var lastTS uint64
-	for i := 0; i < 100; i++ {
-		physical, logical, err := cli.GetLocalTS(context.Background(), "dc-4")
-		if err != nil {
-			c.Assert(err, ErrorMatches, ".*unknown dc-location dc-4.*")
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		ts := s.makeTS(physical, logical)
-		c.Assert(lastTS, Less, ts)
-		lastTS = ts
-	}
-	c.Assert(lastTS, Not(Equals), uint64(0))
-}
-
-func (s *clientTestSuite) TestLocalTSO(c *C) {
+func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
@@ -347,30 +291,26 @@ func (s *clientTestSuite) TestLocalTSO(c *C) {
 
 	wg := sync.WaitGroup{}
 	for _, dcLocation := range dcLocationConfig {
-		wg.Add(1)
-		go func(dc string) {
-			defer wg.Done()
-			var err error
-			var p1, l1 int64
-			testutil.WaitUntil(c, func(c *C) bool {
-				p1, l1, err = cli.GetLocalTS(context.TODO(), dc)
-				if err == nil {
-					return true
+		wg.Add(tsoRequestConcurrentNumber)
+		for i := 0; i < tsoRequestConcurrentNumber; i++ {
+			go func(dc string) {
+				var lastTS, ts uint64
+				for i := 0; i < 100; i++ {
+					testutil.WaitUntil(c, func(c *C) bool {
+						physical, logical, err := cli.GetLocalTS(context.TODO(), dc)
+						if err == nil {
+							ts = tsoutil.ComposeTS(physical, logical)
+							return true
+						}
+						c.Log(err)
+						return false
+					})
+					c.Assert(lastTS, Less, ts)
+					lastTS = ts
 				}
-				c.Log(err)
-				return false
-			})
-			time.Sleep(10 * time.Millisecond)
-			testutil.WaitUntil(c, func(c *C) bool {
-				p2, l2, err := cli.GetLocalTS(context.TODO(), dc)
-				if err != nil {
-					c.Log(err)
-					return false
-				}
-				c.Assert(p1<<18+l1, Less, p2<<18+l2)
-				return true
-			})
-		}(dcLocation)
+				wg.Done()
+			}(dcLocation)
+		}
 	}
 	wg.Wait()
 }
@@ -442,10 +382,6 @@ func (s *clientTestSuite) waitLeader(c *C, cli client, leader string) {
 		cli.ScheduleCheckLeader()
 		return cli.GetLeaderAddr() == leader
 	})
-}
-
-func (s *clientTestSuite) makeTS(physical, logical int64) uint64 {
-	return uint64(physical<<18 + logical)
 }
 
 var _ = Suite(&testClientSuite{})
@@ -575,37 +511,22 @@ func bootstrapServer(c *C, header *pdpb.RequestHeader, client pdpb.PDClient) {
 	c.Assert(err, IsNil)
 }
 
-func (s *testClientSuite) TestTSO(c *C) {
-	var tss []int64
-	for i := 0; i < 100; i++ {
-		p, l, err := s.client.GetTS(context.Background())
-		c.Assert(err, IsNil)
-		tss = append(tss, p<<18+l)
-	}
-
-	var last int64
-	for _, ts := range tss {
-		c.Assert(ts, Greater, last)
-		last = ts
-	}
-}
-
-func (s *testClientSuite) TestTSORace(c *C) {
+func (s *testClientSuite) TestNormalTSO(c *C) {
 	var wg sync.WaitGroup
-	begin := make(chan struct{})
-	count := 10
-	wg.Add(count)
-	for i := 0; i < count; i++ {
+	wg.Add(tsoRequestConcurrentNumber)
+	for i := 0; i < tsoRequestConcurrentNumber; i++ {
 		go func() {
-			<-begin
+			var lastTS uint64
 			for i := 0; i < 100; i++ {
-				_, _, err := s.client.GetTS(context.Background())
+				physical, logical, err := s.client.GetTS(context.Background())
 				c.Assert(err, IsNil)
+				ts := tsoutil.ComposeTS(physical, logical)
+				c.Assert(lastTS, Less, ts)
+				lastTS = ts
 			}
 			wg.Done()
 		}()
 	}
-	close(begin)
 	wg.Wait()
 }
 
