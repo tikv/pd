@@ -56,6 +56,7 @@ var backgroundJobInterval = 10 * time.Second
 const (
 	clientTimeout              = 3 * time.Second
 	defaultChangedRegionsLimit = 10000
+	persistLimitRetryTime      = 10
 )
 
 // Server is the interface for cluster.
@@ -1641,9 +1642,13 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 
 	cfg.StoreLimit[storeID] = sc
 	c.opt.SetScheduleConfig(cfg)
-	if err := c.opt.Persist(c.storage); err != nil {
-		log.Error("persist store limit meet error", errs.ZapError(err))
+	var err error
+	for i := 0; i < persistLimitRetryTime; i++ {
+		if err = c.opt.Persist(c.storage); err == nil {
+			return
+		}
 	}
+	log.Error("persist store limit meet error", errs.ZapError(err))
 }
 
 // RemoveStoreLimit remove a store limit for a given store ID.
@@ -1654,9 +1659,13 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	}
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)
-	if err := c.opt.Persist(c.storage); err != nil {
-		log.Error("persist store limit meet error", errs.ZapError(err))
+	var err error
+	for i := 0; i < persistLimitRetryTime; i++ {
+		if err = c.opt.Persist(c.storage); err == nil {
+			return
+		}
 	}
+	log.Error("persist store limit meet error", errs.ZapError(err))
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.
