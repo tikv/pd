@@ -125,6 +125,45 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	// Put 4 stores.
+	for _, store := range newTestStores(4, "2.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	// store 1: up -> offline
+	c.Assert(cluster.RemoveStore(1, false), IsNil)
+	// store 1: set physically to true success
+	c.Assert(cluster.RemoveStore(1, true), IsNil)
+
+	// store 2:up -> offline & physically destroyed
+	c.Assert(cluster.RemoveStore(2, true), IsNil)
+	// store 2: set physically destroyed to false failed
+	c.Assert(cluster.RemoveStore(2, false), NotNil)
+	c.Assert(cluster.RemoveStore(2, true), IsNil)
+
+	// store 3: up to offline
+	c.Assert(cluster.RemoveStore(3, false), IsNil)
+	c.Assert(cluster.RemoveStore(3, false), IsNil)
+
+	cluster.checkStores()
+	// store 1,2,3 shuold be to tombstone
+	for storeID := uint64(1); storeID <= 3; storeID++ {
+		c.Assert(cluster.GetStore(storeID).IsTombstone(), IsTrue)
+	}
+	// test bury store
+	for storeID := uint64(0); storeID <= 4; storeID++ {
+		store := cluster.GetStore(storeID)
+		if store == nil || store.IsUp() {
+			c.Assert(cluster.buryStore(storeID), NotNil)
+		} else {
+			c.Assert(cluster.buryStore(storeID), IsNil)
+		}
+	}
+}
+
 func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
@@ -134,11 +173,12 @@ func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
 	for _, store := range newTestStores(4, "2.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
-	// Store 3 and 4 offline normally.
+	// Store 3 and 4 offline with physically destroyed.
 	for _, id := range []uint64{3, 4} {
-		c.Assert(cluster.RemoveStore(id), IsNil)
-		c.Assert(cluster.BuryStore(id, false), IsNil)
+		c.Assert(cluster.RemoveStore(id, true), IsNil)
 	}
+	cluster.checkStores()
+
 	// Change the status of 3 directly back to Up.
 	c.Assert(cluster.SetStoreState(3, metapb.StoreState_Up), IsNil)
 	// Update store 1 2 3
@@ -167,8 +207,8 @@ func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	c.Assert(cluster.GetClusterVersion(), Equals, "4.0.9")
 
 	// Bury the other store.
-	c.Assert(cluster.RemoveStore(3), IsNil)
-	c.Assert(cluster.BuryStore(3, false), IsNil)
+	c.Assert(cluster.RemoveStore(3, true), IsNil)
+	cluster.checkStores()
 	c.Assert(cluster.GetClusterVersion(), Equals, "5.0.0")
 }
 

@@ -82,6 +82,16 @@ func SetStoreState(state metapb.StoreState) StoreCreateOption {
 	}
 }
 
+// OfflineStore offline a store
+func OfflineStore(physicallyDestroyed bool) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.State = metapb.StoreState_Offline
+		meta.PhysicallyDestroyed = physicallyDestroyed
+		store.meta = meta
+	}
+}
+
 // PauseLeaderTransfer prevents the store from been selected as source or
 // target store of TransferLeader.
 func PauseLeaderTransfer() StoreCreateOption {
