@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -433,6 +434,14 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 		nextLeaderValue := fmt.Sprintf("%v", am.member.ID())
 		cmps = append(cmps, clientv3.Compare(clientv3.Value(nextLeaderKey), "=", nextLeaderValue))
 	}
+	failpoint.Inject("injectNextLeaderKey", func(val failpoint.Value) {
+		if val.(bool) {
+			cmps = []clientv3.Cmp{
+				clientv3.Compare(clientv3.Value(nextLeaderKey), "=", "mockValue"),
+			}
+		}
+	})
+
 	if err := allocator.CampaignAllocatorLeader(defaultAllocatorLeaderLease, cmps...); err != nil {
 		log.Error("failed to campaign local tso allocator leader",
 			zap.String("dc-location", allocator.dcLocation),
