@@ -507,12 +507,15 @@ func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
 // in the older version may have invalid TTL for gc_worker's safepoint, and it also might be missing. gc_worker's
 // safepoint may also be missing when the cluster is just bootstrapped. Detect these cases and fix gc_worker's safepoint
 // if necessary.
-func (s *Storage) fixGCWorkerServiceSafePpoint(allServiceSafePoints []*ServiceSafePoint) (modified bool, err error) {
+func (s *Storage) fixGCWorkerServiceSafePoint(allServiceSafePoints []*ServiceSafePoint) (modified bool, err error) {
 	if len(allServiceSafePoints) == 0 {
 		// It's a new cluster, or everything is lost so we have no way to recover it. Initialize gc_worker's service
 		// safepoint to zero.
 		_, err = s.initServiceGCSafePointForGCWorker(0)
-		return true, err
+		if err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 
 	var min uint64 = math.MaxUint64
@@ -524,7 +527,10 @@ func (s *Storage) fixGCWorkerServiceSafePpoint(allServiceSafePoints []*ServiceSa
 					zap.Uint64("safepoint", ssp.SafePoint), zap.Int64("expiredAt", ssp.ExpiredAt))
 				ssp.ExpiredAt = math.MaxInt64
 				err = s.SaveServiceGCSafePoint(ssp)
-				return true, err
+				if err != nil {
+					return false, err
+				}
+				return true, nil
 			}
 			// gc_worker's service safepoint exists normally.
 			return false, nil
@@ -536,7 +542,10 @@ func (s *Storage) fixGCWorkerServiceSafePpoint(allServiceSafePoints []*ServiceSa
 
 	// gc_worker is missing.
 	_, err = s.initServiceGCSafePointForGCWorker(min)
-	return true, err
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Storage) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
@@ -577,7 +586,7 @@ func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, e
 		return nil, err
 	}
 
-	modified, err := s.fixGCWorkerServiceSafePpoint(allServiceSafePoints)
+	modified, err := s.fixGCWorkerServiceSafePoint(allServiceSafePoints)
 	if err != nil {
 		return nil, err
 	}
