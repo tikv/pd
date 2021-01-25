@@ -27,13 +27,11 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 )
 
 const (
@@ -503,51 +501,6 @@ func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
 	return s.Remove(key)
 }
 
-// fixGCWorkerServiceSafepoint tries to fix gc_worker's special service safepoint if it's missing or incorrect. An issue
-// in the older version may have invalid TTL for gc_worker's safepoint, and it also might be missing. gc_worker's
-// safepoint may also be missing when the cluster is just bootstrapped. Detect these cases and fix gc_worker's safepoint
-// if necessary.
-func (s *Storage) fixGCWorkerServiceSafePoint(allServiceSafePoints []*ServiceSafePoint) (modified bool, err error) {
-	if len(allServiceSafePoints) == 0 {
-		// It's a new cluster, or everything is lost so we have no way to recover it. Initialize gc_worker's service
-		// safepoint to zero.
-		_, err = s.initServiceGCSafePointForGCWorker(0)
-		if err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-
-	var min uint64 = math.MaxUint64
-	for _, ssp := range allServiceSafePoints {
-		if ssp.ServiceID == gcWorkerServiceSafePointID {
-			if ssp.ExpiredAt != math.MaxInt64 {
-				// gc_worker's TTL is incorrectly set. Set it to MaxInt64.
-				log.Info("gc_worker's service safepoint has invalid TTL, fixing it",
-					zap.Uint64("safepoint", ssp.SafePoint), zap.Int64("expiredAt", ssp.ExpiredAt))
-				ssp.ExpiredAt = math.MaxInt64
-				err = s.SaveServiceGCSafePoint(ssp)
-				if err != nil {
-					return false, err
-				}
-				return true, nil
-			}
-			// gc_worker's service safepoint exists normally.
-			return false, nil
-		}
-		if ssp.SafePoint < min {
-			min = ssp.SafePoint
-		}
-	}
-
-	// gc_worker is missing.
-	_, err = s.initServiceGCSafePointForGCWorker(min)
-	if err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 func (s *Storage) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
 	ssp := &ServiceSafePoint{
 		ServiceID: gcWorkerServiceSafePointID,
@@ -562,60 +515,57 @@ func (s *Storage) initServiceGCSafePointForGCWorker(initialValue uint64) (*Servi
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
 func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
-	loadAll := func() ([]string, []*ServiceSafePoint, error) {
-		prefix := path.Join(gcPath, "safe_point", "service") + "/"
-		prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-		keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		allServiceSafePoints := make([]*ServiceSafePoint, 0, len(values))
-		for _, value := range values {
-			ssp := &ServiceSafePoint{}
-			if err := json.Unmarshal([]byte(value), ssp); err != nil {
-				return nil, nil, err
-			}
-			allServiceSafePoints = append(allServiceSafePoints, ssp)
-		}
-		return keys, allServiceSafePoints, nil
-	}
-
-	keys, allServiceSafePoints, err := loadAll()
+	prefix := path.Join(gcPath, "safe_point", "service") + "/"
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return nil, err
 	}
-
-	modified, err := s.fixGCWorkerServiceSafePoint(allServiceSafePoints)
-	if err != nil {
-		return nil, err
+	if len(keys) == 0 {
+		// There's no service safepoint. Store an initial value for GC worker.
+		return s.initServiceGCSafePointForGCWorker(0)
 	}
 
-	if modified {
-		// Reload the safepoints
-		keys, allServiceSafePoints, err = loadAll()
-		if err != nil {
+	var min uint64 = math.MaxUint64
+	hasGCWorker := false
+	validMin := &ServiceSafePoint{SafePoint: math.MaxUint64}
+	for i, key := range keys {
+		ssp := &ServiceSafePoint{}
+		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
 		}
-	}
-
-	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
-	for i, key := range keys {
-		ssp := allServiceSafePoints[i]
-		if ssp.ExpiredAt < now.Unix() {
-			err = s.Remove(key)
-			if err != nil {
-				log.Warn("failed to remove expired service safepoint",
-					zap.String("id", key), zap.Uint64("safepoint", ssp.SafePoint), zap.Error(err))
+		if ssp.ServiceID == gcWorkerServiceSafePointID {
+			hasGCWorker = true
+			// If gc_worker's expire time is incorrectly set, fix it.
+			if ssp.ExpiredAt != math.MaxInt64 {
+				ssp.ExpiredAt = math.MaxInt64
+				err = s.SaveServiceGCSafePoint(ssp)
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
 			}
+		}
+
+		if ssp.SafePoint < min {
+			min = ssp.SafePoint
+		}
+
+		if ssp.ExpiredAt < now.Unix() {
+			s.Remove(key)
 			continue
 		}
-		if ssp.SafePoint < min.SafePoint {
-			min = ssp
+		if ssp.SafePoint < validMin.SafePoint {
+			validMin = ssp
 		}
 	}
 
-	return min, nil
+	if !hasGCWorker {
+		// If there exists some service safepoints but gc_worker is missing, init it with the min value among all
+		// safepoints (including expired ones)
+		return s.initServiceGCSafePointForGCWorker(min)
+	}
+
+	return validMin, nil
 }
 
 // GetAllServiceGCSafePoints returns all services GC safepoints
