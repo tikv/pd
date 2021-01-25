@@ -198,8 +198,8 @@ docker-build-test:
 	@if [ $(DOCKER_PS_EXIT_CODE) -eq 0 ]; then \
 	docker build --no-cache -t tikv/pd .; \
 	else \
-	echo "Encountered problem while invoking docker cli. Is docker up and running? Skipping docker-build-test."; \
-	exit 1; \
+	echo "Encountered problem while invoking docker cli. Is docker up and running? Failing docker-build-test. Check exit code for details."; \
+	exit $(DOCKER_PS_EXIT_CODE); \
 	fi
 
 check-missing-tests:
