@@ -516,8 +516,15 @@ func (c *TestCluster) ResignLeader() error {
 
 // WaitAllocatorLeader is used to get the Local TSO Allocator leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
-func (c *TestCluster) WaitAllocatorLeader(dcLocation string) string {
-	for i := 0; i < 100; i++ {
+func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) string {
+	woption := &WaitOp{
+		retryTimes:   100,
+		waitInterval: WaitLeaderCheckInterval,
+	}
+	for _, op := range ops {
+		op(woption)
+	}
+	for i := 0; i < woption.retryTimes; i++ {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
@@ -535,7 +542,7 @@ func (c *TestCluster) WaitAllocatorLeader(dcLocation string) string {
 				return serverName
 			}
 		}
-		time.Sleep(WaitLeaderCheckInterval)
+		time.Sleep(woption.waitInterval)
 	}
 	return ""
 }
@@ -598,4 +605,23 @@ func (c *TestCluster) Destroy() {
 			log.Error("failed to destroy the cluster:", zap.Error(err))
 		}
 	}
+}
+
+// WaitOp represent the wait configuration
+type WaitOp struct {
+	retryTimes   int
+	waitInterval time.Duration
+}
+
+// WaitOption represent the wait configuration
+type WaitOption func(*WaitOp)
+
+// WithRetryTimes indicates the retry times
+func WithRetryTimes(r int) WaitOption {
+	return func(op *WaitOp) { op.retryTimes = r }
+}
+
+// WithWaitInterval indicates the wait interval
+func WithWaitInterval(i time.Duration) WaitOption {
+	return func(op *WaitOp) { op.waitInterval = i }
 }
