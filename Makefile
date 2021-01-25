@@ -199,6 +199,7 @@ docker-build-test:
 	docker build --no-cache -t tikv/pd .; \
 	else \
 	echo "Encountered problem while invoking docker cli. Is docker up and running? Skipping docker-build-test."; \
+	exit 1; \
 	fi
 
 check-missing-tests:
