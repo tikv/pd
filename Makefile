@@ -194,7 +194,12 @@ errdoc: install-go-tools
 	./scripts/check-errdoc.sh
 
 docker-build-test:
-	docker build --no-cache -t tikv/pd .
+	$(eval DOCKER_PS_EXIT_CODE=$(shell docker ps > /dev/null 2>&1 ; echo $$?))
+	@if [ $(DOCKER_PS_EXIT_CODE) -eq 0 ]; then \
+	docker build --no-cache -t tikv/pd .; \
+	else \
+	echo "Encountered problem while invoking docker cli. Is docker up and running? Skipping docker-build-test."; \
+	fi
 
 check-missing-tests:
 	./scripts/check-missing-tests.sh
