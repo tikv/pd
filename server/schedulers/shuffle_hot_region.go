@@ -113,15 +113,15 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool 
 	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
-	// TODO: Increment OperatorLimitCounter for OpHotRegion
-	//if !hotRegionAllowed {
-	//}
+	if !hotRegionAllowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpHotRegion.String()).Inc()
+	}
 	if !regionAllowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
 	}
-	// TODO: Increment OperatorLimitCounter for OpLeader
-	//if !leaderAllowed {
-	//}
+	if !leaderAllowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+	}
 	return hotRegionAllowed && regionAllowed && leaderAllowed
 }
 

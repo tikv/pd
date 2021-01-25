@@ -73,6 +73,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
 			}
+			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	} else {
@@ -83,14 +84,20 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
 			}
+			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	}
 
-	if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.opts.GetMergeScheduleLimit() {
-		if ops := c.mergeChecker.Check(region); ops != nil {
-			// It makes sure that two operators can be added successfully altogether.
-			return ops
+	if c.mergeChecker != nil {
+		allowed := opController.OperatorCount(operator.OpMerge) < c.opts.GetMergeScheduleLimit()
+		if !allowed {
+			operator.OperatorLimitCounter.WithLabelValues(c.mergeChecker.GetType(), operator.OpMerge.String()).Inc()
+		} else {
+			if ops := c.mergeChecker.Check(region); ops != nil {
+				// It makes sure that two operators can be added successfully altogether.
+				return ops
+			}
 		}
 	}
 	return nil

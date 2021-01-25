@@ -282,6 +282,23 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 		})
 	}
 
+	// Wait for all nodes becoming healthy.
+	time.Sleep(time.Second * 5)
+
+	// Join a new dc-location
+	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = "dc-4"
+	})
+	c.Assert(err, IsNil)
+	err = pd4.Run()
+	c.Assert(err, IsNil)
+	dcLocationConfig["pd4"] = "dc-4"
+	testutil.WaitUntil(c, func(c *C) bool {
+		leaderName := cluster.WaitAllocatorLeader("dc-4")
+		return len(leaderName) > 0
+	})
+
 	var endpoints []string
 	for _, s := range cluster.GetServers() {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
@@ -294,19 +311,25 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 		wg.Add(tsoRequestConcurrentNumber)
 		for i := 0; i < tsoRequestConcurrentNumber; i++ {
 			go func(dc string) {
-				var lastTS, ts uint64
+				var lastTS, globalTS1, localTS, globalTS2 uint64
 				for i := 0; i < 100; i++ {
 					testutil.WaitUntil(c, func(c *C) bool {
-						physical, logical, err := cli.GetLocalTS(context.TODO(), dc)
-						if err == nil {
-							ts = tsoutil.ComposeTS(physical, logical)
+						globalPhysical1, globalLogical1, globalErr1 := cli.GetTS(context.TODO())
+						localPhysical, localLogical, localErr := cli.GetLocalTS(context.TODO(), dc)
+						globalPhysical2, globalLogical2, globalErr2 := cli.GetTS(context.TODO())
+						if globalErr1 == nil && localErr == nil && globalErr2 == nil {
+							globalTS1 = tsoutil.ComposeTS(globalPhysical1, globalLogical1)
+							localTS = tsoutil.ComposeTS(localPhysical, localLogical)
+							globalTS2 = tsoutil.ComposeTS(globalPhysical2, globalLogical2)
 							return true
 						}
-						c.Log(err)
+						c.Log(globalErr1, localErr, globalErr2)
 						return false
 					})
-					c.Assert(lastTS, Less, ts)
-					lastTS = ts
+					c.Assert(lastTS, Less, globalTS1)
+					c.Assert(globalTS1, Less, localTS)
+					c.Assert(localTS, Less, globalTS2)
+					lastTS = globalTS2
 				}
 				wg.Done()
 			}(dcLocation)
