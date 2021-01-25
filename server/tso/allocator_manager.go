@@ -427,7 +427,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 		zap.Any("dc-location-info", dcLocationInfo),
 		zap.String("name", am.member.Member().Name))
 	cmps := make([]clientv3.Cmp, 0)
-	nextLeaderKey := path.Join(am.rootPath, allocator.dcLocation, "next-leader")
+	nextLeaderKey := am.nextLeaderKey(allocator.dcLocation)
 	if !isNextLeader {
 		cmps = append(cmps, clientv3.Compare(clientv3.CreateRevision(nextLeaderKey), "=", 0))
 	} else {
@@ -798,7 +798,7 @@ func (am *AllocatorManager) PriorityChecker() {
 				zap.String("old-dc-location", leaderServerDCLocation),
 				zap.Uint64("next-leader-id", serverID),
 				zap.String("next-dc-location", myServerDCLocation))
-			nextLeaderKey := path.Join(am.rootPath, allocatorGroup.dcLocation, "next-leader")
+			nextLeaderKey := am.nextLeaderKey(allocatorGroup.dcLocation)
 			// Grant a etcd lease with checkStep * 1.5
 			nextLeaderLease := clientv3.NewLease(am.member.Client())
 			ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)
@@ -854,7 +854,7 @@ func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error)
 }
 
 func (am *AllocatorManager) getNextLeaderID(dcLocation string) (uint64, error) {
-	nextLeaderKey := path.Join(am.rootPath, dcLocation, "next-leader")
+	nextLeaderKey := am.nextLeaderKey(dcLocation)
 	nextLeaderValue, err := etcdutil.GetValue(am.member.Client(), nextLeaderKey)
 	if err != nil {
 		return 0, err
@@ -866,7 +866,7 @@ func (am *AllocatorManager) getNextLeaderID(dcLocation string) (uint64, error) {
 }
 
 func (am *AllocatorManager) deleteNextLeaderID(dcLocation string) error {
-	nextLeaderKey := path.Join(am.rootPath, dcLocation, "next-leader")
+	nextLeaderKey := am.nextLeaderKey(dcLocation)
 	resp, err := kv.NewSlowLogTxn(am.member.Client()).
 		Then(clientv3.OpDelete(nextLeaderKey)).
 		Commit()
@@ -1077,4 +1077,8 @@ func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) {
 		return
 	}
 	am.localAllocatorConn.clientConns[addr] = newConn
+}
+
+func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
+	return path.Join(am.rootPath, dcLocation, "next-leader")
 }

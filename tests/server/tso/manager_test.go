@@ -244,22 +244,11 @@ func (s *testPrioritySuite) TestNextLeaderGuarantee(c *C) {
 
 	cluster.WaitLeader()
 	// To speed up the test, we force to do the check
-	checkLeader := func() {
-		wg := sync.WaitGroup{}
-		for _, server := range cluster.GetServers() {
-			wg.Add(1)
-			go func(ser *tests.TestServer) {
-				ser.GetTSOAllocatorManager().ClusterDCLocationChecker()
-				wg.Done()
-			}(server)
-		}
-		wg.Wait()
-	}
-	checkLeader()
+	triggerCheckLeader(cluster)
 	leaderName := cluster.WaitAllocatorLeader("dc-1")
 	c.Assert(leaderName, Equals, "")
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/tso/injectNextLeaderKey"), IsNil)
-	checkLeader()
+	triggerCheckLeader(cluster)
 	leaderName = cluster.WaitAllocatorLeader("dc-1")
 	c.Assert(leaderName, Equals, "pd1")
 }
@@ -277,4 +266,16 @@ func waitAllocatorPriorityCheck(cluster *tests.TestCluster) {
 	// Because the leader changing may take quite a long period,
 	// so we sleep longer here to wait.
 	time.Sleep(waitAllocatorPriorityCheckInterval)
+}
+
+func triggerCheckLeader(cluster *tests.TestCluster, ) {
+	wg := sync.WaitGroup{}
+	for _, server := range cluster.GetServers() {
+		wg.Add(1)
+		go func(ser *tests.TestServer) {
+			ser.GetTSOAllocatorManager().ClusterDCLocationChecker()
+			wg.Done()
+		}(server)
+	}
+	wg.Wait()
 }

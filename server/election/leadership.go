@@ -100,9 +100,9 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	if err := ls.getLease().Grant(leaseTimeout); err != nil {
 		return err
 	}
-	// The leader key must not exist, so the CreateRevision is 0.
 	finalCmps := make([]clientv3.Cmp, 0, len(cmps)+1)
 	finalCmps = append(finalCmps, cmps...)
+	// The leader key must not exist, so the CreateRevision is 0.
 	finalCmps = append(finalCmps, clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
 	resp, err := kv.NewSlowLogTxn(ls.client).
 		If(finalCmps...).
