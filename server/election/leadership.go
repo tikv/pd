@@ -102,9 +102,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	}
 	// The leader key must not exist, so the CreateRevision is 0.
 	finalCmps := make([]clientv3.Cmp, 0, len(cmps)+1)
-	for _, cmp := range cmps {
-		finalCmps = append(finalCmps, cmp)
-	}
+	finalCmps = append(finalCmps, cmps...)
 	finalCmps = append(finalCmps, clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
 	resp, err := kv.NewSlowLogTxn(ls.client).
 		If(finalCmps...).

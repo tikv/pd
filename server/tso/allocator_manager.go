@@ -426,7 +426,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 		zap.String("dc-location", allocator.dcLocation),
 		zap.Any("dc-location-info", dcLocationInfo),
 		zap.String("name", am.member.Member().Name))
-	cmps := make([]clientv3.Cmp, 0, 0)
+	cmps := make([]clientv3.Cmp, 0)
 	nextLeaderKey := path.Join(am.rootPath, allocator.dcLocation, "next-leader")
 	if !isNextLeader {
 		cmps = append(cmps, clientv3.Compare(clientv3.CreateRevision(nextLeaderKey), "=", 0))
