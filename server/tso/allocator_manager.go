@@ -363,13 +363,17 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		if nextLeader != 0 && nextLeader != am.member.ID() {
-			log.Info("skip campaigning of the local tso allocator leader and check later",
-				zap.String("server-name", am.member.Member().Name),
-				zap.Uint64("server-id", am.member.ID()),
-				zap.Uint64("next-leader-id", nextLeader))
-			time.Sleep(200 * time.Millisecond)
-			continue
+		isNextLeader := false
+		if nextLeader != 0 {
+			if nextLeader != am.member.ID() {
+				log.Info("skip campaigning of the local tso allocator leader and check later",
+					zap.String("server-name", am.member.Member().Name),
+					zap.Uint64("server-id", am.member.ID()),
+					zap.Uint64("next-leader-id", nextLeader))
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			isNextLeader = true
 		}
 
 		// Make sure the leader is aware of this new dc-location in order to make the
@@ -398,7 +402,7 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 			continue
 		}
 
-		am.campaignAllocatorLeader(ctx, allocator, dcLocationInfo)
+		am.campaignAllocatorLeader(ctx, allocator, dcLocationInfo, isNextLeader)
 	}
 }
 
@@ -416,12 +420,20 @@ func longSleep(ctx context.Context, waitStep time.Duration) bool {
 	}
 }
 
-func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, allocator *LocalTSOAllocator, dcLocationInfo *pdpb.GetDCLocationInfoResponse) {
+func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, allocator *LocalTSOAllocator, dcLocationInfo *pdpb.GetDCLocationInfoResponse, isNextLeader bool) {
 	log.Info("start to campaign local tso allocator leader",
 		zap.String("dc-location", allocator.dcLocation),
 		zap.Any("dc-location-info", dcLocationInfo),
 		zap.String("name", am.member.Member().Name))
-	if err := allocator.CampaignAllocatorLeader(defaultAllocatorLeaderLease); err != nil {
+	cmps := make([]clientv3.Cmp, 0, 0)
+	nextLeaderKey := path.Join(am.rootPath, allocator.dcLocation, "next-leader")
+	if !isNextLeader {
+		cmps = append(cmps, clientv3.Compare(clientv3.CreateRevision(nextLeaderKey), "=", 0))
+	} else {
+		nextLeaderValue := fmt.Sprintf("%v", am.member.ID())
+		cmps = append(cmps, clientv3.Compare(clientv3.Value(nextLeaderKey), "=", nextLeaderValue))
+	}
+	if err := allocator.CampaignAllocatorLeader(defaultAllocatorLeaderLease, cmps...); err != nil {
 		log.Error("failed to campaign local tso allocator leader",
 			zap.String("dc-location", allocator.dcLocation),
 			zap.Any("dc-location-info", dcLocationInfo),

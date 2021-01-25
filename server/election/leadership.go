@@ -89,7 +89,7 @@ func (ls *Leadership) GetLeaderKey() string {
 }
 
 // Campaign is used to campaign the leader with given lease and returns a leadership
-func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
+func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
 	ls.setLease(&lease{
@@ -101,9 +101,12 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 		return err
 	}
 	// The leader key must not exist, so the CreateRevision is 0.
-	resp, err := kv.NewSlowLogTxn(ls.client).
-		If(clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0)).
-		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(ls.getLease().ID))).
+	txn := kv.NewSlowLogTxn(ls.client).
+		If(clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
+	for _, cmp := range cmps {
+		txn = txn.If(cmp)
+	}
+	resp, err := txn.Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(ls.getLease().ID))).
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
