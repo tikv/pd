@@ -34,7 +34,10 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt opt.Opti
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			if !filters[i].Source(opt, s) {
-				filterCounter.WithLabelValues("filter-source", s.GetAddress(), fmt.Sprintf("%d", s.GetID()), filters[i].Scope(), filters[i].Type()).Inc()
+				sourceID := fmt.Sprintf("%d", s.GetID())
+				targetID := ""
+				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
+					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
 				return false
 			}
 			return true
@@ -46,8 +49,16 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt opt.Opti
 func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt opt.Options) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
-			if !filters[i].Target(opt, s) {
-				filterCounter.WithLabelValues("filter-target", s.GetAddress(), fmt.Sprintf("%d", s.GetID()), filters[i].Scope(), filters[i].Type()).Inc()
+			filter := filters[i]
+			if !filter.Target(opt, s) {
+				cfilter, ok := filter.(comparingFilter)
+				targetID := fmt.Sprintf("%d", s.GetID())
+				sourceID := ""
+				if ok {
+					sourceID = fmt.Sprintf("%d", cfilter.GetSourceStoreID())
+				}
+				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
+					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
 				return false
 			}
 			return true
@@ -75,13 +86,23 @@ type Filter interface {
 	Target(opt opt.Options, store *core.StoreInfo) bool
 }
 
+// comparingFilter is an interface to filter target store by comparing source and target stores
+type comparingFilter interface {
+	Filter
+	// GetSourceStoreID returns the source store when comparing.
+	GetSourceStoreID() uint64
+}
+
 // Source checks if store can pass all Filters as source store.
 func Source(opt opt.Options, store *core.StoreInfo, filters []Filter) bool {
 	storeAddress := store.GetAddress()
 	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
 		if !filter.Source(opt, store) {
-			filterCounter.WithLabelValues("filter-source", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
+			sourceID := storeID
+			targetID := ""
+			filterCounter.WithLabelValues("filter-source", storeAddress,
+				sourceID, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
 			return false
 		}
 	}
@@ -94,7 +115,14 @@ func Target(opt opt.Options, store *core.StoreInfo, filters []Filter) bool {
 	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
 		if !filter.Target(opt, store) {
-			filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
+			cfilter, ok := filter.(comparingFilter)
+			targetID := storeID
+			sourceID := ""
+			if ok {
+				sourceID = fmt.Sprintf("%d", cfilter.GetSourceStoreID())
+			}
+			filterCounter.WithLabelValues("filter-target", storeAddress,
+				targetID, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
 			return false
 		}
 	}
@@ -328,6 +356,7 @@ type distinctScoreFilter struct {
 	labels    []string
 	stores    []*core.StoreInfo
 	safeScore float64
+	srcStore  uint64
 }
 
 // NewDistinctScoreFilter creates a filter that filters all stores that have
@@ -346,6 +375,7 @@ func NewDistinctScoreFilter(scope string, labels []string, stores []*core.StoreI
 		labels:    labels,
 		stores:    newStores,
 		safeScore: core.DistinctScore(labels, newStores, source),
+		srcStore:  source.GetID(),
 	}
 }
 
@@ -363,6 +393,11 @@ func (f *distinctScoreFilter) Source(opt opt.Options, store *core.StoreInfo) boo
 
 func (f *distinctScoreFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return core.DistinctScore(f.labels, f.stores, store) >= f.safeScore
+}
+
+// GetSourceStoreID implements the ComparingFilter
+func (f *distinctScoreFilter) GetSourceStoreID() uint64 {
+	return f.srcStore
 }
 
 // StoreStateFilter is used to determine whether a store can be selected as the
@@ -595,7 +630,7 @@ type ruleFitFilter struct {
 	fitter   RegionFitter
 	region   *core.RegionInfo
 	oldFit   *placement.RegionFit
-	oldStore uint64
+	srcStore uint64
 }
 
 // NewRuleFitFilter creates a filter that ensures after replace a peer with new
@@ -607,7 +642,7 @@ func NewRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo
 		fitter:   fitter,
 		region:   region,
 		oldFit:   fitter.FitRegion(region),
-		oldStore: oldStoreID,
+		srcStore: oldStoreID,
 	}
 }
 
@@ -626,9 +661,14 @@ func (f *ruleFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
 		f.region.GetPeers(), f.region.GetLeader(),
-		core.WithReplacePeerStore(f.oldStore, store.GetID()))
+		core.WithReplacePeerStore(f.srcStore, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
+}
+
+// GetSourceStoreID implements the ComparingFilter
+func (f *ruleFitFilter) GetSourceStoreID() uint64 {
+	return f.srcStore
 }
 
 type ruleLeaderFitFilter struct {
@@ -636,18 +676,18 @@ type ruleLeaderFitFilter struct {
 	fitter           RegionFitter
 	region           *core.RegionInfo
 	oldFit           *placement.RegionFit
-	oldLeaderStoreID uint64
+	srcLeaderStoreID uint64
 }
 
 // newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
 // the isolation level will not decrease.
-func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldLeaderStoreID uint64) Filter {
+func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, srcLeaderStoreID uint64) Filter {
 	return &ruleLeaderFitFilter{
 		scope:            scope,
 		fitter:           fitter,
 		region:           region,
 		oldFit:           fitter.FitRegion(region),
-		oldLeaderStoreID: oldLeaderStoreID,
+		srcLeaderStoreID: srcLeaderStoreID,
 	}
 }
 
@@ -674,6 +714,10 @@ func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) boo
 		core.WithLeader(targetPeer))
 	newFit := f.fitter.FitRegion(copyRegion)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
+}
+
+func (f *ruleLeaderFitFilter) GetSourceStoreID() uint64 {
+	return f.srcLeaderStoreID
 }
 
 // NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with

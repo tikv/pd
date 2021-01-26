@@ -300,8 +300,8 @@ github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 h1:q2e307iGHPdTGp
 github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5/go.mod h1:jvVRKCrJTQWu0XVbaOlby/2lO20uSCHEMzzplHXte1o=
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d h1:U+PMnTlV2tu7RuMK5etusZG3Cf+rpow5hqQByeCzJ2g=
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d/go.mod h1:lXfE4PvvTW5xOjO6Mba8zDPyw8M93B6AQ7frTGnMlA8=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20201126111827-6c8be2240067 h1:hq1pTBUxx0Szt6vyM++KQR+kmxhTPDC5csJPRkQzxO8=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20201126111827-6c8be2240067/go.mod h1:EONGys2gM5n14pII2vjmU/5VG3Dtj6kpqUT1GUZ4ysw=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20210104140916-41a0a3a87e75 h1:XJ/OVqPtHuGNLgCu6xgSlCouz5roe3Yf3TXHjVNf+9w=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20210104140916-41a0a3a87e75/go.mod h1:EONGys2gM5n14pII2vjmU/5VG3Dtj6kpqUT1GUZ4ysw=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8/go.mod h1:B1+S9LNcuMyLH/4HMTViQOJevkGiik3wW2AN9zb2fNQ=
 github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4/go.mod h1:PYMCGwN0JHjoqGr3HrZoD+b8Tgx8bKnArhSq8YVzUMc=
 github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12/go.mod h1:PYMCGwN0JHjoqGr3HrZoD+b8Tgx8bKnArhSq8YVzUMc=
