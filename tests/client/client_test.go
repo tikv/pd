@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -731,6 +732,56 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"", 1000, 15)
 	c.Assert(err, NotNil)
+
+	// Put some other safepoints to test fixing gc_worker's safepoint when there exists other safepoints.
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"a", 1000, 11)
+	c.Assert(err, IsNil)
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"b", 1000, 12)
+	c.Assert(err, IsNil)
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", 1000, 13)
+	c.Assert(err, IsNil)
+
+	// Force set invalid ttl to gc_worker
+	gcWorkerKey := path.Join("gc", "safe_point", "service", "gc_worker")
+	{
+		gcWorkerSsp := &core.ServiceSafePoint{
+			ServiceID: "gc_worker",
+			ExpiredAt: -12345,
+			SafePoint: 10,
+		}
+		value, err := json.Marshal(gcWorkerSsp)
+		c.Assert(err, IsNil)
+		err = s.srv.GetStorage().Save(gcWorkerKey, string(value))
+		c.Assert(err, IsNil)
+	}
+
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.ServiceID, Equals, "gc_worker")
+	c.Assert(minSsp.SafePoint, Equals, uint64(10))
+	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
+
+	// Force delete gc_worker, then the min service safepoint is 11 of "a".
+	err = s.srv.GetStorage().Remove(gcWorkerKey)
+	c.Assert(err, IsNil)
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.SafePoint, Equals, uint64(11))
+	// After calling LoadMinServiceGCS when "gc_worker"'s service safepoint is missing, "gc_worker"'s service safepoint
+	// will be newly created.
+	// Increase "a" so that "gc_worker" is the only minimum that will be returned by LoadMinServiceGCSafePoint.
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"a", 1000, 14)
+	c.Assert(err, IsNil)
+
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.ServiceID, Equals, "gc_worker")
+	c.Assert(minSsp.SafePoint, Equals, uint64(11))
+	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {
