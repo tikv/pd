@@ -1230,6 +1230,7 @@ func (c *RaftCluster) resetMetrics() {
 	c.coordinator.resetSchedulerMetrics()
 	c.coordinator.resetHotSpotMetrics()
 	c.resetClusterMetrics()
+	c.resetHealthStatus()
 }
 
 func (c *RaftCluster) collectClusterMetrics() {
@@ -1261,14 +1262,18 @@ func (c *RaftCluster) collectHealthStatus() {
 	if err != nil {
 		log.Error("get members error", errs.ZapError(err))
 	}
-	unhealth := CheckHealth(c.httpClient, members)
+	healthy := CheckHealth(c.httpClient, members)
 	for _, member := range members {
-		if _, ok := unhealth[member.GetMemberId()]; ok {
-			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
-			continue
+		var v float64
+		if _, ok := healthy[member.GetMemberId()]; ok {
+			v = 1
 		}
-		healthStatusGauge.WithLabelValues(member.GetName()).Set(1)
+		healthStatusGauge.WithLabelValues(member.GetName()).Set(v)
 	}
+}
+
+func (c *RaftCluster) resetHealthStatus() {
+	healthStatusGauge.Reset()
 }
 
 // GetRegionStatsByType gets the status of the region by types.
