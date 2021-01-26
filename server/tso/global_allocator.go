@@ -127,13 +127,13 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	})
 
 	maxTSO.Logical += int64(count)
-	if maxTSO.GetLogical() > maxLogical {
-		maxTSO.Physical += updateTimestampGuard.Milliseconds()
-		// Equivalent to setting the logical part to zero and adding the given count
-		maxTSO.Logical = int64(count)
-	}
 	// Differentiate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
 	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical, gta.allocatorManager.GetSuffixBits())
+	if maxTSO.GetLogical() > maxLogical {
+		maxTSO.Physical += updateTimestampGuard.Milliseconds()
+		// Equivalent to setting the logical part to zero, adding the given count and differentiating it then
+		maxTSO.Logical = gta.timestampOracle.differentiateLogical(int64(count), gta.allocatorManager.GetSuffixBits())
+	}
 	// Sync the MaxTS with all Local TSO Allocator leaders then
 	if err := gta.SyncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
