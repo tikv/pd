@@ -855,6 +855,7 @@ func createRegionForRuleFit(startKey, endKey []byte,
 		peer := &metapb.Peer{
 			Id:      p.Id,
 			StoreId: p.StoreId,
+			IsLearner: p.IsLearner,
 		}
 		copyPeers = append(copyPeers, peer)
 	}
