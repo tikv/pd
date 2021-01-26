@@ -375,11 +375,7 @@ func NewDistinctScoreFilter(scope string, labels []string, stores []*core.StoreI
 		labels:    labels,
 		stores:    newStores,
 		safeScore: core.DistinctScore(labels, newStores, source),
-<<<<<<< HEAD
-=======
-		policy:    policy,
 		srcStore:  source.GetID(),
->>>>>>> 5f447aee... filter: add label for filterCounter (#3320)
 	}
 }
 
@@ -720,22 +716,10 @@ func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) boo
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
-<<<<<<< HEAD
-=======
 func (f *ruleLeaderFitFilter) GetSourceStoreID() uint64 {
 	return f.srcLeaderStoreID
 }
 
-// NewPlacementSafeguard creates a filter that ensures after replace a peer with new
-// peer, the placement restriction will not become worse.
-func NewPlacementSafeguard(scope string, cluster opt.Cluster, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
-	if cluster.GetOpts().IsPlacementRulesEnabled() {
-		return newRuleFitFilter(scope, cluster, region, sourceStore.GetID())
-	}
-	return NewLocationSafeguard(scope, cluster.GetOpts().GetLocationLabels(), cluster.GetRegionStores(region), sourceStore)
-}
-
->>>>>>> 5f447aee... filter: add label for filterCounter (#3320)
 // NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with
 // existed peer, the placement restriction will not become worse.
 // Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
@@ -871,7 +855,6 @@ func createRegionForRuleFit(startKey, endKey []byte,
 		peer := &metapb.Peer{
 			Id:        p.Id,
 			StoreId:   p.StoreId,
-			IsLearner: p.IsLearner,
 		}
 		copyPeers = append(copyPeers, peer)
 	}
