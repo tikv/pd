@@ -29,3 +29,8 @@ func NewIDAllocator() *IDAllocator {
 func (alloc *IDAllocator) Alloc() (uint64, error) {
 	return atomic.AddUint64(&alloc.base, 1), nil
 }
+
+// Rebase implements the IDAllocator interface.
+func (alloc *IDAllocator) Rebase() error {
+	return nil
+}
