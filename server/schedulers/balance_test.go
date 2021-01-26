@@ -932,6 +932,43 @@ func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
 	}
 }
 
+func (s *testBalanceRegionSchedulerSuite) TestEmptyRegion(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
+	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	c.Assert(err, IsNil)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 9)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+	region := core.NewRegionInfo(
+		&metapb.Region{
+			Id:       5,
+			StartKey: []byte("a"),
+			EndKey:   []byte("b"),
+			Peers: []*metapb.Peer{
+				{Id: 6, StoreId: 1},
+				{Id: 7, StoreId: 3},
+				{Id: 8, StoreId: 4},
+			},
+		},
+		&metapb.Peer{Id: 7, StoreId: 3},
+		core.SetApproximateSize(1),
+		core.SetApproximateKeys(1),
+	)
+	tc.PutRegion(region)
+	operators := sb.Schedule(tc)
+	c.Assert(operators, NotNil)
+
+	for i := uint64(10); i < 60; i++ {
+		tc.PutRegionStores(i, 1, 3, 4)
+	}
+	operators = sb.Schedule(tc)
+	c.Assert(operators, IsNil)
+}
+
 var _ = Suite(&testRandomMergeSchedulerSuite{})
 
 type testRandomMergeSchedulerSuite struct{}

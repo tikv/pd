@@ -117,7 +117,7 @@ type Server struct {
 	// for id allocator, we can use one allocator for
 	// store, region and peer, because we just need
 	// a unique ID.
-	idAllocator *id.AllocatorImpl
+	idAllocator id.Allocator
 	// for encryption
 	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
@@ -353,7 +353,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
-	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
+	s.idAllocator = id.NewAllocator(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
 		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
@@ -714,7 +714,7 @@ func (s *Server) GetHBStreams() *hbstream.HeartbeatStreams {
 }
 
 // GetAllocator returns the ID allocator of server.
-func (s *Server) GetAllocator() *id.AllocatorImpl {
+func (s *Server) GetAllocator() id.Allocator {
 	return s.idAllocator
 }
 
@@ -1223,7 +1223,7 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
 		return
 	}
-	if err := s.idAllocator.Generate(); err != nil {
+	if err := s.idAllocator.Rebase(); err != nil {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
 	}
