@@ -111,19 +111,11 @@ func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit
-<<<<<<< HEAD
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
-	// TODO: Increment OperatorLimitCounter for OpHotRegion
-	//if !hotRegionAllowed {
-	//}
-=======
-	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
-	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !hotRegionAllowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpHotRegion.String()).Inc()
 	}
->>>>>>> c7aac753... scheduler: add operatorLimitCounter metrics for each scheduler (#3367)
 	if !regionAllowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
 	}

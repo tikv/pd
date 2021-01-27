@@ -58,11 +58,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			if op := c.ruleChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
 			}
-<<<<<<< HEAD
-=======
 			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
-			c.regionWaitingList.Put(region.GetID(), nil)
->>>>>>> c7aac753... scheduler: add operatorLimitCounter metrics for each scheduler (#3367)
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
@@ -73,31 +69,19 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			if op := c.replicaChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
 			}
-<<<<<<< HEAD
-		}
-	}
-
-	if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
-		checkerIsBusy = false
-		if ops := c.mergeChecker.Check(region); ops != nil {
-			// It makes sure that two operators can be added successfully altogether.
-			return checkerIsBusy, ops
-=======
-			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
-			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	}
 
 	if c.mergeChecker != nil {
-		allowed := opController.OperatorCount(operator.OpMerge) < c.opts.GetMergeScheduleLimit()
+		allowed := opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit()
 		if !allowed {
 			operator.OperatorLimitCounter.WithLabelValues(c.mergeChecker.GetType(), operator.OpMerge.String()).Inc()
 		} else {
+			checkerIsBusy = false
 			if ops := c.mergeChecker.Check(region); ops != nil {
 				// It makes sure that two operators can be added successfully altogether.
-				return ops
+				return checkerIsBusy, ops
 			}
->>>>>>> c7aac753... scheduler: add operatorLimitCounter metrics for each scheduler (#3367)
 		}
 	}
 	return checkerIsBusy, nil
