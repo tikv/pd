@@ -197,8 +197,11 @@ func (l *scatterRangeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (l *scatterRangeScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
-	// TODO: add metrics for leader limit
-	return l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetLeaderScheduleLimit()
+	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetLeaderScheduleLimit()
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
+	}
+	return allowed
 }
 
 func (l *scatterRangeScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
