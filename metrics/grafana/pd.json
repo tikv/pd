@@ -128,7 +128,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "delta(pd_tso_events{type=\"save\",instance=\"$instance\"}[1m]) > bool 0",
+          "expr": "delta(pd_tso_events{tidb_cluster=\"$tidb_cluster\", type=\"save\",instance=\"$instance\"}[1m]) > bool 0",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "",
@@ -220,7 +220,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"storage_capacity\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",type=\"storage_capacity\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "refId": "A",
@@ -306,7 +306,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"storage_size\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",type=\"storage_size\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "refId": "A",
@@ -391,7 +391,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"storage_size\"}) / sum(pd_cluster_status{instance=\"$instance\",type=\"storage_capacity\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",type=\"storage_size\"}) / sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",type=\"storage_capacity\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "refId": "A",
@@ -473,7 +473,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\",  type=\"store_up_count\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",  type=\"store_up_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "refId": "A"
@@ -556,7 +556,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"leader_count\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",type=\"leader_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "refId": "A",
@@ -629,7 +629,7 @@
       ],
       "targets": [
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_disconnected_count\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"store_disconnected_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Disconnect Stores",
@@ -637,7 +637,7 @@
           "step": 20
         },
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_unhealth_count\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"store_unhealth_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Unhealth Stores",
@@ -645,7 +645,7 @@
           "step": 20
         },
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_low_space_count\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"store_low_space_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "LowSpace Stores",
@@ -653,7 +653,7 @@
           "step": 20
         },
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_down_count\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"store_down_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Down Stores",
@@ -661,7 +661,7 @@
           "step": 20
         },
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_offline_count\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"store_offline_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Offline Stores",
@@ -669,7 +669,7 @@
           "step": 20
         },
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_tombstone_count\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"store_tombstone_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Tombstone Stores",
@@ -759,14 +759,14 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "pd_regions_status{instance=\"$instance\"}",
+          "expr": "pd_regions_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{type}}",
           "refId": "A"
         },
         {
-          "expr": "sum(pd_regions_status) by (instance, type)",
+          "expr": "sum(pd_regions_status{tidb_cluster=\"$tidb_cluster\"}) by (instance, type)",
           "format": "time_series",
           "hide": true,
           "intervalFactor": 2,
@@ -867,7 +867,7 @@
       "steppedLine": true,
       "targets": [
         {
-          "expr": "sum(pd_cluster_status{instance=\"$instance\",  type=\"region_count\"})",
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",  type=\"region_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "count",
@@ -981,7 +981,7 @@
       ],
       "targets": [
         {
-          "expr": "pd_config_status",
+          "expr": "pd_config_status{tidb_cluster=\"$tidb_cluster\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{type}}",
@@ -1043,7 +1043,7 @@
       ],
       "targets": [
         {
-          "expr": "pd_cluster_metadata{instance=\"$instance\"}",
+          "expr": "pd_cluster_metadata{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
           "format": "time_series",
           "instant": true,
           "intervalFactor": 2,
@@ -1121,7 +1121,7 @@
       ],
       "targets": [
         {
-          "expr": "pd_regions_label_level{instance=\"$instance\"}",
+          "expr": "pd_regions_label_level{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{type}}",
@@ -1205,7 +1205,7 @@
       ],
       "targets": [
         {
-          "expr": "pd_cluster_placement_status",
+          "expr": "pd_cluster_placement_status{tidb_cluster=\"$tidb_cluster\"}",
           "format": "time_series",
           "hide": false,
           "intervalFactor": 2,
@@ -1280,7 +1280,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "pd_cluster_tso{instance=\"$instance\"}",
+          "expr": "pd_cluster_tso{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
           "format": "time_series",
           "instant": true,
           "intervalFactor": 2,
@@ -1365,7 +1365,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "pd_cluster_id{instance=\"$instance\"}",
+          "expr": "pd_cluster_id{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
           "format": "time_series",
           "hide": false,
           "instant": true,
@@ -1442,7 +1442,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{instance=\"$instance\", event=\"create\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"create\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -1535,7 +1535,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{instance=\"$instance\", event=\"check\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"check\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -1628,7 +1628,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{instance=\"$instance\", event=\"finish\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"finish\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -1720,7 +1720,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{instance=\"$instance\", event=\"timeout\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"timeout\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -1813,7 +1813,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{instance=\"$instance\", event=\"cancel\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"cancel\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -1821,7 +1821,7 @@
               "step": 4
             },
             {
-              "expr": "sum(delta(pd_schedule_operators_count{instance=\"$instance\", event=\"replace\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"replace\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -1914,7 +1914,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{instance=\"$instance\"}[1m])) by (event)",
+              "expr": "sum(delta(pd_schedule_operators_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[1m])) by (event)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{event}}",
@@ -2007,7 +2007,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_schedule_finish_operators_duration_seconds_bucket[5m])) by (type, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_schedule_finish_operators_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[5m])) by (type, le))",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}-99%",
@@ -2015,7 +2015,7 @@
               "step": 4
             },
             {
-              "expr": "histogram_quantile(0.95, sum(rate(pd_schedule_finish_operators_duration_seconds_bucket[5m])) by (type, le))",
+              "expr": "histogram_quantile(0.95, sum(rate(pd_schedule_finish_operators_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[5m])) by (type, le))",
               "format": "time_series",
               "hide": true,
               "intervalFactor": 2,
@@ -2108,14 +2108,14 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_schedule_finish_operator_steps_duration_seconds_bucket[5m])) by (type, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_schedule_finish_operator_steps_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[5m])) by (type, le))",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}-99%",
               "refId": "A"
             },
             {
-              "expr": "histogram_quantile(0.95, sum(rate(pd_schedule_finish_operator_steps_duration_seconds_bucket[5m])) by (type, le))",
+              "expr": "histogram_quantile(0.95, sum(rate(pd_schedule_finish_operator_steps_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[5m])) by (type, le))",
               "format": "time_series",
               "hide": true,
               "intervalFactor": 2,
@@ -2206,7 +2206,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operator_limit{instance=\"$instance\"}[1m])) by (type,name)",
+              "expr": "sum(delta(pd_schedule_operator_limit{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[1m])) by (type,name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}-{{name}}",
@@ -2316,7 +2316,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"store_capacity\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"store_capacity\"}",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -2411,7 +2411,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "{store=~\"$store\", instance=\"$instance\",  type=\"store_available\"}",
+              "expr": "{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"store_available\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -2505,7 +2505,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"store_used\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"store_used\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -2598,7 +2598,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"store_available\"}) by (address, store) / sum(pd_scheduler_store_status{instance=\"$instance\",  type=\"store_capacity\"}) by (address, store)",
+              "expr": "sum(pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"store_available\"}) by (address, store) / sum(pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",  type=\"store_capacity\"}) by (address, store)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -2691,7 +2691,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"region_size\"}) by (address, store) / sum(pd_scheduler_store_status{instance=\"$instance\",  type=\"store_used\"}) by (address, store) * 2^20",
+              "expr": "sum(pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"region_size\"}) by (address, store) / sum(pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",  type=\"store_used\"}) by (address, store) * 2^20",
               "format": "time_series",
               "instant": false,
               "intervalFactor": 2,
@@ -2789,7 +2789,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"region_score\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"region_score\"}",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -2798,7 +2798,7 @@
               "step": 4
             },
             {
-              "expr": "pd_scheduler_op_influence{instance=\"$instance\",scheduler=\"balance-region-scheduler\"}",
+              "expr": "pd_scheduler_op_influence{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",scheduler=\"balance-region-scheduler\"}",
               "format": "time_series",
               "hide": true,
               "intervalFactor": 1,
@@ -2806,7 +2806,7 @@
               "refId": "C"
             },
             {
-              "expr": "pd_scheduler_tolerant_resource{instance=\"$instance\",scheduler=\"balance-region-scheduler\"}",
+              "expr": "pd_scheduler_tolerant_resource{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",scheduler=\"balance-region-scheduler\"}",
               "format": "time_series",
               "hide": true,
               "intervalFactor": 1,
@@ -2913,7 +2913,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"leader_score\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"leader_score\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3017,7 +3017,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"region_size\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"region_size\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3113,7 +3113,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"leader_size\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"leader_size\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3208,7 +3208,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"region_count\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"region_count\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3302,7 +3302,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"leader_count\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"leader_count\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3401,28 +3401,28 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"store_used\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"store_used\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{store}}",
               "refId": "A"
             },
             {
-              "expr": "1048576*pd_scheduler_store_status{store=~\"$store\", instance=\"$instance\",  type=\"region_size\"}",
+              "expr": "1048576*pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\",  type=\"region_size\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "store-{{store}}",
               "refId": "B"
             },
             {
-              "expr": "-sum(delta(pd_scheduler_balance_region{store=~\"$store\", address=~\".*out\",instance=\"$instance\", type=\"move-peer\"}[1m])) by (address, store)",
+              "expr": "-sum(delta(pd_scheduler_balance_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", address=~\".*out\",instance=\"$instance\", type=\"move-peer\"}[1m])) by (address, store)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "move-store-{{store}}",
               "refId": "C"
             },
             {
-              "expr": "sum(delta(pd_scheduler_balance_region{store=~\"$store\", address=~\".*in\",instance=\"$instance\", type=\"move-peer\"}[1m])) by (address, store)",
+              "expr": "sum(delta(pd_scheduler_balance_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", address=~\".*in\",instance=\"$instance\", type=\"move-peer\"}[1m])) by (address, store)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "move-store-{{store}}",
@@ -3532,7 +3532,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"hot_write_region_as_leader\"}",
+              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"hot_write_region_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3628,7 +3628,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_written_bytes_as_leader\"}",
+              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"total_written_bytes_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3724,7 +3724,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"hot_write_region_as_peer\"}",
+              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"hot_write_region_as_peer\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3820,7 +3820,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_written_bytes_as_peer\"}",
+              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"total_written_bytes_as_peer\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3914,7 +3914,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", type=\"store_write_rate_bytes\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_write_rate_bytes\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -4009,7 +4009,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", type=\"store_write_rate_keys\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_write_rate_keys\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -4104,7 +4104,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotcache_status{name=\"total_length\", store=~\"store-$store\", type=\"write\"}",
+              "expr": "pd_hotcache_status{tidb_cluster=\"$tidb_cluster\", name=\"total_length\", store=~\"store-$store\", type=\"write\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{store}}",
@@ -4199,7 +4199,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "rate(pd_scheduler_hot_region{store=~\"$store\", type=~\".*store.*\"}[1m])",
+              "expr": "rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=~\".*store.*\"}[1m])",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}-{{store}}",
@@ -4294,7 +4294,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "- rate(pd_scheduler_hot_region{store=~\"$store-out\", type=\"move-leader\"}[1m])",
+              "expr": "- rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store-out\", type=\"move-leader\"}[1m])",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{type}}-{{store}}",
@@ -4302,7 +4302,7 @@
               "step": 4
             },
             {
-              "expr": "rate(pd_scheduler_hot_region{store=~\"$store-in\", type=\"move-leader\"}[1m])",
+              "expr": "rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store-in\", type=\"move-leader\"}[1m])",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{type}}-{{store}}",
@@ -4396,7 +4396,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "- rate(pd_scheduler_hot_region{store=~\"$store-out\", type=\"move-peer\"}[1m])",
+              "expr": "- rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store-out\", type=\"move-peer\"}[1m])",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}-{{store}}",
@@ -4404,7 +4404,7 @@
               "step": 4
             },
             {
-              "expr": "rate(pd_scheduler_hot_region{store=~\"$store-in\", type=\"move-peer\"}[1m])",
+              "expr": "rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store-in\", type=\"move-peer\"}[1m])",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{type}}-{{store}}",
@@ -4513,7 +4513,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"hot_read_region_as_leader\"}",
+              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"hot_read_region_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -4609,7 +4609,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_read_bytes_as_leader\"}",
+              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"total_read_bytes_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -4704,7 +4704,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", type=\"store_read_rate_bytes\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_read_rate_bytes\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -4798,7 +4798,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", type=\"store_read_rate_keys\"}",
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_read_rate_keys\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -4893,7 +4893,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotcache_status{name=\"total_length\", store=~\"store-$store\", type=\"read\"}",
+              "expr": "pd_hotcache_status{tidb_cluster=\"$tidb_cluster\", name=\"total_length\", store=~\"store-$store\", type=\"read\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{store}}",
@@ -5001,7 +5001,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_status{type=\"allow\",instance=\"$instance\"}",
+              "expr": "pd_scheduler_status{tidb_cluster=\"$tidb_cluster\", type=\"allow\",instance=\"$instance\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{kind}}",
@@ -5097,14 +5097,14 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "-sum(delta(pd_scheduler_balance_leader{store=~\"$store\", address=~\".*out\",instance=\"$instance\", type=\"move-leader\"}[30s])) by (address, store)",
+              "expr": "-sum(delta(pd_scheduler_balance_leader{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", address=~\".*out\",instance=\"$instance\", type=\"move-leader\"}[30s])) by (address, store)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{store}}",
               "refId": "A"
             },
             {
-              "expr": "sum(delta(pd_scheduler_balance_leader{store=~\"$store\", address=~\".*in\",instance=\"$instance\", type=\"move-leader\"}[30s])) by (address, store)",
+              "expr": "sum(delta(pd_scheduler_balance_leader{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", address=~\".*in\",instance=\"$instance\", type=\"move-leader\"}[30s])) by (address, store)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{store}}",
@@ -5199,14 +5199,14 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "-sum(delta(pd_scheduler_balance_region{store=~\"$store\", address=~\".*out\",instance=\"$instance\", type=\"move-peer\"}[1m])) by (address, store)",
+              "expr": "-sum(delta(pd_scheduler_balance_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", address=~\".*out\",instance=\"$instance\", type=\"move-peer\"}[1m])) by (address, store)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{store}}",
               "refId": "A"
             },
             {
-              "expr": "sum(delta(pd_scheduler_balance_region{store=~\"$store\", address=~\".*in\",instance=\"$instance\", type=\"move-peer\"}[1m])) by (address, store)",
+              "expr": "sum(delta(pd_scheduler_balance_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", address=~\".*in\",instance=\"$instance\", type=\"move-peer\"}[1m])) by (address, store)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{store}}",
@@ -5297,7 +5297,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_balance_leader{store=~\"$store\", instance=\"$instance\", type!=\"move-leader\"}[30s])) by (type, address, store)",
+              "expr": "sum(delta(pd_scheduler_balance_leader{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type!=\"move-leader\"}[30s])) by (type, address, store)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}-store-{{store}}",
@@ -5389,7 +5389,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_balance_region{store=~\"$store\", instance=\"$instance\"}[30s])) by (type, address, store)",
+              "expr": "sum(delta(pd_scheduler_balance_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\"}[30s])) by (type, address, store)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}-store-{{store}}",
@@ -5482,7 +5482,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_event_count{instance=\"$instance\", type=\"balance-leader-scheduler\"}[5m])) by (name)",
+              "expr": "sum(delta(pd_scheduler_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-leader-scheduler\"}[5m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -5577,7 +5577,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_event_count{instance=\"$instance\", type=\"balance-region-scheduler\"}[5m])) by (name)",
+              "expr": "sum(delta(pd_scheduler_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-region-scheduler\"}[5m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -5671,7 +5671,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_balance_direction{instance=\"$instance\"}[1m])) by (type, source, target)",
+              "expr": "sum(delta(pd_scheduler_balance_direction{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[1m])) by (type, source, target)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{source}}-{{target}}-{{type}}",
@@ -5764,7 +5764,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_checker_event_count{instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
+              "expr": "sum(delta(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -5856,7 +5856,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_checker_event_count{instance=\"$instance\", type=\"rule_checker\"}[1m])) by (name)",
+              "expr": "sum(delta(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"rule_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -5949,7 +5949,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_filter{store=~\"$store\", action=\"filter-target\"}[1m])) by (store, type, scope)",
+              "expr": "sum(delta(pd_schedule_filter{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-target\"}[1m])) by (store, type, scope)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{scope}}-store-{{store}}-{{type}}",
@@ -6042,7 +6042,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_checker_event_count{instance=\"$instance\", type=\"merge_checker\"}[1m])) by (name)",
+              "expr": "sum(delta(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"merge_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -6135,7 +6135,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_filter{store=~\"$store\", action=\"filter-source\"}[1m])) by (store, type, scope)",
+              "expr": "sum(delta(pd_schedule_filter{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-source\"}[1m])) by (store, type, scope)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{scope}}-store-{{store}}-{{type}}",
@@ -6144,7 +6144,7 @@
               "step": 4
             },
             {
-              "expr": "sum(delta(pd_schedule_filter{action=\"filter-target\",type=\"distinct-filter\"}[1m])) by (source, target, type, scope)",
+              "expr": "sum(delta(pd_schedule_filter{tidb_cluster=\"$tidb_cluster\", action=\"filter-target\",type=\"distinct-filter\"}[1m])) by (source, target, type, scope)",
               "format": "time_series",
               "hide": true,
               "intervalFactor": 2,
@@ -6152,7 +6152,7 @@
               "refId": "B"
             },
             {
-              "expr": "sum(delta(pd_schedule_filter{action=\"filter-target\",type=\"rule-fit-filter\"}[1m])) by (source, target, type, scope)",
+              "expr": "sum(delta(pd_schedule_filter{tidb_cluster=\"$tidb_cluster\", action=\"filter-target\",type=\"rule-fit-filter\"}[1m])) by (source, target, type, scope)",
               "format": "time_series",
               "hide": true,
               "intervalFactor": 2,
@@ -6160,7 +6160,7 @@
               "refId": "C"
             },
             {
-              "expr": "sum(delta(pd_schedule_filter{action=\"filter-target\",type=\"rule-fit-leader-filter\"}[1m])) by (source, target, type, scope)",
+              "expr": "sum(delta(pd_schedule_filter{tidb_cluster=\"$tidb_cluster\", action=\"filter-target\",type=\"rule-fit-leader-filter\"}[1m])) by (source, target, type, scope)",
               "format": "time_series",
               "hide": true,
               "intervalFactor": 2,
@@ -6272,7 +6272,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(grpc_server_handling_seconds_count{instance=\"$instance\"}[1m])) by (grpc_method)",
+              "expr": "sum(rate(grpc_server_handling_seconds_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[1m])) by (grpc_method)",
               "intervalFactor": 2,
               "legendFormat": "{{grpc_method}}",
               "refId": "A",
@@ -6369,7 +6369,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(grpc_server_handling_seconds_bucket{instance=\"$instance\"}[5m])) by (grpc_method, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(grpc_server_handling_seconds_bucket{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[5m])) by (grpc_method, le))",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{grpc_method}}",
@@ -6474,7 +6474,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "etcd_debugging_mvcc_db_total_size_in_bytes{job=\"pd\"}",
+              "expr": "etcd_debugging_mvcc_db_total_size_in_bytes{tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{instance}}",
@@ -6567,7 +6567,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_txn_handle_txns_duration_seconds_count[5m])) by (instance, result)",
+              "expr": "sum(rate(pd_txn_handle_txns_duration_seconds_count{tidb_cluster=\"$tidb_cluster\"}[5m])) by (instance, result)",
               "intervalFactor": 2,
               "legendFormat": "{{instance}} : {{result}}",
               "refId": "A",
@@ -6661,7 +6661,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_txn_handle_txns_duration_seconds_bucket[5m])) by (instance, result, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_txn_handle_txns_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[5m])) by (instance, result, le))",
               "intervalFactor": 2,
               "legendFormat": "{{instance}} {{result}}",
               "refId": "A",
@@ -6757,7 +6757,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])) by (instance, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(etcd_disk_wal_fsync_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[5m])) by (instance, le))",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}",
               "metric": "",
@@ -6852,7 +6852,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(etcd_network_peer_round_trip_time_seconds_bucket[5m])) by (instance, To, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(etcd_network_peer_round_trip_time_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[5m])) by (instance, To, le))",
               "intervalFactor": 2,
               "legendFormat": "{{instance}} - {{To}}",
               "metric": "",
@@ -6918,7 +6918,7 @@
                 "query": {
                   "datasourceId": 1,
                   "model": {
-                    "expr": "delta(etcd_disk_wal_fsync_duration_seconds_count[1m])",
+                    "expr": "delta(etcd_disk_wal_fsync_duration_seconds_count{tidb_cluster=\"$tidb_cluster\"}[1m])",
                     "intervalFactor": 2,
                     "legendFormat": "{{instance}} etch disk wal fsync rate",
                     "refId": "A",
@@ -6984,7 +6984,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "delta(etcd_disk_wal_fsync_duration_seconds_count[1m])",
+              "expr": "delta(etcd_disk_wal_fsync_duration_seconds_count{tidb_cluster=\"$tidb_cluster\"}[1m])",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}} etch disk wal fsync rate",
@@ -7084,7 +7084,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_server_etcd_state{type=\"term\"}",
+              "expr": "pd_server_etcd_state{tidb_cluster=\"$tidb_cluster\", type=\"term\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}} - {{job}}",
@@ -7176,7 +7176,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_server_etcd_state{type=\"committedIndex\"}",
+              "expr": "pd_server_etcd_state{tidb_cluster=\"$tidb_cluster\", type=\"committedIndex\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}} - {{job}}",
@@ -7267,7 +7267,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_server_etcd_state{type=\"appliedIndex\"}",
+              "expr": "pd_server_etcd_state{tidb_cluster=\"$tidb_cluster\", type=\"appliedIndex\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}} - {{job}}",
@@ -7379,7 +7379,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_server_handle_tso_duration_seconds_bucket[30s])) by (type, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_server_handle_tso_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -7388,7 +7388,7 @@
               "step": 2
             },
             {
-              "expr": "histogram_quantile(0.99999, sum(rate(pd_server_handle_tso_duration_seconds_bucket[30s])) by (type, le))",
+              "expr": "histogram_quantile(0.99999, sum(rate(pd_server_handle_tso_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "99.999%  tso",
@@ -7486,7 +7486,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.98, sum(rate(pd_client_request_handle_requests_duration_seconds_bucket[30s])) by (type, le))",
+              "expr": "histogram_quantile(0.98, sum(rate(pd_client_request_handle_requests_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
               "hide": false,
               "intervalFactor": 2,
               "legendFormat": "{{type}} 98th percentile",
@@ -7494,7 +7494,7 @@
               "step": 2
             },
             {
-              "expr": "avg(rate(pd_client_request_handle_requests_duration_seconds_sum[30s])) by (type) /  avg(rate(pd_client_request_handle_requests_duration_seconds_count[30s])) by (type)",
+              "expr": "avg(rate(pd_client_request_handle_requests_duration_seconds_sum{tidb_cluster=\"$tidb_cluster\"}[30s])) by (type) /  avg(rate(pd_client_request_handle_requests_duration_seconds_count{tidb_cluster=\"$tidb_cluster\"}[30s])) by (type)",
               "intervalFactor": 2,
               "legendFormat": "{{type}} average",
               "refId": "B",
@@ -7588,7 +7588,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_client_request_handle_requests_duration_seconds_count[1m])) by (type)",
+              "expr": "sum(rate(pd_client_request_handle_requests_duration_seconds_count{tidb_cluster=\"$tidb_cluster\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -7699,7 +7699,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_cluster_region_event{store=~\"$store\", instance=\"$instance\"}[1m])) by (address, store, event)",
+              "expr": "sum(rate(pd_cluster_region_event{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\"}[1m])) by (address, store, event)",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -7796,7 +7796,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "round(histogram_quantile(0.99, sum(rate(pd_scheduler_region_heartbeat_latency_seconds_bucket{store=~\"$store\"}[5m])) by (address, store, le)), 1000)",
+              "expr": "round(histogram_quantile(0.99, sum(rate(pd_scheduler_region_heartbeat_latency_seconds_bucket{tidb_cluster=\"$tidb_cluster\", store=~\"$store\"}[5m])) by (address, store, le)), 1000)",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -7893,7 +7893,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"ok\"}[1m])) by (address, store)",
+              "expr": "sum(delta(pd_scheduler_region_heartbeat{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"ok\"}[1m])) by (address, store)",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -7990,7 +7990,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_scheduler_region_heartbeat{store=~\"$store\", type=\"push\",instance=\"$instance\"}[5m])*60) by (address, store, status)",
+              "expr": "sum(rate(pd_scheduler_region_heartbeat{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"push\",instance=\"$instance\"}[5m])*60) by (address, store, status)",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -8083,7 +8083,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"err\"}[1m])) by (address, store)",
+              "expr": "sum(delta(pd_scheduler_region_heartbeat{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"err\"}[1m])) by (address, store)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -8173,7 +8173,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"bind\"}[1m])) by (address, store)",
+              "expr": "sum(delta(pd_scheduler_region_heartbeat{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"bind\"}[1m])) by (address, store)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -8267,7 +8267,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_store_heartbeat_duration_seconds_bucket{store=~\"$store\"}[1m])) by (address, store, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_store_heartbeat_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\", store=~\"$store\"}[1m])) by (address, store, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -8364,7 +8364,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_region_heartbeat_duration_seconds_bucket{store=~\"$store\"}[1m])) by (address, store, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_region_heartbeat_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\", store=~\"$store\"}[1m])) by (address, store, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -8469,7 +8469,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_region_syncer_status{type=\"sync_index\"}",
+              "expr": "pd_region_syncer_status{tidb_cluster=\"$tidb_cluster\", type=\"sync_index\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}",
@@ -8552,7 +8552,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_region_syncer_status{type=\"last_index\"}",
+              "expr": "pd_region_syncer_status{tidb_cluster=\"$tidb_cluster\", type=\"last_index\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}",
@@ -8611,6 +8611,31 @@
       {
         "allValue": null,
         "current": {
+        },
+        "datasource": "${DS_TEST-CLUSTER}",
+        "hide": 2,
+        "includeAll": false,
+        "label": "tidb_cluster",
+        "multi": false,
+        "name": "tidb_cluster",
+        "options": [
+
+        ],
+        "query": "label_values(pd_cluster_status, tidb_cluster)",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [
+
+        ],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": null,
+        "current": {
           "text": "pd-test-pd-0",
           "value": "pd-test-pd-0"
         },
@@ -8622,7 +8647,7 @@
         "multi": false,
         "name": "instance",
         "options": [],
-        "query": "label_values(pd_cluster_status, instance)",
+        "query": "label_values(pd_cluster_status{tidb_cluster=\"$tidb_cluster\"}, instance)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -8640,14 +8665,14 @@
           "value": "$__all"
         },
         "datasource": "${DS_TEST-CLUSTER}",
-        "definition": "label_values(pd_scheduler_store_status, store)",
+        "definition": "label_values(pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\"}, store)",
         "hide": 0,
         "includeAll": true,
         "label": "store",
         "multi": true,
         "name": "store",
         "options": [],
-        "query": "label_values(pd_scheduler_store_status, store)",
+        "query": "label_values(pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\"}, store)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
