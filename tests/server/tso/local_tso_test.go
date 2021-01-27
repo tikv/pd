@@ -249,7 +249,7 @@ func (s *testLocalTSOSuite) TestTransferTSOLocalAllocator(c *C) {
 		if name == originName {
 			continue
 		}
-		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember())
+		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
 		c.Assert(err, IsNil)
 		testutil.WaitUntil(c, func(c *C) bool {
 			currName := cluster.WaitAllocatorLeader("dc-1")

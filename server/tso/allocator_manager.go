@@ -821,7 +821,7 @@ func (am *AllocatorManager) PriorityChecker() {
 	}
 }
 
-func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, member *member.Member) error {
+func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, memberID uint64) error {
 	if dcLocation == config.GlobalDCLocation {
 		return fmt.Errorf("dcLocation %v should be transferred by transfer leader", dcLocation)
 	}
@@ -836,10 +836,10 @@ func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, me
 	}
 	localTSOAllocator, _ := allocator.(*LocalTSOAllocator)
 	leaderServerID := localTSOAllocator.GetAllocatorLeader().GetMemberId()
-	if leaderServerID == member.ID() {
+	if leaderServerID == memberID {
 		return nil
 	}
-	err = am.transferLocalAllocator(dcLocation, member.ID())
+	err = am.transferLocalAllocator(dcLocation, memberID)
 	if err != nil {
 		return err
 	}

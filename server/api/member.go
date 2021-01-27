@@ -242,6 +242,49 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, "success")
 }
 
+// @Tags member
+// @Summary Transfer Local TSO Allocator
+// @Accept json
+// @Param name path string true "PD server name"
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "The transfer command is submitted."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The member does not exist."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /members/name/{name} [post]
+func (h *memberHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Request) {
+	members, membersErr := h.getMembers()
+	if membersErr != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, membersErr.Error())
+		return
+	}
+	var memberID uint64
+	name := mux.Vars(r)["name"]
+	for _, m := range members.GetMembers() {
+		if m.GetName() == name {
+			memberID = m.GetMemberId()
+			break
+		}
+	}
+	h.svr.GetMember()
+	if memberID == 0 {
+		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("not found, pd: %s", name))
+		return
+	}
+	dcLocation := mux.Vars(r)["dcLocation"]
+	if len(dcLocation) < 1 {
+		h.rd.JSON(w, http.StatusBadRequest, "dcLocation is no defined")
+		return
+	}
+	err := h.svr.GetTSOAllocatorManager().TransferAllocatorForDCLocation(dcLocation, memberID)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "The transfer command is submitted.")
+}
+
 type leaderHandler struct {
 	svr *server.Server
 	rd  *render.Render
