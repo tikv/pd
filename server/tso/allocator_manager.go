@@ -1107,7 +1107,7 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, targetServ
 	}
 	if !resp.Succeeded {
 		log.Warn("write next leader id into etcd unsuccessfully", zap.String("dc-location", dcLocation))
-		return fmt.Errorf("write next leader id into etcd unsuccessfully")
+		return errs.ErrEtcdKVPut.GenWithStack("write next leader id into etcd unsuccessfully")
 	}
 	return nil
 }

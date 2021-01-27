@@ -15,7 +15,6 @@ package tso_test
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -245,12 +244,7 @@ func (s *testLocalTSOSuite) TestTransferTSOLocalAllocator(c *C) {
 	c.Assert(err, IsNil)
 
 	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
-	for name, server := range cluster.GetServers() {
-		fmt.Println("name", name, "member", server.GetServer().GetMember().Member().Name)
-	}
-
 	originName := cluster.WaitAllocatorLeader("dc-1")
-	fmt.Println("originAllcocatorName", originName)
 	for name, server := range cluster.GetServers() {
 		if name == originName {
 			continue
@@ -259,7 +253,6 @@ func (s *testLocalTSOSuite) TestTransferTSOLocalAllocator(c *C) {
 		c.Assert(err, IsNil)
 		testutil.WaitUntil(c, func(c *C) bool {
 			currName := cluster.WaitAllocatorLeader("dc-1")
-			fmt.Println("currentAllocatorName", currName, "wantName", name)
 			return currName == name
 		}, testutil.WithSleepInterval(1*time.Second))
 	}
