@@ -67,12 +67,12 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 
 	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
 
+	leaderServer := cluster.GetServer(cluster.GetLeader())
 	dcClientMap := make(map[string]pdpb.PDClient)
 	for _, dcLocation := range dcLocationConfig {
-		pdName := cluster.WaitAllocatorLeader(dcLocation)
+		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
 		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -155,7 +155,8 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 
 	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
 
-	leaderCli := testutil.MustNewGrpcClient(c, cluster.GetServer(cluster.GetLeader()).GetAddr())
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderCli := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId()),
 		Count:      tsoCount,
@@ -186,7 +187,7 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 
 	dcClientMap := make(map[string]pdpb.PDClient)
 	for _, dcLocation := range dcLocationConfig {
-		pdName := cluster.WaitAllocatorLeader(dcLocation)
+		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
 		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
 	}
 	var wg sync.WaitGroup
