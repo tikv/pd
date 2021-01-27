@@ -1030,7 +1030,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	}
 
 	if store.IsPhysicallyDestroyed() {
-		return errors.Errorf("The store is already physically destroyed")
+		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
 	}
 
 	newStore := store.Clone(core.OfflineStore(physicallyDestroyed))
