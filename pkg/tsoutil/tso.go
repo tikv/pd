@@ -41,7 +41,12 @@ func ParseTimestamp(ts pdpb.Timestamp) (time.Time, uint64) {
 
 // GenerateTS generate an `uint64` TS by passing a `pdpb.Timestamp`.
 func GenerateTS(ts *pdpb.Timestamp) uint64 {
-	return uint64(ts.GetPhysical())<<18 | uint64(ts.GetLogical())&0x3FFFF
+	return ComposeTS(ts.GetPhysical(), ts.GetLogical())
+}
+
+// ComposeTS generate an `uint64` TS by passing the physical and logical parts.
+func ComposeTS(physical, logical int64) uint64 {
+	return uint64(physical)<<18 | uint64(logical)&0x3FFFF
 }
 
 // GenerateTimestamp generate a `pdpb.Timestamp` by passing `time.Time` and `uint64`
