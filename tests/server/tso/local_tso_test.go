@@ -15,6 +15,7 @@ package tso_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -225,4 +226,41 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	wg.Wait()
 
 	failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow")
+}
+
+func (s *testLocalTSOSuite) TestTransferTSOLocalAllocator(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-1",
+		"pd3": "dc-1",
+	}
+	serverNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, serverNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+	for name, server := range cluster.GetServers() {
+		fmt.Println("name", name, "member", server.GetServer().GetMember().Member().Name)
+	}
+
+	originName := cluster.WaitAllocatorLeader("dc-1")
+	fmt.Println("originAllcocatorName", originName)
+	for name, server := range cluster.GetServers() {
+		if name == originName {
+			continue
+		}
+		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember())
+		c.Assert(err, IsNil)
+		testutil.WaitUntil(c, func(c *C) bool {
+			currName := cluster.WaitAllocatorLeader("dc-1")
+			fmt.Println("currentAllocatorName", currName, "wantName", name)
+			return currName == name
+		}, testutil.WithSleepInterval(1*time.Second))
+	}
 }

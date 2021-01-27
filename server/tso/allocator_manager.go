@@ -821,6 +821,31 @@ func (am *AllocatorManager) PriorityChecker() {
 	}
 }
 
+func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, member *member.Member) error {
+	if dcLocation == config.GlobalDCLocation {
+		return fmt.Errorf("dcLocation %v should be transferred by transfer leader", dcLocation)
+	}
+	dcLocationsInfo := am.GetClusterDCLocations()
+	_, ok := dcLocationsInfo[dcLocation]
+	if !ok {
+		return fmt.Errorf("dc-location %v haven't been discovered yet", dcLocation)
+	}
+	allocator, err := am.GetAllocator(dcLocation)
+	if err != nil {
+		return err
+	}
+	localTSOAllocator, _ := allocator.(*LocalTSOAllocator)
+	leaderServerID := localTSOAllocator.GetAllocatorLeader().GetMemberId()
+	if leaderServerID == member.ID() {
+		return nil
+	}
+	err = am.transferLocalAllocator(dcLocation, member.ID())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
@@ -1056,4 +1081,33 @@ func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) {
 		return
 	}
 	am.localAllocatorConn.clientConns[addr] = newConn
+}
+
+func (am *AllocatorManager) transferLocalAllocator(dcLocation string, targetServerID uint64) error {
+	serverID := targetServerID
+	nextLeaderKey := path.Join(am.rootPath, dcLocation, "next-leader")
+	// Grant a etcd lease with checkStep * 1.5
+	nextLeaderLease := clientv3.NewLease(am.member.Client())
+	ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)
+	leaseResp, err := nextLeaderLease.Grant(ctx, int64(checkStep.Seconds()*1.5))
+	cancel()
+	if err != nil {
+		err = errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
+		log.Error("failed to grant the lease of the next leader id key", errs.ZapError(err))
+		return err
+	}
+	resp, err := kv.NewSlowLogTxn(am.member.Client()).
+		If(clientv3.Compare(clientv3.CreateRevision(nextLeaderKey), "=", 0)).
+		Then(clientv3.OpPut(nextLeaderKey, fmt.Sprint(serverID), clientv3.WithLease(leaseResp.ID))).
+		Commit()
+	if err != nil {
+		err = errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+		log.Error("failed to write next leader id into etcd", errs.ZapError(err))
+		return err
+	}
+	if !resp.Succeeded {
+		log.Warn("write next leader id into etcd unsuccessfully", zap.String("dc-location", dcLocation))
+		return fmt.Errorf("write next leader id into etcd unsuccessfully")
+	}
+	return nil
 }
