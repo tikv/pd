@@ -821,6 +821,7 @@ func (am *AllocatorManager) PriorityChecker() {
 	}
 }
 
+// TransferAllocatorForDCLocation transfer local tso allocator to the target member for the given dcLocation
 func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, memberID uint64) error {
 	if dcLocation == config.GlobalDCLocation {
 		return fmt.Errorf("dcLocation %v should be transferred by transfer leader", dcLocation)
