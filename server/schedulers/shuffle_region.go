@@ -96,15 +96,11 @@ func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-<<<<<<< HEAD
-	return s.OpController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
-=======
-	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
+	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
 	}
 	return allowed
->>>>>>> 8eabcca7... scheduler, operator:  support operatorLimitCounter for region-schedule-limit (#3351)
 }
 
 func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
