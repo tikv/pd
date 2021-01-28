@@ -234,9 +234,9 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 var _ = Suite(&testLocalTSOSerialSuite{})
 
 type testLocalTSOSerialSuite struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	tsPool      map[uint64]struct{}
+	ctx    context.Context
+	cancel context.CancelFunc
+	tsPool map[uint64]struct{}
 }
 
 func (s *testLocalTSOSerialSuite) SetUpSuite(c *C) {
