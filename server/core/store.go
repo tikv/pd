@@ -139,6 +139,11 @@ func (s *StoreInfo) IsTombstone() bool {
 	return s.GetState() == metapb.StoreState_Tombstone
 }
 
+// IsPhysicallyDestroyed checks if the store's physically destroyed.
+func (s *StoreInfo) IsPhysicallyDestroyed() bool {
+	return s.GetMeta().GetPhysicallyDestroyed()
+}
+
 // DownTime returns the time elapsed since last heartbeat.
 func (s *StoreInfo) DownTime() time.Duration {
 	return time.Since(s.GetLastHeartbeatTS())

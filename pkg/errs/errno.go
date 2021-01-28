@@ -51,6 +51,7 @@ var (
 	ErrStoreNotFound       = errors.Normalize("store %v not found", errors.RFCCodeText("PD:core:ErrStoreNotFound"))
 	ErrPauseLeaderTransfer = errors.Normalize("store %v is paused for leader transfer", errors.RFCCodeText("PD:core:ErrPauseLeaderTransfer"))
 	ErrStoreTombstone      = errors.Normalize("store %v has been removed", errors.RFCCodeText("PD:core:ErrStoreTombstone"))
+	ErrStoreDestroyed      = errors.Normalize("store %v has been physically destroyed", errors.RFCCodeText("PD:core:ErrStoreDestroyed"))
 )
 
 // client errors

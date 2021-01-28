@@ -538,7 +538,6 @@ func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) 
 		}
 		for serverName, num := range counter {
 			if num == running && c.GetServer(serverName).IsAllocatorLeader(dcLocation) {
-				time.Sleep(WaitLeaderReturnDelay)
 				return serverName
 			}
 		}
