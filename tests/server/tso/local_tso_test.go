@@ -237,12 +237,10 @@ var _ = Suite(&testLocalTSOSerialSuite{})
 type testLocalTSOSerialSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	tsPool map[uint64]struct{}
 }
 
 func (s *testLocalTSOSerialSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.tsPool = make(map[uint64]struct{})
 	server.EnableZap = true
 }
 
@@ -285,6 +283,7 @@ func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
 				zap.String("targetName", server.GetServer().GetMember().Member().Name))
 			return currName == name
 		}, testutil.WithSleepInterval(1*time.Second))
-		break
+		log.Info("TestTransferTSOLocalAllocator assert finish")
+		return
 	}
 }
