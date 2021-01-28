@@ -34,7 +34,7 @@ type Options interface {
 
 	// store limit
 	GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64
-	SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
+	SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error
 
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
