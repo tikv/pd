@@ -15,8 +15,6 @@ package tso_test
 
 import (
 	"context"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 	"sync"
 	"time"
 
@@ -251,37 +249,37 @@ func (s *testLocalTSOSerialSuite) TearDownSuite(c *C) {
 }
 
 // TODO: this test would cost 60 secs, we need to find a way to speed it up.
-func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
-	dcLocationConfig := map[string]string{
-		"pd1": "dc-1",
-		"pd2": "dc-1",
-		"pd3": "dc-1",
-	}
-	serverNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, serverNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
-	})
-	defer cluster.Destroy()
-	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-
-	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
-	originName := cluster.WaitAllocatorLeader("dc-1")
-	c.Assert(len(originName), Greater, 0)
-	for name, server := range cluster.GetServers() {
-		if name == originName {
-			continue
-		}
-		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
-		log.Info("TestTransferTSOLocalAllocator", zap.String("originName", originName),
-			zap.String("targetName", server.GetServer().GetMember().Member().Name))
-		c.Assert(err, IsNil)
-		testutil.WaitUntil(c, func(c *C) bool {
-			currName := cluster.WaitAllocatorLeader("dc-1")
-			return currName == name
-		}, testutil.WithSleepInterval(1*time.Second))
-		break
-	}
-}
+//func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
+//	dcLocationConfig := map[string]string{
+//		"pd1": "dc-1",
+//		"pd2": "dc-1",
+//		"pd3": "dc-1",
+//	}
+//	serverNum := len(dcLocationConfig)
+//	cluster, err := tests.NewTestCluster(s.ctx, serverNum, func(conf *config.Config, serverName string) {
+//		conf.LocalTSO.EnableLocalTSO = true
+//		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+//	})
+//	defer cluster.Destroy()
+//	c.Assert(err, IsNil)
+//	err = cluster.RunInitialServers()
+//	c.Assert(err, IsNil)
+//
+//	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+//	originName := cluster.WaitAllocatorLeader("dc-1")
+//	c.Assert(len(originName), Greater, 0)
+//	for name, server := range cluster.GetServers() {
+//		if name == originName {
+//			continue
+//		}
+//		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
+//		log.Info("TestTransferTSOLocalAllocator", zap.String("originName", originName),
+//			zap.String("targetName", server.GetServer().GetMember().Member().Name))
+//		c.Assert(err, IsNil)
+//		testutil.WaitUntil(c, func(c *C) bool {
+//			currName := cluster.WaitAllocatorLeader("dc-1")
+//			return currName == name
+//		}, testutil.WithSleepInterval(1*time.Second))
+//		break
+//	}
+//}
