@@ -273,12 +273,14 @@ func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
 		if name == originName {
 			continue
 		}
-		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
 		log.Info("TestTransferTSOLocalAllocator", zap.String("originName", originName),
 			zap.String("targetName", server.GetServer().GetMember().Member().Name))
+		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
 		c.Assert(err, IsNil)
 		testutil.WaitUntil(c, func(c *C) bool {
 			currName := cluster.WaitAllocatorLeader("dc-1")
+			log.Info("TestTransferTSOLocalAllocator", zap.String("currName", currName),
+				zap.String("targetName", server.GetServer().GetMember().Member().Name))
 			return currName == name
 		}, testutil.WithSleepInterval(1*time.Second))
 		break
