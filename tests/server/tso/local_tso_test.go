@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/zap"
 )
@@ -251,6 +252,7 @@ func (s *testLocalTSOSerialSuite) TearDownSuite(c *C) {
 
 //TODO: this test would cost 60 secs, we need to find a way to speed it up.
 func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
+	tso.PriorityCheck = 5 * time.Second
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-1",

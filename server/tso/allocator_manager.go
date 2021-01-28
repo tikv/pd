@@ -47,6 +47,14 @@ const (
 	localTSOSuffixEtcdPrefix    = "local-tso-suffix"
 )
 
+var (
+	PriorityCheck time.Duration
+)
+
+func init() {
+	PriorityCheck = checkStep
+}
+
 // AllocatorGroupFilter is used to select AllocatorGroup.
 type AllocatorGroupFilter func(ag *allocatorGroup) bool
 
@@ -522,7 +530,7 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	defer tsTicker.Stop()
 	patrolTicker := time.NewTicker(patrolStep)
 	defer patrolTicker.Stop()
-	checkerTicker := time.NewTicker(checkStep)
+	checkerTicker := time.NewTicker(PriorityCheck)
 	defer checkerTicker.Stop()
 
 	for {
