@@ -56,10 +56,10 @@ var backgroundJobInterval = 10 * time.Second
 const (
 	clientTimeout              = 3 * time.Second
 	defaultChangedRegionsLimit = 10000
-	// persistLimitRetryTime is used to reduce the probability of the persistent error
+	// persistLimitRetryTimes is used to reduce the probability of the persistent error
 	// since the once the store is add or remove, we shouldn't return an error even if the store limit is failed to persist.
-	persistLimitRetryTime = 5
-	persistLimitWaitTime  = 100 * time.Millisecond
+	persistLimitRetryTimes = 5
+	persistLimitWaitTime   = 100 * time.Millisecond
 )
 
 // Server is the interface for cluster.
@@ -1648,7 +1648,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	cfg.StoreLimit[storeID] = sc
 	c.opt.SetScheduleConfig(cfg)
 	var err error
-	for i := 0; i < persistLimitRetryTime; i++ {
+	for i := 0; i < persistLimitRetryTimes; i++ {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit added", zap.Uint64("store-id", storeID))
 			return
@@ -1667,7 +1667,7 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)
 	var err error
-	for i := 0; i < persistLimitRetryTime; i++ {
+	for i := 0; i < persistLimitRetryTimes; i++ {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
 			return
