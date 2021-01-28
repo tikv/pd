@@ -27,11 +27,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-<<<<<<< HEAD
-=======
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/encryption"
->>>>>>> cbb89ec0... server: Auto fix gc_worker's service safepoint for upgraded clusters (#3371)
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
