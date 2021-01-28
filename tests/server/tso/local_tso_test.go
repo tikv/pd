@@ -236,7 +236,6 @@ var _ = Suite(&testLocalTSOSerialSuite{})
 type testLocalTSOSerialSuite struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
-	tsPoolMutex sync.Mutex
 	tsPool      map[uint64]struct{}
 }
 
