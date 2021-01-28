@@ -20,6 +20,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -223,6 +224,33 @@ func (s *testPrioritySuite) TestAllocatorPriority(c *C) {
 		currentLeaderName := cluster.WaitAllocatorLeader(dcLocation)
 		c.Assert(currentLeaderName, Equals, serverName)
 	}
+}
+
+func (s *testPrioritySuite) TestNextLeaderGuarantee(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+	}
+	serverNumber := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/injectNextLeaderKey", "return(true)"), IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	cluster.WaitLeader()
+	// To speed up the test, we force to do the check
+	cluster.CheckClusterDCLocation()
+	leaderName := cluster.WaitAllocatorLeader("dc-1", tests.WithRetryTimes(12), tests.WithWaitInterval(5*time.Second))
+	c.Assert(leaderName, Equals, "")
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/tso/injectNextLeaderKey"), IsNil)
+	cluster.CheckClusterDCLocation()
+	leaderName = cluster.WaitAllocatorLeader("dc-1")
+	c.Assert(leaderName, Equals, "pd1")
 }
 
 func waitAllocatorPriorityCheck(cluster *tests.TestCluster) {
