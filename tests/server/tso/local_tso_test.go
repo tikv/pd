@@ -21,11 +21,13 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"go.uber.org/zap"
 )
 
 var _ = Suite(&testLocalTSOSuite{})
@@ -228,57 +230,58 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 
 	failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow")
 }
-//var _ = Suite(&testLocalTSOSerialSuite{})
-//
-//type testLocalTSOSerialSuite struct {
-//	ctx         context.Context
-//	cancel      context.CancelFunc
-//	tsPoolMutex sync.Mutex
-//	tsPool      map[uint64]struct{}
-//}
-//
-//func (s *testLocalTSOSerialSuite) SetUpSuite(c *C) {
-//	s.ctx, s.cancel = context.WithCancel(context.Background())
-//	s.tsPool = make(map[uint64]struct{})
-//	server.EnableZap = true
-//}
-//
-//func (s *testLocalTSOSerialSuite) TearDownSuite(c *C) {
-//	s.cancel()
-//}
 
-// TODO: this test would cost 60 secs, we need to find a way to speed it up.
-//func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
-//	dcLocationConfig := map[string]string{
-//		"pd1": "dc-1",
-//		"pd2": "dc-1",
-//		"pd3": "dc-1",
-//	}
-//	serverNum := len(dcLocationConfig)
-//	cluster, err := tests.NewTestCluster(s.ctx, serverNum, func(conf *config.Config, serverName string) {
-//		conf.LocalTSO.EnableLocalTSO = true
-//		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
-//	})
-//	defer cluster.Destroy()
-//	c.Assert(err, IsNil)
-//	err = cluster.RunInitialServers()
-//	c.Assert(err, IsNil)
-//
-//	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
-//	originName := cluster.WaitAllocatorLeader("dc-1")
-//	c.Assert(len(originName), Greater, 0)
-//	for name, server := range cluster.GetServers() {
-//		if name == originName {
-//			continue
-//		}
-//		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
-//		log.Info("TestTransferTSOLocalAllocator", zap.String("originName", originName),
-//			zap.String("targetName", server.GetServer().GetMember().Member().Name))
-//		c.Assert(err, IsNil)
-//		testutil.WaitUntil(c, func(c *C) bool {
-//			currName := cluster.WaitAllocatorLeader("dc-1")
-//			return currName == name
-//		}, testutil.WithSleepInterval(1*time.Second))
-//		break
-//	}
-//}
+var _ = Suite(&testLocalTSOSerialSuite{})
+
+type testLocalTSOSerialSuite struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
+	tsPoolMutex sync.Mutex
+	tsPool      map[uint64]struct{}
+}
+
+func (s *testLocalTSOSerialSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.tsPool = make(map[uint64]struct{})
+	server.EnableZap = true
+}
+
+func (s *testLocalTSOSerialSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+//TODO: this test would cost 60 secs, we need to find a way to speed it up.
+func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-1",
+		"pd3": "dc-1",
+	}
+	serverNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, serverNum, func(conf *config.Config, serverName string) {
+		conf.LocalTSO.EnableLocalTSO = true
+		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+	originName := cluster.WaitAllocatorLeader("dc-1")
+	c.Assert(len(originName), Greater, 0)
+	for name, server := range cluster.GetServers() {
+		if name == originName {
+			continue
+		}
+		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
+		log.Info("TestTransferTSOLocalAllocator", zap.String("originName", originName),
+			zap.String("targetName", server.GetServer().GetMember().Member().Name))
+		c.Assert(err, IsNil)
+		testutil.WaitUntil(c, func(c *C) bool {
+			currName := cluster.WaitAllocatorLeader("dc-1")
+			return currName == name
+		}, testutil.WithSleepInterval(1*time.Second))
+		break
+	}
+}
