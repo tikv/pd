@@ -232,7 +232,7 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow")
 }
 
-var _ = Suite(&testLocalTSOSerialSuite{})
+var _ = SerialSuites(&testLocalTSOSerialSuite{})
 
 type testLocalTSOSerialSuite struct {
 	ctx    context.Context
