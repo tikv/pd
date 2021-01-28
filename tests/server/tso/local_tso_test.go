@@ -227,7 +227,27 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow")
 }
 
-func (s *testLocalTSOSuite) TestTransferTSOLocalAllocator(c *C) {
+var _ = Suite(&testLocalTSOSerialSuite{})
+
+type testLocalTSOSerialSuite struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
+	tsPoolMutex sync.Mutex
+	tsPool      map[uint64]struct{}
+}
+
+func (s *testLocalTSOSerialSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.tsPool = make(map[uint64]struct{})
+	server.EnableZap = true
+}
+
+func (s *testLocalTSOSerialSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+// TODO: this test would cost 120 secs, we need to find a way to speed it up.
+func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-1",
