@@ -445,6 +445,8 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 	}
 	failpoint.Inject("injectNextLeaderKey", func(val failpoint.Value) {
 		if val.(bool) {
+			// In order not to campaign leader too often in tests
+			time.Sleep(5 * time.Second)
 			cmps = []clientv3.Cmp{
 				clientv3.Compare(clientv3.Value(nextLeaderKey), "=", "mockValue"),
 			}

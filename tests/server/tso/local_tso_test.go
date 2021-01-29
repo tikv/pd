@@ -254,7 +254,6 @@ func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-1",
-		"pd3": "dc-1",
 	}
 	serverNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, serverNum, func(conf *config.Config, serverName string) {
@@ -263,11 +262,18 @@ func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/injectNextLeaderKey", "return(true)"), IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
-	originName := cluster.WaitAllocatorLeader("dc-1")
+	cluster.WaitLeader(tests.WithWaitInterval(5*time.Second), tests.WithRetryTimes(3))
+	// To speed up the test, we force to do the check
+	cluster.CheckClusterDCLocation()
+	originName := cluster.WaitAllocatorLeader("dc-1", tests.WithRetryTimes(12), tests.WithWaitInterval(5*time.Second))
+	c.Assert(originName, Equals, "")
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/tso/injectNextLeaderKey"), IsNil)
+	cluster.CheckClusterDCLocation()
+	originName = cluster.WaitAllocatorLeader("dc-1")
 	c.Assert(len(originName), Greater, 0)
 	for name, server := range cluster.GetServers() {
 		if name == originName {

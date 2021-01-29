@@ -481,8 +481,16 @@ func (c *TestCluster) GetFollower() string {
 
 // WaitLeader is used to get leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
-func (c *TestCluster) WaitLeader() string {
-	for i := 0; i < 100; i++ {
+func (c *TestCluster) WaitLeader(wops ...WaitOption) string {
+	option := &WaitOp{
+		retryTimes:   100,
+		waitInterval: WaitLeaderCheckInterval,
+	}
+	for _, wop := range wops {
+		wop(option)
+	}
+
+	for i := 0; i < option.retryTimes; i++ {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
@@ -500,7 +508,7 @@ func (c *TestCluster) WaitLeader() string {
 				return name
 			}
 		}
-		time.Sleep(WaitLeaderCheckInterval)
+		time.Sleep(option.waitInterval)
 	}
 	return ""
 }
