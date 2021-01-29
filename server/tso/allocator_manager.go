@@ -48,6 +48,7 @@ const (
 )
 
 var (
+	// PriorityCheck exported is only for test.
 	PriorityCheck time.Duration
 )
 

@@ -21,14 +21,12 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/zap"
 )
 
 var _ = Suite(&testLocalTSOSuite{})
@@ -248,7 +246,6 @@ func (s *testLocalTSOSerialSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
 
-//TODO: this test would cost 60 secs, we need to find a way to speed it up.
 func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
 	tso.PriorityCheck = 5 * time.Second
 	dcLocationConfig := map[string]string{
@@ -273,17 +270,12 @@ func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
 		if name == originName {
 			continue
 		}
-		log.Info("TestTransferTSOLocalAllocator", zap.String("originName", originName),
-			zap.String("targetName", server.GetServer().GetMember().Member().Name))
 		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
 		c.Assert(err, IsNil)
 		testutil.WaitUntil(c, func(c *C) bool {
 			currName := cluster.WaitAllocatorLeader("dc-1")
-			log.Info("TestTransferTSOLocalAllocator", zap.String("currName", currName),
-				zap.String("targetName", server.GetServer().GetMember().Member().Name))
 			return currName == name
 		}, testutil.WithSleepInterval(1*time.Second))
-		log.Info("TestTransferTSOLocalAllocator assert finish")
 		return
 	}
 }
