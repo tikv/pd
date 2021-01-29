@@ -269,7 +269,7 @@ func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
 	cluster.WaitLeader(tests.WithWaitInterval(5*time.Second), tests.WithRetryTimes(3))
 	// To speed up the test, we force to do the check
 	cluster.CheckClusterDCLocation()
-	originName := cluster.WaitAllocatorLeader("dc-1", tests.WithRetryTimes(12), tests.WithWaitInterval(5*time.Second))
+	originName := cluster.WaitAllocatorLeader("dc-1", tests.WithRetryTimes(5), tests.WithWaitInterval(5*time.Second))
 	c.Assert(originName, Equals, "")
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/tso/injectNextLeaderKey"), IsNil)
 	cluster.CheckClusterDCLocation()
@@ -282,6 +282,7 @@ func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
 		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
 		c.Assert(err, IsNil)
 		testutil.WaitUntil(c, func(c *C) bool {
+			cluster.CheckClusterDCLocation()
 			currName := cluster.WaitAllocatorLeader("dc-1")
 			return currName == name
 		}, testutil.WithSleepInterval(1*time.Second))
