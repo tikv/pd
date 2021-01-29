@@ -100,9 +100,14 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 
 func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 	cli := pdpb.NewPDClient(conn)
+	var ctx context.Context
 	s.mu.RLock()
-	syncStream, err := cli.SyncRegions(s.mu.regionSyncerCtx)
+	ctx = s.mu.regionSyncerCtx
 	s.mu.RUnlock()
+	if ctx == nil {
+		return nil, errors.New("syncRegion failed due to regionSyncerCtx is nil")
+	}
+	syncStream, err := cli.SyncRegions(ctx)
 	if err != nil {
 		return syncStream, errs.ErrGRPCCreateStream.Wrap(err).FastGenWithCause()
 	}
