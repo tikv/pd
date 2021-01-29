@@ -226,7 +226,7 @@ func (s *testPrioritySuite) TestAllocatorPriority(c *C) {
 	}
 }
 
-func (s *testPrioritySuite) TestNextLeaderGuarantee(c *C) {
+func (s *testLocalTSOSerialSuite) TestNextLeaderGuarantee(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 	}

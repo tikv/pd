@@ -248,6 +248,9 @@ func (s *testLocalTSOSerialSuite) TearDownSuite(c *C) {
 
 func (s *testLocalTSOSerialSuite) TestTransferTSOLocalAllocator(c *C) {
 	tso.PriorityCheck = 5 * time.Second
+	defer func() {
+		tso.PriorityCheck = 1 * time.Minute
+	}()
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-1",
