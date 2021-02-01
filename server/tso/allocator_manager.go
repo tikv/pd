@@ -289,13 +289,16 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 		log.Warn("tso update physical interval is non-default",
 			zap.Duration("update-physical-interval", am.updatePhysicalInterval))
 	}
+	if _, exist := am.mu.allocatorGroups[dcLocation]; exist {
+		return nil
+	}
 	var allocator Allocator
 	if dcLocation == config.GlobalDCLocation {
 		allocator = NewGlobalTSOAllocator(am, leadership)
 	} else {
 		allocator = NewLocalTSOAllocator(am, leadership, dcLocation)
 	}
-	// Update or create a new allocatorGroup
+	// Create a new allocatorGroup
 	am.mu.allocatorGroups[dcLocation] = &allocatorGroup{
 		dcLocation: dcLocation,
 		parentCtx:  parentCtx,
@@ -441,7 +444,6 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 			}
 		}
 	})
-
 	if err := allocator.CampaignAllocatorLeader(defaultAllocatorLeaderLease, cmps...); err != nil {
 		log.Error("failed to campaign local tso allocator leader",
 			zap.String("dc-location", allocator.dcLocation),
@@ -455,7 +457,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 	ctx, cancel := context.WithCancel(loopCtx)
 	defer cancel()
 	defer am.resetAllocatorGroup(allocator.dcLocation)
-	// maintain the Local TSO Allocator leader
+	// Maintain the Local TSO Allocator leader
 	go allocator.KeepAllocatorLeader(ctx)
 	log.Info("campaign local tso allocator leader ok",
 		zap.String("dc-location", allocator.dcLocation),
@@ -532,8 +534,8 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 		case <-patrolTicker.C:
 			am.allocatorPatroller(serverCtx)
 		case <-checkerTicker.C:
-			// These two functions are low frequency and time consuming,
-			// we can run them concurrently.
+			// ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
+			// we should run them concurrently to speed up the progress.
 			go am.ClusterDCLocationChecker()
 			go am.PriorityChecker()
 		case <-serverCtx.Done():
