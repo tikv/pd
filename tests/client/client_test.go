@@ -217,7 +217,7 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-	cluster.WaitLeader()
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	var (
 		endpoints    []string
@@ -275,13 +275,7 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	for _, dcLocation := range dcLocationConfig {
-		testutil.WaitUntil(c, func(c *C) bool {
-			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
-			return len(pdLeader) > 0
-		})
-	}
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
@@ -295,9 +289,10 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	err = pd4.Run()
 	c.Assert(err, IsNil)
 	dcLocationConfig["pd4"] = "dc-4"
+	cluster.CheckClusterDCLocation()
 	testutil.WaitUntil(c, func(c *C) bool {
 		leaderName := cluster.WaitAllocatorLeader("dc-4")
-		return len(leaderName) > 0
+		return leaderName != ""
 	})
 
 	var endpoints []string
@@ -307,69 +302,37 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
+	// Make sure we have a PD leader before the test goes on
+	cluster.WaitLeader()
 	wg := sync.WaitGroup{}
 	for _, dcLocation := range dcLocationConfig {
 		wg.Add(tsoRequestConcurrentNumber)
 		for i := 0; i < tsoRequestConcurrentNumber; i++ {
 			go func(dc string) {
-				var lastTS, globalTS1, localTS, globalTS2 uint64
+				defer wg.Done()
+				var lastTS uint64
 				for i := 0; i < 100; i++ {
-					testutil.WaitUntil(c, func(c *C) bool {
-						globalPhysical1, globalLogical1, globalErr1 := cli.GetTS(context.TODO())
-						localPhysical, localLogical, localErr := cli.GetLocalTS(context.TODO(), dc)
-						globalPhysical2, globalLogical2, globalErr2 := cli.GetTS(context.TODO())
-						if globalErr1 == nil && localErr == nil && globalErr2 == nil {
-							globalTS1 = tsoutil.ComposeTS(globalPhysical1, globalLogical1)
-							localTS = tsoutil.ComposeTS(localPhysical, localLogical)
-							globalTS2 = tsoutil.ComposeTS(globalPhysical2, globalLogical2)
-							return true
-						}
-						c.Log(globalErr1, localErr, globalErr2)
-						return false
-					})
+					globalPhysical1, globalLogical1, err := cli.GetTS(context.TODO())
+					c.Assert(err, IsNil)
+					globalTS1 := tsoutil.ComposeTS(globalPhysical1, globalLogical1)
+					localPhysical, localLogical, err := cli.GetLocalTS(context.TODO(), dc)
+					c.Assert(err, IsNil)
+					localTS := tsoutil.ComposeTS(localPhysical, localLogical)
+					globalPhysical2, globalLogical2, err := cli.GetTS(context.TODO())
+					c.Assert(err, IsNil)
+					globalTS2 := tsoutil.ComposeTS(globalPhysical2, globalLogical2)
 					c.Assert(lastTS, Less, globalTS1)
 					c.Assert(globalTS1, Less, localTS)
 					c.Assert(localTS, Less, globalTS2)
 					lastTS = globalTS2
 				}
-				wg.Done()
+				c.Assert(lastTS, Greater, uint64(0))
 			}(dcLocation)
 		}
 	}
 	wg.Wait()
-}
 
-func (s *clientTestSuite) TestNonexistentLocalTSO(c *C) {
-	dcLocationConfig := map[string]string{
-		"pd1": "dc-1",
-		"pd2": "dc-2",
-		"pd3": "dc-3",
-	}
-	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
-	})
-	c.Assert(err, IsNil)
-	defer cluster.Destroy()
-
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	for _, dcLocation := range dcLocationConfig {
-		testutil.WaitUntil(c, func(c *C) bool {
-			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
-			return len(pdLeader) > 0
-		})
-	}
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
-	c.Assert(err, IsNil)
-
+	// Test a nonexistent dc-location for Local TSO
 	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
 	c.Assert(p, Equals, int64(0))
 	c.Assert(l, Equals, int64(0))
