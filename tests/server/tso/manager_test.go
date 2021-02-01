@@ -195,7 +195,7 @@ func (s *testLocalTSOSerialSuite) TestNextLeaderKey(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/tso/injectNextLeaderKey"), IsNil)
 	cluster.CheckClusterDCLocation()
 	originName = cluster.WaitAllocatorLeader("dc-1")
-	c.Assert(len(originName), Greater, 0)
+	c.Assert(originName, Not(Equals), "")
 	for name, server := range cluster.GetServers() {
 		if name == originName {
 			continue

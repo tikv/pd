@@ -811,28 +811,9 @@ func (am *AllocatorManager) PriorityChecker() {
 				zap.String("old-dc-location", leaderServerDCLocation),
 				zap.Uint64("next-leader-id", serverID),
 				zap.String("next-dc-location", myServerDCLocation))
-			nextLeaderKey := am.nextLeaderKey(allocatorGroup.dcLocation)
-			// Grant a etcd lease with checkStep * 1.5
-			nextLeaderLease := clientv3.NewLease(am.member.Client())
-			ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)
-			leaseResp, err := nextLeaderLease.Grant(ctx, int64(checkStep.Seconds()*1.5))
-			cancel()
+			err = am.transferLocalAllocator(allocatorGroup.dcLocation, am.member.ID())
 			if err != nil {
-				err = errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
-				log.Error("failed to grant the lease of the next leader id key", errs.ZapError(err))
 				continue
-			}
-			resp, err := kv.NewSlowLogTxn(am.member.Client()).
-				If(clientv3.Compare(clientv3.CreateRevision(nextLeaderKey), "=", 0)).
-				Then(clientv3.OpPut(nextLeaderKey, fmt.Sprint(serverID), clientv3.WithLease(leaseResp.ID))).
-				Commit()
-			if err != nil {
-				err = errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
-				log.Error("failed to write next leader id into etcd", errs.ZapError(err))
-				continue
-			}
-			if !resp.Succeeded {
-				log.Warn("write next leader id into etcd unsuccessfully")
 			}
 		}
 	}
@@ -858,7 +839,7 @@ func (am *AllocatorManager) PriorityChecker() {
 // TransferAllocatorForDCLocation transfer local tso allocator to the target member for the given dcLocation
 func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, memberID uint64) error {
 	if dcLocation == config.GlobalDCLocation {
-		return fmt.Errorf("dcLocation %v should be transferred by transfer leader", dcLocation)
+		return fmt.Errorf("dc-location %v should be transferred by transfer leader", dcLocation)
 	}
 	dcLocationsInfo := am.GetClusterDCLocations()
 	_, ok := dcLocationsInfo[dcLocation]
@@ -1120,7 +1101,7 @@ func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) {
 
 func (am *AllocatorManager) transferLocalAllocator(dcLocation string, targetServerID uint64) error {
 	serverID := targetServerID
-	nextLeaderKey := path.Join(am.rootPath, dcLocation, "next-leader")
+	nextLeaderKey := am.nextLeaderKey(dcLocation)
 	// Grant a etcd lease with checkStep * 1.5
 	nextLeaderLease := clientv3.NewLease(am.member.Client())
 	ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)

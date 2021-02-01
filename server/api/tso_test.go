@@ -42,7 +42,7 @@ func (s *testTsoSuite) TearDownSuite(c *C) {
 }
 
 func (s *testTsoSuite) TestTransferAllocator(c *C) {
-	addr := s.urlPrefix + "/tso/local/transfer/pd2?dcLocation=dc-1"
+	addr := s.urlPrefix + "/tso/allocator/transfer/pd2?dcLocation=dc-1"
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/mockTransferAllocatorResponse", `return("pd2,dc-1")`), IsNil)
 	defer failpoint.Disable("github.com/tikv/pd/server/api/mockTransferAllocatorResponse")
 	err := postJSON(testDialClient, addr, nil)

@@ -221,8 +221,8 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	apiRouter.Handle("/metric/query_range", newQueryMetric(svr)).Methods("GET", "POST")
 
 	// tso API
-	tsoHandler := newTsoHandler(svr, rd)
-	apiRouter.HandleFunc("/tso/local/transfer/{name}", tsoHandler.TransferLocalTSOAllocator).Methods("POST")
+	tsoHandler := newTSOHandler(svr, rd)
+	apiRouter.HandleFunc("/tso/allocator/transfer/{name}", tsoHandler.TransferLocalTSOAllocator).Methods("POST")
 
 	// profile API
 	apiRouter.HandleFunc("/debug/pprof/profile", pprof.Profile)

@@ -29,7 +29,7 @@ type tsoHandler struct {
 	rd  *render.Render
 }
 
-func newTsoHandler(svr *server.Server, rd *render.Render) *tsoHandler {
+func newTSOHandler(svr *server.Server, rd *render.Render) *tsoHandler {
 	return &tsoHandler{
 		svr: svr,
 		rd:  rd,
@@ -46,7 +46,7 @@ func newTsoHandler(svr *server.Server, rd *render.Render) *tsoHandler {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 404 {string} string "The member does not exist."
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /tso/local/transfer/{name} [post]
+// @Router /tso/allocator/transfer/{name} [post]
 func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Request) {
 	members, membersErr := getMembers(h.svr)
 	if membersErr != nil {
@@ -76,7 +76,6 @@ func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Re
 			break
 		}
 	}
-	h.svr.GetMember()
 	if memberID == 0 {
 		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("not found, pd: %s", name))
 		return
