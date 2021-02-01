@@ -200,7 +200,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Tags store
 // @Summary Set the store's state.
 // @Param id path integer true "Store Id"
-// @Param state query string true "state" Enums(Up, Offline, Tombstone)
+// @Param state query string true "state" Enums(Up, Offline)
 // @Produce json
 // @Success 200 {string} string "The store's state is updated."
 // @Failure 400 {string} string "The input is invalid."
@@ -222,10 +222,18 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "invalid state")
 		return
 	}
+	var err error
+	switch metapb.StoreState(state) {
+	case metapb.StoreState_Up:
+		err = rc.UpStore(storeID)
+	case metapb.StoreState_Offline:
+		err = rc.RemoveStore(storeID, false)
+	default:
+		err = errors.Errorf("invalid state %v", stateStr)
+	}
 
-	err := rc.SetStoreState(storeID, metapb.StoreState(state))
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.responseStoreErr(w, err, storeID)
 		return
 	}
 

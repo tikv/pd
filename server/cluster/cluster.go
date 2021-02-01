@@ -1072,7 +1072,7 @@ func (c *RaftCluster) buryStore(storeID uint64) error {
 		return errs.ErrStoreIsUp.FastGenByArgs()
 	}
 
-	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	newStore := store.Clone(core.TombstoneStore())
 	log.Warn("store has been Tombstone",
 		zap.Uint64("store-id", newStore.GetID()),
 		zap.String("store-address", newStore.GetAddress()),
@@ -1103,26 +1103,31 @@ func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.T
 	c.core.AttachAvailableFunc(storeID, limitType, f)
 }
 
-// SetStoreState sets up a store's state.
-func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) error {
+// UpStore up a store from offline
+func (c *RaftCluster) UpStore(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
-
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	if store.GetState() == metapb.StoreState_Tombstone && state != metapb.StoreState_Tombstone {
-		if err := c.checkStoreVersion(store.GetMeta()); err != nil {
-			return err
-		}
+	if store.IsTombstone() {
+		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
 	}
 
-	newStore := store.Clone(core.SetStoreState(state))
-	log.Warn("store update state",
+	if store.IsPhysicallyDestroyed() {
+		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
+	}
+
+	if store.IsUp() {
+		return nil
+	}
+
+	newStore := store.Clone(core.UpStore())
+	log.Warn("store has been up",
 		zap.Uint64("store-id", storeID),
-		zap.Stringer("new-state", state))
+		zap.String("store-address", newStore.GetAddress()))
 	return c.putStoreLocked(newStore)
 }
 
