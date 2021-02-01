@@ -1180,7 +1180,14 @@ func (s *Server) leaderLoop() {
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
 	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
-		log.Error("campaign pd leader meet error", errs.ZapError(err))
+		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
+			log.Info("campaign pd leader meets error due to txn conflict, another PD server may campaign successfully",
+				zap.String("campaign-pd-leader-name", s.Name()))
+		} else {
+			log.Error("campaign pd leader meets error due to etcd error",
+				zap.String("campaign-pd-leader-name", s.Name()),
+				errs.ZapError(err))
+		}
 		return
 	}
 
