@@ -195,12 +195,10 @@ errdoc: install-go-tools
 
 docker-build-test:
 	$(eval DOCKER_PS_EXIT_CODE=$(shell docker ps > /dev/null 2>&1 ; echo $$?))
-	@if [ $(DOCKER_PS_EXIT_CODE) -eq 0 ]; then \
-	docker build --no-cache -t tikv/pd .; \
-	else \
-	echo "Encountered problem while invoking docker cli. Is docker up and running? Failing docker-build-test. Check exit code for details."; \
-	exit $(DOCKER_PS_EXIT_CODE); \
+	@if [ $(DOCKER_PS_EXIT_CODE) -ne 0 ]; then \
+	echo "Encountered problem while invoking docker cli. Is the docker daemon running?"; \
 	fi
+	docker build --no-cache -t tikv/pd .
 
 check-missing-tests:
 	./scripts/check-missing-tests.sh
