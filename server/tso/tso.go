@@ -144,7 +144,7 @@ func (t *timestampOracle) saveTimestamp(leadership *election.Leadership, ts time
 		return errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	t.lastSavedTime.Store(ts)
 	return nil
