@@ -50,7 +50,7 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /members [get]
 func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
-	members, err := h.getMembers()
+	members, err := getMembers(h.svr)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -58,34 +58,34 @@ func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, members)
 }
 
-func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: h.svr.ClusterID()}}
-	members, err := h.svr.GetMembers(context.Background(), req)
+func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
+	members, err := svr.GetMembers(context.Background(), req)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 	for _, m := range members.GetMembers() {
-		binaryVersion, e := h.svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
+		binaryVersion, e := svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
 		m.BinaryVersion = binaryVersion
-		deployPath, e := h.svr.GetMember().GetMemberDeployPath(m.GetMemberId())
+		deployPath, e := svr.GetMember().GetMemberDeployPath(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
 		m.DeployPath = deployPath
-		if h.svr.GetMember().GetEtcdLeader() == 0 {
+		if svr.GetMember().GetEtcdLeader() == 0 {
 			log.Warn("no etcd leader, skip get leader priority", zap.Uint64("member", m.GetMemberId()))
 			continue
 		}
-		leaderPriority, e := h.svr.GetMember().GetMemberLeaderPriority(m.GetMemberId())
+		leaderPriority, e := svr.GetMember().GetMemberLeaderPriority(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 			continue
 		}
 		m.LeaderPriority = int32(leaderPriority)
-		gitHash, e := h.svr.GetMember().GetMemberGitHash(m.GetMemberId())
+		gitHash, e := svr.GetMember().GetMemberGitHash(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 			continue
@@ -201,7 +201,7 @@ func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /members/name/{name} [post]
 func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.Request) {
-	members, membersErr := h.getMembers()
+	members, membersErr := getMembers(h.svr)
 	if membersErr != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, membersErr.Error())
 		return
@@ -240,49 +240,6 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 		}
 	}
 	h.rd.JSON(w, http.StatusOK, "success")
-}
-
-// @Tags member
-// @Summary Transfer Local TSO Allocator
-// @Accept json
-// @Param name path string true "PD server name"
-// @Param body body object true "json params"
-// @Produce json
-// @Success 200 {string} string "The transfer command is submitted."
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 404 {string} string "The member does not exist."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /members/name/{name} [post]
-func (h *memberHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Request) {
-	members, membersErr := h.getMembers()
-	if membersErr != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, membersErr.Error())
-		return
-	}
-	var memberID uint64
-	name := mux.Vars(r)["name"]
-	for _, m := range members.GetMembers() {
-		if m.GetName() == name {
-			memberID = m.GetMemberId()
-			break
-		}
-	}
-	h.svr.GetMember()
-	if memberID == 0 {
-		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("not found, pd: %s", name))
-		return
-	}
-	dcLocation := mux.Vars(r)["dcLocation"]
-	if len(dcLocation) < 1 {
-		h.rd.JSON(w, http.StatusBadRequest, "dcLocation is no defined")
-		return
-	}
-	err := h.svr.GetTSOAllocatorManager().TransferAllocatorForDCLocation(dcLocation, memberID)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.rd.JSON(w, http.StatusOK, "The transfer command is submitted.")
 }
 
 type leaderHandler struct {
