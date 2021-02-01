@@ -36,7 +36,7 @@ func newTsoHandler(svr *server.Server, rd *render.Render) *tsoHandler {
 	}
 }
 
-// @Tags member
+// @Tags tso
 // @Summary Transfer Local TSO Allocator
 // @Accept json
 // @Param name path string true "PD server name"
