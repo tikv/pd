@@ -788,7 +788,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
 		// Only consider about key rate.
-		if srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
+		if srcLd.KeyRate-peer.GetKeyRate() >= dstLd.KeyRate+peer.GetKeyRate() {
 			rank = -1
 		}
 	} else {
