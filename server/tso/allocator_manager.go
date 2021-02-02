@@ -855,11 +855,7 @@ func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, me
 	if leaderServerID == memberID {
 		return nil
 	}
-	err = am.transferLocalAllocator(dcLocation, memberID)
-	if err != nil {
-		return err
-	}
-	return nil
+	return am.transferLocalAllocator(dcLocation, memberID)
 }
 
 func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error) {
@@ -1099,8 +1095,7 @@ func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) {
 	am.localAllocatorConn.clientConns[addr] = newConn
 }
 
-func (am *AllocatorManager) transferLocalAllocator(dcLocation string, targetServerID uint64) error {
-	serverID := targetServerID
+func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID uint64) error {
 	nextLeaderKey := am.nextLeaderKey(dcLocation)
 	// Grant a etcd lease with checkStep * 1.5
 	nextLeaderLease := clientv3.NewLease(am.member.Client())
@@ -1109,7 +1104,9 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, targetServ
 	cancel()
 	if err != nil {
 		err = errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
-		log.Error("failed to grant the lease of the next leader id key", errs.ZapError(err))
+		log.Error("failed to grant the lease of the next leader key",
+			zap.String("dc-location", dcLocation), zap.Uint64("serverID", serverID),
+			errs.ZapError(err))
 		return err
 	}
 	resp, err := kv.NewSlowLogTxn(am.member.Client()).
@@ -1118,7 +1115,9 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, targetServ
 		Commit()
 	if err != nil {
 		err = errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
-		log.Error("failed to write next leader id into etcd", errs.ZapError(err))
+		log.Error("failed to write next leader key into etcd",
+			zap.String("dc-location", dcLocation), zap.Uint64("serverID", serverID),
+			errs.ZapError(err))
 		return err
 	}
 	if !resp.Succeeded {

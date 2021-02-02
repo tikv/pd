@@ -16,10 +16,8 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -59,16 +57,6 @@ func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Re
 		h.rd.JSON(w, http.StatusBadRequest, "dcLocation is no defined")
 		return
 	}
-	failpoint.Inject("mockTransferAllocatorResponse", func(val failpoint.Value) {
-		v := strings.Split(val.(string), ",")
-		if name != v[0] {
-			panic("member name isn't right")
-		}
-		if dcLocation != v[1] {
-			panic("dcLocation isn't right")
-		}
-		h.rd.JSON(w, http.StatusOK, "The transfer command is submitted.")
-	})
 	var memberID uint64
 	for _, m := range members.GetMembers() {
 		if m.GetName() == name {

@@ -15,10 +15,12 @@ package api
 
 import (
 	"fmt"
-	"github.com/pingcap/failpoint"
+	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 )
 
 var _ = Suite(&testTsoSuite{})
@@ -30,7 +32,10 @@ type testTsoSuite struct {
 }
 
 func (s *testTsoSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
+		cfg.LocalTSO.EnableLocalTSO = true
+		cfg.LocalTSO.DCLocation = "dc-1"
+	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -42,9 +47,12 @@ func (s *testTsoSuite) TearDownSuite(c *C) {
 }
 
 func (s *testTsoSuite) TestTransferAllocator(c *C) {
-	addr := s.urlPrefix + "/tso/allocator/transfer/pd2?dcLocation=dc-1"
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/mockTransferAllocatorResponse", `return("pd2,dc-1")`), IsNil)
-	defer failpoint.Disable("github.com/tikv/pd/server/api/mockTransferAllocatorResponse")
+	testutil.WaitUntil(c, func(c *C) bool {
+		s.svr.GetTSOAllocatorManager().ClusterDCLocationChecker()
+		_, err := s.svr.GetTSOAllocatorManager().GetAllocator("dc-1")
+		return err == nil
+	}, testutil.WithRetryTimes(5), testutil.WithSleepInterval(3*time.Second))
+	addr := s.urlPrefix + "/tso/allocator/transfer/pd1?dcLocation=dc-1"
 	err := postJSON(testDialClient, addr, nil)
 	c.Assert(err, IsNil)
 }
