@@ -175,14 +175,14 @@ func (am *AllocatorManager) SetLocalTSOConfig(localTSOConfig config.LocalTSOConf
 		Then(clientv3.OpPut(dcLocationKey, localTSOConfig.DCLocation)).
 		Commit()
 	if err != nil {
-		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
 		log.Warn("write dc-location configuration into etcd failed",
 			zap.String("dc-location", localTSOConfig.DCLocation),
 			zap.String("server-name", serverName),
 			zap.Uint64("server-id", serverID))
-		return errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	log.Info("write dc-location configuration into etcd",
 		zap.String("dc-location", localTSOConfig.DCLocation),
@@ -433,7 +433,12 @@ func longSleep(ctx context.Context, waitStep time.Duration) bool {
 	}
 }
 
-func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, allocator *LocalTSOAllocator, dcLocationInfo *pdpb.GetDCLocationInfoResponse, isNextLeader bool) {
+func (am *AllocatorManager) campaignAllocatorLeader(
+	loopCtx context.Context,
+	allocator *LocalTSOAllocator,
+	dcLocationInfo *pdpb.GetDCLocationInfoResponse,
+	isNextLeader bool,
+) {
 	log.Info("start to campaign local tso allocator leader",
 		zap.String("dc-location", allocator.dcLocation),
 		zap.Any("dc-location-info", dcLocationInfo),
@@ -456,11 +461,18 @@ func (am *AllocatorManager) campaignAllocatorLeader(loopCtx context.Context, all
 		}
 	})
 	if err := allocator.CampaignAllocatorLeader(defaultAllocatorLeaderLease, cmps...); err != nil {
-		log.Error("failed to campaign local tso allocator leader",
-			zap.String("dc-location", allocator.dcLocation),
-			zap.Any("dc-location-info", dcLocationInfo),
-			zap.String("name", am.member.Member().Name),
-			errs.ZapError(err))
+		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
+			log.Info("failed to campaign local tso allocator leader due to txn conflict, another allocator may campaign successfully",
+				zap.String("dc-location", allocator.dcLocation),
+				zap.Any("dc-location-info", dcLocationInfo),
+				zap.String("name", am.member.Member().Name))
+		} else {
+			log.Error("failed to campaign local tso allocator leader due to etcd error",
+				zap.String("dc-location", allocator.dcLocation),
+				zap.Any("dc-location-info", dcLocationInfo),
+				zap.String("name", am.member.Member().Name),
+				errs.ZapError(err))
+		}
 		return
 	}
 
@@ -711,7 +723,7 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 		Then(clientv3.OpPut(localTSOSuffixKey, localTSOSuffixValue)).
 		Commit()
 	if err != nil {
-		return -1, errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+		return -1, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !txnResp.Succeeded {
 		log.Warn("write local tso suffix into etcd failed",
@@ -719,7 +731,7 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 			zap.String("local-tso-surfix", localTSOSuffixValue),
 			zap.String("server-name", am.member.Member().Name),
 			zap.Uint64("server-id", am.member.ID()))
-		return -1, errs.ErrEtcdTxn.FastGenByArgs()
+		return -1, errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	return int32(maxSuffix), nil
 }
@@ -896,7 +908,7 @@ func (am *AllocatorManager) deleteNextLeaderID(dcLocation string) error {
 		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	return nil
 }

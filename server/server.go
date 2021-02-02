@@ -602,11 +602,11 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
 	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
-		return nil, errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+		return nil, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
 		log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
-		return nil, errs.ErrEtcdTxn.FastGenByArgs()
+		return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
@@ -1180,7 +1180,14 @@ func (s *Server) leaderLoop() {
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
 	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
-		log.Error("campaign pd leader meet error", errs.ZapError(err))
+		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
+			log.Info("campaign pd leader meets error due to txn conflict, another PD server may campaign successfully",
+				zap.String("campaign-pd-leader-name", s.Name()))
+		} else {
+			log.Error("campaign pd leader meets error due to etcd error",
+				zap.String("campaign-pd-leader-name", s.Name()),
+				errs.ZapError(err))
+		}
 		return
 	}
 

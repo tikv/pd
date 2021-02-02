@@ -112,10 +112,10 @@ func (alloc *allocatorImpl) rebaseLocked() error {
 	t := txn.If(append([]clientv3.Cmp{cmp}, clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member))...)
 	resp, err := t.Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
-		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByArgs()
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByArgs()
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 
 	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))

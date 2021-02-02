@@ -261,9 +261,14 @@ error = '''
 etcd TLS config error
 '''
 
-["PD:etcd:ErrEtcdTxn"]
+["PD:etcd:ErrEtcdTxnConflict"]
 error = '''
-etcd Txn failed
+etcd transaction failed, conflicted and rolled back
+'''
+
+["PD:etcd:ErrEtcdTxnInternal"]
+error = '''
+internal etcd transaction error occurred
 '''
 
 ["PD:etcd:ErrEtcdURLMap"]

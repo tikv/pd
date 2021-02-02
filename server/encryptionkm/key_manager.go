@@ -114,7 +114,7 @@ func saveKeys(
 		Commit()
 	if err != nil {
 		log.Warn("fail to save encryption keys.", zap.Error(err))
-		return errs.ErrEtcdTxn.Wrap(err).GenWithStack("fail to save encryption keys")
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStack("fail to save encryption keys")
 	}
 	if !resp.Succeeded {
 		log.Warn("fail to save encryption keys. leader expired.")
