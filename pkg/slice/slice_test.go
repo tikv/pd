@@ -11,13 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package slice_test
+package slice
 
 import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/tikv/pd/pkg/slice"
 )
 
 func Test(t *testing.T) {
@@ -44,8 +43,8 @@ func (s *testSliceSuite) Test(c *C) {
 
 	for _, t := range tests {
 		even := func(i int) bool { return t.a[i]%2 == 0 }
-		c.Assert(slice.AnyOf(t.a, even), Equals, t.anyOf)
-		c.Assert(slice.NoneOf(t.a, even), Equals, t.noneOf)
-		c.Assert(slice.AllOf(t.a, even), Equals, t.allOf)
+		c.Assert(AnyOf(t.a, even), Equals, t.anyOf)
+		c.Assert(NoneOf(t.a, even), Equals, t.noneOf)
+		c.Assert(AllOf(t.a, even), Equals, t.allOf)
 	}
 }
