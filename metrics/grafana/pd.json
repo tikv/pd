@@ -6226,6 +6226,30 @@
               "metric": "pd_scheduler_event_count",
               "refId": "A",
               "step": 4
+            },
+            {
+              "expr": "sum(delta(pd_schedule_filter{action=\"filter-target\",type=\"distinct-filter\"}[1m])) by (source, target, type, scope)",
+              "format": "time_series",
+              "hide": true,
+              "intervalFactor": 2,
+              "legendFormat": "{{scope}}-{{type}}-{{source}}-{{target}}",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(delta(pd_schedule_filter{action=\"filter-target\",type=\"rule-fit-filter\"}[1m])) by (source, target, type, scope)",
+              "format": "time_series",
+              "hide": true,
+              "intervalFactor": 2,
+              "legendFormat": "{{scope}}-{{type}}-{{source}}-{{target}}",
+              "refId": "C"
+            },
+            {
+              "expr": "sum(delta(pd_schedule_filter{action=\"filter-target\",type=\"rule-fit-leader-filter\"}[1m])) by (source, target, type, scope)",
+              "format": "time_series",
+              "hide": true,
+              "intervalFactor": 2,
+              "legendFormat": "{{scope}}-{{type}}-{{source}}-{{target}}",
+              "refId": "D"
             }
           ],
           "thresholds": [],
