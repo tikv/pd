@@ -1203,10 +1203,8 @@ func (s *Server) campaignLeader() {
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
 	log.Info("setting up the global TSO allocator")
-	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, config.GlobalDCLocation, s.member.GetLeadership()); err != nil {
-		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
-		return
-	}
+	s.tsoAllocatorManager.SetUpAllocator(ctx, config.GlobalDCLocation, s.member.GetLeadership())
+	defer s.tsoAllocatorManager.ResetAllocatorGroup(config.GlobalDCLocation)
 	alllocator, err := s.tsoAllocatorManager.GetAllocator(config.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
@@ -1216,7 +1214,6 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 		return
 	}
-	defer s.tsoAllocatorManager.ResetAllocatorGroup(config.GlobalDCLocation)
 	// Check the cluster dc-location after the PD leader is elected
 	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 

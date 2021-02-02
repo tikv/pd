@@ -282,7 +282,7 @@ func CalSuffixBits(maxSuffix int32) int {
 }
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
-func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) error {
+func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	if am.updatePhysicalInterval != config.DefaultTSOUpdatePhysicalInterval {
@@ -290,7 +290,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 			zap.Duration("update-physical-interval", am.updatePhysicalInterval))
 	}
 	if _, exist := am.mu.allocatorGroups[dcLocation]; exist {
-		return nil
+		return
 	}
 	var allocator Allocator
 	if dcLocation == config.GlobalDCLocation {
@@ -305,21 +305,15 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 		leadership: leadership,
 		allocator:  allocator,
 	}
-	// Different kinds of allocators have different setup works to do
-	switch dcLocation {
-	// For Global TSO Allocator
-	case config.GlobalDCLocation:
-		// Because the Global TSO Allocator only depends on PD leader's leadership,
-		// so we can directly return here. The election and initialization process
-		// will happen in server.campaignLeader().
-		return nil
-	// For Local TSO Allocator
-	default:
-		// Join in a Local TSO Allocator election
-		localTSOAllocator, _ := allocator.(*LocalTSOAllocator)
-		go am.allocatorLeaderLoop(parentCtx, localTSOAllocator)
+	// Because the Global TSO Allocator only depends on PD leader's leadership,
+	// so we can directly return here. The election and initialization process
+	// will happen in server.campaignLeader().
+	if dcLocation == config.GlobalDCLocation {
+		return
 	}
-	return nil
+	// Start election of the Local TSO Allocator here
+	localTSOAllocator, _ := allocator.(*LocalTSOAllocator)
+	go am.allocatorLeaderLoop(parentCtx, localTSOAllocator)
 }
 
 func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
@@ -601,14 +595,11 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 		if slice.NoneOf(allocatorGroups, func(i int) bool {
 			return allocatorGroups[i].dcLocation == dcLocation
 		}) {
-			if err := am.SetUpAllocator(serverCtx, dcLocation, election.NewLeadership(
+			am.SetUpAllocator(serverCtx, dcLocation, election.NewLeadership(
 				am.member.Client(),
 				am.getAllocatorPath(dcLocation),
 				fmt.Sprintf("%s local allocator leader election", dcLocation),
-			)); err != nil {
-				log.Error("check new allocators failed, can't set up a new local allocator", zap.String("dc-location", dcLocation), errs.ZapError(err))
-				continue
-			}
+			))
 		}
 	}
 	// Clean up the unused one
