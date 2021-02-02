@@ -1132,7 +1132,7 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID u
 		Then(clientv3.OpPut(nextLeaderKey, fmt.Sprint(serverID), clientv3.WithLease(leaseResp.ID))).
 		Commit()
 	if err != nil {
-		err = errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+		err = errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 		log.Error("failed to write next leader key into etcd",
 			zap.String("dc-location", dcLocation), zap.Uint64("serverID", serverID),
 			errs.ZapError(err))
@@ -1140,7 +1140,7 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID u
 	}
 	if !resp.Succeeded {
 		log.Warn("write next leader id into etcd unsuccessfully", zap.String("dc-location", dcLocation))
-		return errs.ErrEtcdKVPut.GenWithStack("write next leader id into etcd unsuccessfully")
+		return errs.ErrEtcdTxnConflict.GenWithStack("write next leader id into etcd unsuccessfully")
 	}
 	return nil
 }
