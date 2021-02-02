@@ -49,12 +49,8 @@ const (
 
 var (
 	// PriorityCheck exported is only for test.
-	PriorityCheck time.Duration
+	PriorityCheck = 1 * time.Minute
 )
-
-func init() {
-	PriorityCheck = checkStep
-}
 
 // AllocatorGroupFilter is used to select AllocatorGroup.
 type AllocatorGroupFilter func(ag *allocatorGroup) bool
