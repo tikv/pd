@@ -263,7 +263,7 @@ etcd TLS config error
 
 ["PD:etcd:ErrEtcdTxnConflict"]
 error = '''
-etcd transaction failed, conflicted and rollbacked
+etcd transaction failed, conflicted and rolled back
 '''
 
 ["PD:etcd:ErrEtcdTxnInternal"]
