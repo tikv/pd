@@ -1216,6 +1216,7 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 		return
 	}
+	defer s.tsoAllocatorManager.ResetAllocatorGroup(config.GlobalDCLocation)
 	// Check the cluster dc-location after the PD leader is elected
 	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 
