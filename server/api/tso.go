@@ -54,7 +54,7 @@ func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Re
 	name := mux.Vars(r)["name"]
 	dcLocation := r.URL.Query().Get("dcLocation")
 	if len(dcLocation) < 1 {
-		h.rd.JSON(w, http.StatusBadRequest, "dcLocation is no defined")
+		h.rd.JSON(w, http.StatusBadRequest, "dcLocation is no undefined")
 		return
 	}
 	var memberID uint64

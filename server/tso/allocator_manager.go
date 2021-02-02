@@ -813,6 +813,12 @@ func (am *AllocatorManager) PriorityChecker() {
 				zap.String("next-dc-location", myServerDCLocation))
 			err = am.transferLocalAllocator(allocatorGroup.dcLocation, am.member.ID())
 			if err != nil {
+				log.Error("move the local tso allocator failed",
+					zap.Uint64("old-leader-id", leaderServerID),
+					zap.String("old-dc-location", leaderServerDCLocation),
+					zap.Uint64("next-leader-id", serverID),
+					zap.String("next-dc-location", myServerDCLocation),
+					zap.Error(err))
 				continue
 			}
 		}
