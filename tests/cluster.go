@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -28,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/swaggerserver"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/cluster"
@@ -481,8 +483,15 @@ func (c *TestCluster) GetFollower() string {
 
 // WaitLeader is used to get leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
-func (c *TestCluster) WaitLeader() string {
-	for i := 0; i < 100; i++ {
+func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
+	option := &WaitOp{
+		retryTimes:   100,
+		waitInterval: WaitLeaderCheckInterval,
+	}
+	for _, op := range ops {
+		op(option)
+	}
+	for i := 0; i < option.retryTimes; i++ {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
@@ -500,7 +509,7 @@ func (c *TestCluster) WaitLeader() string {
 				return name
 			}
 		}
-		time.Sleep(WaitLeaderCheckInterval)
+		time.Sleep(option.waitInterval)
 	}
 	return ""
 }
@@ -517,14 +526,14 @@ func (c *TestCluster) ResignLeader() error {
 // WaitAllocatorLeader is used to get the Local TSO Allocator leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
 func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) string {
-	woption := &WaitOp{
+	option := &WaitOp{
 		retryTimes:   100,
 		waitInterval: WaitLeaderCheckInterval,
 	}
 	for _, op := range ops {
-		op(woption)
+		op(option)
 	}
-	for i := 0; i < woption.retryTimes; i++ {
+	for i := 0; i < option.retryTimes; i++ {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
@@ -541,9 +550,28 @@ func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) 
 				return serverName
 			}
 		}
-		time.Sleep(woption.waitInterval)
+		time.Sleep(option.waitInterval)
 	}
 	return ""
+}
+
+// WaitAllLeaders will block and wait for the election of PD leader and all Local TSO Allocator leaders.
+func (c *TestCluster) WaitAllLeaders(testC *check.C, dcLocations map[string]string) {
+	c.WaitLeader()
+	c.CheckClusterDCLocation()
+	// Wait for each DC's Local TSO Allocator leader
+	wg := sync.WaitGroup{}
+	for _, dcLocation := range dcLocations {
+		wg.Add(1)
+		go func(dc string) {
+			testutil.WaitUntil(testC, func(testC *check.C) bool {
+				leaderName := c.WaitAllocatorLeader(dc)
+				return leaderName != ""
+			})
+			wg.Done()
+		}(dcLocation)
+	}
+	wg.Wait()
 }
 
 // GetCluster returns PD cluster.

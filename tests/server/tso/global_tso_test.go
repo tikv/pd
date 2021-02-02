@@ -452,7 +452,7 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	s.leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Assert(s.leaderServer, NotNil)
@@ -523,7 +523,7 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSOOverflow(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	s.leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Assert(s.leaderServer, NotNil)

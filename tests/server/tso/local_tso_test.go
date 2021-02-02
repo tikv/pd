@@ -65,7 +65,7 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	dcClientMap := make(map[string]pdpb.PDClient)
@@ -153,7 +153,7 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	leaderCli := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
@@ -179,10 +179,10 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	err = pd4.Run()
 	c.Assert(err, IsNil)
 	dcLocationConfig["pd4"] = "dc-4"
-	var pdName string
+	cluster.CheckClusterDCLocation()
 	testutil.WaitUntil(c, func(c *C) bool {
-		pdName = cluster.WaitAllocatorLeader("dc-4")
-		return len(pdName) > 0
+		leaderName := cluster.WaitAllocatorLeader("dc-4")
+		return leaderName != ""
 	})
 
 	dcClientMap := make(map[string]pdpb.PDClient)
