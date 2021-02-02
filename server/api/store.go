@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -217,18 +218,12 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stateStr := r.URL.Query().Get("state")
-	state, ok := metapb.StoreState_value[stateStr]
-	if !ok {
-		h.rd.JSON(w, http.StatusBadRequest, "invalid state")
-		return
-	}
 	var err error
-	switch metapb.StoreState(state) {
-	case metapb.StoreState_Up:
+	if strings.EqualFold(stateStr, metapb.StoreState_Up.String()) {
 		err = rc.UpStore(storeID)
-	case metapb.StoreState_Offline:
+	} else if strings.EqualFold(stateStr, metapb.StoreState_Offline.String()) {
 		err = rc.RemoveStore(storeID, false)
-	default:
+	} else {
 		err = errors.Errorf("invalid state %v", stateStr)
 	}
 
