@@ -20,9 +20,7 @@ import (
 	"fmt"
 	"math"
 	"path"
-	"path/filepath"
 	"sort"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -40,7 +38,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 )
 
@@ -184,18 +181,12 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	}()
 
 	// Transfer leader.
-	etcdCli, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: time.Second,
-	})
-	c.Assert(err, IsNil)
-	leaderPath := filepath.Join("/pd", strconv.FormatUint(cli.GetClusterID(context.Background()), 10), "leader")
-	for i := 0; i < 10; i++ {
-		cluster.WaitLeader()
-		_, err = etcdCli.Delete(context.TODO(), leaderPath)
+	for i := 0; i < 5; i++ {
+		oldLeaderName := cluster.WaitLeader()
+		err := cluster.GetServer(oldLeaderName).ResignLeader()
 		c.Assert(err, IsNil)
-		// Sleep to make sure all servers are notified and starts campaign.
-		time.Sleep(time.Second)
+		newLeaderName := cluster.WaitLeader()
+		c.Assert(newLeaderName, Not(Equals), oldLeaderName)
 	}
 	close(quit)
 	wg.Wait()

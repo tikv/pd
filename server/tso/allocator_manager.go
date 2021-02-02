@@ -309,11 +309,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 	switch dcLocation {
 	// For Global TSO Allocator
 	case config.GlobalDCLocation:
-		// Because Global TSO Allocator only depends on PD leader's leadership,
-		// so we can directly initialize it here.
-		if err := am.mu.allocatorGroups[dcLocation].allocator.Initialize(0); err != nil {
-			return err
-		}
+		return nil
 	// For Local TSO Allocator
 	default:
 		// Join in a Local TSO Allocator election
@@ -899,8 +895,8 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
 		allocatorGroup.leadership.Reset()
+		delete(am.mu.allocatorGroups, dcLocation)
 	}
-	delete(am.mu.allocatorGroups, dcLocation)
 }
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.

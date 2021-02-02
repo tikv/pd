@@ -1195,7 +1195,6 @@ func (s *Server) campaignLeader() {
 	// TSO service is strictly enabled/disabled by PD leader lease for 2 reasons:
 	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
-
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 	defer s.member.ResetLeader()
@@ -1206,6 +1205,15 @@ func (s *Server) campaignLeader() {
 	log.Info("setting up the global TSO allocator")
 	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, config.GlobalDCLocation, s.member.GetLeadership()); err != nil {
 		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
+		return
+	}
+	alllocator, err := s.tsoAllocatorManager.GetAllocator(config.GlobalDCLocation)
+	if err != nil {
+		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
+		return
+	}
+	if err := alllocator.Initialize(0); err != nil {
+		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 		return
 	}
 	// Check the cluster dc-location after the PD leader is elected
