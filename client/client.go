@@ -201,6 +201,7 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		checkTSDeadlineCh: make(chan struct{}),
 	}
 
+	c.createTSODispatcher(globalDCLocation)
 	c.wg.Add(2)
 	go c.tsLoop()
 	go c.tsCancelLoop()
