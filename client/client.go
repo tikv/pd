@@ -440,7 +440,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
 		defer span.Finish()
 	}
-	count := len(requests)
+	count := int64(len(requests))
 	start := time.Now()
 	req := &pdpb.TsoRequest{
 		Header:     c.requestHeader(),
@@ -450,52 +450,58 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 
 	if err := stream.Send(req); err != nil {
 		err = errors.WithStack(err)
-		c.finishTSORequest(requests, 0, 0, err)
+		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err
 	}
 	resp, err := stream.Recv()
 	if err != nil {
 		err = errors.WithStack(err)
-		c.finishTSORequest(requests, 0, 0, err)
+		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err
 	}
 	requestDurationTSO.Observe(time.Since(start).Seconds())
 	tsoBatchSize.Observe(float64(count))
 
-	if resp.GetCount() != uint32(len(requests)) {
+	if resp.GetCount() != uint32(count) {
 		err = errors.WithStack(errTSOLength)
-		c.finishTSORequest(requests, 0, 0, err)
+		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err
 	}
 
-	physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
-	// Server returns the highest ts.
-	logical -= int64(resp.GetCount() - 1)
-	c.compareAndSwapTS(dcLocation, physical, logical, int64(len(requests)))
-	c.finishTSORequest(requests, physical, logical, nil)
+	physical, logical, suffixBits := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
+	// logical is the highest ts here, we need to do the subtracting before we finish each TSO request.
+	firstLogical := addLogical(logical, -count+1, suffixBits)
+	c.compareAndSwapTS(dcLocation, physical, firstLogical, suffixBits, count)
+	c.finishTSORequest(requests, physical, firstLogical, suffixBits, nil)
 	return nil
 }
 
-func (c *client) compareAndSwapTS(dcLocation string, physical, logical, n int64) {
-	lastTSOInterface, ok := c.lastTSMap.Load(dcLocation)
-	if !ok {
-		var loaded bool
-		if lastTSOInterface, loaded = c.lastTSMap.LoadOrStore(dcLocation, &lastTSO{
-			physical: physical,
-			logical:  logical + n - 1,
-		}); !loaded {
-			return
-		}
+// Because of the suffix, we need to shift the count before we add it to the logical part.
+func addLogical(logical, count int64, suffixBits uint32) int64 {
+	return logical + count<<suffixBits
+}
+
+func (c *client) compareAndSwapTS(dcLocation string, physical, firstLogical int64, suffixBits uint32, count int64) {
+	highestLogical := addLogical(firstLogical, count-1, suffixBits)
+	lastTSOInterface, loaded := c.lastTSMap.LoadOrStore(dcLocation, &lastTSO{
+		physical: physical,
+		// Save the highest logical part here
+		logical: highestLogical,
+	})
+	if !loaded {
+		return
 	}
 	lastTSOPointer := lastTSOInterface.(*lastTSO)
 	lastPhysical := lastTSOPointer.physical
 	lastLogical := lastTSOPointer.logical
-	if tsLessEqual(physical, logical, lastPhysical, lastLogical) {
+	// The TSO we get is a range like [a, b), so we save the last TSO's b as the lastLogical and compare the new TSO's a with it.
+	if tsLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
 		panic(errors.Errorf("%s timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
-			dcLocation, physical, logical, lastPhysical, lastLogical))
+			dcLocation, physical, firstLogical, lastPhysical, lastLogical))
 	}
 	lastTSOPointer.physical = physical
-	lastTSOPointer.logical = logical + n - 1
+	// Same as above, we save the highest logical part here.
+	lastTSOPointer.logical = highestLogical
 }
 
 func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
@@ -505,12 +511,12 @@ func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
 	return physical < thatPhysical
 }
 
-func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, err error) {
+func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
 	for i := 0; i < len(requests); i++ {
 		if span := opentracing.SpanFromContext(requests[i].requestCtx); span != nil {
 			span.Finish()
 		}
-		requests[i].physical, requests[i].logical = physical, firstLogical+int64(i)
+		requests[i].physical, requests[i].logical = physical, addLogical(firstLogical, int64(i), suffixBits)
 		requests[i].done <- err
 	}
 }

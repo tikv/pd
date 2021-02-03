@@ -100,6 +100,7 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 		c.Log(err)
 		return false
 	})
+	c.Assert(cluster.CheckTSOUnique(ts1), IsTrue)
 
 	leader := cluster.GetLeader()
 	s.waitLeader(c, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
@@ -120,6 +121,7 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 		c.Log(err)
 		return false
 	})
+	c.Assert(cluster.CheckTSOUnique(ts2), IsTrue)
 	c.Assert(ts1, Less, ts2)
 
 	// Check URL list.
@@ -156,6 +158,7 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 		c.Log(err)
 		return false
 	})
+	c.Assert(cluster.CheckTSOUnique(lastTS), IsTrue)
 
 	// Start a goroutine the make sure TS won't fall back.
 	quit := make(chan struct{})
@@ -173,6 +176,7 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 			physical, logical, err := cli.GetTS(context.TODO())
 			if err == nil {
 				ts := tsoutil.ComposeTS(physical, logical)
+				c.Assert(cluster.CheckTSOUnique(ts), IsTrue)
 				c.Assert(lastTS, Less, ts)
 				lastTS = ts
 			}
@@ -266,7 +270,7 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-	cluster.WaitAllLeaders(c, dcLocationConfig)
+	cluster.WaitLeader()
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
@@ -281,10 +285,7 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(err, IsNil)
 	dcLocationConfig["pd4"] = "dc-4"
 	cluster.CheckClusterDCLocation()
-	testutil.WaitUntil(c, func(c *C) bool {
-		leaderName := cluster.WaitAllocatorLeader("dc-4")
-		return leaderName != ""
-	})
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	var endpoints []string
 	for _, s := range cluster.GetServers() {
@@ -293,8 +294,9 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
-	// Make sure we have a PD leader before the test goes on
-	cluster.WaitLeader()
+	// Make sure we have all leaders ready before the test goes on
+	leaderName := cluster.WaitLeader()
+	s.waitLeader(c, cli.(client), cluster.GetServer(leaderName).GetConfig().ClientUrls)
 	wg := sync.WaitGroup{}
 	for _, dcLocation := range dcLocationConfig {
 		wg.Add(tsoRequestConcurrentNumber)
