@@ -165,7 +165,7 @@ func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 func (mc *Cluster) SetStoreUp(storeID uint64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
-		core.SetStoreState(metapb.StoreState_Up),
+		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.PutStore(newStore)
@@ -175,7 +175,7 @@ func (mc *Cluster) SetStoreUp(storeID uint64) {
 func (mc *Cluster) SetStoreDisconnect(storeID uint64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
-		core.SetStoreState(metapb.StoreState_Up),
+		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Now().Add(-time.Second*30)),
 	)
 	mc.PutStore(newStore)
@@ -185,7 +185,7 @@ func (mc *Cluster) SetStoreDisconnect(storeID uint64) {
 func (mc *Cluster) SetStoreDown(storeID uint64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
-		core.SetStoreState(metapb.StoreState_Up),
+		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Time{}),
 	)
 	mc.PutStore(newStore)
@@ -194,7 +194,7 @@ func (mc *Cluster) SetStoreDown(storeID uint64) {
 // SetStoreOffline sets store state to be offline.
 func (mc *Cluster) SetStoreOffline(storeID uint64) {
 	store := mc.GetStore(storeID)
-	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
+	newStore := store.Clone(core.OfflineStore(false))
 	mc.PutStore(newStore)
 }
 

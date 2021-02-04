@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -118,7 +119,7 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 			Available:   50,
 			RegionCount: 1,
 		}
-		newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+		newStore := store.Clone(core.TombstoneStore())
 		c.Assert(cluster.putStoreLocked(newStore), IsNil)
 		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
 		c.Assert(cluster.hotStat.GetRollingStoreStats(store.GetID()), IsNil)
@@ -209,29 +210,37 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 
 }
 
-func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
+func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
-	// Put 4 stores.
-	for _, store := range newTestStores(4, "2.0.0") {
+	// Put 3 stores.
+	for _, store := range newTestStores(3, "2.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
-	// Store 3 and 4 offline with physically destroyed.
-	for _, id := range []uint64{3, 4} {
-		c.Assert(cluster.RemoveStore(id, true), IsNil)
-	}
-	cluster.checkStores()
 
-	// Change the status of 3 directly back to Up.
-	c.Assert(cluster.SetStoreState(3, metapb.StoreState_Up), IsNil)
-	// Update store 1 2 3
-	for _, store := range newTestStores(3, "3.0.0") {
-		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
-	}
-	// Since the store 4 version is too low, setting it to Up should fail.
-	c.Assert(cluster.SetStoreState(4, metapb.StoreState_Up), NotNil)
+	// set store 1 offline
+	c.Assert(cluster.RemoveStore(1, false), IsNil)
+	// up a offline store should be success.
+	c.Assert(cluster.UpStore(1), IsNil)
+
+	// set store 2 offline and physically destroyed
+	c.Assert(cluster.RemoveStore(2, true), IsNil)
+	c.Assert(cluster.UpStore(2), NotNil)
+
+	// bury store 2
+	cluster.checkStores()
+	// store is tombstone
+	err = cluster.UpStore(2)
+	c.Assert(errors.ErrorEqual(err, errs.ErrStoreTombstone.FastGenByArgs(2)), IsTrue)
+
+	// store 3 is up
+	c.Assert(cluster.UpStore(3), IsNil)
+
+	// store 4 not exist
+	err = cluster.UpStore(4)
+	c.Assert(errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(4)), IsTrue)
 }
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {

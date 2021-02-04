@@ -135,6 +135,7 @@ func (s *TestServer) Destroy() error {
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
+	s.server.GetMember().ResetLeader()
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
 }
 
@@ -517,7 +518,7 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 // ResignLeader resigns the leader of the cluster.
 func (c *TestCluster) ResignLeader() error {
 	leader := c.GetLeader()
-	if len(leader) != 0 {
+	if leader != "" {
 		return c.servers[leader].ResignLeader()
 	}
 	return errors.New("no leader")
