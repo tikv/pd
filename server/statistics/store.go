@@ -275,6 +275,13 @@ func (s *StoresStats) GetStoresBytesWriteStat() map[uint64]float64 {
 	})
 }
 
+// GetStoresBytesWriteLeaderStat returns the bytes write leader stat of all StoreInfo.
+func (s *StoresStats) GetStoresBytesWriteLeaderStat() map[uint64]float64 {
+	return s.getStat(func(stats *RollingStoreStats) float64 {
+		return stats.GetBytesWriteLeaderRate()
+	})
+}
+
 // GetStoresBytesReadStat returns the bytes read stat of all StoreInfo.
 func (s *StoresStats) GetStoresBytesReadStat() map[uint64]float64 {
 	return s.getStat(func(stats *RollingStoreStats) float64 {
@@ -286,6 +293,13 @@ func (s *StoresStats) GetStoresBytesReadStat() map[uint64]float64 {
 func (s *StoresStats) GetStoresKeysWriteStat() map[uint64]float64 {
 	return s.getStat(func(stats *RollingStoreStats) float64 {
 		return stats.GetKeysWriteRate()
+	})
+}
+
+// GetStoresKeysWriteLeaderStat returns the keys write leader stat of all StoreInfo.
+func (s *StoresStats) GetStoresKeysWriteLeaderStat() map[uint64]float64 {
+	return s.getStat(func(stats *RollingStoreStats) float64 {
+		return stats.GetKeysWriteLeaderRate()
 	})
 }
 
@@ -310,15 +324,18 @@ func (s *StoresStats) GetStoresOpsWriteStat() map[uint64]float64 {
 	})
 }
 
-// GetStoresLoadsStat returns the all of the load stats of all StoreInfo.
+// GetStoresLoadsStat returns all of the load stats of all StoreInfo.
 func (s *StoresStats) GetStoresLoadsStat() (ret []map[uint64]float64) {
 	ret = append(ret,
-		s.GetStoresBytesWriteStat(),
-		s.GetStoresKeysWriteStat(),
-		s.GetStoresOpsWriteStat(),
 		s.GetStoresBytesReadStat(),
 		s.GetStoresKeysReadStat(),
 		s.GetStoresOpsReadStat(),
+		s.GetStoresBytesWriteLeaderStat(),
+		s.GetStoresKeysWriteLeaderStat(),
+		s.GetStoresOpsWriteStat(),
+		s.GetStoresBytesWriteStat(),
+		s.GetStoresKeysWriteStat(),
+		s.GetStoresOpsWriteStat(),
 	)
 	return
 }
@@ -353,8 +370,10 @@ func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
 type RollingStoreStats struct {
 	sync.RWMutex
 	bytesWriteRate          *TimeMedian
+	bytesWriteLeaderRate    *TimeMedian
 	bytesReadRate           *TimeMedian
 	keysWriteRate           *TimeMedian
+	keysWriteLeaderRate     *TimeMedian
 	keysReadRate            *TimeMedian
 	opsRead                 *TimeMedian
 	opsWrite                *TimeMedian
@@ -377,8 +396,10 @@ const (
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
 		bytesWriteRate:          NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
+		bytesWriteLeaderRate:    NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
 		bytesReadRate:           NewTimeMedian(DefaultAotSize, DefaultReadMfSize),
 		keysWriteRate:           NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
+		keysWriteLeaderRate:     NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
 		keysReadRate:            NewTimeMedian(DefaultAotSize, DefaultReadMfSize),
 		opsRead:                 NewTimeMedian(DefaultAotSize, DefaultReadMfSize),
 		opsWrite:                NewTimeMedian(DefaultAotSize, DefaultReadMfSize),
@@ -404,11 +425,13 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	r.Lock()
 	defer r.Unlock()
 	r.bytesWriteRate.Add(float64(stats.BytesWritten), time.Duration(interval)*time.Second)
+	r.bytesWriteLeaderRate.Add(float64(stats.LeaderBytesWritten), time.Duration(interval)*time.Second)
 	r.bytesReadRate.Add(float64(stats.BytesRead), time.Duration(interval)*time.Second)
 	r.keysWriteRate.Add(float64(stats.KeysWritten), time.Duration(interval)*time.Second)
+	r.keysWriteLeaderRate.Add(float64(stats.LeaderKeysWritten), time.Duration(interval)*time.Second)
 	r.keysReadRate.Add(float64(stats.KeysRead), time.Duration(interval)*time.Second)
-	r.opsRead.Add(float64(stats.Ops), time.Duration(interval)*time.Second)
-	r.opsWrite.Add(float64(stats.OpsW), time.Duration(interval)*time.Second)
+	r.opsRead.Add(float64(stats.OpsRead), time.Duration(interval)*time.Second)
+	r.opsWrite.Add(float64(stats.OpsWrite), time.Duration(interval)*time.Second)
 
 	// Updates the cpu usages and disk rw rates of store.
 	r.totalCPUUsage.Add(collect(stats.GetCpuUsages()))
@@ -426,11 +449,13 @@ func (r *RollingStoreStats) Set(stats *pdpb.StoreStats) {
 	r.Lock()
 	defer r.Unlock()
 	r.bytesWriteRate.Set(float64(stats.BytesWritten) / float64(interval))
+	r.bytesWriteLeaderRate.Set(float64(stats.LeaderBytesWritten) / float64(interval))
 	r.bytesReadRate.Set(float64(stats.BytesRead) / float64(interval))
 	r.keysWriteRate.Set(float64(stats.KeysWritten) / float64(interval))
+	r.keysWriteLeaderRate.Set(float64(stats.LeaderKeysWritten) / float64(interval))
 	r.keysReadRate.Set(float64(stats.KeysRead) / float64(interval))
-	r.opsRead.Set(float64(stats.Ops) / float64(interval))
-	r.opsWrite.Set(float64(stats.Ops) / float64(interval))
+	r.opsRead.Set(float64(stats.OpsRead) / float64(interval))
+	r.opsWrite.Set(float64(stats.OpsWrite) / float64(interval))
 }
 
 // GetBytesRate returns the bytes write rate and the bytes read rate.
@@ -445,6 +470,13 @@ func (r *RollingStoreStats) GetBytesWriteRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
 	return r.bytesWriteRate.Get()
+}
+
+// GetBytesWriteLeaderRate returns the bytes write leader rate.
+func (r *RollingStoreStats) GetBytesWriteLeaderRate() float64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.bytesWriteLeaderRate.Get()
 }
 
 // GetBytesReadRate returns the bytes read rate.
@@ -466,6 +498,13 @@ func (r *RollingStoreStats) GetKeysWriteRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
 	return r.keysWriteRate.Get()
+}
+
+// GetKeysWriteLeaderRate returns the keys write leader rate.
+func (r *RollingStoreStats) GetKeysWriteLeaderRate() float64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.keysWriteLeaderRate.Get()
 }
 
 // GetKeysReadRate returns the keys read rate.

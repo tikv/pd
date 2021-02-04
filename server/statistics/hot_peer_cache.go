@@ -37,17 +37,17 @@ const (
 var (
 	minHotThresholds = [2][dimLen]float64{
 		WriteFlow: {
-			byteDim: 256,
-			keyDim:  16,
-			opsDim:  16,
+			byteDim:      256,
+			keyDim:       16,
+			opsDim:       16,
 			otherByteDim: 256,
 			otherKeyDim:  16,
 			otherOpsDim:  16,
 		},
 		ReadFlow: {
-			byteDim: 256,
-			keyDim:  16,
-			opsDim:  16,
+			byteDim:      256,
+			keyDim:       16,
+			opsDim:       16,
 			otherByteDim: 256,
 			otherKeyDim:  16,
 			otherOpsDim:  16,
@@ -296,9 +296,9 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) [dimLen]float64 {
 		return minThresholds
 	}
 	ret := [dimLen]float64{
-		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate,
-		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).KeyRate,
-		opsDim:  tn.GetTopNMin(opsDim).(*HotPeerStat).Ops,
+		byteDim:      tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate,
+		keyDim:       tn.GetTopNMin(keyDim).(*HotPeerStat).KeyRate,
+		opsDim:       tn.GetTopNMin(opsDim).(*HotPeerStat).Ops,
 		otherByteDim: tn.GetTopNMin(otherByteDim).(*HotPeerStat).OtherByteRate,
 		otherKeyDim:  tn.GetTopNMin(otherKeyDim).(*HotPeerStat).OtherKeyRate,
 		otherOpsDim:  tn.GetTopNMin(otherOpsDim).(*HotPeerStat).OtherOps,

@@ -187,12 +187,17 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 
 	h.prepareForBalance(cluster)
 
-	// switch typ {
-	// case read:
-	// 	return h.balanceHotReadRegions(cluster)
-	// case write:
-	// 	return h.balanceHotWriteRegions(cluster)
-	// }
+	mode := cluster.GetOpts().GetHotSchedulerMode()
+	if mode != 1 {
+		return nil
+	}
+
+	switch typ {
+	case read:
+		return h.balanceHotReadRegions(cluster)
+	case write:
+		return h.balanceHotWriteRegions(cluster)
+	}
 	return nil
 }
 

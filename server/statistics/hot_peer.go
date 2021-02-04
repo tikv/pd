@@ -40,9 +40,9 @@ type HotPeerStat struct {
 	KeyRate  float64  `json:"flow_keys"`
 	Ops      float64  `json:"flow_ops"`
 
-	OtherByteRate float64  `json:"other_flow_bytes"`
-	OtherKeyRate  float64  `json:"other_flow_keys"`
-	OtherOps      float64  `json:"other_flow_ops"`
+	OtherByteRate float64 `json:"other_flow_bytes"`
+	OtherKeyRate  float64 `json:"other_flow_keys"`
+	OtherOps      float64 `json:"other_flow_ops"`
 
 	// rolling statistics, recording some recently added records.
 	rollingByteRate MovingAvg
@@ -148,10 +148,19 @@ func (stat *HotPeerStat) GetOtherOps() float64 {
 
 // GetLoads returns all of the loads if possible.
 func (stat *HotPeerStat) GetLoads() (loads []float64) {
-	loads = append(loads,
-		stat.GetByteRate(), stat.GetKeyRate(), stat.GetOps(),
-		stat.GetOtherByteRate(), stat.GetOtherKeyRate(), stat.GetOtherOps(),
-	)
+	if stat.Kind == ReadFlow {
+		loads = append(loads,
+			stat.GetByteRate(), stat.GetKeyRate(), stat.GetOps(),
+			stat.GetOtherByteRate(), stat.GetOtherKeyRate(), stat.GetOtherOps(),
+			stat.GetOtherByteRate(), stat.GetOtherKeyRate(), stat.GetOtherOps(),
+		)
+	} else {
+		loads = append(loads,
+			stat.GetOtherByteRate(), stat.GetOtherKeyRate(), stat.GetOtherOps(),
+			stat.GetByteRate(), stat.GetKeyRate(), stat.GetOps(),
+			stat.GetByteRate(), stat.GetKeyRate(), stat.GetOps(),
+		)
+	}
 	return
 }
 

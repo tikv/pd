@@ -397,36 +397,75 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	}
 }
 
-// DimensionCount defines the number of dimensions
-const DimensionCount = 6
+type dimType int
 
-type peerInfo struct {
-	regionID        uint64
-	srcStoreID      uint64
-	dstStoreID      uint64
-	loads           [DimensionCount]float64
-	peerStat *statistics.HotPeerStat
-	isLeader        bool
+const (
+	readBytesDim dimType = iota
+	readKeysDim
+	readOpsDim
+	writeBytesLeaderDim
+	writeKeysLeaderDim
+	writeOpsLeaderDim
+	writeBytesPeerDim
+	writeKeysPeerDim
+	writeOpsPeerDim
+
+	// DimensionCount defines the number of dimensions
+	DimensionCount
+)
+
+func dimNeedSched(dimID dimType) bool {
+	switch dimID {
+	case readBytesDim, readKeysDim, writeKeysLeaderDim, writeBytesPeerDim:
+		return true
+	default:
+		return false
+	}
 }
 
-func newPeerInfo(regionID uint64, srcStoreID uint64) *peerInfo {
+func dimForLeader(dimID dimType) bool {
+	if dimID < writeBytesPeerDim {
+		return true
+	}
+	return false
+}
+
+func dimForRead(dimID dimType) bool {
+	if dimID < writeBytesLeaderDim {
+		return true
+	}
+	return false
+}
+
+type peerInfo struct {
+	regionID   uint64
+	srcStoreID uint64
+	dstStoreID uint64
+	loads      [DimensionCount]float64
+	peerStat   *statistics.HotPeerStat
+	isLeader   bool
+}
+
+func newPeerInfo(regionID uint64, srcStoreID uint64, peerStat *statistics.HotPeerStat, isLeader bool) *peerInfo {
 	return &peerInfo{
 		regionID:   regionID,
 		srcStoreID: srcStoreID,
 		dstStoreID: srcStoreID,
+		peerStat:   peerStat,
+		isLeader:   isLeader,
 	}
 }
 
 type storeInfo struct {
-	id            uint64
-	loads         [DimensionCount]float64
-	peers       map[uint64]*peerInfo
+	id    uint64
+	loads [DimensionCount]float64
+	peers map[uint64]*peerInfo
 }
 
 func newStoreInfo(id uint64, peers map[uint64]*peerInfo) *storeInfo {
 	ret := &storeInfo{
-		id:           id,
-		peers:      peers,
+		id:    id,
+		peers: peers,
 	}
 	return ret
 }
@@ -441,23 +480,21 @@ func (store *storeInfo) getMaxLoadInfo(allowedDimensions []uint64) (id uint64, l
 	return
 }
 
-func loadCanTransfered(dimID uint64) bool {
-	if dimID < 3 {	// transfer leader can not be applied to write loads
-		return false
-	}
-	return true
-}
-
 func migratePeer(srcStore, dstStore *storeInfo, srcPeer *peerInfo, opTy opType) {
 	if opTy == transferLeader {
-		var dstPeer *peerInfo
-		if _, ok := dstStore.peers[srcPeer.regionID]; ok {
-			dstPeer = dstStore.peers[srcPeer.regionID]
+		if _, ok := dstStore.peers[srcPeer.regionID]; !ok {
+			log.Info("try to transfer to null peer",
+				zap.Uint64("srcStoreID", srcStore.id),
+				zap.Uint64("dstStoreID", dstStore.id),
+				zap.Uint64("regionID", srcPeer.regionID),
+			)
+			return
 		}
+		dstPeer := dstStore.peers[srcPeer.regionID]
 
 		if _, ok := srcStore.peers[srcPeer.regionID]; ok {
 			for i := range srcPeer.loads {
-				if !loadCanTransfered(uint64(i)) {	// skip transfer leader to write dimension
+				if !dimForLeader(dimType(i)) { // skip transfer leader to write dimension
 					continue
 				}
 				srcStore.loads[i] -= srcPeer.loads[i]
@@ -466,7 +503,7 @@ func migratePeer(srcStore, dstStore *storeInfo, srcPeer *peerInfo, opTy opType) 
 		}
 		if _, ok := dstStore.peers[srcPeer.regionID]; ok {
 			for i := range srcPeer.loads {
-				if !loadCanTransfered(uint64(i)) {	// skip transfer leader to write dimension
+				if !dimForLeader(dimType(i)) { // skip transfer leader to write dimension
 					continue
 				}
 				dstStore.loads[i] += srcPeer.loads[i]
@@ -475,10 +512,10 @@ func migratePeer(srcStore, dstStore *storeInfo, srcPeer *peerInfo, opTy opType) 
 		}
 	} else {
 		if _, ok := srcStore.peers[srcPeer.regionID]; ok {
-			delete(srcStore.peers, srcPeer.regionID)
 			for i := range srcPeer.loads {
 				srcStore.loads[i] -= srcPeer.loads[i]
 			}
+			delete(srcStore.peers, srcPeer.regionID)
 		}
 		if _, ok := dstStore.peers[srcPeer.regionID]; !ok {
 			dstStore.peers[srcPeer.regionID] = srcPeer
@@ -489,7 +526,7 @@ func migratePeer(srcStore, dstStore *storeInfo, srcPeer *peerInfo, opTy opType) 
 	}
 }
 
-func normStoreLoads(sis []*storeInfo) {
+func normalizeStoreLoads(sis []*storeInfo) {
 	storeLen := len(sis)
 	if storeLen == 0 {
 		return
@@ -503,7 +540,7 @@ func normStoreLoads(sis []*storeInfo) {
 	for i := range expLoads {
 		expLoads[i] /= float64(storeLen)
 	}
-	
+
 	for _, si := range sis {
 		for i := range si.loads {
 			if expLoads[i] > 0 {
@@ -522,25 +559,31 @@ func normStoreLoads(sis []*storeInfo) {
 
 type sortedPeerInfos struct {
 	sortedPeers []*peerInfo
-	remainLoads         float64
-	dimID    uint64
+	remainLoads float64
+	dimID       uint64
 }
 
 func buildSortedPeers(s *storeInfo, dimID uint64) *sortedPeerInfos {
 	sortedPeers := make([]*peerInfo, 0)
 	remainLoads := 0.0
-	for _, r := range s.peers {
+	for id, r := range s.peers {
 		sortedPeers = append(sortedPeers, r)
+		if r == nil {
+			log.Info(
+				"buildSortedPeers find nil peer",
+				zap.Uint64("rid", id),
+			)
+		}
 		remainLoads += r.loads[dimID]
 	}
-	sort.Slice(sortedPeers, func (i, j int) bool {
+	sort.Slice(sortedPeers, func(i, j int) bool {
 		return sortedPeers[i].loads[dimID] < sortedPeers[j].loads[dimID]
 	})
 
-	return &sortedPeerInfos {
+	return &sortedPeerInfos{
 		sortedPeers: sortedPeers,
 		remainLoads: remainLoads,
-		dimID: dimID,
+		dimID:       dimID,
 	}
 }
 

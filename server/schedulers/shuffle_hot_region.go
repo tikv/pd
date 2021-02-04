@@ -14,7 +14,10 @@
 package schedulers
 
 import (
+	"fmt"
+	"math"
 	"math/rand"
+	"sort"
 	"strconv"
 	"time"
 
@@ -26,6 +29,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -80,7 +84,7 @@ type shuffleHotRegionScheduler struct {
 	r           *rand.Rand
 	conf        *shuffleHotRegionSchedulerConfig
 	types       []rwType
-	
+
 	schedRegions map[uint64][]uint64
 }
 
@@ -120,8 +124,8 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool 
 
 func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	i := s.r.Int() % len(s.types)
-	return s.dispatchStatic(s.types[i], cluster)
+	// i := s.r.Int() % len(s.types)
+	return s.dispatchStatic(s.types[1], cluster)
 	// return s.dispatch(s.types[i], cluster)
 }
 
@@ -241,79 +245,229 @@ func (s *shuffleHotRegionScheduler) dispatchStatic(typ rwType, cluster opt.Clust
 				hotRegionThreshold,
 				write, core.RegionKind, mixed)
 		}
+		mode := cluster.GetOpts().GetHotSchedulerMode()
+		if mode < 10 {
+			return s.twoDimShuffle(cluster, s.stLoadInfos[writePeer])
+		}
 		return s.randomSchedule(cluster, s.stLoadInfos[writePeer])
 	}
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) efficientRandomSchedule(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) []*operator.Operator {
+type loadDetailPair struct {
+	storeID uint64
+	detail  *storeLoadDetail
+}
+
+func showBalanceRatio(loadDetail map[uint64]*storeLoadDetail) bool {
+	loadMaps := make([]map[uint64]float64, 2)
+	maxRatio := 0.0
+	for dimID := 0; dimID < 2; dimID++ {
+		loadMap := make(map[uint64]float64)
+		loadMaps[dimID] = loadMap
+		var maxLoad, avgLoad float64
+		for storeID, detail := range loadDetail {
+			load := 0.0
+			if dimID == 0 {
+				load = detail.LoadPred.Current.ByteRate
+			} else {
+				load = detail.LoadPred.Current.KeyRate
+			}
+			avgLoad += load
+			maxLoad = math.Max(maxLoad, load)
+			loadMap[storeID] = load
+		}
+		avgLoad /= float64(len(loadDetail))
+		maxRatio = math.Max(maxRatio, maxLoad/avgLoad)
+
+		for storeID := range loadMap {
+			loadMap[storeID] /= avgLoad
+		}
+		log.Info("printLoad",
+			zap.Int("dimID", dimID),
+			zap.Float64("balanceRatio", maxLoad/avgLoad),
+			zap.String("loadRatio", fmt.Sprintf("%+v", loadMap)),
+		)
+	}
+
+	inter := true
+	for id := range loadMaps[0] {
+		if (loadMaps[0][id]-1.0)*(loadMaps[1][id]-1.0) >= 0.0 {
+			inter = false
+			break
+		}
+	}
+	if inter && maxRatio > 1.5 {
+		return true
+	}
+	return false
+}
+
+func (s *shuffleHotRegionScheduler) parseMode(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) (balanceType int, singleDimAdjust bool) {
+	balanceType = s.r.Int() % 2
+	showBalanceRatio(loadDetail)
+	// if enough {
+	// 	balanceType = 0
+	// }
+
+	mode := cluster.GetOpts().GetHotSchedulerMode()
+	if mode == 5 || mode == 7 {
+		balanceType = 0
+	} else if mode == 6 || mode == 8 {
+		balanceType = 1
+	}
+
+	if mode >= 7 {
+		singleDimAdjust = true
+	}
+	return
+}
+
+func (s *shuffleHotRegionScheduler) twoDimShuffle(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) []*operator.Operator {
+	balanceType, singleDimAdjust := s.parseMode(cluster, loadDetail)
+
+	details := []*loadDetailPair{}
 	for srcStoreID, detail := range loadDetail {
+		details = append(details, &loadDetailPair{
+			storeID: srcStoreID,
+			detail:  detail,
+		})
+	}
+
+	sort.Slice(details, func(i, j int) bool {
+		if balanceType == 0 {
+			return details[i].detail.LoadPred.Current.ByteRate < details[j].detail.LoadPred.Current.ByteRate
+		}
+		return details[i].detail.LoadPred.Current.ByteRate >= details[j].detail.LoadPred.Current.ByteRate
+		// return details[i].detail.LoadPred.Current.KeyRate < details[j].detail.LoadPred.Current.KeyRate
+	})
+	storeLen := len(loadDetail)
+	// targetStoreCount := len(loadDetail) - len(loadDetail)/2
+
+	for tryCount := 0; tryCount < 5; tryCount++ {
+		storeIndex := s.r.Int() % (len(loadDetail))
+		detailPair := details[storeIndex]
+		detail := detailPair.detail
+		if storeIndex == storeLen-1 {
+			break
+		}
 		if len(detail.HotPeers) < 1 {
 			continue
 		}
-		i := s.r.Intn(len(detail.HotPeers))
-		r := detail.HotPeers[i]
 
-		if stores, ok := s.schedRegions[r.RegionID]; ok {
-			for _, id := range stores {
-				if srcStoreID == id {
-					continue
+		sort.Slice(detail.HotPeers, func(i, j int) bool {
+			if balanceType == 0 {
+				return detail.HotPeers[i].GetByteRate() > detail.HotPeers[j].GetByteRate()
+			}
+			return detail.HotPeers[i].GetKeyRate() > detail.HotPeers[j].GetKeyRate()
+		})
+
+		var peerIndex int
+		var peer *statistics.HotPeerStat
+		var found bool
+		for peerIndex, peer = range detail.HotPeers {
+			approxKVSize := peer.GetByteRate() / peer.GetKeyRate()
+			bytePercent := peer.GetByteRate() / detail.LoadPred.Future.ExpByteRate
+			keyPercent := peer.GetKeyRate() / detail.LoadPred.Future.ExpKeyRate
+			if singleDimAdjust {
+				if balanceType == 0 && bytePercent > keyPercent {
+					found = true
+					break
+				} else if balanceType == 1 && keyPercent > bytePercent {
+					found = true
+					break
+				}
+			} else {
+				if balanceType == 0 && approxKVSize > 768 && bytePercent > keyPercent {
+					if bytePercent > 0.01 {
+						found = true
+						break
+					}
+				} else if balanceType == 1 && approxKVSize < 400 && keyPercent > bytePercent {
+					if keyPercent > 0.01 {
+						found = true
+						break
+					}
 				}
 			}
 		}
 
-		// select src region
-		srcRegion := cluster.GetRegion(r.RegionID)
-		if srcRegion == nil || len(srcRegion.GetDownPeers()) != 0 || len(srcRegion.GetPendingPeers()) != 0 {
-			continue
-		}
-		srcStore := cluster.GetStore(srcStoreID)
-		if srcStore == nil {
-			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID), errs.ZapError(errs.ErrGetSourceStore))
+		if !found {
 			continue
 		}
 
-		srcPeer := srcRegion.GetStorePeer(srcStoreID)
-		if srcPeer == nil {
+		srcStoreID := detailPair.storeID
+		// dstStoreIndex := s.r.Intn(targetStoreCount) + storeLen/2
+		dstStoreIndex := s.r.Intn(storeLen-storeIndex-1) + storeIndex + 1
+		dstStoreID := details[dstStoreIndex].storeID
+
+		ops := s.check(cluster, peer, srcStoreID, dstStoreID)
+		if ops == nil {
 			continue
 		}
 
-		filters := []filter.Filter{
-			filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
-			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			filter.NewPlacementSafeguard(s.GetName(), cluster, srcRegion, srcStore),
-		}
-		stores := cluster.GetStores()
-		destStoreIDs := make([]uint64, 0, len(stores))
-		for _, store := range stores {
-			if !filter.Target(cluster.GetOpts(), store, filters) {
-				continue
-			}
-			destStoreIDs = append(destStoreIDs, store.GetID())
-		}
-		if len(destStoreIDs) == 0 {
-			return nil
-		}
-		// random pick a dest store
-		destStoreID := destStoreIDs[s.r.Intn(len(destStoreIDs))]
-		if destStoreID == 0 {
-			return nil
-		}
-		srcPeer = srcRegion.GetStorePeer(srcStoreID)
-		if srcPeer == nil {
-			return nil
-		}
-		destPeer := &metapb.Peer{StoreId: destStoreID}
-		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpHotRegion, srcStoreID, destPeer)
-		if err != nil {
-			log.Debug("fail to create move leader operator", errs.ZapError(err))
-			return nil
-		}
-		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
+		detail.HotPeers = append(detail.HotPeers[:peerIndex], detail.HotPeers[peerIndex+1:]...)
+		detail.LoadPred.Current.ByteRate -= peer.GetByteRate()
+		detail.LoadPred.Current.KeyRate -= peer.GetKeyRate()
 
-		s.schedRegions[r.RegionID] = append(s.schedRegions[r.RegionID], srcStoreID, destStoreID)
-		return []*operator.Operator{op}
+		dstDetail := details[dstStoreIndex].detail
+		dstDetail.HotPeers = append(dstDetail.HotPeers, peer)
+		dstDetail.LoadPred.Current.ByteRate += peer.GetByteRate()
+		dstDetail.LoadPred.Current.KeyRate += peer.GetKeyRate()
+
+		log.Info("shuffle: move peer info",
+			zap.Uint64("regionID", peer.RegionID),
+			zap.Uint64("srcStore", srcStoreID),
+			zap.Uint64("dstStore", dstStoreID),
+			zap.Float64("byteRatio", peer.GetByteRate()/detail.LoadPred.Future.ExpByteRate),
+			zap.Float64("keyRatio", peer.GetKeyRate()/detail.LoadPred.Future.ExpKeyRate),
+			zap.Float64("approaxKVSize", peer.GetByteRate()/peer.GetKeyRate()),
+		)
+
+		return ops
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 	return nil
+}
+
+func (s *shuffleHotRegionScheduler) check(cluster opt.Cluster, peer *statistics.HotPeerStat, srcStoreID, dstStoreID uint64) []*operator.Operator {
+	// select src region
+	srcRegion := cluster.GetRegion(peer.RegionID)
+	if srcRegion == nil || len(srcRegion.GetDownPeers()) != 0 || len(srcRegion.GetPendingPeers()) != 0 {
+		return nil
+	}
+	srcStore := cluster.GetStore(srcStoreID)
+	if srcStore == nil {
+		log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID), errs.ZapError(errs.ErrGetSourceStore))
+		return nil
+	}
+	srcPeer := srcRegion.GetStorePeer(srcStoreID)
+	if srcPeer == nil {
+		return nil
+	}
+
+	{
+		dstPeer := srcRegion.GetStorePeer(dstStoreID)
+		if dstPeer != nil {
+			return nil
+		}
+	}
+
+	destPeer := &metapb.Peer{StoreId: dstStoreID}
+
+	var op *operator.Operator
+	var err error
+	if srcRegion.GetLeader().GetStoreId() == srcStoreID {
+		op, err = operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpHotRegion, srcStoreID, destPeer)
+	} else {
+		op, err = operator.CreateMovePeerOperator("random-move-hot-leader", cluster, srcRegion, operator.OpHotRegion, srcStoreID, destPeer)
+	}
+
+	if err != nil {
+		log.Debug("fail to create move leader operator", errs.ZapError(err))
+		return nil
+	}
+	op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
+
+	return []*operator.Operator{op}
 }
