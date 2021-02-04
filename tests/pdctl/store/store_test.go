@@ -193,6 +193,13 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(limit2, Equals, float64(20))
 	c.Assert(limit3, Equals, float64(20))
 
+	c.Assert(leaderServer.Stop(), IsNil)
+	c.Assert(leaderServer.Run(), IsNil)
+	cluster.WaitLeader()
+	storesLimit := leaderServer.GetPersistOptions().GetAllStoresLimit()
+	c.Assert(storesLimit[1].AddPeer, Equals, float64(20))
+	c.Assert(storesLimit[1].RemovePeer, Equals, float64(20))
+
 	// store limit all <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "25", "remove-peer"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)

@@ -73,11 +73,30 @@ func SetStoreDeployPath(deployPath string) StoreCreateOption {
 	}
 }
 
-// SetStoreState sets the state for the store.
-func SetStoreState(state metapb.StoreState) StoreCreateOption {
+// OfflineStore offline a store
+func OfflineStore(physicallyDestroyed bool) StoreCreateOption {
 	return func(store *StoreInfo) {
 		meta := proto.Clone(store.meta).(*metapb.Store)
-		meta.State = state
+		meta.State = metapb.StoreState_Offline
+		meta.PhysicallyDestroyed = physicallyDestroyed
+		store.meta = meta
+	}
+}
+
+// UpStore up a store
+func UpStore() StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.State = metapb.StoreState_Up
+		store.meta = meta
+	}
+}
+
+// TombstoneStore set a store to tombstone.
+func TombstoneStore() StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.State = metapb.StoreState_Tombstone
 		store.meta = meta
 	}
 }

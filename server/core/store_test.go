@@ -87,7 +87,7 @@ func (s *testConcurrencySuite) TestCloneStore(c *C) {
 				break
 			}
 			store.Clone(
-				SetStoreState(metapb.StoreState_Up),
+				UpStore(),
 				SetLastHeartbeatTS(time.Now()),
 			)
 		}
