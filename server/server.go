@@ -359,8 +359,10 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 		s.GetTLSConfig())
-	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
-		return err
+	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
+			return err
+		}
 	}
 	encryptionKeyManager, err := encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
@@ -1203,9 +1205,9 @@ func (s *Server) campaignLeader() {
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
 	log.Info("setting up the global TSO allocator")
-	s.tsoAllocatorManager.SetUpAllocator(ctx, config.GlobalDCLocation, s.member.GetLeadership())
-	defer s.tsoAllocatorManager.ResetAllocatorGroup(config.GlobalDCLocation)
-	alllocator, err := s.tsoAllocatorManager.GetAllocator(config.GlobalDCLocation)
+	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
+	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+	alllocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
 		return

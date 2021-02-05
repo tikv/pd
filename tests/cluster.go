@@ -199,7 +199,7 @@ func (s *TestServer) GetLeader() *pdpb.Member {
 // of PD cluster for given dc-location.
 func (s *TestServer) GetAllocatorLeader(dcLocation string) *pdpb.Member {
 	// For the leader of Global TSO Allocator, it's the PD leader
-	if dcLocation == config.GlobalDCLocation {
+	if dcLocation == tso.GlobalDCLocation {
 		return s.GetLeader()
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
@@ -240,7 +240,7 @@ func (s *TestServer) IsLeader() bool {
 
 // IsAllocatorLeader returns whether the server is a TSO Allocator leader or not.
 func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
-	if dcLocation == config.GlobalDCLocation {
+	if dcLocation == tso.GlobalDCLocation {
 		return s.IsLeader()
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()

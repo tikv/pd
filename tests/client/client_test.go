@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
@@ -204,8 +205,8 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -237,7 +238,7 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	// Check allocator leaders URL map.
 	cli.Close()
 	for dcLocation, url := range cli.(client).GetAllocatorLeaderURLs() {
-		if dcLocation == config.GlobalDCLocation {
+		if dcLocation == tso.GlobalDCLocation {
 			urls := cli.(client).GetURLs()
 			sort.Strings(urls)
 			sort.Strings(endpoints)
@@ -262,8 +263,8 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -277,8 +278,8 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 
 	// Join a new dc-location
 	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = "dc-4"
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = "dc-4"
 	})
 	c.Assert(err, IsNil)
 	err = pd4.Run()
