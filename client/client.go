@@ -201,6 +201,9 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		checkTSDeadlineCh: make(chan struct{}),
 	}
 
+	c.createTSODispatcher(globalDCLocation)
+	dispatcher, _ := c.tsoDispatcher.Load(globalDCLocation)
+	go c.handleDispatcher(c.ctx, globalDCLocation, dispatcher.(chan *tsoRequest))
 	c.wg.Add(2)
 	go c.tsLoop()
 	go c.tsCancelLoop()
@@ -317,91 +320,7 @@ func (c *client) tsLoop() {
 				// The only case that will make the dispatcher goroutine exit
 				// is that the loopCtx is done, otherwise there is no circumstance
 				// this goroutine should exit.
-				go func(dc string, tsoDispatcher chan *tsoRequest) {
-					var (
-						err      error
-						ctx      context.Context
-						cancel   context.CancelFunc
-						stream   pdpb.PD_TsoClient
-						opts     []opentracing.StartSpanOption
-						requests = make([]*tsoRequest, maxMergeTSORequests+1)
-					)
-					defer func() {
-						if cancel != nil {
-							cancel()
-						}
-					}()
-					for {
-						// If the tso stream for the corresponding dc-location has not been created yet or needs to be re-created,
-						// we will try to create the stream first.
-						if stream == nil {
-							ctx, cancel = context.WithCancel(loopCtx)
-							done := make(chan struct{})
-							go c.checkStreamTimeout(ctx, cancel, done)
-							stream, err = pdpb.NewPDClient(c.getClientConnByDCLocation(dc)).Tso(ctx)
-							done <- struct{}{}
-							if err != nil {
-								select {
-								case <-loopCtx.Done():
-									return
-								default:
-								}
-								log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientCreateTSOStream, err))
-								c.ScheduleCheckLeader()
-								cancel()
-								c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
-								select {
-								case <-time.After(time.Second):
-								case <-loopCtx.Done():
-									return
-								}
-								continue
-							}
-						}
-						select {
-						case first := <-tsoDispatcher:
-							pendingPlus1 := len(tsoDispatcher) + 1
-							requests[0] = first
-							for i := 1; i < pendingPlus1; i++ {
-								requests[i] = <-tsoDispatcher
-							}
-							done := make(chan struct{})
-							dl := deadline{
-								timer:  time.After(c.timeout),
-								done:   done,
-								cancel: cancel,
-							}
-							tsDeadlineCh, ok := c.tsDeadline.Load(dc)
-							for !ok || tsDeadlineCh == nil {
-								c.scheduleCheckTSDeadline()
-								time.Sleep(time.Millisecond * 100)
-								tsDeadlineCh, ok = c.tsDeadline.Load(dc)
-							}
-							select {
-							case tsDeadlineCh.(chan deadline) <- dl:
-							case <-loopCtx.Done():
-								return
-							}
-							opts = extractSpanReference(requests[:pendingPlus1], opts[:0])
-							err = c.processTSORequests(stream, dc, requests[:pendingPlus1], opts)
-							close(done)
-						case <-loopCtx.Done():
-							return
-						}
-						// If error happens during tso stream handling, reset stream and run the next trial.
-						if err != nil {
-							select {
-							case <-loopCtx.Done():
-								return
-							default:
-							}
-							log.Error("[pd] getTS error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
-							c.ScheduleCheckLeader()
-							cancel()
-							stream = nil
-						}
-					}
-				}(dcLocation, dispatcher.(chan *tsoRequest))
+				go c.handleDispatcher(loopCtx, dcLocation, dispatcher.(chan *tsoRequest))
 			}
 			return true
 		})
@@ -424,6 +343,92 @@ func (c *client) checkTSODispatcher(dcLocation string) bool {
 
 func (c *client) createTSODispatcher(dcLocation string) {
 	c.tsoDispatcher.Store(dcLocation, make(chan *tsoRequest, maxMergeTSORequests))
+}
+
+func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatcher chan *tsoRequest) {
+	var (
+		err      error
+		ctx      context.Context
+		cancel   context.CancelFunc
+		stream   pdpb.PD_TsoClient
+		opts     []opentracing.StartSpanOption
+		requests = make([]*tsoRequest, maxMergeTSORequests+1)
+	)
+	defer func() {
+		if cancel != nil {
+			cancel()
+		}
+	}()
+	for {
+		// If the tso stream for the corresponding dc-location has not been created yet or needs to be re-created,
+		// we will try to create the stream first.
+		if stream == nil {
+			ctx, cancel = context.WithCancel(loopCtx)
+			done := make(chan struct{})
+			go c.checkStreamTimeout(ctx, cancel, done)
+			stream, err = pdpb.NewPDClient(c.getClientConnByDCLocation(dc)).Tso(ctx)
+			done <- struct{}{}
+			if err != nil {
+				select {
+				case <-loopCtx.Done():
+					return
+				default:
+				}
+				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientCreateTSOStream, err))
+				c.ScheduleCheckLeader()
+				cancel()
+				c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
+				select {
+				case <-time.After(time.Second):
+				case <-loopCtx.Done():
+					return
+				}
+				continue
+			}
+		}
+		select {
+		case first := <-tsoDispatcher:
+			pendingPlus1 := len(tsoDispatcher) + 1
+			requests[0] = first
+			for i := 1; i < pendingPlus1; i++ {
+				requests[i] = <-tsoDispatcher
+			}
+			done := make(chan struct{})
+			dl := deadline{
+				timer:  time.After(c.timeout),
+				done:   done,
+				cancel: cancel,
+			}
+			tsDeadlineCh, ok := c.tsDeadline.Load(dc)
+			for !ok || tsDeadlineCh == nil {
+				c.scheduleCheckTSDeadline()
+				time.Sleep(time.Millisecond * 100)
+				tsDeadlineCh, ok = c.tsDeadline.Load(dc)
+			}
+			select {
+			case tsDeadlineCh.(chan deadline) <- dl:
+			case <-loopCtx.Done():
+				return
+			}
+			opts = extractSpanReference(requests[:pendingPlus1], opts[:0])
+			err = c.processTSORequests(stream, dc, requests[:pendingPlus1], opts)
+			close(done)
+		case <-loopCtx.Done():
+			return
+		}
+		// If error happens during tso stream handling, reset stream and run the next trial.
+		if err != nil {
+			select {
+			case <-loopCtx.Done():
+				return
+			default:
+			}
+			log.Error("[pd] getTS error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+			c.ScheduleCheckLeader()
+			cancel()
+			stream = nil
+		}
+	}
 }
 
 func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
