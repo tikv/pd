@@ -165,7 +165,7 @@ test-with-cover: install-go-tools dashboard-ui
 	done
 	@$(FAILPOINT_DISABLE)
 
-check: install-go-tools check-all check-plugin errdoc check-missing-tests
+check: install-go-tools check-all check-plugin errdoc check-missing-tests docker-build-test
 
 check-all: static lint tidy
 	@echo "checking"
@@ -192,6 +192,13 @@ tidy:
 errdoc: install-go-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
+
+docker-build-test:
+	$(eval DOCKER_PS_EXIT_CODE=$(shell docker ps > /dev/null 2>&1 ; echo $$?))
+	@if [ $(DOCKER_PS_EXIT_CODE) -ne 0 ]; then \
+	echo "Encountered problem while invoking docker cli. Is the docker daemon running?"; \
+	fi
+	docker build --no-cache -t tikv/pd .
 
 check-missing-tests:
 	./scripts/check-missing-tests.sh

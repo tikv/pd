@@ -383,6 +383,11 @@ func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
 type TestCluster struct {
 	config  *clusterConfig
 	servers map[string]*TestServer
+	// tsPool is used to check the TSO uniqueness among the test cluster
+	tsPool struct {
+		sync.Mutex
+		pool map[uint64]struct{}
+	}
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -409,6 +414,12 @@ func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigO
 	return &TestCluster{
 		config:  config,
 		servers: servers,
+		tsPool: struct {
+			sync.Mutex
+			pool map[uint64]struct{}
+		}{
+			pool: make(map[uint64]struct{}),
+		},
 	}, nil
 }
 
@@ -646,6 +657,17 @@ func (c *TestCluster) CheckClusterDCLocation() {
 		}(server)
 	}
 	wg.Wait()
+}
+
+// CheckTSOUnique will check whether the TSO is unique among the cluster in the past and present.
+func (c *TestCluster) CheckTSOUnique(ts uint64) bool {
+	c.tsPool.Lock()
+	defer c.tsPool.Unlock()
+	if _, exist := c.tsPool.pool[ts]; exist {
+		return false
+	}
+	c.tsPool.pool[ts] = struct{}{}
+	return true
 }
 
 // WaitOp represent the wait configuration

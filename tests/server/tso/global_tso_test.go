@@ -122,7 +122,7 @@ func (s *testNormalGlobalTSOSuite) testGetNormalGlobalTimestamp(c *C, pdCli pdpb
 	c.Assert(resp.GetCount(), Equals, req.GetCount())
 	res := resp.GetTimestamp()
 	c.Assert(res.GetPhysical(), Greater, int64(0))
-	c.Assert(res.GetLogical(), GreaterEqual, int64(req.GetCount()))
+	c.Assert(uint32(res.GetLogical())>>res.GetSuffixBits(), GreaterEqual, req.GetCount())
 	return res
 }
 
@@ -270,7 +270,7 @@ func (s *testNormalGlobalTSOSuite) TestDelaySyncTimestamp(c *C) {
 	c.Assert(resp.GetCount(), Equals, uint32(1))
 	res := resp.GetTimestamp()
 	c.Assert(res.GetPhysical(), Greater, int64(0))
-	c.Assert(res.GetLogical(), GreaterEqual, int64(req.GetCount()))
+	c.Assert(uint32(res.GetLogical())>>res.GetSuffixBits(), GreaterEqual, req.GetCount())
 	failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp")
 }
 
@@ -332,7 +332,7 @@ func (s *testTimeFallBackSuite) testGetTimestamp(c *C, n uint32) *pdpb.Timestamp
 	c.Assert(resp.GetCount(), Equals, uint32(n))
 	res := resp.GetTimestamp()
 	c.Assert(tsoutil.CompareTimestamp(res, tsoutil.GenerateTimestamp(time.Now(), 0)), Equals, 1)
-	c.Assert(res.GetLogical(), GreaterEqual, int64(req.GetCount()))
+	c.Assert(uint32(res.GetLogical())>>res.GetSuffixBits(), GreaterEqual, req.GetCount())
 	return res
 }
 
@@ -502,7 +502,7 @@ func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, 
 	c.Assert(resp.GetCount(), Equals, uint32(n))
 	res := resp.GetTimestamp()
 	c.Assert(res.GetPhysical(), Greater, int64(0))
-	c.Assert(res.GetLogical(), GreaterEqual, int64(req.GetCount()))
+	c.Assert(uint32(res.GetLogical())>>res.GetSuffixBits(), GreaterEqual, req.GetCount())
 	return res
 }
 

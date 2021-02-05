@@ -47,6 +47,11 @@ const (
 	localTSOSuffixEtcdPrefix    = "local-tso-suffix"
 )
 
+var (
+	// PriorityCheck exported is only for test.
+	PriorityCheck = 1 * time.Minute
+)
+
 // AllocatorGroupFilter is used to select AllocatorGroup.
 type AllocatorGroupFilter func(ag *allocatorGroup) bool
 
@@ -437,6 +442,8 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 	}
 	failpoint.Inject("injectNextLeaderKey", func(val failpoint.Value) {
 		if val.(bool) {
+			// In order not to campaign leader too often in tests
+			time.Sleep(5 * time.Second)
 			cmps = []clientv3.Cmp{
 				clientv3.Compare(clientv3.Value(nextLeaderKey), "=", "mockValue"),
 			}
@@ -529,7 +536,7 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	defer tsTicker.Stop()
 	patrolTicker := time.NewTicker(patrolStep)
 	defer patrolTicker.Stop()
-	checkerTicker := time.NewTicker(checkStep)
+	checkerTicker := time.NewTicker(PriorityCheck)
 	defer checkerTicker.Stop()
 
 	for {
@@ -802,28 +809,15 @@ func (am *AllocatorManager) PriorityChecker() {
 				zap.String("old-dc-location", leaderServerDCLocation),
 				zap.Uint64("next-leader-id", serverID),
 				zap.String("next-dc-location", myServerDCLocation))
-			nextLeaderKey := am.nextLeaderKey(allocatorGroup.dcLocation)
-			// Grant a etcd lease with checkStep * 1.5
-			nextLeaderLease := clientv3.NewLease(am.member.Client())
-			ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)
-			leaseResp, err := nextLeaderLease.Grant(ctx, int64(checkStep.Seconds()*1.5))
-			cancel()
+			err = am.transferLocalAllocator(allocatorGroup.dcLocation, am.member.ID())
 			if err != nil {
-				err = errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
-				log.Error("failed to grant the lease of the next leader id key", errs.ZapError(err))
+				log.Error("move the local tso allocator failed",
+					zap.Uint64("old-leader-id", leaderServerID),
+					zap.String("old-dc-location", leaderServerDCLocation),
+					zap.Uint64("next-leader-id", serverID),
+					zap.String("next-dc-location", myServerDCLocation),
+					zap.Error(err))
 				continue
-			}
-			resp, err := kv.NewSlowLogTxn(am.member.Client()).
-				If(clientv3.Compare(clientv3.CreateRevision(nextLeaderKey), "=", 0)).
-				Then(clientv3.OpPut(nextLeaderKey, fmt.Sprint(serverID), clientv3.WithLease(leaseResp.ID))).
-				Commit()
-			if err != nil {
-				err = errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-				log.Error("failed to write next leader id into etcd", errs.ZapError(err))
-				continue
-			}
-			if !resp.Succeeded {
-				log.Warn("write next leader id into etcd unsuccessfully")
 			}
 		}
 	}
@@ -844,6 +838,28 @@ func (am *AllocatorManager) PriorityChecker() {
 			am.ResetAllocatorGroup(allocatorGroup.dcLocation)
 		}
 	}
+}
+
+// TransferAllocatorForDCLocation transfer local tso allocator to the target member for the given dcLocation
+func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, memberID uint64) error {
+	if dcLocation == config.GlobalDCLocation {
+		return fmt.Errorf("dc-location %v should be transferred by transfer leader", dcLocation)
+	}
+	dcLocationsInfo := am.GetClusterDCLocations()
+	_, ok := dcLocationsInfo[dcLocation]
+	if !ok {
+		return fmt.Errorf("dc-location %v haven't been discovered yet", dcLocation)
+	}
+	allocator, err := am.GetAllocator(dcLocation)
+	if err != nil {
+		return err
+	}
+	localTSOAllocator, _ := allocator.(*LocalTSOAllocator)
+	leaderServerID := localTSOAllocator.GetAllocatorLeader().GetMemberId()
+	if leaderServerID == memberID {
+		return nil
+	}
+	return am.transferLocalAllocator(dcLocation, memberID)
 }
 
 func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error) {
@@ -1085,6 +1101,38 @@ func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) {
 		return
 	}
 	am.localAllocatorConn.clientConns[addr] = newConn
+}
+
+func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID uint64) error {
+	nextLeaderKey := am.nextLeaderKey(dcLocation)
+	// Grant a etcd lease with checkStep * 1.5
+	nextLeaderLease := clientv3.NewLease(am.member.Client())
+	ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)
+	leaseResp, err := nextLeaderLease.Grant(ctx, int64(checkStep.Seconds()*1.5))
+	cancel()
+	if err != nil {
+		err = errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
+		log.Error("failed to grant the lease of the next leader key",
+			zap.String("dc-location", dcLocation), zap.Uint64("serverID", serverID),
+			errs.ZapError(err))
+		return err
+	}
+	resp, err := kv.NewSlowLogTxn(am.member.Client()).
+		If(clientv3.Compare(clientv3.CreateRevision(nextLeaderKey), "=", 0)).
+		Then(clientv3.OpPut(nextLeaderKey, fmt.Sprint(serverID), clientv3.WithLease(leaseResp.ID))).
+		Commit()
+	if err != nil {
+		err = errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
+		log.Error("failed to write next leader key into etcd",
+			zap.String("dc-location", dcLocation), zap.Uint64("serverID", serverID),
+			errs.ZapError(err))
+		return err
+	}
+	if !resp.Succeeded {
+		log.Warn("write next leader id into etcd unsuccessfully", zap.String("dc-location", dcLocation))
+		return errs.ErrEtcdTxnConflict.GenWithStack("write next leader id into etcd unsuccessfully")
+	}
+	return nil
 }
 
 func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
