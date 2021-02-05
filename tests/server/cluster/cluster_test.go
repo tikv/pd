@@ -1087,8 +1087,8 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	c.Assert(err, IsNil)
 
 	// issue #3379
-	regionReq.KeysWritten = uint64(-1)
-	regionReq.BytesWritten = uint64(-100)
+	regionReq.KeysWritten = uint64(18446744073709551615)  // -1
+	regionReq.BytesWritten = uint64(18446744073709550602) // -1024
 	region = core.RegionFromHeartbeat(regionReq)
 	c.Assert(region.GetKeysWritten(), Equals, uint64(0))
 	c.Assert(region.GetBytesWritten(), Equals, uint64(0))
