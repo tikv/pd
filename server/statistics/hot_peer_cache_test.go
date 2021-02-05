@@ -270,3 +270,34 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 	c.Check(newItem.AntiCount, Equals, 0)
 	c.Check(newItem.needDelete, Equals, true)
 }
+
+func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
+	t.testMetrics(c, 60.)
+	t.testMetrics(c, 1.)
+}
+func (t *testHotPeerCache) testMetrics(c *C, interval float64) {
+	cache := NewHotStoresStats(ReadFlow)
+	minThresholds := minHotThresholds[cache.kind]
+	storeID := uint64(1)
+	for i := uint64(1); i < TopNN+1; i++ {
+		newItem := &HotPeerStat{
+			StoreID:    storeID,
+			RegionID:   i,
+			needDelete: false,
+			thresholds: cache.calcHotThresholds(storeID),
+			ByteRate:   minThresholds[byteDim] * 2,
+			KeyRate:    minThresholds[keyDim] * 2,
+		}
+		item1 := cache.updateHotPeerStat(newItem, nil, minThresholds[byteDim]*2*interval, minThresholds[keyDim]*2*interval, time.Duration(interval)*time.Second)
+
+		for j := 0; j < 10; j++ {
+			cache.Update(item1)
+			item1 = cache.updateHotPeerStat(newItem, item1, minThresholds[byteDim]*2*interval, minThresholds[keyDim]*2*interval, time.Duration(interval)*time.Second)
+		}
+		if i < TopNN {
+			c.Assert(cache.calcHotThresholds(storeID)[byteDim], Equals, minThresholds[byteDim])
+		} else {
+			c.Assert(cache.calcHotThresholds(storeID)[byteDim], Equals, minThresholds[byteDim]*2*HotThresholdRatio)
+		}
+	}
+}

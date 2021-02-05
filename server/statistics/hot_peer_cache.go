@@ -385,11 +385,11 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		if interval == 0 {
 			return nil
 		}
+		isHot := bytes/interval.Seconds() >= newItem.thresholds[byteDim] || keys/interval.Seconds() >= newItem.thresholds[keyDim]
+		if !isHot {
+			return nil
+		}
 		if interval.Seconds() >= RegionHeartBeatReportInterval {
-			isHot := bytes/interval.Seconds() >= newItem.thresholds[byteDim] || keys/interval.Seconds() >= newItem.thresholds[keyDim]
-			if !isHot {
-				return nil
-			}
 			newItem.HotDegree = 1
 			newItem.AntiCount = hotRegionAntiCount
 		}
