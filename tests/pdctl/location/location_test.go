@@ -57,10 +57,8 @@ func (s *locationTestSuite) TestUpdateMemberDCLocationInfo(c *C) {
 		"pd3": "dc-3",
 	}
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
-		conf.LocalTSO = config.LocalTSOConfig{
-			EnableLocalTSO: true,
-			DCLocation:     dcLocationConfig[serverName],
-		}
+		conf.EnableLocalTSO = true
+		conf.Labels = map[string]string{config.ZoneLabel: dcLocationConfig[serverName]}
 	})
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
