@@ -71,7 +71,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	}
 
 	mustExec := func(args []string, v interface{}) {
-		_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+		output, err := pdctl.ExecuteCommand(cmd, args...)
 		c.Assert(err, IsNil)
 		if v == nil {
 			return

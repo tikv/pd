@@ -145,7 +145,7 @@ func (s *regionTestSuite) TestRegion(c *C) {
 
 	for _, testCase := range testRegionsCases {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
-		_, output, e := pdctl.ExecuteCommandC(cmd, args...)
+		output, e := pdctl.ExecuteCommand(cmd, args...)
 		c.Assert(e, IsNil)
 		regionsInfo := api.RegionsInfo{}
 		c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
@@ -168,7 +168,7 @@ func (s *regionTestSuite) TestRegion(c *C) {
 
 	for _, testCase := range testRegionCases {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
-		_, output, e := pdctl.ExecuteCommandC(cmd, args...)
+		output, e := pdctl.ExecuteCommand(cmd, args...)
 		c.Assert(e, IsNil)
 		regionInfo := api.RegionInfo{}
 		c.Assert(json.Unmarshal(output, &regionInfo), IsNil)

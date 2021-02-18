@@ -58,7 +58,7 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 
 	// cluster
 	args := []string{"-u", pdAddr, "cluster"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	ci := &metapb.Cluster{}
 	c.Assert(json.Unmarshal(output, ci), IsNil)
@@ -68,7 +68,7 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 
 	// cluster info
 	args = []string{"-u", pdAddr, "cluster"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	ci = &metapb.Cluster{}
 	c.Assert(json.Unmarshal(output, ci), IsNil)
@@ -76,7 +76,7 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 
 	// cluster status
 	args = []string{"-u", pdAddr, "cluster", "status"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	cs := &clusterpkg.Status{}
 	c.Assert(json.Unmarshal(output, cs), IsNil)
@@ -91,7 +91,7 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 
 	// ping
 	args = []string{"-u", pdAddr, "ping"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(output, NotNil)
 }
