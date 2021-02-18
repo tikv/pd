@@ -256,3 +256,16 @@ func (c *TTLString) Pop() (string, interface{}, bool) {
 func (c *TTLString) Get(id string) (interface{}, bool) {
 	return c.ttlCache.get(id)
 }
+
+// GetAllID returns all key ids
+func (c *TTLString) GetAllID() []string {
+	keys := c.ttlCache.getKeys()
+	var ids []string
+	for _, key := range keys {
+		id, ok := key.(string)
+		if ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}

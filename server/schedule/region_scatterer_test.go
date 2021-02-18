@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -431,4 +432,38 @@ func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
 	c.Assert(ok, Equals, false)
 	_, ok = stores.getGroupDistribution("testgroup")
 	c.Assert(ok, Equals, false)
+}
+
+func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	// Add 6 stores.
+	storeCount := 6
+	for i := uint64(1); i <= uint64(6); i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scatterer := NewRegionScatterer(ctx, tc)
+	regionCount := 50
+	for i := 1; i <= regionCount; i++ {
+		p := rand.Perm(storeCount)
+		scatterer.scatterRegion(tc.AddLeaderRegion(uint64(i), uint64(p[0])+1, uint64(p[1])+1, uint64(p[2])+1), fmt.Sprintf("t%d", i))
+	}
+	check := func(ss *selectedStores) {
+		max := uint64(0)
+		min := uint64(math.MaxUint64)
+		for i := uint64(1); i <= uint64(storeCount); i++ {
+			count := ss.storeTotalCount(i)
+			if count > max {
+				max = count
+			}
+			if count < min {
+				min = count
+			}
+		}
+		c.Assert(max-min, Less, uint64(regionCount/10))
+	}
+	check(scatterer.ordinaryEngine.selectedLeader)
+	check(scatterer.ordinaryEngine.selectedPeer)
 }
