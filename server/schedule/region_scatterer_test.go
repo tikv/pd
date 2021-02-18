@@ -198,16 +198,16 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 
 	// Each store should have the same number of peers.
 	for _, count := range countOrdinaryPeers {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numOrdinaryStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numOrdinaryStores))
+		c.Assert(float64(count), LessEqual, 1.3*float64(numRegions*3)/float64(numOrdinaryStores))
+		c.Assert(float64(count), GreaterEqual, 0.7*float64(numRegions*3)/float64(numOrdinaryStores))
 	}
 	for _, count := range countSpecialPeers {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numSpecialStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numSpecialStores))
+		c.Assert(float64(count), LessEqual, 1.3*float64(numRegions*3)/float64(numSpecialStores))
+		c.Assert(float64(count), GreaterEqual, 0.7*float64(numRegions*3)/float64(numSpecialStores))
 	}
 	for _, count := range countOrdinaryLeaders {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions)/float64(numOrdinaryStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions)/float64(numOrdinaryStores))
+		c.Assert(float64(count), LessEqual, 1.3*float64(numRegions)/float64(numOrdinaryStores))
+		c.Assert(float64(count), GreaterEqual, 0.7*float64(numRegions)/float64(numOrdinaryStores))
 	}
 }
 
