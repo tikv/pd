@@ -100,7 +100,7 @@ func (s *labelTestSuite) TestLabel(c *C) {
 
 	// label command
 	args := []string{"-u", pdAddr, "label"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	labels := make([]*metapb.StoreLabel, 0, len(stores))
 	c.Assert(json.Unmarshal(output, &labels), IsNil)
@@ -124,7 +124,7 @@ func (s *labelTestSuite) TestLabel(c *C) {
 
 	// label store <name> command
 	args = []string{"-u", pdAddr, "label", "store", "zone", "us-west"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	storesInfo := new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)

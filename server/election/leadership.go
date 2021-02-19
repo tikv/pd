@@ -111,11 +111,11 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
 		ls.getLease().Close()
-		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
 		ls.getLease().Close()
-		return errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	log.Info("write leaderData to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
@@ -150,7 +150,7 @@ func (ls *Leadership) DeleteLeader() error {
 		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 
 	return nil

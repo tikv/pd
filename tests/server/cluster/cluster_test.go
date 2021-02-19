@@ -224,7 +224,11 @@ func resetStoreState(c *C, rc *cluster.RaftCluster, storeID uint64, state metapb
 	store := rc.GetStore(storeID)
 	c.Assert(store, NotNil)
 	newStore := store.Clone(core.OfflineStore(false))
-	newStore = newStore.Clone(core.SetStoreState(state))
+	if state == metapb.StoreState_Up {
+		newStore = newStore.Clone(core.UpStore())
+	} else if state == metapb.StoreState_Tombstone {
+		newStore = newStore.Clone(core.TombstoneStore())
+	}
 
 	rc.GetCacheCluster().PutStore(newStore)
 	if state == metapb.StoreState_Offline {

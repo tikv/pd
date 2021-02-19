@@ -20,9 +20,7 @@ import (
 	"fmt"
 	"math"
 	"path"
-	"path/filepath"
 	"sort"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -39,8 +37,8 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 )
 
@@ -103,6 +101,7 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 		c.Log(err)
 		return false
 	})
+	c.Assert(cluster.CheckTSOUnique(ts1), IsTrue)
 
 	leader := cluster.GetLeader()
 	s.waitLeader(c, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
@@ -123,6 +122,7 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 		c.Log(err)
 		return false
 	})
+	c.Assert(cluster.CheckTSOUnique(ts2), IsTrue)
 	c.Assert(ts1, Less, ts2)
 
 	// Check URL list.
@@ -159,6 +159,7 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 		c.Log(err)
 		return false
 	})
+	c.Assert(cluster.CheckTSOUnique(lastTS), IsTrue)
 
 	// Start a goroutine the make sure TS won't fall back.
 	quit := make(chan struct{})
@@ -176,6 +177,7 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 			physical, logical, err := cli.GetTS(context.TODO())
 			if err == nil {
 				ts := tsoutil.ComposeTS(physical, logical)
+				c.Assert(cluster.CheckTSOUnique(ts), IsTrue)
 				c.Assert(lastTS, Less, ts)
 				lastTS = ts
 			}
@@ -184,18 +186,12 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	}()
 
 	// Transfer leader.
-	etcdCli, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: time.Second,
-	})
-	c.Assert(err, IsNil)
-	leaderPath := filepath.Join("/pd", strconv.FormatUint(cli.GetClusterID(context.Background()), 10), "leader")
-	for i := 0; i < 10; i++ {
-		cluster.WaitLeader()
-		_, err = etcdCli.Delete(context.TODO(), leaderPath)
+	for i := 0; i < 5; i++ {
+		oldLeaderName := cluster.WaitLeader()
+		err := cluster.GetServer(oldLeaderName).ResignLeader()
 		c.Assert(err, IsNil)
-		// Sleep to make sure all servers are notified and starts campaign.
-		time.Sleep(time.Second)
+		newLeaderName := cluster.WaitLeader()
+		c.Assert(newLeaderName, Not(Equals), oldLeaderName)
 	}
 	close(quit)
 	wg.Wait()
@@ -209,8 +205,8 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -242,7 +238,7 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	// Check allocator leaders URL map.
 	cli.Close()
 	for dcLocation, url := range cli.(client).GetAllocatorLeaderURLs() {
-		if dcLocation == config.GlobalDCLocation {
+		if dcLocation == tso.GlobalDCLocation {
 			urls := cli.(client).GetURLs()
 			sort.Strings(urls)
 			sort.Strings(endpoints)
@@ -267,33 +263,30 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-	cluster.WaitAllLeaders(c, dcLocationConfig)
+	cluster.WaitLeader()
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
 	// Join a new dc-location
 	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = "dc-4"
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = "dc-4"
 	})
 	c.Assert(err, IsNil)
 	err = pd4.Run()
 	c.Assert(err, IsNil)
 	dcLocationConfig["pd4"] = "dc-4"
 	cluster.CheckClusterDCLocation()
-	testutil.WaitUntil(c, func(c *C) bool {
-		leaderName := cluster.WaitAllocatorLeader("dc-4")
-		return leaderName != ""
-	})
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	var endpoints []string
 	for _, s := range cluster.GetServers() {
@@ -302,8 +295,9 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
-	// Make sure we have a PD leader before the test goes on
-	cluster.WaitLeader()
+	// Make sure we have all leaders ready before the test goes on
+	leaderName := cluster.WaitLeader()
+	s.waitLeader(c, cli.(client), cluster.GetServer(leaderName).GetConfig().ClientUrls)
 	wg := sync.WaitGroup{}
 	for _, dcLocation := range dcLocationConfig {
 		wg.Add(tsoRequestConcurrentNumber)

@@ -85,7 +85,7 @@ func (s *logTestSuite) TestLog(c *C) {
 	}
 
 	for _, testCase := range testCases {
-		_, _, err = pdctl.ExecuteCommandC(cmd, testCase.cmd...)
+		_, err = pdctl.ExecuteCommand(cmd, testCase.cmd...)
 		c.Assert(err, IsNil)
 		c.Assert(svr.GetConfig().Log.Level, Equals, testCase.expect)
 	}

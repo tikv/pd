@@ -101,7 +101,7 @@ func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 		Else(clientv3.OpGet(key)).
 		Commit()
 	if err != nil {
-		return 0, errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+		return 0, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 
 	// Txn commits ok, return the generated cluster ID.
@@ -111,12 +111,12 @@ func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 
 	// Otherwise, parse the committed cluster ID.
 	if len(resp.Responses) == 0 {
-		return 0, errs.ErrEtcdTxn.FastGenByArgs()
+		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 
 	response := resp.Responses[0].GetResponseRange()
 	if response == nil || len(response.Kvs) != 1 {
-		return 0, errs.ErrEtcdTxn.FastGenByArgs()
+		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 
 	return typeutil.BytesToUint64(response.Kvs[0].Value)

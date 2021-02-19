@@ -87,7 +87,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	}
 
 	args := []string{"-u", pdAddr, "hot", "store"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	hotStores := api.HotStoreStats{}
 	c.Assert(json.Unmarshal(output, &hotStores), IsNil)
@@ -98,7 +98,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 
 	// test hot region
 	args = []string{"-u", pdAddr, "config", "set", "hot-region-cache-hits-threshold", "0"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 
 	statistics.Denoising = false
@@ -107,7 +107,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 
 	testHot := func(hotRegionID, hotStoreID uint64, hotType string) {
 		args = []string{"-u", pdAddr, "hot", hotType}
-		_, output, e := pdctl.ExecuteCommandC(cmd, args...)
+		output, e := pdctl.ExecuteCommand(cmd, args...)
 		hotRegion := statistics.StoreHotPeersInfos{}
 		c.Assert(e, IsNil)
 		c.Assert(json.Unmarshal(output, &hotRegion), IsNil)

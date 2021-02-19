@@ -117,27 +117,18 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	maxTSO := &pdpb.Timestamp{}
-	// Collect the MaxTS with all Local TSO Allocator leaders first
+	// 1. Collect the MaxTS with all Local TSO Allocator leaders first
 	if err := gta.SyncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
-
-	failpoint.Inject("globalTSOOverflow", func() {
-		maxTSO.Logical = maxLogical
-	})
-
-	maxTSO.Logical += int64(count)
-	// Differentiate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
-	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical, gta.allocatorManager.GetSuffixBits())
-	if maxTSO.GetLogical() > maxLogical {
-		maxTSO.Physical += updateTimestampGuard.Milliseconds()
-		// Equivalent to setting the logical part to zero, adding the given count and differentiating it then
-		maxTSO.Logical = gta.timestampOracle.differentiateLogical(int64(count), gta.allocatorManager.GetSuffixBits())
-	}
-	// Sync the MaxTS with all Local TSO Allocator leaders then
+	// 2. Add the count and make sure its logical part won't overflow after being differentiated.
+	suffixBits := gta.allocatorManager.GetSuffixBits()
+	gta.preprocessLogical(maxTSO, count, suffixBits)
+	// 3. Sync the MaxTS with all Local TSO Allocator leaders then
 	if err := gta.SyncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
+	// 4. Persist MaxTS into memory, and etcd if needed
 	var (
 		currentGlobalTSO pdpb.Timestamp
 		err              error
@@ -151,7 +142,23 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 			log.Warn("update the global tso in memory failed", errs.ZapError(err))
 		}
 	}
+	// 5.Differentiate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
+	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits)
 	return *maxTSO, nil
+}
+
+func (gta *GlobalTSOAllocator) preprocessLogical(maxTSO *pdpb.Timestamp, count uint32, suffixBits int) {
+	failpoint.Inject("globalTSOOverflow", func() {
+		maxTSO.Logical = maxLogical
+	})
+	maxTSO.Logical += int64(count)
+	// Check if the logical part will reach the overflow condition after being differenitated.
+	if differentiatedLogical := gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits); differentiatedLogical >= maxLogical {
+		maxTSO.Physical += updateTimestampGuard.Milliseconds()
+		// Equivalent to setting the logical part to zero and adding the given count.
+		maxTSO.Logical = int64(count)
+	}
+	maxTSO.SuffixBits = uint32(suffixBits)
 }
 
 const (
