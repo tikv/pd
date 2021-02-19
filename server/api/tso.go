@@ -19,6 +19,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/unrolled/render"
 )
 
@@ -32,6 +33,55 @@ func newTSOHandler(svr *server.Server, rd *render.Render) *tsoHandler {
 		svr: svr,
 		rd:  rd,
 	}
+}
+
+// @Tags tso
+// @Summary Set Local TSO for the specified PD server
+// @Accept json
+// @Param name path string true "PD server name"
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "The setting Local TSO command is submitted."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The member does not exist."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /tso/local/{name} [post]
+func (h *tsoHandler) SetLocalTSO(w http.ResponseWriter, r *http.Request) {
+	members, membersErr := getMembers(h.svr)
+	if membersErr != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, membersErr.Error())
+		return
+	}
+	name := mux.Vars(r)["name"]
+	dcLocation := r.URL.Query().Get("dcLocation")
+	if dcLocation == "" {
+		h.rd.JSON(w, http.StatusBadRequest, "dcLocation is undefined")
+		return
+	}
+	var memberID uint64
+	for _, m := range members.GetMembers() {
+		if m.GetName() == name {
+			memberID = m.GetMemberId()
+			break
+		}
+	}
+	if memberID == 0 {
+		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("not found, pd: %s", name))
+		return
+	}
+	if err := h.svr.SetLabel(memberID, config.ZoneLabel, dcLocation); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := h.svr.SetEnableLocalTSOConfig(memberID, true); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := h.svr.GetTSOAllocatorManager().SetLocalTSOConfig(name, memberID, dcLocation); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "The setting Local TSO command is submitted.")
 }
 
 // @Tags tso
@@ -53,7 +103,7 @@ func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Re
 	}
 	name := mux.Vars(r)["name"]
 	dcLocation := r.URL.Query().Get("dcLocation")
-	if len(dcLocation) < 1 {
+	if dcLocation == "" {
 		h.rd.JSON(w, http.StatusBadRequest, "dcLocation is undefined")
 		return
 	}

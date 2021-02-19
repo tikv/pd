@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -35,17 +36,30 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+// instanceOptions are all instance-level configurations that need to persist to storage and
+// allows to access them safely.
+type instanceOptions struct {
+	enableLocalTSO bool
+	labels         map[string]string
+}
+
 // PersistOptions wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistOptions struct {
+	clusterVersion unsafe.Pointer
 	// configuration -> ttl value
-	ttl             *cache.TTLString
+	ttl *cache.TTLString
+	// cluster-level configuration
 	schedule        atomic.Value
 	replication     atomic.Value
 	pdServerConfig  atomic.Value
 	replicationMode atomic.Value
 	labelProperty   atomic.Value
-	clusterVersion  unsafe.Pointer
+	// instance-level configuration
+	instance struct {
+		sync.RWMutex
+		options map[uint64]*instanceOptions // satisfies memberID -> *instanceOptions
+	}
 }
 
 // NewPersistOptions creates a new PersistOptions instance.
@@ -56,6 +70,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	o.labelProperty.Store(cfg.LabelProperty)
+	o.instance.options = map[uint64]*instanceOptions{}
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.ttl = nil
 	return o
@@ -163,6 +178,92 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 	v := o.GetReplicationConfig().Clone()
 	v.MaxReplicas = uint64(replicas)
 	o.SetReplicationConfig(v)
+}
+
+// InitInstanceOptions initializes the instance-level config with the given memberID.
+func (o *PersistOptions) InitInstanceOptions(memberID uint64, cfg *Config) {
+	o.instance.Lock()
+	defer o.instance.Unlock()
+	o.instance.options[memberID] = &instanceOptions{
+		enableLocalTSO: cfg.EnableLocalTSO,
+		labels:         cfg.Labels,
+	}
+}
+
+// GetLabelsConfig returns the labels config and whether it exists with the given memberID.
+func (o *PersistOptions) GetLabelsConfig(memberID uint64) (map[string]string, bool) {
+	o.instance.RLock()
+	defer o.instance.RUnlock()
+	options, exist := o.instance.options[memberID]
+	if !exist {
+		return nil, false
+	}
+	return options.labels, true
+}
+
+// SetLabelsConfig sets the labels config with the given memberID.
+func (o *PersistOptions) SetLabelsConfig(memberID uint64, labels map[string]string) {
+	o.instance.Lock()
+	defer o.instance.Unlock()
+	options, exist := o.instance.options[memberID]
+	if !exist {
+		options = &instanceOptions{}
+		o.instance.options[memberID] = options
+	}
+	options.labels = labels
+}
+
+// GetEnableLocalTSOConfig returns the enable-local-tso config with the given memberID.
+func (o *PersistOptions) GetEnableLocalTSOConfig(memberID uint64) bool {
+	o.instance.RLock()
+	defer o.instance.RUnlock()
+	options, exist := o.instance.options[memberID]
+	if !exist {
+		return false
+	}
+	return options.enableLocalTSO
+}
+
+// SetEnableLocalTSOConfig sets the enable-local-tso config with the given memberID.
+func (o *PersistOptions) SetEnableLocalTSOConfig(memberID uint64, enableLocalTSO bool) {
+	o.instance.Lock()
+	defer o.instance.Unlock()
+	options, exist := o.instance.options[memberID]
+	if !exist {
+		options = &instanceOptions{}
+		o.instance.options[memberID] = options
+	}
+	options.enableLocalTSO = enableLocalTSO
+}
+
+// GetLabel returns the label value and whether it exists from labels by the given memberID and key.
+func (o *PersistOptions) GetLabel(memberID uint64, labelKey string) (string, bool) {
+	labels, exist := o.GetLabelsConfig(memberID)
+	if !exist {
+		return "", false
+	}
+	labelVal, exist := labels[labelKey]
+	return labelVal, exist
+}
+
+// SetLabel sets the label key into labels with the given memberID and value.
+func (o *PersistOptions) SetLabel(memberID uint64, labelKey, labelValue string) {
+	labels, exist := o.GetLabelsConfig(memberID)
+	if !exist {
+		labels = make(map[string]string)
+	}
+	labels[labelKey] = labelValue
+	o.SetLabelsConfig(memberID, labels)
+}
+
+// DeleteLabel deletes the label key from labels with the given memberID.
+func (o *PersistOptions) DeleteLabel(memberID uint64, labelKey string) {
+	labels, exist := o.GetLabelsConfig(memberID)
+	if !exist {
+		return
+	}
+	delete(labels, labelKey)
+	o.SetLabelsConfig(memberID, labels)
 }
 
 const (
@@ -553,7 +654,7 @@ func (o *PersistOptions) DeleteLabelProperty(typ, labelKey, labelValue string) {
 
 // Persist saves the configuration to the storage.
 func (o *PersistOptions) Persist(storage *core.Storage) error {
-	cfg := &Config{
+	clusterCfg := &Config{
 		Schedule:        *o.GetScheduleConfig(),
 		Replication:     *o.GetReplicationConfig(),
 		PDServerCfg:     *o.GetPDServerConfig(),
@@ -561,27 +662,57 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 		LabelProperty:   o.GetLabelPropertyConfig(),
 		ClusterVersion:  *o.GetClusterVersion(),
 	}
-	return storage.SaveConfig(cfg)
+	if err := storage.SaveConfig(clusterCfg); err != nil {
+		return err
+	}
+	o.instance.Lock()
+	defer o.instance.Unlock()
+	for memberID, options := range o.instance.options {
+		instanceCfg := &Config{
+			Labels:         options.labels,
+			EnableLocalTSO: options.enableLocalTSO,
+		}
+		if err := storage.SaveInstanceConfig(memberID, instanceCfg); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Reload reloads the configuration from the storage.
 func (o *PersistOptions) Reload(storage *core.Storage) error {
-	cfg := &Config{}
-	// pass nil to initialize cfg to default values (all items undefined)
-	cfg.Adjust(nil, true)
+	// Reload the cluster-level config
+	clusterCfg := &Config{}
+	// pass nil to initialize clusterCfg to default values (all items undefined)
+	clusterCfg.Adjust(nil, true)
 
-	isExist, err := storage.LoadConfig(cfg)
+	isExist, err := storage.LoadConfig(clusterCfg)
 	if err != nil {
 		return err
 	}
-	o.adjustScheduleCfg(&cfg.Schedule)
+	o.adjustScheduleCfg(&clusterCfg.Schedule)
 	if isExist {
-		o.schedule.Store(&cfg.Schedule)
-		o.replication.Store(&cfg.Replication)
-		o.pdServerConfig.Store(&cfg.PDServerCfg)
-		o.replicationMode.Store(&cfg.ReplicationMode)
-		o.labelProperty.Store(cfg.LabelProperty)
-		o.SetClusterVersion(&cfg.ClusterVersion)
+		o.schedule.Store(&clusterCfg.Schedule)
+		o.replication.Store(&clusterCfg.Replication)
+		o.pdServerConfig.Store(&clusterCfg.PDServerCfg)
+		o.replicationMode.Store(&clusterCfg.ReplicationMode)
+		o.labelProperty.Store(clusterCfg.LabelProperty)
+		o.SetClusterVersion(&clusterCfg.ClusterVersion)
+	}
+
+	// Reload the instance-level config
+	o.instance.Lock()
+	defer o.instance.Unlock()
+	for memberID, options := range o.instance.options {
+		instanceCfg := &Config{}
+		isExist, err = storage.LoadInstanceConfig(memberID, instanceCfg)
+		if err != nil {
+			return err
+		}
+		if isExist {
+			options.enableLocalTSO = instanceCfg.EnableLocalTSO
+			options.labels = instanceCfg.Labels
+		}
 	}
 	return nil
 }

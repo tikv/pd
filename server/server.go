@@ -359,8 +359,8 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 		s.GetTLSConfig())
-	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
-		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
+	if zone, exist := s.persistOptions.GetLabel(s.member.ID(), config.ZoneLabel); exist && zone != "" && s.persistOptions.GetEnableLocalTSOConfig(s.member.ID()) {
+		if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.member.Member().GetName(), s.member.ID(), zone); err != nil {
 			return err
 		}
 	}
@@ -977,6 +977,48 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 // GetLabelProperty returns the whole label property config.
 func (s *Server) GetLabelProperty() config.LabelPropertyConfig {
 	return s.persistOptions.GetLabelPropertyConfig().Clone()
+}
+
+// SetLabel inserts a label key and value into the labels config.
+func (s *Server) SetLabel(memberID uint64, labelKey, labelValue string) error {
+	oldValue, exist := s.persistOptions.GetLabel(memberID, labelKey)
+	s.persistOptions.SetLabel(memberID, labelKey, labelValue)
+	err := s.persistOptions.Persist(s.storage)
+	if err != nil {
+		if exist {
+			s.persistOptions.SetLabel(memberID, labelKey, oldValue)
+		} else {
+			s.persistOptions.DeleteLabel(memberID, labelKey)
+		}
+		labels, _ := s.persistOptions.GetLabelsConfig(memberID)
+		log.Error("failed to update labels config",
+			zap.Uint64("member-id", memberID),
+			zap.String("label-key", labelKey),
+			zap.String("label-value", labelValue),
+			zap.Reflect("labels", labels),
+			errs.ZapError(err))
+		return err
+	}
+
+	labels, _ := s.persistOptions.GetLabelsConfig(memberID)
+	log.Info("labels config is updated", zap.Reflect("labels", labels))
+	return nil
+}
+
+// SetEnableLocalTSOConfig sets the enable-local-tso config.
+func (s *Server) SetEnableLocalTSOConfig(memberID uint64, val bool) error {
+	old := s.persistOptions.GetEnableLocalTSOConfig(memberID)
+	s.persistOptions.SetEnableLocalTSOConfig(memberID, val)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetEnableLocalTSOConfig(memberID, old)
+		log.Error("failed to update enable-local-tso config",
+			zap.Reflect("new", val),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("enable-local-tso config is updated", zap.Reflect("new", val), zap.Reflect("old", old))
+	return nil
 }
 
 // SetClusterVersion sets the version of cluster.

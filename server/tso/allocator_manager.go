@@ -148,9 +148,7 @@ func NewAllocatorManager(
 
 // SetLocalTSOConfig receives the zone label of this PD server and write it into etcd as dc-location
 // to make the whole cluster know the DC-level topology for later Local TSO Allocator campaign.
-func (am *AllocatorManager) SetLocalTSOConfig(dcLocation string) error {
-	serverName := am.member.Member().Name
-	serverID := am.member.ID()
+func (am *AllocatorManager) SetLocalTSOConfig(serverName string, serverID uint64, dcLocation string) error {
 	if err := am.checkDCLocationUpperLimit(dcLocation); err != nil {
 		log.Error("check dc-location upper limit failed",
 			zap.Int("upper-limit", int(math.Pow(2, MaxSuffixBits))-1),

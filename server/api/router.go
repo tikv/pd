@@ -222,6 +222,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 
 	// tso API
 	tsoHandler := newTSOHandler(svr, rd)
+	apiRouter.HandleFunc("/tso/local/{name}", tsoHandler.SetLocalTSO).Methods("POST")
 	apiRouter.HandleFunc("/tso/allocator/transfer/{name}", tsoHandler.TransferLocalTSOAllocator).Methods("POST")
 
 	// profile API
