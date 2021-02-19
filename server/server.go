@@ -330,6 +330,8 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		time.Sleep(1500 * time.Millisecond)
 	})
 	s.member = member.NewMember(etcd, client, etcdServerID)
+	// Init the instance options once we get the member ID
+	s.persistOptions.InitInstanceOptions(s.GetMember().ID(), s.cfg)
 	return nil
 }
 
