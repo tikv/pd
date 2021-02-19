@@ -69,7 +69,7 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 		return nil, errors.WithStack(err)
 	}
 	for _, m := range members.GetMembers() {
-		m.DcLocation = "global"
+		m.DcLocation = ""
 		binaryVersion, e := svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
