@@ -72,7 +72,7 @@ func (s *locationTestSuite) TestUpdateMemberDCLocationInfo(c *C) {
 	checkDCLocation := func(expected, unexpected []string) {
 		testutil.WaitUntil(c, func(c *C) bool {
 			args := []string{"-u", pdAddr, "member"}
-			_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+			output, err := pdctl.ExecuteCommand(cmd, args...)
 			c.Assert(err, IsNil)
 			resp := &pdpb.GetMembersResponse{}
 			c.Assert(json.Unmarshal(output, resp), IsNil)
@@ -99,8 +99,9 @@ func (s *locationTestSuite) TestUpdateMemberDCLocationInfo(c *C) {
 
 	// modify dc location of pd1
 	args := []string{"-u", pdAddr, "location", "pd1", "dc-4"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
+	c.Logf("output: %s", output)
 	c.Assert(strings.Contains(string(output), "Success"), IsTrue)
 	// check dc location after modification
 	checkDCLocation([]string{"dc-2", "dc-3", "dc-4"}, []string{"dc-1"})
@@ -108,7 +109,7 @@ func (s *locationTestSuite) TestUpdateMemberDCLocationInfo(c *C) {
 	// tso allocator leader of "dc-4" should be pd1 finally.
 	testutil.WaitUntil(c, func(c *C) bool {
 		args := []string{"-u", pdAddr, "member"}
-		_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+		output, err := pdctl.ExecuteCommand(cmd, args...)
 		c.Assert(err, IsNil)
 		resp := &pdpb.GetMembersResponse{}
 		c.Assert(json.Unmarshal(output, resp), IsNil)

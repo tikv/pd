@@ -1159,7 +1159,7 @@ func (am *AllocatorManager) UpdateMemberDCLocationInfo(id uint64, dcLocation str
 	// Simplely overwrite dcLocationPath in etcd, leave the rest work to backgroup loop in AllocatorDaemon.
 	resp, err := kv.
 		NewSlowLogTxn(am.member.Client()).
-		If(clientv3.Compare(clientv3.Value(key), "=", res.Kvs[0].Value)).
+		If(clientv3.Compare(clientv3.Value(key), "=", string(res.Kvs[0].Value))).
 		Then(clientv3.OpPut(key, dcLocation)).
 		Commit()
 	if err != nil {
