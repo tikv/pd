@@ -290,7 +290,10 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 		log.Warn("tso update physical interval is non-default",
 			zap.Duration("update-physical-interval", am.updatePhysicalInterval))
 	}
-	if _, exist := am.mu.allocatorGroups[dcLocation]; exist {
+	if ag, exist := am.mu.allocatorGroups[dcLocation]; exist {
+		// Since the parentCtx will change every time due to the different leader loops,
+		// we should update it here.
+		ag.parentCtx = parentCtx
 		return
 	}
 	var allocator Allocator

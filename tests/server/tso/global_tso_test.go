@@ -108,6 +108,30 @@ func (s *testNormalGlobalTSOSuite) TestNormalGlobalTSO(c *C) {
 		}()
 	}
 	wg.Wait()
+
+	// Test Global TSO after the leader change
+	leaderServer.GetServer().GetMember().ResetLeader()
+	cluster.WaitLeader()
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			last := &pdpb.Timestamp{
+				Physical: 0,
+				Logical:  0,
+			}
+
+			for j := 0; j < 30; j++ {
+				ts := s.testGetNormalGlobalTimestamp(c, grpcPDClient, req)
+				// Check whether the TSO fallbacks
+				c.Assert(tsoutil.CompareTimestamp(ts, last), Equals, 1)
+				last = ts
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func (s *testNormalGlobalTSOSuite) testGetNormalGlobalTimestamp(c *C, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdpb.Timestamp {
