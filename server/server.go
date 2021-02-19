@@ -330,6 +330,8 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		time.Sleep(1500 * time.Millisecond)
 	})
 	s.member = member.NewMember(etcd, client, etcdServerID)
+	// Init the instance options once we get the member ID
+	s.persistOptions.InitInstanceOptions(s.GetMember().ID(), s.cfg)
 	return nil
 }
 
@@ -359,7 +361,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 		s.GetTLSConfig())
-	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
+	if zone, exist := s.persistOptions.GetLabel(s.member.ID(), config.ZoneLabel); exist && zone != "" && s.persistOptions.GetEnableLocalTSOConfig(s.member.ID()) {
 		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
 			return err
 		}

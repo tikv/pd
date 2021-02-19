@@ -232,7 +232,7 @@ func (s *Storage) DeleteRegion(region *metapb.Region) error {
 	return deleteRegion(s.Base, region)
 }
 
-// SaveConfig stores marshallable cfg to the configPath.
+// SaveConfig stores marshallable cluster-level cfg to the configPath.
 func (s *Storage) SaveConfig(cfg interface{}) error {
 	value, err := json.Marshal(cfg)
 	if err != nil {
@@ -241,9 +241,38 @@ func (s *Storage) SaveConfig(cfg interface{}) error {
 	return s.Save(configPath, string(value))
 }
 
-// LoadConfig loads config from configPath then unmarshal it to cfg.
+// LoadConfig loads cluster-level config from configPath then unmarshal it to cfg.
 func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 	value, err := s.Load(configPath)
+	if err != nil {
+		return false, err
+	}
+	if value == "" {
+		return false, nil
+	}
+	err = json.Unmarshal([]byte(value), cfg)
+	if err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return true, nil
+}
+
+// SaveInstanceConfig stores marshallable instance-level cfg to the configPath with memberID.
+func (s *Storage) SaveInstanceConfig(memberID uint64, cfg interface{}) error {
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
+	}
+	return s.Save(getInstanceConfigPath(memberID), string(value))
+}
+
+func getInstanceConfigPath(memberID uint64) string {
+	return path.Join(configPath, strconv.FormatUint(memberID, 10))
+}
+
+// LoadInstanceConfig loads instance-level config from configPath with memberID then unmarshal it to cfg.
+func (s *Storage) LoadInstanceConfig(memberID uint64, cfg interface{}) (bool, error) {
+	value, err := s.Load(getInstanceConfigPath(memberID))
 	if err != nil {
 		return false, err
 	}
