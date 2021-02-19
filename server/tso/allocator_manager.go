@@ -1134,3 +1134,8 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID u
 func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
 	return path.Join(am.rootPath, dcLocation, "next-leader")
 }
+
+// GetClusterDCLocationsFromEtcd fetches the dcLocation topology from etcd
+func (am *AllocatorManager) GetClusterDCLocationsFromEtcd() (map[string][]uint64, error) {
+	return am.getClusterDCLocationsFromEtcd()
+}
