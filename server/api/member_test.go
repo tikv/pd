@@ -41,7 +41,7 @@ func (s *testMemberAPISuite) SetUpSuite(c *C) {
 	s.cfgs, s.servers, s.clean = mustNewCluster(c, 3, func(cfg *config.Config) {
 		cfg.EnableLocalTSO = true
 		cfg.Labels = map[string]string{
-			"zone": "dc-1",
+			config.ZoneLabel: "dc-1",
 		}
 	})
 }
