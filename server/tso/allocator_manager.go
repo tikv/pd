@@ -284,6 +284,7 @@ func CalSuffixBits(maxSuffix int32) int {
 }
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
+// One TSO Allocator should only be set once, and may be initialized and reset multiple times depending on the election.
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()

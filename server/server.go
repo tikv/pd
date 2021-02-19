@@ -359,6 +359,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 		s.GetTLSConfig())
+	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
 	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
 		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
