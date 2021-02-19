@@ -908,8 +908,8 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 		log.Info("delete a tso allocator group", zap.String("dc-location", dcLocation), zap.String("member", am.member.Member().Name))
 		allocatorGroup.allocator.Reset()
 		allocatorGroup.leadership.Reset()
-		delete(am.mu.allocatorGroups, dcLocation)
 		allocatorGroup.cancel()
+		delete(am.mu.allocatorGroups, dcLocation)
 	}
 }
 
@@ -1159,6 +1159,7 @@ func (am *AllocatorManager) UpdateMemberDCLocationInfo(id uint64, dcLocation str
 	// Simplely overwrite dcLocationPath in etcd, leave the rest work to backgroup loop in AllocatorDaemon.
 	resp, err := kv.
 		NewSlowLogTxn(am.member.Client()).
+		If(clientv3.Compare(clientv3.Value(key), "=", res.Kvs[0].Value)).
 		Then(clientv3.OpPut(key, dcLocation)).
 		Commit()
 	if err != nil {

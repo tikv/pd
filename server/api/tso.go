@@ -77,12 +77,12 @@ func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Re
 }
 
 // @Tags tso
-// @Summary Update dc location of a PD member, mainly for test usage.
+// @Summary Update DC location config of a PD member, mainly for test usage.
 // @Accept json
 // @Param name path string true "PD server name"
 // @Param body body object true "json params"
 // @Produce json
-// @Success 200 {string} string "The dc location config is updated."
+// @Success 200 {string} string "The DC location config is updated."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 404 {string} string "The member does not exist."
 // @Failure 500 {string} string "PD server failed to proceed the request."
@@ -108,7 +108,7 @@ func (h *tsoHandler) UpdateDCLocationInfo(w http.ResponseWriter, r *http.Request
 	}
 
 	dcLocation := r.URL.Query().Get("dcLocation")
-	if len(dcLocation) < 1 {
+	if dcLocation == "" {
 		h.rd.JSON(w, http.StatusBadRequest, "dcLocation is undefined")
 		return
 	}
@@ -116,5 +116,5 @@ func (h *tsoHandler) UpdateDCLocationInfo(w http.ResponseWriter, r *http.Request
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, "The dc location config is updated.")
+	h.rd.JSON(w, http.StatusOK, "The DC location config is updated.")
 }
