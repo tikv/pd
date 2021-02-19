@@ -1351,8 +1351,3 @@ func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) e
 	}
 	return nil
 }
-
-// UpdateMemberDCLocationInfo updates dc location of member by id.
-func (s *Server) UpdateMemberDCLocationInfo(id uint64, dcLocation string) error {
-	return s.tsoAllocatorManager.UpdateMemberDCLocationInfo(id, dcLocation)
-}

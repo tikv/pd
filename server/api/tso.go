@@ -112,7 +112,7 @@ func (h *tsoHandler) UpdateDCLocationInfo(w http.ResponseWriter, r *http.Request
 		h.rd.JSON(w, http.StatusBadRequest, "dcLocation is undefined")
 		return
 	}
-	if err := h.svr.UpdateMemberDCLocationInfo(memberID, dcLocation); err != nil {
+	if err := h.svr.GetTSOAllocatorManager().UpdateMemberDCLocationInfo(memberID, dcLocation); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
