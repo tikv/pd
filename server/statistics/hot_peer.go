@@ -46,8 +46,12 @@ func (d *dimStat) Add(delta float64, interval time.Duration) {
 	d.Rolling.Add(delta, interval)
 }
 
+func (d *dimStat) isLastAverageHot(thresholds [dimLen]float64) bool {
+	return d.LastAverage.Get() >= thresholds[d.typ]
+}
+
 func (d *dimStat) isHot(thresholds [dimLen]float64) bool {
-	return d.LastAverage.IsFull() && d.LastAverage.Get() >= thresholds[d.typ]
+	return d.Rolling.Get() >= thresholds[d.typ]
 }
 
 func (d *dimStat) isFull() bool {
@@ -156,8 +160,9 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	return &ret
 }
 
-func (stat *HotPeerStat) isHot() bool {
-	return stat.rollingByteRate.isHot(stat.thresholds) || stat.rollingKeyRate.isHot(stat.thresholds)
+func (stat *HotPeerStat) isFullAndHot() bool {
+	return (stat.rollingByteRate.isFull() && stat.rollingByteRate.isLastAverageHot(stat.thresholds)) ||
+		(stat.rollingKeyRate.isFull() && stat.rollingKeyRate.isLastAverageHot(stat.thresholds))
 }
 
 func (stat *HotPeerStat) clearLastAverage() {

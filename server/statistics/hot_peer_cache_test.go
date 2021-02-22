@@ -272,32 +272,40 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 }
 
 func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
-	t.testMetrics(c, 60.)
-	t.testMetrics(c, 1.)
+	byteRate := minHotThresholds[ReadFlow][byteDim] * 2
+	expectThreshold := byteRate * HotThresholdRatio
+	t.testMetrics(c, 60., byteRate, expectThreshold)
+	t.testMetrics(c, 1., byteRate, expectThreshold)
 }
-func (t *testHotPeerCache) testMetrics(c *C, interval float64) {
+func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold float64) {
 	cache := NewHotStoresStats(ReadFlow)
 	minThresholds := minHotThresholds[cache.kind]
 	storeID := uint64(1)
-	for i := uint64(1); i < TopNN+1; i++ {
-		newItem := &HotPeerStat{
-			StoreID:    storeID,
-			RegionID:   i,
-			needDelete: false,
-			thresholds: cache.calcHotThresholds(storeID),
-			ByteRate:   minThresholds[byteDim] * 2,
-			KeyRate:    minThresholds[keyDim] * 2,
+	c.Assert(byteRate, GreaterEqual, minThresholds[byteDim])
+	for i := uint64(1); i < TopNN+10; i++ {
+		var oldItem *HotPeerStat
+		for {
+			thresholds := cache.calcHotThresholds(storeID)
+			newItem := &HotPeerStat{
+				StoreID:    storeID,
+				RegionID:   i,
+				needDelete: false,
+				thresholds: thresholds,
+				ByteRate:   byteRate,
+				KeyRate:    0,
+			}
+			oldItem = cache.getOldHotPeerStat(i, storeID)
+			if oldItem != nil && oldItem.rollingByteRate.isHot(thresholds) == true {
+				break
+			}
+			item := cache.updateHotPeerStat(newItem, oldItem, byteRate*interval, 0, time.Duration(interval)*time.Second)
+			cache.Update(item)
 		}
-		item1 := cache.updateHotPeerStat(newItem, nil, minThresholds[byteDim]*2*interval, minThresholds[keyDim]*2*interval, time.Duration(interval)*time.Second)
-
-		for j := 0; j < 10; j++ {
-			cache.Update(item1)
-			item1 = cache.updateHotPeerStat(newItem, item1, minThresholds[byteDim]*2*interval, minThresholds[keyDim]*2*interval, time.Duration(interval)*time.Second)
-		}
+		thresholds := cache.calcHotThresholds(storeID)
 		if i < TopNN {
-			c.Assert(cache.calcHotThresholds(storeID)[byteDim], Equals, minThresholds[byteDim])
+			c.Assert(thresholds[byteDim], Equals, minThresholds[byteDim])
 		} else {
-			c.Assert(cache.calcHotThresholds(storeID)[byteDim], Equals, minThresholds[byteDim]*2*HotThresholdRatio)
+			c.Assert(thresholds[byteDim], Equals, expectThreshold)
 		}
 	}
 }
