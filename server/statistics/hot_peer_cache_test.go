@@ -274,7 +274,10 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
 	byteRate := minHotThresholds[ReadFlow][byteDim] * 2
 	expectThreshold := byteRate * HotThresholdRatio
+	t.testMetrics(c, 120., byteRate, expectThreshold)
 	t.testMetrics(c, 60., byteRate, expectThreshold)
+	t.testMetrics(c, 30., byteRate, expectThreshold)
+	t.testMetrics(c, 17., byteRate, expectThreshold)
 	t.testMetrics(c, 1., byteRate, expectThreshold)
 }
 func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold float64) {
