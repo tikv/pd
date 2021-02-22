@@ -273,9 +273,12 @@ func (c *baseClient) updateLeader() error {
 			}
 		}
 		c.updateURLs(members.GetMembers())
-		return c.switchLeader(members.GetLeader().GetClientUrls())
+		if err := c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
+			return err
+		}
+		c.scheduleCheckTSODispatcher()
+		return nil
 	}
-	c.scheduleCheckTSODispatcher()
 	return errs.ErrClientGetLeader.FastGenByArgs(c.urls)
 }
 
