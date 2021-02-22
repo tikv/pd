@@ -38,7 +38,12 @@ type testMemberAPISuite struct {
 }
 
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
-	s.cfgs, s.servers, s.clean = mustNewCluster(c, 3)
+	s.cfgs, s.servers, s.clean = mustNewCluster(c, 3, func(cfg *config.Config) {
+		cfg.EnableLocalTSO = true
+		cfg.Labels = map[string]string{
+			config.ZoneLabel: "dc-1",
+		}
+	})
 }
 
 func (s *testMemberAPISuite) TearDownSuite(c *C) {
@@ -66,7 +71,7 @@ func checkListResponse(c *C, body []byte, cfgs []*config.Config) {
 			if member.GetName() != cfg.Name {
 				continue
 			}
-
+			c.Assert(member.DcLocation, Equals, "dc-1")
 			relaxEqualStings(c, member.ClientUrls, strings.Split(cfg.ClientUrls, ","))
 			relaxEqualStings(c, member.PeerUrls, strings.Split(cfg.PeerUrls, ","))
 		}

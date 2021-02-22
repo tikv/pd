@@ -377,7 +377,7 @@ func (f *hotPeerCache) getDefaultTimeMedian() *movingaverage.TimeMedian {
 }
 
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, keys float64, interval time.Duration) *HotPeerStat {
-	if newItem == nil || newItem.needDelete {
+	if newItem.needDelete {
 		return newItem
 	}
 

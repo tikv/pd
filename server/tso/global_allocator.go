@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -106,32 +107,28 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
 	// To check if we have any dc-location configured in the cluster
 	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
-	// No dc-locations configured in the cluster
+	// No dc-locations configured in the cluster, use the normal TSO generation way.
 	if len(dcLocationMap) == 0 {
 		return gta.timestampOracle.getTS(gta.leadership, count, 0)
 	}
+
+	// Have dc-locations configured in the cluster, use the Global TSO generation way.
 	// Send maxTS to all Local TSO Allocator leaders to prewrite
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	maxTSO := &pdpb.Timestamp{}
-	// Collect the MaxTS with all Local TSO Allocator leaders first
+	// 1. Collect the MaxTS with all Local TSO Allocator leaders first
 	if err := gta.SyncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
-	maxTSO.Logical += int64(count)
-	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical, gta.allocatorManager.GetSuffixBits())
-	// If the maxTSO's logical part is bigger than maxLogical, just add a updateTimestampGuard
-	// to the physical time and empty the logical part. We just need to make sure it's bigger than
-	// all the other Local TSOs. And because the Global TSO's suffix will always be zero,
-	// so there's no need to differentiate it again here.
-	if maxTSO.GetLogical() > maxLogical {
-		maxTSO.Physical += updateTimestampGuard.Milliseconds()
-		maxTSO.Logical = 0
-	}
-	// Sync the MaxTS with all Local TSO Allocator leaders then
+	// 2. Add the count and make sure its logical part won't overflow after being differentiated.
+	suffixBits := gta.allocatorManager.GetSuffixBits()
+	gta.preprocessLogical(maxTSO, count, suffixBits)
+	// 3. Sync the MaxTS with all Local TSO Allocator leaders then
 	if err := gta.SyncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
+	// 4. Persist MaxTS into memory, and etcd if needed
 	var (
 		currentGlobalTSO pdpb.Timestamp
 		err              error
@@ -145,7 +142,23 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 			log.Warn("update the global tso in memory failed", errs.ZapError(err))
 		}
 	}
+	// 5.Differentiate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
+	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits)
 	return *maxTSO, nil
+}
+
+func (gta *GlobalTSOAllocator) preprocessLogical(maxTSO *pdpb.Timestamp, count uint32, suffixBits int) {
+	failpoint.Inject("globalTSOOverflow", func() {
+		maxTSO.Logical = maxLogical
+	})
+	maxTSO.Logical += int64(count)
+	// Check if the logical part will reach the overflow condition after being differenitated.
+	if differentiatedLogical := gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits); differentiatedLogical >= maxLogical {
+		maxTSO.Physical += updateTimestampGuard.Milliseconds()
+		// Equivalent to setting the logical part to zero and adding the given count.
+		maxTSO.Logical = int64(count)
+	}
+	maxTSO.SuffixBits = uint32(suffixBits)
 }
 
 const (

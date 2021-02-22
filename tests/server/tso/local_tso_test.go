@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
 
@@ -56,8 +57,8 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -65,14 +66,14 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
+	leaderServer := cluster.GetServer(cluster.GetLeader())
 	dcClientMap := make(map[string]pdpb.PDClient)
 	for _, dcLocation := range dcLocationConfig {
-		pdName := cluster.WaitAllocatorLeader(dcLocation)
+		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
 		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -120,7 +121,8 @@ func testGetLocalTimestamp(c *C, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdp
 	c.Assert(err, IsNil)
 	c.Assert(resp.GetCount(), Equals, req.GetCount())
 	res := resp.GetTimestamp()
-	c.Assert(res.GetLogical(), Greater, int64(0))
+	c.Assert(res.GetPhysical(), Greater, int64(0))
+	c.Assert(res.GetLogical(), GreaterEqual, int64(req.GetCount()))
 	return res
 }
 
@@ -143,8 +145,8 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -152,13 +154,14 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	waitAllLeaders(s.ctx, c, cluster, dcLocationConfig)
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
-	leaderCli := testutil.MustNewGrpcClient(c, cluster.GetServer(cluster.GetLeader()).GetAddr())
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderCli := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId()),
 		Count:      tsoCount,
-		DcLocation: config.GlobalDCLocation,
+		DcLocation: tso.GlobalDCLocation,
 	}
 	globalTS := testGetLocalTimestamp(c, leaderCli, req)
 
@@ -170,22 +173,22 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 
 	// Join a new dc-location
 	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = "dc-4"
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = "dc-4"
 	})
 	c.Assert(err, IsNil)
 	err = pd4.Run()
 	c.Assert(err, IsNil)
 	dcLocationConfig["pd4"] = "dc-4"
-	var pdName string
+	cluster.CheckClusterDCLocation()
 	testutil.WaitUntil(c, func(c *C) bool {
-		pdName = cluster.WaitAllocatorLeader("dc-4")
-		return len(pdName) > 0
+		leaderName := cluster.WaitAllocatorLeader("dc-4")
+		return leaderName != ""
 	})
 
 	dcClientMap := make(map[string]pdpb.PDClient)
 	for _, dcLocation := range dcLocationConfig {
-		pdName := cluster.WaitAllocatorLeader(dcLocation)
+		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
 		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
 	}
 	var wg sync.WaitGroup

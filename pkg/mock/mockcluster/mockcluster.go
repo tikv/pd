@@ -15,6 +15,7 @@ package mockcluster
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -145,7 +146,7 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
-		mc.RuleManager = placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()))
+		mc.RuleManager = placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()), mc)
 		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels)
 	}
 }
@@ -164,7 +165,7 @@ func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 func (mc *Cluster) SetStoreUp(storeID uint64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
-		core.SetStoreState(metapb.StoreState_Up),
+		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.PutStore(newStore)
@@ -174,7 +175,7 @@ func (mc *Cluster) SetStoreUp(storeID uint64) {
 func (mc *Cluster) SetStoreDisconnect(storeID uint64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
-		core.SetStoreState(metapb.StoreState_Up),
+		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Now().Add(-time.Second*30)),
 	)
 	mc.PutStore(newStore)
@@ -184,7 +185,7 @@ func (mc *Cluster) SetStoreDisconnect(storeID uint64) {
 func (mc *Cluster) SetStoreDown(storeID uint64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
-		core.SetStoreState(metapb.StoreState_Up),
+		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Time{}),
 	)
 	mc.PutStore(newStore)
@@ -193,7 +194,7 @@ func (mc *Cluster) SetStoreDown(storeID uint64) {
 // SetStoreOffline sets store state to be offline.
 func (mc *Cluster) SetStoreOffline(storeID uint64) {
 	store := mc.GetStore(storeID)
-	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
+	newStore := store.Clone(core.OfflineStore(false))
 	mc.PutStore(newStore)
 }
 
@@ -585,7 +586,11 @@ func (mc *Cluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) b
 
 // PutRegionStores mocks method.
 func (mc *Cluster) PutRegionStores(id uint64, stores ...uint64) {
-	meta := &metapb.Region{Id: id}
+	meta := &metapb.Region{
+		Id:       id,
+		StartKey: []byte(strconv.FormatUint(id, 10)),
+		EndKey:   []byte(strconv.FormatUint(id+1, 10)),
+	}
 	for _, s := range stores {
 		meta.Peers = append(meta.Peers, &metapb.Peer{StoreId: s})
 	}

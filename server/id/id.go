@@ -28,13 +28,18 @@ import (
 
 // Allocator is the allocator to generate unique ID.
 type Allocator interface {
+	// Alloc allocs a unique id.
 	Alloc() (uint64, error)
+	// Rebase resets the base for the allocator from the persistent window boundary,
+	// which also resets the end of the allocator. (base, end) is the range that can
+	// be allocated in memory.
+	Rebase() error
 }
 
 const allocStep = uint64(1000)
 
-// AllocatorImpl is used to allocate ID.
-type AllocatorImpl struct {
+// allocatorImpl is used to allocate ID.
+type allocatorImpl struct {
 	mu   sync.Mutex
 	base uint64
 	end  uint64
@@ -44,18 +49,18 @@ type AllocatorImpl struct {
 	member   string
 }
 
-// NewAllocatorImpl creates a new IDAllocator.
-func NewAllocatorImpl(client *clientv3.Client, rootPath string, member string) *AllocatorImpl {
-	return &AllocatorImpl{client: client, rootPath: rootPath, member: member}
+// NewAllocator creates a new ID Allocator.
+func NewAllocator(client *clientv3.Client, rootPath string, member string) Allocator {
+	return &allocatorImpl{client: client, rootPath: rootPath, member: member}
 }
 
 // Alloc returns a new id.
-func (alloc *AllocatorImpl) Alloc() (uint64, error) {
+func (alloc *allocatorImpl) Alloc() (uint64, error) {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
 	if alloc.base == alloc.end {
-		if err := alloc.generateLocked(); err != nil {
+		if err := alloc.rebaseLocked(); err != nil {
 			return 0, err
 		}
 	}
@@ -65,15 +70,17 @@ func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 	return alloc.base, nil
 }
 
-// Generate synchronizes and generates id range.
-func (alloc *AllocatorImpl) Generate() error {
+// Rebase resets the base for the allocator from the persistent window boundary,
+// which also resets the end of the allocator. (base, end) is the range that can
+// be allocated in memory.
+func (alloc *allocatorImpl) Rebase() error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
-	return alloc.generateLocked()
+	return alloc.rebaseLocked()
 }
 
-func (alloc *AllocatorImpl) generateLocked() error {
+func (alloc *allocatorImpl) rebaseLocked() error {
 	key := alloc.getAllocIDPath()
 	value, err := etcdutil.GetValue(alloc.client, key)
 	if err != nil {
@@ -105,10 +112,10 @@ func (alloc *AllocatorImpl) generateLocked() error {
 	t := txn.If(append([]clientv3.Cmp{cmp}, clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member))...)
 	resp, err := t.Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
-		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByArgs()
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByArgs()
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 
 	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
@@ -118,6 +125,6 @@ func (alloc *AllocatorImpl) generateLocked() error {
 	return nil
 }
 
-func (alloc *AllocatorImpl) getAllocIDPath() string {
+func (alloc *allocatorImpl) getAllocIDPath() string {
 	return path.Join(alloc.rootPath, "alloc_id")
 }

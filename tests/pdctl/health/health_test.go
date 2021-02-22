@@ -72,7 +72,7 @@ func (s *healthTestSuite) TestHealth(c *C) {
 
 	// health command
 	args := []string{"-u", pdAddr, "health"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	h := make([]api.Health, len(healths))
 	c.Assert(json.Unmarshal(output, &h), IsNil)

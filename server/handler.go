@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/tso"
 	"go.uber.org/zap"
 )
 
@@ -394,8 +395,7 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	if err != nil {
 		return err
 	}
-	c.SetAllStoresLimit(limitType, ratePerMin)
-	return nil
+	return c.SetAllStoresLimit(limitType, ratePerMin)
 }
 
 // SetAllStoresLimitTTL is used to set limit of all stores with ttl
@@ -418,7 +418,8 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 		for _, label := range labels {
 			for _, sl := range store.GetLabels() {
 				if label.Key == sl.Key && label.Value == sl.Value {
-					c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
+					// TODO: need to handle some of stores are persisted, and some of stores are not.
+					_ = c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
 				}
 			}
 		}
@@ -441,8 +442,7 @@ func (h *Handler) SetStoreLimit(storeID uint64, ratePerMin float64, limitType st
 	if err != nil {
 		return err
 	}
-	c.SetStoreLimit(storeID, limitType, ratePerMin)
-	return nil
+	return c.SetStoreLimit(storeID, limitType, ratePerMin)
 }
 
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.
@@ -843,7 +843,7 @@ func (h *Handler) GetOfflinePeer(typ statistics.RegionStatisticType) ([]*core.Re
 
 // ResetTS resets the ts with specified tso.
 func (h *Handler) ResetTS(ts uint64) error {
-	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(config.GlobalDCLocation)
+	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		return err
 	}
