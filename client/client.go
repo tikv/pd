@@ -204,6 +204,13 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	c.createTSODispatcher(globalDCLocation)
 	dispatcher, _ := c.tsoDispatcher.Load(globalDCLocation)
 	go c.handleDispatcher(c.ctx, globalDCLocation, dispatcher.(chan *tsoRequest))
+	c.allocators.Range(func(dcLocation, _ interface{}) bool {
+		dc := dcLocation.(string)
+		c.createTSODispatcher(dc)
+		dispatcher, _ := c.tsoDispatcher.Load(dc)
+		go c.handleDispatcher(c.ctx, dc, dispatcher.(chan *tsoRequest))
+		return true
+	})
 	c.wg.Add(2)
 	go c.tsLoop()
 	go c.tsCancelLoop()
