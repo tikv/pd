@@ -334,7 +334,7 @@ func (s *leaderTestSuite) sendRequest(c *C, addr string) {
 	defer s.wg.Done()
 
 	req := &pdpb.AllocIDRequest{
-		Header: testutil.NewRequestHeader(0),
+		Header: testutil.NewRequestHeader(0, ""),
 	}
 
 	for {

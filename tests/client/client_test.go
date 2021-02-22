@@ -367,6 +367,87 @@ func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	c.Assert(time.Since(start), Less, 2*time.Second)
 }
 
+func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithCustomTimeoutOption(1*time.Second))
+	c.Assert(err, IsNil)
+
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"), IsNil)
+	r, err := cli.GetRegion(context.Background(), []byte("a"))
+	c.Assert(err, IsNil)
+	c.Assert(r, NotNil)
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"), IsNil)
+	r, err = cli.GetRegion(context.Background(), []byte("a"))
+	c.Assert(err, IsNil)
+	c.Assert(r, NotNil)
+}
+
+func (s *clientTestSuite) TestGetTsoFromFollowerClient(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithCustomTimeoutOption(3*time.Second))
+	c.Assert(err, IsNil)
+
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
+	var lastTS uint64
+	testutil.WaitUntil(c, func(c *C) bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		c.Log(err)
+		return false
+	})
+
+	for i := 0; i < 100; i++ {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			ts := tsoutil.ComposeTS(physical, logical)
+			c.Assert(lastTS, Less, ts)
+			lastTS = ts
+		}
+		time.Sleep(time.Millisecond)
+	}
+	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"), IsNil)
+	time.Sleep(2 * time.Second)
+	for i := 0; i < 100; i++ {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			ts := tsoutil.ComposeTS(physical, logical)
+			c.Assert(lastTS, Less, ts)
+			lastTS = ts
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func (s *clientTestSuite) waitLeader(c *C, cli client, leader string) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		cli.ScheduleCheckLeader()

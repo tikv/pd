@@ -90,7 +90,7 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 			for j := 0; j < 30; j++ {
 				for _, dcLocation := range dcLocationConfig {
 					req := &pdpb.TsoRequest{
-						Header:     testutil.NewRequestHeader(leaderServer.GetClusterID()),
+						Header:     testutil.NewRequestHeader(leaderServer.GetClusterID(), cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr()),
 						Count:      tsoCount,
 						DcLocation: dcLocation,
 					}
@@ -159,7 +159,7 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	leaderCli := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId()),
+		Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId(), leaderServer.GetAddr()),
 		Count:      tsoCount,
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -206,7 +206,7 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 			for j := 0; j < 30; j++ {
 				for _, dcLocation := range dcLocationConfig {
 					req := &pdpb.TsoRequest{
-						Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId()),
+						Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId(), cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr()),
 						Count:      tsoCount,
 						DcLocation: dcLocation,
 					}

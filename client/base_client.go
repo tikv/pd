@@ -37,6 +37,8 @@ type baseClient struct {
 	clusterID uint64
 	// PD leader URL
 	leader atomic.Value // Store as string
+	// PD follower URLs
+	followers atomic.Value // Store as string
 	// dc-location -> TSO allocator leader gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 	// dc-location -> TSO allocator leader URL
@@ -108,14 +110,14 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption, 
 		c.cancel()
 		return nil, err
 	}
-	if err := c.initRetry(c.updateLeader); err != nil {
+	if err := c.initRetry(c.updateMember); err != nil {
 		c.cancel()
 		return nil, err
 	}
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
 	c.wg.Add(1)
-	go c.leaderLoop()
+	go c.memberLoop()
 
 	return c, nil
 }
@@ -135,7 +137,7 @@ func (c *baseClient) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
-func (c *baseClient) leaderLoop() {
+func (c *baseClient) memberLoop() {
 	defer c.wg.Done()
 
 	ctx, cancel := context.WithCancel(c.ctx)
@@ -151,8 +153,8 @@ func (c *baseClient) leaderLoop() {
 		failpoint.Inject("skipUpdateLeader", func() {
 			failpoint.Continue()
 		})
-		if err := c.updateLeader(); err != nil {
-			log.Error("[pd] failed updateLeader", errs.ZapError(err))
+		if err := c.updateMember(); err != nil {
+			log.Error("[pd] failed updateMember", errs.ZapError(err))
 		}
 	}
 }
@@ -178,13 +180,17 @@ func (c *baseClient) GetClusterID(context.Context) uint64 {
 }
 
 // GetLeaderAddr returns the leader address.
-// For testing use.
 func (c *baseClient) GetLeaderAddr() string {
 	leaderAddr := c.leader.Load()
 	if leaderAddr == nil {
 		return ""
 	}
 	return leaderAddr.(string)
+}
+
+// GetLeaderAddr returns the follower address.
+func (c *baseClient) GetFollowerAddr() []string {
+	return c.followers.Load().([]string)
 }
 
 // GetURLs returns the URLs.
@@ -257,12 +263,12 @@ func (c *baseClient) initClusterID() error {
 	return errors.WithStack(errFailInitClusterID)
 }
 
-func (c *baseClient) updateLeader() error {
+func (c *baseClient) updateMember() error {
 	for _, u := range c.urls {
-		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
+		ctx, cancel := context.WithTimeout(c.ctx, updateMemberTimeout)
 		members, err := c.getMembers(ctx, u)
 		if err != nil {
-			log.Warn("[pd] cannot update leader", zap.String("address", u), errs.ZapError(err))
+			log.Warn("[pd] cannot update member", zap.String("address", u), errs.ZapError(err))
 		}
 		cancel()
 		if err := c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders()); err != nil {
@@ -277,6 +283,7 @@ func (c *baseClient) updateLeader() error {
 			}
 		}
 		c.updateURLs(members.GetMembers())
+		c.updateFollowers(members.GetMembers(), members.GetLeader())
 		if err := c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
 			return err
 		}
@@ -331,6 +338,18 @@ func (c *baseClient) switchLeader(addrs []string) error {
 	c.leader.Store(addr)
 	c.allocators.Store(globalDCLocation, addr)
 	return nil
+}
+
+func (c *baseClient) updateFollowers(members []*pdpb.Member, leader *pdpb.Member) {
+	var addrs []string
+	for _, member := range members {
+		if member.GetMemberId() != leader.GetMemberId() {
+			if len(member.GetClientUrls()) > 0 {
+				addrs = append(addrs, member.GetClientUrls()[0])
+			}
+		}
+	}
+	c.followers.Store(addrs)
 }
 
 func (c *baseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Member) error {

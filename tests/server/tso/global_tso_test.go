@@ -82,7 +82,7 @@ func (s *testNormalGlobalTSOSuite) TestNormalGlobalTSO(c *C) {
 
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
+		Header:     testutil.NewRequestHeader(clusterID, leaderServer.GetAddr()),
 		Count:      uint32(tsoCount),
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -193,7 +193,7 @@ func (s *testNormalGlobalTSOSuite) TestZeroTSOCount(c *C) {
 	clusterID := leaderServer.GetClusterID()
 
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
+		Header:     testutil.NewRequestHeader(clusterID, leaderServer.GetAddr()),
 		DcLocation: tso.GlobalDCLocation,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -227,7 +227,7 @@ func (s *testNormalGlobalTSOSuite) TestRequestFollower(c *C) {
 	grpcPDClient := testutil.MustNewGrpcClient(c, followerServer.GetAddr())
 	clusterID := followerServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
+		Header:     testutil.NewRequestHeader(clusterID, followerServer.GetAddr()),
 		Count:      1,
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -272,7 +272,7 @@ func (s *testNormalGlobalTSOSuite) TestDelaySyncTimestamp(c *C) {
 	grpcPDClient := testutil.MustNewGrpcClient(c, nextLeaderServer.GetAddr())
 	clusterID := nextLeaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
+		Header:     testutil.NewRequestHeader(clusterID, nextLeaderServer.GetAddr()),
 		Count:      1,
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -340,7 +340,7 @@ func (s *testTimeFallBackSuite) TearDownSuite(c *C) {
 func (s *testTimeFallBackSuite) testGetTimestamp(c *C, n uint32) *pdpb.Timestamp {
 	clusterID := s.server.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
+		Header:     testutil.NewRequestHeader(clusterID, s.cluster.GetServer(s.cluster.GetLeader()).GetAddr()),
 		Count:      n,
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -423,7 +423,7 @@ func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	clusterID := followerServer.GetClusterID()
 
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
+		Header:     testutil.NewRequestHeader(clusterID, followerServer.GetAddr()),
 		Count:      1,
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -511,7 +511,7 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 
 func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, n uint32, dcLocation string) *pdpb.Timestamp {
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(s.leaderServer.GetClusterID()),
+		Header:     testutil.NewRequestHeader(s.leaderServer.GetClusterID(), s.leaderServer.GetAddr()),
 		Count:      n,
 		DcLocation: dcLocation,
 	}

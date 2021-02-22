@@ -130,7 +130,7 @@ func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
 	// Get region.
-	region := getRegion(c, clusterID, grpcPDClient, []byte("abc"))
+	region := getRegion(c, clusterID, grpcPDClient, leaderServer.GetAddr(), []byte("abc"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 	peer := region.GetPeers()[0]
 
@@ -155,7 +155,7 @@ func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 
 	// Update cluster config.
 	req := &pdpb.PutClusterConfigRequest{
-		Header: testutil.NewRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID, ""),
 		Cluster: &metapb.Cluster{
 			Id:           clusterID,
 			MaxPeerCount: 5,
@@ -313,7 +313,7 @@ func testRemoveStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClie
 	{
 		// Update after removed should return tombstone error.
 		req := &pdpb.StoreHeartbeatRequest{
-			Header: testutil.NewRequestHeader(clusterID),
+			Header: testutil.NewRequestHeader(clusterID, ""),
 			Stats:  &pdpb.StoreStats{StoreId: store.GetId()},
 		}
 		resp, err := grpcPDClient.StoreHeartbeat(context.Background(), req)
@@ -402,7 +402,7 @@ func (s *clusterTestSuite) TestGetPDMembers(c *C) {
 	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.GetMembersRequest{
-		Header: testutil.NewRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID, ""),
 	}
 
 	resp, err := grpcPDClient.GetMembers(context.Background(), req)
@@ -480,7 +480,7 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 	// register store and bind stream
 	for i, store := range stores {
 		req := &pdpb.StoreHeartbeatRequest{
-			Header: testutil.NewRequestHeader(clusterID),
+			Header: testutil.NewRequestHeader(clusterID, ""),
 			Stats: &pdpb.StoreStats{
 				StoreId:   store.GetId(),
 				Capacity:  1000 * (1 << 20),
@@ -497,7 +497,7 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 		c.Assert(err, IsNil)
 		peer := &metapb.Peer{Id: peerID, StoreId: store.GetId()}
 		regionReq := &pdpb.RegionHeartbeatRequest{
-			Header: testutil.NewRequestHeader(clusterID),
+			Header: testutil.NewRequestHeader(clusterID, ""),
 			Region: &metapb.Region{
 				Id:    regionID,
 				Peers: []*metapb.Peer{peer},
@@ -790,7 +790,7 @@ func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(putRes.GetReplicationStatus().GetMode(), Equals, replication_modepb.ReplicationMode_DR_AUTO_SYNC) // check status in putStore response
 	hbReq := &pdpb.StoreHeartbeatRequest{
-		Header: testutil.NewRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID, ""),
 		Stats:  &pdpb.StoreStats{StoreId: store.GetId()},
 	}
 	hbRes, err := grpcPDClient.StoreHeartbeat(context.Background(), hbReq)
@@ -800,7 +800,7 @@ func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {
 
 func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
 	req := &pdpb.IsBootstrappedRequest{
-		Header: testutil.NewRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID, ""),
 	}
 
 	return req
@@ -808,7 +808,7 @@ func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
 
 func newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.BootstrapRequest {
 	req := &pdpb.BootstrapRequest{
-		Header: testutil.NewRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID, ""),
 		Store:  &metapb.Store{Id: 1, Address: storeAddr},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
@@ -825,7 +825,7 @@ func bootstrapCluster(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, storeA
 
 func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.Store) (*pdpb.PutStoreResponse, error) {
 	req := &pdpb.PutStoreRequest{
-		Header: testutil.NewRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID, ""),
 		Store:  store,
 	}
 	resp, err := grpcPDClient.PutStore(context.Background(), req)
@@ -834,7 +834,7 @@ func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.
 
 func getStore(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, storeID uint64) *metapb.Store {
 	req := &pdpb.GetStoreRequest{
-		Header:  testutil.NewRequestHeader(clusterID),
+		Header:  testutil.NewRequestHeader(clusterID, ""),
 		StoreId: storeID,
 	}
 	resp, err := grpcPDClient.GetStore(context.Background(), req)
@@ -844,9 +844,9 @@ func getStore(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, storeID uint64
 	return resp.GetStore()
 }
 
-func getRegion(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, regionKey []byte) *metapb.Region {
+func getRegion(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, leaderAddr string, regionKey []byte) *metapb.Region {
 	req := &pdpb.GetRegionRequest{
-		Header:    testutil.NewRequestHeader(clusterID),
+		Header:    testutil.NewRequestHeader(clusterID, leaderAddr),
 		RegionKey: regionKey,
 	}
 
@@ -859,7 +859,7 @@ func getRegion(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, regionKey []b
 
 func getRegionByID(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, regionID uint64) *metapb.Region {
 	req := &pdpb.GetRegionByIDRequest{
-		Header:   testutil.NewRequestHeader(clusterID),
+		Header:   testutil.NewRequestHeader(clusterID, ""),
 		RegionId: regionID,
 	}
 
@@ -872,7 +872,7 @@ func getRegionByID(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, regionID 
 
 func getClusterConfig(c *C, clusterID uint64, grpcPDClient pdpb.PDClient) *metapb.Cluster {
 	req := &pdpb.GetClusterConfigRequest{
-		Header: testutil.NewRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID, ""),
 	}
 
 	resp, err := grpcPDClient.GetClusterConfig(context.Background(), req)
@@ -1059,7 +1059,7 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	}
 
 	regionReq := &pdpb.RegionHeartbeatRequest{
-		Header: testutil.NewRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID, ""),
 		Region: &metapb.Region{
 			Id:       1,
 			Peers:    peers,
