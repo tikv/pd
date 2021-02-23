@@ -347,12 +347,13 @@ func (c *client) createTSODispatcher(dcLocation string) {
 
 func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatcher chan *tsoRequest) {
 	var (
-		err      error
-		ctx      context.Context
-		cancel   context.CancelFunc
-		stream   pdpb.PD_TsoClient
-		opts     []opentracing.StartSpanOption
-		requests = make([]*tsoRequest, maxMergeTSORequests+1)
+		err        error
+		ctx        context.Context
+		cancel     context.CancelFunc
+		stream     pdpb.PD_TsoClient
+		opts       []opentracing.StartSpanOption
+		requests   = make([]*tsoRequest, maxMergeTSORequests+1)
+		needUpdate = false
 	)
 	defer func() {
 		if cancel != nil {
@@ -363,6 +364,19 @@ func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatc
 		// If the tso stream for the corresponding dc-location has not been created yet or needs to be re-created,
 		// we will try to create the stream first.
 		if stream == nil {
+			if needUpdate {
+				err = c.updateLeader()
+				if err != nil {
+					select {
+					case <-loopCtx.Done():
+						return
+					default:
+					}
+					log.Error("[pd] failed updateLeader", errs.ZapError(err))
+					continue
+				}
+				needUpdate = false
+			}
 			ctx, cancel = context.WithCancel(loopCtx)
 			done := make(chan struct{})
 			go c.checkStreamTimeout(ctx, cancel, done)
@@ -427,6 +441,9 @@ func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatc
 			c.ScheduleCheckLeader()
 			cancel()
 			stream = nil
+			if isMismatchLeader(err) {
+				needUpdate = true
+			}
 		}
 	}
 }
@@ -1065,4 +1082,8 @@ func addrsToUrls(addrs []string) []string {
 		}
 	}
 	return urls
+}
+
+func isMismatchLeader(err error) bool {
+	return strings.Contains(err.Error(), errs.MismatchLeaderErr)
 }
