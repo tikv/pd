@@ -146,13 +146,9 @@ func (c *baseClient) leaderLoop() {
 		case <-ctx.Done():
 			return
 		}
-		skipUpdateLeader := false
 		failpoint.Inject("skipUpdateLeader", func() {
-			skipUpdateLeader = true
+			failpoint.Continue()
 		})
-		if skipUpdateLeader {
-			continue
-		}
 		if err := c.updateLeader(); err != nil {
 			log.Error("[pd] failed updateLeader", errs.ZapError(err))
 		}
