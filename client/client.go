@@ -349,10 +349,10 @@ func (c *client) tsLoop() {
 	ticker := time.NewTicker(tsLoopDCCheckInterval)
 	defer ticker.Stop()
 	for {
+		c.updateTSODispatcher()
 		select {
-		case <-c.checkTSODispatcherCh:
 		case <-ticker.C:
-			c.updateTSODispatcher()
+		case <-c.checkTSODispatcherCh:
 		case <-loopCtx.Done():
 			return
 		}
