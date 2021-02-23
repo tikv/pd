@@ -33,6 +33,3 @@ func ZapError(err error, causeError ...error) zap.Field {
 	}
 	return zap.Field{Key: "error", Type: zapcore.ErrorType, Interface: err}
 }
-
-// MismatchLeaderErr indicates the the non-leader member received the requests which should be received by leader
-const MismatchLeaderErr = "mismatch leader id"
