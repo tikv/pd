@@ -846,7 +846,7 @@ func getStore(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, storeID uint64
 
 func getRegion(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, leaderAddr string, regionKey []byte) *metapb.Region {
 	req := &pdpb.GetRegionRequest{
-		Header:    testutil.NewRequestHeader(clusterID, leaderAddr),
+		Header:    testutil.NewRequestHeader(clusterID, ""),
 		RegionKey: regionKey,
 	}
 

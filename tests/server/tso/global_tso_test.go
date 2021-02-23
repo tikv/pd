@@ -82,7 +82,7 @@ func (s *testNormalGlobalTSOSuite) TestNormalGlobalTSO(c *C) {
 
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID, leaderServer.GetAddr()),
+		Header:     testutil.NewRequestHeader(clusterID, ""),
 		Count:      uint32(tsoCount),
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -193,7 +193,7 @@ func (s *testNormalGlobalTSOSuite) TestZeroTSOCount(c *C) {
 	clusterID := leaderServer.GetClusterID()
 
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID, leaderServer.GetAddr()),
+		Header:     testutil.NewRequestHeader(clusterID, ""),
 		DcLocation: tso.GlobalDCLocation,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -340,7 +340,7 @@ func (s *testTimeFallBackSuite) TearDownSuite(c *C) {
 func (s *testTimeFallBackSuite) testGetTimestamp(c *C, n uint32) *pdpb.Timestamp {
 	clusterID := s.server.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID, s.cluster.GetServer(s.cluster.GetLeader()).GetAddr()),
+		Header:     testutil.NewRequestHeader(clusterID, ""),
 		Count:      n,
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -492,26 +492,26 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 	// Get some local TSOs first
 	oldLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
 	for _, dcLocation := range dcLocationConfig {
-		oldLocalTSOs = append(oldLocalTSOs, s.testGetTimestamp(ctx, c, tsoCount, dcLocation))
+		oldLocalTSOs = append(oldLocalTSOs, s.testGetTimestamp(ctx, c, cluster, tsoCount, dcLocation))
 	}
 	// Get a global TSO then
-	globalTSO := s.testGetTimestamp(ctx, c, tsoCount, tso.GlobalDCLocation)
+	globalTSO := s.testGetTimestamp(ctx, c, cluster, tsoCount, tso.GlobalDCLocation)
 	for _, oldLocalTSO := range oldLocalTSOs {
 		c.Assert(tsoutil.CompareTimestamp(globalTSO, oldLocalTSO), Equals, 1)
 	}
 	// Get some local TSOs again
 	newLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
 	for _, dcLocation := range dcLocationConfig {
-		newLocalTSOs = append(newLocalTSOs, s.testGetTimestamp(ctx, c, tsoCount, dcLocation))
+		newLocalTSOs = append(newLocalTSOs, s.testGetTimestamp(ctx, c, cluster, tsoCount, dcLocation))
 	}
 	for _, newLocalTSO := range newLocalTSOs {
 		c.Assert(tsoutil.CompareTimestamp(globalTSO, newLocalTSO), Equals, -1)
 	}
 }
 
-func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, n uint32, dcLocation string) *pdpb.Timestamp {
+func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, cluster *tests.TestCluster, n uint32, dcLocation string) *pdpb.Timestamp {
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(s.leaderServer.GetClusterID(), s.leaderServer.GetAddr()),
+		Header:     testutil.NewRequestHeader(s.leaderServer.GetClusterID(), cluster.GetServer(s.leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr()),
 		Count:      n,
 		DcLocation: dcLocation,
 	}
@@ -561,6 +561,6 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSOOverflow(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/globalTSOOverflow", `return(true)`), IsNil)
-	s.testGetTimestamp(ctx, c, tsoCount, tso.GlobalDCLocation)
+	s.testGetTimestamp(ctx, c, cluster, tsoCount, tso.GlobalDCLocation)
 	failpoint.Disable("github.com/tikv/pd/server/tso/globalTSOOverflow")
 }
