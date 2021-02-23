@@ -96,8 +96,9 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 	var (
-		redirectStream pdpb.PD_TsoClient
-		cancel         context.CancelFunc
+		redirectStream   pdpb.PD_TsoClient
+		cancel           context.CancelFunc
+		lastReceiverAddr string
 	)
 	defer func() {
 		// cancel the redirect stream
@@ -116,13 +117,19 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 
 		receiverAddr := request.GetHeader().GetReceiverAddr()
 		if !s.isLocalRequest(receiverAddr) {
-			client, err := s.getDelegateClient(s.ctx, receiverAddr)
-			if err != nil {
-				return err
-			}
-			redirectStream, cancel, err = s.createRedirectStream(client)
-			if err != nil {
-				return err
+			if redirectStream == nil || lastReceiverAddr != receiverAddr {
+				if cancel != nil {
+					cancel()
+				}
+				client, err := s.getDelegateClient(s.ctx, receiverAddr)
+				if err != nil {
+					return err
+				}
+				redirectStream, cancel, err = s.createRedirectStream(client)
+				if err != nil {
+					return err
+				}
+				lastReceiverAddr = receiverAddr
 			}
 			if err := redirectStream.Send(request); err != nil {
 				return errors.WithStack(err)
