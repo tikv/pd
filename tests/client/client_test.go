@@ -21,6 +21,7 @@ import (
 	"math"
 	"path"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -331,6 +332,16 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(p, Equals, int64(0))
 	c.Assert(l, Equals, int64(0))
 	c.Assert(err, NotNil)
+
+	// assert global tso after resign leader
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "mismatch leader id"), Equals, true)
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, IsNil)
 }
 
 func (s *clientTestSuite) TestCustomTimeout(c *C) {
