@@ -428,6 +428,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		if err != nil {
 			msg := err.Error()
 			s.hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
+			log.Error("Can't handle the heartbeat of the region normally", zap.Reflect("region", region.GetMeta()), zap.Error(err))
 			continue
 		}
 

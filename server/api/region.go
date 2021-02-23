@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -49,6 +50,8 @@ type RegionInfo struct {
 	ReadKeys        uint64            `json:"read_keys"`
 	ApproximateSize int64             `json:"approximate_size"`
 	ApproximateKeys int64             `json:"approximate_keys"`
+
+	LastReportTime time.Time `json:"last_report_time"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
@@ -94,6 +97,7 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ReadKeys = r.GetKeysRead()
 	s.ApproximateSize = r.GetApproximateSize()
 	s.ApproximateKeys = r.GetApproximateKeys()
+	s.LastReportTime = r.GetLastReportTime()
 	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())
 
 	return s

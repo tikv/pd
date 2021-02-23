@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/gogo/protobuf/proto"
@@ -51,6 +52,7 @@ type RegionInfo struct {
 	approximateSize   int64
 	approximateKeys   int64
 	interval          *pdpb.TimeInterval
+	lastReportTime    time.Time
 	replicationStatus *replication_modepb.RegionReplicationStatus
 }
 
@@ -109,6 +111,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		approximateSize:   int64(regionSize),
 		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
 		interval:          heartbeat.GetInterval(),
+		lastReportTime:    time.Now(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
 	}
 
@@ -140,6 +143,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		approximateSize:   r.approximateSize,
 		approximateKeys:   r.approximateKeys,
 		interval:          proto.Clone(r.interval).(*pdpb.TimeInterval),
+		lastReportTime:    r.lastReportTime,
 		replicationStatus: r.replicationStatus,
 	}
 
@@ -340,6 +344,11 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 		KeysWritten:  r.writtenKeys,
 		KeysRead:     r.readKeys,
 	}
+}
+
+// GetLastReportTime returns the last time of the region arrive.
+func (r *RegionInfo) GetLastReportTime() time.Time {
+	return r.lastReportTime
 }
 
 // GetApproximateSize returns the approximate size of the region.
