@@ -23,7 +23,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	pdClient "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
@@ -481,17 +480,6 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 	cluster.WaitAllLeaders(c, dcLocationConfig)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pClient, err := pdClient.NewClientWithContext(s.ctx, []string{cluster.GetServer(cluster.GetLeader()).GetAddr()}, pdClient.SecurityOption{})
-	c.Assert(err, IsNil)
-	// assert global tso
-	err = cluster.ResignLeader()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	_, _, err = pClient.GetTS(ctx)
-	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "mismatch leader id"), Equals, true)
-	_, _, err = pClient.GetTS(ctx)
-	c.Assert(err, IsNil)
 
 	s.leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Assert(s.leaderServer, NotNil)
