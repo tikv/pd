@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
@@ -428,7 +429,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		if err != nil {
 			msg := err.Error()
 			s.hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
-			log.Error("Can't handle the heartbeat of the region normally", zap.Reflect("region", region.GetMeta()), zap.Error(err))
+			log.Error("Can't handle the heartbeat of the region normally", logutil.ZapRedactStringer("region", core.RegionToHexMeta(region.GetMeta())), zap.Error(err))
 			continue
 		}
 
