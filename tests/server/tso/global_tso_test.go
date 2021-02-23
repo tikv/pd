@@ -478,8 +478,6 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 	c.Assert(err, IsNil)
 
 	cluster.WaitAllLeaders(c, dcLocationConfig)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	s.leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Assert(s.leaderServer, NotNil)
@@ -489,6 +487,8 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 		s.dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	// Get some local TSOs first
 	oldLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
 	for _, dcLocation := range dcLocationConfig {
