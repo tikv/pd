@@ -571,10 +571,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			}
 			saveCache, needSync = true, true
 		}
-		if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 {
+		if len(region.GetDownPeers()) != len(origin.GetDownPeers()) {
 			saveCache = true
 		}
-		if len(origin.GetDownPeers()) > 0 || len(origin.GetPendingPeers()) > 0 {
+		if len(region.GetPendingPeers()) != len(origin.GetPendingPeers()) {
 			saveCache = true
 		}
 		if len(region.GetPeers()) != len(origin.GetPeers()) {
