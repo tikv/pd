@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -352,8 +353,8 @@ func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatc
 		cancel     context.CancelFunc
 		stream     pdpb.PD_TsoClient
 		opts       []opentracing.StartSpanOption
-		requests        = make([]*tsoRequest, maxMergeTSORequests+1)
-		needUpdate bool = false
+		requests   = make([]*tsoRequest, maxMergeTSORequests+1)
+		needUpdate = false
 	)
 	defer func() {
 		if cancel != nil {
@@ -1085,5 +1086,5 @@ func addrsToUrls(addrs []string) []string {
 }
 
 func isMismatchLeader(err error) bool {
-	return strings.Contains(err.Error(), "mismatch leader id")
+	return strings.Contains(err.Error(), server.MismatchLeaderErr)
 }

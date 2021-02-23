@@ -484,7 +484,6 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 	pClient, err := pdClient.NewClientWithContext(s.ctx, []string{cluster.GetServer(cluster.GetLeader()).GetAddr()}, pdClient.SecurityOption{})
 	c.Assert(err, IsNil)
 	// assert global tso
-	cluster.WaitLeader()
 	err = cluster.ResignLeader()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
