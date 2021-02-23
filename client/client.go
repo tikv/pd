@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -1086,5 +1085,5 @@ func addrsToUrls(addrs []string) []string {
 }
 
 func isMismatchLeader(err error) bool {
-	return strings.Contains(err.Error(), server.MismatchLeaderErr)
+	return strings.Contains(err.Error(), errs.MismatchLeaderErr)
 }
