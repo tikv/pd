@@ -72,7 +72,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "handle_region_heartbeat_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled region heartbeat requests.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 29),
 		}, []string{"address", "store"})
 
 	storeHeartbeatHandleDuration = prometheus.NewHistogramVec(
