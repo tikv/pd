@@ -334,6 +334,8 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(err, NotNil)
 
 	// assert global tso after resign leader
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateLeader", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/client/skipUpdateLeader")
 	err = cluster.ResignLeader()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()

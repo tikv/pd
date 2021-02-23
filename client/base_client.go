@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -145,7 +146,9 @@ func (c *baseClient) leaderLoop() {
 		case <-ctx.Done():
 			return
 		}
-
+		failpoint.Inject("skipUpdateLeader", func() {
+			failpoint.Continue()
+		})
 		if err := c.updateLeader(); err != nil {
 			log.Error("[pd] failed updateLeader", errs.ZapError(err))
 		}
