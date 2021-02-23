@@ -105,6 +105,9 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
+	if !gta.leadership.Check() {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("requested pd is not leader")
+	}
 	// To check if we have any dc-location configured in the cluster
 	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
 	// No dc-locations configured in the cluster, use the normal TSO generation way.
@@ -128,20 +131,24 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	if err := gta.SyncMaxTS(ctx, dcLocationMap, maxTSO); err != nil {
 		return pdpb.Timestamp{}, err
 	}
-	// 4. Persist MaxTS into memory, and etcd if needed
-	var (
-		currentGlobalTSO pdpb.Timestamp
-		err              error
-	)
-	if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
-		return pdpb.Timestamp{}, err
-	}
-	if tsoutil.CompareTimestamp(&currentGlobalTSO, maxTSO) < 0 {
-		// Update the global TSO in memory
-		if err := gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(maxTSO), true); err != nil {
-			log.Warn("update the global tso in memory failed", errs.ZapError(err))
+	// 4. Persist MaxTS into memory and etcd asynchronously.
+	// This is meaningful if the user wants to turn off the Local TSO function and use the old Global TSO.
+	// We need to make sure consistency after the user switches it back.
+	go func(rawGlobalTSO pdpb.Timestamp) {
+		var (
+			currentGlobalTSO pdpb.Timestamp
+			err              error
+		)
+		if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
+			log.Error("get current global tso in memory failed", errs.ZapError(err))
 		}
-	}
+		if tsoutil.CompareTimestamp(&currentGlobalTSO, &rawGlobalTSO) < 0 {
+			// Update the Global TSO in memory
+			if err := gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(&rawGlobalTSO), true); err != nil {
+				log.Error("update the global tso in memory failed", errs.ZapError(err))
+			}
+		}
+	}(*maxTSO)
 	// 5.Differentiate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
 	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits)
 	return *maxTSO, nil
