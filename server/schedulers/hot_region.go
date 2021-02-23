@@ -163,12 +163,23 @@ func (h *hotScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (h *hotScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
-	return h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetHotRegionScheduleLimit() &&
-		h.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	hotRegionAllowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetHotRegionScheduleLimit()
+	leaderAllowed := h.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	if !hotRegionAllowed {
+		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
+	}
+	if !leaderAllowed {
+		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpLeader.String()).Inc()
+	}
+	return hotRegionAllowed && leaderAllowed
 }
 
 func (h *hotScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
-	return h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetHotRegionScheduleLimit()
+	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetHotRegionScheduleLimit()
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
+	}
+	return allowed
 }
 
 func (h *hotScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

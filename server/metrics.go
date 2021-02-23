@@ -83,6 +83,14 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled store heartbeat requests.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
 		}, []string{"address", "store"})
+
+	serverInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "info",
+			Help:      "Indicate the pd server info, and the value is the start timestamp (s).",
+		}, []string{"version", "hash"})
 )
 
 func init() {
@@ -94,4 +102,5 @@ func init() {
 	prometheus.MustRegister(tsoHandleDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
+	prometheus.MustRegister(serverInfo)
 }

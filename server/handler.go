@@ -415,8 +415,7 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	if err != nil {
 		return err
 	}
-	c.SetAllStoresLimit(limitType, ratePerMin)
-	return nil
+	return c.SetAllStoresLimit(limitType, ratePerMin)
 }
 
 // SetAllStoresLimitTTL is used to set limit of all stores with ttl
@@ -439,7 +438,8 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 		for _, label := range labels {
 			for _, sl := range store.GetLabels() {
 				if label.Key == sl.Key && label.Value == sl.Value {
-					c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
+					// TODO: need to handle some of stores are persisted, and some of stores are not.
+					_ = c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
 				}
 			}
 		}
@@ -462,8 +462,7 @@ func (h *Handler) SetStoreLimit(storeID uint64, ratePerMin float64, limitType st
 	if err != nil {
 		return err
 	}
-	c.SetStoreLimit(storeID, limitType, ratePerMin)
-	return nil
+	return c.SetStoreLimit(storeID, limitType, ratePerMin)
 }
 
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.

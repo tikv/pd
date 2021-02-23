@@ -127,7 +127,11 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
+	allowed := s.opController.OperatorCount(operator.OpRegion)-s.opController.OperatorCount(operator.OpMerge) < cluster.GetRegionScheduleLimit()
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+	}
+	return allowed
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

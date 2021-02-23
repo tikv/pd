@@ -110,9 +110,19 @@ func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit &&
-		s.OpController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit() &&
-		s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit
+	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
+	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	if !hotRegionAllowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpHotRegion.String()).Inc()
+	}
+	if !regionAllowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+	}
+	if !leaderAllowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+	}
+	return hotRegionAllowed && regionAllowed && leaderAllowed
 }
 
 func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

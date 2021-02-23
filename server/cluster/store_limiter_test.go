@@ -16,19 +16,21 @@ package cluster
 import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/storelimit"
 )
 
 var _ = Suite(&testStoreLimiterSuite{})
 
 type testStoreLimiterSuite struct {
-	opt *mockoption.ScheduleOptions
+	opt *config.PersistOptions
 }
 
 func (s *testStoreLimiterSuite) SetUpSuite(c *C) {
 	// Create a server for testing
-	s.opt = mockoption.NewScheduleOptions()
+	cfg := config.NewConfig()
+	cfg.Adjust(nil)
+	s.opt = config.NewPersistOptions(cfg)
 }
 
 func (s *testStoreLimiterSuite) TestCollect(c *C) {

@@ -29,6 +29,8 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
+const maxTargetRegionSize = 500
+
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	cluster    opt.Cluster
@@ -44,6 +46,11 @@ func NewMergeChecker(ctx context.Context, cluster opt.Cluster) *MergeChecker {
 		splitCache: splitCache,
 		startTime:  time.Now(),
 	}
+}
+
+// GetType return MergeChecker's type
+func (m *MergeChecker) GetType() string {
+	return "merge-checker"
 }
 
 // RecordRegionSplit put the recently split region into cache. MergeChecker
@@ -116,6 +123,11 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	if target == nil {
 		checkerCounter.WithLabelValues("merge_checker", "no-target").Inc()
+		return nil
+	}
+
+	if target.GetApproximateSize() > maxTargetRegionSize {
+		checkerCounter.WithLabelValues("merge_checker", "target-too-large").Inc()
 		return nil
 	}
 

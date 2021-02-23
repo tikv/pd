@@ -344,6 +344,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	// It may lose accuracy if use float64 to store uint64. So we store the
 	// cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
+	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
