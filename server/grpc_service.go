@@ -1072,6 +1072,7 @@ func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocat
 	return resp, nil
 }
 
+// MismatchLeaderErr indicates the the non-leader member received the requests which should be received by leader
 const MismatchLeaderErr = "mismatch leader id"
 
 // validateInternalRequest checks if server is closed, which is used to validate
