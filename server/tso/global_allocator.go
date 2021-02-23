@@ -106,7 +106,7 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 // Make sure you have initialized the TSO allocator before calling.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
 	if !gta.leadership.Check() {
-		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("requested pd is not leader")
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
 	// To check if we have any dc-location configured in the cluster
 	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()

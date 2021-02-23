@@ -441,7 +441,7 @@ func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatc
 			c.ScheduleCheckLeader()
 			cancel()
 			stream = nil
-			if isMismatchLeader(err) {
+			if isLeaderChange(err) {
 				needUpdate = true
 			}
 		}
@@ -1084,6 +1084,6 @@ func addrsToUrls(addrs []string) []string {
 	return urls
 }
 
-func isMismatchLeader(err error) bool {
-	return strings.Contains(err.Error(), errs.MismatchLeaderErr)
+func isLeaderChange(err error) bool {
+	return strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr)
 }
