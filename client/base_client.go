@@ -38,7 +38,7 @@ type baseClient struct {
 	// PD leader URL
 	leader atomic.Value // Store as string
 	// PD follower URLs
-	followers atomic.Value // Store as string
+	followers atomic.Value // Store as []string
 	// dc-location -> TSO allocator leader gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 	// dc-location -> TSO allocator leader URL
@@ -216,16 +216,16 @@ func (c *baseClient) getAllocatorLeaderAddrByDCLocation(dcLocation string) (stri
 	return url.(string), true
 }
 
-func (c *baseClient) getClientConnByDCLocation(dcLocation string) *grpc.ClientConn {
+func (c *baseClient) getClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string) {
 	url, ok := c.allocators.Load(dcLocation)
 	if !ok {
-		return nil
+		return nil, ""
 	}
 	cc, ok := c.clientConns.Load(url)
 	if !ok {
-		return nil
+		return nil, ""
 	}
-	return cc.(*grpc.ClientConn)
+	return cc.(*grpc.ClientConn), url.(string)
 }
 
 const globalDCLocation = "global"

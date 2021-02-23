@@ -331,17 +331,28 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
 	cctx, cancel := context.WithTimeout(ctx, c.timeout)
-	resp, err := c.leaderClient().GetMembers(cctx, &pdpb.GetMembersRequest{
-		Header: c.requestHeader(c.GetLeaderAddr()),
-	})
+	req := &pdpb.GetMembersRequest{Header: c.requestHeader(c.GetLeaderAddr())}
+	resp, err := c.leaderClient().GetMembers(cctx, req)
 	cancel()
+
 	if err != nil {
+		if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
+			followerClient := c.followerClient()
+			if followerClient != nil {
+				cctx, cancel := context.WithTimeout(ctx, c.timeout)
+				resp, err = followerClient.GetMembers(cctx, req)
+				cancel()
+				if err == nil {
+					return resp.GetMembers(), nil
+				}
+			}
+		}
+
 		cmdFailDurationGetAllMembers.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
 	}
-	members := resp.GetMembers()
-	return members, nil
+	return resp.GetMembers(), nil
 }
 
 func (c *client) tsLoop() {
@@ -363,50 +374,63 @@ func (c *client) tsLoop() {
 	}
 }
 
-func (c *client) createTsoStream(parentCtx context.Context, client pdpb.PDClient) (pdpb.PD_TsoClient, context.CancelFunc, error) {
+func (c *client) createTsoStream(ctx context.Context, cancel context.CancelFunc, client pdpb.PDClient) (pdpb.PD_TsoClient, error) {
 	done := make(chan struct{})
-	ctx, cancel := context.WithCancel(parentCtx)
 	go c.checkStreamTimeout(ctx, cancel, done)
 	stream, err := client.Tso(ctx)
 	done <- struct{}{}
-	return stream, cancel, err
+	return stream, err
 }
 
-func (c *client) checkAllocator(ctx context.Context, cancel context.CancelFunc, dc string,
+func (c *client) checkAllocator(parentCtx context.Context, redirectCancel context.CancelFunc, dc, url string,
 	streamCh chan struct {
 		cancel context.CancelFunc
 		stream pdpb.PD_TsoClient
 	}, changedCh chan bool) {
+	defer func() {
+		// cancel the redirect stream
+		redirectCancel()
+		close(streamCh)
+		close(changedCh)
+	}()
+	cc, u := c.getClientConnByDCLocation(dc)
+	healthCli := healthpb.NewHealthClient(cc)
 	for {
-		cc := c.getClientConnByDCLocation(dc)
-		healthCtx, healthCancel := context.WithCancel(ctx)
-		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
+		// the pd/allocator leader change, we need to re-establish the stream
+		if u != url {
+			log.Info("the leader of the allocator leader is changed", zap.String("dc", dc), zap.String("origin", url), zap.String("new", u))
+			return
+		}
+		healthCtx, healthCancel := context.WithCancel(parentCtx)
+		resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		failpoint.Inject("unreachableNetwork", func() {
 			resp.Status = healthpb.HealthCheckResponse_UNKNOWN
 		})
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 			// create a stream of the original allocator
-			stream, cancel1, err := c.createTsoStream(ctx, pdpb.NewPDClient(cc))
+			cctx, cancel := context.WithCancel(parentCtx)
+			stream, err := c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 			if err == nil && stream != nil {
-				log.Info("recover the original tso stream since the network has become normal", zap.String("dc", dc))
+				log.Info("recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
 				streamCh <- struct {
 					cancel context.CancelFunc
 					stream pdpb.PD_TsoClient
 				}{
-					cancel: cancel1,
+					cancel: cancel,
 					stream: stream,
 				}
 				<-changedCh
 				healthCancel()
-				// cancel the redirect stream
-				cancel()
-				close(streamCh)
-				close(changedCh)
 				return
 			}
 		}
 		healthCancel()
-		time.Sleep(time.Second)
+		select {
+		case <-parentCtx.Done():
+			return
+		case <-time.After(time.Second):
+			_, u = c.getClientConnByDCLocation(dc)
+		}
 	}
 }
 
@@ -431,6 +455,7 @@ func (c *client) createTSODispatcher(dcLocation string) {
 func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoDispatcher chan *tsoRequest) {
 	var (
 		err        error
+		cctx       context.Context
 		cancel     context.CancelFunc
 		stream     pdpb.PD_TsoClient
 		opts       []opentracing.StartSpanOption
@@ -460,12 +485,14 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 						return
 					default:
 					}
-					log.Error("[pd] failed updateLeader", errs.ZapError(err))
+					log.Error("[pd] failed update member", errs.ZapError(err))
 					continue
 				}
 				needUpdate = false
 			}
-			stream, cancel, err = c.createTsoStream(dispatcherCtx, pdpb.NewPDClient(c.getClientConnByDCLocation(dc)))
+			cc, url := c.getClientConnByDCLocation(dc)
+			cctx, cancel = context.WithCancel(dispatcherCtx)
+			stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 			failpoint.Inject("unreachableNetwork", func() {
 				cancel()
 				stream, cancel = nil, nil
@@ -478,7 +505,8 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				followerClient := c.followerClient()
 				if followerClient != nil {
 					// create the follower stream
-					stream, cancel, err = c.createTsoStream(dispatcherCtx, followerClient)
+					cctx, cancel = context.WithCancel(dispatcherCtx)
+					stream, err = c.createTsoStream(cctx, cancel, followerClient)
 					if err == nil {
 						streamCh = make(chan struct {
 							cancel context.CancelFunc
@@ -486,7 +514,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 						})
 						changedCh = make(chan bool)
 						// the goroutine is used to check the network and change back to the original stream
-						go c.checkAllocator(dispatcherCtx, cancel, dc, streamCh, changedCh)
+						go c.checkAllocator(dispatcherCtx, cancel, dc, url, streamCh, changedCh)
 					}
 				}
 			}

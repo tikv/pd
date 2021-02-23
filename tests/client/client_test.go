@@ -138,16 +138,7 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
-	c.Assert(err, IsNil)
+	cli := s.setupCli(c, cluster)
 
 	var lastTS uint64
 	testutil.WaitUntil(c, func(c *C) bool {
@@ -372,18 +363,7 @@ func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithCustomTimeoutOption(1*time.Second))
-	c.Assert(err, IsNil)
+	cli := s.setupCli(c, cluster)
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"), IsNil)
 	r, err := cli.GetRegion(context.Background(), []byte("a"))
@@ -396,23 +376,13 @@ func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
 	c.Assert(r, NotNil)
 }
 
-func (s *clientTestSuite) TestGetTsoFromFollowerClient(c *C) {
+// case 1: unreachable -> normal
+func (s *clientTestSuite) TestGetTsoFromFollowerClient1(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithCustomTimeoutOption(3*time.Second))
-	c.Assert(err, IsNil)
+	cli := s.setupCli(c, cluster)
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
 	var lastTS uint64
@@ -426,17 +396,43 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient(c *C) {
 		return false
 	})
 
-	for i := 0; i < 100; i++ {
-		physical, logical, err := cli.GetTS(context.TODO())
-		if err == nil {
-			ts := tsoutil.ComposeTS(physical, logical)
-			c.Assert(lastTS, Less, ts)
-			lastTS = ts
-		}
-		time.Sleep(time.Millisecond)
-	}
+	lastTS = checkTS(c, cli, lastTS)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"), IsNil)
 	time.Sleep(2 * time.Second)
+	checkTS(c, cli, lastTS)
+}
+
+// case 2: unreachable -> leader transfer -> normal
+func (s *clientTestSuite) TestGetTsoFromFollowerClient2(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	cli := s.setupCli(c, cluster)
+
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
+	var lastTS uint64
+	testutil.WaitUntil(c, func(c *C) bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		c.Log(err)
+		return false
+	})
+
+	lastTS = checkTS(c, cli, lastTS)
+	c.Assert(cluster.GetServer(cluster.GetLeader()).ResignLeader(), IsNil)
+	cluster.WaitLeader()
+	lastTS = checkTS(c, cli, lastTS)
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"), IsNil)
+	time.Sleep(5 * time.Second)
+	checkTS(c, cli, lastTS)
+}
+
+func checkTS(c *C, cli pd.Client, lastTS uint64) uint64 {
 	for i := 0; i < 100; i++ {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
@@ -446,6 +442,23 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient(c *C) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+	return lastTS
+}
+
+func (s *clientTestSuite) setupCli(c *C, cluster *tests.TestCluster) pd.Client {
+	err := cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+	return cli
 }
 
 func (s *clientTestSuite) waitLeader(c *C, cli client, leader string) {

@@ -401,10 +401,7 @@ func (s *clusterTestSuite) TestGetPDMembers(c *C) {
 	leaderServer := tc.GetServer(tc.GetLeader())
 	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
-	req := &pdpb.GetMembersRequest{
-		Header: testutil.NewRequestHeader(clusterID, ""),
-	}
-
+	req := &pdpb.GetMembersRequest{Header: testutil.NewRequestHeader(clusterID, "")}
 	resp, err := grpcPDClient.GetMembers(context.Background(), req)
 	c.Assert(err, IsNil)
 	// A more strict test can be found at api/member_test.go
@@ -871,9 +868,7 @@ func getRegionByID(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, regionID 
 }
 
 func getClusterConfig(c *C, clusterID uint64, grpcPDClient pdpb.PDClient) *metapb.Cluster {
-	req := &pdpb.GetClusterConfigRequest{
-		Header: testutil.NewRequestHeader(clusterID, ""),
-	}
+	req := &pdpb.GetClusterConfigRequest{Header: testutil.NewRequestHeader(clusterID, "")}
 
 	resp, err := grpcPDClient.GetClusterConfig(context.Background(), req)
 	c.Assert(err, IsNil)
