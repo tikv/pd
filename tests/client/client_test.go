@@ -21,7 +21,6 @@ import (
 	"math"
 	"path"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,7 +31,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
@@ -342,7 +340,7 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cluster.WaitLeader()
 	_, _, err = cli.GetTS(s.ctx)
 	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr), Equals, true)
+	c.Assert(pd.IsLeaderChange(err), Equals, true)
 	_, _, err = cli.GetTS(s.ctx)
 	c.Assert(err, IsNil)
 }
