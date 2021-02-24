@@ -434,6 +434,8 @@ func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
 	c.Assert(ok, Equals, false)
 }
 
+// TestRegionFromDifferentGroups test the multi regions. each region have its own group.
+// After scatter, the distribution for the whole cluster should be well.
 func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
