@@ -474,7 +474,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 			c.ScheduleCheckLeader()
 			cancel()
 			stream = nil
-			if isMismatchLeader(err) {
+			if IsLeaderChange(err) {
 				needUpdate = true
 			}
 		}
@@ -1118,6 +1118,8 @@ func addrsToUrls(addrs []string) []string {
 	return urls
 }
 
-func isMismatchLeader(err error) bool {
-	return strings.Contains(err.Error(), errs.MismatchLeaderErr)
+// IsLeaderChange will determine whether there is a leader change.
+func IsLeaderChange(err error) bool {
+	errMsg := err.Error()
+	return strings.Contains(errMsg, errs.NotLeaderErr) || strings.Contains(errMsg, errs.MismatchLeaderErr)
 }
