@@ -52,6 +52,7 @@ require (
 )
 
 replace (
+	github.com/oleiade/reflections => github.com/oleiade/reflections v1.0.1
 	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 )

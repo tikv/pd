@@ -21,7 +21,6 @@ import (
 	"math"
 	"path"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -341,7 +340,7 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cluster.WaitLeader()
 	_, _, err = cli.GetTS(s.ctx)
 	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "mismatch leader id"), Equals, true)
+	c.Assert(pd.IsLeaderChange(err), Equals, true)
 	_, _, err = cli.GetTS(s.ctx)
 	c.Assert(err, IsNil)
 }
