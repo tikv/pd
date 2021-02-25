@@ -635,40 +635,26 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req.clientCtx = c.ctx
 	req.start = time.Now()
 	req.dcLocation = dcLocation
-	c.waitForDispatcher()
-	return c.dispatchRequest(dcLocation, req)
-}
-
-func (c *client) waitForDispatcher() {
-	for {
-		if c.getDispatcherSize() != 0 {
-			break
-		}
-		log.Info("[pd] tso dispatcher is not ready, wait for a while")
+	if err := c.dispatchRequest(dcLocation, req); err != nil {
+		// Wait for a while and try again
 		time.Sleep(50 * time.Millisecond)
+		if err = c.dispatchRequest(dcLocation, req); err != nil {
+			req.done <- err
+		}
 	}
+	return req
 }
 
-func (c *client) getDispatcherSize() int {
-	i := 0
-	c.tsoDispatcher.Range(func(_, _ interface{}) bool {
-		i++
-		return true
-	})
-	return i
-}
-
-func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) *tsoRequest {
+func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) error {
 	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
 		log.Error("[pd] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
-		request.done <- err
 		c.ScheduleCheckLeader()
-		return request
+		return err
 	}
 	dispatcher.(*tsoDispatcher).tsoRequestCh <- request
-	return request
+	return nil
 }
 
 // TSFuture is a future which promises to return a TSO.
