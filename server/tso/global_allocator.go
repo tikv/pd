@@ -105,6 +105,9 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
+	if !gta.leadership.Check() {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
+	}
 	// To check if we have any dc-location configured in the cluster
 	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
 	// No dc-locations configured in the cluster, use the normal TSO generation way.
@@ -137,7 +140,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		return pdpb.Timestamp{}, err
 	}
 	if tsoutil.CompareTimestamp(&currentGlobalTSO, maxTSO) < 0 {
-		// Update the global TSO in memory
+		// Update the Global TSO in memory
 		if err := gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(maxTSO), true); err != nil {
 			log.Warn("update the global tso in memory failed", errs.ZapError(err))
 		}
