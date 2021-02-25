@@ -91,13 +91,14 @@ func WithMaxErrorRetry(count int) ClientOption {
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption, opts ...ClientOption) (*baseClient, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	c := &baseClient{
-		urls:          urls,
-		checkLeaderCh: make(chan struct{}, 1),
-		ctx:           ctx1,
-		cancel:        cancel,
-		security:      security,
-		timeout:       defaultPDTimeout,
-		maxRetryTimes: maxInitClusterRetries,
+		urls:                 urls,
+		checkLeaderCh:        make(chan struct{}, 1),
+		checkTSODispatcherCh: make(chan struct{}, 1),
+		ctx:                  ctx1,
+		cancel:               cancel,
+		security:             security,
+		timeout:              defaultPDTimeout,
+		maxRetryTimes:        maxInitClusterRetries,
 	}
 	for _, opt := range opts {
 		opt(c)
