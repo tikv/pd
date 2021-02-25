@@ -150,7 +150,7 @@ func (c *baseClient) memberLoop() {
 		case <-ctx.Done():
 			return
 		}
-		failpoint.Inject("skipUpdateLeader", func() {
+		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
 		})
 		if err := c.updateMember(); err != nil {
@@ -190,7 +190,11 @@ func (c *baseClient) GetLeaderAddr() string {
 
 // GetLeaderAddr returns the follower address.
 func (c *baseClient) GetFollowerAddr() []string {
-	return c.followers.Load().([]string)
+	followerAddrs := c.followers.Load()
+	if followerAddrs == nil {
+		return []string{}
+	}
+	return followerAddrs.([]string)
 }
 
 // GetURLs returns the URLs.

@@ -321,8 +321,8 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(err, NotNil)
 
 	// assert global tso after resign leader
-	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateLeader", `return(true)`), IsNil)
-	defer failpoint.Disable("github.com/tikv/pd/client/skipUpdateLeader")
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember")
 	err = cluster.ResignLeader()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
@@ -366,11 +366,13 @@ func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
 	cli := s.setupCli(c, cluster)
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"), IsNil)
+	time.Sleep(200 * time.Millisecond)
 	r, err := cli.GetRegion(context.Background(), []byte("a"))
 	c.Assert(err, IsNil)
 	c.Assert(r, NotNil)
 
 	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"), IsNil)
+	time.Sleep(200 * time.Millisecond)
 	r, err = cli.GetRegion(context.Background(), []byte("a"))
 	c.Assert(err, IsNil)
 	c.Assert(r, NotNil)

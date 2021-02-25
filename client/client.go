@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -164,12 +165,13 @@ type lastTSO struct {
 }
 
 const (
-	defaultPDTimeout      = 3 * time.Second
-	dialTimeout           = 3 * time.Second
-	updateMemberTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
-	tsLoopDCCheckInterval = time.Minute
-	maxMergeTSORequests   = 10000 // should be higher if client is sending requests in burst
-	maxInitClusterRetries = 100
+	defaultPDTimeout          = 3 * time.Second
+	dialTimeout               = 3 * time.Second
+	updateMemberTimeout       = time.Second // Use a shorter timeout to recover faster from network isolation.
+	tsLoopDCCheckInterval     = time.Minute
+	leaderHealthCheckInterval = 100 * time.Millisecond
+	maxMergeTSORequests       = 10000 // should be higher if client is sending requests in burst
+	maxInitClusterRetries     = 100
 )
 
 var (
@@ -192,6 +194,8 @@ type client struct {
 	lastTSMap sync.Map // Same as map[string]*lastTSO
 
 	checkTSDeadlineCh chan struct{}
+
+	leaderNetworkFailure int32
 }
 
 // NewClient creates a PD client.
@@ -212,9 +216,10 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	}
 
 	c.updateTSODispatcher()
-	c.wg.Add(2)
+	c.wg.Add(3)
 	go c.tsLoop()
 	go c.tsCancelLoop()
+	go c.leaderCheckLoop()
 
 	return c, nil
 }
@@ -251,6 +256,42 @@ func (c *client) updateTSODispatcher() {
 		}
 		return true
 	})
+}
+
+func (c *client) leaderCheckLoop() {
+	defer c.wg.Done()
+
+	leaderCheckLoopCtx, leaderCheckLoopCancel := context.WithCancel(c.ctx)
+	defer leaderCheckLoopCancel()
+
+	ticker := time.NewTicker(leaderHealthCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			c.checkLeaderHealth(leaderCheckLoopCtx)
+		}
+	}
+}
+
+func (c *client) checkLeaderHealth(ctx context.Context) {
+	if cc, ok := c.clientConns.Load(c.GetLeaderAddr()); ok {
+		healthCli := healthpb.NewHealthClient(cc.(*grpc.ClientConn))
+		resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
+		rpcErr, ok := status.FromError(err)
+		failpoint.Inject("unreachableNetwork1", func() {
+			resp = nil
+			err = status.New(codes.Unavailable, "unavailable").Err()
+		})
+		if (ok && isNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(1))
+		} else {
+			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(0))
+		}
+	}
 }
 
 type deadline struct {
@@ -332,22 +373,11 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 
 	cctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetMembersRequest{Header: c.requestHeader(c.GetLeaderAddr())}
-	resp, err := c.leaderClient().GetMembers(cctx, req)
+	client := c.getClient()
+	resp, err := client.GetMembers(cctx, req)
 	cancel()
 
 	if err != nil {
-		if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
-			followerClient := c.followerClient()
-			if followerClient != nil {
-				cctx, cancel := context.WithTimeout(ctx, c.timeout)
-				resp, err = followerClient.GetMembers(cctx, req)
-				cancel()
-				if err == nil {
-					return resp.GetMembers(), nil
-				}
-			}
-		}
-
 		cmdFailDurationGetAllMembers.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
@@ -501,9 +531,9 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 			rpcErr, ok := status.FromError(err)
 			// encounter the network error
 			if ok && isNetworkError(rpcErr.Code()) {
-				log.Info("fall back to use follower to redirect tso stream")
-				followerClient := c.followerClient()
+				followerClient, addr := c.followerClient()
 				if followerClient != nil {
+					log.Info("fall back to use follower to redirect tso stream", zap.String("addr", addr))
 					// create the follower stream
 					cctx, cancel = context.WithCancel(dispatcherCtx)
 					stream, err = c.createTsoStream(cctx, cancel, followerClient)
@@ -566,9 +596,9 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 			case s, ok := <-streamCh:
 				if ok {
 					stream = s.stream
-					cancel = s.cancel
 					changedCh <- true
-					log.Info("tso stream has changed")
+					cancel = s.cancel
+					log.Info("tso stream has changed back to pd or tso allocator leader")
 				}
 			default:
 			}
@@ -727,12 +757,12 @@ func (c *client) leaderClient() pdpb.PDClient {
 }
 
 // followerClient gets the client of current PD follower.
-func (c *client) followerClient() pdpb.PDClient {
+func (c *client) followerClient() (pdpb.PDClient, string) {
 	addrs := c.GetFollowerAddr()
 	var cc *grpc.ClientConn
 	var err error
-	if addrs == nil || len(addrs) < 1 {
-		return nil
+	if len(addrs) < 1 {
+		return nil, ""
 	}
 	healthCtx, healthCancel := context.WithCancel(c.ctx)
 	defer healthCancel()
@@ -742,11 +772,19 @@ func (c *client) followerClient() pdpb.PDClient {
 		}
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			log.Info("use follower client", zap.String("addr", addr))
-			return pdpb.NewPDClient(cc)
+			return pdpb.NewPDClient(cc), addr
 		}
 	}
-	return nil
+	return nil, ""
+}
+
+func (c *client) getClient() pdpb.PDClient {
+	followerClient, addr := c.followerClient()
+	if followerClient != nil && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
+		log.Info("use follower client", zap.String("addr", addr))
+		return followerClient
+	}
+	return c.leaderClient()
 }
 
 var tsoReqPool = sync.Pool{
@@ -865,26 +903,11 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 		Header:    c.requestHeader(c.GetLeaderAddr()),
 		RegionKey: key,
 	}
-	resp, err := c.leaderClient().GetRegion(cctx, req)
-	failpoint.Inject("unreachableNetwork1", func() {
-		resp = nil
-		err = status.New(codes.Unavailable, "unavailable").Err()
-	})
+	client := c.getClient()
+	resp, err := client.GetRegion(cctx, req)
 	cancel()
 
 	if err != nil {
-		if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
-			followerClient := c.followerClient()
-			if followerClient != nil {
-				cctx, cancel := context.WithTimeout(ctx, c.timeout)
-				resp, err = followerClient.GetRegion(cctx, req)
-				cancel()
-				if err == nil {
-					return handleRegionResponse(resp), nil
-				}
-			}
-		}
-
 		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
@@ -947,22 +970,11 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 		Header:    c.requestHeader(c.GetLeaderAddr()),
 		RegionKey: key,
 	}
-	resp, err := c.leaderClient().GetPrevRegion(cctx, req)
+	client := c.getClient()
+	resp, err := client.GetPrevRegion(cctx, req)
 	cancel()
 
 	if err != nil {
-		if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
-			followerClient := c.followerClient()
-			if followerClient != nil {
-				cctx, cancel := context.WithTimeout(ctx, c.timeout)
-				resp, err = c.followerClient().GetPrevRegion(cctx, req)
-				cancel()
-				if err == nil {
-					return handleRegionResponse(resp), nil
-				}
-			}
-		}
-
 		cmdFailDurationGetPrevRegion.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
@@ -983,22 +995,11 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*Region, e
 		Header:   c.requestHeader(c.GetLeaderAddr()),
 		RegionId: regionID,
 	}
-	resp, err := c.leaderClient().GetRegionByID(cctx, req)
+	cli := c.getClient()
+	resp, err := cli.GetRegionByID(cctx, req)
 	cancel()
 
 	if err != nil {
-		if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
-			followerClient := c.followerClient()
-			if followerClient != nil {
-				cctx, cancel := context.WithTimeout(ctx, c.timeout)
-				resp, err = c.followerClient().GetRegionByID(cctx, req)
-				cancel()
-				if err == nil {
-					return handleRegionResponse(resp), nil
-				}
-			}
-		}
-
 		cmdFailedDurationGetRegionByID.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
@@ -1026,20 +1027,11 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 		EndKey:   endKey,
 		Limit:    int32(limit),
 	}
-	resp, err := c.leaderClient().ScanRegions(scanCtx, req)
-	if err != nil {
-		if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
-			followerClient := c.followerClient()
-			if followerClient != nil {
-				cctx, cancel := context.WithTimeout(ctx, c.timeout)
-				resp, err = c.followerClient().ScanRegions(cctx, req)
-				cancel()
-				if err == nil {
-					return handleRegionsResponse(resp), nil
-				}
-			}
-		}
+	cli := c.getClient()
+	resp, err := cli.ScanRegions(scanCtx, req)
+	cancel()
 
+	if err != nil {
 		cmdFailedDurationScanRegions.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
@@ -1089,22 +1081,11 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		Header:  c.requestHeader(c.GetLeaderAddr()),
 		StoreId: storeID,
 	}
-	resp, err := c.leaderClient().GetStore(cctx, req)
+	cli := c.getClient()
+	resp, err := cli.GetStore(cctx, req)
 	cancel()
 
 	if err != nil {
-		if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
-			followerClient := c.followerClient()
-			if followerClient != nil {
-				cctx, cancel := context.WithTimeout(ctx, c.timeout)
-				resp, err = c.followerClient().GetStore(cctx, req)
-				cancel()
-				if err == nil {
-					return handleStoreResponse(resp)
-				}
-			}
-		}
-
 		cmdFailedDurationGetStore.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
@@ -1142,22 +1123,11 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 		Header:                 c.requestHeader(c.GetLeaderAddr()),
 		ExcludeTombstoneStores: options.excludeTombstone,
 	}
-	resp, err := c.leaderClient().GetAllStores(cctx, req)
+	cli := c.getClient()
+	resp, err := cli.GetAllStores(cctx, req)
 	cancel()
 
 	if err != nil {
-		if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
-			followerClient := c.followerClient()
-			if followerClient != nil {
-				cctx, cancel := context.WithTimeout(ctx, c.timeout)
-				resp, err = c.followerClient().GetAllStores(cctx, req)
-				cancel()
-				if err == nil {
-					return resp.GetStores(), nil
-				}
-			}
-		}
-
 		cmdFailedDurationGetAllStores.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
@@ -1178,22 +1148,11 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 		Header:    c.requestHeader(c.GetLeaderAddr()),
 		SafePoint: safePoint,
 	}
-	resp, err := c.leaderClient().UpdateGCSafePoint(cctx, req)
+	cli := c.getClient()
+	resp, err := cli.UpdateGCSafePoint(cctx, req)
 	cancel()
 
 	if err != nil {
-		if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
-			followerClient := c.followerClient()
-			if followerClient != nil {
-				cctx, cancel := context.WithTimeout(ctx, c.timeout)
-				resp, err = c.followerClient().UpdateGCSafePoint(cctx, req)
-				cancel()
-				if err == nil {
-					return resp.GetNewSafePoint(), nil
-				}
-			}
-		}
-
 		cmdFailedDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return 0, errors.WithStack(err)
@@ -1221,22 +1180,11 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 		TTL:       ttl,
 		SafePoint: safePoint,
 	}
-	resp, err := c.leaderClient().UpdateServiceGCSafePoint(cctx, req)
+	cli := c.getClient()
+	resp, err := cli.UpdateServiceGCSafePoint(cctx, req)
 	cancel()
 
 	if err != nil {
-		if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
-			followerClient := c.followerClient()
-			if followerClient != nil {
-				cctx, cancel := context.WithTimeout(ctx, c.timeout)
-				resp, err = c.followerClient().UpdateServiceGCSafePoint(cctx, req)
-				cancel()
-				if err == nil {
-					return resp.GetMinSafePoint(), nil
-				}
-			}
-		}
-
 		cmdFailedDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return 0, errors.WithStack(err)
@@ -1262,24 +1210,11 @@ func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, g
 		RegionId: regionID,
 		Group:    group,
 	}
-	resp, err := c.leaderClient().ScatterRegion(cctx, req)
+	cli := c.getClient()
+	resp, err := cli.ScatterRegion(cctx, req)
 	cancel()
 	if err != nil {
-		rpcErr, ok := status.FromError(err)
-		if !ok || !isNetworkError(rpcErr.Code()) {
-			return err
-		}
-
-		followerClient := c.followerClient()
-		if followerClient == nil {
-			return err
-		}
-		cctx, cancel := context.WithTimeout(ctx, c.timeout)
-		resp, err = c.followerClient().ScatterRegion(cctx, req)
-		cancel()
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	if resp.Header.GetError() != nil {
 		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
@@ -1309,20 +1244,10 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 		Header:   c.requestHeader(c.GetLeaderAddr()),
 		RegionId: regionID,
 	}
-	resp, err := c.leaderClient().GetOperator(cctx, req)
-	if err != nil {
-		rpcErr, ok := status.FromError(err)
-		if !ok || !isNetworkError(rpcErr.Code()) {
-			return nil, err
-		}
-		followerClient := c.followerClient()
-		if followerClient == nil {
-			return nil, err
-		}
-		cctx, cancel := context.WithTimeout(ctx, c.timeout)
-		resp, err = c.followerClient().GetOperator(cctx, req)
-		cancel()
-	}
+	cli := c.getClient()
+	resp, err := cli.GetOperator(cctx, req)
+	cancel()
+
 	return resp, err
 }
 
@@ -1345,20 +1270,10 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 		SplitKeys:  splitKeys,
 		RetryLimit: options.retryLimit,
 	}
-	resp, err := c.leaderClient().SplitRegions(cctx, req)
-	if err != nil {
-		rpcErr, ok := status.FromError(err)
-		if !ok || !isNetworkError(rpcErr.Code()) {
-			return nil, err
-		}
-		followerClient := c.followerClient()
-		if followerClient == nil {
-			return nil, err
-		}
-		cctx, cancel := context.WithTimeout(ctx, c.timeout)
-		resp, err = c.followerClient().SplitRegions(cctx, req)
-		cancel()
-	}
+	cli := c.getClient()
+	resp, err := cli.SplitRegions(cctx, req)
+	cancel()
+
 	return resp, err
 }
 
@@ -1383,24 +1298,12 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 		RegionsId:  regionsID,
 		RetryLimit: options.retryLimit,
 	}
-	resp, err := c.leaderClient().ScatterRegion(cctx, req)
+	cli := c.getClient()
+	resp, err := cli.ScatterRegion(cctx, req)
 	cancel()
-	if err != nil {
-		rpcErr, ok := status.FromError(err)
-		if !ok || !isNetworkError(rpcErr.Code()) {
-			return nil, err
-		}
 
-		followerClient := c.followerClient()
-		if followerClient == nil {
-			return nil, err
-		}
-		cctx, cancel := context.WithTimeout(ctx, c.timeout)
-		resp, err = c.followerClient().ScatterRegion(cctx, req)
-		cancel()
-		if err != nil {
-			return nil, err
-		}
+	if err != nil {
+		return nil, err
 	}
 	if resp.Header.GetError() != nil {
 		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.Header.GetError().String())
