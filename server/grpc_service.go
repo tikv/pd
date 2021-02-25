@@ -1082,7 +1082,7 @@ func (s *Server) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLe
 	if onlyAllowLeader {
 		leaderID := s.GetLeader().GetMemberId()
 		if leaderID != header.GetSenderId() {
-			return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
+			return status.Errorf(codes.FailedPrecondition, "%s, need %d but got %d", errs.MismatchLeaderErr, leaderID, header.GetSenderId())
 		}
 	}
 	return nil
