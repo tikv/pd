@@ -373,10 +373,9 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 
 	cctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetMembersRequest{Header: c.requestHeader(c.GetLeaderAddr())}
-	client := c.getClient()
-	resp, err := client.GetMembers(cctx, req)
+	cli := c.getClient()
+	resp, err := cli.GetMembers(cctx, req)
 	cancel()
-
 	if err != nil {
 		cmdFailDurationGetAllMembers.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
@@ -528,23 +527,25 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				stream, cancel = nil, nil
 				err = status.New(codes.Unavailable, "unavailable").Err()
 			})
-			rpcErr, ok := status.FromError(err)
-			// encounter the network error
-			if ok && isNetworkError(rpcErr.Code()) {
-				followerClient, addr := c.followerClient()
-				if followerClient != nil {
-					log.Info("fall back to use follower to redirect tso stream", zap.String("addr", addr))
-					// create the follower stream
-					cctx, cancel = context.WithCancel(dispatcherCtx)
-					stream, err = c.createTsoStream(cctx, cancel, followerClient)
-					if err == nil {
-						streamCh = make(chan struct {
-							cancel context.CancelFunc
-							stream pdpb.PD_TsoClient
-						})
-						changedCh = make(chan bool)
-						// the goroutine is used to check the network and change back to the original stream
-						go c.checkAllocator(dispatcherCtx, cancel, dc, url, streamCh, changedCh)
+			if c.enableRedirection {
+				rpcErr, ok := status.FromError(err)
+				// encounter the network error
+				if ok && isNetworkError(rpcErr.Code()) {
+					followerClient, addr := c.followerClient()
+					if followerClient != nil {
+						log.Info("fall back to use follower to redirect tso stream", zap.String("addr", addr))
+						// create the follower stream
+						cctx, cancel = context.WithCancel(dispatcherCtx)
+						stream, err = c.createTsoStream(cctx, cancel, followerClient)
+						if err == nil {
+							streamCh = make(chan struct {
+								cancel context.CancelFunc
+								stream pdpb.PD_TsoClient
+							})
+							changedCh = make(chan bool)
+							// the goroutine is used to check the network and change back to the original stream
+							go c.checkAllocator(dispatcherCtx, cancel, dc, url, streamCh, changedCh)
+						}
 					}
 				}
 			}
@@ -779,10 +780,12 @@ func (c *client) followerClient() (pdpb.PDClient, string) {
 }
 
 func (c *client) getClient() pdpb.PDClient {
-	followerClient, addr := c.followerClient()
-	if followerClient != nil && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
-		log.Info("use follower client", zap.String("addr", addr))
-		return followerClient
+	if c.enableRedirection {
+		followerClient, addr := c.followerClient()
+		if followerClient != nil && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
+			log.Info("use follower client", zap.String("addr", addr))
+			return followerClient
+		}
 	}
 	return c.leaderClient()
 }
@@ -903,8 +906,8 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 		Header:    c.requestHeader(c.GetLeaderAddr()),
 		RegionKey: key,
 	}
-	client := c.getClient()
-	resp, err := client.GetRegion(cctx, req)
+	cli := c.getClient()
+	resp, err := cli.GetRegion(cctx, req)
 	cancel()
 
 	if err != nil {
@@ -970,8 +973,8 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 		Header:    c.requestHeader(c.GetLeaderAddr()),
 		RegionKey: key,
 	}
-	client := c.getClient()
-	resp, err := client.GetPrevRegion(cctx, req)
+	cli := c.getClient()
+	resp, err := cli.GetPrevRegion(cctx, req)
 	cancel()
 
 	if err != nil {

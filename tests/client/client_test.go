@@ -80,14 +80,7 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
+	endpoints := s.runServer(c, cluster)
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
@@ -138,7 +131,8 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	cli := s.setupCli(c, cluster)
+	endpoints := s.runServer(c, cluster)
+	cli := s.setupCli(c, endpoints, false)
 
 	var lastTS uint64
 	testutil.WaitUntil(c, func(c *C) bool {
@@ -260,14 +254,7 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
+	endpoints := s.runServer(c, cluster)
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
@@ -338,14 +325,7 @@ func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
+	endpoints := s.runServer(c, cluster)
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithCustomTimeoutOption(1*time.Second))
 	c.Assert(err, IsNil)
 
@@ -363,7 +343,8 @@ func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	cli := s.setupCli(c, cluster)
+	endpoints := s.runServer(c, cluster)
+	cli := s.setupCli(c, endpoints, true)
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"), IsNil)
 	time.Sleep(200 * time.Millisecond)
@@ -384,7 +365,8 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient1(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	cli := s.setupCli(c, cluster)
+	endpoints := s.runServer(c, cluster)
+	cli := s.setupCli(c, endpoints, true)
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
 	var lastTS uint64
@@ -410,7 +392,8 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient2(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	cli := s.setupCli(c, cluster)
+	endpoints := s.runServer(c, cluster)
+	cli := s.setupCli(c, endpoints, true)
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
 	var lastTS uint64
@@ -447,7 +430,7 @@ func checkTS(c *C, cli pd.Client, lastTS uint64) uint64 {
 	return lastTS
 }
 
-func (s *clientTestSuite) setupCli(c *C, cluster *tests.TestCluster) pd.Client {
+func (s *clientTestSuite) runServer(c *C, cluster *tests.TestCluster) []string {
 	err := cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
@@ -458,7 +441,11 @@ func (s *clientTestSuite) setupCli(c *C, cluster *tests.TestCluster) pd.Client {
 	for _, s := range cluster.GetServers() {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	return endpoints
+}
+
+func (s *clientTestSuite) setupCli(c *C, endpoints []string, enableRedirection bool) pd.Client {
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithRedirectionOption(enableRedirection))
 	c.Assert(err, IsNil)
 	return cli
 }

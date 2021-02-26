@@ -53,9 +53,10 @@ type baseClient struct {
 
 	security SecurityOption
 
-	gRPCDialOptions []grpc.DialOption
-	timeout         time.Duration
-	maxRetryTimes   int
+	gRPCDialOptions   []grpc.DialOption
+	timeout           time.Duration
+	maxRetryTimes     int
+	enableRedirection bool
 }
 
 // SecurityOption records options about tls
@@ -79,6 +80,13 @@ func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
 func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
 	return func(c *baseClient) {
 		c.timeout = timeout
+	}
+}
+
+// WithRedirectionOption configures the client with redirection option.
+func WithRedirectionOption(enableRedirection bool) ClientOption {
+	return func(c *baseClient) {
+		c.enableRedirection = enableRedirection
 	}
 }
 
