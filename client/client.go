@@ -642,7 +642,12 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 	}
 	count := int64(len(requests))
 	start := time.Now()
-	addr, _ := c.getAllocatorLeaderAddrByDCLocation(dcLocation)
+	addr, exist := c.getAllocatorLeaderAddrByDCLocation(dcLocation)
+	if !exist {
+		err := errors.Errorf("allocator leader %s of %s is no longer existed", addr, dcLocation)
+		c.finishTSORequest(requests, 0, 0, 0, err)
+		return err
+	}
 	req := &pdpb.TsoRequest{
 		Header:     c.requestHeader(addr),
 		Count:      uint32(count),
