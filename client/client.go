@@ -148,6 +148,12 @@ type tsoRequest struct {
 	dcLocation string
 }
 
+type tsoDispatcher struct {
+	dispatcherCtx    context.Context
+	dispatcherCancel context.CancelFunc
+	tsoRequestCh     chan *tsoRequest
+}
+
 type lastTSO struct {
 	physical int64
 	logical  int64
@@ -201,14 +207,46 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		checkTSDeadlineCh: make(chan struct{}),
 	}
 
-	c.createTSODispatcher(globalDCLocation)
-	dispatcher, _ := c.tsoDispatcher.Load(globalDCLocation)
-	go c.handleDispatcher(c.ctx, globalDCLocation, dispatcher.(chan *tsoRequest))
+	c.updateTSODispatcher()
 	c.wg.Add(2)
 	go c.tsLoop()
 	go c.tsCancelLoop()
 
 	return c, nil
+}
+
+func (c *client) updateTSODispatcher() {
+	// Set up the new TSO dispatcher
+	c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
+		dcLocation := dcLocationKey.(string)
+		if !c.checkTSODispatcher(dcLocation) {
+			log.Info("[pd] create tso dispatcher", zap.String("dc-location", dcLocation))
+			c.createTSODispatcher(dcLocation)
+			dispatcher, _ := c.tsoDispatcher.Load(dcLocation)
+			dispatcherCtx := dispatcher.(*tsoDispatcher).dispatcherCtx
+			tsoRequestCh := dispatcher.(*tsoDispatcher).tsoRequestCh
+			// Each goroutine is responsible for handling the tso stream request for its dc-location.
+			// The only case that will make the dispatcher goroutine exit
+			// is that the loopCtx is done, otherwise there is no circumstance
+			// this goroutine should exit.
+			go c.handleDispatcher(dispatcherCtx, dcLocation, tsoRequestCh)
+		}
+		return true
+	})
+	// Clean up the unused TSO dispatcher
+	c.tsoDispatcher.Range(func(dcLocationKey, _ interface{}) bool {
+		dcLocation := dcLocationKey.(string)
+		// Skip the Global TSO Allocator
+		if dcLocation == globalDCLocation {
+			return true
+		}
+		if dispatcher, exist := c.allocators.Load(dcLocation); !exist {
+			log.Info("[pd] delete unused tso dispatcher", zap.String("dc-location", dcLocation))
+			dispatcher.(*tsoDispatcher).dispatcherCancel()
+			c.tsoDispatcher.Delete(dcLocation)
+		}
+		return true
+	})
 }
 
 type deadline struct {
@@ -311,22 +349,10 @@ func (c *client) tsLoop() {
 	ticker := time.NewTicker(tsLoopDCCheckInterval)
 	defer ticker.Stop()
 	for {
-		c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
-			dcLocation := dcLocationKey.(string)
-			if !c.checkTSODispatcher(dcLocation) {
-				c.createTSODispatcher(dcLocation)
-				dispatcher, _ := c.tsoDispatcher.Load(dcLocation)
-				// Each goroutine is responsible for handling the tso stream request for its dc-location.
-				// The only case that will make the dispatcher goroutine exit
-				// is that the loopCtx is done, otherwise there is no circumstance
-				// this goroutine should exit.
-				go c.handleDispatcher(loopCtx, dcLocation, dispatcher.(chan *tsoRequest))
-			}
-			return true
-		})
+		c.updateTSODispatcher()
 		select {
 		case <-ticker.C:
-			continue
+		case <-c.checkTSODispatcherCh:
 		case <-loopCtx.Done():
 			return
 		}
@@ -334,27 +360,35 @@ func (c *client) tsLoop() {
 }
 
 func (c *client) checkTSODispatcher(dcLocation string) bool {
-	tsoChan, ok := c.tsoDispatcher.Load(dcLocation)
-	if !ok || tsoChan == nil {
+	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
+	if !ok || dispatcher == nil {
 		return false
 	}
 	return true
 }
 
 func (c *client) createTSODispatcher(dcLocation string) {
-	c.tsoDispatcher.Store(dcLocation, make(chan *tsoRequest, maxMergeTSORequests))
+	dispatcherCtx, dispatcherCancel := context.WithCancel(c.ctx)
+	dispatcher := &tsoDispatcher{
+		dispatcherCtx:    dispatcherCtx,
+		dispatcherCancel: dispatcherCancel,
+		tsoRequestCh:     make(chan *tsoRequest, maxMergeTSORequests),
+	}
+	c.tsoDispatcher.Store(dcLocation, dispatcher)
 }
 
-func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatcher chan *tsoRequest) {
+func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoDispatcher chan *tsoRequest) {
 	var (
-		err      error
-		ctx      context.Context
-		cancel   context.CancelFunc
-		stream   pdpb.PD_TsoClient
-		opts     []opentracing.StartSpanOption
-		requests = make([]*tsoRequest, maxMergeTSORequests+1)
+		err        error
+		ctx        context.Context
+		cancel     context.CancelFunc
+		stream     pdpb.PD_TsoClient
+		opts       []opentracing.StartSpanOption
+		requests   = make([]*tsoRequest, maxMergeTSORequests+1)
+		needUpdate = false
 	)
 	defer func() {
+		log.Info("[pd] exit tso dispatcher", zap.String("dc-location", dc))
 		if cancel != nil {
 			cancel()
 		}
@@ -363,14 +397,27 @@ func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatc
 		// If the tso stream for the corresponding dc-location has not been created yet or needs to be re-created,
 		// we will try to create the stream first.
 		if stream == nil {
-			ctx, cancel = context.WithCancel(loopCtx)
+			if needUpdate {
+				err = c.updateLeader()
+				if err != nil {
+					select {
+					case <-dispatcherCtx.Done():
+						return
+					default:
+					}
+					log.Error("[pd] failed updateLeader", errs.ZapError(err))
+					continue
+				}
+				needUpdate = false
+			}
+			ctx, cancel = context.WithCancel(dispatcherCtx)
 			done := make(chan struct{})
 			go c.checkStreamTimeout(ctx, cancel, done)
 			stream, err = pdpb.NewPDClient(c.getClientConnByDCLocation(dc)).Tso(ctx)
 			done <- struct{}{}
 			if err != nil {
 				select {
-				case <-loopCtx.Done():
+				case <-dispatcherCtx.Done():
 					return
 				default:
 				}
@@ -380,7 +427,7 @@ func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatc
 				c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
 				select {
 				case <-time.After(time.Second):
-				case <-loopCtx.Done():
+				case <-dispatcherCtx.Done():
 					return
 				}
 				continue
@@ -407,19 +454,19 @@ func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatc
 			}
 			select {
 			case tsDeadlineCh.(chan deadline) <- dl:
-			case <-loopCtx.Done():
+			case <-dispatcherCtx.Done():
 				return
 			}
 			opts = extractSpanReference(requests[:pendingPlus1], opts[:0])
 			err = c.processTSORequests(stream, dc, requests[:pendingPlus1], opts)
 			close(done)
-		case <-loopCtx.Done():
+		case <-dispatcherCtx.Done():
 			return
 		}
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if err != nil {
 			select {
-			case <-loopCtx.Done():
+			case <-dispatcherCtx.Done():
 				return
 			default:
 			}
@@ -427,6 +474,9 @@ func (c *client) handleDispatcher(loopCtx context.Context, dc string, tsoDispatc
 			c.ScheduleCheckLeader()
 			cancel()
 			stream = nil
+			if IsLeaderChange(err) {
+				needUpdate = true
+			}
 		}
 	}
 }
@@ -539,7 +589,8 @@ func (c *client) Close() {
 
 	c.tsoDispatcher.Range(func(_, dispatcher interface{}) bool {
 		if dispatcher != nil {
-			c.revokeTSORequest(errors.WithStack(errClosing), dispatcher.(chan *tsoRequest))
+			c.revokeTSORequest(errors.WithStack(errClosing), dispatcher.(*tsoDispatcher).tsoRequestCh)
+			dispatcher.(*tsoDispatcher).dispatcherCancel()
 		}
 		return true
 	})
@@ -584,40 +635,26 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req.clientCtx = c.ctx
 	req.start = time.Now()
 	req.dcLocation = dcLocation
-	c.waitForDispatcher()
-	return c.dispatchRequest(dcLocation, req)
-}
-
-func (c *client) waitForDispatcher() {
-	for {
-		if c.getDispatcherSize() != 0 {
-			break
-		}
-		log.Info("[pd] tso dispatcher is not ready, wait for a while")
+	if err := c.dispatchRequest(dcLocation, req); err != nil {
+		// Wait for a while and try again
 		time.Sleep(50 * time.Millisecond)
+		if err = c.dispatchRequest(dcLocation, req); err != nil {
+			req.done <- err
+		}
 	}
+	return req
 }
 
-func (c *client) getDispatcherSize() int {
-	i := 0
-	c.tsoDispatcher.Range(func(_, _ interface{}) bool {
-		i++
-		return true
-	})
-	return i
-}
-
-func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) *tsoRequest {
+func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) error {
 	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
 		log.Error("[pd] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
-		request.done <- err
 		c.ScheduleCheckLeader()
-		return request
+		return err
 	}
-	dispatcher.(chan *tsoRequest) <- request
-	return request
+	dispatcher.(*tsoDispatcher).tsoRequestCh <- request
+	return nil
 }
 
 // TSFuture is a future which promises to return a TSO.
@@ -1065,4 +1102,10 @@ func addrsToUrls(addrs []string) []string {
 		}
 	}
 	return urls
+}
+
+// IsLeaderChange will determine whether there is a leader change.
+func IsLeaderChange(err error) bool {
+	errMsg := err.Error()
+	return strings.Contains(errMsg, errs.NotLeaderErr) || strings.Contains(errMsg, errs.MismatchLeaderErr)
 }

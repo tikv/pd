@@ -273,6 +273,13 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
@@ -288,16 +295,6 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cluster.CheckClusterDCLocation()
 	cluster.WaitAllLeaders(c, dcLocationConfig)
 
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
-	c.Assert(err, IsNil)
-
-	// Make sure we have all leaders ready before the test goes on
-	leaderName := cluster.WaitLeader()
-	s.waitLeader(c, cli.(client), cluster.GetServer(leaderName).GetConfig().ClientUrls)
 	wg := sync.WaitGroup{}
 	for _, dcLocation := range dcLocationConfig {
 		wg.Add(tsoRequestConcurrentNumber)
@@ -331,6 +328,18 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(p, Equals, int64(0))
 	c.Assert(l, Equals, int64(0))
 	c.Assert(err, NotNil)
+
+	// assert global tso after resign leader
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateLeader", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/client/skipUpdateLeader")
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, NotNil)
+	c.Assert(pd.IsLeaderChange(err), Equals, true)
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, IsNil)
 }
 
 func (s *clientTestSuite) TestCustomTimeout(c *C) {

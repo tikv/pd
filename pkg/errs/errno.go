@@ -15,6 +15,13 @@ package errs
 
 import "github.com/pingcap/errors"
 
+const (
+	// NotLeaderErr indicates the the non-leader member received the requests which should be received by leader.
+	NotLeaderErr = "is not leader"
+	// MismatchLeaderErr indicates the the non-leader member received the requests which should be received by leader.
+	MismatchLeaderErr = "mismatch leader id"
+)
+
 // common error in multiple packages
 var (
 	ErrGetSourceStore      = errors.Normalize("failed to get the source store", errors.RFCCodeText("PD:common:ErrGetSourceStore"))
