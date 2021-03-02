@@ -50,6 +50,7 @@ func newSelectedStores(ctx context.Context) *selectedStores {
 	}
 }
 
+// Put ...
 func (s *selectedStores) Put(id uint64, group string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -63,6 +64,7 @@ func (s *selectedStores) Put(id uint64, group string) bool {
 	return true
 }
 
+// Get ...
 func (s *selectedStores) Get(id uint64, group string) uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -77,6 +79,7 @@ func (s *selectedStores) Get(id uint64, group string) uint64 {
 	return count
 }
 
+// GetGroupDistribution ...
 func (s *selectedStores) GetGroupDistribution(group string) (map[uint64]uint64, bool) {
 	return s.getGroupDistribution(group)
 }
@@ -284,11 +287,11 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 
 func (r *RegionScatterer) selectStores(group string, peers []*metapb.Peer, context engineContext) map[uint64]*metapb.Peer {
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
+		&filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true, ScatterRegion: true},
 	}
 	filters = append(filters, context.filters...)
 	stores := r.cluster.GetStores()
-	l := make([]StoreCount, 0)
+	l := make([]storeCount, 0)
 	candidates := make([]uint64, 0)
 	for _, store := range stores {
 		if filter.Target(r.cluster.GetOpts(), store, filters) && !store.IsBusy() {
@@ -303,7 +306,7 @@ func (r *RegionScatterer) selectStores(group string, peers []*metapb.Peer, conte
 		return targetPeers
 	}
 	for _, storeID := range candidates {
-		l = append(l, StoreCount{
+		l = append(l, storeCount{
 			count:   context.selectedPeer.Get(storeID, group),
 			storeID: storeID,
 		})
@@ -319,23 +322,6 @@ func (r *RegionScatterer) selectStores(group string, peers []*metapb.Peer, conte
 		targetPeers[storeID] = newPeer
 	}
 	return targetPeers
-}
-
-type StoreCount struct {
-	count   uint64
-	storeID uint64
-}
-
-type StoreCountSlice []StoreCount
-
-func (a StoreCountSlice) Len() int {
-	return len(a)
-}
-func (a StoreCountSlice) Swap(i, j int) {
-	a[i], a[j] = a[j], a[i]
-}
-func (a StoreCountSlice) Less(i, j int) bool {
-	return a[i].count < a[j].count
 }
 
 // selectAvailableLeaderStores select the target leader store from the candidates. The candidates would be collected by
@@ -354,4 +340,27 @@ func (r *RegionScatterer) selectAvailableLeaderStores(group string, peers map[ui
 		context.selectedLeader.Put(id, group)
 	}
 	return id
+}
+
+type storeCount struct {
+	count   uint64
+	storeID uint64
+}
+
+// StoreCountSlice ...
+type StoreCountSlice []storeCount
+
+// Len implement Sorter
+func (a StoreCountSlice) Len() int {
+	return len(a)
+}
+
+// Swap implement Sorter
+func (a StoreCountSlice) Swap(i, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+
+// Less implement Sorter
+func (a StoreCountSlice) Less(i, j int) bool {
+	return a[i].count < a[j].count
 }
