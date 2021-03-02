@@ -64,7 +64,12 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
+	dclocationDistribution, err := svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
 	for _, m := range members.GetMembers() {
+		m.DcLocation = ""
 		binaryVersion, e := svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
@@ -91,6 +96,19 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 			continue
 		}
 		m.GitHash = gitHash
+		found := false
+		for dcLocation, serverIDs := range dclocationDistribution {
+			for _, serverID := range serverIDs {
+				if serverID == m.MemberId {
+					m.DcLocation = dcLocation
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
 	}
 	return members, nil
 }

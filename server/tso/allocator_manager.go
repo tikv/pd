@@ -185,7 +185,7 @@ func (am *AllocatorManager) SetLocalTSOConfig(dcLocation string) error {
 }
 
 func (am *AllocatorManager) checkDCLocationUpperLimit(dcLocation string) error {
-	clusterDCLocations, err := am.getClusterDCLocationsFromEtcd()
+	clusterDCLocations, err := am.GetClusterDCLocationsFromEtcd()
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,8 @@ func (am *AllocatorManager) checkDCLocationUpperLimit(dcLocation string) error {
 	return nil
 }
 
-func (am *AllocatorManager) getClusterDCLocationsFromEtcd() (clusterDCLocations map[string][]uint64, err error) {
+// GetClusterDCLocationsFromEtcd fetches dcLocation topology from etcd
+func (am *AllocatorManager) GetClusterDCLocationsFromEtcd() (clusterDCLocations map[string][]uint64, err error) {
 	resp, err := etcdutil.EtcdKVGet(
 		am.member.Client(),
 		am.member.GetDCLocationPathPrefix(),
@@ -283,6 +284,7 @@ func CalSuffixBits(maxSuffix int32) int {
 }
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
+// One TSO Allocator should only be set once, and may be initialized and reset multiple times depending on the election.
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
@@ -620,7 +622,7 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 	if am.member.GetLeader() == nil {
 		return
 	}
-	newClusterDCLocations, err := am.getClusterDCLocationsFromEtcd()
+	newClusterDCLocations, err := am.GetClusterDCLocationsFromEtcd()
 	if err != nil {
 		log.Error("get cluster dc-locations from etcd failed", errs.ZapError(err))
 		return

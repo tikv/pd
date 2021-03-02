@@ -431,6 +431,10 @@ func (s *testHotWriteRegionSchedulerSuite) TestLeader(c *C) {
 	tc.UpdateStorageWrittenKeys(2, 10*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenKeys(3, 10*MB*statistics.StoreHeartBeatReportInterval)
 
+	// store1 has 2 peer as leader
+	// store2 has 3 peer as leader
+	// store3 has 2 peer as leader
+	// If transfer leader from store2 to store1 or store3, it will keep on looping, which introduces a lot of unnecessary scheduling
 	addRegionInfo(tc, write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 0.5 * MB, 1 * MB},
 		{2, []uint64{1, 2, 3}, 0.5 * MB, 1 * MB},
@@ -443,9 +447,21 @@ func (s *testHotWriteRegionSchedulerSuite) TestLeader(c *C) {
 
 	for i := 0; i < 100; i++ {
 		hb.(*hotScheduler).clearPendingInfluence()
+		c.Assert(hb.Schedule(tc), HasLen, 0)
+	}
+
+	addRegionInfo(tc, write, []testRegionInfo{
+		{8, []uint64{2, 1, 3}, 0.5 * MB, 1 * MB},
+	})
+
+	// store1 has 2 peer as leader
+	// store2 has 4 peer as leader
+	// store3 has 2 peer as leader
+	// We expect to transfer leader from store2 to store1 or store3
+	for i := 0; i < 100; i++ {
+		hb.(*hotScheduler).clearPendingInfluence()
 		op := hb.Schedule(tc)[0]
 		testutil.CheckTransferLeaderFrom(c, op, operator.OpHotRegion, 2)
-
 		c.Assert(hb.Schedule(tc), HasLen, 0)
 	}
 }

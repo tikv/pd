@@ -15,6 +15,7 @@ package tso
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -97,6 +98,9 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
+	if !lta.leadership.Check() {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of %s allocator", errs.NotLeaderErr, lta.dcLocation))
+	}
 	return lta.timestampOracle.getTS(lta.leadership, count, lta.allocatorManager.GetSuffixBits())
 }
 

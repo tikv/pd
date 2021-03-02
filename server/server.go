@@ -359,6 +359,8 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 		s.GetTLSConfig())
+	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
+	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
 	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
 		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
 			return err
@@ -1204,18 +1206,17 @@ func (s *Server) campaignLeader() {
 	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
-	log.Info("setting up the global TSO allocator")
-	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
-	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
 	alllocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
 		return
 	}
+	log.Info("initializing the global TSO allocator")
 	if err := alllocator.Initialize(0); err != nil {
 		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 		return
 	}
+	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
 	// Check the cluster dc-location after the PD leader is elected
 	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 
