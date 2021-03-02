@@ -75,6 +75,7 @@ func NewGlobalTSOAllocator(
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,
+			dcLocation:             GlobalDCLocation,
 		},
 	}
 	return gta

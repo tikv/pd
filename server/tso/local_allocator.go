@@ -62,6 +62,7 @@ func NewLocalTSOAllocator(
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,
+			dcLocation:             dcLocation,
 		},
 		rootPath:   leadership.GetLeaderKey(),
 		dcLocation: dcLocation,

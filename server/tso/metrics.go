@@ -22,7 +22,7 @@ var (
 			Subsystem: "tso",
 			Name:      "events",
 			Help:      "Counter of tso events",
-		}, []string{"type"})
+		}, []string{"type", "dc"})
 
 	tsoGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -30,7 +30,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "tso",
 			Help:      "Record of tso metadata.",
-		}, []string{"type"})
+		}, []string{"type", "dc"})
 )
 
 func init() {
