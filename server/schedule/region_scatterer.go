@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"go.uber.org/zap"
 )
 
 const regionScatterName = "region-scatter"
@@ -51,24 +51,23 @@ func newSelectedStores(ctx context.Context) *selectedStores {
 }
 
 // Put ...
-func (s *selectedStores) Put(id uint64, group string) bool {
+func (s *selectedStores) Put(id uint64, group string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	distribution, ok := s.getGroupDistribution(group)
+	distribution, ok := s.getDistributionByGroup(group)
 	if !ok {
 		distribution = map[uint64]uint64{}
 		distribution[id] = 0
 	}
 	distribution[id] = distribution[id] + 1
 	s.groupDistribution.Put(group, distribution)
-	return true
 }
 
 // Get ...
 func (s *selectedStores) Get(id uint64, group string) uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	distribution, ok := s.getGroupDistribution(group)
+	distribution, ok := s.getDistributionByGroup(group)
 	if !ok {
 		return 0
 	}
@@ -81,10 +80,12 @@ func (s *selectedStores) Get(id uint64, group string) uint64 {
 
 // GetGroupDistribution ...
 func (s *selectedStores) GetGroupDistribution(group string) (map[uint64]uint64, bool) {
-	return s.getGroupDistribution(group)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.getDistributionByGroup(group)
 }
 
-func (s *selectedStores) getGroupDistribution(group string) (map[uint64]uint64, bool) {
+func (s *selectedStores) getDistributionByGroup(group string) (map[uint64]uint64, bool) {
 	if result, ok := s.groupDistribution.Get(group); ok {
 		return result.(map[uint64]uint64), true
 	}
@@ -240,24 +241,30 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*opera
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *operator.Operator {
 	ordinaryFilter := filter.NewOrdinaryEngineFilter(r.name)
-	var ordinaryPeers []*metapb.Peer
-	specialPeers := make(map[string][]*metapb.Peer)
+	ordinaryPeers := make(map[uint64]*metapb.Peer)
+	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if ordinaryFilter.Target(r.cluster.GetOpts(), store) {
-			ordinaryPeers = append(ordinaryPeers, peer)
+			ordinaryPeers[peer.GetId()] = peer
 		} else {
 			engine := store.GetLabelValue(filter.EngineKey)
-			specialPeers[engine] = append(specialPeers[engine], peer)
+			if _, ok := specialPeers[engine]; !ok {
+				specialPeers[engine] = make(map[uint64]*metapb.Peer)
+			}
+			specialPeers[engine][peer.GetId()] = peer
 		}
 	}
 
 	targetPeers := make(map[uint64]*metapb.Peer)
-	scatterWithSameEngine := func(peers []*metapb.Peer, context engineContext) {
-		targetPeers = r.selectStores(group, peers, context)
-		for storeID := range targetPeers {
-			context.selectedPeer.Put(storeID, group)
+	selectedStores := make(map[uint64]struct{})
+	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) {
+		for _, peer := range peers {
+			candidates := r.selectCandidates(region, peer.GetStoreId(), selectedStores, context)
+			newPeer := r.selectStore(group, peer, candidates, context)
+			targetPeers[newPeer.GetStoreId()] = newPeer
+			selectedStores[newPeer.GetStoreId()] = struct{}{}
 		}
 	}
 
@@ -278,50 +285,62 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 
 	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader)
 	if err != nil {
-		log.Debug("scatterRegion fail to create scatter region operator", errs.ZapError(err))
+		for _, peer := range region.GetPeers() {
+			targetPeers[peer.GetStoreId()] = peer
+		}
+		r.Put(targetPeers, region.GetLeader().GetStoreId(), group)
+		log.Debug("fail to create scatter region operator", errs.ZapError(err))
 		return nil
 	}
+	r.Put(targetPeers, targetLeader, group)
 	op.SetPriorityLevel(core.HighPriority)
 	return op
 }
 
-func (r *RegionScatterer) selectStores(group string, peers []*metapb.Peer, context engineContext) map[uint64]*metapb.Peer {
+func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreID uint64, selectedStores map[uint64]struct{}, context engineContext) []uint64 {
+	sourceStore := r.cluster.GetStore(sourceStoreID)
+	if sourceStore == nil {
+		log.Error("failed to get the store", zap.Uint64("store-id", sourceStoreID), errs.ZapError(errs.ErrGetSourceStore))
+		return nil
+	}
 	filters := []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true, ScatterRegion: true},
+		filter.NewExcludedFilter("scatter-region", nil, selectedStores),
 	}
+	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster, region, sourceStore)
 	filters = append(filters, context.filters...)
+	filters = append(filters, scoreGuard)
 	stores := r.cluster.GetStores()
-	l := make([]storeCount, 0)
 	candidates := make([]uint64, 0)
 	for _, store := range stores {
 		if filter.Target(r.cluster.GetOpts(), store, filters) && !store.IsBusy() {
 			candidates = append(candidates, store.GetID())
 		}
 	}
-	targetPeers := make(map[uint64]*metapb.Peer)
-	if len(candidates) < len(peers) {
-		for _, peer := range peers {
-			targetPeers[peer.GetStoreId()] = peer
-		}
-		return targetPeers
+	return candidates
+}
+
+func (r *RegionScatterer) selectStore(group string, peer *metapb.Peer, candidates []uint64, context engineContext) *metapb.Peer {
+	if len(candidates) < 1 {
+		return peer
 	}
+	var newPeer *metapb.Peer
+	minCount := uint64(math.MaxUint64)
 	for _, storeID := range candidates {
-		l = append(l, storeCount{
-			count:   context.selectedPeer.Get(storeID, group),
-			storeID: storeID,
-		})
-	}
-	sort.Sort(StoreCountSlice(l))
-	for i := 0; i < len(peers); i++ {
-		storeID := l[i].storeID
-		oldPeer := peers[i]
-		newPeer := &metapb.Peer{
-			StoreId: storeID,
-			Role:    oldPeer.GetRole(),
+		count := context.selectedPeer.Get(storeID, group)
+		if count < minCount {
+			minCount = count
+			newPeer = &metapb.Peer{
+				StoreId: storeID,
+				Role:    peer.GetRole(),
+				//Id:      peer.GetId(),
+			}
 		}
-		targetPeers[storeID] = newPeer
 	}
-	return targetPeers
+	if newPeer == nil {
+		return peer
+	}
+	return newPeer
 }
 
 // selectAvailableLeaderStores select the target leader store from the candidates. The candidates would be collected by
@@ -330,37 +349,31 @@ func (r *RegionScatterer) selectAvailableLeaderStores(group string, peers map[ui
 	minStoreGroupLeader := uint64(math.MaxUint64)
 	id := uint64(0)
 	for storeID := range peers {
+		if id == 0 {
+			id = storeID
+		}
 		storeGroupLeaderCount := context.selectedLeader.Get(storeID, group)
 		if minStoreGroupLeader > storeGroupLeaderCount {
 			minStoreGroupLeader = storeGroupLeaderCount
 			id = storeID
 		}
 	}
-	if id != 0 {
-		context.selectedLeader.Put(id, group)
-	}
 	return id
 }
 
-type storeCount struct {
-	count   uint64
-	storeID uint64
-}
-
-// StoreCountSlice ...
-type StoreCountSlice []storeCount
-
-// Len implement Sorter
-func (a StoreCountSlice) Len() int {
-	return len(a)
-}
-
-// Swap implement Sorter
-func (a StoreCountSlice) Swap(i, j int) {
-	a[i], a[j] = a[j], a[i]
-}
-
-// Less implement Sorter
-func (a StoreCountSlice) Less(i, j int) bool {
-	return a[i].count < a[j].count
+// Put put the final distribution in the context no matter the operator was created
+func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint64, group string) {
+	ordinaryFilter := filter.NewOrdinaryEngineFilter(r.name)
+	// Group peers by the engine of their stores
+	for _, peer := range peers {
+		storeID := peer.GetStoreId()
+		store := r.cluster.GetStore(storeID)
+		if ordinaryFilter.Target(r.cluster.GetOpts(), store) {
+			r.ordinaryEngine.selectedPeer.Put(storeID, group)
+		} else {
+			engine := store.GetLabelValue(filter.EngineKey)
+			r.specialEngines[engine].selectedPeer.Put(storeID, group)
+		}
+	}
+	r.ordinaryEngine.selectedLeader.Put(leaderStoreID, group)
 }
