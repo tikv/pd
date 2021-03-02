@@ -17,7 +17,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
-	"go.uber.org/zap"
 )
 
 const regionScatterName = "region-scatter"
@@ -41,80 +40,32 @@ var gcInterval = time.Minute
 var gcTTL = time.Minute * 3
 
 type selectedStores struct {
-	mu sync.Mutex
-	// If checkExist is true, after each putting operation, an entry with the key constructed by group and storeID would be put
-	// into "stores" map. And the entry with the same key (storeID, group) couldn't be put before "stores" being reset
-	checkExist bool
-
-	stores            *cache.TTLString // value type: map[uint64]struct{}, group -> StoreID -> struct{}
+	mu                sync.RWMutex
 	groupDistribution *cache.TTLString // value type: map[uint64]uint64, group -> StoreID -> count
 }
 
-func newSelectedStores(ctx context.Context, checkExist bool) *selectedStores {
+func newSelectedStores(ctx context.Context) *selectedStores {
 	return &selectedStores{
-		checkExist:        checkExist,
-		stores:            cache.NewStringTTL(ctx, gcInterval, gcTTL),
 		groupDistribution: cache.NewStringTTL(ctx, gcInterval, gcTTL),
 	}
 }
 
-func (s *selectedStores) getStore(group string) (map[uint64]struct{}, bool) {
-	if result, ok := s.stores.Get(group); ok {
-		return result.(map[uint64]struct{}), true
-	}
-	return nil, false
-}
-
-func (s *selectedStores) getGroupDistribution(group string) (map[uint64]uint64, bool) {
-	if result, ok := s.groupDistribution.Get(group); ok {
-		return result.(map[uint64]uint64), true
-	}
-	return nil, false
-}
-
-func (s *selectedStores) getStoreOrDefault(group string) map[uint64]struct{} {
-	if result, ok := s.getStore(group); ok {
-		return result
-	}
-	return make(map[uint64]struct{})
-}
-
-func (s *selectedStores) getGroupDistributionOrDefault(group string) map[uint64]uint64 {
-	if result, ok := s.getGroupDistribution(group); ok {
-		return result
-	}
-	return make(map[uint64]uint64)
-}
-
-func (s *selectedStores) put(id uint64, group string) bool {
+func (s *selectedStores) Put(id uint64, group string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.checkExist {
-		placed := s.getStoreOrDefault(group)
-		if _, ok := placed[id]; ok {
-			return false
-		}
-		placed[id] = struct{}{}
-		s.stores.Put(group, placed)
+	distribution, ok := s.getGroupDistribution(group)
+	if !ok {
+		distribution = map[uint64]uint64{}
+		distribution[id] = 0
 	}
-	distribution := s.getGroupDistributionOrDefault(group)
 	distribution[id] = distribution[id] + 1
 	s.groupDistribution.Put(group, distribution)
 	return true
 }
 
-func (s *selectedStores) reset() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.checkExist {
-		return
-	}
-	s.stores.Clear()
-}
-
-func (s *selectedStores) get(id uint64, group string) uint64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *selectedStores) Get(id uint64, group string) uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	distribution, ok := s.getGroupDistribution(group)
 	if !ok {
 		return 0
@@ -126,19 +77,15 @@ func (s *selectedStores) get(id uint64, group string) uint64 {
 	return count
 }
 
-func (s *selectedStores) newFilters(scope, group string) []filter.Filter {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.checkExist {
-		return nil
+func (s *selectedStores) GetGroupDistribution(group string) (map[uint64]uint64, bool) {
+	return s.getGroupDistribution(group)
+}
+
+func (s *selectedStores) getGroupDistribution(group string) (map[uint64]uint64, bool) {
+	if result, ok := s.groupDistribution.Get(group); ok {
+		return result.(map[uint64]uint64), true
 	}
-	cloned := make(map[uint64]struct{})
-	if groupPlaced, ok := s.getStore(group); ok {
-		for id := range groupPlaced {
-			cloned[id] = struct{}{}
-		}
-	}
-	return []filter.Filter{filter.NewExcludedFilter(scope, nil, cloned)}
+	return nil, false
 }
 
 // RegionScatterer scatters regions.
@@ -172,8 +119,8 @@ func newEngineContext(ctx context.Context, filters ...filter.Filter) engineConte
 	filters = append(filters, &filter.StoreStateFilter{ActionScope: regionScatterName})
 	return engineContext{
 		filters:        filters,
-		selectedPeer:   newSelectedStores(ctx, true),
-		selectedLeader: newSelectedStores(ctx, false),
+		selectedPeer:   newSelectedStores(ctx),
+		selectedLeader: newSelectedStores(ctx),
 	}
 }
 
@@ -304,28 +251,10 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	}
 
 	targetPeers := make(map[uint64]*metapb.Peer)
-
 	scatterWithSameEngine := func(peers []*metapb.Peer, context engineContext) {
-		stores := r.collectAvailableStores(group, region, context)
-		for _, peer := range peers {
-			if len(stores) == 0 {
-				context.selectedPeer.reset()
-				stores = r.collectAvailableStores(group, region, context)
-			}
-			if context.selectedPeer.put(peer.GetStoreId(), group) {
-				delete(stores, peer.GetStoreId())
-				targetPeers[peer.GetStoreId()] = peer
-				continue
-			}
-			newPeer := r.selectPeerToReplace(group, stores, region, peer, context)
-			if newPeer == nil {
-				targetPeers[peer.GetStoreId()] = peer
-				continue
-			}
-			// Remove it from stores and mark it as selected.
-			delete(stores, newPeer.GetStoreId())
-			context.selectedPeer.put(newPeer.GetStoreId(), group)
-			targetPeers[newPeer.GetStoreId()] = newPeer
+		targetPeers = r.selectStores(group, peers, context)
+		for storeID := range targetPeers {
+			context.selectedPeer.Put(storeID, group)
 		}
 	}
 
@@ -346,74 +275,67 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 
 	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader)
 	if err != nil {
-		log.Debug("fail to create scatter region operator", errs.ZapError(err))
+		log.Debug("scatterRegion fail to create scatter region operator", errs.ZapError(err))
 		return nil
 	}
 	op.SetPriorityLevel(core.HighPriority)
 	return op
 }
 
-func (r *RegionScatterer) selectPeerToReplace(group string, stores map[uint64]*core.StoreInfo, region *core.RegionInfo, oldPeer *metapb.Peer, context engineContext) *metapb.Peer {
-	// scoreGuard guarantees that the distinct score will not decrease.
-	storeID := oldPeer.GetStoreId()
-	sourceStore := r.cluster.GetStore(storeID)
-	if sourceStore == nil {
-		log.Error("failed to get the store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
-		return nil
-	}
-	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster, region, sourceStore)
-
-	candidates := make([]*core.StoreInfo, 0, len(stores))
-	for _, store := range stores {
-		if !scoreGuard.Target(r.cluster.GetOpts(), store) {
-			continue
-		}
-		candidates = append(candidates, store)
-	}
-
-	if len(candidates) == 0 {
-		return nil
-	}
-
-	minPeer := uint64(math.MaxUint64)
-	var selectedCandidateID uint64
-	for _, candidate := range candidates {
-		count := context.selectedPeer.get(candidate.GetID(), group)
-		if count < minPeer {
-			minPeer = count
-			selectedCandidateID = candidate.GetID()
-		}
-	}
-	if selectedCandidateID < 1 {
-		target := candidates[rand.Intn(len(candidates))]
-		return &metapb.Peer{
-			StoreId: target.GetID(),
-			Role:    oldPeer.GetRole(),
-		}
-	}
-
-	return &metapb.Peer{
-		StoreId: selectedCandidateID,
-		Role:    oldPeer.GetRole(),
-	}
-}
-
-func (r *RegionScatterer) collectAvailableStores(group string, region *core.RegionInfo, context engineContext) map[uint64]*core.StoreInfo {
+func (r *RegionScatterer) selectStores(group string, peers []*metapb.Peer, context engineContext) map[uint64]*metapb.Peer {
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
 		&filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
 	}
 	filters = append(filters, context.filters...)
-	filters = append(filters, context.selectedPeer.newFilters(r.name, group)...)
-
 	stores := r.cluster.GetStores()
-	targets := make(map[uint64]*core.StoreInfo, len(stores))
+	l := make([]StoreCount, 0)
+	candidates := make([]uint64, 0)
 	for _, store := range stores {
 		if filter.Target(r.cluster.GetOpts(), store, filters) && !store.IsBusy() {
-			targets[store.GetID()] = store
+			candidates = append(candidates, store.GetID())
 		}
 	}
-	return targets
+	targetPeers := make(map[uint64]*metapb.Peer)
+	if len(candidates) < len(peers) {
+		for _, peer := range peers {
+			targetPeers[peer.GetStoreId()] = peer
+		}
+		return targetPeers
+	}
+	for _, storeID := range candidates {
+		l = append(l, StoreCount{
+			count:   context.selectedPeer.Get(storeID, group),
+			storeID: storeID,
+		})
+	}
+	sort.Sort(StoreCountSlice(l))
+	for i := 0; i < len(peers); i++ {
+		storeID := l[i].storeID
+		oldPeer := peers[i]
+		newPeer := &metapb.Peer{
+			StoreId: storeID,
+			Role:    oldPeer.GetRole(),
+		}
+		targetPeers[storeID] = newPeer
+	}
+	return targetPeers
+}
+
+type StoreCount struct {
+	count   uint64
+	storeID uint64
+}
+
+type StoreCountSlice []StoreCount
+
+func (a StoreCountSlice) Len() int {
+	return len(a)
+}
+func (a StoreCountSlice) Swap(i, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+func (a StoreCountSlice) Less(i, j int) bool {
+	return a[i].count < a[j].count
 }
 
 // selectAvailableLeaderStores select the target leader store from the candidates. The candidates would be collected by
@@ -422,14 +344,14 @@ func (r *RegionScatterer) selectAvailableLeaderStores(group string, peers map[ui
 	minStoreGroupLeader := uint64(math.MaxUint64)
 	id := uint64(0)
 	for storeID := range peers {
-		storeGroupLeaderCount := context.selectedLeader.get(storeID, group)
+		storeGroupLeaderCount := context.selectedLeader.Get(storeID, group)
 		if minStoreGroupLeader > storeGroupLeaderCount {
 			minStoreGroupLeader = storeGroupLeaderCount
 			id = storeID
 		}
 	}
 	if id != 0 {
-		context.selectedLeader.put(id, group)
+		context.selectedLeader.Put(id, group)
 	}
 	return id
 }

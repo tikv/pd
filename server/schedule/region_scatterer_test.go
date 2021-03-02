@@ -390,7 +390,9 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 		scatterer.ScatterRegions(regions, failures, group, 3)
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
-		for _, count := range scatterer.ordinaryEngine.selectedLeader.getGroupDistributionOrDefault(group) {
+		groupDistribution, exist := scatterer.ordinaryEngine.selectedLeader.GetGroupDistribution(group)
+		c.Assert(exist, Equals, true)
+		for _, count := range groupDistribution {
 			if count > max {
 				max = count
 			}
@@ -420,14 +422,14 @@ func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
 	gcTTL = time.Second * 3
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stores := newSelectedStores(ctx, true)
-	stores.put(1, "testgroup")
-	_, ok := stores.getStore("testgroup")
+	stores := newSelectedStores(ctx)
+	stores.Put(1, "testgroup")
+	_, ok := stores.GetGroupDistribution("testgroup")
 	c.Assert(ok, Equals, true)
 	_, ok = stores.getGroupDistribution("testgroup")
 	c.Assert(ok, Equals, true)
 	time.Sleep(gcTTL)
-	_, ok = stores.getStore("testgroup")
+	_, ok = stores.GetGroupDistribution("testgroup")
 	c.Assert(ok, Equals, false)
 	_, ok = stores.getGroupDistribution("testgroup")
 	c.Assert(ok, Equals, false)
