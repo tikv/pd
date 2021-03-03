@@ -134,8 +134,9 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "delta(pd_tso_events{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"save\", dc=\"global\"}[1m]) > bool 0",
+          "expr": "pd_cluster_tso{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", dc=\"global\"} > bool 0",
           "format": "time_series",
+          "instant": true,
           "intervalFactor": 2,
           "legendFormat": "",
           "metric": "pd_server_tso",
@@ -1300,7 +1301,7 @@
           "thresholds": "",
           "timeFrom": null,
           "timeShift": null,
-          "title": "Current TSO",
+          "title": "Current Global TSO",
           "type": "singlestat",
           "valueFontSize": "80%",
           "valueMaps": [
