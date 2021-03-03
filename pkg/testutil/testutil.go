@@ -71,10 +71,9 @@ func WaitUntil(c *check.C, f CheckFunc, opts ...WaitOption) {
 }
 
 // NewRequestHeader creates a new request header.
-func NewRequestHeader(clusterID uint64, leaderAddr string) *pdpb.RequestHeader {
+func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId:    clusterID,
-		ReceiverAddr: leaderAddr,
+		ClusterId: clusterID,
 	}
 }
 

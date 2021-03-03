@@ -22,6 +22,7 @@ import (
 	"go.etcd.io/etcd/pkg/transport"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 )
 
 // TLSConfig is the configuration for supporting tls.
@@ -100,4 +101,11 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
 	}
 	return cc, nil
+}
+
+// NewReceiverMetadata creates a context with receiver metadata information.
+// It is used in client side.
+func NewReceiverMetadata(ctx context.Context, addr string) context.Context {
+	md := metadata.Pairs("receiver", addr)
+	return metadata.NewOutgoingContext(ctx, md)
 }

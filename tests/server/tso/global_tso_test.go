@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc/metadata"
 )
 
 func Test(t *testing.T) {
@@ -82,7 +83,7 @@ func (s *testNormalGlobalTSOSuite) TestNormalGlobalTSO(c *C) {
 
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID, ""),
+		Header:     testutil.NewRequestHeader(clusterID),
 		Count:      uint32(tsoCount),
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -193,7 +194,7 @@ func (s *testNormalGlobalTSOSuite) TestZeroTSOCount(c *C) {
 	clusterID := leaderServer.GetClusterID()
 
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID, ""),
+		Header:     testutil.NewRequestHeader(clusterID),
 		DcLocation: tso.GlobalDCLocation,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -227,12 +228,14 @@ func (s *testNormalGlobalTSOSuite) TestRequestFollower(c *C) {
 	grpcPDClient := testutil.MustNewGrpcClient(c, followerServer.GetAddr())
 	clusterID := followerServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID, followerServer.GetAddr()),
+		Header:     testutil.NewRequestHeader(clusterID),
 		Count:      1,
 		DcLocation: tso.GlobalDCLocation,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	md := metadata.Pairs("receiver", followerServer.GetAddr())
+	ctx = metadata.NewOutgoingContext(ctx, md)
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -272,7 +275,7 @@ func (s *testNormalGlobalTSOSuite) TestDelaySyncTimestamp(c *C) {
 	grpcPDClient := testutil.MustNewGrpcClient(c, nextLeaderServer.GetAddr())
 	clusterID := nextLeaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID, nextLeaderServer.GetAddr()),
+		Header:     testutil.NewRequestHeader(clusterID),
 		Count:      1,
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -285,6 +288,8 @@ func (s *testNormalGlobalTSOSuite) TestDelaySyncTimestamp(c *C) {
 	leaderServer.ResignLeader()
 	c.Assert(nextLeaderServer.WaitLeader(), IsTrue)
 
+	md := metadata.Pairs("receiver", nextLeaderServer.GetAddr())
+	ctx = metadata.NewOutgoingContext(ctx, md)
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -340,7 +345,7 @@ func (s *testTimeFallBackSuite) TearDownSuite(c *C) {
 func (s *testTimeFallBackSuite) testGetTimestamp(c *C, n uint32) *pdpb.Timestamp {
 	clusterID := s.server.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID, ""),
+		Header:     testutil.NewRequestHeader(clusterID),
 		Count:      n,
 		DcLocation: tso.GlobalDCLocation,
 	}
@@ -423,12 +428,14 @@ func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	clusterID := followerServer.GetClusterID()
 
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID, followerServer.GetAddr()),
+		Header:     testutil.NewRequestHeader(clusterID),
 		Count:      1,
 		DcLocation: tso.GlobalDCLocation,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	md := metadata.Pairs("receiver", followerServer.GetAddr())
+	ctx = metadata.NewOutgoingContext(ctx, md)
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -511,12 +518,14 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 
 func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, cluster *tests.TestCluster, n uint32, dcLocation string) *pdpb.Timestamp {
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(s.leaderServer.GetClusterID(), cluster.GetServer(s.leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr()),
+		Header:     testutil.NewRequestHeader(s.leaderServer.GetClusterID()),
 		Count:      n,
 		DcLocation: dcLocation,
 	}
 	pdClient, ok := s.dcClientMap[dcLocation]
 	c.Assert(ok, IsTrue)
+	md := metadata.Pairs("receiver", cluster.GetServer(s.leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
+	ctx = metadata.NewOutgoingContext(ctx, md)
 	tsoClient, err := pdClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()

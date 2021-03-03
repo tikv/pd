@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -374,7 +375,8 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	req := &pdpb.GetMembersRequest{Header: c.requestHeader(c.GetLeaderAddr())}
+	req := &pdpb.GetMembersRequest{Header: c.requestHeader()}
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetMembers(ctx, req)
 	cancel()
 	if err != nil {
@@ -536,7 +538,11 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 					if followerClient != nil {
 						log.Info("fall back to use follower to redirect tso stream", zap.String("addr", addr))
 						// create the follower stream
+						if addr, ok = c.getAllocatorLeaderAddrByDCLocation(dc); !ok {
+							continue
+						}
 						cctx, cancel = context.WithCancel(dispatcherCtx)
+						cctx = grpcutil.NewReceiverMetadata(cctx, addr)
 						stream, err = c.createTsoStream(cctx, cancel, followerClient)
 						if err == nil {
 							streamCh = make(chan struct {
@@ -643,14 +649,8 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 	}
 	count := int64(len(requests))
 	start := time.Now()
-	addr, exist := c.getAllocatorLeaderAddrByDCLocation(dcLocation)
-	if !exist {
-		err := errors.Errorf("allocator leader %s of %s is no longer existed", addr, dcLocation)
-		c.finishTSORequest(requests, 0, 0, 0, err)
-		return err
-	}
 	req := &pdpb.TsoRequest{
-		Header:     c.requestHeader(addr),
+		Header:     c.requestHeader(),
 		Count:      uint32(count),
 		DcLocation: dcLocation,
 	}
@@ -911,9 +911,10 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetRegionRequest{
-		Header:    c.requestHeader(c.GetLeaderAddr()),
+		Header:    c.requestHeader(),
 		RegionKey: key,
 	}
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetRegion(ctx, req)
 	cancel()
 
@@ -946,7 +947,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 		}
 		cc := pdpb.NewPDClient(conn)
 		resp, err = cc.GetRegion(ctx, &pdpb.GetRegionRequest{
-			Header:    c.requestHeader(c.GetLeaderAddr()),
+			Header:    c.requestHeader(),
 			RegionKey: key,
 		})
 		if err != nil {
@@ -977,9 +978,10 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetRegionRequest{
-		Header:    c.requestHeader(c.GetLeaderAddr()),
+		Header:    c.requestHeader(),
 		RegionKey: key,
 	}
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetPrevRegion(ctx, req)
 	cancel()
 
@@ -1001,9 +1003,10 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*Region, e
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetRegionByIDRequest{
-		Header:   c.requestHeader(c.GetLeaderAddr()),
+		Header:   c.requestHeader(),
 		RegionId: regionID,
 	}
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetRegionByID(ctx, req)
 	cancel()
 
@@ -1030,11 +1033,12 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 		defer cancel()
 	}
 	req := &pdpb.ScanRegionsRequest{
-		Header:   c.requestHeader(c.GetLeaderAddr()),
+		Header:   c.requestHeader(),
 		StartKey: key,
 		EndKey:   endKey,
 		Limit:    int32(limit),
 	}
+	scanCtx = grpcutil.NewReceiverMetadata(scanCtx, c.GetLeaderAddr())
 	resp, err := c.getClient().ScanRegions(scanCtx, req)
 
 	if err != nil {
@@ -1084,9 +1088,10 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetStoreRequest{
-		Header:  c.requestHeader(c.GetLeaderAddr()),
+		Header:  c.requestHeader(),
 		StoreId: storeID,
 	}
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetStore(ctx, req)
 	cancel()
 
@@ -1125,9 +1130,10 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetAllStoresRequest{
-		Header:                 c.requestHeader(c.GetLeaderAddr()),
+		Header:                 c.requestHeader(),
 		ExcludeTombstoneStores: options.excludeTombstone,
 	}
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetAllStores(ctx, req)
 	cancel()
 
@@ -1149,9 +1155,10 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.UpdateGCSafePointRequest{
-		Header:    c.requestHeader(c.GetLeaderAddr()),
+		Header:    c.requestHeader(),
 		SafePoint: safePoint,
 	}
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().UpdateGCSafePoint(ctx, req)
 	cancel()
 
@@ -1178,11 +1185,12 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.UpdateServiceGCSafePointRequest{
-		Header:    c.requestHeader(c.GetLeaderAddr()),
+		Header:    c.requestHeader(),
 		ServiceId: []byte(serviceID),
 		TTL:       ttl,
 		SafePoint: safePoint,
 	}
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().UpdateServiceGCSafePoint(ctx, req)
 	cancel()
 
@@ -1208,10 +1216,11 @@ func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, g
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.ScatterRegionRequest{
-		Header:   c.requestHeader(c.GetLeaderAddr()),
+		Header:   c.requestHeader(),
 		RegionId: regionID,
 		Group:    group,
 	}
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().ScatterRegion(ctx, req)
 	cancel()
 	if err != nil {
@@ -1242,10 +1251,10 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	req := &pdpb.GetOperatorRequest{
-		Header:   c.requestHeader(c.GetLeaderAddr()),
+		Header:   c.requestHeader(),
 		RegionId: regionID,
 	}
-
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	return c.getClient().GetOperator(ctx, req)
 }
 
@@ -1264,17 +1273,17 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 		opt(options)
 	}
 	req := &pdpb.SplitRegionsRequest{
-		Header:     c.requestHeader(c.GetLeaderAddr()),
+		Header:     c.requestHeader(),
 		SplitKeys:  splitKeys,
 		RetryLimit: options.retryLimit,
 	}
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	return c.getClient().SplitRegions(ctx, req)
 }
 
-func (c *client) requestHeader(receiverAddr string) *pdpb.RequestHeader {
+func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId:    c.clusterID,
-		ReceiverAddr: receiverAddr,
+		ClusterId: c.clusterID,
 	}
 }
 
@@ -1287,11 +1296,13 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.ScatterRegionRequest{
-		Header:     c.requestHeader(c.GetLeaderAddr()),
+		Header:     c.requestHeader(),
 		Group:      options.group,
 		RegionsId:  regionsID,
 		RetryLimit: options.retryLimit,
 	}
+
+	ctx = grpcutil.NewReceiverMetadata(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().ScatterRegion(ctx, req)
 	cancel()
 
