@@ -278,6 +278,8 @@ func (c *client) leaderCheckLoop() {
 }
 
 func (c *client) checkLeaderHealth(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
 	if cc, ok := c.clientConns.Load(c.GetLeaderAddr()); ok {
 		healthCli := healthpb.NewHealthClient(cc.(*grpc.ClientConn))
 		resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
@@ -371,10 +373,9 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	start := time.Now()
 	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetMembersRequest{Header: c.requestHeader(c.GetLeaderAddr())}
-	cli := c.getClient()
-	resp, err := cli.GetMembers(cctx, req)
+	resp, err := c.getClient().GetMembers(ctx, req)
 	cancel()
 	if err != nil {
 		cmdFailDurationGetAllMembers.Observe(time.Since(start).Seconds())
@@ -770,24 +771,26 @@ func (c *client) followerClient() (pdpb.PDClient, string) {
 	if len(addrs) < 1 {
 		return nil, ""
 	}
-	healthCtx, healthCancel := context.WithCancel(c.ctx)
-	defer healthCancel()
+
 	for _, addr := range addrs {
 		if cc, err = c.getOrCreateGRPCConn(addr); err != nil {
 			continue
 		}
+		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.timeout)
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
+			healthCancel()
 			return pdpb.NewPDClient(cc), addr
 		}
+		healthCancel()
 	}
 	return nil, ""
 }
 
 func (c *client) getClient() pdpb.PDClient {
-	if c.enableRedirection {
+	if c.enableRedirection && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
 		followerClient, addr := c.followerClient()
-		if followerClient != nil && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
+		if followerClient != nil {
 			log.Info("use follower client", zap.String("addr", addr))
 			return followerClient
 		}
@@ -906,13 +909,12 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 	start := time.Now()
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetRegionRequest{
 		Header:    c.requestHeader(c.GetLeaderAddr()),
 		RegionKey: key,
 	}
-	cli := c.getClient()
-	resp, err := cli.GetRegion(cctx, req)
+	resp, err := c.getClient().GetRegion(ctx, req)
 	cancel()
 
 	if err != nil {
@@ -973,13 +975,12 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 	start := time.Now()
 	defer func() { cmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
 
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetRegionRequest{
 		Header:    c.requestHeader(c.GetLeaderAddr()),
 		RegionKey: key,
 	}
-	cli := c.getClient()
-	resp, err := cli.GetPrevRegion(cctx, req)
+	resp, err := c.getClient().GetPrevRegion(ctx, req)
 	cancel()
 
 	if err != nil {
@@ -998,13 +999,12 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*Region, e
 	start := time.Now()
 	defer func() { cmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetRegionByIDRequest{
 		Header:   c.requestHeader(c.GetLeaderAddr()),
 		RegionId: regionID,
 	}
-	cli := c.getClient()
-	resp, err := cli.GetRegionByID(cctx, req)
+	resp, err := c.getClient().GetRegionByID(ctx, req)
 	cancel()
 
 	if err != nil {
@@ -1035,9 +1035,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 		EndKey:   endKey,
 		Limit:    int32(limit),
 	}
-	cli := c.getClient()
-	resp, err := cli.ScanRegions(scanCtx, req)
-	cancel()
+	resp, err := c.getClient().ScanRegions(scanCtx, req)
 
 	if err != nil {
 		cmdFailedDurationScanRegions.Observe(time.Since(start).Seconds())
@@ -1084,13 +1082,12 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	start := time.Now()
 	defer func() { cmdDurationGetStore.Observe(time.Since(start).Seconds()) }()
 
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetStoreRequest{
 		Header:  c.requestHeader(c.GetLeaderAddr()),
 		StoreId: storeID,
 	}
-	cli := c.getClient()
-	resp, err := cli.GetStore(cctx, req)
+	resp, err := c.getClient().GetStore(ctx, req)
 	cancel()
 
 	if err != nil {
@@ -1126,13 +1123,12 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 	start := time.Now()
 	defer func() { cmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
 
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.GetAllStoresRequest{
 		Header:                 c.requestHeader(c.GetLeaderAddr()),
 		ExcludeTombstoneStores: options.excludeTombstone,
 	}
-	cli := c.getClient()
-	resp, err := cli.GetAllStores(cctx, req)
+	resp, err := c.getClient().GetAllStores(ctx, req)
 	cancel()
 
 	if err != nil {
@@ -1151,13 +1147,12 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 	start := time.Now()
 	defer func() { cmdDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.UpdateGCSafePointRequest{
 		Header:    c.requestHeader(c.GetLeaderAddr()),
 		SafePoint: safePoint,
 	}
-	cli := c.getClient()
-	resp, err := cli.UpdateGCSafePoint(cctx, req)
+	resp, err := c.getClient().UpdateGCSafePoint(ctx, req)
 	cancel()
 
 	if err != nil {
@@ -1181,15 +1176,14 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	start := time.Now()
 	defer func() { cmdDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.UpdateServiceGCSafePointRequest{
 		Header:    c.requestHeader(c.GetLeaderAddr()),
 		ServiceId: []byte(serviceID),
 		TTL:       ttl,
 		SafePoint: safePoint,
 	}
-	cli := c.getClient()
-	resp, err := cli.UpdateServiceGCSafePoint(cctx, req)
+	resp, err := c.getClient().UpdateServiceGCSafePoint(ctx, req)
 	cancel()
 
 	if err != nil {
@@ -1212,14 +1206,13 @@ func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, g
 	start := time.Now()
 	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
 
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.ScatterRegionRequest{
 		Header:   c.requestHeader(c.GetLeaderAddr()),
 		RegionId: regionID,
 		Group:    group,
 	}
-	cli := c.getClient()
-	resp, err := cli.ScatterRegion(cctx, req)
+	resp, err := c.getClient().ScatterRegion(ctx, req)
 	cancel()
 	if err != nil {
 		return err
@@ -1246,17 +1239,14 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 	start := time.Now()
 	defer func() { cmdDurationGetOperator.Observe(time.Since(start).Seconds()) }()
 
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	req := &pdpb.GetOperatorRequest{
 		Header:   c.requestHeader(c.GetLeaderAddr()),
 		RegionId: regionID,
 	}
-	cli := c.getClient()
-	resp, err := cli.GetOperator(cctx, req)
-	cancel()
 
-	return resp, err
+	return c.getClient().GetOperator(ctx, req)
 }
 
 // SplitRegions split regions by given split keys
@@ -1267,7 +1257,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 	}
 	start := time.Now()
 	defer func() { cmdDurationSplitRegions.Observe(time.Since(start).Seconds()) }()
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	options := &RegionsOp{}
 	for _, opt := range opts {
@@ -1278,11 +1268,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 		SplitKeys:  splitKeys,
 		RetryLimit: options.retryLimit,
 	}
-	cli := c.getClient()
-	resp, err := cli.SplitRegions(cctx, req)
-	cancel()
-
-	return resp, err
+	return c.getClient().SplitRegions(ctx, req)
 }
 
 func (c *client) requestHeader(receiverAddr string) *pdpb.RequestHeader {
@@ -1299,15 +1285,14 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	for _, opt := range opts {
 		opt(options)
 	}
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	req := &pdpb.ScatterRegionRequest{
 		Header:     c.requestHeader(c.GetLeaderAddr()),
 		Group:      options.group,
 		RegionsId:  regionsID,
 		RetryLimit: options.retryLimit,
 	}
-	cli := c.getClient()
-	resp, err := cli.ScatterRegion(cctx, req)
+	resp, err := c.getClient().ScatterRegion(ctx, req)
 	cancel()
 
 	if err != nil {
