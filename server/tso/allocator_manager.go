@@ -59,10 +59,11 @@ type AllocatorGroupFilter func(ag *allocatorGroup) bool
 
 type allocatorGroup struct {
 	dcLocation string
-	// Because an allocator may be set up with different context,
-	// we need to store the parent context for each allocator in
-	// order to receive the Done() signal correctly.
-	parentCtx context.Context
+	// ctx is built with cancel from a parent context when set up which can be different
+	// in order to receive Done() signal correctly.
+	// cancel would be call when allocatorGroup is deleted to stop background loop.
+	ctx    context.Context
+	cancel context.CancelFunc
 	// For the Global TSO Allocator, leadership is a PD leader's
 	// leadership, and for the Local TSO Allocator, leadership
 	// is a DC-level certificate to allow an allocator to generate
@@ -302,9 +303,11 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 		allocator = NewLocalTSOAllocator(am, leadership, dcLocation)
 	}
 	// Create a new allocatorGroup
+	ctx, cancel := context.WithCancel(parentCtx)
 	am.mu.allocatorGroups[dcLocation] = &allocatorGroup{
 		dcLocation: dcLocation,
-		parentCtx:  parentCtx,
+		ctx:        ctx,
+		cancel:     cancel,
 		leadership: leadership,
 		allocator:  allocator,
 	}
@@ -570,7 +573,7 @@ func (am *AllocatorManager) allocatorUpdater() {
 func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 	defer am.wg.Done()
 	select {
-	case <-ag.parentCtx.Done():
+	case <-ag.ctx.Done():
 		// Resetting the allocator will clear TSO in memory
 		ag.allocator.Reset()
 		return
@@ -905,6 +908,7 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
 		allocatorGroup.leadership.Reset()
+		allocatorGroup.cancel()
 		delete(am.mu.allocatorGroups, dcLocation)
 	}
 }
