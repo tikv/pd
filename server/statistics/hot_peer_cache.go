@@ -385,11 +385,11 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		if interval == 0 {
 			return nil
 		}
+		isHot := bytes/interval.Seconds() >= newItem.thresholds[byteDim] || keys/interval.Seconds() >= newItem.thresholds[keyDim]
+		if !isHot {
+			return nil
+		}
 		if interval.Seconds() >= RegionHeartBeatReportInterval {
-			isHot := bytes/interval.Seconds() >= newItem.thresholds[byteDim] || keys/interval.Seconds() >= newItem.thresholds[keyDim]
-			if !isHot {
-				return nil
-			}
 			newItem.HotDegree = 1
 			newItem.AntiCount = hotRegionAntiCount
 		}
@@ -423,14 +423,14 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		newItem.AntiCount = oldItem.AntiCount
 	} else {
 		if f.isOldColdPeer(oldItem, newItem.StoreID) {
-			if newItem.isHot() {
+			if newItem.isFullAndHot() {
 				newItem.HotDegree = 1
 				newItem.AntiCount = hotRegionAntiCount
 			} else {
 				newItem.needDelete = true
 			}
 		} else {
-			if newItem.isHot() {
+			if newItem.isFullAndHot() {
 				newItem.HotDegree = oldItem.HotDegree + 1
 				newItem.AntiCount = hotRegionAntiCount
 			} else {
