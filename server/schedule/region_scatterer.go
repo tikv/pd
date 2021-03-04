@@ -50,7 +50,7 @@ func newSelectedStores(ctx context.Context) *selectedStores {
 	}
 }
 
-// Put ...
+// Put plus count by storeID and group
 func (s *selectedStores) Put(id uint64, group string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -63,7 +63,7 @@ func (s *selectedStores) Put(id uint64, group string) {
 	s.groupDistribution.Put(group, distribution)
 }
 
-// Get ...
+// Get the count by storeID and group
 func (s *selectedStores) Get(id uint64, group string) uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -78,7 +78,7 @@ func (s *selectedStores) Get(id uint64, group string) uint64 {
 	return count
 }
 
-// GetGroupDistribution ...
+// GetGroupDistribution get distribution group by `group`
 func (s *selectedStores) GetGroupDistribution(group string) (map[uint64]uint64, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -333,7 +333,6 @@ func (r *RegionScatterer) selectStore(group string, peer *metapb.Peer, candidate
 			newPeer = &metapb.Peer{
 				StoreId: storeID,
 				Role:    peer.GetRole(),
-				//Id:      peer.GetId(),
 			}
 		}
 	}
