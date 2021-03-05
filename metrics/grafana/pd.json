@@ -134,7 +134,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "pd_cluster_tso{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", dc=\"global\"} > bool 0",
+          "expr": "pd_tso_role{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", dc=\"global\"} > bool 0",
           "format": "time_series",
           "instant": true,
           "intervalFactor": 2,

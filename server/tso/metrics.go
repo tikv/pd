@@ -31,9 +31,18 @@ var (
 			Name:      "tso",
 			Help:      "Record of tso metadata.",
 		}, []string{"type", "dc"})
+
+	tsoAllocatorRole = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "tso",
+			Name:      "role",
+			Help:      "Indicate the PD server role info, whether it's a TSO allocator.",
+		}, []string{"dc"})
 )
 
 func init() {
 	prometheus.MustRegister(tsoCounter)
 	prometheus.MustRegister(tsoGauge)
+	prometheus.MustRegister(tsoAllocatorRole)
 }
