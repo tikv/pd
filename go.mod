@@ -35,12 +35,14 @@ require (
 	github.com/prometheus/client_golang v1.2.1
 	github.com/prometheus/common v0.9.1
 	github.com/sasha-s/go-deadlock v0.2.0
+	github.com/shirou/gopsutil v3.21.2+incompatible // indirect
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
 	github.com/swaggo/swag v1.6.6-0.20200529100950-7c765ddd0476
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
+	github.com/tklauser/go-sysconf v0.3.4 // indirect
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
