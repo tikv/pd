@@ -54,7 +54,7 @@ func newSelectedStores(ctx context.Context) *selectedStores {
 func (s *selectedStores) Put(id uint64, group string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	distribution, ok := s.getDistributionByGroup(group)
+	distribution, ok := s.getDistributionByGroupLocked(group)
 	if !ok {
 		distribution = map[uint64]uint64{}
 		distribution[id] = 0
@@ -67,7 +67,7 @@ func (s *selectedStores) Put(id uint64, group string) {
 func (s *selectedStores) Get(id uint64, group string) uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	distribution, ok := s.getDistributionByGroup(group)
+	distribution, ok := s.getDistributionByGroupLocked(group)
 	if !ok {
 		return 0
 	}
@@ -82,10 +82,11 @@ func (s *selectedStores) Get(id uint64, group string) uint64 {
 func (s *selectedStores) GetGroupDistribution(group string) (map[uint64]uint64, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.getDistributionByGroup(group)
+	return s.getDistributionByGroupLocked(group)
 }
 
-func (s *selectedStores) getDistributionByGroup(group string) (map[uint64]uint64, bool) {
+// getDistributionByGroupLocked should be called with lock
+func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]uint64, bool) {
 	if result, ok := s.groupDistribution.Get(group); ok {
 		return result.(map[uint64]uint64), true
 	}
