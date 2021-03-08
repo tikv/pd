@@ -53,6 +53,7 @@ require (
 
 replace (
 	github.com/oleiade/reflections => github.com/oleiade/reflections v1.0.1
+	github.com/pingcap/kvproto v0.0.0-20210219064844-c1844a4775d6 => github.com/JmPotato/kvproto v0.0.0-20210222031724-03117d594669
 	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 )

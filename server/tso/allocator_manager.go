@@ -1081,7 +1081,7 @@ func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp
 		}
 	}
 	maxTSO := &pdpb.Timestamp{}
-	if err := globalAllocator.(*GlobalTSOAllocator).SyncMaxTS(ctx, clusterDCLocations, maxTSO); err != nil {
+	if err := globalAllocator.(*GlobalTSOAllocator).SyncMaxTS(ctx, clusterDCLocations, false, maxTSO); err != nil {
 		return &pdpb.Timestamp{}, err
 	}
 	return maxTSO, nil
