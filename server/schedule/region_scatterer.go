@@ -121,7 +121,7 @@ type engineContext struct {
 }
 
 func newEngineContext(ctx context.Context, filters ...filter.Filter) engineContext {
-	filters = append(filters, &filter.StoreStateFilter{ActionScope: regionScatterName})
+	filters = append(filters, &filter.StoreStateFilter{ActionScope: regionScatterName, MoveRegion: true, ScatterRegion: true})
 	return engineContext{
 		filters:        filters,
 		selectedPeer:   newSelectedStores(ctx),
@@ -305,7 +305,6 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 		return nil
 	}
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true, ScatterRegion: true},
 		filter.NewExcludedFilter("scatter-region", nil, selectedStores),
 	}
 	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster, region, sourceStore)
