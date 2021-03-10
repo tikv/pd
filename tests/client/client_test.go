@@ -447,8 +447,8 @@ func (s *clientTestSuite) runServer(c *C, cluster *tests.TestCluster) []string {
 	return endpoints
 }
 
-func (s *clientTestSuite) setupCli(c *C, endpoints []string, enableRedirection bool) pd.Client {
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithRedirectionOption(enableRedirection))
+func (s *clientTestSuite) setupCli(c *C, endpoints []string, enableForwarding bool) pd.Client {
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithForwardingOption(enableForwarding))
 	c.Assert(err, IsNil)
 	return cli
 }

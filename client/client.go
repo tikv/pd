@@ -16,6 +16,7 @@ package pd
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -410,20 +411,21 @@ func (c *client) tsLoop() {
 
 func (c *client) createTsoStream(ctx context.Context, cancel context.CancelFunc, client pdpb.PDClient) (pdpb.PD_TsoClient, error) {
 	done := make(chan struct{})
+	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
 	go c.checkStreamTimeout(ctx, cancel, done)
 	stream, err := client.Tso(ctx)
 	done <- struct{}{}
 	return stream, err
 }
 
-func (c *client) checkAllocator(dispatcherCtx context.Context, redirectCancel context.CancelFunc, dc, url string,
+func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel context.CancelFunc, dc, url string,
 	streamCh chan struct {
 		cancel context.CancelFunc
 		stream pdpb.PD_TsoClient
 	}, changedCh chan bool) {
 	defer func() {
-		// cancel the redirect stream
-		redirectCancel()
+		// cancel the forward stream
+		forwardCancel()
 		close(streamCh)
 		close(changedCh)
 	}()
@@ -463,6 +465,8 @@ func (c *client) checkAllocator(dispatcherCtx context.Context, redirectCancel co
 		case <-dispatcherCtx.Done():
 			return
 		case <-time.After(time.Second):
+			// To ensure we can get the latest allocator leader
+			// and once the leader is changed, we can exit this function.
 			_, u = c.getAllocatorClientConnByDCLocation(dc)
 		}
 	}
@@ -532,13 +536,14 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				stream, cancel = nil, nil
 				err = status.New(codes.Unavailable, "unavailable").Err()
 			})
-			if c.enableRedirection {
+			if c.enableForwarding {
 				rpcErr, ok := status.FromError(err)
 				// encounter the network error
 				if ok && isNetworkError(rpcErr.Code()) {
+					// TODO: we need to choose the follower in the same dc with the leader.
 					followerClient, addr := c.followerClient()
 					if followerClient != nil {
-						log.Info("fall back to use follower to redirect tso stream", zap.String("addr", addr), zap.String("dc", dc))
+						log.Info("fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("addr", addr))
 						// create the follower stream
 						if addr, ok = c.getAllocatorLeaderAddrByDCLocation(dc); !ok {
 							continue
@@ -774,7 +779,8 @@ func (c *client) followerClient() (pdpb.PDClient, string) {
 		return nil, ""
 	}
 
-	for _, addr := range addrs {
+	for i := 0; i < len(addrs); i++ {
+		addr := addrs[rand.Intn(len(addrs))]
 		if cc, err = c.getOrCreateGRPCConn(addr); err != nil {
 			continue
 		}
@@ -790,7 +796,7 @@ func (c *client) followerClient() (pdpb.PDClient, string) {
 }
 
 func (c *client) getClient() pdpb.PDClient {
-	if c.enableRedirection && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
+	if c.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
 		followerClient, addr := c.followerClient()
 		if followerClient != nil {
 			log.Info("use follower client", zap.String("addr", addr))

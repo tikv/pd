@@ -15,6 +15,7 @@ package pd
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sort"
 	"sync"
@@ -53,10 +54,10 @@ type baseClient struct {
 
 	security SecurityOption
 
-	gRPCDialOptions   []grpc.DialOption
-	timeout           time.Duration
-	maxRetryTimes     int
-	enableRedirection bool
+	gRPCDialOptions  []grpc.DialOption
+	timeout          time.Duration
+	maxRetryTimes    int
+	enableForwarding bool
 }
 
 // SecurityOption records options about tls
@@ -83,10 +84,10 @@ func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
 	}
 }
 
-// WithRedirectionOption configures the client with redirection option.
-func WithRedirectionOption(enableRedirection bool) ClientOption {
+// WithForwardingOption configures the client with forwarding option.
+func WithForwardingOption(enableForwarding bool) ClientOption {
 	return func(c *baseClient) {
-		c.enableRedirection = enableRedirection
+		c.enableForwarding = enableForwarding
 	}
 }
 
@@ -231,11 +232,11 @@ func (c *baseClient) getAllocatorLeaderAddrByDCLocation(dcLocation string) (stri
 func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string) {
 	url, ok := c.allocators.Load(dcLocation)
 	if !ok {
-		return nil, ""
+		panic(fmt.Sprintf("the allocator leader in %s should exist", dcLocation))
 	}
 	cc, ok := c.clientConns.Load(url)
 	if !ok {
-		return nil, ""
+		panic(fmt.Sprintf("the client connection of %s in %s should exist", url, dcLocation))
 	}
 	return cc.(*grpc.ClientConn), url.(string)
 }
@@ -357,7 +358,7 @@ func (c *baseClient) updateFollowers(members []*pdpb.Member, leader *pdpb.Member
 	for _, member := range members {
 		if member.GetMemberId() != leader.GetMemberId() {
 			if len(member.GetClientUrls()) > 0 {
-				addrs = append(addrs, member.GetClientUrls()[0])
+				addrs = append(addrs, member.GetClientUrls()...)
 			}
 		}
 	}

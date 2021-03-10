@@ -97,13 +97,13 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 	var (
-		redirectStream   pdpb.PD_TsoClient
+		forwardStream    pdpb.PD_TsoClient
 		cancel           context.CancelFunc
 		lastReceiverAddr string
 		errCh            chan error
 	)
 	defer func() {
-		// cancel the redirect stream
+		// cancel the forward stream
 		if cancel != nil {
 			cancel()
 		}
@@ -119,7 +119,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 
 		receiverAddr := getReceiverAddr(stream.Context())
 		if !s.isLocalRequest(receiverAddr) {
-			if redirectStream == nil || lastReceiverAddr != receiverAddr {
+			if forwardStream == nil || lastReceiverAddr != receiverAddr {
 				if cancel != nil {
 					cancel()
 				}
@@ -127,27 +127,16 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 				if err != nil {
 					return err
 				}
-				redirectStream, cancel, err = s.createTsoRedirectStream(client, receiverAddr)
+				log.Info("create TSO forward stream", zap.String("receiver", receiverAddr))
+				forwardStream, cancel, err = s.createTsoForwardStream(client, receiverAddr)
 				if err != nil {
 					return err
 				}
 				lastReceiverAddr = receiverAddr
 				errCh = make(chan error, 1)
-				go func(redirectStream pdpb.PD_TsoClient, errCh chan error) {
-					for {
-						resp, err := redirectStream.Recv()
-						if err != nil {
-							errCh <- errors.WithStack(err)
-							return
-						}
-						if err := stream.Send(resp); err != nil {
-							errCh <- errors.WithStack(err)
-							return
-						}
-					}
-				}(redirectStream, errCh)
+				go forwardTsoClientToServer(forwardStream, stream, errCh)
 			}
-			if err := redirectStream.Send(request); err != nil {
+			if err := forwardStream.Send(request); err != nil {
 				return errors.WithStack(err)
 			}
 			select {
@@ -503,14 +492,14 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 	server := &heartbeatServer{stream: stream}
 	var (
-		redirectStream   pdpb.PD_RegionHeartbeatClient
+		forwardStream    pdpb.PD_RegionHeartbeatClient
 		cancel           context.CancelFunc
 		lastReceiverAddr string
 		lastBind         time.Time
 		errCh            chan error
 	)
 	defer func() {
-		// cancel the redirect stream
+		// cancel the forward stream
 		if cancel != nil {
 			cancel()
 		}
@@ -527,7 +516,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		receiverAddr := getReceiverAddr(stream.Context())
 		if !s.isLocalRequest(receiverAddr) {
-			if redirectStream == nil || lastReceiverAddr != receiverAddr {
+			if forwardStream == nil || lastReceiverAddr != receiverAddr {
 				if cancel != nil {
 					cancel()
 				}
@@ -535,28 +524,16 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				if err != nil {
 					return err
 				}
-				log.Info("create region heartbeat redirect stream", zap.String("receiver", receiverAddr))
-				redirectStream, cancel, err = s.createHeartbeatRedirectStream(client, receiverAddr)
+				log.Info("create region heartbeat forward stream", zap.String("receiver", receiverAddr))
+				forwardStream, cancel, err = s.createHeartbeatForwardStream(client, receiverAddr)
 				if err != nil {
 					return err
 				}
 				lastReceiverAddr = receiverAddr
 				errCh = make(chan error, 1)
-				go func(redirectStream pdpb.PD_RegionHeartbeatClient, errCh chan error) {
-					for {
-						resp, err := redirectStream.Recv()
-						if err != nil {
-							errCh <- errors.WithStack(err)
-							return
-						}
-						if err := server.Send(resp); err != nil {
-							errCh <- errors.WithStack(err)
-							return
-						}
-					}
-				}(redirectStream, errCh)
+				go forwardRegionHeartbeatClientToServer(forwardStream, server, errCh)
 			}
-			if err := redirectStream.Send(request); err != nil {
+			if err := forwardStream.Send(request); err != nil {
 				return errors.WithStack(err)
 			}
 
@@ -1465,24 +1442,54 @@ func (s *Server) isLocalRequest(receiverAddr string) bool {
 	return false
 }
 
-func (s *Server) createTsoRedirectStream(client *grpc.ClientConn, addr string) (pdpb.PD_TsoClient, context.CancelFunc, error) {
+func (s *Server) createTsoForwardStream(client *grpc.ClientConn, addr string) (pdpb.PD_TsoClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	ctx = grpcutil.NewReceiverMetadata(ctx, addr)
 	go checkStream(ctx, cancel, done)
-	redirectStream, err := pdpb.NewPDClient(client).Tso(ctx)
+	forwardStream, err := pdpb.NewPDClient(client).Tso(ctx)
 	done <- struct{}{}
-	return redirectStream, cancel, err
+	return forwardStream, cancel, err
 }
 
-func (s *Server) createHeartbeatRedirectStream(client *grpc.ClientConn, addr string) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
+func forwardTsoClientToServer(forwardStream pdpb.PD_TsoClient, stream pdpb.PD_TsoServer, errCh chan error) {
+	defer close(errCh)
+	for {
+		resp, err := forwardStream.Recv()
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		if err := stream.Send(resp); err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+	}
+}
+
+func (s *Server) createHeartbeatForwardStream(client *grpc.ClientConn, addr string) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	ctx = grpcutil.NewReceiverMetadata(ctx, addr)
 	go checkStream(ctx, cancel, done)
-	redirectStream, err := pdpb.NewPDClient(client).RegionHeartbeat(ctx)
+	forwardStream, err := pdpb.NewPDClient(client).RegionHeartbeat(ctx)
 	done <- struct{}{}
-	return redirectStream, cancel, err
+	return forwardStream, cancel, err
+}
+
+func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
+	defer close(errCh)
+	for {
+		resp, err := forwardStream.Recv()
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		if err := server.Send(resp); err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+	}
 }
 
 // TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
