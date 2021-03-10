@@ -15,7 +15,6 @@ package statistics
 
 import (
 	"math"
-	"sync"
 	"time"
 
 	"github.com/tikv/pd/pkg/movingaverage"
@@ -29,11 +28,8 @@ const (
 
 type dimStat struct {
 	typ int
-	mu  struct {
-		sync.RWMutex
-		Rolling     *movingaverage.TimeMedian  // it's used to statistic hot degree and average speed.
-		LastAverage *movingaverage.AvgOverTime // it's used to obtain the average speed in last second as instantaneous speed.
-	}
+	Rolling     *movingaverage.TimeMedian  // it's used to statistic hot degree and average speed.
+	LastAverage *movingaverage.AvgOverTime // it's used to obtain the average speed in last second as instantaneous speed.
 }
 
 func newDimStat(typ int) *dimStat {
@@ -41,46 +37,34 @@ func newDimStat(typ int) *dimStat {
 	ds := &dimStat{
 		typ: typ,
 	}
-	ds.mu.Rolling = movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval)
-	ds.mu.LastAverage = movingaverage.NewAvgOverTime(reportInterval)
+	ds.Rolling = movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval)
+	ds.LastAverage = movingaverage.NewAvgOverTime(reportInterval)
 	return ds
 }
 
 func (d *dimStat) Add(delta float64, interval time.Duration) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.mu.LastAverage.Add(delta, interval)
-	d.mu.Rolling.Add(delta, interval)
+	d.LastAverage.Add(delta, interval)
+	d.Rolling.Add(delta, interval)
 }
 
 func (d *dimStat) isLastAverageHot(thresholds [dimLen]float64) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.mu.LastAverage.Get() >= thresholds[d.typ]
+	return d.LastAverage.Get() >= thresholds[d.typ]
 }
 
 func (d *dimStat) isHot(thresholds [dimLen]float64) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.mu.Rolling.Get() >= thresholds[d.typ]
+	return d.Rolling.Get() >= thresholds[d.typ]
 }
 
 func (d *dimStat) isFull() bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.mu.LastAverage.IsFull()
+	return d.LastAverage.IsFull()
 }
 
 func (d *dimStat) clearLastAverage() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.mu.LastAverage.Clear()
+	d.LastAverage.Clear()
 }
 
 func (d *dimStat) Get() float64 {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.mu.Rolling.Get()
+	return d.Rolling.Get()
 }
 
 // HotPeerStat records each hot peer's statistics

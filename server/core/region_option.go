@@ -124,6 +124,13 @@ func WithIncConfVer() RegionCreateOption {
 	}
 }
 
+// WithInterval sets the interval
+func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.interval = interval
+	}
+}
+
 // WithDecConfVer decreases the config version of the region.
 func WithDecConfVer() RegionCreateOption {
 	return func(region *RegionInfo) {
