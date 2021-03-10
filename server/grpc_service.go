@@ -100,6 +100,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		redirectStream   pdpb.PD_TsoClient
 		cancel           context.CancelFunc
 		lastReceiverAddr string
+		errCh            chan error
 	)
 	defer func() {
 		// cancel the redirect stream
@@ -131,16 +132,28 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 					return err
 				}
 				lastReceiverAddr = receiverAddr
+				errCh = make(chan error, 1)
+				go func(redirectStream pdpb.PD_TsoClient, errCh chan error) {
+					for {
+						resp, err := redirectStream.Recv()
+						if err != nil {
+							errCh <- errors.WithStack(err)
+							return
+						}
+						if err := stream.Send(resp); err != nil {
+							errCh <- errors.WithStack(err)
+							return
+						}
+					}
+				}(redirectStream, errCh)
 			}
 			if err := redirectStream.Send(request); err != nil {
 				return errors.WithStack(err)
 			}
-			resp, err := redirectStream.Recv()
-			if err != nil {
-				return errors.WithStack(err)
-			}
-			if err := stream.Send(resp); err != nil {
-				return errors.WithStack(err)
+			select {
+			case err := <-errCh:
+				return err
+			default:
 			}
 			continue
 		}
@@ -489,19 +502,12 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 	server := &heartbeatServer{stream: stream}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		resp := &pdpb.RegionHeartbeatResponse{
-			Header: s.notBootstrappedHeader(),
-		}
-		err := server.Send(resp)
-		return errors.WithStack(err)
-	}
 	var (
 		redirectStream   pdpb.PD_RegionHeartbeatClient
 		cancel           context.CancelFunc
 		lastReceiverAddr string
 		lastBind         time.Time
+		errCh            chan error
 	)
 	defer func() {
 		// cancel the redirect stream
@@ -529,23 +535,46 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				if err != nil {
 					return err
 				}
+				log.Info("create region heartbeat redirect stream", zap.String("receiver", receiverAddr))
 				redirectStream, cancel, err = s.createHeartbeatRedirectStream(client, receiverAddr)
 				if err != nil {
 					return err
 				}
 				lastReceiverAddr = receiverAddr
+				errCh = make(chan error, 1)
+				go func(redirectStream pdpb.PD_RegionHeartbeatClient, errCh chan error) {
+					for {
+						resp, err := redirectStream.Recv()
+						if err != nil {
+							errCh <- errors.WithStack(err)
+							return
+						}
+						if err := server.Send(resp); err != nil {
+							errCh <- errors.WithStack(err)
+							return
+						}
+					}
+				}(redirectStream, errCh)
 			}
 			if err := redirectStream.Send(request); err != nil {
 				return errors.WithStack(err)
 			}
-			resp, err := redirectStream.Recv()
-			if err != nil {
-				return errors.WithStack(err)
-			}
-			if err := stream.Send(resp); err != nil {
-				return errors.WithStack(err)
+
+			select {
+			case err := <-errCh:
+				return err
+			default:
 			}
 			continue
+		}
+
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			resp := &pdpb.RegionHeartbeatResponse{
+				Header: s.notBootstrappedHeader(),
+			}
+			err := server.Send(resp)
+			return errors.WithStack(err)
 		}
 
 		if err = s.validateRequest(request.GetHeader()); err != nil {
@@ -593,7 +622,6 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
-
 		start := time.Now()
 
 		err = rc.HandleRegionHeartbeat(region)
@@ -603,7 +631,6 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
-
 		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 	}
@@ -854,6 +881,15 @@ func (s *Server) ReportSplit(ctx context.Context, request *pdpb.ReportSplitReque
 
 // ReportBatchSplit implements gRPC PDServer.
 func (s *Server) ReportBatchSplit(ctx context.Context, request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
+	receiverAddr := getReceiverAddr(ctx)
+	if !s.isLocalRequest(receiverAddr) {
+		client, err := s.getDelegateClient(ctx, receiverAddr)
+		if err != nil {
+			return nil, err
+		}
+		return pdpb.NewPDClient(client).ReportBatchSplit(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}

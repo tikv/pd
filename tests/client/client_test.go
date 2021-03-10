@@ -339,6 +339,7 @@ func (s *clientTestSuite) TestCustomTimeout(c *C) {
 }
 
 func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
+	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -361,6 +362,7 @@ func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
 
 // case 1: unreachable -> normal
 func (s *clientTestSuite) TestGetTsoFromFollowerClient1(c *C) {
+	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -388,6 +390,7 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient1(c *C) {
 
 // case 2: unreachable -> leader transfer -> normal
 func (s *clientTestSuite) TestGetTsoFromFollowerClient2(c *C) {
+	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()

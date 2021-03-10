@@ -228,7 +228,7 @@ func (c *baseClient) getAllocatorLeaderAddrByDCLocation(dcLocation string) (stri
 	return url.(string), true
 }
 
-func (c *baseClient) getClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string) {
+func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string) {
 	url, ok := c.allocators.Load(dcLocation)
 	if !ok {
 		return nil, ""

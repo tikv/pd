@@ -166,14 +166,16 @@ type lastTSO struct {
 }
 
 const (
-	defaultPDTimeout          = 3 * time.Second
-	dialTimeout               = 3 * time.Second
-	updateMemberTimeout       = time.Second // Use a shorter timeout to recover faster from network isolation.
-	tsLoopDCCheckInterval     = time.Minute
-	leaderHealthCheckInterval = 100 * time.Millisecond
-	maxMergeTSORequests       = 10000 // should be higher if client is sending requests in burst
-	maxInitClusterRetries     = 100
+	defaultPDTimeout      = 3 * time.Second
+	dialTimeout           = 3 * time.Second
+	updateMemberTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
+	tsLoopDCCheckInterval = time.Minute
+	maxMergeTSORequests   = 10000 // should be higher if client is sending requests in burst
+	maxInitClusterRetries = 100
 )
+
+// LeaderHealthCheckInterval might be chagned in the unit to shorten the testing time.
+var LeaderHealthCheckInterval = time.Second
 
 var (
 	// errFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
@@ -265,7 +267,7 @@ func (c *client) leaderCheckLoop() {
 	leaderCheckLoopCtx, leaderCheckLoopCancel := context.WithCancel(c.ctx)
 	defer leaderCheckLoopCancel()
 
-	ticker := time.NewTicker(leaderHealthCheckInterval)
+	ticker := time.NewTicker(LeaderHealthCheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -414,7 +416,7 @@ func (c *client) createTsoStream(ctx context.Context, cancel context.CancelFunc,
 	return stream, err
 }
 
-func (c *client) checkAllocator(parentCtx context.Context, redirectCancel context.CancelFunc, dc, url string,
+func (c *client) checkAllocator(dispatcherCtx context.Context, redirectCancel context.CancelFunc, dc, url string,
 	streamCh chan struct {
 		cancel context.CancelFunc
 		stream pdpb.PD_TsoClient
@@ -425,7 +427,7 @@ func (c *client) checkAllocator(parentCtx context.Context, redirectCancel contex
 		close(streamCh)
 		close(changedCh)
 	}()
-	cc, u := c.getClientConnByDCLocation(dc)
+	cc, u := c.getAllocatorClientConnByDCLocation(dc)
 	healthCli := healthpb.NewHealthClient(cc)
 	for {
 		// the pd/allocator leader change, we need to re-establish the stream
@@ -433,14 +435,14 @@ func (c *client) checkAllocator(parentCtx context.Context, redirectCancel contex
 			log.Info("the leader of the allocator leader is changed", zap.String("dc", dc), zap.String("origin", url), zap.String("new", u))
 			return
 		}
-		healthCtx, healthCancel := context.WithCancel(parentCtx)
+		healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.timeout)
 		resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		failpoint.Inject("unreachableNetwork", func() {
 			resp.Status = healthpb.HealthCheckResponse_UNKNOWN
 		})
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 			// create a stream of the original allocator
-			cctx, cancel := context.WithCancel(parentCtx)
+			cctx, cancel := context.WithCancel(dispatcherCtx)
 			stream, err := c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 			if err == nil && stream != nil {
 				log.Info("recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
@@ -458,10 +460,10 @@ func (c *client) checkAllocator(parentCtx context.Context, redirectCancel contex
 		}
 		healthCancel()
 		select {
-		case <-parentCtx.Done():
+		case <-dispatcherCtx.Done():
 			return
 		case <-time.After(time.Second):
-			_, u = c.getClientConnByDCLocation(dc)
+			_, u = c.getAllocatorClientConnByDCLocation(dc)
 		}
 	}
 }
@@ -522,7 +524,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				}
 				needUpdate = false
 			}
-			cc, url := c.getClientConnByDCLocation(dc)
+			cc, url := c.getAllocatorClientConnByDCLocation(dc)
 			cctx, cancel = context.WithCancel(dispatcherCtx)
 			stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 			failpoint.Inject("unreachableNetwork", func() {
@@ -536,7 +538,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				if ok && isNetworkError(rpcErr.Code()) {
 					followerClient, addr := c.followerClient()
 					if followerClient != nil {
-						log.Info("fall back to use follower to redirect tso stream", zap.String("addr", addr))
+						log.Info("fall back to use follower to redirect tso stream", zap.String("addr", addr), zap.String("dc", dc))
 						// create the follower stream
 						if addr, ok = c.getAllocatorLeaderAddrByDCLocation(dc); !ok {
 							continue
