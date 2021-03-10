@@ -56,7 +56,7 @@ var (
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
 	mu struct {
-		sync.RWMutex
+		sync.Mutex
 		peersOfStore   map[uint64]*TopN               // storeID -> hot peers
 		storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	}
@@ -75,8 +75,8 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 
 // RegionStats returns hot items
 func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	res := make(map[uint64][]*HotPeerStat)
 	for storeID, peers := range f.mu.peersOfStore {
 		values := peers.GetAll()
@@ -219,8 +219,8 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 }
 
 func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	switch f.kind {
 	case WriteFlow:
 		return f.isRegionHotWithAnyPeersLocked(region, hotDegree)
@@ -231,8 +231,8 @@ func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool 
 }
 
 func (f *hotPeerCache) CollectMetrics(typ string) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	for storeID, peers := range f.mu.peersOfStore {
 		store := storeTag(storeID)
 		thresholds := f.calcHotThresholdsLocked(storeID)

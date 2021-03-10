@@ -16,7 +16,6 @@ package statistics
 import (
 	"math/rand"
 	"sync"
-	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -24,10 +23,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
 )
-
-func Test(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testHotPeerCache{})
 
