@@ -15,6 +15,7 @@ package statistics
 
 import (
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -216,6 +217,32 @@ func newPeers(n int, pid genID, sid genID) []*metapb.Peer {
 		peers = append(peers, peer)
 	}
 	return peers
+}
+
+func (t *testHotPeerCache) TestUpdateHotPeerStatInConcurrency(c *C) {
+	cache := NewHotStoresStats(ReadFlow)
+	// new peer, interval is less than report interval
+	newItem := &HotPeerStat{needDelete: false, thresholds: [2]float64{0.0, 0.0}}
+	newItem = cache.updateHotPeerStat(newItem, nil, 60, 60, 30*time.Second)
+	c.Check(newItem, NotNil)
+	c.Check(newItem.HotDegree, Equals, 0)
+	c.Check(newItem.AntiCount, Equals, 0)
+	// sum of interval is less than report interval
+	oldItem := newItem
+	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 10*time.Second)
+	c.Check(newItem.HotDegree, Equals, 0)
+	c.Check(newItem.AntiCount, Equals, 0)
+	wg := &sync.WaitGroup{}
+	wg.Add(100)
+	oldItem = newItem
+	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 50*time.Second)
+	for i := 0; i < 100; i++ {
+		go func(newItem, oldItem *HotPeerStat, wg *sync.WaitGroup) {
+			defer wg.Done()
+			cache.updateHotPeerStat(newItem, oldItem, 60, 60, 50*time.Second)
+		}(oldItem, newItem, wg)
+	}
+	wg.Wait()
 }
 
 func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {

@@ -14,8 +14,6 @@
 package statistics
 
 import (
-	"testing"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -24,10 +22,6 @@ import (
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule/placement"
 )
-
-func TestStatistics(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testRegionStatisticsSuite{})
 
