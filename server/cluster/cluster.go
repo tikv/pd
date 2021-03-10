@@ -593,11 +593,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 		if !core.SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
 			log.Debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
-			saveKV, saveCache = true, true
+			saveCache, needSync = true, true
 		}
 		if !core.SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
 			log.Debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
-			saveKV, saveCache = true, true
+			saveCache, needSync = true, true
 		}
 		if len(region.GetPeers()) != len(origin.GetPeers()) {
 			saveKV, saveCache = true, true
