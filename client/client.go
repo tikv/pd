@@ -523,7 +523,6 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 						return
 					default:
 					}
-					log.Error("[pd] failed update member", errs.ZapError(err))
 					continue
 				}
 				needUpdate = false
