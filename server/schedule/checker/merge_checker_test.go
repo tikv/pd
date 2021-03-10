@@ -192,10 +192,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	s.cluster.RuleManager.DeleteRule("pd", "test")
 
 	// Skip recently split regions.
-<<<<<<< HEAD
 	s.cluster.ScheduleOptions.SplitMergeInterval = time.Hour
-=======
-	s.cluster.SetSplitMergeInterval(time.Hour)
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
 
@@ -205,7 +202,6 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	ops = s.mc.Check(s.regions[3])
 	c.Assert(ops, NotNil)
 
->>>>>>> 722a6655... checker: prevent the regions in split-cache from becoming the target of merge (#3454)
 	s.mc.RecordRegionSplit([]uint64{s.regions[2].GetID()})
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
