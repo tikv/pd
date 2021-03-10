@@ -50,19 +50,25 @@ type testScatterRegionSuite struct{}
 func (s *testScatterRegionSuite) TestSixStores(c *C) {
 	s.scatter(c, 6, 100, false)
 	s.scatter(c, 6, 100, true)
+	s.scatter(c, 6, 1000, false)
+	s.scatter(c, 6, 1000, true)
 }
 
 func (s *testScatterRegionSuite) TestFiveStores(c *C) {
 	s.scatter(c, 5, 100, false)
 	s.scatter(c, 5, 100, true)
+	s.scatter(c, 5, 1000, false)
+	s.scatter(c, 5, 1000, true)
 }
 
 func (s *testScatterRegionSuite) TestSixSpecialStores(c *C) {
 	s.scatterSpecial(c, 3, 6, 100)
+	s.scatterSpecial(c, 3, 6, 1000)
 }
 
 func (s *testScatterRegionSuite) TestFiveSpecialStores(c *C) {
 	s.scatterSpecial(c, 5, 5, 100)
+	s.scatterSpecial(c, 5, 5, 1000)
 }
 
 func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {

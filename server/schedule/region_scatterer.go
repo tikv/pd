@@ -263,7 +263,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) {
 		for _, peer := range peers {
 			candidates := r.selectCandidates(region, peer.GetStoreId(), selectedStores, context)
-			newPeer := r.selectStore(group, peer, candidates, context)
+			newPeer := r.selectStore(group, peer, peer.GetStoreId(), candidates, context)
 			targetPeers[newPeer.GetStoreId()] = newPeer
 			selectedStores[newPeer.GetStoreId()] = struct{}{}
 		}
@@ -320,7 +320,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 	return candidates
 }
 
-func (r *RegionScatterer) selectStore(group string, peer *metapb.Peer, candidates []uint64, context engineContext) *metapb.Peer {
+func (r *RegionScatterer) selectStore(group string, peer *metapb.Peer, sourceStoreID uint64, candidates []uint64, context engineContext) *metapb.Peer {
 	if len(candidates) < 1 {
 		return peer
 	}
@@ -334,6 +334,12 @@ func (r *RegionScatterer) selectStore(group string, peer *metapb.Peer, candidate
 				StoreId: storeID,
 				Role:    peer.GetRole(),
 			}
+		}
+	}
+	// if the source store have the least count, we don't need to scatter this peer
+	for _, storeID := range candidates {
+		if storeID == sourceStoreID && context.selectedPeer.Get(sourceStoreID, group) <= minCount {
+			return peer
 		}
 	}
 	if newPeer == nil {
