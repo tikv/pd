@@ -7659,7 +7659,7 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The heartbeat latency of each TiKV instance in .99",
+          "description": "The heartbeat update cache or kv OPS",
           "editable": true,
           "error": false,
           "fill": 0,
@@ -7712,7 +7712,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Heartbeat  region event QPS",
+          "title": "Heartbeat region event QPS",
           "tooltip": {
             "msResolution": false,
             "shared": true,
@@ -7756,7 +7756,7 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The heartbeat latency of each TiKV instance in .99",
+          "description": "The region heartbeat handle duration in .99",
           "editable": true,
           "error": false,
           "fill": 0,
@@ -7796,7 +7796,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "round(histogram_quantile(0.99, sum(rate(pd_scheduler_region_heartbeat_latency_seconds_bucket{tidb_cluster=\"$tidb_cluster\", store=~\"$store\"}[5m])) by (address, store, le)), 1000)",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_region_heartbeat_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\", store=~\"$store\"}[1m])) by (address, store, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -7809,7 +7809,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "99% Region heartbeat latency",
+          "title": "99% Region heartbeat handle latency",
           "tooltip": {
             "msResolution": false,
             "shared": true,
@@ -7826,7 +7826,7 @@
           },
           "yaxes": [
             {
-              "format": "ms",
+              "format": "s",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -7834,7 +7834,7 @@
               "show": true
             },
             {
-              "format": "ms",
+              "format": "s",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -8297,7 +8297,7 @@
           },
           "yaxes": [
             {
-              "format": "ms",
+              "format": "s",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -8305,104 +8305,7 @@
               "show": true
             },
             {
-              "format": "ms",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The region heartbeat handle duration in .99",
-          "editable": true,
-          "error": false,
-          "fill": 0,
-          "grid": {},
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 47
-          },
-          "id": 1401,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": false,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null as zero",
-          "paceLength": 10,
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_scheduler_handle_region_heartbeat_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\", store=~\"$store\"}[1m])) by (address, store, le))",
-              "format": "time_series",
-              "hide": false,
-              "intervalFactor": 2,
-              "legendFormat": "{{address}}-store-{{store}}",
-              "refId": "A",
-              "step": 4
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "99% region heartbeat handle duration",
-          "tooltip": {
-            "msResolution": false,
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "ms",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": "0",
-              "show": true
-            },
-            {
-              "format": "ms",
+              "format": "s",
               "label": null,
               "logBase": 1,
               "max": null,
