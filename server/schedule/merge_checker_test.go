@@ -98,8 +98,8 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 				},
 			},
 			&metapb.Peer{Id: 109, StoreId: 4},
-			core.SetApproximateSize(10),
-			core.SetApproximateKeys(10),
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1),
 		),
 	}
 
@@ -148,6 +148,11 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
 
 	// Skip recently split regions.
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	ops = s.mc.Check(s.regions[3])
+	c.Assert(ops, NotNil)
+
 	s.mc.RecordRegionSplit(s.regions[2].GetID())
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
