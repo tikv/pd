@@ -232,10 +232,10 @@ func (l *LabelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreI
 		if label == regionIsolation {
 			return
 		}
-		l.counterDec(label)
+		l.labelCounter[label]--
 	}
 	l.regionLabelStats[regionID] = regionIsolation
-	l.counterInc(regionIsolation)
+	l.labelCounter[regionIsolation]++
 }
 
 // Collect collects the metrics of the label status.
@@ -253,24 +253,8 @@ func (l *LabelStatistics) Reset() {
 // ClearDefunctRegion is used to handle the overlap region.
 func (l *LabelStatistics) ClearDefunctRegion(regionID uint64, labels []string) {
 	if label, ok := l.regionLabelStats[regionID]; ok {
-		l.counterDec(label)
-		delete(l.regionLabelStats, regionID)
-	}
-}
-
-func (l *LabelStatistics) counterInc(label string) {
-	if label == nonIsolation {
-		l.labelCounter[nonIsolation]++
-	} else {
-		l.labelCounter[label]++
-	}
-}
-
-func (l *LabelStatistics) counterDec(label string) {
-	if label == nonIsolation {
-		l.labelCounter[nonIsolation]--
-	} else {
 		l.labelCounter[label]--
+		delete(l.regionLabelStats, regionID)
 	}
 }
 
