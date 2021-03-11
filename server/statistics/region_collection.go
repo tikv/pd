@@ -251,7 +251,7 @@ func (l *LabelStatistics) Reset() {
 }
 
 // ClearDefunctRegion is used to handle the overlap region.
-func (l *LabelStatistics) ClearDefunctRegion(regionID uint64, labels []string) {
+func (l *LabelStatistics) ClearDefunctRegion(regionID uint64) {
 	if label, ok := l.regionLabelStats[regionID]; ok {
 		l.labelCounter[label]--
 		delete(l.regionLabelStats, regionID)
@@ -280,17 +280,35 @@ func getRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
 }
 
 func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {
-	m := make(map[string][]*core.StoreInfo)
+	var emptyValueStores []*core.StoreInfo
+	valueStoresMap := make(map[string][]*core.StoreInfo)
+
 	for _, s := range stores {
 		labelValue := s.GetLabelValue(label)
 		if labelValue == "" {
-			continue
+			emptyValueStores = append(emptyValueStores, s)
+		} else {
+			valueStoresMap[labelValue] = append(valueStoresMap[labelValue], s)
 		}
-		m[labelValue] = append(m[labelValue], s)
 	}
+
+	if len(valueStoresMap) == 0 {
+		if len(emptyValueStores) > 1 {
+			return [][]*core.StoreInfo{emptyValueStores}
+		}
+		return nil
+	}
+
 	var res [][]*core.StoreInfo
-	for _, stores := range m {
-		if len(stores) > 1 {
+	if len(emptyValueStores) == 0 {
+		for _, stores := range valueStoresMap {
+			if len(stores) > 1 {
+				res = append(res, stores)
+			}
+		}
+	} else {
+		for _, stores := range valueStoresMap {
+			stores = append(stores, emptyValueStores...)
 			res = append(res, stores)
 		}
 	}
