@@ -186,10 +186,10 @@ func (l *LabelLevelStatistics) Observe(region *core.RegionInfo, stores []*core.S
 		if label == regionIsolation {
 			return
 		}
-		l.counterDec(label)
+		l.labelCounter[label]--
 	}
 	l.regionLabelStats[regionID] = regionIsolation
-	l.counterInc(regionIsolation)
+	l.labelCounter[regionIsolation]++
 }
 
 // Collect collects the metrics of the label status.
@@ -205,6 +205,7 @@ func (l *LabelLevelStatistics) Reset() {
 }
 
 // ClearDefunctRegion is used to handle the overlap region.
+<<<<<<< HEAD
 func (l *LabelLevelStatistics) ClearDefunctRegion(regionID uint64, labels []string) {
 	if label, ok := l.regionLabelStats[regionID]; ok {
 		l.counterDec(label)
@@ -224,7 +225,12 @@ func (l *LabelLevelStatistics) counterDec(label string) {
 	if label == nonIsolation {
 		l.labelCounter[nonIsolation]--
 	} else {
+=======
+func (l *LabelStatistics) ClearDefunctRegion(regionID uint64) {
+	if label, ok := l.regionLabelStats[regionID]; ok {
+>>>>>>> 3c818178... statistics: fix the bug that the isolation level is wrong when the store lacks label (#3467)
 		l.labelCounter[label]--
+		delete(l.regionLabelStats, regionID)
 	}
 }
 
@@ -250,17 +256,39 @@ func getRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
 }
 
 func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {
-	m := make(map[string][]*core.StoreInfo)
+	var emptyValueStores []*core.StoreInfo
+	valueStoresMap := make(map[string][]*core.StoreInfo)
+
 	for _, s := range stores {
 		labelValue := s.GetLabelValue(label)
 		if labelValue == "" {
-			continue
+			emptyValueStores = append(emptyValueStores, s)
+		} else {
+			valueStoresMap[labelValue] = append(valueStoresMap[labelValue], s)
 		}
-		m[labelValue] = append(m[labelValue], s)
 	}
+
+	if len(valueStoresMap) == 0 {
+		// Usually it is because all TiKVs lack this label.
+		if len(emptyValueStores) > 1 {
+			return [][]*core.StoreInfo{emptyValueStores}
+		}
+		return nil
+	}
+
 	var res [][]*core.StoreInfo
-	for _, stores := range m {
-		if len(stores) > 1 {
+	if len(emptyValueStores) == 0 {
+		// No TiKV lacks this label.
+		for _, stores := range valueStoresMap {
+			if len(stores) > 1 {
+				res = append(res, stores)
+			}
+		}
+	} else {
+		// Usually it is because some TiKVs lack this label.
+		// The TiKVs in each label and the TiKVs without label form a group.
+		for _, stores := range valueStoresMap {
+			stores = append(stores, emptyValueStores...)
 			res = append(res, stores)
 		}
 	}
