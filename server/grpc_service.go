@@ -31,8 +31,8 @@ import (
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -850,7 +850,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		}
 	}
 
-	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(config.GlobalDCLocation, 1)
+	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -1082,7 +1082,7 @@ func (s *Server) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLe
 	if onlyAllowLeader {
 		leaderID := s.GetLeader().GetMemberId()
 		if leaderID != header.GetSenderId() {
-			return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
+			return status.Errorf(codes.FailedPrecondition, "%s, need %d but got %d", errs.MismatchLeaderErr, leaderID, header.GetSenderId())
 		}
 	}
 	return nil

@@ -67,8 +67,8 @@ func (s *serverTestSuite) TestMemberDelete(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)

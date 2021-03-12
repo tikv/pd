@@ -64,8 +64,8 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	}
 	serverNumber := len(testCase.dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = testCase.dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = testCase.dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -115,8 +115,8 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 	}
 	serverNumber := len(testCase.dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = testCase.dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = testCase.dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -178,8 +178,8 @@ func (s *testLocalTSOSerialSuite) TestNextLeaderKey(c *C) {
 	}
 	serverNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, serverNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)

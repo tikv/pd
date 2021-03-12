@@ -98,12 +98,13 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	defer cancel()
 	// nolint
 	cli := &baseClient{
-		urls:            []string{"localhost:8080"},
-		checkLeaderCh:   make(chan struct{}, 1),
-		ctx:             ctx,
-		cancel:          cancel,
-		security:        SecurityOption{},
-		gRPCDialOptions: []grpc.DialOption{grpc.WithBlock()},
+		urls:                 []string{"localhost:8080"},
+		checkLeaderCh:        make(chan struct{}, 1),
+		checkTSODispatcherCh: make(chan struct{}, 1),
+		ctx:                  ctx,
+		cancel:               cancel,
+		security:             SecurityOption{},
+		gRPCDialOptions:      []grpc.DialOption{grpc.WithBlock()},
 	}
 
 	err := cli.updateLeader()

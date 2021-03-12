@@ -33,8 +33,8 @@ type testTsoSuite struct {
 
 func (s *testTsoSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
-		cfg.LocalTSO.EnableLocalTSO = true
-		cfg.LocalTSO.DCLocation = "dc-1"
+		cfg.EnableLocalTSO = true
+		cfg.Labels[config.ZoneLabel] = "dc-1"
 	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 

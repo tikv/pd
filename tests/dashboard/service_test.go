@@ -154,14 +154,14 @@ func (s *serverTestSuite) testDashboard(c *C, internalProxy bool) {
 		}
 	}
 	args := []string{"-u", leaderAddr, "config", "set", "dashboard-address", dashboardAddress2}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	s.checkServiceIsStarted(c, internalProxy, servers, leader)
 	c.Assert(leader.GetServer().GetPersistOptions().GetDashboardAddress(), Equals, dashboardAddress2)
 
 	// pd-ctl set stop
 	args = []string{"-u", leaderAddr, "config", "set", "dashboard-address", "none"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	s.checkServiceIsStopped(c, servers)
 }

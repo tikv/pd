@@ -226,11 +226,14 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 
 	// profile API
 	apiRouter.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	apiRouter.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	apiRouter.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	apiRouter.Handle("/debug/pprof/heap", pprof.Handler("heap"))
 	apiRouter.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
 	apiRouter.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
 	apiRouter.Handle("/debug/pprof/block", pprof.Handler("block"))
 	apiRouter.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	apiRouter.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
 
 	// service GC safepoint API
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)

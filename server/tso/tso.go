@@ -234,8 +234,8 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	if err != nil {
 		return err
 	}
-	// save into etcd only if the time difference is big enough
-	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) > 3*updateTimestampGuard {
+	// save into etcd only if nextPhysical is close to lastSavedTime
+	if typeutil.SubTimeByWallClock(t.lastSavedTime.Load().(time.Time), nextPhysical) <= updateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		if err = t.saveTimestamp(leadership, save); err != nil {
 			tsoCounter.WithLabelValues("err_save_reset_ts").Inc()

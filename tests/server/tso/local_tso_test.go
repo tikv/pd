@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
 
@@ -56,8 +57,8 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -144,8 +145,8 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -160,7 +161,7 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId()),
 		Count:      tsoCount,
-		DcLocation: config.GlobalDCLocation,
+		DcLocation: tso.GlobalDCLocation,
 	}
 	globalTS := testGetLocalTimestamp(c, leaderCli, req)
 
@@ -172,8 +173,8 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 
 	// Join a new dc-location
 	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = "dc-4"
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = "dc-4"
 	})
 	c.Assert(err, IsNil)
 	err = pd4.Run()

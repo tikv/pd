@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
@@ -204,8 +205,8 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -237,7 +238,7 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	// Check allocator leaders URL map.
 	cli.Close()
 	for dcLocation, url := range cli.(client).GetAllocatorLeaderURLs() {
-		if dcLocation == config.GlobalDCLocation {
+		if dcLocation == tso.GlobalDCLocation {
 			urls := cli.(client).GetURLs()
 			sort.Strings(urls)
 			sort.Strings(endpoints)
@@ -262,8 +263,8 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -272,13 +273,20 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
+	c.Assert(err, IsNil)
+
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
 	// Join a new dc-location
 	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = "dc-4"
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = "dc-4"
 	})
 	c.Assert(err, IsNil)
 	err = pd4.Run()
@@ -287,16 +295,6 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cluster.CheckClusterDCLocation()
 	cluster.WaitAllLeaders(c, dcLocationConfig)
 
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
-	c.Assert(err, IsNil)
-
-	// Make sure we have all leaders ready before the test goes on
-	leaderName := cluster.WaitLeader()
-	s.waitLeader(c, cli.(client), cluster.GetServer(leaderName).GetConfig().ClientUrls)
 	wg := sync.WaitGroup{}
 	for _, dcLocation := range dcLocationConfig {
 		wg.Add(tsoRequestConcurrentNumber)
@@ -330,6 +328,18 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(p, Equals, int64(0))
 	c.Assert(l, Equals, int64(0))
 	c.Assert(err, NotNil)
+
+	// assert global tso after resign leader
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateLeader", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/client/skipUpdateLeader")
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, NotNil)
+	c.Assert(pd.IsLeaderChange(err), Equals, true)
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, IsNil)
 }
 
 func (s *clientTestSuite) TestCustomTimeout(c *C) {
