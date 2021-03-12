@@ -99,6 +99,9 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		approximateKeys: int64(heartbeat.GetApproximateKeys()),
 	}
 
+	sort.Sort(peerStatsSlice(region.downPeers))
+	sort.Sort(peerSlice(region.pendingPeers))
+
 	classifyVoterAndLearner(region)
 	return region
 }
@@ -574,10 +577,86 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	// Remove from leaders and followers.
 	for _, peer := range region.meta.GetPeers() {
 		storeID := peer.GetStoreId()
+<<<<<<< HEAD
 		r.leaders[storeID].Delete(region.GetID())
 		r.followers[storeID].Delete(region.GetID())
 		r.learners[storeID].Delete(region.GetID())
 		r.pendingPeers[storeID].Delete(region.GetID())
+=======
+		r.leaders[storeID].remove(region)
+		r.followers[storeID].remove(region)
+		r.learners[storeID].remove(region)
+		r.pendingPeers[storeID].remove(region)
+	}
+}
+
+type peerSlice []*metapb.Peer
+
+func (s peerSlice) Len() int {
+	return len(s)
+}
+func (s peerSlice) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s peerSlice) Less(i, j int) bool {
+	return s[i].GetId() < s[j].GetId()
+}
+
+// SortedPeersEqual judges whether two sorted `peerSlice` are equal
+func SortedPeersEqual(peersA, peersB []*metapb.Peer) bool {
+	if len(peersA) != len(peersB) {
+		return false
+	}
+	for i, peer := range peersA {
+		if peer.GetId() != peersB[i].GetId() {
+			return false
+		}
+	}
+	return true
+}
+
+type peerStatsSlice []*pdpb.PeerStats
+
+func (s peerStatsSlice) Len() int {
+	return len(s)
+}
+func (s peerStatsSlice) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s peerStatsSlice) Less(i, j int) bool {
+	return s[i].GetPeer().GetId() < s[j].GetPeer().GetId()
+}
+
+// SortedPeersStatsEqual judges whether two sorted `peerStatsSlice` are equal
+func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
+	if len(peersA) != len(peersB) {
+		return false
+	}
+	for i, peerStats := range peersA {
+		if peerStats.GetPeer().GetId() != peersB[i].GetPeer().GetId() {
+			return false
+		}
+	}
+	return true
+}
+
+// shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
+// new peer was created, learners changed, pendingPeers changed, and so on.
+func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
+	checkPeersChange := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
+		if len(origin) != len(other) {
+			return true
+		}
+		sort.Sort(peerSlice(origin))
+		sort.Sort(peerSlice(other))
+		for index, peer := range origin {
+			if peer.GetStoreId() == other[index].GetStoreId() && peer.GetId() == other[index].GetId() {
+				continue
+			}
+			return true
+		}
+		return false
+>>>>>>> b1ba2d01... cluster: save to the region cache when pending-peers or down-peers change (#3462)
 	}
 }
 
