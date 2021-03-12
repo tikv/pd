@@ -25,6 +25,9 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+// ForwardMetadataKey is used to record the forwarded host of PD.
+const ForwardMetadataKey = "pd-forwarded-host"
+
 // TLSConfig is the configuration for supporting tls.
 type TLSConfig struct {
 	// CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
@@ -103,9 +106,9 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	return cc, nil
 }
 
-// NewReceiverMetadata creates a context with receiver metadata information.
+// BuildForwardContext creates a context with receiver metadata information.
 // It is used in client side.
-func NewReceiverMetadata(ctx context.Context, addr string) context.Context {
-	md := metadata.Pairs("receiver", addr)
+func BuildForwardContext(ctx context.Context, addr string) context.Context {
+	md := metadata.Pairs(ForwardMetadataKey, addr)
 	return metadata.NewOutgoingContext(ctx, md)
 }

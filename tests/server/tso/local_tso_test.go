@@ -96,7 +96,7 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 						DcLocation: dcLocation,
 					}
 					ctx, cancel := context.WithCancel(context.Background())
-					ctx = grpcutil.NewReceiverMetadata(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
+					ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
 					ts := testGetLocalTimestamp(c, ctx, dcClientMap[dcLocation], req)
 					cancel()
 					lastTS := lastList[dcLocation]
@@ -166,7 +166,7 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 		DcLocation: tso.GlobalDCLocation,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx = grpcutil.NewReceiverMetadata(ctx, leaderServer.GetAddr())
+	ctx = grpcutil.BuildForwardContext(ctx, leaderServer.GetAddr())
 	globalTS := testGetLocalTimestamp(c, ctx, leaderCli, req)
 	cancel()
 
@@ -216,7 +216,7 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 						DcLocation: dcLocation,
 					}
 					ctx, cancel := context.WithCancel(context.Background())
-					ctx = grpcutil.NewReceiverMetadata(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
+					ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
 					ts := testGetLocalTimestamp(c, ctx, dcClientMap[dcLocation], req)
 					cancel()
 					lastTS := lastList[dcLocation]

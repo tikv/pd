@@ -23,6 +23,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
@@ -30,7 +31,6 @@ import (
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
-	"google.golang.org/grpc/metadata"
 )
 
 func Test(t *testing.T) {
@@ -234,8 +234,7 @@ func (s *testNormalGlobalTSOSuite) TestRequestFollower(c *C) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	md := metadata.Pairs("receiver", followerServer.GetAddr())
-	ctx = metadata.NewOutgoingContext(ctx, md)
+	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -288,8 +287,7 @@ func (s *testNormalGlobalTSOSuite) TestDelaySyncTimestamp(c *C) {
 	leaderServer.ResignLeader()
 	c.Assert(nextLeaderServer.WaitLeader(), IsTrue)
 
-	md := metadata.Pairs("receiver", nextLeaderServer.GetAddr())
-	ctx = metadata.NewOutgoingContext(ctx, md)
+	ctx = grpcutil.BuildForwardContext(ctx, nextLeaderServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -434,8 +432,7 @@ func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	md := metadata.Pairs("receiver", followerServer.GetAddr())
-	ctx = metadata.NewOutgoingContext(ctx, md)
+	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -524,8 +521,8 @@ func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, 
 	}
 	pdClient, ok := s.dcClientMap[dcLocation]
 	c.Assert(ok, IsTrue)
-	md := metadata.Pairs("receiver", cluster.GetServer(s.leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
-	ctx = metadata.NewOutgoingContext(ctx, md)
+	targetAddr := cluster.GetServer(s.leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr()
+	ctx = grpcutil.BuildForwardContext(ctx, targetAddr)
 	tsoClient, err := pdClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
