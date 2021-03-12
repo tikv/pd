@@ -14,6 +14,8 @@
 package core
 
 import (
+	"sort"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
@@ -28,14 +30,20 @@ type RegionCreateOption func(region *RegionInfo)
 // WithDownPeers sets the down peers for the region.
 func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.downPeers = downPeers
+		region.downPeers = append(downPeers[:0:0], downPeers...)
+		sort.Sort(peerStatsSlice(region.downPeers))
 	}
 }
 
 // WithPendingPeers sets the pending peers for the region.
 func WithPendingPeers(pengdingPeers []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
+<<<<<<< HEAD
 		region.pendingPeers = pengdingPeers
+=======
+		region.pendingPeers = append(pendingPeers[:0:0], pendingPeers...)
+		sort.Sort(peerSlice(region.pendingPeers))
+>>>>>>> b1ba2d01... cluster: save to the region cache when pending-peers or down-peers change (#3462)
 	}
 }
 

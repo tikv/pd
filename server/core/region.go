@@ -112,6 +112,9 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		replicationStatus: heartbeat.GetReplicationStatus(),
 	}
 
+	sort.Sort(peerStatsSlice(region.downPeers))
+	sort.Sort(peerSlice(region.pendingPeers))
+
 	classifyVoterAndLearner(region)
 	return region
 }
@@ -708,6 +711,44 @@ func (s peerSlice) Swap(i, j int) {
 }
 func (s peerSlice) Less(i, j int) bool {
 	return s[i].GetId() < s[j].GetId()
+}
+
+// SortedPeersEqual judges whether two sorted `peerSlice` are equal
+func SortedPeersEqual(peersA, peersB []*metapb.Peer) bool {
+	if len(peersA) != len(peersB) {
+		return false
+	}
+	for i, peer := range peersA {
+		if peer.GetId() != peersB[i].GetId() {
+			return false
+		}
+	}
+	return true
+}
+
+type peerStatsSlice []*pdpb.PeerStats
+
+func (s peerStatsSlice) Len() int {
+	return len(s)
+}
+func (s peerStatsSlice) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s peerStatsSlice) Less(i, j int) bool {
+	return s[i].GetPeer().GetId() < s[j].GetPeer().GetId()
+}
+
+// SortedPeersStatsEqual judges whether two sorted `peerStatsSlice` are equal
+func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
+	if len(peersA) != len(peersB) {
+		return false
+	}
+	for i, peerStats := range peersA {
+		if peerStats.GetPeer().GetId() != peersB[i].GetPeer().GetId() {
+			return false
+		}
+	}
+	return true
 }
 
 // shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
