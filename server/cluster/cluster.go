@@ -635,11 +635,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			if c.regionStats != nil {
 				c.regionStats.ClearDefunctRegion(item.GetID())
 			}
-<<<<<<< HEAD
-			c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.GetLocationLabels())
-=======
 			c.labelLevelStats.ClearDefunctRegion(item.GetID())
->>>>>>> 3c818178... statistics: fix the bug that the isolation level is wrong when the store lacks label (#3467)
 		}
 
 		// Update related stores.

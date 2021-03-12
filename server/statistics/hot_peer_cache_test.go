@@ -15,10 +15,6 @@ package statistics
 
 import (
 	"math/rand"
-<<<<<<< HEAD
-=======
-	"time"
->>>>>>> 3c818178... statistics: fix the bug that the isolation level is wrong when the store lacks label (#3467)
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
