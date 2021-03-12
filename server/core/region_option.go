@@ -36,14 +36,10 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 }
 
 // WithPendingPeers sets the pending peers for the region.
-func WithPendingPeers(pengdingPeers []*metapb.Peer) RegionCreateOption {
+func WithPendingPeers(pendingPeers []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
-<<<<<<< HEAD
-		region.pendingPeers = pengdingPeers
-=======
 		region.pendingPeers = append(pendingPeers[:0:0], pendingPeers...)
 		sort.Sort(peerSlice(region.pendingPeers))
->>>>>>> b1ba2d01... cluster: save to the region cache when pending-peers or down-peers change (#3462)
 	}
 }
 
