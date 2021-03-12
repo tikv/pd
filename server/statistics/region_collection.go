@@ -40,8 +40,8 @@ const nonIsolation = "none"
 // RegionInfo is used to record the status of region.
 type RegionInfo struct {
 	*core.RegionInfo
-	startMissPeerTs int64
-	startDownPeerTs int64
+	startMissVoterPeerTs int64
+	startDownPeerTs      int64
 }
 
 // RegionStatistics is used to record the status of regions.
@@ -125,15 +125,20 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		deleteIndex          RegionStatisticType
 	)
 	desiredReplicas := r.opt.GetMaxReplicas()
+	desiredVoters := desiredReplicas
 	if r.opt.IsPlacementRulesEnabled() {
 		if !r.ruleManager.IsInitialized() {
 			log.Warn("ruleManager haven't been initialized")
 			return
 		}
 		desiredReplicas = 0
+		desiredVoters = 0
 		rules := r.ruleManager.GetRulesForApplyRegion(region)
 		for _, rule := range rules {
 			desiredReplicas += rule.Count
+			if rule.Role != placement.Learner {
+				desiredVoters += rule.Count
+			}
 		}
 	}
 
@@ -170,18 +175,17 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 					RegionInfo: region,
 				}
 			}
-			switch typ {
-			case MissPeer:
-				if info.startMissPeerTs != 0 {
-					regionMissPeerDuration.Observe(float64(time.Now().Unix() - info.startMissPeerTs))
-				} else {
-					info.startMissPeerTs = time.Now().Unix()
-				}
-			case DownPeer:
+			if typ == DownPeer {
 				if info.startDownPeerTs != 0 {
 					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.startDownPeerTs))
 				} else {
 					info.startDownPeerTs = time.Now().Unix()
+				}
+			} else if typ == MissPeer && len(region.GetVoters()) < desiredVoters {
+				if info.startMissVoterPeerTs != 0 {
+					regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.startMissVoterPeerTs))
+				} else {
+					info.startMissVoterPeerTs = time.Now().Unix()
 				}
 			}
 

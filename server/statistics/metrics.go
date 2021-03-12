@@ -140,8 +140,8 @@ var (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	regionMissPeerDuration = regionAbnormalPeerDuration.WithLabelValues("miss-peer")
-	regionDownPeerDuration = regionAbnormalPeerDuration.WithLabelValues("down-peer")
+	regionMissVoterPeerDuration = regionAbnormalPeerDuration.WithLabelValues("miss-voter-peer")
+	regionDownPeerDuration      = regionAbnormalPeerDuration.WithLabelValues("down-peer")
 )
 
 func init() {
