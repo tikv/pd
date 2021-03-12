@@ -15,17 +15,12 @@ package statistics
 
 import (
 	"math/rand"
-	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 )
-
-func Test(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testHotPeerCache{})
 

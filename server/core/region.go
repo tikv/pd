@@ -30,7 +30,7 @@ import (
 )
 
 // errRegionIsStale is error info for region is stale.
-var errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
+func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 	return errors.Errorf("region is stale: region %v origin %v", region, origin)
 }
 
@@ -83,9 +83,16 @@ func classifyVoterAndLearner(region *RegionInfo) {
 	region.voters = voters
 }
 
-// EmptyRegionApproximateSize is the region approximate size of an empty region
-// (heartbeat size <= 1MB).
-const EmptyRegionApproximateSize = 1
+const (
+	// EmptyRegionApproximateSize is the region approximate size of an empty region
+	// (heartbeat size <= 1MB).
+	EmptyRegionApproximateSize = 1
+	// ImpossibleFlowSize is an impossible flow size (such as written_bytes, read_keys, etc.)
+	// It may be caused by overflow, refer to https://github.com/tikv/pd/issues/3379.
+	// They need to be filtered so as not to affect downstream.
+	// (flow size >= 1024TB)
+	ImpossibleFlowSize = 1 << 50
+)
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
@@ -111,6 +118,18 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
 	}
+
+	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
+		region.writtenKeys = 0
+		region.writtenBytes = 0
+	}
+	if region.readKeys >= ImpossibleFlowSize || region.readBytes >= ImpossibleFlowSize {
+		region.readKeys = 0
+		region.readBytes = 0
+	}
+
+	sort.Sort(peerStatsSlice(region.downPeers))
+	sort.Sort(peerSlice(region.pendingPeers))
 
 	classifyVoterAndLearner(region)
 	return region
@@ -727,6 +746,44 @@ func (s peerSlice) Swap(i, j int) {
 }
 func (s peerSlice) Less(i, j int) bool {
 	return s[i].GetId() < s[j].GetId()
+}
+
+// SortedPeersEqual judges whether two sorted `peerSlice` are equal
+func SortedPeersEqual(peersA, peersB []*metapb.Peer) bool {
+	if len(peersA) != len(peersB) {
+		return false
+	}
+	for i, peer := range peersA {
+		if peer.GetId() != peersB[i].GetId() {
+			return false
+		}
+	}
+	return true
+}
+
+type peerStatsSlice []*pdpb.PeerStats
+
+func (s peerStatsSlice) Len() int {
+	return len(s)
+}
+func (s peerStatsSlice) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s peerStatsSlice) Less(i, j int) bool {
+	return s[i].GetPeer().GetId() < s[j].GetPeer().GetId()
+}
+
+// SortedPeersStatsEqual judges whether two sorted `peerStatsSlice` are equal
+func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
+	if len(peersA) != len(peersB) {
+		return false
+	}
+	for i, peerStats := range peersA {
+		if peerStats.GetPeer().GetId() != peersB[i].GetPeer().GetId() {
+			return false
+		}
+	}
+	return true
 }
 
 // shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
