@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -97,7 +97,9 @@ func (m *Manager) updateInfo() {
 	if !m.srv.GetMember().IsLeader() {
 		m.isLeader = false
 		m.members = nil
-		m.srv.GetPersistOptions().Reload(m.srv.GetStorage())
+		if err := m.srv.GetPersistOptions().Reload(m.srv.GetStorage()); err != nil {
+			log.Warn("failed to reload persist options")
+		}
 		return
 	}
 
@@ -187,7 +189,9 @@ func (m *Manager) setNewAddress() {
 	// set new dashboard address
 	cfg := m.srv.GetPersistOptions().GetPDServerConfig().Clone()
 	cfg.DashboardAddress = addr
-	m.srv.SetPDServerConfig(*cfg)
+	if err := m.srv.SetPDServerConfig(*cfg); err != nil {
+		log.Warn("failed to set persist options")
+	}
 }
 
 func (m *Manager) startService() {

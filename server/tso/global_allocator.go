@@ -75,6 +75,7 @@ func NewGlobalTSOAllocator(
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,
+			dcLocation:             GlobalDCLocation,
 		},
 	}
 	return gta
@@ -82,6 +83,7 @@ func NewGlobalTSOAllocator(
 
 // Initialize will initialize the created global TSO allocator.
 func (gta *GlobalTSOAllocator) Initialize(int) error {
+	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(1)
 	// The suffix of a Global TSO should always be 0.
 	gta.timestampOracle.suffix = 0
 	return gta.timestampOracle.SyncTimestamp(gta.leadership)
@@ -316,5 +318,6 @@ func (gta *GlobalTSOAllocator) getCurrentTSO() (pdpb.Timestamp, error) {
 
 // Reset is used to reset the TSO allocator.
 func (gta *GlobalTSOAllocator) Reset() {
+	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(0)
 	gta.timestampOracle.ResetTimestamp()
 }
