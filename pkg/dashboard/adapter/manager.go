@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
