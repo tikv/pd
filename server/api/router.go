@@ -220,13 +220,20 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	apiRouter.Handle("/metric/query", newQueryMetric(svr)).Methods("GET", "POST")
 	apiRouter.Handle("/metric/query_range", newQueryMetric(svr)).Methods("GET", "POST")
 
+	// tso API
+	tsoHandler := newTSOHandler(svr, rd)
+	apiRouter.HandleFunc("/tso/allocator/transfer/{name}", tsoHandler.TransferLocalTSOAllocator).Methods("POST")
+
 	// profile API
 	apiRouter.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	apiRouter.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	apiRouter.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	apiRouter.Handle("/debug/pprof/heap", pprof.Handler("heap"))
 	apiRouter.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
 	apiRouter.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
 	apiRouter.Handle("/debug/pprof/block", pprof.Handler("block"))
 	apiRouter.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	apiRouter.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
 
 	// service GC safepoint API
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)

@@ -91,6 +91,11 @@ error = '''
 store %v is paused for leader transfer
 '''
 
+["PD:core:ErrStoreDestroyed"]
+error = '''
+store %v has been physically destroyed
+'''
+
 ["PD:core:ErrStoreNotFound"]
 error = '''
 store %v not found
@@ -256,9 +261,14 @@ error = '''
 etcd TLS config error
 '''
 
-["PD:etcd:ErrEtcdTxn"]
+["PD:etcd:ErrEtcdTxnConflict"]
 error = '''
-etcd Txn failed
+etcd transaction failed, conflicted and rolled back
+'''
+
+["PD:etcd:ErrEtcdTxnInternal"]
+error = '''
+internal etcd transaction error occurred
 '''
 
 ["PD:etcd:ErrEtcdURLMap"]

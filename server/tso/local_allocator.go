@@ -15,6 +15,7 @@ package tso
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
@@ -96,6 +98,9 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
+	if !lta.leadership.Check() {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of %s allocator", errs.NotLeaderErr, lta.dcLocation))
+	}
 	return lta.timestampOracle.getTS(lta.leadership, count, lta.allocatorManager.GetSuffixBits())
 }
 
@@ -156,8 +161,8 @@ func (lta *LocalTSOAllocator) EnableAllocatorLeader() {
 }
 
 // CampaignAllocatorLeader is used to campaign a Local TSO Allocator's leadership.
-func (lta *LocalTSOAllocator) CampaignAllocatorLeader(leaseTimeout int64) error {
-	return lta.leadership.Campaign(leaseTimeout, lta.allocatorManager.member.MemberValue())
+func (lta *LocalTSOAllocator) CampaignAllocatorLeader(leaseTimeout int64, cmps ...clientv3.Cmp) error {
+	return lta.leadership.Campaign(leaseTimeout, lta.allocatorManager.member.MemberValue(), cmps...)
 }
 
 // KeepAllocatorLeader is used to keep the PD leader's leadership.

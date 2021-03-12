@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -41,7 +42,8 @@ type baseClient struct {
 	// dc-location -> TSO allocator leader URL
 	allocators sync.Map // Store as map[string]string
 
-	checkLeaderCh chan struct{}
+	checkLeaderCh        chan struct{}
+	checkTSODispatcherCh chan struct{}
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -89,13 +91,14 @@ func WithMaxErrorRetry(count int) ClientOption {
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption, opts ...ClientOption) (*baseClient, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	c := &baseClient{
-		urls:          urls,
-		checkLeaderCh: make(chan struct{}, 1),
-		ctx:           ctx1,
-		cancel:        cancel,
-		security:      security,
-		timeout:       defaultPDTimeout,
-		maxRetryTimes: maxInitClusterRetries,
+		urls:                 urls,
+		checkLeaderCh:        make(chan struct{}, 1),
+		checkTSODispatcherCh: make(chan struct{}, 1),
+		ctx:                  ctx1,
+		cancel:               cancel,
+		security:             security,
+		timeout:              defaultPDTimeout,
+		maxRetryTimes:        maxInitClusterRetries,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -145,7 +148,9 @@ func (c *baseClient) leaderLoop() {
 		case <-ctx.Done():
 			return
 		}
-
+		failpoint.Inject("skipUpdateLeader", func() {
+			failpoint.Continue()
+		})
 		if err := c.updateLeader(); err != nil {
 			log.Error("[pd] failed updateLeader", errs.ZapError(err))
 		}
@@ -156,6 +161,13 @@ func (c *baseClient) leaderLoop() {
 func (c *baseClient) ScheduleCheckLeader() {
 	select {
 	case c.checkLeaderCh <- struct{}{}:
+	default:
+	}
+}
+
+func (c *baseClient) scheduleCheckTSODispatcher() {
+	select {
+	case c.checkTSODispatcherCh <- struct{}{}:
 	default:
 	}
 }
@@ -214,12 +226,14 @@ const globalDCLocation = "global"
 
 func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
 	// Clean up the old TSO allocators
-	c.allocators.Range(func(dcLocation, _ interface{}) bool {
+	c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
+		dcLocation := dcLocationKey.(string)
 		// Skip the Global TSO Allocator
-		if dcLocation.(string) == globalDCLocation {
+		if dcLocation == globalDCLocation {
 			return true
 		}
-		if _, exist := curAllocatorMap[dcLocation.(string)]; !exist {
+		if _, exist := curAllocatorMap[dcLocation]; !exist {
+			log.Info("[pd] delete unused tso allocator", zap.String("dc-location", dcLocation))
 			c.allocators.Delete(dcLocation)
 		}
 		return true
@@ -263,7 +277,11 @@ func (c *baseClient) updateLeader() error {
 			}
 		}
 		c.updateURLs(members.GetMembers())
-		return c.switchLeader(members.GetLeader().GetClientUrls())
+		if err := c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
+			return err
+		}
+		c.scheduleCheckTSODispatcher()
+		return nil
 	}
 	return errs.ErrClientGetLeader.FastGenByArgs(c.urls)
 }

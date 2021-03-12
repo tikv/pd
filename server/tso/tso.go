@@ -144,7 +144,7 @@ func (t *timestampOracle) saveTimestamp(leadership *election.Leadership, ts time
 		return errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	t.lastSavedTime.Store(ts)
 	return nil
@@ -234,8 +234,8 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	if err != nil {
 		return err
 	}
-	// save into etcd only if the time difference is big enough
-	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) > 3*updateTimestampGuard {
+	// save into etcd only if nextPhysical is close to lastSavedTime
+	if typeutil.SubTimeByWallClock(t.lastSavedTime.Load().(time.Time), nextPhysical) <= updateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		if err = t.saveTimestamp(leadership, save); err != nil {
 			tsoCounter.WithLabelValues("err_save_reset_ts").Inc()
@@ -366,6 +366,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 		if !leadership.Check() {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd or local tso allocator leader")
 		}
+		resp.SuffixBits = uint32(suffixBits)
 		return resp, nil
 	}
 	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")

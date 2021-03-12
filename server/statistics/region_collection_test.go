@@ -72,7 +72,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 		{Peer: peers[1], DownSeconds: 3608},
 	}
 
-	store3 := stores[3].Clone(core.SetStoreState(metapb.StoreState_Offline))
+	store3 := stores[3].Clone(core.OfflineStore(false))
 	stores[3] = store3
 	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb")}
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
@@ -136,7 +136,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.offlineStats[LearnerPeer]), Equals, 0)
 	c.Assert(len(regionStats.offlineStats[OfflinePeer]), Equals, 0)
 
-	store3 = stores[3].Clone(core.SetStoreState(metapb.StoreState_Up))
+	store3 = stores[3].Clone(core.UpStore())
 	stores[3] = store3
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[OfflinePeer]), Equals, 0)
@@ -217,9 +217,21 @@ func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
 			{"zone": "z1", "rack": "r2", "host": "h2"},
 			{"zone": "z1", "rack": "r2", "host": "h2"},
 		},
+		{
+			// isolated by rack
+			{"rack": "r1", "host": "h1"},
+			{"rack": "r2", "host": "h2"},
+			{"rack": "r3", "host": "h3"},
+		},
+		{
+			// isolated by host
+			{"zone": "z1", "rack": "r1", "host": "h1"},
+			{"zone": "z1", "rack": "r2", "host": "h2"},
+			{"zone": "z1", "host": "h3"},
+		},
 	}
-	res := []string{"rack", "host", "zone", "rack", "none"}
-	counter := map[string]int{"none": 1, "host": 1, "rack": 2, "zone": 1}
+	res := []string{"rack", "host", "zone", "rack", "none", "rack", "host"}
+	counter := map[string]int{"none": 1, "host": 2, "rack": 3, "zone": 1}
 	regionID := 1
 	f := func(labels []map[string]string, res string, locationLabels []string) {
 		metaStores := []*metapb.Store{
@@ -255,10 +267,13 @@ func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
 	c.Assert(label, Equals, nonIsolation)
 	label = getRegionLabelIsolation(nil, nil)
 	c.Assert(label, Equals, nonIsolation)
+	store := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1"}, core.SetStoreLabels([]*metapb.StoreLabel{{Key: "foo", Value: "bar"}}))
+	label = getRegionLabelIsolation([]*core.StoreInfo{store}, locationLabels)
+	c.Assert(label, Equals, "zone")
 
 	regionID = 1
-	res = []string{"rack", "none", "zone", "rack", "none"}
-	counter = map[string]int{"none": 2, "host": 0, "rack": 2, "zone": 1}
+	res = []string{"rack", "none", "zone", "rack", "none", "rack", "none"}
+	counter = map[string]int{"none": 3, "host": 0, "rack": 3, "zone": 1}
 	locationLabels = []string{"zone", "rack"}
 
 	for i, labels := range labelsSet {

@@ -120,7 +120,7 @@ func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 func (c *testCluster) setStoreDown(storeID uint64) error {
 	store := c.GetStore(storeID)
 	newStore := store.Clone(
-		core.SetStoreState(metapb.StoreState_Up),
+		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Time{}),
 	)
 	c.Lock()
@@ -130,7 +130,7 @@ func (c *testCluster) setStoreDown(storeID uint64) error {
 
 func (c *testCluster) setStoreOffline(storeID uint64) error {
 	store := c.GetStore(storeID)
-	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
+	newStore := store.Clone(core.OfflineStore(false))
 	c.Lock()
 	defer c.Unlock()
 	return c.putStoreLocked(newStore)

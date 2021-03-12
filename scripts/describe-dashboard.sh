@@ -9,7 +9,7 @@ if [ "${DASHBOARD-}" == "0" ]; then
   exit 0
 fi
 
-DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap-incubator/tidb-dashboard)
+DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
 
 if [ "$1" = "git-hash" ]; then
   echo "${DASHBOARD_DIR}" | awk -F- '{print $NF}'
