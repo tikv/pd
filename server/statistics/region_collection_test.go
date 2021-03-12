@@ -190,9 +190,21 @@ func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
 			{"zone": "z1", "rack": "r2", "host": "h2"},
 			{"zone": "z1", "rack": "r2", "host": "h2"},
 		},
+		{
+			// isolated by rack
+			{"rack": "r1", "host": "h1"},
+			{"rack": "r2", "host": "h2"},
+			{"rack": "r3", "host": "h3"},
+		},
+		{
+			// isolated by host
+			{"zone": "z1", "rack": "r1", "host": "h1"},
+			{"zone": "z1", "rack": "r2", "host": "h2"},
+			{"zone": "z1", "host": "h3"},
+		},
 	}
-	res := []string{"rack", "host", "zone", "rack", "none"}
-	counter := map[string]int{"none": 1, "host": 1, "rack": 2, "zone": 1}
+	res := []string{"rack", "host", "zone", "rack", "none", "rack", "host"}
+	counter := map[string]int{"none": 1, "host": 2, "rack": 3, "zone": 1}
 	regionID := 1
 	f := func(labels []map[string]string, res string, locationLabels []string) {
 		metaStores := []*metapb.Store{
@@ -228,10 +240,13 @@ func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
 	c.Assert(label, Equals, nonIsolation)
 	label = getRegionLabelIsolation(nil, nil)
 	c.Assert(label, Equals, nonIsolation)
+	store := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1"}, core.SetStoreLabels([]*metapb.StoreLabel{{Key: "foo", Value: "bar"}}))
+	label = getRegionLabelIsolation([]*core.StoreInfo{store}, locationLabels)
+	c.Assert(label, Equals, "zone")
 
 	regionID = 1
-	res = []string{"rack", "none", "zone", "rack", "none"}
-	counter = map[string]int{"none": 2, "host": 0, "rack": 2, "zone": 1}
+	res = []string{"rack", "none", "zone", "rack", "none", "rack", "none"}
+	counter = map[string]int{"none": 3, "host": 0, "rack": 3, "zone": 1}
 	locationLabels = []string{"zone", "rack"}
 
 	for i, labels := range labelsSet {
