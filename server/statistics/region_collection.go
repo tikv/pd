@@ -293,6 +293,7 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 	}
 
 	if len(valueStoresMap) == 0 {
+		// Usually it is because all TiKVs lack this label.
 		if len(emptyValueStores) > 1 {
 			return [][]*core.StoreInfo{emptyValueStores}
 		}
@@ -301,12 +302,15 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 
 	var res [][]*core.StoreInfo
 	if len(emptyValueStores) == 0 {
+		// No TiKV lacks this label.
 		for _, stores := range valueStoresMap {
 			if len(stores) > 1 {
 				res = append(res, stores)
 			}
 		}
 	} else {
+		// Usually it is because some TiKVs lack this label.
+		// The TiKVs in each label and the TiKVs without label form a group.
 		for _, stores := range valueStoresMap {
 			stores = append(stores, emptyValueStores...)
 			res = append(res, stores)
