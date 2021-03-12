@@ -437,6 +437,24 @@ func dimForRead(dimID dimType) bool {
 	return false
 }
 
+func dimForBytesDim(dimID dimType) bool {
+	switch dimID {
+	case readBytesDim, writeBytesLeaderDim, writeBytesPeerDim:
+		return true
+	default:
+		return false
+	}
+}
+
+func dimForKeysDim(dimID dimType) bool {
+	switch dimID {
+	case readKeysDim, writeKeysLeaderDim, writeKeysPeerDim:
+		return true
+	default:
+		return false
+	}
+}
+
 type peerInfo struct {
 	regionID   uint64
 	srcStoreID uint64

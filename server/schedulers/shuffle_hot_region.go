@@ -74,6 +74,18 @@ type shuffleHotRegionSchedulerConfig struct {
 	Limit uint64 `json:"limit"`
 }
 
+type modeTypeShuffle int
+
+const (
+	randomModeShuffle = iota
+	twoDimRelaxModeShuffle
+	bytesDimRelaxModeShuffle
+	keysDimRelaxModeShuffle
+	twoDimStrictModeShuffle
+	bytesDimStrictModeShuffle
+	keysDimStrictModeShuffle
+)
+
 // ShuffleHotRegionScheduler mainly used to test.
 // It will randomly pick a hot peer, and move the peer
 // to a random store, and then transfer the leader to
@@ -85,6 +97,7 @@ type shuffleHotRegionScheduler struct {
 	conf        *shuffleHotRegionSchedulerConfig
 	types       []rwType
 
+	mode         modeTypeShuffle
 	schedRegions map[uint64][]uint64
 }
 
@@ -219,6 +232,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 func (s *shuffleHotRegionScheduler) dispatchStatic(typ rwType, cluster opt.Cluster) []*operator.Operator {
 	storesStats := cluster.GetStoresStats()
 	minHotDegree := cluster.GetOpts().GetHotRegionCacheHitsThreshold()
+	s.mode = modeTypeShuffle(cluster.GetOpts().GetShuffleHotSchedulerMode())
 	switch typ {
 	case read:
 		hotRegionThreshold := getHotRegionThreshold(storesStats, read)
@@ -245,11 +259,10 @@ func (s *shuffleHotRegionScheduler) dispatchStatic(typ rwType, cluster opt.Clust
 				hotRegionThreshold,
 				write, core.RegionKind, mixed)
 		}
-		mode := cluster.GetOpts().GetHotSchedulerMode()
-		if mode < 10 {
-			return s.twoDimShuffle(cluster, s.stLoadInfos[writePeer])
+		if s.mode == randomModeShuffle {
+			return s.randomSchedule(cluster, s.stLoadInfos[writePeer])
 		}
-		return s.randomSchedule(cluster, s.stLoadInfos[writePeer])
+		return s.twoDimShuffle(cluster, s.stLoadInfos[writePeer])
 	}
 	return nil
 }
@@ -303,28 +316,34 @@ func showBalanceRatio(loadDetail map[uint64]*storeLoadDetail) bool {
 	return false
 }
 
-func (s *shuffleHotRegionScheduler) parseMode(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) (balanceType int, singleDimAdjust bool) {
+func (s *shuffleHotRegionScheduler) parseMode(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) (balanceType int, relaxedSelection bool) {
 	balanceType = s.r.Int() % 2
 	showBalanceRatio(loadDetail)
-	// if enough {
-	// 	balanceType = 0
-	// }
 
-	mode := cluster.GetOpts().GetHotSchedulerMode()
-	if mode == 5 || mode == 7 {
+	switch s.mode {
+	case twoDimRelaxModeShuffle:
+		relaxedSelection = true
+	case bytesDimRelaxModeShuffle:
+		relaxedSelection = true
 		balanceType = 0
-	} else if mode == 6 || mode == 8 {
+	case keysDimRelaxModeShuffle:
+		relaxedSelection = true
+		balanceType = 1
+	case twoDimStrictModeShuffle:
+		relaxedSelection = false
+	case bytesDimStrictModeShuffle:
+		relaxedSelection = false
+		balanceType = 0
+	case keysDimStrictModeShuffle:
+		relaxedSelection = false
 		balanceType = 1
 	}
 
-	if mode >= 7 {
-		singleDimAdjust = true
-	}
 	return
 }
 
 func (s *shuffleHotRegionScheduler) twoDimShuffle(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) []*operator.Operator {
-	balanceType, singleDimAdjust := s.parseMode(cluster, loadDetail)
+	balanceType, relaxedSelection := s.parseMode(cluster, loadDetail)
 
 	details := []*loadDetailPair{}
 	for srcStoreID, detail := range loadDetail {
@@ -339,7 +358,6 @@ func (s *shuffleHotRegionScheduler) twoDimShuffle(cluster opt.Cluster, loadDetai
 			return details[i].detail.LoadPred.Current.ByteRate < details[j].detail.LoadPred.Current.ByteRate
 		}
 		return details[i].detail.LoadPred.Current.ByteRate >= details[j].detail.LoadPred.Current.ByteRate
-		// return details[i].detail.LoadPred.Current.KeyRate < details[j].detail.LoadPred.Current.KeyRate
 	})
 	storeLen := len(loadDetail)
 	// targetStoreCount := len(loadDetail) - len(loadDetail)/2
@@ -369,7 +387,7 @@ func (s *shuffleHotRegionScheduler) twoDimShuffle(cluster opt.Cluster, loadDetai
 			approxKVSize := peer.GetByteRate() / peer.GetKeyRate()
 			bytePercent := peer.GetByteRate() / detail.LoadPred.Future.ExpByteRate
 			keyPercent := peer.GetKeyRate() / detail.LoadPred.Future.ExpKeyRate
-			if singleDimAdjust {
+			if relaxedSelection {
 				if balanceType == 0 && bytePercent > keyPercent {
 					found = true
 					break

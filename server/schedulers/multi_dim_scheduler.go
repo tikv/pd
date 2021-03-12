@@ -64,6 +64,15 @@ const (
 	allowedDeviation         = float64(0.05)
 )
 
+type modeTypeMulti int
+
+const (
+	skipModeMulti = iota
+	allDimModeMulti
+	bytesDimModeMulti
+	keysDimModeMulti
+)
+
 type multiDimensionScheduler struct {
 	name string
 	*BaseScheduler
@@ -83,7 +92,7 @@ type multiDimensionScheduler struct {
 	pendingSums    map[uint64]loadInfluence
 
 	minExpLoads           []float64
-	mode                  int
+	mode                  modeTypeMulti
 	balanceRatio          float64
 	relaxBalanceCondition bool
 	splitTrigeCount       int
@@ -158,8 +167,8 @@ func (h *multiDimensionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 	h.Lock()
 	defer h.Unlock()
 
-	mode := cluster.GetOpts().GetHotSchedulerMode()
-	if mode != 2 {
+	h.mode = modeTypeMulti(cluster.GetOpts().GetMultiHotSchedulerMode())
+	if h.mode == skipModeMulti {
 		return nil
 	}
 
@@ -293,6 +302,16 @@ func (balancer *multiBalancer) collectPendingLoadInfo(storeLoads []map[uint64]fl
 func (balancer *multiBalancer) isLoadIdle(expStoreLoads []float64) bool {
 	for i := range expStoreLoads {
 		if dimNeedSched(dimType(i)) && expStoreLoads[i] >= balancer.sche.minExpLoads[i] {
+			switch balancer.sche.mode {
+			case bytesDimModeMulti:
+				if !dimForBytesDim(dimType(i)) {
+					continue
+				}
+			case keysDimModeMulti:
+				if !dimForKeysDim(dimType(i)) {
+					continue
+				}
+			}
 			balancer.allowedDimensions = append(balancer.allowedDimensions, uint64(i))
 		}
 	}
@@ -483,7 +502,7 @@ func (balancer *multiBalancer) filterDstStores(opTy opType, isLargeRegion bool) 
 
 		newLoad := balancer.loadOfMigrated(store, opTy)
 
-		if newLoad <= 1+balancer.sche.balanceRatio || !isLargeRegion {
+		if newLoad <= 1+balancer.sche.balanceRatio { //  || !isLargeRegion
 			if newLoad < minLoad {
 				dstStore = store
 				minLoad = newLoad

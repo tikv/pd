@@ -188,7 +188,7 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 	h.prepareForBalance(cluster)
 
 	mode := cluster.GetOpts().GetHotSchedulerMode()
-	if mode != 1 {
+	if mode == 0 {
 		return nil
 	}
 

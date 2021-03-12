@@ -393,6 +393,16 @@ func (o *PersistOptions) GetHotSchedulerMode() int {
 	return int(o.GetScheduleConfig().HotSchedulerMode)
 }
 
+// GetMultiHotSchedulerMode is used to control scheduling.
+func (o *PersistOptions) GetMultiHotSchedulerMode() int {
+	return int(o.GetScheduleConfig().MultiHotSchedulerMode)
+}
+
+// GetShuffleHotSchedulerMode is used to control scheduling.
+func (o *PersistOptions) GetShuffleHotSchedulerMode() int {
+	return int(o.GetScheduleConfig().ShuffleHotSchedulerMode)
+}
+
 // GetHotBalanceRatio is used to control scheduling.
 func (o *PersistOptions) GetHotBalanceRatio() float64 {
 	return float64(o.GetScheduleConfig().HotBalanceRatio)
