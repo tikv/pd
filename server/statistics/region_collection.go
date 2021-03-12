@@ -18,6 +18,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
+	"time"
 )
 
 // RegionStatisticType represents the type of the region's status.
@@ -36,10 +37,17 @@ const (
 
 const nonIsolation = "none"
 
+// RegionInfo is used to record the status of region.
+type RegionInfo struct {
+	*core.RegionInfo
+	startMissPeerTs int64
+	startDownPeerTs int64
+}
+
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
 	opt          *config.PersistOptions
-	stats        map[RegionStatisticType]map[uint64]*core.RegionInfo
+	stats        map[RegionStatisticType]map[uint64]*RegionInfo
 	offlineStats map[RegionStatisticType]map[uint64]*core.RegionInfo
 	index        map[uint64]RegionStatisticType
 	offlineIndex map[uint64]RegionStatisticType
@@ -50,17 +58,17 @@ type RegionStatistics struct {
 func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.RuleManager) *RegionStatistics {
 	r := &RegionStatistics{
 		opt:          opt,
-		stats:        make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
+		stats:        make(map[RegionStatisticType]map[uint64]*RegionInfo),
 		offlineStats: make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
 		index:        make(map[uint64]RegionStatisticType),
 		offlineIndex: make(map[uint64]RegionStatisticType),
 	}
-	r.stats[MissPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[DownPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[PendingPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
+	r.stats[MissPeer] = make(map[uint64]*RegionInfo)
+	r.stats[ExtraPeer] = make(map[uint64]*RegionInfo)
+	r.stats[DownPeer] = make(map[uint64]*RegionInfo)
+	r.stats[PendingPeer] = make(map[uint64]*RegionInfo)
+	r.stats[LearnerPeer] = make(map[uint64]*RegionInfo)
+	r.stats[EmptyRegion] = make(map[uint64]*RegionInfo)
 
 	r.offlineStats[MissPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
@@ -77,7 +85,7 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core.RegionInfo {
 	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
 	for _, r := range r.stats[typ] {
-		res = append(res, r)
+		res = append(res, r.RegionInfo)
 	}
 	return res
 }
@@ -156,7 +164,28 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 				r.offlineStats[typ][regionID] = region
 				offlinePeerTypeIndex |= typ
 			}
-			r.stats[typ][regionID] = region
+			info := r.stats[typ][regionID]
+			if info == nil {
+				info = &RegionInfo{
+					RegionInfo: region,
+				}
+			}
+			switch typ {
+			case MissPeer:
+				if info.startMissPeerTs != 0 {
+					regionMissPeerDuration.Observe(float64(time.Now().Unix() - info.startMissPeerTs))
+				} else {
+					info.startMissPeerTs = time.Now().Unix()
+				}
+			case DownPeer:
+				if info.startDownPeerTs != 0 {
+					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.startDownPeerTs))
+				} else {
+					info.startDownPeerTs = time.Now().Unix()
+				}
+			}
+
+			r.stats[typ][regionID] = info
 			peerTypeIndex |= typ
 		}
 	}
