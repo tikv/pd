@@ -80,6 +80,7 @@ func NewGlobalTSOAllocator(
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,
+			dcLocation:             GlobalDCLocation,
 		},
 	}
 	return gta
@@ -115,6 +116,7 @@ func (gta *GlobalTSOAllocator) estimateMaxTS(count uint32) (*pdpb.Timestamp, err
 
 // Initialize will initialize the created global TSO allocator.
 func (gta *GlobalTSOAllocator) Initialize(int) error {
+	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(1)
 	// The suffix of a Global TSO should always be 0.
 	gta.timestampOracle.suffix = 0
 	return gta.timestampOracle.SyncTimestamp(gta.leadership)
@@ -177,7 +179,7 @@ SETTING_PHASE:
 	// 4. If skipCheck is false and the maxTSO is bigger than estimatedMaxTSO,
 	// we need to redo the setting phase with the bigger one and skip the check safely.
 	if !skipCheck && tsoutil.CompareTimestamp(estimatedMaxTSO, maxTSO) < 0 {
-		tsoCounter.WithLabelValues("global_tso_sync").Inc()
+		tsoCounter.WithLabelValues("global_tso_sync", gta.timestampOracle.dcLocation).Inc()
 		*estimatedMaxTSO = *maxTSO
 		// Re-add the count
 		estimatedMaxTSO.Logical += int64(count)
@@ -216,7 +218,7 @@ func (gta *GlobalTSOAllocator) precheckLogical(maxTSO *pdpb.Timestamp, suffixBit
 	if differentiatedLogical := gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits); differentiatedLogical >= maxLogical {
 		log.Error("estimated logical part outside of max logical interval, please check ntp time",
 			zap.Reflect("max-tso", maxTSO), errs.ZapError(errs.ErrLogicOverflow))
-		tsoCounter.WithLabelValues("logical_overflow").Inc()
+		tsoCounter.WithLabelValues("logical_overflow", gta.timestampOracle.dcLocation).Inc()
 		return false
 	}
 	return true
@@ -381,5 +383,6 @@ func (gta *GlobalTSOAllocator) getCurrentTSO() (pdpb.Timestamp, error) {
 
 // Reset is used to reset the TSO allocator.
 func (gta *GlobalTSOAllocator) Reset() {
+	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(0)
 	gta.timestampOracle.ResetTimestamp()
 }

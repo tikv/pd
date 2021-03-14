@@ -21,6 +21,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
@@ -94,7 +95,10 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 						Count:      tsoCount,
 						DcLocation: dcLocation,
 					}
-					ts := testGetLocalTimestamp(c, dcClientMap[dcLocation], req)
+					ctx, cancel := context.WithCancel(context.Background())
+					ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
+					ts := testGetLocalTimestamp(c, ctx, dcClientMap[dcLocation], req)
+					cancel()
 					lastTS := lastList[dcLocation]
 					// Check whether the TSO fallbacks
 					c.Assert(tsoutil.CompareTimestamp(ts, lastTS), Equals, 1)
@@ -109,9 +113,7 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 	wg.Wait()
 }
 
-func testGetLocalTimestamp(c *C, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdpb.Timestamp {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func testGetLocalTimestamp(c *C, ctx context.Context, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdpb.Timestamp {
 	tsoClient, err := pdCli.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -163,7 +165,10 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 		Count:      tsoCount,
 		DcLocation: tso.GlobalDCLocation,
 	}
-	globalTS := testGetLocalTimestamp(c, leaderCli, req)
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = grpcutil.BuildForwardContext(ctx, leaderServer.GetAddr())
+	globalTS := testGetLocalTimestamp(c, ctx, leaderCli, req)
+	cancel()
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
@@ -210,7 +215,10 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 						Count:      tsoCount,
 						DcLocation: dcLocation,
 					}
-					ts := testGetLocalTimestamp(c, dcClientMap[dcLocation], req)
+					ctx, cancel := context.WithCancel(context.Background())
+					ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
+					ts := testGetLocalTimestamp(c, ctx, dcClientMap[dcLocation], req)
+					cancel()
 					lastTS := lastList[dcLocation]
 					// Check whether the TSO fallbacks
 					c.Assert(tsoutil.CompareTimestamp(ts, lastTS), Equals, 1)

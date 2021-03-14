@@ -105,9 +105,7 @@ func (s *testAllocIDSuite) TestCommand(c *C) {
 	cluster.WaitLeader()
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	req := &pdpb.AllocIDRequest{
-		Header: testutil.NewRequestHeader(leaderServer.GetClusterID()),
-	}
+	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(leaderServer.GetClusterID())}
 
 	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	var last uint64

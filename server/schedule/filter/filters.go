@@ -273,6 +273,8 @@ type StoreStateFilter struct {
 	TransferLeader bool
 	// Set true if the schedule involves any move region operation.
 	MoveRegion bool
+	// Set true if the scatter move the region
+	ScatterRegion bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
 	// Reason is used to distinguish the reason of store state filter
@@ -370,6 +372,7 @@ const (
 	regionSource
 	leaderTarget
 	regionTarget
+	scatterRegionTarget
 )
 
 func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions, store *core.StoreInfo) bool {
@@ -385,6 +388,8 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 	case regionTarget:
 		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
+	case scatterRegionTarget:
+		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected}
 	}
 	for _, cf := range funcs {
 		if cf(opt, store) {
@@ -412,7 +417,10 @@ func (f *StoreStateFilter) Target(opts *config.PersistOptions, store *core.Store
 	if f.TransferLeader && f.anyConditionMatch(leaderTarget, opts, store) {
 		return false
 	}
-	if f.MoveRegion && f.anyConditionMatch(regionTarget, opts, store) {
+	if f.MoveRegion && f.ScatterRegion && f.anyConditionMatch(scatterRegionTarget, opts, store) {
+		return false
+	}
+	if f.MoveRegion && !f.ScatterRegion && f.anyConditionMatch(regionTarget, opts, store) {
 		return false
 	}
 	return true

@@ -333,9 +333,7 @@ func (s *leaderTestSuite) TestGetLeader(c *C) {
 func (s *leaderTestSuite) sendRequest(c *C, addr string) {
 	defer s.wg.Done()
 
-	req := &pdpb.AllocIDRequest{
-		Header: testutil.NewRequestHeader(0),
-	}
+	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(0)}
 
 	for {
 		select {

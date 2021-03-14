@@ -134,8 +134,9 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "delta(pd_tso_events{tidb_cluster=\"$tidb_cluster\", type=\"save\",instance=\"$instance\"}[1m]) > bool 0",
+          "expr": "pd_tso_role{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", dc=\"global\"}",
           "format": "time_series",
+          "instant": true,
           "intervalFactor": 2,
           "legendFormat": "",
           "metric": "pd_server_tso",
@@ -152,6 +153,11 @@
           "op": "=",
           "text": "Follower",
           "value": "null"
+        },
+        {
+          "op": "=",
+          "text": "Follower",
+          "value": "0"
         },
         {
           "op": "=",
@@ -1289,7 +1295,7 @@
           "tableColumn": "",
           "targets": [
             {
-              "expr": "pd_cluster_tso{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
+              "expr": "pd_cluster_tso{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", dc=\"global\"}",
               "format": "time_series",
               "instant": true,
               "intervalFactor": 2,
@@ -1300,7 +1306,7 @@
           "thresholds": "",
           "timeFrom": null,
           "timeShift": null,
-          "title": "Current TSO",
+          "title": "Current Global TSO",
           "type": "singlestat",
           "valueFontSize": "80%",
           "valueMaps": [
