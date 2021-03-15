@@ -12,6 +12,7 @@ assigneeGroups:
     - shafreeck
     - HunDunDM
     - rleungx
+    - JmPotato
 filterLabels:
   # Run
   include:
