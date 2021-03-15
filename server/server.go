@@ -140,6 +140,9 @@ type Server struct {
 
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
 	serviceSafePointLock sync.Mutex
+
+	// Store as map[string]*grpc.ClientConn
+	clientConns sync.Map
 }
 
 // HandlerBuilder builds a server HTTP handler.

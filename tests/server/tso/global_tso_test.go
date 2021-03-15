@@ -23,6 +23,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
@@ -233,6 +234,7 @@ func (s *testNormalGlobalTSOSuite) TestRequestFollower(c *C) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -285,6 +287,7 @@ func (s *testNormalGlobalTSOSuite) TestDelaySyncTimestamp(c *C) {
 	leaderServer.ResignLeader()
 	c.Assert(nextLeaderServer.WaitLeader(), IsTrue)
 
+	ctx = grpcutil.BuildForwardContext(ctx, nextLeaderServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -429,6 +432,7 @@ func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -492,24 +496,24 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 	// Get some local TSOs first
 	oldLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
 	for _, dcLocation := range dcLocationConfig {
-		oldLocalTSOs = append(oldLocalTSOs, s.testGetTimestamp(ctx, c, tsoCount, dcLocation))
+		oldLocalTSOs = append(oldLocalTSOs, s.testGetTimestamp(ctx, c, cluster, tsoCount, dcLocation))
 	}
 	// Get a global TSO then
-	globalTSO := s.testGetTimestamp(ctx, c, tsoCount, tso.GlobalDCLocation)
+	globalTSO := s.testGetTimestamp(ctx, c, cluster, tsoCount, tso.GlobalDCLocation)
 	for _, oldLocalTSO := range oldLocalTSOs {
 		c.Assert(tsoutil.CompareTimestamp(globalTSO, oldLocalTSO), Equals, 1)
 	}
 	// Get some local TSOs again
 	newLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
 	for _, dcLocation := range dcLocationConfig {
-		newLocalTSOs = append(newLocalTSOs, s.testGetTimestamp(ctx, c, tsoCount, dcLocation))
+		newLocalTSOs = append(newLocalTSOs, s.testGetTimestamp(ctx, c, cluster, tsoCount, dcLocation))
 	}
 	for _, newLocalTSO := range newLocalTSOs {
 		c.Assert(tsoutil.CompareTimestamp(globalTSO, newLocalTSO), Equals, -1)
 	}
 }
 
-func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, n uint32, dcLocation string) *pdpb.Timestamp {
+func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, cluster *tests.TestCluster, n uint32, dcLocation string) *pdpb.Timestamp {
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(s.leaderServer.GetClusterID()),
 		Count:      n,
@@ -517,6 +521,8 @@ func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, 
 	}
 	pdClient, ok := s.dcClientMap[dcLocation]
 	c.Assert(ok, IsTrue)
+	targetAddr := cluster.GetServer(s.leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr()
+	ctx = grpcutil.BuildForwardContext(ctx, targetAddr)
 	tsoClient, err := pdClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -561,6 +567,6 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSOOverflow(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/globalTSOOverflow", `return(true)`), IsNil)
-	s.testGetTimestamp(ctx, c, tsoCount, tso.GlobalDCLocation)
+	s.testGetTimestamp(ctx, c, cluster, tsoCount, tso.GlobalDCLocation)
 	failpoint.Disable("github.com/tikv/pd/server/tso/globalTSOOverflow")
 }

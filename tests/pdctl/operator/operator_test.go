@@ -188,28 +188,6 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 
-	// operator add scatter-region <region_id>
-	args = []string{"-u", pdAddr, "operator", "add", "scatter-region", "3"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
-	args = []string{"-u", pdAddr, "operator", "add", "scatter-region", "1"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
-	args = []string{"-u", pdAddr, "operator", "show", "region"}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "scatter-region"), IsTrue)
-
-	// test echo
-	echo := pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
-	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "operator", "add", "scatter-region", "1"})
-	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
-	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
-	c.Assert(strings.Contains(echo, "Success!"), IsFalse)
-
 	_, err = pdctl.ExecuteCommand(cmd, "config", "set", "enable-placement-rules", "true")
 	c.Assert(err, IsNil)
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "3")
@@ -227,4 +205,25 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "leader", "3", "follower")
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	echo := pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
+	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
+
+	_, err = pdctl.ExecuteCommand(cmd, "config", "set", "enable-placement-rules", "false")
+	c.Assert(err, IsNil)
+	// operator add scatter-region <region_id>
+	args = []string{"-u", pdAddr, "operator", "add", "scatter-region", "3"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "operator", "add", "scatter-region", "1"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "operator", "show", "region"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "scatter-region"), IsTrue)
+
+	// test echo, as the scatter region result is random, both region 1 and region 3 can be the region to be scattered
+	echo1 := pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
+	echo2 := pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "3"})
+	c.Assert(strings.Contains(echo1, "Success!") || strings.Contains(echo2, "Success!"), IsTrue)
 }
