@@ -14,11 +14,12 @@
 package statistics
 
 import (
+	"time"
+
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
-	"time"
 )
 
 // RegionStatisticType represents the type of the region's status.
