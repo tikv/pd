@@ -134,7 +134,7 @@ var (
 			Subsystem: "regions",
 			Name:      "abnormal_peer_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 16), // 1s ~ 18 hours
+			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
 		}, []string{"type"})
 )
 
