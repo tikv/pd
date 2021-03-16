@@ -391,11 +391,6 @@ error = '''
 init file log error, %s
 '''
 
-["PD:main:ErrParseFlags"]
-error = '''
-parse flags error
-'''
-
 ["PD:member:ErrEtcdLeaderNotFound"]
 error = '''
 etcd leader not found

@@ -30,9 +30,7 @@ var (
 
 // The internal error which is generated in PD project.
 // main errors
-var (
-	ErrParseFlags = errors.Normalize("parse flags error", errors.RFCCodeText("PD:main:ErrParseFlags"))
-)
+var ()
 
 // tso errors
 var (
