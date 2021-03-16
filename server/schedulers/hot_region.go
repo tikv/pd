@@ -754,12 +754,8 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 			filters = append(filters, leaderFilter)
 		}
 
-		regionStores := make(map[uint64]*core.StoreInfo, 0)
 		for _, store := range bs.cluster.GetFollowerStores(bs.cur.region) {
-			regionStores[store.GetID()] = store
-		}
-		for storeID := range bs.stLoadDetail {
-			if store, ok := regionStores[storeID]; ok {
+			if _, ok := bs.stLoadDetail[store.GetID()]; ok {
 				candidates = append(candidates, store)
 			}
 		}
