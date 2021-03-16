@@ -127,7 +127,8 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 				if err != nil {
 					return err
 				}
-				log.Info("create TSO forward stream", zap.String("target-addr", targetAddr))
+				// TODO: change it to the info level once the TiKV doesn't use it in a unary way.
+				log.Debug("create TSO forward stream", zap.String("target-addr", targetAddr))
 				forwardStream, cancel, err = s.createTsoForwardStream(client, targetAddr)
 				if err != nil {
 					return err

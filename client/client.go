@@ -173,6 +173,8 @@ const (
 	tsLoopDCCheckInterval = time.Minute
 	maxMergeTSORequests   = 10000 // should be higher if client is sending requests in burst
 	maxInitClusterRetries = 100
+	retryInterval         = 1 * time.Second
+	maxRetryTimes         = 5
 )
 
 // LeaderHealthCheckInterval might be chagned in the unit to shorten the testing time.
@@ -504,6 +506,8 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 			stream pdpb.PD_TsoClient
 		}
 		changedCh chan bool
+		// the number of retrying to connect leader
+		retryTimes uint64
 	)
 	defer func() {
 		log.Info("[pd] exit tso dispatcher", zap.String("dc-location", dc))
@@ -532,35 +536,49 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 			stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 			failpoint.Inject("unreachableNetwork", func() {
 				cancel()
-				stream, cancel = nil, nil
+				stream = nil
 				err = status.New(codes.Unavailable, "unavailable").Err()
 			})
-			if c.enableForwarding {
+			if err != nil && c.enableForwarding {
 				rpcErr, ok := status.FromError(err)
 				// encounter the network error
 				if ok && isNetworkError(rpcErr.Code()) {
-					// TODO: we need to choose the follower in the same dc with the leader.
-					followerClient, addr := c.followerClient()
-					if followerClient != nil {
-						log.Info("fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("addr", addr))
-						// create the follower stream
-						if addr, ok = c.getAllocatorLeaderAddrByDCLocation(dc); !ok {
-							continue
+					retryTimes++
+					// retry several times before falling back to the follower when the network problem happens
+					if retryTimes >= maxRetryTimes {
+						// TODO: we need to choose the follower in the same dc with the leader.
+						followerClient, addr := c.followerClient()
+						if followerClient != nil {
+							log.Info("fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("addr", addr))
+							// create the follower stream
+							if addr, ok = c.getAllocatorLeaderAddrByDCLocation(dc); !ok {
+								cancel()
+								continue
+							}
+							cctx, cancel = context.WithCancel(dispatcherCtx)
+							cctx = grpcutil.BuildForwardContext(cctx, addr)
+							stream, err = c.createTsoStream(cctx, cancel, followerClient)
+							if err == nil {
+								streamCh = make(chan struct {
+									cancel context.CancelFunc
+									stream pdpb.PD_TsoClient
+								})
+								changedCh = make(chan bool)
+								// the goroutine is used to check the network and change back to the original stream
+								go c.checkAllocator(dispatcherCtx, cancel, dc, url, streamCh, changedCh)
+							}
 						}
-						cctx, cancel = context.WithCancel(dispatcherCtx)
-						cctx = grpcutil.BuildForwardContext(cctx, addr)
-						stream, err = c.createTsoStream(cctx, cancel, followerClient)
-						if err == nil {
-							streamCh = make(chan struct {
-								cancel context.CancelFunc
-								stream pdpb.PD_TsoClient
-							})
-							changedCh = make(chan bool)
-							// the goroutine is used to check the network and change back to the original stream
-							go c.checkAllocator(dispatcherCtx, cancel, dc, url, streamCh, changedCh)
-						}
+					} else {
+						// not reach the max retry time, sleep for a while and retry
+						time.Sleep(retryInterval)
+						cancel()
+						continue
 					}
 				}
+			}
+
+			if err == nil {
+				retryTimes = 0
 			}
 
 			if err != nil {
