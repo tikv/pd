@@ -648,9 +648,9 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		if detail.LoadPred.min().ByteRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpByteRate &&
 			detail.LoadPred.min().KeyRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpKeyRate {
 			ret[id] = detail
-			balanceHotRegionCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+			balanceHotRegionCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10), bs.rwTy.String()).Inc()
 		}
-		balanceHotRegionCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+		balanceHotRegionCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10), bs.rwTy.String()).Inc()
 	}
 	return ret
 }
@@ -821,9 +821,9 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 			if detail.LoadPred.max().ByteRate*dstToleranceRatio < detail.LoadPred.Future.ExpByteRate &&
 				detail.LoadPred.max().KeyRate*dstToleranceRatio < detail.LoadPred.Future.ExpKeyRate {
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
-				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
+				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10), bs.rwTy.String()).Inc()
 			}
-			balanceHotRegionCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
+			balanceHotRegionCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10), bs.rwTy.String()).Inc()
 		}
 	}
 	return ret
@@ -1046,8 +1046,8 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 			dstPeer)
 
 		counters = append(counters,
-			balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(bs.cur.srcStoreID, 10)+"-out"),
-			balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(dstPeer.GetStoreId(), 10)+"-in"))
+			balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(bs.cur.srcStoreID, 10)+"-out", bs.rwTy.String()),
+			balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(dstPeer.GetStoreId(), 10)+"-in", bs.rwTy.String()))
 	case transferLeader:
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
 			return nil, nil
@@ -1060,8 +1060,8 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 			bs.cur.dstStoreID,
 			operator.OpHotRegion)
 		counters = append(counters,
-			balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(bs.cur.srcStoreID, 10)+"-out"),
-			balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(bs.cur.dstStoreID, 10)+"-in"))
+			balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(bs.cur.srcStoreID, 10)+"-out", bs.rwTy.String()),
+			balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(bs.cur.dstStoreID, 10)+"-in", bs.rwTy.String()))
 	}
 
 	if err != nil {
