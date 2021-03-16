@@ -182,6 +182,8 @@ static:
 
 lint:
 	@echo "linting"
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@which revive >/dev/null 2>&1 || cd $$(dirname $(GO_TOOLS_BIN_PATH)); go build -o ./bin github.com/mgechev/revive
 	revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
 tidy:
