@@ -521,8 +521,8 @@ func (s *testSynchronizedGlobalTSO) testGetTimestamp(ctx context.Context, c *C, 
 	}
 	pdClient, ok := s.dcClientMap[dcLocation]
 	c.Assert(ok, IsTrue)
-	targetAddr := cluster.GetServer(s.leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr()
-	ctx = grpcutil.BuildForwardContext(ctx, targetAddr)
+	forwardedHost := cluster.GetServer(s.leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr()
+	ctx = grpcutil.BuildForwardContext(ctx, forwardedHost)
 	tsoClient, err := pdClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
