@@ -114,6 +114,7 @@ func BuildForwardContext(ctx context.Context, addr string) context.Context {
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
+// ResetForwardContext is going to reset the forwarded host in metadata.
 func ResetForwardContext(ctx context.Context) context.Context {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
