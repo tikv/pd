@@ -27,7 +27,6 @@ import (
 	zaplog "github.com/pingcap/log"
 	log "github.com/sirupsen/logrus"
 	"github.com/tikv/pd/pkg/errs"
-	etcdlog "go.etcd.io/etcd/pkg/logutil"
 	"go.etcd.io/etcd/raft"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -272,13 +271,6 @@ func InitLogger(cfg *zaplog.Config) error {
 
 		// etcd log
 		capnslog.SetFormatter(&redirectFormatter{})
-		err := zap.RegisterEncoder("zaplog", func(zapcore.EncoderConfig) (zapcore.Encoder, error) {
-			return zaplog.NewTextEncoder(cfg), nil
-		})
-		if err != nil {
-			return
-		}
-		etcdlog.DefaultZapLoggerConfig.Encoding = "zaplog"
 		// grpc log
 		lg := &wrapLogrus{log.StandardLogger()}
 		grpclog.SetLoggerV2(lg)
