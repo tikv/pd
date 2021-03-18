@@ -732,7 +732,6 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	if srcStore == nil {
 		return nil
 	}
-
 	switch bs.opTy {
 	case movePeer:
 		filters = []filter.Filter{
@@ -742,7 +741,9 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
 		}
 
-		candidates = bs.cluster.GetStores()
+		for storeID := range bs.stLoadDetail {
+			candidates = append(candidates, bs.cluster.GetStore(storeID))
+		}
 
 	case transferLeader:
 		filters = []filter.Filter{
@@ -753,7 +754,11 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 			filters = append(filters, leaderFilter)
 		}
 
-		candidates = bs.cluster.GetFollowerStores(bs.cur.region)
+		for _, store := range bs.cluster.GetFollowerStores(bs.cur.region) {
+			if _, ok := bs.stLoadDetail[store.GetID()]; ok {
+				candidates = append(candidates, store)
+			}
+		}
 
 	default:
 		return nil
