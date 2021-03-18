@@ -615,11 +615,11 @@ type connectionContext struct {
 
 func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectionContext, error) {
 	var (
-		url        string
-		networkErr uint64
-		err        error
-		cc         *grpc.ClientConn
-		stream     pdpb.PD_TsoClient
+		url           string
+		networkErrNum uint64
+		err           error
+		cc            *grpc.ClientConn
+		stream        pdpb.PD_TsoClient
 	)
 	// retry several times before falling back to the follower when the network problem happens
 	for i := 0; i < maxRetryTimes; i++ {
@@ -636,7 +636,7 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 
 		if err != nil && c.enableForwarding {
 			if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
-				networkErr++
+				networkErrNum++
 			}
 		}
 
@@ -648,7 +648,7 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 		}
 	}
 
-	if networkErr == maxRetryTimes {
+	if networkErrNum == maxRetryTimes {
 		// encounter the network error
 		followerClient, addr := c.followerClient()
 		if followerClient != nil {
