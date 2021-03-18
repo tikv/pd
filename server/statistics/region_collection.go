@@ -20,6 +20,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
+	"go.uber.org/zap"
 )
 
 // RegionStatisticType represents the type of the region's status.
@@ -164,6 +165,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
 	}
 
+	isAbnormal := isOffline
 	for typ, c := range conditions {
 		if c {
 			if isOffline {
@@ -182,16 +184,29 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 				} else {
 					info.startDownPeerTs = time.Now().Unix()
 				}
+				isAbnormal = true
 			} else if typ == MissPeer && len(region.GetVoters()) < desiredVoters {
 				if info.startMissVoterPeerTs != 0 {
 					regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.startMissVoterPeerTs))
 				} else {
 					info.startMissVoterPeerTs = time.Now().Unix()
 				}
+				isAbnormal = true
 			}
 
 			r.stats[typ][regionID] = info
 			peerTypeIndex |= typ
+		}
+	}
+
+	if isAbnormal {
+		if normal := region.GetNormalVotersCount(); normal <= desiredVoters/2 {
+			regionIsDangerousCounter.Add(1)
+			log.Warn("region normal voter count less than major replicas",
+				zap.Uint64("region-id", region.GetID()),
+				zap.Int("desired-voters", desiredVoters),
+				zap.Int("normal-voters", normal),
+				zap.Int("total-peers", len(region.GetPeers())))
 		}
 	}
 

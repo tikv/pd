@@ -136,6 +136,14 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
 			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
 		}, []string{"type"})
+
+	regionIsDangerousCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "is_dangerous_total",
+			Help:      "Counter of region which the normal voter count is less than major replicas.",
+		})
 )
 
 var (
@@ -160,4 +168,5 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatIntervalHist)
 	prometheus.MustRegister(storeHeartbeatIntervalHist)
 	prometheus.MustRegister(regionAbnormalPeerDuration)
+	prometheus.MustRegister(regionIsDangerousCounter)
 }

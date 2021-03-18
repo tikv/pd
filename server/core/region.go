@@ -436,6 +436,25 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
+// GetNormalVotersCount gets the normal voters count.
+// Normal voter means the peer.role is not learner and the peer status not in pending or down.
+func (r *RegionInfo) GetNormalVotersCount() int {
+	normal := 0
+	for _, peer := range r.GetPeers() {
+		if peer.Role == metapb.PeerRole_Learner {
+			continue
+		}
+		if r.GetPendingPeer(peer.Id) != nil {
+			continue
+		}
+		if r.GetDownPeer(peer.Id) != nil {
+			continue
+		}
+		normal++
+	}
+	return normal
+}
+
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
 type regionMap struct {
 	m         map[uint64]*RegionInfo
