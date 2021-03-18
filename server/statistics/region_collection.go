@@ -42,8 +42,8 @@ const nonIsolation = "none"
 // RegionInfo is used to record the status of region.
 type RegionInfo struct {
 	*core.RegionInfo
-	startMissVoterPeerTs int64
-	startDownPeerTs      int64
+	startMissVoterPeerTS int64
+	startDownPeerTS      int64
 }
 
 // RegionStatistics is used to record the status of regions.
@@ -179,17 +179,17 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 				}
 			}
 			if typ == DownPeer {
-				if info.startDownPeerTs != 0 {
-					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.startDownPeerTs))
+				if info.startDownPeerTS != 0 {
+					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.startDownPeerTS))
 				} else {
-					info.startDownPeerTs = time.Now().Unix()
+					info.startDownPeerTS = time.Now().Unix()
 				}
 				isAbnormal = true
 			} else if typ == MissPeer && len(region.GetVoters()) < desiredVoters {
-				if info.startMissVoterPeerTs != 0 {
-					regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.startMissVoterPeerTs))
+				if info.startMissVoterPeerTS != 0 {
+					regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.startMissVoterPeerTS))
 				} else {
-					info.startMissVoterPeerTs = time.Now().Unix()
+					info.startMissVoterPeerTS = time.Now().Unix()
 				}
 				isAbnormal = true
 			}
