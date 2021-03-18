@@ -174,14 +174,22 @@ check-plugin:
 	@echo "checking plugin"
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
+GOLANGCILINT := $(shell command -v golangci-lint 2>/dev/null)
 static: export GO111MODULE=on
 static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l -d $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
+ifndef GOLANGCILINT
+	$(error Please run `make install-go-tools` before running this task)
+endif
 	golangci-lint run $$($(PACKAGE_DIRECTORIES))
 
+REVIVE := $(shell command -v revive 2>/dev/null)
 lint:
 	@echo "linting"
+ifndef REVIVE
+	$(error Please run `make install-go-tools` before running this task)
+endif
 	revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
 tidy:
