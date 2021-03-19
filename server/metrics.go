@@ -91,6 +91,14 @@ var (
 			Name:      "info",
 			Help:      "Indicate the pd server info, and the value is the start timestamp (s).",
 		}, []string{"version", "hash"})
+	forwardedCmdDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_forwarded_cmds_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled forwarded cmds.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		}, []string{"type"})
 )
 
 func init() {
@@ -103,4 +111,5 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
 	prometheus.MustRegister(serverInfo)
+	prometheus.MustRegister(forwardedCmdDuration)
 }

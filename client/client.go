@@ -426,6 +426,7 @@ func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel con
 		forwardCancel()
 		close(streamCh)
 		close(changedCh)
+		requestForwarded.Set(0)
 	}()
 	cc, u := c.getAllocatorClientConnByDCLocation(dc)
 	healthCli := healthpb.NewHealthClient(cc)
@@ -667,6 +668,7 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 				changedCh := make(chan bool)
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkAllocator(dispatcherCtx, cancel, dc, url, streamCh, changedCh)
+				requestForwarded.Set(1)
 				return connectionContext{stream, cancel, streamCh, changedCh}, nil
 			}
 			cancel()
