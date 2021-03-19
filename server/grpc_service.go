@@ -119,7 +119,6 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 
 		forwardedHost := getForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
-			start := time.Now()
 			if forwardStream == nil || lastReceiverAddr != forwardedHost {
 				if cancel != nil {
 					cancel()
@@ -146,8 +145,6 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 				return err
 			default:
 			}
-			// TODO: we should also record the failed request in metrics
-			forwardedCmdDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
 			continue
 		}
 
@@ -185,8 +182,6 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 func (s *Server) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("bootstrap").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -223,8 +218,6 @@ func (s *Server) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) 
 func (s *Server) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstrappedRequest) (*pdpb.IsBootstrappedResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("is_bootstrapped").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -248,8 +241,6 @@ func (s *Server) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstrappe
 func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pdpb.AllocIDResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("alloc_id").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -278,8 +269,6 @@ func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pd
 func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -328,8 +317,6 @@ func checkStore(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
 func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*pdpb.PutStoreResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("put_store").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -376,8 +363,6 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("get_all_stores").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -420,8 +405,6 @@ func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresReq
 func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("store_heartbeat").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -541,7 +524,6 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		forwardedHost := getForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
-			start := time.Now()
 			if forwardStream == nil || lastReceiverAddr != forwardedHost {
 				if cancel != nil {
 					cancel()
@@ -568,8 +550,6 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				return err
 			default:
 			}
-			// TODO: we should also record the failed request in metrics
-			forwardedCmdDuration.WithLabelValues("region_heartbeat").Observe(time.Since(start).Seconds())
 			continue
 		}
 
@@ -645,8 +625,6 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -680,8 +658,6 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) 
 func (s *Server) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("get_prev_region").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -716,8 +692,6 @@ func (s *Server) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionReque
 func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("get_region_by_id").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -751,8 +725,6 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -793,8 +765,6 @@ func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsReque
 func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("ask_split").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -833,8 +803,6 @@ func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*
 func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("ask_batch_split").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -877,8 +845,6 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 func (s *Server) ReportSplit(ctx context.Context, request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("report_split").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -909,8 +875,6 @@ func (s *Server) ReportSplit(ctx context.Context, request *pdpb.ReportSplitReque
 func (s *Server) ReportBatchSplit(ctx context.Context, request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("report_batch_split").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -942,8 +906,6 @@ func (s *Server) ReportBatchSplit(ctx context.Context, request *pdpb.ReportBatch
 func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb.GetClusterConfigRequest) (*pdpb.GetClusterConfigResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("get_cluster_config").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -970,8 +932,6 @@ func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb.GetClusterC
 func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterConfigRequest) (*pdpb.PutClusterConfigResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("put_cluster_config").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -1004,8 +964,6 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionRequest) (*pdpb.ScatterRegionResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("scatter_region").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -1078,8 +1036,6 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePointRequest) (*pdpb.GetGCSafePointResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("get_gc_safe_point").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -1120,8 +1076,6 @@ func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (*pdpb.UpdateGCSafePointResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -1173,9 +1127,6 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("update_service_gc_safe_point").Observe(time.Since(start).Seconds())
-
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -1245,8 +1196,6 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("get_operator").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -1333,8 +1282,6 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("sync_max_ts").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -1401,8 +1348,6 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("split_regions").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -1427,8 +1372,6 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		start := time.Now()
-		defer forwardedCmdDuration.WithLabelValues("get_dc_location_info").Observe(time.Since(start).Seconds())
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
