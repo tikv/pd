@@ -420,12 +420,13 @@ func (c *client) createTsoStream(ctx context.Context, cancel context.CancelFunc,
 	return stream, err
 }
 
-func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel context.CancelFunc, dc, url string, streamCh streamCh, changedCh chan bool) {
+func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel context.CancelFunc, dc, target, addr, url string, streamCh streamCh, changedCh chan bool) {
 	defer func() {
 		// cancel the forward stream
 		forwardCancel()
 		close(streamCh)
 		close(changedCh)
+		requestForwarded.WithLabelValues(target, addr).Set(0)
 	}()
 	cc, u := c.getAllocatorClientConnByDCLocation(dc)
 	healthCli := healthpb.NewHealthClient(cc)
@@ -666,7 +667,8 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 				streamCh := make(streamCh)
 				changedCh := make(chan bool)
 				// the goroutine is used to check the network and change back to the original stream
-				go c.checkAllocator(dispatcherCtx, cancel, dc, url, streamCh, changedCh)
+				go c.checkAllocator(dispatcherCtx, cancel, dc, target, addr, url, streamCh, changedCh)
+				requestForwarded.WithLabelValues(target, addr).Set(1)
 				return connectionContext{stream, cancel, streamCh, changedCh}, nil
 			}
 			cancel()
