@@ -277,6 +277,102 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 	}
 }
 
+func (s *testCreateOperatorSuite) TestCreateTransferLeaderOperator(c *C) {
+	type testCase struct {
+		originPeers         []*metapb.Peer // first is leader
+		targetLeaderStoreID uint64
+		isErr               bool
+	}
+	cases := []testCase{
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			targetLeaderStoreID: 3,
+			isErr:               false,
+		},
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			targetLeaderStoreID: 1,
+			isErr:               true,
+		},
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			targetLeaderStoreID: 4,
+			isErr:               true,
+		},
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
+			},
+			targetLeaderStoreID: 3,
+			isErr:               true,
+		},
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			targetLeaderStoreID: 3,
+			isErr:               true,
+		},
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			targetLeaderStoreID: 4,
+			isErr:               false,
+		},
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			targetLeaderStoreID: 3,
+			isErr:               false,
+		},
+	}
+	for _, tc := range cases {
+		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.originPeers}, tc.originPeers[0])
+		op, err := CreateTransferLeaderOperator("test", s.cluster, region, tc.originPeers[0].StoreId, tc.targetLeaderStoreID, 0)
+
+		if tc.isErr {
+			c.Assert(err, NotNil)
+			continue
+		}
+
+		c.Assert(err, IsNil)
+		c.Assert(op.Kind(), Equals, OpLeader)
+		c.Assert(len(op.steps), Equals, 1)
+		switch step := op.Step(0).(type) {
+		case TransferLeader:
+			c.Assert(step.FromStore, Equals, tc.originPeers[0].StoreId)
+			c.Assert(step.ToStore, Equals, tc.targetLeaderStoreID)
+		default:
+			c.Errorf("unexpected type: %s", step.String())
+		}
+	}
+}
+
 func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 	type testCase struct {
 		originPeers []*metapb.Peer // first is leader
