@@ -21,10 +21,12 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
+	"go.uber.org/zap"
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
@@ -221,7 +223,7 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 	}
 
 	leader := b.originPeers[b.originLeaderStoreID]
-	if leader == nil || (leader.GetRole() == metapb.PeerRole_DemotingVoter || core.IsLearner(leader)) {
+	if leader == nil || !b.allowLeader(leader, true) {
 		b.targetLeaderStoreID = 0
 	} else {
 		b.targetLeaderStoreID = b.originLeaderStoreID
@@ -236,6 +238,17 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
+		// Because the demote leader will be rejected by TiKV,
+		// when the target leader cannot be found, we need to force a target to be found.
+		b.forceTargetLeader = true
+		b.setTargetLeaderIfNotExist()
+	}
+
+	if b.targetLeaderStoreID == 0 {
+		log.Error(
+			"unable to find target leader",
+			zap.Reflect("region", origin),
+			errs.ZapError(errs.ErrCreateOperator.FastGenByArgs("no target leader")))
 		b.originLeaderStoreID = 0
 	} else if b.originLeaderStoreID != b.targetLeaderStoreID {
 		kind |= OpLeader

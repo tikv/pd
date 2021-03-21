@@ -375,9 +375,10 @@ func (s *testCreateOperatorSuite) TestCreateTransferLeaderOperator(c *C) {
 
 func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 	type testCase struct {
-		originPeers []*metapb.Peer // first is leader
-		kind        OpKind
-		steps       []OpStep // empty means error
+		originPeers   []*metapb.Peer // first is leader
+		offlineStores []uint64
+		kind          OpKind
+		steps         []OpStep // empty means error
 	}
 	cases := []testCase{
 		{
@@ -392,6 +393,73 @@ func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 				ChangePeerV2Leave{
 					PromoteLearners: []PromoteLearner{{ToStore: 4}},
 					DemoteVoters:    []DemoteVoter{{ToStore: 3}},
+				},
+			},
+		},
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			kind: OpLeader,
+			steps: []OpStep{
+				TransferLeader{FromStore: 1, ToStore: 2},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 4}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
+				},
+			},
+		},
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			offlineStores: []uint64{2},
+			kind:          OpLeader,
+			steps: []OpStep{
+				TransferLeader{FromStore: 1, ToStore: 3},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 4}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
+				},
+			},
+		},
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			offlineStores: []uint64{2, 3},
+			kind:          OpLeader,
+			steps: []OpStep{
+				TransferLeader{FromStore: 1, ToStore: 4},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 4}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
+				},
+			},
+		},
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			offlineStores: []uint64{1, 2, 3, 4},
+			kind:          OpLeader,
+			steps: []OpStep{
+				TransferLeader{FromStore: 1, ToStore: 2},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 4}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
 				},
 			},
 		},
@@ -445,10 +513,21 @@ func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 	}
 
 	for _, tc := range cases {
+		for _, storeID := range tc.offlineStores {
+			s.cluster.SetStoreOffline(storeID)
+		}
+
+		revertOffline := func() {
+			for _, storeID := range tc.offlineStores {
+				s.cluster.SetStoreUp(storeID)
+			}
+		}
+
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.originPeers}, tc.originPeers[0])
 		op, err := CreateLeaveJointStateOperator("test", s.cluster, region)
 		if len(tc.steps) == 0 {
 			c.Assert(err, NotNil)
+			revertOffline()
 			continue
 		}
 		c.Assert(err, IsNil)
@@ -472,6 +551,8 @@ func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 				c.Errorf("unexpected type: %s", step.String())
 			}
 		}
+
+		revertOffline()
 	}
 }
 
