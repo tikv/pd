@@ -168,5 +168,4 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatIntervalHist)
 	prometheus.MustRegister(storeHeartbeatIntervalHist)
 	prometheus.MustRegister(regionAbnormalPeerDuration)
-	prometheus.MustRegister(regionIsDangerousCounter)
 }
