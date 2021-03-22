@@ -75,6 +75,7 @@ var (
 	ErrUnexpectedOperatorStatus = errors.Normalize("operator with unexpected status", errors.RFCCodeText("PD:schedule:ErrUnexpectedOperatorStatus"))
 	ErrUnknownOperatorStep      = errors.Normalize("unknown operator step found", errors.RFCCodeText("PD:schedule:ErrUnknownOperatorStep"))
 	ErrMergeOperator            = errors.Normalize("merge operator error, %s", errors.RFCCodeText("PD:schedule:ErrMergeOperator"))
+	ErrCreateOperator           = errors.Normalize("unable to create operator, %s", errors.RFCCodeText("PD:schedule:ErrCreateOperator"))
 )
 
 // scheduler errors

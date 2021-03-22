@@ -471,6 +471,11 @@ error = '''
 failed to unmarshal proto
 '''
 
+["PD:schedule:ErrCreateOperator"]
+error = '''
+unable to create operator, %s
+'''
+
 ["PD:schedule:ErrMergeOperator"]
 error = '''
 merge operator error, %s
