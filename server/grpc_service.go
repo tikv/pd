@@ -134,6 +134,10 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 				}
 				lastForwardedHost = forwardedHost
 			}
+
+			// In order to avoid the forwarding stream being canceled, we are not going to handle the EOF before the
+			// forwarding stream responds.
+			// TODO: we should change this part of logic once the TiKV uses this RPC call in the streaming way.
 			if err := forwardStream.Send(request); err != nil {
 				return errors.WithStack(err)
 			}
