@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"net/url"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/pkg/transport"
 	"google.golang.org/grpc"
@@ -110,5 +111,15 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 // It is used in client side.
 func BuildForwardContext(ctx context.Context, addr string) context.Context {
 	md := metadata.Pairs(ForwardMetadataKey, addr)
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+// ResetForwardContext is going to reset the forwarded host in metadata.
+func ResetForwardContext(ctx context.Context) context.Context {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		log.Error("failed to get forwarding metadata")
+	}
+	md.Set(ForwardMetadataKey, "")
 	return metadata.NewOutgoingContext(ctx, md)
 }
