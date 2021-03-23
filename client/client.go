@@ -420,13 +420,13 @@ func (c *client) createTsoStream(ctx context.Context, cancel context.CancelFunc,
 	return stream, err
 }
 
-func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel context.CancelFunc, dc, target, addr, url string, streamCh streamCh, changedCh chan bool) {
+func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel context.CancelFunc, dc, forwardedHostTrim, addrTrim, url string, streamCh streamCh, changedCh chan bool) {
 	defer func() {
 		// cancel the forward stream
 		forwardCancel()
 		close(streamCh)
 		close(changedCh)
-		requestForwarded.WithLabelValues(target, addr).Set(0)
+		requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(0)
 	}()
 	cc, u := c.getAllocatorClientConnByDCLocation(dc)
 	healthCli := healthpb.NewHealthClient(cc)
@@ -659,21 +659,23 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 		followerClient, addr := c.followerClient()
 		if followerClient != nil {
 			log.Info("fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("addr", addr))
-			target, ok := c.getAllocatorLeaderAddrByDCLocation(dc)
+			forwardedHost, ok := c.getAllocatorLeaderAddrByDCLocation(dc)
 			if !ok {
 				return connectionContext{}, errors.Errorf("cannot find the allocator leader in %s", dc)
 			}
 
 			// create the follower stream
 			cctx, cancel := context.WithCancel(dispatcherCtx)
-			cctx = grpcutil.BuildForwardContext(cctx, target)
+			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
 			stream, err1 := c.createTsoStream(cctx, cancel, followerClient)
 			if err1 == nil {
 				streamCh := make(streamCh)
 				changedCh := make(chan bool)
+				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
+				addrTrim := trimHTTPPrefix(addr)
 				// the goroutine is used to check the network and change back to the original stream
-				go c.checkAllocator(dispatcherCtx, cancel, dc, target, addr, url, streamCh, changedCh)
-				requestForwarded.WithLabelValues(target, addr).Set(1)
+				go c.checkAllocator(dispatcherCtx, cancel, dc, forwardedHostTrim, addrTrim, url, streamCh, changedCh)
+				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 				return connectionContext{stream, cancel, streamCh, changedCh}, nil
 			}
 			cancel()
@@ -1383,4 +1385,10 @@ func addrsToUrls(addrs []string) []string {
 func IsLeaderChange(err error) bool {
 	errMsg := err.Error()
 	return strings.Contains(errMsg, errs.NotLeaderErr) || strings.Contains(errMsg, errs.MismatchLeaderErr)
+}
+
+func trimHTTPPrefix(str string) string {
+	str = strings.TrimPrefix(str, "http://")
+	str = strings.TrimPrefix(str, "https://")
+	return str
 }
