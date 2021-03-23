@@ -250,6 +250,7 @@ func (h *hotScheduler) gcRegionPendings() {
 		for ty, op := range pendings {
 			if op != nil && op.IsEnd() {
 				if time.Now().After(op.GetCreateTime().Add(h.conf.GetMaxZombieDuration())) {
+					log.Debug("gc pending influence in hot region scheduler", zap.Uint64("region-id", regionID), zap.Time("create", op.GetCreateTime()), zap.Time("now", time.Now()), zap.Duration("zombie", h.conf.GetMaxZombieDuration()))
 					schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
 					pendings[ty] = nil
 				}
@@ -616,7 +617,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 
 	// filter pending region
 	appendItem := func(items []*statistics.HotPeerStat, item *statistics.HotPeerStat) []*statistics.HotPeerStat {
-		if _, ok := bs.sche.regionPendings[item.ID()]; !ok {
+		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsJustTransferLeader() {
 			items = append(items, item)
 		}
 		return items
