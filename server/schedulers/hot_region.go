@@ -773,14 +773,6 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		filters    []filter.Filter
 		candidates []*core.StoreInfo
 	)
-<<<<<<< HEAD
-
-=======
-	srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
-	if srcStore == nil {
-		return nil
-	}
->>>>>>> f82f2d82... schedule: fix panic during hot schedule (#3483)
 	switch bs.opTy {
 	case movePeer:
 		var scoreGuard filter.Filter
