@@ -844,7 +844,7 @@ func (c *client) getClient() pdpb.PDClient {
 	if c.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
 		followerClient, addr := c.followerClient()
 		if followerClient != nil {
-			log.Info("use follower client", zap.String("addr", addr))
+			log.Debug("use follower client", zap.String("addr", addr))
 			return followerClient
 		}
 	}
