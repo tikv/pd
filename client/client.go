@@ -636,7 +636,12 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 		}
 
 		if err != nil && c.enableForwarding {
-			if rpcErr, ok := status.FromError(err); ok && isNetworkError(rpcErr.Code()) {
+			// The reason we need to judge if the error code is equal to "Canceled" here is that
+			// when we create a stream we use a goroutine to manually control the timeout of the connection.
+			// There is no need to wait for the transport layer timeout which can reduce the time of unavailability.
+			// But it conflicts with the retry mechanism since we use the error code to decide if it is caused by network error.
+			// And actually the `Canceled` error can be regarded as a kind of network error in some way.
+			if rpcErr, ok := status.FromError(err); ok && (isNetworkError(rpcErr.Code()) || rpcErr.Code() == codes.Canceled) {
 				networkErrNum++
 			}
 		}
