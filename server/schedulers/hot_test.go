@@ -1079,16 +1079,21 @@ func addRegionInfo(tc *mockcluster.Cluster, rwTy rwType, regions []testRegionInf
 }
 
 func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
-	s.checkRegionFlowTest(c, tc.AddLeaderRegionWithWriteInfo)
-	s.checkRegionFlowTest(c, tc.AddLeaderRegionWithReadInfo)
+	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
+	c.Assert(err, IsNil)
+	hb := sche.(*hotScheduler)
+	s.checkRegionFlowTest(c, tc, hb, tc.AddLeaderRegionWithWriteInfo)
+	s.checkRegionFlowTest(c, tc, hb, tc.AddLeaderRegionWithReadInfo)
 }
 
-func (s *testHotCacheSuite) checkRegionFlowTest(c *C, heartbeat func(
+func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, hb *hotScheduler, heartbeat func(
 	regionID uint64, leaderID uint64,
 	readBytes, readKeys uint64,
 	reportInterval uint64,
@@ -1101,11 +1106,19 @@ func (s *testHotCacheSuite) checkRegionFlowTest(c *C, heartbeat func(
 		c.Check(item.HotDegree, Equals, 3)
 	}
 
-	// transfer leader and skip the first heartbeat
+	// transfer leader, skip the first heartbeat and schedule.
 	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3}, 1)
 	for _, item := range items {
 		c.Check(item.HotDegree, Equals, 3)
+		c.Check(item.IsJustTransferLeader(), Equals, true)
 	}
+
+	tc.AddRegionStore(2, 20)
+	tc.UpdateStorageReadStats(2, 9.5*MB*statistics.StoreHeartBeatReportInterval, 9.5*MB*statistics.StoreHeartBeatReportInterval)
+	hb.prepareForBalance(tc)
+	leaderSolver := newBalanceSolver(hb, tc, read, transferLeader)
+	leaderSolver.cur = &solution{srcStoreID: 2}
+	c.Check(leaderSolver.filterHotPeers(), HasLen, 0) // skip schedule
 
 	// move peer: add peer and remove peer
 	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3, 4}, 1)
