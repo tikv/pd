@@ -269,3 +269,10 @@ func WithReplacePeerStore(oldStoreID, newStoreID uint64) RegionCreateOption {
 		}
 	}
 }
+
+// WithInterval sets the interval
+func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.interval = interval
+	}
+}
