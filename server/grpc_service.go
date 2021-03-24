@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -218,6 +219,90 @@ func checkStore(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
 	return nil
 }
 
+func (s *Server) checkNewStore(src *metapb.Store) *pdpb.Error {
+	go func() {
+		progress := 0
+		regionCount := 0
+		rc := s.GetRaftCluster()
+		targetStore := pickOneSimilarStore(rc, s.persistOptions, src)
+		for {
+			if progress > 90 {
+				return
+			}
+			if targetStore == nil {
+				log.Info("not find similar store ", zap.Uint64("store id", src.GetId()))
+				storeProgressGauge.WithLabelValues(src.Address, strconv.FormatUint(src.GetId(), 10)).Set(100.0)
+				return
+			}
+			if srcStore := rc.GetStore(src.GetId()); srcStore != nil {
+				regionCount = srcStore.GetRegionCount()
+			}
+			log.Info("check  has similar store", zap.Uint64("store id", src.GetId()),
+				zap.Int("src region count", regionCount),
+				zap.Uint64("target-store", targetStore.GetID()),
+				zap.Int("target region count", targetStore.GetRegionCount()))
+			select {
+			case <-time.After(time.Second):
+				currentProgress := 100.00 * regionCount / targetStore.GetRegionCount()
+				if currentProgress > progress {
+					progress = currentProgress
+				}
+				storeProgressGauge.WithLabelValues(src.Address).Set(float64(progress))
+				// update target state and judge target is not up
+				if targetStore = rc.GetStore(targetStore.GetID()); targetStore == nil || !targetStore.IsUp() {
+					targetStore = pickOneSimilarStore(s.GetRaftCluster(), s.persistOptions, src)
+				}
+			}
+			rc = s.GetRaftCluster()
+		}
+	}()
+	return nil
+}
+
+func pickOneSimilarStore(rc *cluster.RaftCluster, opt *config.PersistOptions, src *metapb.Store) (store *core.StoreInfo) {
+	stores := rc.GetStores()
+	candidates := make([]*core.StoreInfo, 0)
+	labels := src.GetLabels()
+	var zone string
+	var sack string
+	for _, v := range labels {
+		if v.Key == "zone" {
+			zone = v.Value
+			continue
+		}
+		if v.Key == "sack" {
+			sack = v.Value
+		}
+	}
+	for _, v := range stores {
+		log.Info("candidate:", zap.Stringer("store", v.GetMeta()),
+			zap.Int("region count", v.GetRegionCount()))
+		if v.GetID() == src.GetId() || v.IsOffline() || v.GetRegionCount() == 0 {
+			continue
+		}
+		if v.GetLabelValue("zone") != zone {
+			continue
+		}
+		if v.GetLabelValue("sack") != sack {
+			continue
+		}
+		candidates = append(candidates, v)
+	}
+
+	if len(candidates) == 0 {
+		return nil
+	}
+	// choose store that has lowest score
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].RegionScore(opt.GetRegionScoreFormulaVersion(),
+			opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 1.0, -1) <
+			candidates[j].RegionScore(opt.GetRegionScoreFormulaVersion(),
+				opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 1.0, -1)
+	})
+	return candidates[0]
+
+}
+
 // PutStore implements gRPC PDServer.
 func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*pdpb.PutStoreResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
@@ -230,7 +315,13 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	store := request.GetStore()
+	// check store exist  and tombstore
 	if pberr := checkStore(rc, store.GetId()); pberr != nil {
+		return &pdpb.PutStoreResponse{
+			Header: s.errorHeader(pberr),
+		}, nil
+	}
+	if pberr := s.checkNewStore(store); pberr != nil {
 		return &pdpb.PutStoreResponse{
 			Header: s.errorHeader(pberr),
 		}, nil
