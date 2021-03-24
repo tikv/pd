@@ -28,9 +28,11 @@ import (
 
 const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
-	storePersistInterval = 5 * time.Minute
-	mb                   = 1 << 20 // megabyte
-	gb                   = 1 << 30
+	storePersistInterval   = 5 * time.Minute
+	mb                     = 1 << 20 // megabyte
+	gb                     = 1 << 30
+	initialMaxRegionCounts = 30          // exclude storage Threshold Filter when region less than 30
+	minimumSpace           = 10737418240 // 10GB
 )
 
 // StoreInfo contains information about a store.
@@ -335,9 +337,16 @@ func (s *StoreInfo) AvailableRatio() float64 {
 	return float64(s.GetAvailable()) / float64(s.GetCapacity())
 }
 
-// IsLowSpace checks if the store is lack of space.
+// IsLowSpace checks if the store is lack of space. not check if region count less
+// than initialMaxRegionCounts and available space more than minimumSpace
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
-	return s.GetStoreStats() != nil && s.AvailableRatio() < 1-lowSpaceRatio
+	if s.GetStoreStats() == nil {
+		return false
+	}
+	if s.regionCount < initialMaxRegionCounts && s.GetAvailable() > minimumSpace {
+		return false
+	}
+	return s.AvailableRatio() < 1-lowSpaceRatio
 }
 
 // ResourceCount returns count of leader/region in the store.
