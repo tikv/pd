@@ -339,7 +339,7 @@ func (s *StoreInfo) AvailableRatio() float64 {
 }
 
 // IsLowSpace checks if the store is lack of space. not check if region count less
-// than initialMaxRegionCounts and available space  more than minimumSpace
+// than initialMaxRegionCounts and available space more than minimumSpace
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 	if s.GetStoreStats() == nil {
 		return false
