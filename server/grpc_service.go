@@ -97,10 +97,9 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 	var (
-		forwardStream    pdpb.PD_TsoClient
-		cancel           context.CancelFunc
-		lastReceiverAddr string
-		errCh            chan error
+		forwardStream     pdpb.PD_TsoClient
+		cancel            context.CancelFunc
+		lastForwardedHost string
 	)
 	defer func() {
 		// cancel the forward stream
@@ -119,7 +118,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 
 		forwardedHost := getForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
-			if forwardStream == nil || lastReceiverAddr != forwardedHost {
+			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
 					cancel()
 				}
@@ -133,17 +132,21 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 				if err != nil {
 					return err
 				}
-				lastReceiverAddr = forwardedHost
-				errCh = make(chan error, 1)
-				go forwardTsoClientToServer(forwardStream, stream, errCh)
+				lastForwardedHost = forwardedHost
 			}
+
+			// In order to avoid the forwarding stream being canceled, we are not going to handle the EOF before the
+			// forwarding stream responds.
+			// TODO: we should change this part of logic once the TiKV uses this RPC call in the streaming way.
 			if err := forwardStream.Send(request); err != nil {
 				return errors.WithStack(err)
 			}
-			select {
-			case err := <-errCh:
-				return err
-			default:
+			resp, err := forwardStream.Recv()
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			if err := stream.Send(resp); err != nil {
+				return errors.WithStack(err)
 			}
 			continue
 		}
@@ -500,11 +503,11 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 	server := &heartbeatServer{stream: stream}
 	var (
-		forwardStream    pdpb.PD_RegionHeartbeatClient
-		cancel           context.CancelFunc
-		lastReceiverAddr string
-		lastBind         time.Time
-		errCh            chan error
+		forwardStream     pdpb.PD_RegionHeartbeatClient
+		cancel            context.CancelFunc
+		lastForwardedHost string
+		lastBind          time.Time
+		errCh             chan error
 	)
 	defer func() {
 		// cancel the forward stream
@@ -524,7 +527,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		forwardedHost := getForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
-			if forwardStream == nil || lastReceiverAddr != forwardedHost {
+			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
 					cancel()
 				}
@@ -537,7 +540,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				if err != nil {
 					return err
 				}
-				lastReceiverAddr = forwardedHost
+				lastForwardedHost = forwardedHost
 				errCh = make(chan error, 1)
 				go forwardRegionHeartbeatClientToServer(forwardStream, server, errCh)
 			}
@@ -1475,21 +1478,6 @@ func (s *Server) createTsoForwardStream(client *grpc.ClientConn, addr string) (p
 	forwardStream, err := pdpb.NewPDClient(client).Tso(ctx)
 	done <- struct{}{}
 	return forwardStream, cancel, err
-}
-
-func forwardTsoClientToServer(forwardStream pdpb.PD_TsoClient, stream pdpb.PD_TsoServer, errCh chan error) {
-	defer close(errCh)
-	for {
-		resp, err := forwardStream.Recv()
-		if err != nil {
-			errCh <- errors.WithStack(err)
-			return
-		}
-		if err := stream.Send(resp); err != nil {
-			errCh <- errors.WithStack(err)
-			return
-		}
-	}
 }
 
 func (s *Server) createHeartbeatForwardStream(client *grpc.ClientConn, addr string) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
