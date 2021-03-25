@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -40,7 +39,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const slowThreshold = 5 * time.Millisecond
+const (
+	slowThreshold        = 5 * time.Millisecond
+	progressMetricsTimer = 5  // progress run interval
+	maxRetryTimes        = 20 // region check max times
+)
 
 // gRPC errors
 var (
@@ -219,49 +222,66 @@ func checkStore(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
 	return nil
 }
 
-func (s *Server) checkNewStore(src *metapb.Store) *pdpb.Error {
-	go func() {
-		progress := 0
-		regionCount := 0
-		rc := s.GetRaftCluster()
-		targetStore := pickOneSimilarStore(rc, s.persistOptions, src)
-		for {
-			if progress > 90 {
-				return
-			}
-			if targetStore == nil {
-				log.Info("not find similar store ", zap.Uint64("store id", src.GetId()))
-				storeProgressGauge.WithLabelValues(src.Address, strconv.FormatUint(src.GetId(), 10)).Set(100.0)
-				return
-			}
-			if srcStore := rc.GetStore(src.GetId()); srcStore != nil {
-				regionCount = srcStore.GetRegionCount()
-			}
-			log.Info("check  has similar store", zap.Uint64("store id", src.GetId()),
-				zap.Int("src region count", regionCount),
-				zap.Uint64("target-store", targetStore.GetID()),
-				zap.Int("target region count", targetStore.GetRegionCount()))
-			select {
-			case <-time.After(time.Second):
-				currentProgress := 100.00 * regionCount / targetStore.GetRegionCount()
-				if currentProgress > progress {
-					progress = currentProgress
-				}
-				storeProgressGauge.WithLabelValues(src.Address).Set(float64(progress))
-				// update target state and judge target is not up
-				if targetStore = rc.GetStore(targetStore.GetID()); targetStore == nil || !targetStore.IsUp() {
-					targetStore = pickOneSimilarStore(s.GetRaftCluster(), s.persistOptions, src)
-				}
-			}
-			rc = s.GetRaftCluster()
+// recordUpStoreProgress record the progress of new store ，it stop recording if
+// region count not change continue 100 or progress is more than 90
+func (s *Server) recordUpStoreProgress(src *metapb.Store) {
+	progress := 0
+	regionCount := 0
+	rc := s.GetRaftCluster()
+	retryTime := 0
+	targetStore := pickOneSimilarStore(rc, s.persistOptions, src)
+	storeLabel := strconv.FormatUint(src.GetId(), 10)
+	for {
+		if progress > 90 {
+			storeProgressGauge.WithLabelValues(src.Address, storeLabel).Set(100.00)
+			log.Info("store up finish ", zap.Uint64("store id", src.GetId()))
+			return
 		}
-	}()
-	return nil
+		if targetStore == nil {
+			log.Warn("not find similar store ", zap.Uint64("store id", src.GetId()))
+			storeProgressGauge.WithLabelValues(src.Address, storeLabel).Set(100.0)
+			return
+		}
+
+		if srcStore := rc.GetStore(src.GetId()); srcStore != nil {
+			regionCount = srcStore.GetRegionCount()
+		}
+		log.Info("check  has similar store", zap.Uint64("store id", src.GetId()),
+			zap.Int("src region count", regionCount),
+			zap.Uint64("target-store", targetStore.GetID()),
+			zap.Int("target region count", targetStore.GetRegionCount()))
+		select {
+		case <-time.After(progressMetricsTimer * time.Second):
+			currentProgress := 100.00 * regionCount / targetStore.GetRegionCount()
+			if currentProgress > progress {
+				progress = currentProgress
+				retryTime = 0
+				storeProgressGauge.WithLabelValues(src.Address, storeLabel).Set(float64(progress))
+			} else {
+				retryTime = retryTime + 1
+				if retryTime > maxRetryTimes {
+					if similar := pickOneSimilarStore(s.GetRaftCluster(), s.persistOptions, src); similar != nil &&
+						similar.GetID() != targetStore.GetID() {
+						targetStore = similar
+						continue
+					} else {
+						storeProgressGauge.WithLabelValues(src.Address, storeLabel).Set(100.00)
+						log.Warn("store has reach max retry time", zap.Uint64("store id", src.GetId()))
+						return
+					}
+				}
+			}
+			if targetStore = rc.GetStore(targetStore.GetID()); targetStore == nil || !targetStore.IsUp() {
+				targetStore = pickOneSimilarStore(s.GetRaftCluster(), s.persistOptions, src)
+			}
+		}
+		rc = s.GetRaftCluster()
+	}
 }
 
+// pickOneSimilarStore find one target store
 func pickOneSimilarStore(rc *cluster.RaftCluster, opt *config.PersistOptions, src *metapb.Store) (store *core.StoreInfo) {
 	stores := rc.GetStores()
-	candidates := make([]*core.StoreInfo, 0)
 	labels := src.GetLabels()
 	var zone string
 	var sack string
@@ -274,9 +294,8 @@ func pickOneSimilarStore(rc *cluster.RaftCluster, opt *config.PersistOptions, sr
 			sack = v.Value
 		}
 	}
+	var ret *core.StoreInfo
 	for _, v := range stores {
-		log.Info("candidate:", zap.Stringer("store", v.GetMeta()),
-			zap.Int("region count", v.GetRegionCount()))
 		if v.GetID() == src.GetId() || v.IsOffline() || v.GetRegionCount() == 0 {
 			continue
 		}
@@ -286,20 +305,15 @@ func pickOneSimilarStore(rc *cluster.RaftCluster, opt *config.PersistOptions, sr
 		if v.GetLabelValue("sack") != sack {
 			continue
 		}
-		candidates = append(candidates, v)
+		if ret == nil {
+			ret = v
+		} else {
+			if v.GetRegionCount() < ret.GetRegionCount() {
+				ret = v
+			}
+		}
 	}
-
-	if len(candidates) == 0 {
-		return nil
-	}
-	// choose store that has lowest score
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].RegionScore(opt.GetRegionScoreFormulaVersion(),
-			opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 1.0, -1) <
-			candidates[j].RegionScore(opt.GetRegionScoreFormulaVersion(),
-				opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 1.0, -1)
-	})
-	return candidates[0]
+	return ret
 
 }
 
@@ -321,12 +335,6 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 			Header: s.errorHeader(pberr),
 		}, nil
 	}
-	if pberr := s.checkNewStore(store); pberr != nil {
-		return &pdpb.PutStoreResponse{
-			Header: s.errorHeader(pberr),
-		}, nil
-	}
-
 	// NOTE: can be removed when placement rules feature is enabled by default.
 	if !s.GetConfig().Replication.EnablePlacementRules && core.IsTiFlashStore(store) {
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
@@ -338,7 +346,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 
 	log.Info("put store ok", zap.Stringer("store", store))
 	CheckPDVersion(s.persistOptions)
-
+	go s.recordUpStoreProgress(store)
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),

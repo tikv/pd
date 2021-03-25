@@ -20,6 +20,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
+	"github.com/tikv/pd/server/cluster"
+
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
@@ -71,6 +76,7 @@ type StoreInfo struct {
 const (
 	disconnectedName = "Disconnected"
 	downStateName    = "Down"
+	maxRetryTimes    = 20 // region check max times
 )
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
@@ -202,8 +208,56 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusGone, err.Error())
 		return
 	}
-
+	go recordStoreOffLineProgress(storeID, rc)
 	h.rd.JSON(w, http.StatusOK, "The store is set as Offline or Tombstone.")
+}
+
+// recordStoreOffLineProgress record the progress of the offLine store
+func recordStoreOffLineProgress(storeID uint64, rc *cluster.RaftCluster) {
+	store := rc.GetStore(storeID)
+	if store == nil {
+		log.Warn("store not find ", zap.Uint64("store Id", storeID))
+		return
+	}
+	storeLabel := strconv.FormatUint(storeID, 10)
+	count := store.GetRegionCount()
+	if count == 0 {
+		storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
+		return
+	}
+	progress := 0
+	retryTime := 0
+	for {
+		if progress > 95.00 {
+			log.Info("store down finish", zap.Uint64("store id ", storeID))
+			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
+			return
+		}
+		select {
+		case <-time.After(time.Second):
+			currentProgress := 100.00 * (count - store.GetRegionCount()) / count
+			if currentProgress > progress {
+				progress = currentProgress
+				storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(float64(progress))
+				retryTime = 0
+			} else {
+				retryTime = retryTime + 1
+				if retryTime > maxRetryTimes {
+					log.Warn("store region count not change, it has reach the max retry time limit",
+						zap.Uint64("store id", storeID))
+					return
+				}
+			}
+		}
+
+		store = rc.GetStore(storeID)
+		if store == nil {
+			log.Warn("down store not find ", zap.Uint64("store id", storeID))
+			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
+			return
+		}
+	}
+
 }
 
 // @Tags store

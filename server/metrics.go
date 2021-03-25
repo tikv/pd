@@ -90,7 +90,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "store_progress",
 			Help:      "Store process after join",
-		}, []string{"address"})
+		}, []string{"address", "store"})
 )
 
 func init() {
