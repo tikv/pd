@@ -175,12 +175,12 @@ check-plugin:
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
 static: export GO111MODULE=on
-static:
+static: install-go-tools
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l -d $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	golangci-lint run $$($(PACKAGE_DIRECTORIES))
 
-lint:
+lint: install-go-tools
 	@echo "linting"
 	revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
