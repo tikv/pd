@@ -299,3 +299,167 @@ func (s *testRuleCheckerSuite) TestIssue2419(c *C) {
 	c.Assert(op.Step(1).(operator.PromoteLearner).ToStore, Equals, uint64(4))
 	c.Assert(op.Step(2).(operator.RemovePeer).FromStore, Equals, uint64(3))
 }
+<<<<<<< HEAD
+=======
+
+// Ref https://github.com/tikv/pd/issues/3521
+// The problem is when offline a store, we may add learner multiple times if
+// the operator is timeout.
+func (s *testRuleCheckerSuite) TestIssue3521_PriorityFixOrphanPeer(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+	var add operator.AddLearner
+	var remove operator.RemovePeer
+	s.cluster.SetStoreOffline(2)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Step(0), FitsTypeOf, add)
+	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
+	r := s.cluster.GetRegion(1).Clone(core.WithAddPeer(
+		&metapb.Peer{
+			Id:      5,
+			StoreId: 4,
+			Role:    metapb.PeerRole_Learner,
+		}))
+	s.cluster.PutRegion(r)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op.Step(0), FitsTypeOf, remove)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+}
+
+func (s *testRuleCheckerSuite) TestIssue3293(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	err := s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "TiDB_DDL_51",
+		ID:      "0",
+		Role:    placement.Follower,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key: "host",
+				Values: []string{
+					"host5",
+				},
+				Op: placement.In,
+			},
+		},
+	})
+	c.Assert(err, IsNil)
+	s.cluster.DeleteStore(s.cluster.TakeStore(5))
+	err = s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "TiDB_DDL_51",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	c.Assert(err, IsNil)
+	err = s.ruleManager.DeleteRule("pd", "default")
+	c.Assert(err, IsNil)
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "add-rule-peer")
+}
+
+func (s *testRuleCheckerSuite) TestIssue3299(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"dc": "sh"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+
+	testCases := []struct {
+		constraints []placement.LabelConstraint
+		err         string
+	}{
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host5"},
+					Op:     placement.In,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "ho",
+					Values: []string{"sh"},
+					Op:     placement.In,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.NotIn,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+				{
+					Key:    "host",
+					Values: []string{"host3"},
+					Op:     placement.In,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+			},
+			err: "",
+		},
+	}
+
+	for _, t := range testCases {
+		err := s.ruleManager.SetRule(&placement.Rule{
+			GroupID:          "p",
+			ID:               "0",
+			Role:             placement.Follower,
+			Count:            1,
+			LabelConstraints: t.constraints,
+		})
+		if t.err != "" {
+			c.Assert(err, ErrorMatches, t.err)
+		} else {
+			c.Assert(err, IsNil)
+		}
+	}
+}
+>>>>>>> 60508bde... checker: priority to fix orphan peers  (#3522)
