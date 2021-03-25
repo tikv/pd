@@ -303,7 +303,7 @@ func (s *testPrometheusQuerierSuite) TestGetInstanceNameFromAddress(c *C) {
 			expectedInstanceName: "test-tikv-0_namespace",
 		},
 		{
-			address:              "tidb-0_10080",
+			address:              "tidb-0_10081",
 			expectedInstanceName: "",
 		},
 		{
