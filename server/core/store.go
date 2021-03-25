@@ -30,9 +30,9 @@ const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
 	storePersistInterval   = 5 * time.Minute
 	mb                     = 1 << 20 // megabyte
-	gb                     = 1 << 30
-	initialMaxRegionCounts = 30          // exclude storage Threshold Filter when region less than 30
-	minimumSpace           = 10737418240 // 10GB
+	gb                     = 1 << 30 // 1GB size
+	initialMaxRegionCounts = 30      // exclude storage Threshold Filter when region less than 30
+	minimumSpace           = 1 << 33 // 2^3=8GB
 )
 
 // StoreInfo contains information about a store.
