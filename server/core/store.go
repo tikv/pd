@@ -343,7 +343,7 @@ func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 	if s.GetStoreStats() == nil {
 		return false
 	}
-	//issue #3444
+	// issue #3444
 	if s.regionCount < initialMaxRegionCounts && s.GetAvailable() > initialMinSpace {
 		return false
 	}
