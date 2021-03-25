@@ -117,7 +117,7 @@ func (s *testStoreSuite) TestRegionScore(c *C) {
 
 func (s *testStoreSuite) TestLowSpaceRatio(c *C) {
 	store := NewStoreInfoWithLabel(1, 20, nil)
-	store.rawStats.Capacity = minimumSpace << 4
+	store.rawStats.Capacity = initialMinSpace << 4
 	store.rawStats.Available = store.rawStats.Capacity >> 3
 
 	c.Assert(store.IsLowSpace(0.8), Equals, false)

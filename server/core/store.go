@@ -32,7 +32,7 @@ const (
 	mb                     = 1 << 20 // megabyte
 	gb                     = 1 << 30 // 1GB size
 	initialMaxRegionCounts = 30      // exclude storage Threshold Filter when region less than 30
-	minimumSpace           = 1 << 33 // 2^3=8GB
+	initialMinSpace        = 1 << 33 // 2^3=8GB
 )
 
 // StoreInfo contains information about a store.
@@ -338,12 +338,13 @@ func (s *StoreInfo) AvailableRatio() float64 {
 }
 
 // IsLowSpace checks if the store is lack of space. not check if region count less
-// than initialMaxRegionCounts and available space more than minimumSpace
+// than initialMaxRegionCounts and available space more than initialMinSpace
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 	if s.GetStoreStats() == nil {
 		return false
 	}
-	if s.regionCount < initialMaxRegionCounts && s.GetAvailable() > minimumSpace {
+	//issue #3444
+	if s.regionCount < initialMaxRegionCounts && s.GetAvailable() > initialMinSpace {
 		return false
 	}
 	return s.AvailableRatio() < 1-lowSpaceRatio
