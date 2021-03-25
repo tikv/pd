@@ -537,7 +537,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 
 	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[targetLeaderStoreID]
-		if !b.allowLeader(peer, false) {
+		if !b.allowLeader(peer, b.forceTargetLeader) {
 			continue
 		}
 		// if role info is given, store having role follower should not be target leader.
