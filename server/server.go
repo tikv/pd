@@ -857,7 +857,6 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			}
 			rule = rules[0]
 			if !(rule.Count == int(old.MaxReplicas) && reflect.DeepEqual(rule.LocationLabels, []string(old.LocationLabels))) {
-				fmt.Println(rule.Count, old.MaxReplicas, old.LocationLabels, rule.LocationLabels)
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
