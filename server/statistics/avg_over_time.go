@@ -56,7 +56,7 @@ func (aot *AvgOverTime) Get() float64 {
 
 // Clear clears the AvgOverTime.
 func (aot *AvgOverTime) Clear() {
-	aot.que = NewSafeQueue()
+	aot.que.Init()
 	aot.intervalSum = 0
 	aot.deltaSum = 0
 }
