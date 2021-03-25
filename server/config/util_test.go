@@ -67,7 +67,7 @@ func (s *testUtilSuite) TestValidateURLWithScheme(c *C) {
 		{"http://", true},
 		{"http://foo", false},
 		{"https://foo", false},
-		{"http://127.0.0.1", false},
+		{"http://127.0.0.1 ", false},
 		{"http://127.0.0.1/", false},
 		{"https://foo.com/bar", false},
 		{"https://foo.com/bar/", false},
