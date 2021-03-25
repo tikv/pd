@@ -365,7 +365,6 @@ func (s *testRuleCheckerSuite) TestIssue3521_PriorityFixOrphanPeer(c *C) {
 		}))
 	s.cluster.PutRegion(r)
 	op = s.rc.Check(s.cluster.GetRegion(1))
-	c.Assert(op, NotNil)
 	c.Assert(op.Step(0), FitsTypeOf, remove)
 	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
 }
