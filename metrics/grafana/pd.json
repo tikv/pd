@@ -1454,11 +1454,11 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "irate(process_cpu_seconds_total{tidb_cluster=\"$tidb_cluster\",instance=~\".*pd.*\"}[30s])",
+              "expr": "irate(process_cpu_seconds_total{tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}[30s])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "{{instance}}",
+              "legendFormat": "{{job}}-{{instance}}",
               "refId": "A",
               "step": 4
             }
@@ -1557,55 +1557,55 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "process_resident_memory_bytes{tidb_cluster=\"$tidb_cluster\",instance=~\".*pd.*\"}",
+              "expr": "process_resident_memory_bytes{tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "process-{{instance}}",
+              "legendFormat": "process-{{job}}-{{instance}}",
               "refId": "A",
               "step": 4
             },
             {
-              "expr": "go_memstats_heap_sys_bytes{tidb_cluster=\"$tidb_cluster\",instance=~\".*pd.*\"}",
+              "expr": "go_memstats_heap_sys_bytes{tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
               "hide": true,
               "interval": "",
-              "legendFormat": "HeapSys-{{instance}}",
+              "legendFormat": "HeapSys-{{job}}-{{instance}}",
               "refId": "B"
             },
             {
-              "expr": "go_memstats_heap_inuse_bytes{tidb_cluster=\"$tidb_cluster\",instance=~\".*pd.*\"}",
+              "expr": "go_memstats_heap_inuse_bytes{tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
               "hide": false,
               "interval": "",
-              "legendFormat": "HeapInuse-{{instance}}",
+              "legendFormat": "HeapInuse-{{job}}-{{instance}}",
               "refId": "C"
             },
             {
-              "expr": "go_memstats_heap_alloc_bytes{tidb_cluster=\"$tidb_cluster\",instance=~\".*pd.*\"}",
+              "expr": "go_memstats_heap_alloc_bytes{tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
               "hide": true,
               "interval": "",
-              "legendFormat": "HeapAlloc-{{instance}}",
+              "legendFormat": "HeapAlloc-{{job}}-{{instance}}",
               "refId": "D"
             },
             {
-              "expr": "go_memstats_heap_idle_bytes{tidb_cluster=\"$tidb_cluster\",instance=~\".*pd.*\"}",
+              "expr": "go_memstats_heap_idle_bytes{tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
               "hide": true,
               "interval": "",
-              "legendFormat": "HeapIdle-{{instance}}",
+              "legendFormat": "HeapIdle-{{job}}-{{instance}}",
               "refId": "E"
             },
             {
-              "expr": "go_memstats_heap_released_bytes{tidb_cluster=\"$tidb_cluster\",instance=~\".*pd.*\"}",
+              "expr": "go_memstats_heap_released_bytes{tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
               "hide": true,
               "interval": "",
-              "legendFormat": "HeapReleased-{{instance}}",
+              "legendFormat": "HeapReleased-{{job}}-{{instance}}",
               "refId": "F"
             },
             {
-              "expr": "go_memstats_next_gc_bytes{tidb_cluster=\"$tidb_cluster\",instance=~\".*pd.*\"}",
+              "expr": "go_memstats_next_gc_bytes{tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
               "hide": true,
               "interval": "",
-              "legendFormat": "GCTrigger-{{instance}}",
+              "legendFormat": "GCTrigger-{{job}}-{{instance}}",
               "refId": "G"
             }
           ],
@@ -1702,11 +1702,11 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "(time() - process_start_time_seconds{tidb_cluster=\"$tidb_cluster\",instance=~\".*pd.*\"})",
+              "expr": "(time() - process_start_time_seconds{tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"})",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "{{instance}}",
+              "legendFormat": "{{job}}-{{instance}}",
               "refId": "A",
               "step": 4
             }
@@ -1804,11 +1804,11 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "go_goroutines{tidb_cluster=\"$tidb_cluster\",instance=~\".*pd.*\"}",
+              "expr": "go_goroutines{tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "{{instance}}",
+              "legendFormat": "{{job}}-{{instance}}",
               "refId": "A",
               "step": 4
             }
