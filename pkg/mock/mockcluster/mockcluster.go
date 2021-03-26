@@ -339,7 +339,7 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items := mc.HotCache.CheckRead(r)
+		items = mc.HotCache.CheckRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
