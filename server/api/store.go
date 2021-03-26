@@ -74,9 +74,12 @@ type StoreInfo struct {
 }
 
 const (
-	disconnectedName = "Disconnected"
-	downStateName    = "Down"
-	maxRetryTimes    = 20 // region check max times
+	disconnectedName         = "Disconnected"
+	downStateName            = "Down"
+	progressMaxRetryLimit    = 20 // store down progress retry limit
+	progressFinish           = 1  // progress progressFinish normal
+	progressStoreOffLine     = 2  // store offline
+	progressExceedRetryLimit = 3  // progress retry reach max retry limit
 )
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
@@ -208,30 +211,34 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusGone, err.Error())
 		return
 	}
-	go recordStoreOffLineProgress(storeID, rc)
+	go recordStoreOffLineProgress(storeID, progressMaxRetryLimit, rc)
 	h.rd.JSON(w, http.StatusOK, "The store is set as Offline or Tombstone.")
 }
 
-// recordStoreOffLineProgress record the progress of the offLine store
-func recordStoreOffLineProgress(storeID uint64, rc *cluster.RaftCluster) {
+// recordStoreOffLineProgress record the progress of the progressStoreOffLine store
+// return status for test
+// 	1: normal
+// 	2: store has offline
+// 	3: progressMaxRetryLimit limit
+func recordStoreOffLineProgress(storeID uint64, maxRetryTimes int, rc *cluster.RaftCluster) int {
 	store := rc.GetStore(storeID)
 	if store == nil {
 		log.Warn("store not find ", zap.Uint64("store Id", storeID))
-		return
+		return progressStoreOffLine
 	}
 	storeLabel := strconv.FormatUint(storeID, 10)
 	count := store.GetRegionCount()
 	if count == 0 {
 		storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
-		return
+		return progressFinish
 	}
 	progress := 0
 	retryTime := 0
 	for {
 		if progress > 95.00 {
-			log.Info("store down finish", zap.Uint64("store id ", storeID))
+			log.Info("store down progressFinish", zap.Uint64("store id ", storeID))
 			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
-			return
+			return progressFinish
 		}
 		select {
 		case <-time.After(time.Second):
@@ -245,19 +252,17 @@ func recordStoreOffLineProgress(storeID uint64, rc *cluster.RaftCluster) {
 				if retryTime > maxRetryTimes {
 					log.Warn("store region count not change, it has reach the max retry time limit",
 						zap.Uint64("store id", storeID))
-					return
+					return progressExceedRetryLimit
 				}
 			}
 		}
-
 		store = rc.GetStore(storeID)
 		if store == nil {
 			log.Warn("down store not find ", zap.Uint64("store id", storeID))
 			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
-			return
+			return progressStoreOffLine
 		}
 	}
-
 }
 
 // @Tags store

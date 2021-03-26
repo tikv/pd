@@ -23,6 +23,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tikv/pd/server/versioninfo"
+
+	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/server/kv"
+
+	"github.com/tikv/pd/server/cluster"
+
 	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
@@ -448,4 +455,75 @@ func (s *testStoreSuite) TestStoreLimitTTL(c *C) {
 	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer, Not(Equals), float64(998))
 	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer, Not(Equals), float64(997))
 	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer, Not(Equals), float64(996))
+}
+
+// TestProgressWhenStoreDown
+func (s *testStoreSuite) TestProgressWhenStoreDown(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	data := []struct {
+		rc        *cluster.RaftCluster
+		store     *core.StoreInfo
+		bs        *core.BasicCluster
+		endRegion int
+		expect    int
+	}{
+		{
+			rc:        cluster.NewRaftCluster(ctx, "", 1, nil, nil, nil),
+			store:     core.NewStoreInfoWithLabel(1, 10, nil),
+			bs:        core.NewBasicCluster(),
+			expect:    progressFinish,
+			endRegion: 0,
+		},
+		{
+			rc:        cluster.NewRaftCluster(ctx, "", 1, nil, nil, nil),
+			store:     core.NewStoreInfoWithLabel(1, 0, nil),
+			bs:        core.NewBasicCluster(),
+			expect:    progressFinish,
+			endRegion: 0,
+		},
+		{
+			rc:        cluster.NewRaftCluster(ctx, "", 1, nil, nil, nil),
+			store:     core.NewStoreInfoWithLabel(2, 10, nil),
+			bs:        core.NewBasicCluster(),
+			expect:    progressStoreOffLine,
+			endRegion: 0,
+		}, {
+			rc:        cluster.NewRaftCluster(ctx, "", 1, nil, nil, nil),
+			store:     core.NewStoreInfoWithLabel(1, 10, nil),
+			bs:        core.NewBasicCluster(),
+			expect:    progressExceedRetryLimit,
+			endRegion: 1,
+		},
+	}
+	cancelFunc()
+	for _, testcase := range data {
+		testcase.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), testcase.bs)
+		testcase.bs.Stores.SetStore(testcase.store)
+		go process(testcase.bs, testcase.endRegion)
+		progress := recordStoreOffLineProgress(1, 2, testcase.rc)
+		c.Assert(testcase.expect, Equals, progress)
+	}
+}
+
+func process(cluster *core.BasicCluster, end int) {
+	for {
+		select {
+		case <-time.After(time.Second):
+			clone := core.NewStoreInfoWithLabel(1, end, nil)
+			cluster.Stores.SetStore(clone)
+			return
+		}
+		return
+	}
+}
+func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
+	cfg := config.NewConfig()
+	cfg.Schedule.TolerantSizeRatio = 5
+	if err := cfg.Adjust(nil, false); err != nil {
+		return nil, nil, err
+	}
+	opt := config.NewPersistOptions(cfg)
+	opt.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version2_0))
+	return &cfg.Schedule, opt, nil
 }
