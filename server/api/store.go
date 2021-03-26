@@ -20,19 +20,18 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pingcap/log"
 	"go.uber.org/zap"
-
-	"github.com/tikv/pd/server/cluster"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -223,7 +222,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func recordStoreOffLineProgress(storeID uint64, maxRetryTimes int, rc *cluster.RaftCluster) int {
 	store := rc.GetStore(storeID)
 	if store == nil {
-		log.Warn("store not find ", zap.Uint64("store Id", storeID))
+		log.Warn("store not find", zap.Uint64("store-id", storeID))
 		return progressStoreOffLine
 	}
 	storeLabel := strconv.FormatUint(storeID, 10)
@@ -258,7 +257,7 @@ func recordStoreOffLineProgress(storeID uint64, maxRetryTimes int, rc *cluster.R
 		}
 		store = rc.GetStore(storeID)
 		if store == nil {
-			log.Warn("down store not find ", zap.Uint64("store id", storeID))
+			log.Warn("down store not find", zap.Uint64("store-id", storeID))
 			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
 			return progressStoreOffLine
 		}

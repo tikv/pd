@@ -237,18 +237,18 @@ func recordUpStoreProgress(rc *cluster.RaftCluster, src *metapb.Store, maxRetryL
 	for {
 		if progress > 90 {
 			storeProgressGauge.WithLabelValues(src.Address, storeId).Set(100.00)
-			log.Info("store up finish ", zap.Uint64("store id", src.GetId()))
+			log.Info("store up finish ", zap.Uint64("store-id", src.GetId()))
 			return progressFinish
 		}
 		if targetStore == nil {
-			log.Warn("not find similar store ", zap.Uint64("store id", src.GetId()))
+			log.Warn("not find similar store", zap.Uint64("store id", src.GetId()))
 			storeProgressGauge.WithLabelValues(src.Address, storeId).Set(100.0)
 			return progressStoreOffLine
 		}
 		if srcStore := rc.GetStore(src.GetId()); srcStore != nil {
 			regionCount = srcStore.GetRegionCount()
 		}
-		log.Debug("check  has similar store", zap.Uint64("store id", src.GetId()),
+		log.Debug("check  has similar store", zap.Uint64("store-id", src.GetId()),
 			zap.Int("src region count", regionCount),
 			zap.Uint64("target-store", targetStore.GetID()),
 			zap.Int("target region count", targetStore.GetRegionCount()))
@@ -268,7 +268,7 @@ func recordUpStoreProgress(rc *cluster.RaftCluster, src *metapb.Store, maxRetryL
 						continue
 					}
 					storeProgressGauge.WithLabelValues(src.Address, storeId).Set(100.00)
-					log.Warn("store has reach max retry time", zap.Uint64("store id", src.GetId()))
+					log.Warn("store has reach max retry time", zap.Uint64("store-id", src.GetId()))
 					return progressExceedRetryLimit
 				}
 			}

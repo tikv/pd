@@ -275,7 +275,6 @@ func (s *testServerHandlerSuite) TestRecordUpStoreProgress(c *C) {
 		} else {
 			go precess(ctx, data.bc, data.region, false)
 		}
-
 		ret := recordUpStoreProgress(data.rc, data.store.GetMeta(), 1)
 		c.Assert(ret, Equals, data.expect)
 	}
@@ -293,7 +292,6 @@ func precess(ctx context.Context, bc *core.BasicCluster, region int, isOffLine b
 			return
 		}
 	}
-
 }
 
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
