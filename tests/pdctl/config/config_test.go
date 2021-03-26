@@ -393,10 +393,6 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "dc,rack")
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "please update rule instead"), IsTrue)
-
 	// test get
 	var bundle placement.GroupBundle
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pd")
@@ -564,7 +560,7 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 	check()
 }
 
-func (s *configTestSuite) TestUpdateMaxReplicas(c *C) {
+func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
@@ -594,6 +590,15 @@ func (s *configTestSuite) TestUpdateMaxReplicas(c *C) {
 		c.Assert(replicationCfg.MaxReplicas, Equals, expect)
 	}
 
+	checkLocaltionLabels := func(expect int) {
+		args := []string{"-u", pdAddr, "config", "show", "replication"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		c.Assert(err, IsNil)
+		replicationCfg := config.ReplicationConfig{}
+		c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
+		c.Assert(len(replicationCfg.LocationLabels), Equals, expect)
+	}
+
 	checkRuleCount := func(expect int) {
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
@@ -603,11 +608,25 @@ func (s *configTestSuite) TestUpdateMaxReplicas(c *C) {
 		c.Assert(rule.Count, Equals, expect)
 	}
 
+	checkRuleLocationLabels := func(expect int) {
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		c.Assert(err, IsNil)
+		rule := placement.Rule{}
+		c.Assert(json.Unmarshal(output, &rule), IsNil)
+		c.Assert(len(rule.LocationLabels), Equals, expect)
+	}
+
 	// update successfully when placement rules is not enabled.
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "2")
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 	checkMaxReplicas(2)
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "zone,host")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	checkLocaltionLabels(2)
+	checkRuleLocationLabels(2)
 
 	// update successfully when only one default rule exists.
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -619,6 +638,12 @@ func (s *configTestSuite) TestUpdateMaxReplicas(c *C) {
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 	checkMaxReplicas(3)
 	checkRuleCount(3)
+
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "host")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	checkLocaltionLabels(1)
+	checkRuleLocationLabels(1)
 
 	// update unsuccessfully when many rule exists.
 	f, _ := ioutil.TempFile("/tmp", "pd_tests")
@@ -649,4 +674,6 @@ func (s *configTestSuite) TestUpdateMaxReplicas(c *C) {
 	c.Assert(strings.Contains(string(output), "please update rule instead"), IsTrue)
 	checkMaxReplicas(3)
 	checkRuleCount(3)
+	checkLocaltionLabels(1)
+	checkRuleLocationLabels(1)
 }
