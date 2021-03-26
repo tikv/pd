@@ -114,3 +114,15 @@ func (s *testStoreSuite) TestRegionScore(c *C) {
 	// Region score should never be NaN, or /store API would fail.
 	c.Assert(math.IsNaN(score), Equals, false)
 }
+
+func (s *testStoreSuite) TestLowSpaceRatio(c *C) {
+	store := NewStoreInfoWithLabel(1, 20, nil)
+	store.rawStats.Capacity = initialMinSpace << 4
+	store.rawStats.Available = store.rawStats.Capacity >> 3
+
+	c.Assert(store.IsLowSpace(0.8), Equals, false)
+	store.regionCount = 31
+	c.Assert(store.IsLowSpace(0.8), Equals, true)
+	store.rawStats.Available = store.rawStats.Capacity >> 2
+	c.Assert(store.IsLowSpace(0.8), Equals, false)
+}

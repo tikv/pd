@@ -307,11 +307,11 @@ func (s *testPrometheusQuerierSuite) TestGetInstanceNameFromAddress(c *C) {
 			expectedInstanceName: "",
 		},
 		{
-			address:              "1.2.3.4:2333",
+			address:              "127.0.0.1:2333",
 			expectedInstanceName: "",
 		},
 		{
-			address:              "1.2.3.4",
+			address:              "127.0.0.1",
 			expectedInstanceName: "",
 		},
 	}
