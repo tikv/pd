@@ -38,7 +38,7 @@ func (s *testUtilSuite) TestValidateLabels(c *C) {
 		{"hos&t-15", true},
 		{"_test1", true},
 		{"-test1", true},
-		{"192.168.199.1", false},
+		{"127.0.0.1", false},
 		{"www.pingcap.com", false},
 		{"h_127.0.0.1", false},
 		{"a", false},
