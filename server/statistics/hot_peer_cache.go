@@ -410,12 +410,15 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 	newItem.rollingKeyRate = oldItem.rollingKeyRate
 
 	if newItem.justTransferLeader {
+		// skip the first heartbeat flow statistic after transfer leader, because its statistics are calculated by the last leader in this store and are inaccurate
+		// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.
 		newItem.HotDegree = oldItem.HotDegree
 		newItem.AntiCount = oldItem.AntiCount
-		// skip the first heartbeat interval after transfer leader
+		newItem.lastTransferLeaderTime = time.Now()
 		return newItem
 	}
 
+	newItem.lastTransferLeaderTime = oldItem.lastTransferLeaderTime
 	newItem.rollingByteRate.Add(bytes, interval)
 	newItem.rollingKeyRate.Add(keys, interval)
 
