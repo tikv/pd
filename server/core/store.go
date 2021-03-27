@@ -32,7 +32,7 @@ const (
 	mb                     = 1 << 20 // megabyte
 	gb                     = 1 << 30 // 1GB size
 	initialMaxRegionCounts = 30      // exclude storage Threshold Filter when region less than 30
-	initialMinSpace        = 1 << 33 // 2^3=8GB
+	initialMinSpace        = 1 << 33 // 2^33=8GB
 )
 
 // StoreInfo contains information about a store.
