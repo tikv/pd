@@ -406,8 +406,18 @@ func (mc *Cluster) UpdateStoreRegionSize(storeID uint64, size int64) {
 	store := mc.GetStore(storeID)
 	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
 	newStats.Available = newStats.Capacity - uint64(store.GetRegionSize())
+	newStats.UsedSize = uint64(store.GetRegionSize() * mb)
 	newStore := store.Clone(
 		core.SetStoreStats(newStats),
+		core.SetRegionSize(size),
+	)
+	mc.PutStore(newStore)
+}
+
+// UpdateStoreRegionSizeAlone only updates store region size.
+func (mc *Cluster) UpdateStoreRegionSizeAlone(storeID uint64, size int64) {
+	store := mc.GetStore(storeID)
+	newStore := store.Clone(
 		core.SetRegionSize(size),
 	)
 	mc.PutStore(newStore)
@@ -429,7 +439,7 @@ func (mc *Cluster) UpdateRegionCount(storeID uint64, regionCount int) {
 	newStore := store.Clone(
 		core.SetRegionCount(regionCount),
 		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
-	)
+		core.SetStoreUsage(uint64(regionCount*defaultRegionSize)))
 	mc.PutStore(newStore)
 }
 

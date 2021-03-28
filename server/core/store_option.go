@@ -152,6 +152,15 @@ func SetRegionSize(regionSize int64) StoreCreateOption {
 	}
 }
 
+// SetStoreUsage sets the store usage for the store.
+func SetStoreUsage(usage uint64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.mu.Lock()
+		store.rawStats.UsedSize = usage
+		store.mu.Unlock()
+	}
+}
+
 // SetLeaderWeight sets the leader weight for the store.
 func SetLeaderWeight(leaderWeight float64) StoreCreateOption {
 	return func(store *StoreInfo) {
