@@ -69,12 +69,8 @@ type StoreInfo struct {
 }
 
 const (
-	disconnectedName         = "Disconnected"
-	downStateName            = "Down"
-	progressMaxRetryLimit    = 20 // store down progress retry limit
-	progressFinish           = 1  // progress progressFinish normal
-	progressStoreOffLine     = 2  // store offline
-	progressExceedRetryLimit = 3  // progress retry reach max retry limit
+	disconnectedName = "Disconnected"
+	downStateName    = "Down"
 )
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
