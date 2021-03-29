@@ -202,6 +202,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusGone, err.Error())
 		return
 	}
+
 	h.rd.JSON(w, http.StatusOK, "The store is set as Offline or Tombstone.")
 }
 

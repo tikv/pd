@@ -39,9 +39,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const (
-	slowThreshold = 5 * time.Millisecond
-)
+const slowThreshold = 5 * time.Millisecond
 
 // gRPC errors
 var (
@@ -237,6 +235,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 			Header: s.errorHeader(pberr),
 		}, nil
 	}
+
 	// NOTE: can be removed when placement rules feature is enabled by default.
 	if !s.GetConfig().Replication.EnablePlacementRules && core.IsTiFlashStore(store) {
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
@@ -248,6 +247,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 
 	log.Info("put store ok", zap.Stringer("store", store))
 	CheckPDVersion(s.persistOptions)
+
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
