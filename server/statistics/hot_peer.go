@@ -88,13 +88,14 @@ type HotPeerStat struct {
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
 
-	needDelete         bool
-	isLeader           bool
-	isNew              bool
-	justTransferLeader bool
-	interval           uint64
-	thresholds         [dimLen]float64
-	peers              []uint64
+	needDelete             bool
+	isLeader               bool
+	isNew                  bool
+	justTransferLeader     bool
+	interval               uint64
+	thresholds             [dimLen]float64
+	peers                  []uint64
+	lastTransferLeaderTime time.Time
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -132,12 +133,13 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Bool("just-transfer-leader", stat.justTransferLeader),
 		zap.Bool("is-leader", stat.isLeader),
 		zap.Bool("need-delete", stat.IsNeedDelete()),
-		zap.String("type", stat.Kind.String()))
+		zap.String("type", stat.Kind.String()),
+		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
 }
 
-// IsJustTransferLeader indicates the item belong to the leader.
-func (stat *HotPeerStat) IsJustTransferLeader() bool {
-	return stat.justTransferLeader
+// IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
+func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
+	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*RegionHeartBeatReportInterval)
 }
 
 // IsNeedDelete to delete the item in cache.
