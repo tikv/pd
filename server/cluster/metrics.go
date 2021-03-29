@@ -84,7 +84,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "store_progress",
-			Help:      "Store process after join",
+			Help:      "Store setStoreRegionCount after up/down",
 		}, []string{"address", "store", "type"})
 )
 

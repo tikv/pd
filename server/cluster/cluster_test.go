@@ -925,8 +925,8 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 	return nil
 }
 
-//func (s *Server) recordUpStoreProgress(src *metapb.Store) int
-func (s *testGetStoresSuite) TestRecordUpStoreProgress(c *C) {
+//func (s *Server) recordUpProgress(src *metapb.Store) int
+func (s *testGetStoresSuite) TestRecordProgressAfterStoreUp(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	_, opt, _ := newTestScheduleConfig()
 	defer cancel()
@@ -964,7 +964,7 @@ func (s *testGetStoresSuite) TestRecordUpStoreProgress(c *C) {
 		} else {
 			go precess(ctx, data.bc, data.region, false)
 		}
-		ret := recordUpStoreProgress(data.rc, data.store.GetMeta(), 1)
+		ret := recordUpProgress(data.rc, data.store.GetMeta(), 1)
 		c.Assert(ret, Equals, data.expect)
 	}
 }
@@ -984,7 +984,7 @@ func precess(ctx context.Context, bc *core.BasicCluster, region int, isOffLine b
 }
 
 // TestProgressWhenStoreDown
-func (s *testGetStoresSuite) TestProgressWhenStoreDown(c *C) {
+func (s *testGetStoresSuite) TestRecordProgressAfterStoreDown(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	data := []struct {
@@ -1026,13 +1026,13 @@ func (s *testGetStoresSuite) TestProgressWhenStoreDown(c *C) {
 	for _, testcase := range data {
 		testcase.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), testcase.bs)
 		testcase.bs.Stores.SetStore(testcase.store)
-		go process(testcase.bs, testcase.endRegion)
-		progress := recordStoreOffLineProgress(1, 2, testcase.rc)
+		go setStoreRegionCount(testcase.bs, testcase.endRegion)
+		progress := recordDownProgress(1, 2, testcase.rc)
 		c.Assert(testcase.expect, Equals, progress)
 	}
 }
 
-func process(cluster *core.BasicCluster, end int) {
+func setStoreRegionCount(cluster *core.BasicCluster, end int) {
 	for {
 		select {
 		case <-time.After(time.Second):
