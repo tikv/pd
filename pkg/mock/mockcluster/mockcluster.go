@@ -439,7 +439,7 @@ func (mc *Cluster) UpdateRegionCount(storeID uint64, regionCount int) {
 	newStore := store.Clone(
 		core.SetRegionCount(regionCount),
 		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
-		core.SetStoreUsage(uint64(regionCount*defaultRegionSize)))
+		core.SetUsedSize(uint64(regionCount*defaultRegionSize)))
 	mc.PutStore(newStore)
 }
 

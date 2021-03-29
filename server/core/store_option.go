@@ -152,8 +152,8 @@ func SetRegionSize(regionSize int64) StoreCreateOption {
 	}
 }
 
-// SetStoreUsage sets the store usage for the store.
-func SetStoreUsage(usage uint64) StoreCreateOption {
+// SetUsedSize sets the store usage for the store.
+func SetUsedSize(usage uint64) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.mu.Lock()
 		store.rawStats.UsedSize = usage
