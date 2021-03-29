@@ -19,15 +19,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"testing"
-	"time"
-
-	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/server/kv"
-
-	"github.com/tikv/pd/server/versioninfo"
-
-	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/core"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -234,73 +225,4 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	c.Assert(err, IsNil)
 	bodyString := string(bodyBytes)
 	c.Assert(bodyString, Equals, "Hello World\n")
-}
-
-//func (s *Server) recordUpStoreProgress(src *metapb.Store) int
-func (s *testServerHandlerSuite) TestRecordUpStoreProgress(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	_, opt, _ := newTestScheduleConfig()
-	defer cancel()
-	testdata := []struct {
-		bc     *core.BasicCluster
-		rc     *cluster.RaftCluster
-		store  *core.StoreInfo
-		expect int
-		region int
-	}{{
-		rc:     cluster.NewRaftCluster(ctx, "", 1, nil, nil, nil),
-		bc:     core.NewBasicCluster(),
-		store:  core.NewStoreInfoWithLabel(1, 0, nil),
-		expect: progressFinish,
-		region: 10,
-	}, {
-		rc:     cluster.NewRaftCluster(ctx, "", 1, nil, nil, nil),
-		bc:     core.NewBasicCluster(),
-		store:  core.NewStoreInfoWithLabel(1, 0, nil),
-		expect: progressExceedRetryLimit,
-		region: 5,
-	}, {
-		rc:     cluster.NewRaftCluster(ctx, "", 1, nil, nil, nil),
-		bc:     core.NewBasicCluster(),
-		store:  core.NewStoreInfoWithLabel(1, 0, nil),
-		expect: progressStoreOffLine,
-		region: 0,
-	}}
-	for _, data := range testdata {
-		data.bc.Stores.SetStore(core.NewStoreInfoWithLabel(2, 10, nil))
-		data.bc.Stores.SetStore(data.store)
-		data.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), data.bc)
-		if data.expect == progressStoreOffLine {
-			go precess(ctx, data.bc, data.region, true)
-		} else {
-			go precess(ctx, data.bc, data.region, false)
-		}
-		ret := recordUpStoreProgress(data.rc, data.store.GetMeta(), 1)
-		c.Assert(ret, Equals, data.expect)
-	}
-}
-func precess(ctx context.Context, bc *core.BasicCluster, region int, isOffLine bool) {
-	for {
-		select {
-		case <-time.After(time.Second):
-			if isOffLine {
-				bc.DeleteStore(core.NewStoreInfoWithLabel(2, region, nil))
-			} else {
-				bc.Stores.SetStore(core.NewStoreInfoWithLabel(1, region, nil))
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
-	cfg := config.NewConfig()
-	cfg.Schedule.TolerantSizeRatio = 5
-	if err := cfg.Adjust(nil, false); err != nil {
-		return nil, nil, err
-	}
-	opt := config.NewPersistOptions(cfg)
-	opt.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version2_0))
-	return &cfg.Schedule, opt, nil
 }

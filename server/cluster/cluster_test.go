@@ -924,3 +924,122 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 
 	return nil
 }
+
+//func (s *Server) recordUpStoreProgress(src *metapb.Store) int
+func (s *testGetStoresSuite) TestRecordUpStoreProgress(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	_, opt, _ := newTestScheduleConfig()
+	defer cancel()
+	testdata := []struct {
+		bc     *core.BasicCluster
+		rc     *RaftCluster
+		store  *core.StoreInfo
+		expect int
+		region int
+	}{{
+		rc:     NewRaftCluster(ctx, "", 1, nil, nil, nil),
+		bc:     core.NewBasicCluster(),
+		store:  core.NewStoreInfoWithLabel(1, 0, nil),
+		expect: progressFinish,
+		region: 10,
+	}, {
+		rc:     NewRaftCluster(ctx, "", 1, nil, nil, nil),
+		bc:     core.NewBasicCluster(),
+		store:  core.NewStoreInfoWithLabel(1, 0, nil),
+		expect: progressExceedRetryLimit,
+		region: 5,
+	}, {
+		rc:     NewRaftCluster(ctx, "", 1, nil, nil, nil),
+		bc:     core.NewBasicCluster(),
+		store:  core.NewStoreInfoWithLabel(1, 0, nil),
+		expect: progressStoreOffLine,
+		region: 0,
+	}}
+	for _, data := range testdata {
+		data.bc.Stores.SetStore(core.NewStoreInfoWithLabel(2, 10, nil))
+		data.bc.Stores.SetStore(data.store)
+		data.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), data.bc)
+		if data.expect == progressStoreOffLine {
+			go precess(ctx, data.bc, data.region, true)
+		} else {
+			go precess(ctx, data.bc, data.region, false)
+		}
+		ret := recordUpStoreProgress(data.rc, data.store.GetMeta(), 1)
+		c.Assert(ret, Equals, data.expect)
+	}
+}
+func precess(ctx context.Context, bc *core.BasicCluster, region int, isOffLine bool) {
+	for {
+		select {
+		case <-time.After(time.Second):
+			if isOffLine {
+				bc.DeleteStore(core.NewStoreInfoWithLabel(2, region, nil))
+			} else {
+				bc.Stores.SetStore(core.NewStoreInfoWithLabel(1, region, nil))
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// TestProgressWhenStoreDown
+func (s *testGetStoresSuite) TestProgressWhenStoreDown(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	data := []struct {
+		rc        *RaftCluster
+		store     *core.StoreInfo
+		bs        *core.BasicCluster
+		endRegion int
+		expect    int
+	}{
+		{
+			rc:        NewRaftCluster(ctx, "", 1, nil, nil, nil),
+			store:     core.NewStoreInfoWithLabel(1, 10, nil),
+			bs:        core.NewBasicCluster(),
+			expect:    progressFinish,
+			endRegion: 0,
+		},
+		{
+			rc:        NewRaftCluster(ctx, "", 1, nil, nil, nil),
+			store:     core.NewStoreInfoWithLabel(1, 0, nil),
+			bs:        core.NewBasicCluster(),
+			expect:    progressFinish,
+			endRegion: 0,
+		},
+		{
+			rc:        NewRaftCluster(ctx, "", 1, nil, nil, nil),
+			store:     core.NewStoreInfoWithLabel(2, 10, nil),
+			bs:        core.NewBasicCluster(),
+			expect:    progressStoreOffLine,
+			endRegion: 0,
+		}, {
+			rc:        NewRaftCluster(ctx, "", 1, nil, nil, nil),
+			store:     core.NewStoreInfoWithLabel(1, 10, nil),
+			bs:        core.NewBasicCluster(),
+			expect:    progressExceedRetryLimit,
+			endRegion: 1,
+		},
+	}
+	cancelFunc()
+	for _, testcase := range data {
+		testcase.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), testcase.bs)
+		testcase.bs.Stores.SetStore(testcase.store)
+		go process(testcase.bs, testcase.endRegion)
+		progress := recordStoreOffLineProgress(1, 2, testcase.rc)
+		c.Assert(testcase.expect, Equals, progress)
+	}
+}
+
+func process(cluster *core.BasicCluster, end int) {
+	for {
+		select {
+		case <-time.After(time.Second):
+			clone := core.NewStoreInfoWithLabel(1, end, nil)
+			cluster.Stores.SetStore(clone)
+			return
+		}
+		return
+	}
+}

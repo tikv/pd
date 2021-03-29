@@ -20,18 +20,14 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -210,58 +206,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusGone, err.Error())
 		return
 	}
-	go recordStoreOffLineProgress(storeID, progressMaxRetryLimit, rc)
 	h.rd.JSON(w, http.StatusOK, "The store is set as Offline or Tombstone.")
-}
-
-// recordStoreOffLineProgress record the progress of the progressStoreOffLine store
-// return status for test
-// 	1: normal
-// 	2: store has offline
-// 	3: progressMaxRetryLimit limit
-func recordStoreOffLineProgress(storeID uint64, maxRetryTimes int, rc *cluster.RaftCluster) int {
-	store := rc.GetStore(storeID)
-	if store == nil {
-		log.Warn("store not find", zap.Uint64("store-id", storeID))
-		return progressStoreOffLine
-	}
-	storeLabel := strconv.FormatUint(storeID, 10)
-	count := store.GetRegionCount()
-	if count == 0 {
-		storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
-		return progressFinish
-	}
-	progress := 0
-	retryTime := 0
-	for {
-		if progress > 95.00 {
-			log.Info("store down progressFinish", zap.Uint64("store id ", storeID))
-			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
-			return progressFinish
-		}
-		select {
-		case <-time.After(time.Second):
-			currentProgress := 100.00 * (count - store.GetRegionCount()) / count
-			if currentProgress > progress {
-				progress = currentProgress
-				storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(float64(progress))
-				retryTime = 0
-			} else {
-				retryTime = retryTime + 1
-				if retryTime > maxRetryTimes {
-					log.Warn("store region count not change, it has reach the max retry time limit",
-						zap.Uint64("store id", storeID))
-					return progressExceedRetryLimit
-				}
-			}
-		}
-		store = rc.GetStore(storeID)
-		if store == nil {
-			log.Warn("down store not find", zap.Uint64("store-id", storeID))
-			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
-			return progressStoreOffLine
-		}
-	}
 }
 
 // @Tags store

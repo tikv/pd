@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -56,6 +57,11 @@ var backgroundJobInterval = 10 * time.Second
 const (
 	clientTimeout              = 3 * time.Second
 	defaultChangedRegionsLimit = 10000
+	progressMetricsTimer       = 5  // progress run interval second
+	progressMaxRetryLimit      = 20 // region check max times
+	progressFinish             = 1  // progress progressFinish normal
+	progressStoreOffLine       = 2  // store offline
+	progressExceedRetryLimit   = 3  // progress retry reach max retry limit
 )
 
 // Server is the interface for cluster.
@@ -914,7 +920,145 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 	}
 	c.OnStoreVersionChange()
 	c.AddStoreLimit(store)
+	go recordUpStoreProgress(c, store, progressMaxRetryLimit)
 	return nil
+}
+
+// recordUpStoreProgress record the progress of new store.
+//It will stop recording if region count not change continue 100 or progress is more than 90
+func recordUpStoreProgress(rc *RaftCluster, src *metapb.Store, maxRetryLimit int) int {
+	progress := 0
+	regionCount := 0
+	retryTime := 0
+	storeId := strconv.FormatUint(src.GetId(), 10)
+	targetStore := pickSimilarStore(rc.GetStores(), src)
+
+	for {
+		if progress > 90 {
+			storeProgressGauge.WithLabelValues(src.Address, storeId, "up").Set(100.00)
+			log.Info("store up finish ", zap.Uint64("store-id", src.GetId()))
+			return progressFinish
+		}
+		if targetStore == nil {
+			log.Warn("not find similar store", zap.Uint64("store-id", src.GetId()))
+			storeProgressGauge.WithLabelValues(src.Address, storeId, "up").Set(100.0)
+			return progressStoreOffLine
+		}
+		if srcStore := rc.GetStore(src.GetId()); srcStore != nil {
+			regionCount = srcStore.GetRegionCount()
+		}
+		log.Debug("check  has similar store", zap.Uint64("store-id", src.GetId()),
+			zap.Int("src region count", regionCount),
+			zap.Uint64("target store", targetStore.GetID()),
+			zap.Int("target region count", targetStore.GetRegionCount()))
+		select {
+		case <-time.After(progressMetricsTimer * time.Second):
+			currentProgress := 100.00 * regionCount / targetStore.GetRegionCount()
+			if currentProgress > progress {
+				progress = currentProgress
+				retryTime = 0
+				storeProgressGauge.WithLabelValues(src.Address, storeId, "up").Set(float64(progress))
+			} else {
+				retryTime = retryTime + 1
+				if retryTime > maxRetryLimit {
+					if similar := pickSimilarStore(rc.GetStores(), src); similar != nil &&
+						similar.GetID() != targetStore.GetID() {
+						targetStore = similar
+						continue
+					}
+					storeProgressGauge.WithLabelValues(src.Address, storeId, "up").Set(100.00)
+					log.Warn("store has reach max retry time", zap.Uint64("store-id", src.GetId()))
+					return progressExceedRetryLimit
+				}
+			}
+			// pick again if target offline
+			if targetStore = rc.GetStore(targetStore.GetID()); targetStore == nil || !targetStore.IsUp() {
+				targetStore = pickSimilarStore(rc.GetStores(), src)
+			}
+		}
+	}
+}
+
+// recordStoreOffLineProgress record the progress of the progressStoreOffLine store
+// return status for test
+// 	1: normal
+// 	2: store has offline
+// 	3: progressMaxRetryLimit limit
+func recordStoreOffLineProgress(storeID uint64, maxRetryTimes int, rc *RaftCluster) int {
+	store := rc.GetStore(storeID)
+	if store == nil {
+		log.Warn("store not find", zap.Uint64("store-id", storeID))
+		return progressStoreOffLine
+	}
+	storeLabel := strconv.FormatUint(storeID, 10)
+	count := store.GetRegionCount()
+	if count == 0 {
+		storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
+		return progressFinish
+	}
+	progress := 0
+	retryTime := 0
+	for {
+		if progress > 95.00 {
+			log.Info("store down progressFinish", zap.Uint64("store-id ", storeID))
+			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
+			return progressFinish
+		}
+		select {
+		case <-time.After(time.Second):
+			currentProgress := 100.00 * (count - store.GetRegionCount()) / count
+			if currentProgress > progress {
+				progress = currentProgress
+				storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(float64(progress))
+				retryTime = 0
+			} else {
+				retryTime = retryTime + 1
+				if retryTime > maxRetryTimes {
+					log.Warn("store region count not change, it has reach the max retry time limit",
+						zap.Uint64("store-id", storeID))
+					return progressExceedRetryLimit
+				}
+			}
+		}
+		store = rc.GetStore(storeID)
+		if store == nil {
+			log.Warn("down store not find", zap.Uint64("store-id", storeID))
+			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
+			return progressStoreOffLine
+		}
+	}
+}
+
+// pickSimilarStore find one target store
+func pickSimilarStore(stores []*core.StoreInfo, src *metapb.Store) (store *core.StoreInfo) {
+	labels := src.GetLabels()
+	var zone string
+	var sack string
+	for _, v := range labels {
+		if v.Key == "zone" {
+			zone = v.Value
+			continue
+		}
+		if v.Key == "sack" {
+			sack = v.Value
+		}
+	}
+	var ret *core.StoreInfo
+	for _, v := range stores {
+		if v.GetID() == src.GetId() || v.IsOffline() || v.GetRegionCount() == 0 {
+			continue
+		}
+		if v.GetLabelValue("zone") != zone {
+			continue
+		}
+		if v.GetLabelValue("sack") != sack {
+			continue
+		}
+		if ret == nil || v.GetRegionCount() < ret.GetRegionCount() {
+			ret = v
+		}
+	}
+	return ret
 }
 
 // putStoreImpl puts a store.
@@ -1038,6 +1182,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	if err == nil {
 		c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
+	go recordStoreOffLineProgress(storeID, progressMaxRetryLimit, c)
 	return err
 }
 
@@ -1075,6 +1220,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	if err == nil {
 		c.RemoveStoreLimit(storeID)
 	}
+	go recordStoreOffLineProgress(storeID, progressMaxRetryLimit, c)
 	return err
 }
 
