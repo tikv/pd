@@ -848,7 +848,8 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], operator.OpKind(0), 1, 3)
 }
 
-func (s *testBalanceRegionSchedulerSuite) TestIssue3544_UsageRatio(c *C) {
+// Ref Issue: https://github.com/tikv/pd/issues/3544
+func (s *testBalanceRegionSchedulerSuite) TestUsageRatio(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	// TODO: enable placementrules
