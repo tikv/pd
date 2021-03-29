@@ -851,7 +851,7 @@ func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.Region
 }
 
 // GetStoresStats returns stores' statistics from cluster.
-// And it will be unnecessary to filter unhealthy store, because it has been solved in setStoreRegionCount heartbeat
+// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
 func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 	c.RLock()
 	defer c.RUnlock()
