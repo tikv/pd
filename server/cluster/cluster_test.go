@@ -934,7 +934,7 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreUp(c *C) {
 		bc     *core.BasicCluster
 		rc     *RaftCluster
 		store  *core.StoreInfo
-		expect int
+		expect storeProgressStatus
 		region int
 	}{{
 		rc:     NewRaftCluster(ctx, "", 1, nil, nil, nil),
@@ -992,7 +992,7 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreDown(c *C) {
 		store     *core.StoreInfo
 		bs        *core.BasicCluster
 		endRegion int
-		expect    int
+		expect    storeProgressStatus
 	}{
 		{
 			rc:        NewRaftCluster(ctx, "", 1, nil, nil, nil),
@@ -1027,7 +1027,7 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreDown(c *C) {
 		testcase.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), testcase.bs)
 		testcase.bs.Stores.SetStore(testcase.store)
 		go setStoreRegionCount(testcase.bs, testcase.endRegion)
-		progress := recordDownProgress(1, 2, testcase.rc)
+		progress := recordOfflineProgress(1, 2, testcase.rc)
 		c.Assert(testcase.expect, Equals, progress)
 	}
 }

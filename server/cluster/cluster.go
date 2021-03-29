@@ -54,15 +54,16 @@ import (
 
 var backgroundJobInterval = 10 * time.Second
 
-const (
-	clientTimeout              = 3 * time.Second
-	defaultChangedRegionsLimit = 10000
-	progressMetricsTimer       = 5  // progress run interval second
-	progressMaxRetryLimit      = 20 // max check times
+type storeProgressStatus int
 
-	progressFinish           = 1 // progress progress finish
-	progressStoreOffLine     = 2 // store offline
-	progressExceedRetryLimit = 3 // progress retry reach max retry limit
+const (
+	clientTimeout                                  = 3 * time.Second
+	defaultChangedRegionsLimit                     = 10000
+	progressMetricsTimer                           = 5    // progress run interval second
+	progressMaxRetryLimit                          = 20   // max check times
+	progressFinish             storeProgressStatus = iota // progress progress finish
+	progressStoreOffLine                                  // store offline
+	progressExceedRetryLimit                              // progress retry reach max retry limit
 )
 
 // Server is the interface for cluster.
@@ -927,7 +928,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 
 // recordUpProgress record the progress of new store.
 //It will stop recording if region count not change continue 100 or progress is more than 90
-func recordUpProgress(rc *RaftCluster, src *metapb.Store, maxRetryLimit int) int {
+func recordUpProgress(rc *RaftCluster, src *metapb.Store, maxRetryLimit int) storeProgressStatus {
 	progress := 0
 	regionCount := 0
 	retryTime := 0
@@ -980,8 +981,8 @@ func recordUpProgress(rc *RaftCluster, src *metapb.Store, maxRetryLimit int) int
 	}
 }
 
-// recordDownProgress record the progress of the progressStoreOffLine store
-func recordDownProgress(storeID uint64, maxRetryTimes int, rc *RaftCluster) int {
+// recordOfflineProgress record the progress of the offline store
+func recordOfflineProgress(storeID uint64, maxRetryTimes int, rc *RaftCluster) storeProgressStatus {
 	store := rc.GetStore(storeID)
 	if store == nil {
 		log.Warn("store not find", zap.Uint64("store-id", storeID))
@@ -1176,7 +1177,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	if err == nil {
 		c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
-	go recordDownProgress(storeID, progressMaxRetryLimit, c)
+	go recordOfflineProgress(storeID, progressMaxRetryLimit, c)
 	return err
 }
 
@@ -1214,7 +1215,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	if err == nil {
 		c.RemoveStoreLimit(storeID)
 	}
-	go recordDownProgress(storeID, progressMaxRetryLimit, c)
+	go recordOfflineProgress(storeID, progressMaxRetryLimit, c)
 	return err
 }
 
