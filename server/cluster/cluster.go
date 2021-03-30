@@ -60,8 +60,8 @@ type storeProgressStatus int
 const (
 	clientTimeout                                  = 3 * time.Second
 	defaultChangedRegionsLimit                     = 10000
-	progressMetricsTimer                           = 5    // progress run interval second
-	progressMaxRetryLimit                          = 20   // max check times
+	progressMetricsTimer                           = 15   // progress interval second,same with grafana refresh frequency
+	progressMaxRetryLimit                          = 20   // progress max check times
 	progressFinish             storeProgressStatus = iota // progress progress finish
 	progressNoTarget                                      // progress no target selected
 	progressExceedRetryLimit                              // progress retry reach max retry limit
