@@ -930,45 +930,89 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreUp(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	_, opt, _ := newTestScheduleConfig()
 	defer cancel()
+	label := map[string]string{
+		"zone": "zone1",
+		"rack": "rack1",
+		"host": "host1",
+	}
+
+	targetLabels := []string{"zone", "rack", "host"}
 	testdata := []struct {
+		name   string
 		bc     *core.BasicCluster
 		rc     *RaftCluster
 		store  *core.StoreInfo
-		expect storeProgressStatus
 		region int
+		expect storeProgressStatus
+		label  map[string]string
 	}{{
+		name:   "normal",
 		rc:     NewRaftCluster(ctx, "", 1, nil, nil, nil),
 		bc:     core.NewBasicCluster(),
 		store:  core.NewStoreInfoWithLabel(1, 0, nil),
 		expect: progressFinish,
 		region: 10,
 	}, {
+		name:   "region no zero",
 		rc:     NewRaftCluster(ctx, "", 1, nil, nil, nil),
 		bc:     core.NewBasicCluster(),
 		store:  core.NewStoreInfoWithLabel(1, 0, nil),
 		expect: progressExceedRetryLimit,
 		region: 5,
 	}, {
+		name:   "target is offline",
 		rc:     NewRaftCluster(ctx, "", 1, nil, nil, nil),
 		bc:     core.NewBasicCluster(),
 		store:  core.NewStoreInfoWithLabel(1, 0, nil),
-		expect: progressStoreOffLine,
+		expect: progressNoTarget,
+		region: 0,
+	}, {
+		name:   "label test",
+		rc:     NewRaftCluster(ctx, "", 1, nil, nil, nil),
+		bc:     core.NewBasicCluster(),
+		store:  core.NewStoreInfoWithLabel(1, 0, label),
+		expect: progressFinish,
+		region: 10,
+		label: map[string]string{
+			"zone": "zone1",
+			"rack": "rack1",
+			"host": "host2",
+		},
+	}, {
+		name:   "no match label store",
+		rc:     NewRaftCluster(ctx, "", 1, nil, nil, nil),
+		bc:     core.NewBasicCluster(),
+		store:  core.NewStoreInfoWithLabel(1, 0, label),
+		expect: progressNoTarget,
+		region: 10,
+		label: map[string]string{
+			"zone": "zone1",
+			"rack": "rack2",
+			"host": "host1",
+		},
+	}, {
+		name:   "no label store test",
+		rc:     NewRaftCluster(ctx, "", 1, nil, nil, nil),
+		bc:     core.NewBasicCluster(),
+		store:  core.NewStoreInfoWithLabel(1, 0, nil),
+		expect: progressNoTarget,
 		region: 0,
 	}}
-	for _, data := range testdata {
-		data.bc.Stores.SetStore(core.NewStoreInfoWithLabel(2, 10, nil))
-		data.bc.Stores.SetStore(data.store)
-		data.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), data.bc)
-		if data.expect == progressStoreOffLine {
-			go precess(ctx, data.bc, data.region, true)
+	for _, testcase := range testdata {
+		testcase.bc.Stores.SetStore(core.NewStoreInfoWithLabel(2, 10, testcase.label))
+
+		testcase.bc.Stores.SetStore(testcase.store)
+		testcase.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), testcase.bc)
+		if testcase.expect == progressNoTarget && testcase.label == nil {
+			go process(ctx, testcase.bc, testcase.region, true)
 		} else {
-			go precess(ctx, data.bc, data.region, false)
+			go process(ctx, testcase.bc, testcase.region, false)
 		}
-		ret := recordUpProgress(data.rc, data.store.GetMeta(), 1)
-		c.Assert(ret, Equals, data.expect)
+		ret := recordUpProgress(ctx, testcase.rc, testcase.store.GetMeta(), 1, targetLabels)
+		c.Assert(ret, Equals, testcase.expect)
 	}
 }
-func precess(ctx context.Context, bc *core.BasicCluster, region int, isOffLine bool) {
+func process(ctx context.Context, bc *core.BasicCluster, region int, isOffLine bool) {
 	for {
 		select {
 		case <-time.After(time.Second):
@@ -988,6 +1032,7 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreDown(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	data := []struct {
+		name      string
 		rc        *RaftCluster
 		store     *core.StoreInfo
 		bs        *core.BasicCluster
@@ -995,6 +1040,7 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreDown(c *C) {
 		expect    storeProgressStatus
 	}{
 		{
+			name:      "normal",
 			rc:        NewRaftCluster(ctx, "", 1, nil, nil, nil),
 			store:     core.NewStoreInfoWithLabel(1, 10, nil),
 			bs:        core.NewBasicCluster(),
@@ -1002,6 +1048,7 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreDown(c *C) {
 			endRegion: 0,
 		},
 		{
+			name:      "no region",
 			rc:        NewRaftCluster(ctx, "", 1, nil, nil, nil),
 			store:     core.NewStoreInfoWithLabel(1, 0, nil),
 			bs:        core.NewBasicCluster(),
@@ -1009,12 +1056,7 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreDown(c *C) {
 			endRegion: 0,
 		},
 		{
-			rc:        NewRaftCluster(ctx, "", 1, nil, nil, nil),
-			store:     core.NewStoreInfoWithLabel(2, 10, nil),
-			bs:        core.NewBasicCluster(),
-			expect:    progressStoreOffLine,
-			endRegion: 0,
-		}, {
+			name:      "not finish",
 			rc:        NewRaftCluster(ctx, "", 1, nil, nil, nil),
 			store:     core.NewStoreInfoWithLabel(1, 10, nil),
 			bs:        core.NewBasicCluster(),
@@ -1022,12 +1064,12 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreDown(c *C) {
 			endRegion: 1,
 		},
 	}
-	cancelFunc()
+	defer cancelFunc()
 	for _, testcase := range data {
 		testcase.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), testcase.bs)
 		testcase.bs.Stores.SetStore(testcase.store)
 		go setStoreRegionCount(testcase.bs, testcase.endRegion)
-		progress := recordOfflineProgress(1, 2, testcase.rc)
+		progress := recordOfflineProgress(ctx, 1, 2, testcase.rc)
 		c.Assert(testcase.expect, Equals, progress)
 	}
 }

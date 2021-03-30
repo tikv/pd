@@ -3310,7 +3310,7 @@
               "expr": "pd_scheduler_store_progress",
               "format": "time_series",
               "intervalFactor": 1,
-              "legendFormat": "{{address}}--{{store}}--{{type}}",
+              "legendFormat": "{{address}}-{{store}}-{{type}}",
               "refId": "A"
             }
           ],
