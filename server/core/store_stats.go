@@ -153,7 +153,7 @@ func (ss *storeStats) GetAvgAvailable() uint64 {
 func (ss *storeStats) GetAvgUsedSize() uint64 {
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
-	return climp0(ss.avgAvailable.Get())
+	return climp0(ss.avgUsedSize.Get())
 }
 
 // GetAvailableDeviation returns approximate magnitude of available in the recent period.
