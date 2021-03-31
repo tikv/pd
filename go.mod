@@ -35,7 +35,7 @@ require (
 	github.com/prometheus/client_golang v1.2.1
 	github.com/prometheus/common v0.9.1
 	github.com/sasha-s/go-deadlock v0.2.0
-	github.com/sirupsen/logrus v1.4.2
+	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
@@ -51,8 +51,4 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
-replace (
-	github.com/oleiade/reflections => github.com/oleiade/reflections v1.0.1
-	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
-	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
-)
+replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
