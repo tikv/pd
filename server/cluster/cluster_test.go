@@ -929,6 +929,7 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 func (s *testGetStoresSuite) TestRecordProgressAfterStoreUp(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	_, opt, _ := newTestScheduleConfig()
+	opt.SetReplicationConfig(&config.ReplicationConfig{LocationLabels: []string{"zone", "rack", "host"}})
 	defer cancel()
 	label := map[string]string{
 		"zone": "zone1",
@@ -936,7 +937,6 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreUp(c *C) {
 		"host": "host1",
 	}
 
-	targetLabels := []string{"zone", "rack", "host"}
 	testdata := []struct {
 		name   string
 		bc     *core.BasicCluster
@@ -1000,7 +1000,6 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreUp(c *C) {
 	}}
 	for _, testcase := range testdata {
 		testcase.bc.Stores.SetStore(core.NewStoreInfoWithLabel(2, 10, testcase.label))
-
 		testcase.bc.Stores.SetStore(testcase.store)
 		testcase.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), testcase.bc)
 		if testcase.expect == progressNoTarget && testcase.label == nil {
@@ -1008,7 +1007,7 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreUp(c *C) {
 		} else {
 			go process(ctx, testcase.bc, testcase.region, false)
 		}
-		ret := recordUpProgress(ctx, testcase.rc, testcase.store.GetMeta(), 1, targetLabels)
+		ret := testcase.rc.recordUpProgress(testcase.store.GetMeta(), 1)
 		c.Assert(ret, Equals, testcase.expect)
 	}
 }
@@ -1069,7 +1068,7 @@ func (s *testGetStoresSuite) TestRecordProgressAfterStoreDown(c *C) {
 		testcase.rc.InitCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), testcase.bs)
 		testcase.bs.Stores.SetStore(testcase.store)
 		go setStoreRegionCount(testcase.bs, testcase.endRegion)
-		progress := recordOfflineProgress(ctx, 1, 2, testcase.rc)
+		progress := testcase.rc.recordOfflineProgress(1, 2)
 		c.Assert(testcase.expect, Equals, progress)
 	}
 }
