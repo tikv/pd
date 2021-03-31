@@ -309,7 +309,7 @@ func (s *StoreInfo) regionScoreV2(delta int64, deviation int) float64 {
 		K, M float64 = 1, 256 // Experience value to control the weight of the available influence on score
 		F    float64 = 20     // Experience value to prevent some nodes from running out of disk space prematurely.
 	)
-	used := float64(s.GetUsedSize()) / mb
+	used := float64(s.GetAvgUsedSize()) / mb
 	if s.GetRegionSize() == 0 || used == 0 {
 		amplification = 1
 	} else {
