@@ -52,7 +52,7 @@ func (ss *storeStats) updateRawStats(rawStats *pdpb.StoreStats) {
 	ss.rawStats = rawStats
 
 	ss.avgAvailable.Add(float64(rawStats.GetAvailable()))
-	ss.avgUsedSize.Add(float64(rawStats.GetAvailable()))
+	ss.avgUsedSize.Add(float64(rawStats.GetUsedSize()))
 	deviation := math.Abs(float64(rawStats.GetAvailable()) - ss.avgAvailable.Get())
 	ss.maxAvailableDeviation.Add(deviation)
 	ss.avgMaxAvailableDeviation.Add(ss.maxAvailableDeviation.Get())
