@@ -51,6 +51,13 @@ var (
 			Help:      "Bucketed histogram of the batch size of handled requests.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
 		})
+	requestForwarded = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd_client",
+			Subsystem: "request",
+			Name:      "forwarded_status",
+			Help:      "The status to indicate if the request is forwarded",
+		}, []string{"host", "delegate"})
 )
 
 var (
@@ -90,4 +97,5 @@ func init() {
 	prometheus.MustRegister(cmdFailedDuration)
 	prometheus.MustRegister(requestDuration)
 	prometheus.MustRegister(tsoBatchSize)
+	prometheus.MustRegister(requestForwarded)
 }

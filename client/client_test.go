@@ -107,7 +107,7 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 		gRPCDialOptions:      []grpc.DialOption{grpc.WithBlock()},
 	}
 
-	err := cli.updateLeader()
+	err := cli.updateMember()
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Greater, 500*time.Millisecond)
 }

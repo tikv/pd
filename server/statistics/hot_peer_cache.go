@@ -94,6 +94,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 		if stores, ok := f.storesOfRegion[item.RegionID]; ok {
 			delete(stores, item.StoreID)
 		}
+		item.Log("region heartbeat delete from cache", log.Debug)
 	} else {
 		peers, ok := f.peersOfStore[item.StoreID]
 		if !ok {
@@ -108,6 +109,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 			f.storesOfRegion[item.RegionID] = stores
 		}
 		stores[item.StoreID] = struct{}{}
+		item.Log("region heartbeat update", log.Debug)
 	}
 }
 
@@ -385,11 +387,11 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		if interval == 0 {
 			return nil
 		}
+		isHot := bytes/interval.Seconds() >= newItem.thresholds[byteDim] || keys/interval.Seconds() >= newItem.thresholds[keyDim]
+		if !isHot {
+			return nil
+		}
 		if interval.Seconds() >= RegionHeartBeatReportInterval {
-			isHot := bytes/interval.Seconds() >= newItem.thresholds[byteDim] || keys/interval.Seconds() >= newItem.thresholds[keyDim]
-			if !isHot {
-				return nil
-			}
 			newItem.HotDegree = 1
 			newItem.AntiCount = hotRegionAntiCount
 		}
@@ -408,12 +410,15 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 	newItem.rollingKeyRate = oldItem.rollingKeyRate
 
 	if newItem.justTransferLeader {
+		// skip the first heartbeat flow statistic after transfer leader, because its statistics are calculated by the last leader in this store and are inaccurate
+		// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.
 		newItem.HotDegree = oldItem.HotDegree
 		newItem.AntiCount = oldItem.AntiCount
-		// skip the first heartbeat interval after transfer leader
+		newItem.lastTransferLeaderTime = time.Now()
 		return newItem
 	}
 
+	newItem.lastTransferLeaderTime = oldItem.lastTransferLeaderTime
 	newItem.rollingByteRate.Add(bytes, interval)
 	newItem.rollingKeyRate.Add(keys, interval)
 
@@ -423,14 +428,14 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		newItem.AntiCount = oldItem.AntiCount
 	} else {
 		if f.isOldColdPeer(oldItem, newItem.StoreID) {
-			if newItem.isHot() {
+			if newItem.isFullAndHot() {
 				newItem.HotDegree = 1
 				newItem.AntiCount = hotRegionAntiCount
 			} else {
 				newItem.needDelete = true
 			}
 		} else {
-			if newItem.isHot() {
+			if newItem.isFullAndHot() {
 				newItem.HotDegree = oldItem.HotDegree + 1
 				newItem.AntiCount = hotRegionAntiCount
 			} else {

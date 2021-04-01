@@ -63,6 +63,11 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 		// multiple rules.
 		return c.fixRange(region)
 	}
+	op, err := c.fixOrphanPeers(region, fit)
+	if err == nil && op != nil {
+		return op
+	}
+	log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	for _, rf := range fit.RuleFits {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
@@ -73,12 +78,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 			return op
 		}
 	}
-	op, err := c.fixOrphanPeers(region, fit)
-	if err != nil {
-		log.Debug("fail to fix orphan peer", errs.ZapError(err))
-		return nil
-	}
-	return op
+	return nil
 }
 
 func (c *RuleChecker) fixRange(region *core.RegionInfo) *operator.Operator {
