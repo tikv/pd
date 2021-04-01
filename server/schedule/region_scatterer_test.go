@@ -204,16 +204,16 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 
 	// Each store should have the same number of peers.
 	for _, count := range countOrdinaryPeers {
-		c.Assert(float64(count), LessEqual, 1.3*float64(numRegions*3)/float64(numOrdinaryStores))
-		c.Assert(float64(count), GreaterEqual, 0.7*float64(numRegions*3)/float64(numOrdinaryStores))
+		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numOrdinaryStores))
+		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numOrdinaryStores))
 	}
 	for _, count := range countSpecialPeers {
-		c.Assert(float64(count), LessEqual, 1.3*float64(numRegions*3)/float64(numSpecialStores))
-		c.Assert(float64(count), GreaterEqual, 0.7*float64(numRegions*3)/float64(numSpecialStores))
+		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numSpecialStores))
+		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numSpecialStores))
 	}
 	for _, count := range countOrdinaryLeaders {
-		c.Assert(float64(count), LessEqual, 1.3*float64(numRegions)/float64(numOrdinaryStores))
-		c.Assert(float64(count), GreaterEqual, 0.7*float64(numRegions)/float64(numOrdinaryStores))
+		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions)/float64(numOrdinaryStores))
+		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions)/float64(numOrdinaryStores))
 	}
 }
 
@@ -293,7 +293,7 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 	}
 }
 
-func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
+func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	// Add 5 stores.
@@ -319,6 +319,7 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 		},
 	}
 
+	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
 	for _, testcase := range testcases {
 		c.Logf(testcase.name)
 		ctx, cancel := context.WithCancel(context.Background())
@@ -326,36 +327,35 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 		regionID := 1
 		for i := 0; i < 100; i++ {
 			for j := 0; j < testcase.groupCount; j++ {
-				_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
+				scatterer.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
 					fmt.Sprintf("group-%v", j))
-				c.Assert(err, IsNil)
 				regionID++
 			}
-			// insert region with no group
-			_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3), "")
-			c.Assert(err, IsNil)
-			regionID++
 		}
 
-		for i := 0; i < testcase.groupCount; i++ {
-			// comparing the leader distribution
-			group := fmt.Sprintf("group-%v", i)
-			max := uint64(0)
-			min := uint64(math.MaxUint64)
-			groupDistribution, _ := scatterer.ordinaryEngine.selectedLeader.groupDistribution.Get(group)
-			for _, count := range groupDistribution.(map[uint64]uint64) {
-				if count > max {
-					max = count
+		checker := func(ss *selectedStores, expected uint64, delta float64) {
+			for i := 0; i < testcase.groupCount; i++ {
+				// comparing the leader distribution
+				group := fmt.Sprintf("group-%v", i)
+				max := uint64(0)
+				min := uint64(math.MaxUint64)
+				groupDistribution, _ := ss.groupDistribution.Get(group)
+				for _, count := range groupDistribution.(map[uint64]uint64) {
+					if count > max {
+						max = count
+					}
+					if count < min {
+						min = count
+					}
 				}
-				if count < min {
-					min = count
-				}
+				c.Assert(math.Abs(float64(max)-float64(expected)), LessEqual, delta)
+				c.Assert(math.Abs(float64(min)-float64(expected)), LessEqual, delta)
 			}
-			// 100 regions divided 5 stores, each store expected to have about 20 regions.
-			c.Assert(min, LessEqual, uint64(20))
-			c.Assert(max, GreaterEqual, uint64(20))
-			c.Assert(max-min, LessEqual, uint64(5))
 		}
+		// For leader, we expect each store have about 20 leader for each group
+		checker(scatterer.ordinaryEngine.selectedLeader, 20, 5)
+		// For peer, we expect each store have about 50 peers for each group
+		checker(scatterer.ordinaryEngine.selectedPeer, 50, 15)
 		cancel()
 	}
 }
