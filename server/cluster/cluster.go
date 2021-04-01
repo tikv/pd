@@ -548,6 +548,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	writeItems := c.CheckWriteStatus(region)
 	readItems := c.CheckReadStatus(region)
 	c.RUnlock()
+	c.Lock()
+	if c.regionStats != nil {
+		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
+	}
+	c.Unlock()
 
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
@@ -676,10 +681,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 	if isNew {
 		c.prepareChecker.collect(region)
-	}
-
-	if c.regionStats != nil {
-		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
 	}
 
 	for _, writeItem := range writeItems {
