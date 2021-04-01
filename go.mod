@@ -53,4 +53,5 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
+// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
 replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
