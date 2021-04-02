@@ -3848,7 +3848,12 @@
           },
           "yaxes": [
             {
+<<<<<<< HEAD
               "format": "decbytes",
+=======
+              "decimals": null,
+              "format": "short",
+>>>>>>> 8661fc53... metrics: correction of statistical unit errors (#3554)
               "label": null,
               "logBase": 1,
               "max": null,
@@ -4638,7 +4643,12 @@
           },
           "yaxes": [
             {
+<<<<<<< HEAD
               "format": "decbytes",
+=======
+              "decimals": null,
+              "format": "short",
+>>>>>>> 8661fc53... metrics: correction of statistical unit errors (#3554)
               "label": null,
               "logBase": 1,
               "max": null,
