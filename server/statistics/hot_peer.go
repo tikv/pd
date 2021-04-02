@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/movingaverage"
+	"go.uber.org/zap"
 )
 
 const (
@@ -87,13 +88,14 @@ type HotPeerStat struct {
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
 
-	needDelete         bool
-	isLeader           bool
-	isNew              bool
-	justTransferLeader bool
-	interval           uint64
-	thresholds         [dimLen]float64
-	peers              []uint64
+	needDelete             bool
+	isLeader               bool
+	isNew                  bool
+	justTransferLeader     bool
+	interval               uint64
+	thresholds             [dimLen]float64
+	peers                  []uint64
+	lastTransferLeaderTime time.Time
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -112,6 +114,32 @@ func (stat *HotPeerStat) Less(k int, than TopNItem) bool {
 	default:
 		return stat.GetByteRate() < rhs.GetByteRate()
 	}
+}
+
+// Log is used to output some info
+func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Field)) {
+	level(str,
+		zap.Uint64("interval", stat.interval),
+		zap.Uint64("region-id", stat.RegionID),
+		zap.Uint64("store", stat.StoreID),
+		zap.Float64("byte-rate", stat.GetByteRate()),
+		zap.Float64("byte-rate-instant", stat.ByteRate),
+		zap.Float64("byte-rate-threshold", stat.thresholds[byteDim]),
+		zap.Float64("key-rate", stat.GetKeyRate()),
+		zap.Float64("key-rate-instant", stat.KeyRate),
+		zap.Float64("key-rate-threshold", stat.thresholds[keyDim]),
+		zap.Int("hot-degree", stat.HotDegree),
+		zap.Int("hot-anti-count", stat.AntiCount),
+		zap.Bool("just-transfer-leader", stat.justTransferLeader),
+		zap.Bool("is-leader", stat.isLeader),
+		zap.Bool("need-delete", stat.IsNeedDelete()),
+		zap.String("type", stat.Kind.String()),
+		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
+}
+
+// IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
+func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
+	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*RegionHeartBeatReportInterval)
 }
 
 // IsNeedDelete to delete the item in cache.

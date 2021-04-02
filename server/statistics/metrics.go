@@ -127,6 +127,21 @@ var (
 			Help:      "Bucketed histogram of the batch size of handled requests.",
 			Buckets:   prometheus.LinearBuckets(0, 5, 12),
 		})
+
+	regionAbnormalPeerDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "abnormal_peer_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
+			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
+		}, []string{"type"})
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	regionMissVoterPeerDuration = regionAbnormalPeerDuration.WithLabelValues("miss-voter-peer")
+	regionDownPeerDuration      = regionAbnormalPeerDuration.WithLabelValues("down-peer")
 )
 
 func init() {
@@ -144,4 +159,5 @@ func init() {
 	prometheus.MustRegister(writeByteHist)
 	prometheus.MustRegister(regionHeartbeatIntervalHist)
 	prometheus.MustRegister(storeHeartbeatIntervalHist)
+	prometheus.MustRegister(regionAbnormalPeerDuration)
 }

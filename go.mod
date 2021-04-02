@@ -29,13 +29,15 @@ require (
 	github.com/pingcap/errors v0.11.5-0.20201126102027-b0a155152ca3
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
 	github.com/pingcap/kvproto v0.0.0-20210219064844-c1844a4775d6
-	github.com/pingcap/log v0.0.0-20201112100606-8f1e84a3abc8
+	github.com/pingcap/log v0.0.0-20210317133921-96f4fcab92a4
 	github.com/pingcap/sysutil v0.0.0-20210315073920-cc0985d983a3
-	github.com/pingcap/tidb-dashboard v0.0.0-20210312062513-eef5d6404638
-	github.com/prometheus/client_golang v1.2.1
-	github.com/prometheus/common v0.9.1
+	github.com/pingcap/tidb-dashboard v0.0.0-20210318164227-2baddeb3c504
+	github.com/prometheus/client_golang v1.1.0
+	github.com/prometheus/client_model v0.2.0 // indirect
+	github.com/prometheus/common v0.6.0
+	github.com/prometheus/procfs v0.0.5 // indirect
 	github.com/sasha-s/go-deadlock v0.2.0
-	github.com/sirupsen/logrus v1.4.2
+	github.com/sirupsen/logrus v1.2.0
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
@@ -52,8 +54,7 @@ require (
 )
 
 replace (
-	github.com/oleiade/reflections => github.com/oleiade/reflections v1.0.1
 	github.com/pingcap/kvproto v0.0.0-20210219064844-c1844a4775d6 => github.com/JmPotato/kvproto v0.0.0-20210222031724-03117d594669
-	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
+	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 )

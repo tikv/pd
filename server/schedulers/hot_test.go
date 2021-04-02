@@ -1079,40 +1079,63 @@ func addRegionInfo(tc *mockcluster.Cluster, rwTy rwType, regions []testRegionInf
 }
 
 func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
-	s.checkRegionFlowTest(c, tc.AddLeaderRegionWithWriteInfo)
-	s.checkRegionFlowTest(c, tc.AddLeaderRegionWithReadInfo)
+	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
+	c.Assert(err, IsNil)
+	hb := sche.(*hotScheduler)
+	s.checkRegionFlowTest(c, tc, hb, write, tc.AddLeaderRegionWithWriteInfo)
+	s.checkRegionFlowTest(c, tc, hb, read, tc.AddLeaderRegionWithReadInfo)
 }
 
-func (s *testHotCacheSuite) checkRegionFlowTest(c *C, heartbeat func(
+func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, hb *hotScheduler, kind rwType, heartbeat func(
 	regionID uint64, leaderID uint64,
 	readBytes, readKeys uint64,
 	reportInterval uint64,
 	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat) {
+
+	tc.AddRegionStore(2, 20)
+	tc.UpdateStorageReadStats(2, 9.5*MB*statistics.StoreHeartBeatReportInterval, 9.5*MB*statistics.StoreHeartBeatReportInterval)
 	// hot degree increase
 	heartbeat(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
 	heartbeat(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
 	items := heartbeat(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
+	c.Check(len(items), Greater, 0)
 	for _, item := range items {
 		c.Check(item.HotDegree, Equals, 3)
 	}
 
-	// transfer leader and skip the first heartbeat
+	// transfer leader, skip the first heartbeat and schedule.
 	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3}, 1)
 	for _, item := range items {
-		c.Check(item.HotDegree, Equals, 3)
+		if !item.IsNeedDelete() {
+			c.Check(item.HotDegree, Equals, 3)
+		}
 	}
+
+	// try schedule
+	hb.prepareForBalance(tc)
+	leaderSolver := newBalanceSolver(hb, tc, kind, transferLeader)
+	leaderSolver.cur = &solution{srcStoreID: 2}
+	c.Check(leaderSolver.filterHotPeers(), HasLen, 0) // skip schedule
+	threshold := tc.GetHotRegionCacheHitsThreshold()
+	tc.SetHotRegionCacheHitsThreshold(0)
+	c.Check(leaderSolver.filterHotPeers(), HasLen, 1)
+	tc.SetHotRegionCacheHitsThreshold(threshold)
 
 	// move peer: add peer and remove peer
 	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3, 4}, 1)
+	c.Check(len(items), Greater, 0)
 	for _, item := range items {
 		c.Check(item.HotDegree, Equals, 4)
 	}
 	items = heartbeat(1, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 4}, 1)
+	c.Check(len(items), Greater, 0)
 	for _, item := range items {
 		if item.StoreID == 3 {
 			c.Check(item.IsNeedDelete(), IsTrue)

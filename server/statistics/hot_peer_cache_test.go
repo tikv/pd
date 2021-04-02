@@ -15,10 +15,12 @@ package statistics
 
 import (
 	"math/rand"
+	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -304,6 +306,31 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 			c.Assert(thresholds[byteDim], Equals, minThresholds[byteDim])
 		} else {
 			c.Assert(thresholds[byteDim], Equals, expectThreshold)
+		}
+	}
+}
+
+func BenchmarkCheckRegionFlow(b *testing.B) {
+	cache := NewHotStoresStats(ReadFlow)
+	region := core.NewRegionInfo(&metapb.Region{
+		Id: 1,
+		Peers: []*metapb.Peer{
+			{Id: 101, StoreId: 1},
+			{Id: 102, StoreId: 2},
+			{Id: 103, StoreId: 3},
+		},
+	},
+		&metapb.Peer{Id: 101, StoreId: 1},
+	)
+	newRegion := region.Clone(
+		core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}),
+		core.SetReadBytes(30000*10),
+		core.SetReadKeys(300000*10))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rets := cache.CheckRegionFlow(newRegion)
+		for _, ret := range rets {
+			cache.Update(ret)
 		}
 	}
 }

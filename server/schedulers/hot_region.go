@@ -250,6 +250,7 @@ func (h *hotScheduler) gcRegionPendings() {
 		for ty, op := range pendings {
 			if op != nil && op.IsEnd() {
 				if time.Now().After(op.GetCreateTime().Add(h.conf.GetMaxZombieDuration())) {
+					log.Debug("gc pending influence in hot region scheduler", zap.Uint64("region-id", regionID), zap.Time("create", op.GetCreateTime()), zap.Time("now", time.Now()), zap.Duration("zombie", h.conf.GetMaxZombieDuration()))
 					schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
 					pendings[ty] = nil
 				}
@@ -616,7 +617,9 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 
 	// filter pending region
 	appendItem := func(items []*statistics.HotPeerStat, item *statistics.HotPeerStat) []*statistics.HotPeerStat {
-		if _, ok := bs.sche.regionPendings[item.ID()]; !ok {
+		minHotDegree := bs.cluster.GetOpts().GetHotRegionCacheHitsThreshold()
+		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(minHotDegree) {
+			// no in pending operator and no need cool down after transfer leader
 			items = append(items, item)
 		}
 		return items
@@ -732,7 +735,6 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	if srcStore == nil {
 		return nil
 	}
-
 	switch bs.opTy {
 	case movePeer:
 		filters = []filter.Filter{
@@ -742,7 +744,9 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
 		}
 
-		candidates = bs.cluster.GetStores()
+		for storeID := range bs.stLoadDetail {
+			candidates = append(candidates, bs.cluster.GetStore(storeID))
+		}
 
 	case transferLeader:
 		filters = []filter.Filter{
@@ -753,7 +757,11 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 			filters = append(filters, leaderFilter)
 		}
 
-		candidates = bs.cluster.GetFollowerStores(bs.cur.region)
+		for _, store := range bs.cluster.GetFollowerStores(bs.cur.region) {
+			if _, ok := bs.stLoadDetail[store.GetID()]; ok {
+				candidates = append(candidates, store)
+			}
+		}
 
 	default:
 		return nil
