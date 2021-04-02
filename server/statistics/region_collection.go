@@ -14,6 +14,8 @@
 package statistics
 
 import (
+	"time"
+
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -36,10 +38,17 @@ const (
 
 const nonIsolation = "none"
 
+// RegionInfo is used to record the status of region.
+type RegionInfo struct {
+	*core.RegionInfo
+	startMissVoterPeerTS int64
+	startDownPeerTS      int64
+}
+
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
 	opt          *config.PersistOptions
-	stats        map[RegionStatisticType]map[uint64]*core.RegionInfo
+	stats        map[RegionStatisticType]map[uint64]*RegionInfo
 	offlineStats map[RegionStatisticType]map[uint64]*core.RegionInfo
 	index        map[uint64]RegionStatisticType
 	offlineIndex map[uint64]RegionStatisticType
@@ -50,17 +59,17 @@ type RegionStatistics struct {
 func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.RuleManager) *RegionStatistics {
 	r := &RegionStatistics{
 		opt:          opt,
-		stats:        make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
+		stats:        make(map[RegionStatisticType]map[uint64]*RegionInfo),
 		offlineStats: make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
 		index:        make(map[uint64]RegionStatisticType),
 		offlineIndex: make(map[uint64]RegionStatisticType),
 	}
-	r.stats[MissPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[DownPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[PendingPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
+	r.stats[MissPeer] = make(map[uint64]*RegionInfo)
+	r.stats[ExtraPeer] = make(map[uint64]*RegionInfo)
+	r.stats[DownPeer] = make(map[uint64]*RegionInfo)
+	r.stats[PendingPeer] = make(map[uint64]*RegionInfo)
+	r.stats[LearnerPeer] = make(map[uint64]*RegionInfo)
+	r.stats[EmptyRegion] = make(map[uint64]*RegionInfo)
 
 	r.offlineStats[MissPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
@@ -77,7 +86,7 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core.RegionInfo {
 	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
 	for _, r := range r.stats[typ] {
-		res = append(res, r)
+		res = append(res, r.RegionInfo)
 	}
 	return res
 }
@@ -117,15 +126,20 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		deleteIndex          RegionStatisticType
 	)
 	desiredReplicas := r.opt.GetMaxReplicas()
+	desiredVoters := desiredReplicas
 	if r.opt.IsPlacementRulesEnabled() {
 		if !r.ruleManager.IsInitialized() {
 			log.Warn("ruleManager haven't been initialized")
 			return
 		}
 		desiredReplicas = 0
+		desiredVoters = 0
 		rules := r.ruleManager.GetRulesForApplyRegion(region)
 		for _, rule := range rules {
 			desiredReplicas += rule.Count
+			if rule.Role != placement.Learner {
+				desiredVoters += rule.Count
+			}
 		}
 	}
 
@@ -156,7 +170,27 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 				r.offlineStats[typ][regionID] = region
 				offlinePeerTypeIndex |= typ
 			}
-			r.stats[typ][regionID] = region
+			info := r.stats[typ][regionID]
+			if info == nil {
+				info = &RegionInfo{
+					RegionInfo: region,
+				}
+			}
+			if typ == DownPeer {
+				if info.startDownPeerTS != 0 {
+					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.startDownPeerTS))
+				} else {
+					info.startDownPeerTS = time.Now().Unix()
+				}
+			} else if typ == MissPeer && len(region.GetVoters()) < desiredVoters {
+				if info.startMissVoterPeerTS != 0 {
+					regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.startMissVoterPeerTS))
+				} else {
+					info.startMissVoterPeerTS = time.Now().Unix()
+				}
+			}
+
+			r.stats[typ][regionID] = info
 			peerTypeIndex |= typ
 		}
 	}
