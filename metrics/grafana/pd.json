@@ -3848,12 +3848,7 @@
           },
           "yaxes": [
             {
-<<<<<<< HEAD
-              "format": "decbytes",
-=======
-              "decimals": null,
               "format": "ops",
->>>>>>> 94961bf1...  metrics: keep unit consistent with tikv (#3567)
               "label": null,
               "logBase": 1,
               "max": null,
@@ -4643,12 +4638,7 @@
           },
           "yaxes": [
             {
-<<<<<<< HEAD
-              "format": "decbytes",
-=======
-              "decimals": null,
               "format": "ops",
->>>>>>> 94961bf1...  metrics: keep unit consistent with tikv (#3567)
               "label": null,
               "logBase": 1,
               "max": null,
