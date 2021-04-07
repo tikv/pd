@@ -1294,8 +1294,8 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
 	// There is no dc-location found in this server, return err.
-	if len(tsoAllocatorManager.GetClusterDCLocations()) == 0 {
-		return nil, status.Errorf(codes.Unknown, "empty cluster dc-Location found, checker may not work properly")
+	if tsoAllocatorManager.GetClusterDCLocationsNumber() == 0 {
+		return nil, status.Errorf(codes.Unknown, "empty cluster dc-location found, checker may not work properly")
 	}
 	// Get all Local TSO Allocator leaders
 	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
@@ -1304,7 +1304,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	}
 	var maxLocalTS *pdpb.Timestamp
 	if !request.GetSkipCheck() {
-		syncedDCs := make([]string, 0)
+		syncedDCs := make([]string, 0, len(allocatorLeaders))
 		for _, allocator := range allocatorLeaders {
 			// No longer leader, just skip here because
 			// the global allocator will check if all DCs are handled.
@@ -1320,12 +1320,8 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			}
 			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 		}
-		if tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs()) >= 0 {
-			// Make the MaxLocalTs bigger to distinguish it from the estimated one
-			if tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs()) == 0 {
-				maxLocalTS.Physical += tso.UpdateTimestampGuard.Milliseconds()
-				maxLocalTS.Logical = 0
-			}
+		// Found a bigger maxLocalTS, return it directly.
+		if tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs()) > 0 {
 			return &pdpb.SyncMaxTSResponse{
 				Header:     s.header(),
 				MaxLocalTs: maxLocalTS,
@@ -1333,7 +1329,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			}, nil
 		}
 	}
-	syncedDCs := make([]string, 0)
+	syncedDCs := make([]string, 0, len(allocatorLeaders))
 	for _, allocator := range allocatorLeaders {
 		if !allocator.IsAllocatorLeader() {
 			continue

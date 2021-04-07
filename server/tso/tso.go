@@ -328,19 +328,17 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	return nil
 }
 
+var maxRetryCount = 10
+
 // getTS is used to get a timestamp.
 func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
 	var resp pdpb.Timestamp
-
 	if count == 0 {
 		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 	}
-
-	maxRetryCount := 10
 	failpoint.Inject("skipRetryGetTS", func() {
 		maxRetryCount = 1
 	})
-
 	for i := 0; i < maxRetryCount; i++ {
 		currentPhysical, currentLogical := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {

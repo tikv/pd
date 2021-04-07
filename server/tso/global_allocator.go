@@ -98,20 +98,26 @@ func (gta *GlobalTSOAllocator) getSyncRTT() int64 {
 	return syncRTT.(int64)
 }
 
-func (gta *GlobalTSOAllocator) estimateMaxTS(count uint32) (*pdpb.Timestamp, error) {
+func (gta *GlobalTSOAllocator) estimateMaxTS(count uint32, suffixBits int) (*pdpb.Timestamp, bool, error) {
 	physical, logical, lastUpdateTime := gta.timestampOracle.generateTSO(int64(count), 0)
 	if physical == 0 {
 		log.Error("invalid global tso in memory, unable to estimate maxTSO",
 			zap.Any("timestamp-physical", physical),
 			zap.Any("timestamp-logical", logical),
 			errs.ZapError(errs.ErrInvalidTimestamp))
-		return &pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
+		return &pdpb.Timestamp{}, false, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 	}
-	syncRTT := gta.getSyncRTT()
-	return &pdpb.Timestamp{
-		Physical: physical + time.Since(lastUpdateTime).Milliseconds() + 2*syncRTT, // TODO: make the coefficient of RTT configurable
+	estimatedMaxTSO := &pdpb.Timestamp{
+		Physical: physical + time.Since(lastUpdateTime).Milliseconds() + 2*gta.getSyncRTT(), // TODO: make the coefficient of RTT configurable
 		Logical:  logical,
-	}, nil
+	}
+	// Precheck to make sure the logical part won't overflow after being differentiated.
+	// If precheckLogical returns false, it means the logical part is overflow,
+	// we need to wait a UpdatePhysicalInterval and retry the estimation.
+	if !gta.precheckLogical(estimatedMaxTSO, suffixBits) {
+		return nil, true, nil
+	}
+	return estimatedMaxTSO, false, nil
 }
 
 // Initialize will initialize the created global TSO allocator.
@@ -154,58 +160,58 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	skipCheck := false
-	maxTSO := &pdpb.Timestamp{}
-ESTIMATING_PHASE:
-	// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT.
-	estimatedMaxTSO, err := gta.estimateMaxTS(count)
-	if err != nil {
-		return pdpb.Timestamp{}, err
-	}
-SETTING_PHASE:
-	// 2. Precheck to make sure the logical part won't overflow after being differentiated.
 	suffixBits := gta.allocatorManager.GetSuffixBits()
-	// If precheckLogical returns false, it means the logical part is overflow,
-	// we need to wait a updatePhysicalInterval and retry the estimation.
-	if !gta.precheckLogical(estimatedMaxTSO, suffixBits) {
-		time.Sleep(gta.timestampOracle.updatePhysicalInterval)
-		goto ESTIMATING_PHASE
-	}
-	// 3. Send the MaxTSO to all Local TSO Allocators leader to make sure the subsequent Local TSOs will be bigger than it.
-	// It's not safe to skip the check here because the estimated maxTSO may not be big enough.
-	*maxTSO = *estimatedMaxTSO
-	if err := gta.SyncMaxTS(ctx, dcLocationMap, maxTSO, skipCheck); err != nil {
-		return pdpb.Timestamp{}, err
-	}
-	// 4. If skipCheck is false and the maxTSO is bigger than estimatedMaxTSO,
-	// we need to redo the setting phase with the bigger one and skip the check safely.
-	if !skipCheck && tsoutil.CompareTimestamp(estimatedMaxTSO, maxTSO) < 0 {
-		tsoCounter.WithLabelValues("global_tso_sync", gta.timestampOracle.dcLocation).Inc()
-		*estimatedMaxTSO = *maxTSO
-		// Re-add the count and check the overflow.
-		estimatedMaxTSO.Logical += int64(count)
-		if !gta.precheckLogical(estimatedMaxTSO, suffixBits) {
-			estimatedMaxTSO.Physical += UpdateTimestampGuard.Milliseconds()
-			estimatedMaxTSO.Logical = int64(count)
-		}
-		skipCheck = true
-		goto SETTING_PHASE
-	}
-	// 5. Persist MaxTS into memory, and etcd if needed
-	var currentGlobalTSO *pdpb.Timestamp
-	if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
-		return pdpb.Timestamp{}, err
-	}
-	if tsoutil.CompareTimestamp(currentGlobalTSO, maxTSO) < 0 {
-		// Update the Global TSO in memory
-		if err := gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(maxTSO), true); err != nil {
-			log.Error("update the global tso in memory failed", errs.ZapError(err))
+
+	var resp pdpb.Timestamp
+	for i := 0; i < maxRetryCount; i++ {
+		// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT.
+		estimatedMaxTSO, shouldRetry, err := gta.estimateMaxTS(count, suffixBits)
+		if err != nil {
 			return pdpb.Timestamp{}, err
 		}
+		if shouldRetry {
+			time.Sleep(gta.timestampOracle.updatePhysicalInterval)
+			continue
+		}
+	SETTING_PHASE:
+		// 2. Send the MaxTSO to all Local TSO Allocators leader to make sure the subsequent Local TSOs will be bigger than it.
+		// It's not safe to skip the check here because the estimated maxTSO may not be big enough.
+		resp = *estimatedMaxTSO
+		if err := gta.SyncMaxTS(ctx, dcLocationMap, &resp, skipCheck); err != nil {
+			return pdpb.Timestamp{}, err
+		}
+		// 3. If skipCheck is false and the maxTSO is bigger than estimatedMaxTSO,
+		// we need to redo the setting phase with the bigger one and skip the check safely.
+		if !skipCheck && tsoutil.CompareTimestamp(&resp, estimatedMaxTSO) > 0 {
+			tsoCounter.WithLabelValues("global_tso_sync", gta.timestampOracle.dcLocation).Inc()
+			*estimatedMaxTSO = resp
+			// Re-add the count and check the overflow.
+			estimatedMaxTSO.Logical += int64(count)
+			if !gta.precheckLogical(estimatedMaxTSO, suffixBits) {
+				estimatedMaxTSO.Physical += UpdateTimestampGuard.Milliseconds()
+				estimatedMaxTSO.Logical = int64(count)
+			}
+			skipCheck = true
+			goto SETTING_PHASE
+		}
+		// 4. Persist MaxTS into memory, and etcd if needed
+		var currentGlobalTSO *pdpb.Timestamp
+		if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
+			return pdpb.Timestamp{}, err
+		}
+		if tsoutil.CompareTimestamp(currentGlobalTSO, &resp) < 0 {
+			// Update the Global TSO in memory
+			if err := gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(&resp), true); err != nil {
+				log.Error("update the global tso in memory failed", errs.ZapError(err))
+				return pdpb.Timestamp{}, err
+			}
+		}
+		// 5. Differentiate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
+		resp.Logical = gta.timestampOracle.differentiateLogical(resp.GetLogical(), suffixBits)
+		resp.SuffixBits = uint32(suffixBits)
+		return resp, nil
 	}
-	// 6. Differentiate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
-	maxTSO.Logical = gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits)
-	maxTSO.SuffixBits = uint32(suffixBits)
-	return *maxTSO, nil
+	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
 }
 
 // Only used for test
@@ -333,7 +339,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 				return errs.ErrSyncMaxTS.FastGenByArgs("got nil response")
 			}
 			if skipCheck {
-				// Handle the response of the second phase: set all the Local TSOs to the maxTSO unconditionally
+				// Set all the Local TSOs to the maxTSO unconditionally, so the MaxLocalTS in response should be nil.
 				if resp.rpcRes.GetMaxLocalTs() != nil {
 					return errs.ErrSyncMaxTS.FastGenByArgs("got non-nil max local ts in the second sync phase")
 				}
