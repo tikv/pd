@@ -76,14 +76,14 @@ func (s *testClientCtxSuite) TestClientCtx(c *C) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*3)
 	defer cancel()
-	_, err := NewClientWithContext(ctx, []string{"127.0.0.1:5299"}, SecurityOption{})
+	_, err := NewClientWithContext(ctx, []string{"tmp//test.url:5299"}, SecurityOption{})
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Less, time.Second*4)
 }
 
 func (s *testClientCtxSuite) TestClientWithRetry(c *C) {
 	start := time.Now()
-	_, err := NewClientWithContext(context.TODO(), []string{"127.0.0.1:5299"}, SecurityOption{}, WithMaxErrorRetry(5))
+	_, err := NewClientWithContext(context.TODO(), []string{"tmp//test.url:5299"}, SecurityOption{}, WithMaxErrorRetry(5))
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Less, time.Second*6)
 }
@@ -98,7 +98,7 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	defer cancel()
 	// nolint
 	cli := &baseClient{
-		urls:                 []string{"http://127.0.0.1:5299"},
+		urls:                 []string{"tmp//test.url:5299"},
 		checkLeaderCh:        make(chan struct{}, 1),
 		checkTSODispatcherCh: make(chan struct{}, 1),
 		ctx:                  ctx,
