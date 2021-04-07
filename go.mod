@@ -54,7 +54,7 @@ require (
 )
 
 replace (
-	github.com/pingcap/kvproto v0.0.0-20210219064844-c1844a4775d6 => github.com/JmPotato/kvproto v0.0.0-20210222031724-03117d594669
+	github.com/pingcap/kvproto v0.0.0-20210219064844-c1844a4775d6 => github.com/JmPotato/kvproto v0.0.0-20210407170524-c0d89fd1a7df
 	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 )
