@@ -319,7 +319,7 @@ func (s *StoreInfo) regionScoreV2(delta int64, deviation int) float64 {
 		score = (K + M*(math.Log(C)-math.Log(A-F+1))/(C-A+F-1)) * R
 	} else {
 		// When remaining space is less then F, the score is mainly determined by available space.
-		score = (K+M*math.Log(C)/C)*R + (F-A)*(K+M*math.Log(F)/F)
+		score = (K + M*math.Log(C)/(C)) * (R + (F-A)*(C/F))
 	}
 	return score / math.Max(s.GetRegionWeight(), minWeight)
 }
