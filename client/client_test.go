@@ -80,14 +80,14 @@ func (s *testClientCtxSuite) TestClientCtx(c *C) {
 	defer cancel()
 	_, err := NewClientWithContext(ctx, []string{testClientURL}, SecurityOption{})
 	c.Assert(err, NotNil)
-	c.Assert(time.Since(start), Less, time.Second*4)
+	c.Assert(time.Since(start), Less, time.Second*5)
 }
 
 func (s *testClientCtxSuite) TestClientWithRetry(c *C) {
 	start := time.Now()
 	_, err := NewClientWithContext(context.TODO(), []string{testClientURL}, SecurityOption{}, WithMaxErrorRetry(5))
 	c.Assert(err, NotNil)
-	c.Assert(time.Since(start), Less, time.Second*6)
+	c.Assert(time.Since(start), Less, time.Second*10)
 }
 
 var _ = Suite(&testClientDialOptionSuite{})
