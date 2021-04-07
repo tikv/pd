@@ -98,7 +98,7 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	defer cancel()
 	// nolint
 	cli := &baseClient{
-		urls:                 []string{"127.0.0.1:8080"},
+		urls:                 []string{"http://127.0.0.1:8080"},
 		checkLeaderCh:        make(chan struct{}, 1),
 		checkTSODispatcherCh: make(chan struct{}, 1),
 		ctx:                  ctx,
