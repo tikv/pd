@@ -345,7 +345,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
 			if leadership.Check() {
-				log.Info("sync hasn't completed yet, wait for a while")
+				log.Info("this PD is a new leader, but sync hasn't been completed yet, wait for a while")
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}

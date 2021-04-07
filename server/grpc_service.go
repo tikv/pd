@@ -1274,17 +1274,13 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	})
 }
 
-// SyncMaxTS is a RPC method used to synchronize the timestamp of TSO between the
-// Global TSO Allocator and multi Local TSO Allocator leaders. It contains two
-// phases:
-// 1. Collect timestamps among all Local TSO Allocator leaders, and choose the
-//    greatest one as MaxTS.
-// 2. Send the MaxTS to all Local TSO Allocator leaders. They will compare MaxTS
-//    with its current TSO in memory to make sure their local TSOs are not less
-//    than MaxTS by writing MaxTS into memory to finish the global TSO synchronization.
+// SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
+// and write it into all Local TSO Allocators then if it's indeed the biggest one.
 func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
+	// Check the connection forwarding.
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
+		// In theory, it will not run to here because CollectMaxTS is an internal request.
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
@@ -1292,7 +1288,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		ctx = grpcutil.ResetForwardContext(ctx)
 		return pdpb.NewPDClient(client).SyncMaxTS(ctx, request)
 	}
-
+	// Validate the internal request header.
 	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
 		return nil, err
 	}
@@ -1306,7 +1302,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
-	var maxLocalTS pdpb.Timestamp
+	var maxLocalTS *pdpb.Timestamp
 	if !request.GetSkipCheck() {
 		syncedDCs := make([]string, 0)
 		for _, allocator := range allocatorLeaders {
@@ -1319,20 +1315,20 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			if err != nil {
 				return nil, status.Errorf(codes.Unknown, err.Error())
 			}
-			if tsoutil.CompareTimestamp(&currentLocalTSO, &maxLocalTS) > 0 {
+			if tsoutil.CompareTimestamp(currentLocalTSO, maxLocalTS) > 0 {
 				maxLocalTS = currentLocalTSO
 			}
 			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 		}
-		if tsoutil.CompareTimestamp(request.GetMaxTs(), &maxLocalTS) <= 0 {
+		if tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs()) >= 0 {
 			// Make the MaxLocalTs bigger to distinguish it from the estimated one
-			if tsoutil.CompareTimestamp(request.GetMaxTs(), &maxLocalTS) == 0 {
+			if tsoutil.CompareTimestamp(request.GetMaxTs(), maxLocalTS) == 0 {
 				maxLocalTS.Physical += tso.UpdateTimestampGuard.Milliseconds()
 				maxLocalTS.Logical = 0
 			}
 			return &pdpb.SyncMaxTSResponse{
 				Header:     s.header(),
-				MaxLocalTs: &maxLocalTS,
+				MaxLocalTs: maxLocalTS,
 				SyncedDcs:  syncedDCs,
 			}, nil
 		}

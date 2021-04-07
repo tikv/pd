@@ -109,7 +109,7 @@ func (gta *GlobalTSOAllocator) estimateMaxTS(count uint32) (*pdpb.Timestamp, err
 	}
 	syncRTT := gta.getSyncRTT()
 	return &pdpb.Timestamp{
-		Physical: physical + time.Since(lastUpdateTime).Milliseconds() + 2*syncRTT,
+		Physical: physical + time.Since(lastUpdateTime).Milliseconds() + 2*syncRTT, // TODO: make the coefficient of RTT configurable
 		Logical:  logical,
 	}, nil
 }
@@ -173,7 +173,7 @@ SETTING_PHASE:
 	// 3. Send the MaxTSO to all Local TSO Allocators leader to make sure the subsequent Local TSOs will be bigger than it.
 	// It's not safe to skip the check here because the estimated maxTSO may not be big enough.
 	*maxTSO = *estimatedMaxTSO
-	if err := gta.SyncMaxTS(ctx, dcLocationMap, skipCheck, maxTSO); err != nil {
+	if err := gta.SyncMaxTS(ctx, dcLocationMap, maxTSO, skipCheck); err != nil {
 		return pdpb.Timestamp{}, err
 	}
 	// 4. If skipCheck is false and the maxTSO is bigger than estimatedMaxTSO,
@@ -181,17 +181,21 @@ SETTING_PHASE:
 	if !skipCheck && tsoutil.CompareTimestamp(estimatedMaxTSO, maxTSO) < 0 {
 		tsoCounter.WithLabelValues("global_tso_sync", gta.timestampOracle.dcLocation).Inc()
 		*estimatedMaxTSO = *maxTSO
-		// Re-add the count
+		// Re-add the count and check the overflow.
 		estimatedMaxTSO.Logical += int64(count)
+		if !gta.precheckLogical(estimatedMaxTSO, suffixBits) {
+			estimatedMaxTSO.Physical += UpdateTimestampGuard.Milliseconds()
+			estimatedMaxTSO.Logical = int64(count)
+		}
 		skipCheck = true
 		goto SETTING_PHASE
 	}
 	// 5. Persist MaxTS into memory, and etcd if needed
-	var currentGlobalTSO pdpb.Timestamp
+	var currentGlobalTSO *pdpb.Timestamp
 	if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
 		return pdpb.Timestamp{}, err
 	}
-	if tsoutil.CompareTimestamp(&currentGlobalTSO, maxTSO) < 0 {
+	if tsoutil.CompareTimestamp(currentGlobalTSO, maxTSO) < 0 {
 		// Update the Global TSO in memory
 		if err := gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(maxTSO), true); err != nil {
 			log.Error("update the global tso in memory failed", errs.ZapError(err))
@@ -235,14 +239,15 @@ type syncResp struct {
 	rtt    time.Duration
 }
 
-// SyncMaxTS is used to sync the MaxTS with the Local TSO Allocator leaders in the dcLocationMap.
-// If the maxTSO is empty, it will collect the max Local TSO and load it into maxTSO.
-// If the maxTSO is not empty, it will set in-memory-TSO of the Local TSO Allocator leaders to maxTSO if maxTSO is greater.
+// SyncMaxTS is used to sync MaxTS with all Local TSO Allocator leaders in dcLocationMap.
+// If maxTSO is the biggest TSO among all Local TSO Allocators, it will be written into
+// each allocator and remines the same after the synchronization.
+// If not, it will be replaced with the new max Local TSO and return.
 func (gta *GlobalTSOAllocator) SyncMaxTS(
 	ctx context.Context,
 	dcLocationMap map[string]DCLocationInfo,
-	skipCheck bool,
 	maxTSO *pdpb.Timestamp,
+	skipCheck bool,
 ) error {
 	maxRetryCount := 1
 	for i := 0; i < maxRetryCount; i++ {
@@ -273,28 +278,29 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 		// Prepare to make RPC requests concurrently
 		respCh := make(chan *syncResp, len(leaderURLs))
 		wg := sync.WaitGroup{}
+		request := &pdpb.SyncMaxTSRequest{
+			Header: &pdpb.RequestHeader{
+				SenderId: gta.allocatorManager.member.ID(),
+			},
+			SkipCheck: skipCheck,
+			MaxTs:     maxTSO,
+		}
 		for _, leaderURL := range leaderURLs {
 			leaderConn, err := gta.allocatorManager.getOrCreateGRPCConn(ctx, leaderURL)
 			if err != nil {
 				return err
 			}
+			// Send SyncMaxTSRequest to all allocator leaders concurrently.
 			wg.Add(1)
 			go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *syncResp) {
 				defer wg.Done()
-				request := &pdpb.SyncMaxTSRequest{
-					Header: &pdpb.RequestHeader{
-						SenderId: gta.allocatorManager.member.ID(),
-					},
-					SkipCheck: skipCheck,
-					MaxTs:     maxTSO,
-				}
 				syncCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
 				startTime := time.Now()
 				res, err := pdpb.NewPDClient(conn).SyncMaxTS(syncCtx, request)
 				syncMaxTSResp := &syncResp{
 					rpcRes: res,
 					err:    err,
-					rtt:    time.Since(startTime),
+					rtt:    time.Since(startTime), // Including RPC request -> RPC processing -> RPC response
 				}
 				cancel()
 				respCh <- syncMaxTSResp
@@ -314,11 +320,12 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 			syncedDCs []string
 			maxTSORtt time.Duration
 		)
+		// Iterate each response to handle the error and compare MaxTSO.
 		for resp := range respCh {
 			if resp.err != nil {
 				errList = append(errList, resp.err)
 			}
-			// If any error occurs, the synchronization process will fail
+			// If any error occurs, just jump out of the loop.
 			if len(errList) != 0 {
 				continue
 			}
@@ -340,9 +347,12 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 				syncedDCs = append(syncedDCs, resp.rpcRes.GetSyncedDcs()...)
 			}
 		}
+		// We need to collect all info needed to ensure the consistency of TSO.
+		// So if any error occurs, the synchronization process will fail directly.
 		if len(errList) != 0 {
 			return errs.ErrSyncMaxTS.FastGenWithCause(errList)
 		}
+		// Check whether all dc-locations have been considered during the synchronization and retry once if any dc-location missed.
 		if ok, unsyncedDCs := gta.checkSyncedDCs(dcLocationMap, syncedDCs); !ok {
 			// Only retry one time when synchronization is incomplete
 			if maxRetryCount == 1 {
@@ -354,7 +364,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 			}
 			return errs.ErrSyncMaxTS.FastGenByArgs(fmt.Sprintf("unsynced dc-locations found, synced dc-locations: %+v, unsynced dc-locations: %+v", syncedDCs, unsyncedDCs))
 		}
-		// Update the sync RTT
+		// Update the sync RTT to help estimate MaxTS later.
 		if maxTSORtt != 0 {
 			gta.setSyncRTT(maxTSORtt.Milliseconds())
 		}
@@ -373,12 +383,12 @@ func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string]DCLocatio
 	return len(unsyncedDCs) == 0, unsyncedDCs
 }
 
-func (gta *GlobalTSOAllocator) getCurrentTSO() (pdpb.Timestamp, error) {
+func (gta *GlobalTSOAllocator) getCurrentTSO() (*pdpb.Timestamp, error) {
 	currentPhysical, currentLogical := gta.timestampOracle.getTSO()
 	if currentPhysical == typeutil.ZeroTime {
-		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
+		return &pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 	}
-	return *tsoutil.GenerateTimestamp(currentPhysical, uint64(currentLogical)), nil
+	return tsoutil.GenerateTimestamp(currentPhysical, uint64(currentLogical)), nil
 }
 
 // Reset is used to reset the TSO allocator.
