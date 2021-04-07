@@ -68,6 +68,8 @@ func (s *testClientSuite) TestUpdateURLs(c *C) {
 	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
 }
 
+const testClientURL = "tmp//test.url:5299"
+
 var _ = Suite(&testClientCtxSuite{})
 
 type testClientCtxSuite struct{}
@@ -76,14 +78,14 @@ func (s *testClientCtxSuite) TestClientCtx(c *C) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*3)
 	defer cancel()
-	_, err := NewClientWithContext(ctx, []string{"tmp//test.url:5299"}, SecurityOption{})
+	_, err := NewClientWithContext(ctx, []string{testClientURL}, SecurityOption{})
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Less, time.Second*4)
 }
 
 func (s *testClientCtxSuite) TestClientWithRetry(c *C) {
 	start := time.Now()
-	_, err := NewClientWithContext(context.TODO(), []string{"tmp//test.url:5299"}, SecurityOption{}, WithMaxErrorRetry(5))
+	_, err := NewClientWithContext(context.TODO(), []string{testClientURL}, SecurityOption{}, WithMaxErrorRetry(5))
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Less, time.Second*6)
 }
@@ -98,7 +100,7 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	defer cancel()
 	// nolint
 	cli := &baseClient{
-		urls:                 []string{"tmp//test.url:5299"},
+		urls:                 []string{testClientURL},
 		checkLeaderCh:        make(chan struct{}, 1),
 		checkTSODispatcherCh: make(chan struct{}, 1),
 		ctx:                  ctx,
