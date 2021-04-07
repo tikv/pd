@@ -15,8 +15,6 @@ package statistics
 
 import (
 	"time"
-
-	"github.com/phf/go-queue/queue"
 )
 
 const (
@@ -35,7 +33,7 @@ type deltaWithInterval struct {
 // stores recent changes that happened in the last avgInterval,
 // then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
-	que         *queue.Queue
+	que         *SafeQueue
 	deltaSum    float64
 	intervalSum time.Duration
 	avgInterval time.Duration
@@ -44,7 +42,7 @@ type AvgOverTime struct {
 // NewAvgOverTime returns an AvgOverTime with given interval.
 func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 	return &AvgOverTime{
-		que:         queue.New(),
+		que:         NewSafeQueue(),
 		deltaSum:    0,
 		intervalSum: 0,
 		avgInterval: interval,
@@ -58,7 +56,7 @@ func (aot *AvgOverTime) Get() float64 {
 
 // Clear clears the AvgOverTime.
 func (aot *AvgOverTime) Clear() {
-	aot.que = queue.New()
+	aot.que.Init()
 	aot.intervalSum = 0
 	aot.deltaSum = 0
 }
