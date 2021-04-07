@@ -258,6 +258,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) == 0 && int64(nextLogical) > t.tsoMux.tso.logical {
 		t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: int64(nextLogical)}
 	}
+	t.tsoMux.updateTime = time.Now()
 	tsoCounter.WithLabelValues("reset_tso_ok", t.dcLocation).Inc()
 	return nil
 }

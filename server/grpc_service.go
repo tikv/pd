@@ -1322,7 +1322,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		}
 		if tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs()) >= 0 {
 			// Make the MaxLocalTs bigger to distinguish it from the estimated one
-			if tsoutil.CompareTimestamp(request.GetMaxTs(), maxLocalTS) == 0 {
+			if tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs()) == 0 {
 				maxLocalTS.Physical += tso.UpdateTimestampGuard.Milliseconds()
 				maxLocalTS.Logical = 0
 			}
