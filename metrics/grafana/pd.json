@@ -4390,7 +4390,7 @@
           "yaxes": [
             {
               "decimals": null,
-              "format": "Bps",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -5179,7 +5179,7 @@
           "yaxes": [
             {
               "decimals": null,
-              "format": "Bps",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
