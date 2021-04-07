@@ -48,10 +48,10 @@ func (s *testClientSuite) TestTsLessEqual(c *C) {
 
 func (s *testClientSuite) TestUpdateURLs(c *C) {
 	members := []*pdpb.Member{
-		{Name: "pd4", ClientUrls: []string{"tmp//pd4"}},
-		{Name: "pd1", ClientUrls: []string{"tmp//pd1"}},
-		{Name: "pd3", ClientUrls: []string{"tmp//pd3"}},
-		{Name: "pd2", ClientUrls: []string{"tmp//pd2"}},
+		{Name: "pd4", ClientUrls: []string{"tmp://pd4"}},
+		{Name: "pd1", ClientUrls: []string{"tmp://pd1"}},
+		{Name: "pd3", ClientUrls: []string{"tmp://pd3"}},
+		{Name: "pd2", ClientUrls: []string{"tmp://pd2"}},
 	}
 	getURLs := func(ms []*pdpb.Member) (urls []string) {
 		for _, m := range ms {
@@ -68,7 +68,7 @@ func (s *testClientSuite) TestUpdateURLs(c *C) {
 	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
 }
 
-const testClientURL = "tmp//test.url:5299"
+const testClientURL = "tmp://test.url:5255"
 
 var _ = Suite(&testClientCtxSuite{})
 
