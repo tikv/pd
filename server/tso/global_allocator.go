@@ -113,7 +113,7 @@ func (gta *GlobalTSOAllocator) estimateMaxTS(count uint32, suffixBits int) (*pdp
 	}
 	// Precheck to make sure the logical part won't overflow after being differentiated.
 	// If precheckLogical returns false, it means the logical part is overflow,
-	// we need to wait a UpdatePhysicalInterval and retry the estimation.
+	// we need to wait a updatePhysicalInterval and retry the estimation later.
 	if !gta.precheckLogical(estimatedMaxTSO, suffixBits) {
 		return nil, true, nil
 	}
@@ -143,20 +143,22 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 	return gta.timestampOracle.resetUserTimestamp(gta.leadership, tso, false)
 }
 
-// GenerateTSO is used to generate a given number of TSOs.
-// Make sure you have initialized the TSO allocator before calling.
+// GenerateTSO is used to generate the given number of TSOs.
+// Make sure you have initialized the TSO allocator before calling this method.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
 	if !gta.leadership.Check() {
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
 	// To check if we have any dc-location configured in the cluster
 	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
-	// No dc-locations configured in the cluster, use the normal TSO generation way.
+	// No dc-locations configured in the cluster, use the normal Global TSO generation way.
+	// (without synchronization with other Local TSO Allocators)
 	if len(dcLocationMap) == 0 {
 		return gta.timestampOracle.getTS(gta.leadership, count, 0)
 	}
 
 	// Have dc-locations configured in the cluster, use the Global TSO generation way.
+	// (whit synchronization with other Local TSO Allocators)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	skipCheck := false
@@ -174,8 +176,9 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 			continue
 		}
 	SETTING_PHASE:
-		// 2. Send the MaxTSO to all Local TSO Allocators leader to make sure the subsequent Local TSOs will be bigger than it.
-		// It's not safe to skip the check here because the estimated maxTSO may not be big enough.
+		// 2. Send the MaxTSO to all Local TSO Allocators leaders to make sure the subsequent Local TSOs will be bigger than it.
+		// It's not safe to skip check at the first time here because the estimated maxTSO may not be big enough,
+		// we need to validate it first before we write it into every Local TSO Allocator's memory.
 		resp = *estimatedMaxTSO
 		if err := gta.SyncMaxTS(ctx, dcLocationMap, &resp, skipCheck); err != nil {
 			return pdpb.Timestamp{}, err
@@ -300,14 +303,12 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 			wg.Add(1)
 			go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *syncResp) {
 				defer wg.Done()
+				syncMaxTSResp := &syncResp{}
 				syncCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
 				startTime := time.Now()
-				res, err := pdpb.NewPDClient(conn).SyncMaxTS(syncCtx, request)
-				syncMaxTSResp := &syncResp{
-					rpcRes: res,
-					err:    err,
-					rtt:    time.Since(startTime), // Including RPC request -> RPC processing -> RPC response
-				}
+				syncMaxTSResp.rpcRes, syncMaxTSResp.err = pdpb.NewPDClient(conn).SyncMaxTS(syncCtx, request)
+				// Including RPC request -> RPC processing -> RPC response
+				syncMaxTSResp.rtt = time.Since(startTime)
 				cancel()
 				respCh <- syncMaxTSResp
 				if syncMaxTSResp.err != nil {
