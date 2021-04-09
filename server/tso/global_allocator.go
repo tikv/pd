@@ -52,6 +52,9 @@ type Allocator interface {
 	Reset()
 }
 
+// TODO: make enableGlobalTSOEstimation become a config field.
+const enableGlobalTSOEstimation = true
+
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalTSOAllocator struct {
 	// for global TSO synchronization
@@ -161,26 +164,32 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	// (whit synchronization with other Local TSO Allocators)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	skipCheck := false
-	suffixBits := gta.allocatorManager.GetSuffixBits()
 
-	var resp pdpb.Timestamp
+	var (
+		resp                   pdpb.Timestamp  = pdpb.Timestamp{}
+		estimatedMaxTSO        *pdpb.Timestamp = &pdpb.Timestamp{}
+		suffixBits             int             = gta.allocatorManager.GetSuffixBits()
+		shouldRetry, skipCheck bool
+		err                    error
+	)
 	for i := 0; i < maxRetryCount; i++ {
-		// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT.
-		estimatedMaxTSO, shouldRetry, err := gta.estimateMaxTS(count, suffixBits)
-		if err != nil {
-			return pdpb.Timestamp{}, err
-		}
-		if shouldRetry {
-			time.Sleep(gta.timestampOracle.updatePhysicalInterval)
-			continue
+		// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT if enableGlobalTSOEstimation.
+		if enableGlobalTSOEstimation {
+			estimatedMaxTSO, shouldRetry, err = gta.estimateMaxTS(count, suffixBits)
+			if err != nil {
+				return pdpb.Timestamp{}, err
+			}
+			if shouldRetry {
+				time.Sleep(gta.timestampOracle.updatePhysicalInterval)
+				continue
+			}
 		}
 	SETTING_PHASE:
 		// 2. Send the MaxTSO to all Local TSO Allocators leaders to make sure the subsequent Local TSOs will be bigger than it.
 		// It's not safe to skip check at the first time here because the estimated maxTSO may not be big enough,
 		// we need to validate it first before we write it into every Local TSO Allocator's memory.
 		resp = *estimatedMaxTSO
-		if err := gta.SyncMaxTS(ctx, dcLocationMap, &resp, skipCheck); err != nil {
+		if err = gta.SyncMaxTS(ctx, dcLocationMap, &resp, skipCheck); err != nil {
 			return pdpb.Timestamp{}, err
 		}
 		// 3. If skipCheck is false and the maxTSO is bigger than estimatedMaxTSO,
@@ -204,7 +213,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		}
 		if tsoutil.CompareTimestamp(currentGlobalTSO, &resp) < 0 {
 			// Update the Global TSO in memory
-			if err := gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(&resp), true); err != nil {
+			if err = gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(&resp), true); err != nil {
 				log.Error("update the global tso in memory failed", errs.ZapError(err))
 				return pdpb.Timestamp{}, err
 			}
