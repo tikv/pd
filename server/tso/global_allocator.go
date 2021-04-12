@@ -148,6 +148,13 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 
 // GenerateTSO is used to generate the given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling this method.
+// Basically, there are two ways to generate a Global TSO:
+//   1. The old way to generate a normal TSO from memory directly, which makes the TSO service node become single point.
+//   2. The new way to generate a Global TSO by synchronizing with all other Local TSO Allocators.
+// And for the new way, there are two different strategies:
+//   1. Collect the max Local TSO from all Local TSO Allocator leaders and write it back to them as MaxTS.
+//   2. Estimate a MaxTS and try to write it to all Local TSO Allocator leaders directly to reduce the RTT.
+//      During the process, if the estimated MaxTS is not accurate, it will fallback to the collecting way.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
 	if !gta.leadership.Check() {
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
@@ -267,8 +274,8 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 	maxTSO *pdpb.Timestamp,
 	skipCheck bool,
 ) error {
-	maxRetryCount := 1
-	for i := 0; i < maxRetryCount; i++ {
+	// Retry once when synchronization is incomplete
+	for i := 0; i < 2; i++ {
 		// Collect all allocator leaders' client URLs
 		allocatorLeaders := make(map[string]*pdpb.Member)
 		for dcLocation := range dcLocationMap {
@@ -343,7 +350,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 			}
 			// If any error occurs, just jump out of the loop.
 			if len(errList) != 0 {
-				continue
+				break
 			}
 			if resp.rpcRes == nil {
 				return errs.ErrSyncMaxTS.FastGenByArgs("got nil response")
@@ -358,7 +365,9 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 				// Compare and get the max one
 				if tsoutil.CompareTimestamp(resp.rpcRes.GetMaxLocalTs(), maxTSO) > 0 {
 					*maxTSO = *(resp.rpcRes.GetMaxLocalTs())
-					maxTSORtt = resp.rtt
+					if resp.rtt > maxTSORtt {
+						maxTSORtt = resp.rtt
+					}
 				}
 				syncedDCs = append(syncedDCs, resp.rpcRes.GetSyncedDcs()...)
 			}
@@ -370,22 +379,18 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 		}
 		// Check whether all dc-locations have been considered during the synchronization and retry once if any dc-location missed.
 		if ok, unsyncedDCs := gta.checkSyncedDCs(dcLocationMap, syncedDCs); !ok {
-			// Only retry one time when synchronization is incomplete
-			if maxRetryCount == 1 {
-				log.Warn("unsynced dc-locations found, will retry", zap.Strings("synced-DCs", syncedDCs), zap.Strings("unsynced-DCs", unsyncedDCs))
-				maxRetryCount++
-				// To make sure we have the latest dc-location info
-				gta.allocatorManager.ClusterDCLocationChecker()
-				continue
-			}
-			return errs.ErrSyncMaxTS.FastGenByArgs(fmt.Sprintf("unsynced dc-locations found, synced dc-locations: %+v, unsynced dc-locations: %+v", syncedDCs, unsyncedDCs))
+			log.Warn("unsynced dc-locations found", zap.Strings("unsynced-DCs", unsyncedDCs), zap.Strings("synced-DCs", syncedDCs))
+			// To make sure we have the latest dc-location info
+			gta.allocatorManager.ClusterDCLocationChecker()
+			continue
 		}
 		// Update the sync RTT to help estimate MaxTS later.
 		if maxTSORtt != 0 {
 			gta.setSyncRTT(maxTSORtt.Milliseconds())
 		}
+		return nil
 	}
-	return nil
+	return errs.ErrSyncMaxTS.FastGenByArgs("maximum number of retries exceeded")
 }
 
 func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string]DCLocationInfo, syncedDCs []string) (bool, []string) {
