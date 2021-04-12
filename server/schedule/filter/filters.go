@@ -686,6 +686,8 @@ const (
 	EngineKey = "engine"
 	// EngineTiFlash is the tiflash value of the engine label.
 	EngineTiFlash = "tiflash"
+	// EngineTiKV indicates the tikv engine in metrics
+	EngineTiKV = "tikv"
 )
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
