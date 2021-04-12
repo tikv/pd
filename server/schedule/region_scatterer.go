@@ -343,7 +343,10 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 	}
 	for _, store := range stores {
 		storeCount := context.selectedPeer.storeTotalCount(store.GetID())
-		if storeCount < maxStoreTotalCount || storeCount == minStoreTotalCount {
+		// If storeCount is equal to the maxStoreTotalCount, we should skip this store as candidate.
+		// If the storeCount are all the same for the whole cluster(maxStoreTotalCount == minStoreTotalCount), any store
+		// could be selected as candidate.
+		if storeCount < maxStoreTotalCount || maxStoreTotalCount == minStoreTotalCount {
 			if filter.Target(r.cluster.GetOpts(), store, filters) && !store.IsBusy() {
 				candidates = append(candidates, store.GetID())
 			}
