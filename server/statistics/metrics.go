@@ -72,6 +72,7 @@ var (
 			Help:      "Status of the scheduling configurations.",
 		}, []string{"type"})
 
+	// StoreLimitGauge is used to record the current store limit.
 	StoreLimitGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
