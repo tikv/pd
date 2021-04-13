@@ -759,6 +759,32 @@ func (f *isolationFilter) Target(opt *config.PersistOptions, store *core.StoreIn
 	return true
 }
 
+// NewStoreBusyFilter creates storeBusyFilter
+func NewStoreBusyFilter(scope string) *storeBusyFilter {
+	return &storeBusyFilter{scope: scope}
+}
+
+// StoreBusyFilter
+type storeBusyFilter struct {
+	scope string
+}
+
+func (f *storeBusyFilter) Scope() string {
+	return f.scope
+}
+
+func (f *storeBusyFilter) Type() string {
+	return "store-busy-filter"
+}
+
+func (f *storeBusyFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	return true
+}
+
+func (f *storeBusyFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	return !store.IsBusy()
+}
+
 // createRegionForRuleFit is used to create a clone region with RegionCreateOptions which is only used for
 // FitRegion in filter
 func createRegionForRuleFit(startKey, endKey []byte,
