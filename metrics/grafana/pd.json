@@ -4942,211 +4942,109 @@
             "align": false,
             "alignLevel": null
           }
-        }
-                  {
-            "aliasColors": {},
-            "bars": false,
-            "dashLength": 10,
-            "dashes": false,
-            "datasource": "tidb-cluster",
-            "decimals": 0,
-            "fill": 0,
-            "gridPos": {
-              "h": 7,
-              "w": 12,
-              "x": 12,
-              "y": 39
-            },
-            "id": 1427,
-            "legend": {
-              "alignAsTable": true,
-              "avg": true,
-              "current": true,
-              "hideEmpty": true,
-              "hideZero": true,
-              "max": false,
-              "min": false,
-              "rightSide": true,
-              "show": true,
-              "sort": "current",
-              "sortDesc": true,
-              "total": false,
-              "values": true
-            },
-            "lines": true,
-            "linewidth": 1,
-            "links": [],
-            "nullPointMode": "null",
-            "paceLength": 10,
-            "percentage": false,
-            "pointradius": 5,
-            "points": false,
-            "renderer": "flot",
-            "seriesOverrides": [],
-            "spaceLength": 10,
-            "stack": false,
-            "steppedLine": false,
-            "targets": [
-              {
-                "expr": "- rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store-out\", type=\"move-leader\",rw=\"read\"}[1m])",
-                "format": "time_series",
-                "intervalFactor": 1,
-                "legendFormat": "{{type}}-{{store}}",
-                "refId": "A",
-                "step": 4
-              },
-              {
-                "expr": "rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store-in\", type=\"move-leader\", rw=\"read\"}[1m])",
-                "format": "time_series",
-                "intervalFactor": 1,
-                "legendFormat": "{{type}}-{{store}}",
-                "refId": "B"
-              }
-            ],
-            "thresholds": [],
-            "timeFrom": null,
-            "timeRegions": [],
-            "timeShift": null,
-            "title": "Direction of hotspot move leader",
-            "tooltip": {
-              "shared": true,
-              "sort": 0,
-              "value_type": "individual"
-            },
-            "type": "graph",
-            "xaxis": {
-              "buckets": null,
-              "mode": "time",
-              "name": null,
-              "show": true,
-              "values": []
-            },
-            "yaxes": [
-              {
-                "decimals": null,
-                "format": "none",
-                "label": null,
-                "logBase": 1,
-                "max": null,
-                "min": null,
-                "show": true
-              },
-              {
-                "format": "short",
-                "label": null,
-                "logBase": 1,
-                "max": null,
-                "min": null,
-                "show": true
-              }
-            ],
-            "yaxis": {
-              "align": false,
-              "alignLevel": null
-            }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "tidb-cluster",
+          "decimals": 0,
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 39
           },
-          {
-            "aliasColors": {},
-            "bars": false,
-            "dashLength": 10,
-            "dashes": false,
-            "datasource": "tidb-cluster",
-            "decimals": 0,
-            "fill": 0,
-            "gridPos": {
-              "h": 7,
-              "w": 12,
-              "x": 12,
-              "y": 39
+          "id": 1427,
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": false,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "- rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store-out\", type=\"move-leader\",rw=\"read\"}[1m])",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "{{type}}-{{store}}",
+              "refId": "A",
+              "step": 4
             },
-            "id": 1427,
-            "legend": {
-              "alignAsTable": true,
-              "avg": true,
-              "current": true,
-              "hideEmpty": true,
-              "hideZero": true,
-              "max": false,
-              "min": false,
-              "rightSide": true,
-              "show": true,
-              "sort": "current",
-              "sortDesc": true,
-              "total": false,
-              "values": true
-            },
-            "lines": true,
-            "linewidth": 1,
-            "links": [],
-            "nullPointMode": "null",
-            "paceLength": 10,
-            "percentage": false,
-            "pointradius": 5,
-            "points": false,
-            "renderer": "flot",
-            "seriesOverrides": [],
-            "spaceLength": 10,
-            "stack": false,
-            "steppedLine": false,
-            "targets": [
-              {
-                "expr": "- rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store-out\", type=\"move-leader\",rw=\"read\"}[1m])",
-                "format": "time_series",
-                "intervalFactor": 1,
-                "legendFormat": "{{type}}-{{store}}",
-                "refId": "A",
-                "step": 4
-              },
-              {
-                "expr": "rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store-in\", type=\"move-leader\", rw=\"read\"}[1m])",
-                "format": "time_series",
-                "intervalFactor": 1,
-                "legendFormat": "{{type}}-{{store}}",
-                "refId": "B"
-              }
-            ],
-            "thresholds": [],
-            "timeFrom": null,
-            "timeRegions": [],
-            "timeShift": null,
-            "title": "Direction of hotspot move leader",
-            "tooltip": {
-              "shared": true,
-              "sort": 0,
-              "value_type": "individual"
-            },
-            "type": "graph",
-            "xaxis": {
-              "buckets": null,
-              "mode": "time",
-              "name": null,
-              "show": true,
-              "values": []
-            },
-            "yaxes": [
-              {
-                "decimals": null,
-                "format": "none",
-                "label": null,
-                "logBase": 1,
-                "max": null,
-                "min": null,
-                "show": true
-              },
-              {
-                "format": "short",
-                "label": null,
-                "logBase": 1,
-                "max": null,
-                "min": null,
-                "show": true
-              }
-            ],
-            "yaxis": {
-              "align": false,
-              "alignLevel": null
+            {
+              "expr": "rate(pd_scheduler_hot_region{tidb_cluster=\"$tidb_cluster\", store=~\"$store-in\", type=\"move-leader\", rw=\"read\"}[1m])",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "{{type}}-{{store}}",
+              "refId": "B"
             }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Direction of hotspot move leader",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "decimals": null,
+              "format": "none",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
           }
+        }
       ],
       "repeat": null,
       "title": "Statistics - hot read",
@@ -8717,25 +8615,20 @@
     "list": [
       {
         "allValue": null,
-        "current": {
-        },
+        "current": {},
         "datasource": "${DS_TEST-CLUSTER}",
         "hide": 2,
         "includeAll": false,
         "label": "tidb_cluster",
         "multi": false,
         "name": "tidb_cluster",
-        "options": [
-
-        ],
+        "options": [],
         "query": "label_values(pd_cluster_status, tidb_cluster)",
         "refresh": 2,
         "regex": "",
         "sort": 1,
         "tagValuesQuery": "",
-        "tags": [
-
-        ],
+        "tags": [],
         "tagsQuery": "",
         "type": "query",
         "useTags": false
