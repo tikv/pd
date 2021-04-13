@@ -403,6 +403,7 @@ func (r *RegionScatterer) selectAvailableLeaderStores(group string, peers map[ui
 			id = storeID
 		}
 	}
+	// unreachable
 	if id < 1 {
 		return leaderCandidateStores[rand.Intn(len(leaderCandidateStores))]
 	}
