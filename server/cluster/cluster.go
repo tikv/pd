@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -1680,6 +1681,9 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	for i := 0; i < persistLimitRetryTimes; i++ {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
+			id := strconv.FormatUint(storeID, 10)
+			statistics.StoreLimitGauge.WithLabelValues(id, "add-peer").Set(0)
+			statistics.StoreLimitGauge.WithLabelValues(id, "remove-peer").Set(0)
 			return
 		}
 		time.Sleep(persistLimitWaitTime)
