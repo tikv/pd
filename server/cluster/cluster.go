@@ -1682,8 +1682,8 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
 			id := strconv.FormatUint(storeID, 10)
-			statistics.StoreLimitGauge.WithLabelValues(id, "add-peer").Set(0)
-			statistics.StoreLimitGauge.WithLabelValues(id, "remove-peer").Set(0)
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
 			return
 		}
 		time.Sleep(persistLimitWaitTime)
