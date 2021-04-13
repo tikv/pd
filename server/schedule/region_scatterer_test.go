@@ -449,7 +449,7 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 	tc := mockcluster.NewCluster(opt)
 	// Add 6 stores.
 	storeCount := 6
-	for i := uint64(1); i <= uint64(6); i++ {
+	for i := uint64(1); i <= uint64(storeCount); i++ {
 		tc.AddRegionStore(i, 0)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -464,7 +464,7 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
 		for i := uint64(1); i <= uint64(storeCount); i++ {
-			count := ss.storeTotalCount(i)
+			count := ss.totalCountByStore(i)
 			if count > max {
 				max = count
 			}
@@ -472,7 +472,7 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 				min = count
 			}
 		}
-		c.Assert(max-min, LessEqual, uint64(regionCount/6))
+		c.Assert(max-min, LessEqual, uint64(regionCount/10))
 	}
 	check(scatterer.ordinaryEngine.selectedPeer)
 }

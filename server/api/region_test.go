@@ -297,7 +297,7 @@ func (s *testRegionSuite) TestScatterRegions(c *C) {
 	op2 := s.svr.GetRaftCluster().GetOperatorController().GetOperator(602)
 	op3 := s.svr.GetRaftCluster().GetOperatorController().GetOperator(603)
 	// At least one operator used to scatter region
-	c.Assert(op1 != nil || op2 != nil || op3 != nil, Equals, true)
+	c.Assert(op1 != nil || op2 != nil || op3 != nil, IsTrue)
 }
 
 func (s *testRegionSuite) TestSplitRegions(c *C) {

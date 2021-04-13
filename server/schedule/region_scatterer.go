@@ -94,7 +94,7 @@ func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]
 	return nil, false
 }
 
-func (s *selectedStores) storeTotalCount(storeID uint64) uint64 {
+func (s *selectedStores) totalCountByStore(storeID uint64) uint64 {
 	groups := s.groupDistribution.GetAllID()
 	totalCount := uint64(0)
 	for _, group := range groups {
@@ -333,7 +333,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 	maxStoreTotalCount := uint64(0)
 	minStoreTotalCount := uint64(math.MaxUint64)
 	for _, store := range r.cluster.GetStores() {
-		count := context.selectedPeer.storeTotalCount(store.GetID())
+		count := context.selectedPeer.totalCountByStore(store.GetID())
 		if count > maxStoreTotalCount {
 			maxStoreTotalCount = count
 		}
@@ -342,7 +342,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 		}
 	}
 	for _, store := range stores {
-		storeCount := context.selectedPeer.storeTotalCount(store.GetID())
+		storeCount := context.selectedPeer.totalCountByStore(store.GetID())
 		// If storeCount is equal to the maxStoreTotalCount, we should skip this store as candidate.
 		// If the storeCount are all the same for the whole cluster(maxStoreTotalCount == minStoreTotalCount), any store
 		// could be selected as candidate.
