@@ -225,7 +225,6 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 // in a group level instead of cluster level.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*operator.Operator, error) {
 	if !opt.IsRegionReplicated(r.cluster, region) {
-		//r.cluster.AddSuspectRegions(region.GetID())
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
 	}
 
@@ -318,7 +317,6 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 		}
 		scoreGuard = filter.NewDistinctScoreFilter(r.name, r.cluster.GetLocationLabels(), regionStores, sourceStore)
 	}
-	//scoreGuard := filter.NewRuleFitFilter(r.name, r.cluster, region, sourceStore.GetID())
 	filters = append(filters, context.filters...)
 	filters = append(filters, scoreGuard)
 	stores := r.cluster.GetStores()
