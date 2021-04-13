@@ -71,6 +71,9 @@ type Config struct {
 	// Join to an existing pd cluster, a string of endpoints.
 	Join string `toml:"join" json:"join"`
 
+	// used to filter connections when it is not https
+	HostWhitelist string `toml:"host-whitelist" json:"host-whitelist"`
+
 	// LeaderLease time, if leader doesn't update its TTL
 	// in etcd after lease time, etcd will expire the leader key
 	// and other servers can campaign the leader again.
@@ -176,6 +179,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
 	fs.StringVar(&cfg.Metric.PushAddress, "metrics-addr", "", "prometheus pushgateway address, leaves it empty will disable prometheus push")
+	fs.StringVar(&cfg.HostWhitelist, "host-whitelist", "", "filter connections if it is insecure(non-https), default to allow all")
 
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
@@ -1246,6 +1250,13 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ACUrls, err = ParseUrls(c.AdvertiseClientUrls)
 	if err != nil {
 		return nil, err
+	}
+
+	if list := strings.TrimSpace(c.HostWhitelist); len(list) > 0 {
+		delete(cfg.HostWhitelist, "*")
+		for _, str := range strings.Split(list, ",") {
+			cfg.HostWhitelist[str] = struct{}{}
+		}
 	}
 
 	return cfg, nil
