@@ -78,6 +78,14 @@ var (
 			Name:      "region_waiting_list",
 			Help:      "Number of region in waiting list",
 		})
+
+	storeProgressGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "store_progress",
+			Help:      "Store setStoreRegionCount after up/down",
+		}, []string{"address", "store", "type"})
 )
 
 func init() {
@@ -89,4 +97,5 @@ func init() {
 	prometheus.MustRegister(clusterStateCPUGauge)
 	prometheus.MustRegister(clusterStateCurrent)
 	prometheus.MustRegister(regionWaitingListGauge)
+	prometheus.MustRegister(storeProgressGauge)
 }

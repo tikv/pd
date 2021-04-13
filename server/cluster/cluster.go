@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -53,9 +55,16 @@ import (
 
 var backgroundJobInterval = 10 * time.Second
 
+type storeProgressStatus int
+
 const (
-	clientTimeout              = 3 * time.Second
-	defaultChangedRegionsLimit = 10000
+	clientTimeout                                  = 3 * time.Second
+	defaultChangedRegionsLimit                     = 10000
+	progressMetricsTimer                           = 15   // progress interval second,same with grafana refresh frequency
+	progressMaxRetryLimit                          = 20   // progress max check times
+	progressFinish             storeProgressStatus = iota // progress progress finish
+	progressNoTarget                                      // progress no target selected
+	progressExceedRetryLimit                              // progress retry reach max retry limit
 )
 
 // Server is the interface for cluster.
@@ -118,6 +127,7 @@ type RaftCluster struct {
 
 	// It's used to manage components.
 	componentManager *component.Manager
+	pendingUpStore   sync.Map
 }
 
 // Status saves some state information.
@@ -130,13 +140,14 @@ type Status struct {
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		ctx:          ctx,
-		running:      false,
-		clusterID:    clusterID,
-		clusterRoot:  root,
-		regionSyncer: regionSyncer,
-		httpClient:   httpClient,
-		etcdClient:   etcdClient,
+		ctx:            ctx,
+		running:        false,
+		clusterID:      clusterID,
+		clusterRoot:    root,
+		regionSyncer:   regionSyncer,
+		httpClient:     httpClient,
+		etcdClient:     etcdClient,
+		pendingUpStore: sync.Map{},
 	}
 }
 
@@ -909,12 +920,168 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 
 // PutStore puts a store.
 func (c *RaftCluster) PutStore(store *metapb.Store) error {
+	if c.GetStore(store.GetId()) == nil {
+		log.Info("pd will record progress for new store", zap.Uint64("store-id", store.GetId()))
+
+		go c.recordUpProgress(store, progressMaxRetryLimit)
+	}
 	if err := c.putStoreImpl(store, false); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
 	c.AddStoreLimit(store)
 	return nil
+}
+
+// recordUpProgress record the progress of new store.
+//It will stop recording if region count not change continue 100 or progress is more than 90
+func (c *RaftCluster) recordUpProgress(src *metapb.Store, maxRetryLimit int) storeProgressStatus {
+	progress := 0
+	regionCount := 0
+	retryTime := 0
+	storeId := strconv.FormatUint(src.GetId(), 10)
+	c.pendingUpStore.Store(src.GetId(), struct{}{})
+	targetStore := c.pickSimilarStore(src)
+
+	defer func() {
+		c.pendingUpStore.Delete(src.GetId())
+	}()
+	for {
+		if progress > 90 {
+			storeProgressGauge.WithLabelValues(src.Address, storeId, "up").Set(100.00)
+			log.Info("store up finish", zap.Uint64("store-id", src.GetId()))
+			return progressFinish
+		}
+		if targetStore == nil {
+			log.Warn("not find similar store", zap.Uint64("store-id", src.GetId()))
+			storeProgressGauge.WithLabelValues(src.Address, storeId, "up").Set(100.0)
+			return progressNoTarget
+		}
+		if srcStore := c.GetStore(src.GetId()); srcStore != nil {
+			regionCount = srcStore.GetRegionCount()
+		}
+		log.Debug("check has similar store", zap.Uint64("store-id", src.GetId()),
+			zap.Int("src region count", regionCount),
+			zap.Uint64("target store", targetStore.GetID()),
+			zap.Int("target region count", targetStore.GetRegionCount()))
+		select {
+		case <-time.After(progressMetricsTimer * time.Second):
+			currentProgress := 100.00 * regionCount / targetStore.GetRegionCount()
+			if currentProgress > progress {
+				progress = currentProgress
+				retryTime = 0
+				storeProgressGauge.WithLabelValues(src.Address, storeId, "up").Set(float64(progress))
+			} else {
+				retryTime = retryTime + 1
+				if retryTime > maxRetryLimit {
+					if similar := c.pickSimilarStore(src); similar != nil &&
+						similar.GetID() != targetStore.GetID() {
+						targetStore = similar
+						continue
+					}
+					storeProgressGauge.WithLabelValues(src.Address, storeId, "up").Set(100.00)
+					log.Warn("store has reach max retry limit", zap.Uint64("store-id", src.GetId()))
+					return progressExceedRetryLimit
+				}
+			}
+			// pick again if target offline
+			if targetStore = c.GetStore(targetStore.GetID()); targetStore == nil || !targetStore.IsUp() {
+				targetStore = c.pickSimilarStore(src)
+			}
+		case <-c.ctx.Done():
+			return progressNoTarget
+		}
+	}
+}
+
+// recordOfflineProgress record the progress of the offline store
+func (c *RaftCluster) recordOfflineProgress(storeID uint64, maxRetryTimes int) storeProgressStatus {
+	store := c.GetStore(storeID)
+	if store == nil {
+		log.Warn("store not find", zap.Uint64("store-id", storeID))
+		return progressNoTarget
+	}
+	storeLabel := strconv.FormatUint(storeID, 10)
+	count := store.GetRegionCount()
+	if count == 0 {
+		storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
+		return progressFinish
+	}
+	progress := 0
+	retryTime := 0
+	for {
+		if progress >= 100 {
+			log.Info("store down finish", zap.Uint64("store-id ", storeID))
+			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
+			return progressFinish
+		}
+		select {
+		case <-time.After(progressMetricsTimer * time.Second):
+			currentProgress := 100.00 * (count - store.GetRegionCount()) / count
+			if currentProgress > progress {
+				progress = currentProgress
+				storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(float64(progress))
+				retryTime = 0
+			} else {
+				retryTime = retryTime + 1
+				if retryTime > maxRetryTimes {
+					log.Warn("store region count not change, it has reach the max retry time limit",
+						zap.Uint64("store-id", storeID))
+					return progressExceedRetryLimit
+				}
+			}
+		case <-c.ctx.Done():
+			return progressNoTarget
+		}
+		store = c.GetStore(storeID)
+		if store == nil {
+			log.Warn("store not find", zap.Uint64("store-id", storeID))
+			storeProgressGauge.WithLabelValues(store.GetAddress(), storeLabel, "offline").Set(100.00)
+			return progressNoTarget
+		}
+	}
+}
+
+// pickSimilarStore find one target store
+func (c *RaftCluster) pickSimilarStore(src *metapb.Store) (store *core.StoreInfo) {
+	labels := src.GetLabels()
+	stores := c.GetStores()
+	locationLabels := c.GetReplicationConfig().LocationLabels
+	srcLocationLabels := make([]*metapb.StoreLabel, len(locationLabels)-1)
+
+	for i := 0; i < len(locationLabels)-1; i++ {
+		slice.AnyOf(labels, func(j int) bool {
+			if labels[j].Key == locationLabels[i] {
+				srcLocationLabels[i] = labels[j]
+				return true
+			}
+			return false
+		})
+	}
+
+	var ret *core.StoreInfo
+	for _, v := range stores {
+		if v.GetID() == src.GetId() || v.IsOffline() || v.GetRegionCount() == 0 {
+			continue
+		}
+
+		// filter up pending store
+		if _, ok := c.pendingUpStore.Load(v.GetID()); ok {
+			continue
+		}
+		log.Debug("store", zap.Any("store:", v.GetLabels()), zap.Any("src", srcLocationLabels))
+		// it will pass if label is none
+		same := slice.AllOf(srcLocationLabels, func(i int) bool {
+			return srcLocationLabels[i] == nil || srcLocationLabels[i].Value == v.GetLabelValue(srcLocationLabels[i].Key)
+		})
+		if !same {
+			continue
+		}
+		if ret == nil || v.GetRegionCount() < ret.GetRegionCount() {
+			ret = v
+		}
+	}
+	return ret
 }
 
 // putStoreImpl puts a store.
@@ -1038,6 +1205,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	if err == nil {
 		c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
+	go c.recordOfflineProgress(storeID, progressMaxRetryLimit)
 	return err
 }
 
@@ -1075,6 +1243,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	if err == nil {
 		c.RemoveStoreLimit(storeID)
 	}
+	go c.recordOfflineProgress(storeID, progressMaxRetryLimit)
 	return err
 }
 
