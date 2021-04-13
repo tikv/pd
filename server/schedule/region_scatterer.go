@@ -320,7 +320,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 		return nil
 	}
 	filters := []filter.Filter{
-		filter.NewExcludedFilter("scatter-region", nil, selectedStores),
+		filter.NewExcludedFilter(r.name, nil, selectedStores),
 	}
 	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster, region, sourceStore)
 	filters = append(filters, context.filters...)
