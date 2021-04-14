@@ -669,7 +669,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	checkMaxReplicas(3)
 	checkRuleCount(3)
 
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "4")
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "4")
 	c.Assert(err, IsNil)
 	checkMaxReplicas(4)
 	checkRuleCount(4)
