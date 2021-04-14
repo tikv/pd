@@ -246,26 +246,6 @@ func (f *hotPeerCache) CollectMetrics(typ string) {
 	}
 }
 
-func (f *hotPeerCache) getRegionBytes(region *core.RegionInfo) uint64 {
-	switch f.kind {
-	case WriteFlow:
-		return region.GetBytesWritten()
-	case ReadFlow:
-		return region.GetBytesRead()
-	}
-	return 0
-}
-
-func (f *hotPeerCache) getRegionKeys(region *core.RegionInfo) uint64 {
-	switch f.kind {
-	case WriteFlow:
-		return region.GetKeysWritten()
-	case ReadFlow:
-		return region.GetKeysRead()
-	}
-	return 0
-}
-
 func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat {
 	if hotPeers, ok := f.peersOfStore[storeID]; ok {
 		if v := hotPeers.Get(regionID); v != nil {
