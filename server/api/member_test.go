@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -30,6 +31,7 @@ import (
 )
 
 var _ = Suite(&testMemberAPISuite{})
+var _ = Suite(&testResignAPISuite{})
 
 type testMemberAPISuite struct {
 	cfgs    []*config.Config
@@ -146,4 +148,27 @@ func changeLeaderPeerUrls(c *C, leader *pdpb.Member, id uint64, urls []string) {
 	resp, err := testDialClient.Do(req)
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, 204)
+}
+
+type testResignAPISuite struct {
+	cfgs    []*config.Config
+	servers []*server.Server
+	clean   func()
+}
+
+func (s *testResignAPISuite) SetUpSuite(c *C) {
+	s.cfgs, s.servers, s.clean = mustNewCluster(c, 1)
+}
+
+func (s *testResignAPISuite) TearDownSuite(c *C) {
+	s.clean()
+}
+
+func (s *testResignAPISuite) TestResignMyself(c *C) {
+	addr := s.cfgs[0].ClientUrls + apiPrefix + "/api/v1/leader/resign"
+	resp, err := testDialClient.Post(addr, "", nil)
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	_, _ = io.Copy(ioutil.Discard, resp.Body)
+	resp.Body.Close()
 }
