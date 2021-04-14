@@ -277,6 +277,7 @@ func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
 	t.testMetrics(c, 17., byteRate, expectThreshold)
 	t.testMetrics(c, 1., byteRate, expectThreshold)
 }
+
 func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold float64) {
 	cache := NewHotStoresStats(ReadFlow)
 	minThresholds := minHotThresholds[cache.kind]
