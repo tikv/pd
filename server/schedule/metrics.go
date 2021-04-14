@@ -50,22 +50,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
 		}, []string{"type"})
 
-	storeLimitAvailableGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "store_limit_available",
-			Help:      "available limit rate of store.",
-		}, []string{"store", "limit_type"})
-
-	storeLimitRateGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "store_limit_rate",
-			Help:      "the limit rate of store.",
-		}, []string{"store", "limit_type"})
-
 	storeLimitCostCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -79,8 +63,6 @@ func init() {
 	prometheus.MustRegister(operatorCounter)
 	prometheus.MustRegister(operatorDuration)
 	prometheus.MustRegister(operatorWaitDuration)
-	prometheus.MustRegister(storeLimitAvailableGauge)
-	prometheus.MustRegister(storeLimitRateGauge)
 	prometheus.MustRegister(storeLimitCostCounter)
 	prometheus.MustRegister(operatorWaitCounter)
 }
