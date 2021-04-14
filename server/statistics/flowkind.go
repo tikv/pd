@@ -31,3 +31,13 @@ func (k FlowKind) String() string {
 	}
 	return "unimplemented"
 }
+
+func (k FlowKind) RegionStats() []RegionStatKind {
+	switch k {
+	case WriteFlow:
+		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys}
+	case ReadFlow:
+		return []RegionStatKind{RegionReadBytes, RegionReadKeys}
+	}
+	return nil
+}

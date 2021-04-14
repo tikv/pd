@@ -13,6 +13,33 @@
 
 package statistics
 
+// RegionStatKind represents the statistics type of region.
+type RegionStatKind int
+
+// Different region statistics kinds.
+const (
+	RegionReadBytes RegionStatKind = iota
+	RegionReadKeys
+	RegionWriteBytes
+	RegionWriteKeys
+
+	RegionStatCount
+)
+
+func (k RegionStatKind) String() string {
+	switch k {
+	case RegionReadBytes:
+		return "read_bytes"
+	case RegionReadKeys:
+		return "read_keys"
+	case RegionWriteBytes:
+		return "write_bytes"
+	case RegionWriteKeys:
+		return "write_keys"
+	}
+	return "unknown RegionStatKind"
+}
+
 // StoreStatKind represents the statistics type of store.
 type StoreStatKind int
 

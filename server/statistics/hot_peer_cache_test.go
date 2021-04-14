@@ -269,7 +269,7 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 }
 
 func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
-	byteRate := minHotThresholds[ReadFlow][byteDim] * 2
+	byteRate := minHotThresholds[RegionReadBytes] * 2
 	expectThreshold := byteRate * HotThresholdRatio
 	t.testMetrics(c, 120., byteRate, expectThreshold)
 	t.testMetrics(c, 60., byteRate, expectThreshold)
@@ -279,9 +279,8 @@ func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
 }
 func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold float64) {
 	cache := NewHotStoresStats(ReadFlow)
-	minThresholds := minHotThresholds[cache.kind]
 	storeID := uint64(1)
-	c.Assert(byteRate, GreaterEqual, minThresholds[byteDim])
+	c.Assert(byteRate, GreaterEqual, minHotThresholds[RegionReadBytes])
 	for i := uint64(1); i < TopNN+10; i++ {
 		var oldItem *HotPeerStat
 		for {
@@ -291,11 +290,11 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 				RegionID:   i,
 				needDelete: false,
 				thresholds: thresholds,
-				ByteRate:   byteRate,
-				KeyRate:    0,
+				Loads:      make([]float64, DimLen),
 			}
+			newItem.Loads[RegionReadBytes] = byteRate
 			oldItem = cache.getOldHotPeerStat(i, storeID)
-			if oldItem != nil && oldItem.rollingByteRate.isHot(thresholds) == true {
+			if oldItem != nil && oldItem.rollingLoads[RegionReadBytes].isHot(thresholds[RegionReadBytes]) == true {
 				break
 			}
 			item := cache.updateHotPeerStat(newItem, oldItem, byteRate*interval, 0, time.Duration(interval)*time.Second)
@@ -303,9 +302,9 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 		}
 		thresholds := cache.calcHotThresholds(storeID)
 		if i < TopNN {
-			c.Assert(thresholds[byteDim], Equals, minThresholds[byteDim])
+			c.Assert(thresholds[RegionReadBytes], Equals, minHotThresholds[RegionReadBytes])
 		} else {
-			c.Assert(thresholds[byteDim], Equals, expectThreshold)
+			c.Assert(thresholds[RegionReadBytes], Equals, expectThreshold)
 		}
 	}
 }
