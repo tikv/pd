@@ -209,11 +209,7 @@ func PrepareJoinCluster(cfg *Config) error {
 func isDataExist(d string) bool {
 	dir, err := os.Open(d)
 	if err != nil {
-<<<<<<< HEAD:server/join.go
-		log.Error("failed to open directory", zap.Error(err))
-=======
 		log.Info("failed to open directory, maybe start for the first time", zap.Error(err))
->>>>>>> b6e80b2d... join: modify log level (#3584):server/join/join.go
 		return false
 	}
 	defer dir.Close()
