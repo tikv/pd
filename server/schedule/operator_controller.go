@@ -968,30 +968,3 @@ func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	}
 	return oc.cluster.GetOpts().GetLeaderSchedulePolicy()
 }
-
-// CollectStoreLimitMetrics collects the metrics about store limit
-func (oc *OperatorController) CollectStoreLimitMetrics() {
-	oc.RLock()
-	defer oc.RUnlock()
-	if oc.storesLimit == nil {
-		return
-	}
-	stores := oc.cluster.GetStores()
-	for _, store := range stores {
-		if store != nil {
-			storeID := store.GetID()
-			storeIDStr := strconv.FormatUint(storeID, 10)
-			for n, v := range storelimit.TypeNameValue {
-				var storeLimit *storelimit.StoreLimit
-				if oc.storesLimit[storeID] == nil || oc.storesLimit[storeID][v] == nil {
-					// Set to 0 to represent the store limit of the specific type is not initialized.
-					storeLimitRateGauge.WithLabelValues(storeIDStr, n).Set(0)
-					continue
-				}
-				storeLimit = oc.storesLimit[storeID][v]
-				storeLimitAvailableGauge.WithLabelValues(storeIDStr, n).Set(float64(storeLimit.Available()) / float64(storelimit.RegionInfluence[v]))
-				storeLimitRateGauge.WithLabelValues(storeIDStr, n).Set(storeLimit.Rate() * StoreBalanceBaseTime)
-			}
-		}
-	}
-}
