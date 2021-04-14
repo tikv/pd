@@ -305,7 +305,7 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 			c.Assert(err.Error(), Equals, testcase.response)
 		}
 	}
-	c.Assert(1, Equals, s.svr.GetPersistOptions().GetReplicationConfig().MaxReplicas)
+	c.Assert(1, Equals, int(s.svr.GetPersistOptions().GetReplicationConfig().MaxReplicas))
 
 }
 
