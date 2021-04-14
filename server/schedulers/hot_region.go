@@ -818,25 +818,24 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			rank = -1
 		}
 	} else {
+		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
+		// than the src store's (key/byte) rate after scheduling one peer.
 		getSrcDecRate := func(a, b float64) float64 {
 			if a-b <= 0 {
 				return 1
 			}
 			return a - b
 		}
-		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
-		// than the src store's (key/byte) rate after scheduling one peer.
-		srcKeyRate := srcLd.Loads[statistics.KeyDim]
-		dstKeyRate := dstLd.Loads[statistics.KeyDim]
-		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
-		keyDecRatio := (dstKeyRate + peerKeyRate) / getSrcDecRate(srcKeyRate, peerKeyRate)
-		keyHot := peerKeyRate >= bs.sche.conf.GetMinHotKeyRate()
-
-		srcByteRate := srcLd.Loads[statistics.ByteDim]
-		dstByteRate := dstLd.Loads[statistics.ByteDim]
-		peerByteRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.ByteDim))
-		byteDecRatio := (dstByteRate + peerByteRate) / getSrcDecRate(srcByteRate, peerByteRate)
-		byteHot := peerByteRate >= bs.sche.conf.GetMinHotByteRate()
+		checkHot := func(dim int) (bool, float64) {
+			srcRate := srcLd.Loads[dim]
+			dstRate := dstLd.Loads[dim]
+			peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, dim))
+			decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
+			isHot := peerRate >= bs.sche.conf.GetMinHotKeyRate()
+			return isHot, decRatio
+		}
+		keyHot, keyDecRatio := checkHot(statistics.KeyDim)
+		byteHot, byteDecRatio := checkHot(statistics.ByteDim)
 
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
 		switch {
