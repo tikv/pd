@@ -389,7 +389,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
 	case scatterRegionTarget:
-		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected}
+		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy}
 	}
 	for _, cf := range funcs {
 		if cf(opt, store) {
@@ -757,32 +757,6 @@ func (f *isolationFilter) Target(opt *config.PersistOptions, store *core.StoreIn
 		}
 	}
 	return true
-}
-
-// NewStoreBusyFilter creates storeBusyFilter
-func NewStoreBusyFilter(scope string) *storeBusyFilter {
-	return &storeBusyFilter{scope: scope}
-}
-
-// StoreBusyFilter
-type storeBusyFilter struct {
-	scope string
-}
-
-func (f *storeBusyFilter) Scope() string {
-	return f.scope
-}
-
-func (f *storeBusyFilter) Type() string {
-	return "store-busy-filter"
-}
-
-func (f *storeBusyFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return true
-}
-
-func (f *storeBusyFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return !store.IsBusy()
 }
 
 // createRegionForRuleFit is used to create a clone region with RegionCreateOptions which is only used for

@@ -325,7 +325,6 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster, region, sourceStore)
 	filters = append(filters, context.filters...)
 	filters = append(filters, scoreGuard)
-	filters = append(filters, filter.NewStoreBusyFilter(r.name))
 	stores := r.cluster.GetStores()
 	candidates := make([]uint64, 0)
 	for _, store := range stores {
