@@ -234,7 +234,12 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule4 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
-	rule5 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 1}
+	rule5 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 1,
+		LocationLabels: []string{"host"}}
+	rule6 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 3}
+
+	s.svr.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
+	s.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default").LocationLabels = []string{"host"}
 
 	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
 	c.Assert(err, IsNil)
@@ -248,22 +253,29 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 	defaultData, err := json.Marshal([]*placement.Rule{&rule1, &rule5})
 	c.Assert(err, IsNil)
 
+	recoverData, err := json.Marshal([]*placement.Rule{&rule1, &rule6})
+	c.Assert(err, IsNil)
+
 	testcases := []struct {
-		name     string
-		rawData  []byte
-		success  bool
-		response string
+		name          string
+		rawData       []byte
+		success       bool
+		response      string
+		isDefaultRule bool
+		count         int
 	}{
 		{
-			name:     "Set rules successfully, with oldRules full of nil",
-			rawData:  successData,
-			success:  true,
-			response: "",
+			name:          "Set rules successfully, with oldRules full of nil",
+			rawData:       successData,
+			success:       true,
+			response:      "",
+			isDefaultRule: false,
 		},
 		{
-			name:    "Parse Json failed",
-			rawData: []byte("foo"),
-			success: false,
+			name:          "Parse Json failed",
+			rawData:       []byte("foo"),
+			success:       false,
+			isDefaultRule: false,
 			response: `{
   "code": "input",
   "msg": "invalid character 'o' in literal false (expecting 'a')",
@@ -274,24 +286,36 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 `,
 		},
 		{
-			name:    "Check rule failed",
-			rawData: checkErrData,
-			success: false,
+			name:          "Check rule failed",
+			rawData:       checkErrData,
+			success:       false,
+			isDefaultRule: false,
 			response: `"[PD:hex:ErrHexDecodingString]decode string XXXX error"
 `,
 		},
 		{
-			name:    "Set Rule Failed",
-			rawData: setErrData,
-			success: false,
+			name:          "Set Rule Failed",
+			rawData:       setErrData,
+			success:       false,
+			isDefaultRule: false,
 			response: `"[PD:placement:ErrRuleContent]invalid rule content, invalid count -1"
 `,
 		},
 		{
-			name:     "set default rule",
-			rawData:  defaultData,
-			success:  true,
-			response: "",
+			name:          "set default rule",
+			rawData:       defaultData,
+			success:       true,
+			response:      "",
+			isDefaultRule: true,
+			count:         1,
+		},
+		{
+			name:          "recover default rule",
+			rawData:       recoverData,
+			success:       true,
+			response:      "",
+			isDefaultRule: true,
+			count:         3,
 		},
 	}
 
@@ -300,13 +324,14 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 		err := postJSON(testDialClient, s.urlPrefix+"/rules", testcase.rawData)
 		if testcase.success {
 			c.Assert(err, IsNil)
+			if testcase.isDefaultRule {
+				c.Assert(testcase.count, Equals, int(s.svr.GetPersistOptions().GetReplicationConfig().MaxReplicas))
+			}
 		} else {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)
 		}
 	}
-	c.Assert(1, Equals, int(s.svr.GetPersistOptions().GetReplicationConfig().MaxReplicas))
-
 }
 
 func (s *testRuleSuite) TestGetAllByGroup(c *C) {
