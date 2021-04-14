@@ -114,12 +114,9 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Uint64("interval", stat.interval),
 		zap.Uint64("region-id", stat.RegionID),
 		zap.Uint64("store", stat.StoreID),
-		zap.Float64("byte-rate", stat.rollingLoads[ByteDim].Get()),
-		zap.Float64("byte-rate-instant", stat.Loads[ByteDim]),
-		zap.Float64("byte-rate-threshold", stat.thresholds[ByteDim]),
-		zap.Float64("key-rate", stat.rollingLoads[KeyDim].Get()),
-		zap.Float64("key-rate-instant", stat.Loads[KeyDim]),
-		zap.Float64("key-rate-threshold", stat.thresholds[KeyDim]),
+		zap.Float64s("loads", stat.GetLoads()),
+		zap.Float64s("loads-instant", stat.Loads),
+		zap.Float64s("thresholds", stat.thresholds),
 		zap.Int("hot-degree", stat.HotDegree),
 		zap.Int("hot-anti-count", stat.AntiCount),
 		zap.Bool("just-transfer-leader", stat.justTransferLeader),
@@ -155,6 +152,16 @@ func (stat *HotPeerStat) GetLoad(k RegionStatKind) float64 {
 		return math.Round(stat.rollingLoads[int(k)].Get())
 	}
 	return math.Round(stat.Loads[int(k)])
+}
+
+// GetLoads returns denoised load if possible.
+func (stat *HotPeerStat) GetLoads() []float64 {
+	regionStats := stat.Kind.RegionStats()
+	loads := make([]float64, len(regionStats))
+	for i, k := range regionStats {
+		loads[i] = stat.GetLoad(k)
+	}
+	return loads
 }
 
 // GetThresholds returns thresholds
