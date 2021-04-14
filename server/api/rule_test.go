@@ -234,6 +234,7 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule4 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
+	rule5 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 1}
 
 	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
 	c.Assert(err, IsNil)
@@ -242,6 +243,9 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 	c.Assert(err, IsNil)
 
 	setErrData, err := json.Marshal([]*placement.Rule{&rule1, &rule4})
+	c.Assert(err, IsNil)
+
+	defaultData, err := json.Marshal([]*placement.Rule{&rule1, &rule5})
 	c.Assert(err, IsNil)
 
 	testcases := []struct {
@@ -283,6 +287,12 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 			response: `"[PD:placement:ErrRuleContent]invalid rule content, invalid count -1"
 `,
 		},
+		{
+			name:     "set default rule",
+			rawData:  defaultData,
+			success:  true,
+			response: "",
+		},
 	}
 
 	for _, testcase := range testcases {
@@ -295,6 +305,8 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 			c.Assert(err.Error(), Equals, testcase.response)
 		}
 	}
+	c.Assert(1, Equals, s.svr.GetPersistOptions().GetReplicationConfig().MaxReplicas)
+
 }
 
 func (s *testRuleSuite) TestGetAllByGroup(c *C) {
