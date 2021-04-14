@@ -63,8 +63,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 1,
-  "id": 11,
-  "iteration": 1608795246154,
+  "id": 25,
+  "iteration": 1618283470402,
   "links": [],
   "panels": [
     {
@@ -957,7 +957,7 @@
           "fontSize": "90%",
           "gridPos": {
             "h": 7,
-            "w": 6,
+            "w": 4,
             "x": 0,
             "y": 14
           },
@@ -1009,14 +1009,132 @@
           "type": "table"
         },
         {
+          "columns": [],
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fontSize": "100%",
+          "gridPos": {
+            "h": 7,
+            "w": 5,
+            "x": 4,
+            "y": 14
+          },
+          "id": 1433,
+          "links": [],
+          "pageSize": null,
+          "scroll": true,
+          "showHeader": true,
+          "sort": {
+            "col": 4,
+            "desc": true
+          },
+          "styles": [
+            {
+              "alias": "",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "link": false,
+              "mappingType": 1,
+              "pattern": "Time",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "short"
+            },
+            {
+              "alias": "",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "__name__",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "short"
+            },
+            {
+              "alias": "",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "instance",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "short"
+            },
+            {
+              "alias": "",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "job",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "short"
+            },
+            {
+              "alias": "limit (opm)",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 0,
+              "mappingType": 1,
+              "pattern": "Value",
+              "thresholds": [],
+              "type": "number",
+              "unit": "short"
+            }
+          ],
+          "targets": [
+            {
+              "expr": "pd_cluster_store_limit",
+              "format": "table",
+              "instant": true,
+              "intervalFactor": 1,
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "Store limit",
+          "transform": "table",
+          "type": "table"
+        },
+        {
           "cacheTimeout": null,
           "columns": [],
           "datasource": "${DS_TEST-CLUSTER}",
           "fontSize": "100%",
           "gridPos": {
             "h": 3,
-            "w": 6,
-            "x": 6,
+            "w": 5,
+            "x": 9,
             "y": 14
           },
           "hideTimeOverride": true,
@@ -1083,8 +1201,8 @@
           "fontSize": "100%",
           "gridPos": {
             "h": 7,
-            "w": 6,
-            "x": 12,
+            "w": 5,
+            "x": 14,
             "y": 14
           },
           "hideTimeOverride": true,
@@ -1160,8 +1278,8 @@
           "fontSize": "100%",
           "gridPos": {
             "h": 7,
-            "w": 6,
-            "x": 18,
+            "w": 5,
+            "x": 19,
             "y": 14
           },
           "hideTimeOverride": true,
@@ -1253,8 +1371,8 @@
           },
           "gridPos": {
             "h": 2,
-            "w": 6,
-            "x": 6,
+            "w": 5,
+            "x": 9,
             "y": 17
           },
           "hideTimeOverride": true,
@@ -1338,8 +1456,8 @@
           },
           "gridPos": {
             "h": 2,
-            "w": 6,
-            "x": 6,
+            "w": 5,
+            "x": 9,
             "y": 19
           },
           "hideTimeOverride": true,
@@ -9916,24 +10034,25 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
+          "text": "None",
+          "value": ""
         },
         "datasource": "${DS_TEST-CLUSTER}",
+        "definition": "",
         "hide": 2,
         "includeAll": false,
         "label": "tidb_cluster",
         "multi": false,
         "name": "tidb_cluster",
-        "options": [
-
-        ],
+        "options": [],
         "query": "label_values(pd_cluster_status, tidb_cluster)",
         "refresh": 2,
         "regex": "",
+        "skipUrlSync": false,
         "sort": 1,
         "tagValuesQuery": "",
-        "tags": [
-
-        ],
+        "tags": [],
         "tagsQuery": "",
         "type": "query",
         "useTags": false
