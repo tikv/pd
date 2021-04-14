@@ -114,12 +114,12 @@ func (h *trendHandler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *trendHandler) getTrendStores() ([]trendStore, error) {
-	var leaderStats, peerStats statistics.StoreHotPeersStat
+	var readStats, writeStats statistics.StoreHotPeersStat
 	if hotRead := h.GetHotReadRegions(); hotRead != nil {
-		leaderStats = hotRead.AsLeader
+		readStats = hotRead.AsLeader
 	}
 	if hotWrite := h.GetHotWriteRegions(); hotWrite != nil {
-		peerStats = hotWrite.AsPeer
+		writeStats = hotWrite.AsPeer
 	}
 	stores, err := h.GetStores()
 	if err != nil {
@@ -140,8 +140,8 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 			LastHeartbeatTS: info.Status.LastHeartbeatTS,
 			Uptime:          info.Status.Uptime,
 		}
-		s.HotReadFlow, s.HotReadRegionFlows = h.getStoreFlow(leaderStats, statistics.RegionReadBytes, store.GetID())
-		s.HotWriteFlow, s.HotWriteRegionFlows = h.getStoreFlow(peerStats, statistics.RegionWriteBytes, store.GetID())
+		s.HotReadFlow, s.HotReadRegionFlows = h.getStoreFlow(readStats, statistics.RegionReadBytes, store.GetID())
+		s.HotWriteFlow, s.HotWriteRegionFlows = h.getStoreFlow(writeStats, statistics.RegionWriteBytes, store.GetID())
 		trendStores = append(trendStores, s)
 	}
 	return trendStores, nil
