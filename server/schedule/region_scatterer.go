@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -417,10 +416,6 @@ func (r *RegionScatterer) selectAvailableLeaderStores(group string, peers map[ui
 			minStoreGroupLeader = storeGroupLeaderCount
 			id = storeID
 		}
-	}
-	// unreachable
-	if id < 1 {
-		return leaderCandidateStores[rand.Intn(len(leaderCandidateStores))]
 	}
 	return id
 }
