@@ -190,9 +190,11 @@ func SetStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 // SetNewStoreStats sets the raw statistics information for the store.
 func SetNewStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	return func(store *StoreInfo) {
-		// there is no clone in default store stats, we create new one to avoid to modify others.
-		store.storeStats = newStoreStats()
-		store.storeStats.rawStats = stats
+		// There is no clone in default store stats, we create new one to avoid to modify others.
+		// And range cluster doesn't need HMA.
+		store.storeStats = &storeStats{
+			rawStats: stats,
+		}
 	}
 }
 
