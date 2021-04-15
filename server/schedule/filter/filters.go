@@ -389,7 +389,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
 	case scatterRegionTarget:
-		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected}
+		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy}
 	}
 	for _, cf := range funcs {
 		if cf(opt, store) {
@@ -686,6 +686,8 @@ const (
 	EngineKey = "engine"
 	// EngineTiFlash is the tiflash value of the engine label.
 	EngineTiFlash = "tiflash"
+	// EngineTiKV indicates the tikv engine in metrics
+	EngineTiKV = "tikv"
 )
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
