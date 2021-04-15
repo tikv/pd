@@ -72,6 +72,15 @@ var (
 			Help:      "Status of the scheduling configurations.",
 		}, []string{"type"})
 
+	// StoreLimitGauge is used to record the current store limit.
+	StoreLimitGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "store_limit",
+			Help:      "Status of the store limit.",
+		}, []string{"store", "type"})
+
 	regionLabelLevelGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -152,6 +161,7 @@ func init() {
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)
+	prometheus.MustRegister(StoreLimitGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
 	prometheus.MustRegister(readByteHist)
 	prometheus.MustRegister(readKeyHist)

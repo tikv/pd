@@ -1122,9 +1122,6 @@ func RegionToHexMeta(meta *metapb.Region) HexRegionMeta {
 	if meta == nil {
 		return HexRegionMeta{}
 	}
-	meta = proto.Clone(meta).(*metapb.Region)
-	meta.StartKey = HexRegionKey(meta.StartKey)
-	meta.EndKey = HexRegionKey(meta.EndKey)
 	return HexRegionMeta{meta}
 }
 
@@ -1134,20 +1131,17 @@ type HexRegionMeta struct {
 }
 
 func (h HexRegionMeta) String() string {
-	return strings.TrimSpace(proto.CompactTextString(h.Region))
+	var meta = proto.Clone(h.Region).(*metapb.Region)
+	meta.StartKey = HexRegionKey(meta.StartKey)
+	meta.EndKey = HexRegionKey(meta.EndKey)
+	return strings.TrimSpace(proto.CompactTextString(meta))
 }
 
 // RegionsToHexMeta converts regions' meta keys to hex format. Used for formating
 // region in logs.
 func RegionsToHexMeta(regions []*metapb.Region) HexRegionsMeta {
 	hexRegionMetas := make([]*metapb.Region, len(regions))
-	for i, region := range regions {
-		meta := proto.Clone(region).(*metapb.Region)
-		meta.StartKey = HexRegionKey(meta.StartKey)
-		meta.EndKey = HexRegionKey(meta.EndKey)
-
-		hexRegionMetas[i] = meta
-	}
+	copy(hexRegionMetas, regions)
 	return hexRegionMetas
 }
 
@@ -1158,7 +1152,11 @@ type HexRegionsMeta []*metapb.Region
 func (h HexRegionsMeta) String() string {
 	var b strings.Builder
 	for _, r := range h {
-		b.WriteString(proto.CompactTextString(r))
+		meta := proto.Clone(r).(*metapb.Region)
+		meta.StartKey = HexRegionKey(meta.StartKey)
+		meta.EndKey = HexRegionKey(meta.EndKey)
+
+		b.WriteString(proto.CompactTextString(meta))
 	}
 	return strings.TrimSpace(b.String())
 }
