@@ -307,7 +307,7 @@ func (s *StoreInfo) regionScoreV2(delta int64, deviation int, lowSpaceRatio floa
 	R := float64(s.GetRegionSize() + delta)
 	var (
 		K, M float64 = 1, 256 // Experience value to control the weight of the available influence on score
-		F    float64 = 20     // Experience value to prevent some nodes from running out of disk space prematurely.
+		F    float64 = 50     // Experience value to prevent some nodes from running out of disk space prematurely.
 		B            = 1e7
 	)
 	F = math.Max(F, C*(1-lowSpaceRatio))
