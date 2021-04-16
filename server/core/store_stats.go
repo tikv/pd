@@ -49,6 +49,10 @@ func (ss *storeStats) updateRawStats(rawStats *pdpb.StoreStats) {
 	defer ss.mu.Unlock()
 	ss.rawStats = rawStats
 
+	if ss.avgAvailable == nil {
+		return
+	}
+
 	ss.avgAvailable.Add(float64(rawStats.GetAvailable()))
 	deviation := math.Abs(float64(rawStats.GetAvailable()) - ss.avgAvailable.Get())
 	ss.maxAvailableDeviation.Add(deviation)
@@ -143,6 +147,9 @@ func (ss *storeStats) GetApplyingSnapCount() uint32 {
 func (ss *storeStats) GetAvgAvailable() uint64 {
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
+	if ss.avgAvailable == nil {
+		return ss.rawStats.Available
+	}
 	return climp0(ss.avgAvailable.Get())
 }
 
@@ -150,6 +157,9 @@ func (ss *storeStats) GetAvgAvailable() uint64 {
 func (ss *storeStats) GetAvailableDeviation() uint64 {
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
+	if ss.avgMaxAvailableDeviation == nil {
+		return 0
+	}
 	return climp0(ss.avgMaxAvailableDeviation.Get())
 }
 
