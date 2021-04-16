@@ -191,7 +191,7 @@ func SetStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 func SetNewStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	return func(store *StoreInfo) {
 		// There is no clone in default store stats, we create new one to avoid to modify others.
-		// And range cluster doesn't need HMA.
+		// And range cluster cannot use HMA because the last value is not cached
 		store.storeStats = &storeStats{
 			rawStats: stats,
 		}
