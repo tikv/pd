@@ -1047,7 +1047,11 @@ func (c *RaftCluster) pickSimilarStore(src *metapb.Store) (store *core.StoreInfo
 	labels := src.GetLabels()
 	stores := c.GetStores()
 	locationLabels := c.GetReplicationConfig().LocationLabels
-	srcLocationLabels := make([]*metapb.StoreLabel, len(locationLabels)-1)
+	length := len(locationLabels) - 1
+	if length < 0 {
+		length = 0
+	}
+	srcLocationLabels := make([]*metapb.StoreLabel, length)
 
 	for i := 0; i < len(locationLabels)-1; i++ {
 		slice.AnyOf(labels, func(j int) bool {
