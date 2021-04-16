@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -392,20 +393,20 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 			r.ordinaryEngine.selectedPeer.Put(storeID, group)
 			scatterDistributionCounter.WithLabelValues(
 				fmt.Sprintf("%v", storeID),
-				fmt.Sprintf("%v", false),
+				strconv.FormatBool(false),
 				filter.EngineTiKV).Inc()
 		} else {
 			engine := store.GetLabelValue(filter.EngineKey)
 			r.specialEngines[engine].selectedPeer.Put(storeID, group)
 			scatterDistributionCounter.WithLabelValues(
 				fmt.Sprintf("%v", storeID),
-				fmt.Sprintf("%v", false),
+				strconv.FormatBool(false),
 				engine).Inc()
 		}
 	}
 	r.ordinaryEngine.selectedLeader.Put(leaderStoreID, group)
 	scatterDistributionCounter.WithLabelValues(
 		fmt.Sprintf("%v", leaderStoreID),
-		fmt.Sprintf("%v", true),
+		strconv.FormatBool(true),
 		filter.EngineTiKV).Inc()
 }
