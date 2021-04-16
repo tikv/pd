@@ -785,9 +785,7 @@ func (s *Server) GetConfig() *config.Config {
 
 // GetScheduleConfig gets the balance config information.
 func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
-	cfg := &config.ScheduleConfig{}
-	*cfg = *s.persistOptions.GetScheduleConfig()
-	return cfg
+	return s.persistOptions.GetScheduleConfig().Clone()
 }
 
 // SetScheduleConfig sets the balance config information.
@@ -815,9 +813,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 
 // GetReplicationConfig get the replication config.
 func (s *Server) GetReplicationConfig() *config.ReplicationConfig {
-	cfg := &config.ReplicationConfig{}
-	*cfg = *s.persistOptions.GetReplicationConfig()
-	return cfg
+	return s.persistOptions.GetReplicationConfig().Clone()
 }
 
 // SetReplicationConfig sets the replication config.
@@ -905,9 +901,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 
 // GetPDServerConfig gets the balance config information.
 func (s *Server) GetPDServerConfig() *config.PDServerConfig {
-	cfg := &config.PDServerConfig{}
-	*cfg = *s.persistOptions.GetPDServerConfig()
-	return cfg
+	return s.persistOptions.GetPDServerConfig().Clone()
 }
 
 // SetPDServerConfig sets the server config.
