@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -679,7 +680,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if c.regionStats != nil {
-		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
+		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
 
 	for _, writeItem := range writeItems {
@@ -1257,7 +1258,6 @@ func (c *RaftCluster) collectMetrics() {
 
 	c.coordinator.collectSchedulerMetrics()
 	c.coordinator.collectHotSpotMetrics()
-	c.coordinator.opController.CollectStoreLimitMetrics()
 	c.collectClusterMetrics()
 	c.collectHealthStatus()
 }
@@ -1339,14 +1339,14 @@ func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	c.Lock()
 	defer c.Unlock()
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.takeRegionStoresLocked(region), c.opt.GetLocationLabels())
+		c.labelLevelStats.Observe(region, c.getRegionStoresLocked(region), c.opt.GetLocationLabels())
 	}
 }
 
-func (c *RaftCluster) takeRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
+func (c *RaftCluster) getRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
 	for _, p := range region.GetPeers() {
-		if store := c.core.TakeStore(p.StoreId); store != nil {
+		if store := c.core.GetStore(p.StoreId); store != nil {
 			stores = append(stores, store)
 		}
 	}
@@ -1680,6 +1680,9 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	for i := 0; i < persistLimitRetryTimes; i++ {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
+			id := strconv.FormatUint(storeID, 10)
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
 			return
 		}
 		time.Sleep(persistLimitWaitTime)
