@@ -247,8 +247,12 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 			return err
 		}
 	}
-	// save into memory and make sure the ts won't fall back
-	t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: int64(nextLogical)}
+	// save into memory
+	if t.tsoMux.tso == nil {
+		t.tsoMux.tso = &tsoObject{}
+	}
+	t.tsoMux.tso.physical = nextPhysical
+	t.tsoMux.tso.logical = int64(nextLogical)
 	t.tsoMux.updateTime = time.Now()
 	tsoCounter.WithLabelValues("reset_tso_ok", t.dcLocation).Inc()
 	return nil
