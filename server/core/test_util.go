@@ -55,9 +55,10 @@ func MergeRegions(regions []*RegionInfo) []*RegionInfo {
 			right = regions[i+1]
 		}
 		region := &RegionInfo{meta: &metapb.Region{
-			Id:       left.GetID() + uint64(len(regions)),
+			Id:       left.GetID(),
 			StartKey: left.GetStartKey(),
 			EndKey:   right.GetEndKey(),
+			Peers:    left.meta.Peers,
 		}}
 		if left.GetRegionEpoch().GetVersion() > right.GetRegionEpoch().GetVersion() {
 			region.meta.RegionEpoch = left.GetRegionEpoch()
@@ -65,6 +66,7 @@ func MergeRegions(regions []*RegionInfo) []*RegionInfo {
 			region.meta.RegionEpoch = right.GetRegionEpoch()
 		}
 		region.meta.RegionEpoch.Version++
+		region.leader = left.leader
 		results = append(results, region)
 	}
 	return results
