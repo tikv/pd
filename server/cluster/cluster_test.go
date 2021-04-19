@@ -672,13 +672,14 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 
-	peers := []*metapb.Peer{{
+	peers := []*metapb.Peer{
+		{
 			Id:      4,
 			StoreId: 1,
-		},{
+		}, {
 			Id:      5,
 			StoreId: 2,
-		},{
+		}, {
 			Id:      6,
 			StoreId: 3,
 		},
