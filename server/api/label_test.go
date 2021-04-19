@@ -184,7 +184,6 @@ type testStrictlyLabelsStoreSuite struct {
 }
 
 func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
-	// TODO: enable placementrules
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.LocationLabels = []string{"zone", "disk"}
 		cfg.Replication.StrictlyMatchLabel = true
@@ -291,7 +290,11 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 				Version: t.store.Version,
 			},
 		})
-		c.Assert(err, IsNil)
+		if t.valid {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(strings.Contains(err.Error(), t.expectError), IsTrue)
+		}
 	}
 }
 
