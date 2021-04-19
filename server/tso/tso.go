@@ -216,7 +216,6 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 		return errs.ErrResetUserTimestamp.FastGenByArgs("lease expired")
 	}
 	nextPhysical, nextLogical := tsoutil.ParseTS(tso)
-	nextPhysical = nextPhysical.Add(UpdateTimestampGuard)
 	var err error
 	// do not update if next logical time is less/before than prev
 	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) == 0 && int64(nextLogical) <= t.tsoMux.tso.logical {
@@ -249,15 +248,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 		}
 	}
 	// save into memory and make sure the ts won't fall back
-	if t.tsoMux.tso == nil {
-		t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: int64(nextLogical)}
-	}
-	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) > 0 {
-		t.tsoMux.tso = &tsoObject{physical: nextPhysical}
-	}
-	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) == 0 && int64(nextLogical) > t.tsoMux.tso.logical {
-		t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: int64(nextLogical)}
-	}
+	t.tsoMux.tso = &tsoObject{physical: nextPhysical, logical: int64(nextLogical)}
 	t.tsoMux.updateTime = time.Now()
 	tsoCounter.WithLabelValues("reset_tso_ok", t.dcLocation).Inc()
 	return nil
