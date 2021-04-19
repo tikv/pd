@@ -986,9 +986,6 @@ func (c *RaftCluster) checkStoreVersion(store *metapb.Store) error {
 }
 
 func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
-	if c.opt.IsPlacementRulesEnabled() {
-		return nil
-	}
 	keysSet := make(map[string]struct{})
 	for _, k := range c.opt.GetLocationLabels() {
 		keysSet[k] = struct{}{}
