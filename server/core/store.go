@@ -247,12 +247,12 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 // store of balance, 1 when it is the target, and 0 in the rest of cases.
 func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64, deviation int) float64 {
 	switch version {
-	case "v2":
-		return s.regionScoreV2(delta, deviation, lowSpaceRatio)
 	case "v1":
+		return s.regionScoreV1(highSpaceRatio, lowSpaceRatio, delta)
+	case "v2":
 		fallthrough
 	default:
-		return s.regionScoreV1(highSpaceRatio, lowSpaceRatio, delta)
+		return s.regionScoreV2(delta, deviation, lowSpaceRatio)
 	}
 }
 
