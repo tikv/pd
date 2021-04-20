@@ -19,6 +19,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
@@ -36,10 +37,17 @@ func init() {
 	schedulePeerPr = 1.0
 }
 
+type testHotSchedulerSuite struct{}
+type testHotWriteRegionSchedulerSuite struct{}
+type testHotReadRegionSchedulerSuite struct{}
+type testHotCacheSuite struct{}
+type testInfluenceSerialSuite struct{}
+
 var _ = Suite(&testHotWriteRegionSchedulerSuite{})
 var _ = Suite(&testHotSchedulerSuite{})
-
-type testHotSchedulerSuite struct{}
+var _ = Suite(&testHotReadRegionSchedulerSuite{})
+var _ = Suite(&testHotCacheSuite{})
+var _ = SerialSuites(&testInfluenceSerialSuite{})
 
 func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -119,12 +127,66 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	}
 }
 
+func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+	tc := mockcluster.NewCluster(opt)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.AddRegionStore(4, 20)
+	tc.UpdateStorageWrittenStats(1, 99*MB*statistics.StoreHeartBeatReportInterval, 99*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 50*MB*statistics.StoreHeartBeatReportInterval, 98*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 2*MB*statistics.StoreHeartBeatReportInterval, 2*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 1*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	addRegionInfo(tc, write, []testRegionInfo{
+		{1, []uint64{2, 1, 3}, 0.5 * MB, 0.5 * MB},
+	})
+	// must move peer
+	failpoint.Enable("github.com/tikv/pd/server/schedulers/inject_write_op", "return(1)")
+	// must move peer from 1 to 4
+	op := hb.Schedule(tc)[0]
+	failpoint.Disable("github.com/tikv/pd/server/schedulers/inject_write_op")
+	c.Assert(op, NotNil)
+	hb.(*hotScheduler).summaryPendingInfluence()
+	writePendingInfluence := hb.(*hotScheduler).pendingSums[write]
+	c.Assert(nearlyAbout(writePendingInfluence[1].KeyRate, -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[1].ByteRate, -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[4].KeyRate, 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[4].KeyRate, 0.5*MB), IsTrue)
+
+	addRegionInfo(tc, write, []testRegionInfo{
+		{2, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{3, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{4, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+	})
+	// must transfer leader
+	failpoint.Enable("github.com/tikv/pd/server/schedulers/inject_write_op", "return(101)")
+	// must transfer leader from 1 to 3
+	op = hb.Schedule(tc)[0]
+	failpoint.Disable("github.com/tikv/pd/server/schedulers/inject_write_op")
+	c.Assert(op, NotNil)
+	hb.(*hotScheduler).summaryPendingInfluence()
+	writePendingInfluence = hb.(*hotScheduler).pendingSums[write]
+	// assert write influence is the sum of write peer and write leader
+	c.Assert(nearlyAbout(writePendingInfluence[1].KeyRate, -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[1].ByteRate, -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[3].KeyRate, 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[3].KeyRate, 0.7*MB), IsTrue)
+}
+
 func newTestRegion(id uint64) *core.RegionInfo {
 	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
 	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
 }
-
-type testHotWriteRegionSchedulerSuite struct{}
 
 func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -624,10 +686,6 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithRuleEnabled(c *C) {
 	}
 }
 
-var _ = Suite(&testHotReadRegionSchedulerSuite{})
-
-type testHotReadRegionSchedulerSuite struct{}
-
 func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -884,10 +942,6 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 		}
 	}
 }
-
-var _ = Suite(&testHotCacheSuite{})
-
-type testHotCacheSuite struct{}
 
 func (s *testHotCacheSuite) TestUpdateCache(c *C) {
 	opt := config.NewTestOptions()
@@ -1172,4 +1226,13 @@ func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
 			c.Check(item.IsNeedDelete(), IsFalse)
 		}
 	}
+}
+
+func nearlyAbout(f1, f2 float64) bool {
+	if f1-f2 < 0.1*KB {
+		return true
+	} else if f2-f1 < 0.1*KB {
+		return true
+	}
+	return false
 }
