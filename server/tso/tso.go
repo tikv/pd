@@ -43,8 +43,9 @@ const (
 	MaxSuffixBits = 4
 )
 
-// tsoObject is used to store the current TSO in memory.
+// tsoObject is used to store the current TSO in memory with a RWMutex lock.
 type tsoObject struct {
+	sync.RWMutex
 	physical time.Time
 	logical  int64
 }
@@ -58,10 +59,7 @@ type timestampOracle struct {
 	updatePhysicalInterval time.Duration
 	maxResetTSGap          func() time.Duration
 	// tso info stored in the memory
-	tsoMux struct {
-		sync.RWMutex
-		tsoObject
-	}
+	tsoMux *tsoObject
 	// last timestamp window stored in etcd
 	lastSavedTime atomic.Value // stored as time.Time
 	suffix        int
