@@ -215,6 +215,11 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			h.pendingSums[readLeader],
 			regionRead,
 			read, core.LeaderKind)
+		h.stLoadInfos[readPeer] = summaryStoresLoad(
+			storesLoads,
+			h.pendingSums[readPeer],
+			regionRead,
+			read, core.RegionKind)
 	}
 
 	{ // update write statistics
@@ -476,6 +481,8 @@ func (bs *balanceSolver) init() {
 		bs.stLoadDetail = bs.sche.stLoadInfos[writeLeader]
 	case readLeader:
 		bs.stLoadDetail = bs.sche.stLoadInfos[readLeader]
+	case readPeer:
+		bs.stLoadDetail = bs.sche.stLoadInfos[readPeer]
 	}
 	// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
 
@@ -1168,6 +1175,7 @@ const (
 	writePeer resourceType = iota
 	writeLeader
 	readLeader
+	readPeer
 	resourceTypeLen
 )
 
@@ -1181,7 +1189,12 @@ func toResourceType(rwTy rwType, opTy opType) resourceType {
 			return writeLeader
 		}
 	case read:
-		return readLeader
+		switch opTy {
+		case movePeer:
+			return readPeer
+		case transferLeader:
+			return readLeader
+		}
 	}
 	panic(fmt.Sprintf("invalid arguments for toResourceType: rwTy = %v, opTy = %v", rwTy, opTy))
 }
