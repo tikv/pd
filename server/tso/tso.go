@@ -198,10 +198,10 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 func (t *timestampOracle) isInitialized() bool {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	return t.tsoMux.physical == typeutil.ZeroTime
+	return t.tsoMux.physical != typeutil.ZeroTime
 }
 
-// resetUserTimestamp update the TSO in memory with specified TSO by an atomicly way.
+// resetUserTimestamp update the TSO in memory with specified TSO by an atomically way.
 func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, tso uint64, ignoreSmaller bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
