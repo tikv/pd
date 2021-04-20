@@ -43,10 +43,12 @@ const (
 	MaxSuffixBits = 4
 )
 
-// tsoObject is used to store the current TSO in memory.
+// tsoObject is used to store the current TSO in memory with a RWMutex lock.
 type tsoObject struct {
-	physical time.Time
-	logical  int64
+	sync.RWMutex
+	physical   time.Time
+	logical    int64
+	updateTime time.Time
 }
 
 // timestampOracle is used to maintain the logic of TSO.
@@ -58,11 +60,7 @@ type timestampOracle struct {
 	updatePhysicalInterval time.Duration
 	maxResetTSGap          func() time.Duration
 	// tso info stored in the memory
-	tsoMux struct {
-		sync.RWMutex
-		tso        *tsoObject
-		updateTime time.Time
-	}
+	tsoMux *tsoObject
 	// last timestamp window stored in etcd
 	lastSavedTime atomic.Value // stored as time.Time
 	suffix        int
@@ -73,8 +71,9 @@ func (t *timestampOracle) setTSOPhysical(next time.Time) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// make sure the ts won't fall back
-	if t.tsoMux.tso == nil || typeutil.SubTimeByWallClock(next, t.tsoMux.tso.physical) > 0 {
-		t.tsoMux.tso = &tsoObject{physical: next}
+	if typeutil.SubTimeByWallClock(next, t.tsoMux.physical) >= UpdateTimestampGuard {
+		t.tsoMux.physical = next
+		t.tsoMux.logical = 0
 		t.tsoMux.updateTime = time.Now()
 	}
 }
@@ -82,22 +81,22 @@ func (t *timestampOracle) setTSOPhysical(next time.Time) {
 func (t *timestampOracle) getTSO() (time.Time, int64) {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	if t.tsoMux.tso == nil {
+	if t.tsoMux.physical == typeutil.ZeroTime {
 		return typeutil.ZeroTime, 0
 	}
-	return t.tsoMux.tso.physical, t.tsoMux.tso.logical
+	return t.tsoMux.physical, t.tsoMux.logical
 }
 
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
 func (t *timestampOracle) generateTSO(count int64, suffixBits int) (physical int64, logical int64, lastUpdateTime time.Time) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if t.tsoMux.tso == nil {
-		return 0, 0, t.tsoMux.updateTime
+	if t.tsoMux.physical == typeutil.ZeroTime {
+		return 0, 0, typeutil.ZeroTime
 	}
-	physical = t.tsoMux.tso.physical.UnixNano() / int64(time.Millisecond)
-	t.tsoMux.tso.logical += count
-	logical = t.tsoMux.tso.logical
+	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
+	t.tsoMux.logical += count
+	logical = t.tsoMux.logical
 	if suffixBits > 0 && t.suffix >= 0 {
 		logical = t.differentiateLogical(logical, suffixBits)
 	}
@@ -204,10 +203,10 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 func (t *timestampOracle) isInitialized() bool {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	return t.tsoMux.tso != nil
+	return t.tsoMux.physical != typeutil.ZeroTime
 }
 
-// resetUserTimestamp update the TSO in memory with specified TSO by an atomicly way.
+// resetUserTimestamp update the TSO in memory with specified TSO by an atomically way.
 func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, tso uint64, ignoreSmaller bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
@@ -218,21 +217,21 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	nextPhysical, nextLogical := tsoutil.ParseTS(tso)
 	var err error
 	// do not update if next logical time is less/before than prev
-	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) == 0 && int64(nextLogical) <= t.tsoMux.tso.logical {
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.physical) == 0 && int64(nextLogical) <= t.tsoMux.logical {
 		tsoCounter.WithLabelValues("err_reset_small_counter", t.dcLocation).Inc()
 		if !ignoreSmaller {
 			err = errs.ErrResetUserTimestamp.FastGenByArgs("the specified counter is smaller than now")
 		}
 	}
 	// do not update if next physical time is less/before than prev
-	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) < 0 {
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.physical) < 0 {
 		tsoCounter.WithLabelValues("err_reset_small_ts", t.dcLocation).Inc()
 		if !ignoreSmaller {
 			err = errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is smaller than now")
 		}
 	}
 	// do not update if physical time is too greater than prev
-	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.tso.physical) >= t.maxResetTSGap() {
+	if typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.physical) >= t.maxResetTSGap() {
 		tsoCounter.WithLabelValues("err_reset_large_ts", t.dcLocation).Inc()
 		err = errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
 	}
@@ -248,11 +247,8 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 		}
 	}
 	// save into memory
-	if t.tsoMux.tso == nil {
-		t.tsoMux.tso = &tsoObject{}
-	}
-	t.tsoMux.tso.physical = nextPhysical
-	t.tsoMux.tso.logical = int64(nextLogical)
+	t.tsoMux.physical = nextPhysical
+	t.tsoMux.logical = int64(nextLogical)
 	t.tsoMux.updateTime = time.Now()
 	tsoCounter.WithLabelValues("reset_tso_ok", t.dcLocation).Inc()
 	return nil
@@ -377,6 +373,7 @@ func (t *timestampOracle) ResetTimestamp() {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	log.Info("reset the timestamp in memory")
-	t.tsoMux.tso = nil
-	t.tsoMux.updateTime = time.Now()
+	t.tsoMux.physical = typeutil.ZeroTime
+	t.tsoMux.logical = 0
+	t.tsoMux.updateTime = typeutil.ZeroTime
 }
