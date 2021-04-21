@@ -641,85 +641,29 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			// The newly added peer is pending.
 			return
 		}
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_AddNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Voter,
-				},
-			},
-		}
+		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.AddLightPeer:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_AddNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Voter,
-				},
-			},
-		}
+		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.AddLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Learner,
-				},
-			},
-		}
+		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Learner,
-				},
-			},
-		}
+		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.PromoteLearner:
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				// reuse AddNode type
-				ChangeType: eraftpb.ConfChangeType_AddNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Voter,
-				},
-			},
-		}
+		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.DemoteFollower:
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				// reuse AddLearnerNode type
-				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Learner,
-				},
-			},
-		}
+		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.RemovePeer:
 		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
@@ -756,6 +700,32 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		return
 	}
 	oc.hbStreams.SendMsg(region, cmd)
+}
+
+func addNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
+	return &pdpb.RegionHeartbeatResponse{
+		ChangePeer: &pdpb.ChangePeer{
+			ChangeType: eraftpb.ConfChangeType_AddNode,
+			Peer: &metapb.Peer{
+				Id:      id,
+				StoreId: storeID,
+				Role:    metapb.PeerRole_Voter,
+			},
+		},
+	}
+}
+
+func addLearnerNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
+	return &pdpb.RegionHeartbeatResponse{
+		ChangePeer: &pdpb.ChangePeer{
+			ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+			Peer: &metapb.Peer{
+				Id:      id,
+				StoreId: storeID,
+				Role:    metapb.PeerRole_Learner,
+			},
+		},
+	}
 }
 
 func (oc *OperatorController) pushHistory(op *operator.Operator) {

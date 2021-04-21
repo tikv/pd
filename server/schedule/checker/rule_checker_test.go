@@ -341,7 +341,7 @@ func (s *testRuleCheckerSuite) TestIssue2419(c *C) {
 // Ref https://github.com/tikv/pd/issues/3521
 // The problem is when offline a store, we may add learner multiple times if
 // the operator is timeout.
-func (s *testRuleCheckerSuite) TestIssue3521_PriorityFixOrphanPeer(c *C) {
+func (s *testRuleCheckerSuite) TestPriorityFixOrphanPeer(c *C) {
 	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
 	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
@@ -392,7 +392,7 @@ func (s *testRuleCheckerSuite) TestIssue3293(c *C) {
 		},
 	})
 	c.Assert(err, IsNil)
-	s.cluster.DeleteStore(s.cluster.TakeStore(5))
+	s.cluster.DeleteStore(s.cluster.GetStore(5))
 	err = s.ruleManager.SetRule(&placement.Rule{
 		GroupID: "TiDB_DDL_51",
 		ID:      "default",
