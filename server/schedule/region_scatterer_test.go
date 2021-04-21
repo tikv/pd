@@ -472,7 +472,7 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 				min = count
 			}
 		}
-		c.Assert(max-min, LessEqual, uint64(regionCount/10))
+		c.Assert(max-min, LessEqual, uint64(2))
 	}
 	check(scatterer.ordinaryEngine.selectedPeer)
 }
