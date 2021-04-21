@@ -4,6 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math"
+<<<<<<< HEAD
+=======
+	"math/rand"
+	"time"
+>>>>>>> 9e60f4d3... schedule: revise region_scatter distribution for multi groups  (#3422)
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -230,8 +235,58 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 	}
 }
 
+<<<<<<< HEAD
 func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 	opt := mockoption.NewScheduleOptions()
+=======
+func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	// Add 5 stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	testcases := []struct {
+		name        string
+		checkRegion *core.RegionInfo
+		needFix     bool
+	}{
+		{
+			name:        "region with 4 replicas",
+			checkRegion: tc.AddLeaderRegion(1, 1, 2, 3, 4),
+			needFix:     true,
+		},
+		{
+			name:        "region with 3 replicas",
+			checkRegion: tc.AddLeaderRegion(1, 1, 2, 3),
+			needFix:     false,
+		},
+		{
+			name:        "region with 2 replicas",
+			checkRegion: tc.AddLeaderRegion(1, 1, 2),
+			needFix:     true,
+		},
+	}
+	for _, testcase := range testcases {
+		c.Logf(testcase.name)
+		ctx, cancel := context.WithCancel(context.Background())
+		scatterer := NewRegionScatterer(ctx, tc)
+		_, err := scatterer.Scatter(testcase.checkRegion, "")
+		if testcase.needFix {
+			c.Assert(err, NotNil)
+			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, true)
+		} else {
+			c.Assert(err, IsNil)
+			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, false)
+		}
+		tc.ResetSuspectRegions()
+		cancel()
+	}
+}
+
+func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
+	opt := config.NewTestOptions()
+>>>>>>> 9e60f4d3... schedule: revise region_scatter distribution for multi groups  (#3422)
 	tc := mockcluster.NewCluster(opt)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -256,23 +311,20 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 		},
 	}
 
+	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
 	for _, testcase := range testcases {
 		c.Logf(testcase.name)
 		scatterer := NewRegionScatterer(tc)
 		regionID := 1
 		for i := 0; i < 100; i++ {
 			for j := 0; j < testcase.groupCount; j++ {
-				_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
+				scatterer.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
 					fmt.Sprintf("group-%v", j))
-				c.Assert(err, IsNil)
 				regionID++
 			}
-			// insert region with no group
-			_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3), "")
-			c.Assert(err, IsNil)
-			regionID++
 		}
 
+<<<<<<< HEAD
 		for i := 0; i < testcase.groupCount; i++ {
 			// comparing the leader distribution
 			group := fmt.Sprintf("group-%v", i)
@@ -284,12 +336,145 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 				}
 				if count < min {
 					min = count
+=======
+		checker := func(ss *selectedStores, expected uint64, delta float64) {
+			for i := 0; i < testcase.groupCount; i++ {
+				// comparing the leader distribution
+				group := fmt.Sprintf("group-%v", i)
+				max := uint64(0)
+				min := uint64(math.MaxUint64)
+				groupDistribution, _ := ss.groupDistribution.Get(group)
+				for _, count := range groupDistribution.(map[uint64]uint64) {
+					if count > max {
+						max = count
+					}
+					if count < min {
+						min = count
+					}
+>>>>>>> 9e60f4d3... schedule: revise region_scatter distribution for multi groups  (#3422)
 				}
+				c.Assert(math.Abs(float64(max)-float64(expected)), LessEqual, delta)
+				c.Assert(math.Abs(float64(min)-float64(expected)), LessEqual, delta)
 			}
+<<<<<<< HEAD
 			// 100 regions divided 5 stores, each store expected to have about 20 regions.
 			c.Assert(min, LessEqual, uint64(20))
 			c.Assert(max, GreaterEqual, uint64(20))
 			c.Assert(max-min, LessEqual, uint64(3))
+=======
+		}
+		// For leader, we expect each store have about 20 leader for each group
+		checker(scatterer.ordinaryEngine.selectedLeader, 20, 5)
+		// For peer, we expect each store have about 50 peers for each group
+		checker(scatterer.ordinaryEngine.selectedPeer, 50, 15)
+		cancel()
+	}
+}
+
+func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	// Add 5 stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	testcases := []struct {
+		name    string
+		failure bool
+	}{
+		{
+			name:    "have failure",
+			failure: true,
+		},
+		{
+			name:    "no failure",
+			failure: false,
+		},
+	}
+	group := "group"
+	for _, testcase := range testcases {
+		ctx, cancel := context.WithCancel(context.Background())
+		scatterer := NewRegionScatterer(ctx, tc)
+		regions := map[uint64]*core.RegionInfo{}
+		for i := 1; i <= 100; i++ {
+			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+		}
+		c.Log(testcase.name)
+		failures := map[uint64]error{}
+		if testcase.failure {
+			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`), IsNil)
+		}
+
+		scatterer.ScatterRegions(regions, failures, group, 3)
+		max := uint64(0)
+		min := uint64(math.MaxUint64)
+		groupDistribution, exist := scatterer.ordinaryEngine.selectedLeader.GetGroupDistribution(group)
+		c.Assert(exist, Equals, true)
+		for _, count := range groupDistribution {
+			if count > max {
+				max = count
+			}
+			if count < min {
+				min = count
+			}
+>>>>>>> 9e60f4d3... schedule: revise region_scatter distribution for multi groups  (#3422)
 		}
 	}
 }
+<<<<<<< HEAD
+=======
+
+func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
+	// use a shorter gcTTL and gcInterval during the test
+	gcInterval = time.Second
+	gcTTL = time.Second * 3
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stores := newSelectedStores(ctx)
+	stores.Put(1, "testgroup")
+	_, ok := stores.GetGroupDistribution("testgroup")
+	c.Assert(ok, Equals, true)
+	_, ok = stores.GetGroupDistribution("testgroup")
+	c.Assert(ok, Equals, true)
+	time.Sleep(gcTTL)
+	_, ok = stores.GetGroupDistribution("testgroup")
+	c.Assert(ok, Equals, false)
+	_, ok = stores.GetGroupDistribution("testgroup")
+	c.Assert(ok, Equals, false)
+}
+
+// TestRegionFromDifferentGroups test the multi regions. each region have its own group.
+// After scatter, the distribution for the whole cluster should be well.
+func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	// Add 6 stores.
+	storeCount := 6
+	for i := uint64(1); i <= uint64(storeCount); i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scatterer := NewRegionScatterer(ctx, tc)
+	regionCount := 50
+	for i := 1; i <= regionCount; i++ {
+		p := rand.Perm(storeCount)
+		scatterer.scatterRegion(tc.AddLeaderRegion(uint64(i), uint64(p[0])+1, uint64(p[1])+1, uint64(p[2])+1), fmt.Sprintf("t%d", i))
+	}
+	check := func(ss *selectedStores) {
+		max := uint64(0)
+		min := uint64(math.MaxUint64)
+		for i := uint64(1); i <= uint64(storeCount); i++ {
+			count := ss.totalCountByStore(i)
+			if count > max {
+				max = count
+			}
+			if count < min {
+				min = count
+			}
+		}
+		c.Assert(max-min, LessEqual, uint64(2))
+	}
+	check(scatterer.ordinaryEngine.selectedPeer)
+}
+>>>>>>> 9e60f4d3... schedule: revise region_scatter distribution for multi groups  (#3422)
