@@ -170,14 +170,15 @@ func (gta *GlobalTSOAllocator) preprocessLogical(maxTSO *pdpb.Timestamp, count u
 const (
 	dialTimeout = 3 * time.Second
 	rpcTimeout  = 3 * time.Second
+	// TODO: maybe make syncMaxRetryCount configurable
+	syncMaxRetryCount = 2
 )
 
 // SyncMaxTS is used to sync the MaxTS with the Local TSO Allocator leaders in the dcLocationMap. If the maxTSO is empty, it will collect
 // the max Local TSO and load it into maxTSO. If the maxTSO is not empty, it will set in-memory-TSO of the Local TSO Allocator leaders to
 // maxTSO if maxTSO is greater.
 func (gta *GlobalTSOAllocator) SyncMaxTS(ctx context.Context, dcLocationMap map[string]DCLocationInfo, maxTSO *pdpb.Timestamp) error {
-	maxRetryCount := 1
-	for i := 0; i < maxRetryCount; i++ {
+	for i := 0; i < syncMaxRetryCount; i++ {
 		// Collect all allocator leaders' client URLs
 		allocatorLeaders := make(map[string]*pdpb.Member)
 		for dcLocation := range dcLocationMap {
@@ -284,15 +285,13 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(ctx context.Context, dcLocationMap map[
 			}
 		}
 		if ok, unsyncedDCs := gta.checkSyncedDCs(dcLocationMap, syncedDCs); !ok {
-			// Only retry one time when synchronization is incomplete
-			if maxRetryCount == 1 {
-				log.Warn("unsynced dc-locations found, will retry", zap.Strings("synced-DCs", syncedDCs), zap.Strings("unsynced-DCs", unsyncedDCs))
-				maxRetryCount++
+			log.Info("unsynced dc-locations found, will retry", zap.Bool("in-collecting-phase", inCollectingPhase), zap.Strings("synced-DCs", syncedDCs), zap.Strings("unsynced-DCs", unsyncedDCs))
+			if i < syncMaxRetryCount-1 {
 				// To make sure we have the latest dc-location info
 				gta.allocatorManager.ClusterDCLocationChecker()
 				continue
 			}
-			return errs.ErrSyncMaxTS.FastGenByArgs(fmt.Sprintf("unsynced dc-locations found, synced dc-locations: %+v, unsynced dc-locations: %+v", syncedDCs, unsyncedDCs))
+			return errs.ErrSyncMaxTS.FastGenByArgs(fmt.Sprintf("unsynced dc-locations found, in-collecting-phase: %t, synced dc-locations: %+v, unsynced dc-locations: %+v", inCollectingPhase, syncedDCs, unsyncedDCs))
 		}
 	}
 	return nil

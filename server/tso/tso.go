@@ -14,6 +14,7 @@
 package tso
 
 import (
+	"fmt"
 	"path"
 	"sync"
 	"sync/atomic"
@@ -361,7 +362,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 		resp.SuffixBits = uint32(suffixBits)
 		return resp, nil
 	}
-	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
+	return resp, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("generate %s tso maximum number of retries exceeded", t.dcLocation))
 }
 
 // ResetTimestamp is used to reset the timestamp in memory.
