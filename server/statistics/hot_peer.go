@@ -88,9 +88,10 @@ type HotPeerStat struct {
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
 
-	needDelete             bool
-	isLeader               bool
-	isNew                  bool
+	needDelete bool
+	isLeader   bool
+	isNew      bool
+	//TODO: remove it when we send peer stat by store info
 	justTransferLeader     bool
 	interval               uint64
 	thresholds             [dimLen]float64
