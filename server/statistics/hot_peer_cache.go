@@ -29,7 +29,10 @@ const (
 	TopNN = 60
 	// HotThresholdRatio is used to calculate hot thresholds
 	HotThresholdRatio = 0.8
-	topNTTL           = 3 * RegionHeartBeatReportInterval * time.Second
+	// ReportInterval indicates the interval between each data reporting
+	// TODO: change into StoreHeartBeatReportInterval when we use store heartbeat to report data
+	ReportInterval = RegionHeartBeatReportInterval
+	topNTTL        = 3 * ReportInterval * time.Second
 
 	rollingWindowsSize = 5
 
@@ -68,6 +71,7 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 	}
 }
 
+// TODO: rename RegionStats as PeerStats
 // RegionStats returns hot items
 func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 	res := make(map[uint64][]*HotPeerStat)
@@ -113,90 +117,47 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	}
 }
 
-func (f *hotPeerCache) collectRegionMetrics(byteRate, keyRate float64, interval uint64) {
-	regionHeartbeatIntervalHist.Observe(float64(interval))
-	if interval == 0 {
-		return
-	}
-	if f.kind == ReadFlow {
-		readByteHist.Observe(byteRate)
-		readKeyHist.Observe(keyRate)
-	}
-	if f.kind == WriteFlow {
-		writeByteHist.Observe(byteRate)
-		writeKeyHist.Observe(keyRate)
-	}
+func (f *hotPeerCache) collectPeerMetrics(byteRate, keyRate float64, interval uint64) {
+	// TODO
 }
 
 // CheckRegionFlow checks the flow information of region.
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
-
-	bytes := float64(f.getRegionBytes(region))
-	keys := float64(f.getRegionKeys(region))
-
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-
-	byteRate := bytes / float64(interval)
-	keyRate := keys / float64(interval)
-
-	f.collectRegionMetrics(byteRate, keyRate, interval)
-	// old region is in the front and new region is in the back
-	// which ensures it will hit the cache if moving peer or transfer leader occurs with the same replica number
-
+	regionID := region.GetID()
+	storeIDs := f.getAllStoreIDs(region)
 	var peers []uint64
 	for _, peer := range region.GetPeers() {
 		peers = append(peers, peer.StoreId)
 	}
 
-	var tmpItem *HotPeerStat
-	storeIDs := f.getAllStoreIDs(region)
-	justTransferLeader := f.justTransferLeader(region)
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+
+	{
+		bytes := float64(f.getRegionBytes(region))
+		keys := float64(f.getRegionKeys(region))
+		byteRate := bytes / float64(interval)
+		keyRate := keys / float64(interval)
+		f.collectRegionMetrics(byteRate, keyRate, interval)
+	}
+
 	for _, storeID := range storeIDs {
-		isExpired := f.isRegionExpired(region, storeID) // transfer read leader or remove write peer
-		oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
-		if isExpired && oldItem != nil { // it may has been moved to other store, we save it to tmpItem
-			tmpItem = oldItem
+		peer := region.GetStorePeer(storeID)
+		var item *HotPeerStat
+		if peer != nil {
+			peerInfo := core.FromMetaPeer(peer).
+				SetReadKeys(region.GetKeysRead()).
+				SetReadBytes(region.GetBytesRead()).
+				SetWriteKeys(region.GetKeysWritten()).
+				SetWriteBytes(region.GetBytesWritten())
+			item = f.CheckPeerFlow(peerInfo, region, interval)
+		} else {
+			// Not in region anymore
+			item = f.getOldHotPeerStat(regionID, storeID)
+			item.needDelete = true
 		}
-
-		// This is used for the simulator and test. Ignore if report too fast.
-		if !isExpired && Denoising && interval < HotRegionReportMinInterval {
-			continue
-		}
-
-		thresholds := f.calcHotThresholds(storeID)
-
-		newItem := &HotPeerStat{
-			StoreID:            storeID,
-			RegionID:           region.GetID(),
-			Kind:               f.kind,
-			ByteRate:           byteRate,
-			KeyRate:            keyRate,
-			LastUpdateTime:     time.Now(),
-			needDelete:         isExpired,
-			isLeader:           region.GetLeader().GetStoreId() == storeID,
-			justTransferLeader: justTransferLeader,
-			interval:           interval,
-			peers:              peers,
-			thresholds:         thresholds,
-		}
-
-		if oldItem == nil {
-			if tmpItem != nil { // use the tmpItem cached from the store where this region was in before
-				oldItem = tmpItem
-			} else { // new item is new peer after adding replica
-				for _, storeID := range storeIDs {
-					oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
-					if oldItem != nil {
-						break
-					}
-				}
-			}
-		}
-
-		newItem = f.updateHotPeerStat(newItem, oldItem, bytes, keys, time.Duration(interval)*time.Second)
-		if newItem != nil {
-			ret = append(ret, newItem)
+		if item != nil {
+			ret = append(ret, item)
 		}
 	}
 
@@ -207,6 +168,57 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 		zap.Uint64s("peers", peers),
 	)
 	return ret
+}
+
+func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *HotPeerStat {
+	storeID := peer.GetStoreID()
+	bytes := float64(f.getPeerBytes(peer))
+	keys := float64(f.getPeerKeys(peer))
+	byteRate := bytes / float64(interval)
+	keyRate := keys / float64(interval)
+	f.collectPeerMetrics(byteRate, keyRate, interval)
+	var tmpItem *HotPeerStat
+	justTransferLeader := f.justTransferLeaderPeer(peer, region.GetID())
+	isExpired := f.isPeerExpired(peer, region) // transfer read leader or remove write peer
+	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
+	if isExpired && oldItem != nil { // it may has been moved to other store, we save it to tmpItem
+		tmpItem = oldItem
+	}
+	if !isExpired && Denoising && interval < HotRegionReportMinInterval {
+		return nil
+	}
+	thresholds := f.calcHotThresholds(storeID)
+	var peers []uint64
+	for _, peer := range region.GetPeers() {
+		peers = append(peers, peer.StoreId)
+	}
+	newItem := &HotPeerStat{
+		StoreID:            storeID,
+		RegionID:           region.GetID(),
+		Kind:               f.kind,
+		ByteRate:           byteRate,
+		KeyRate:            keyRate,
+		LastUpdateTime:     time.Now(),
+		needDelete:         isExpired,
+		isLeader:           region.GetLeader().GetStoreId() == storeID,
+		justTransferLeader: justTransferLeader,
+		interval:           interval,
+		peers:              peers,
+		thresholds:         thresholds,
+	}
+	if oldItem == nil {
+		if tmpItem != nil { // use the tmpItem cached from the store where this region was in before
+			oldItem = tmpItem
+		} else { // new item is new peer after adding replica
+			for _, storeID := range f.getAllStoreIDs(region) {
+				oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
+				if oldItem != nil {
+					break
+				}
+			}
+		}
+	}
+	return f.updateHotPeerStat(newItem, oldItem, bytes, keys, time.Duration(interval)*time.Second)
 }
 
 func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
@@ -231,22 +243,22 @@ func (f *hotPeerCache) CollectMetrics(typ string) {
 	}
 }
 
-func (f *hotPeerCache) getRegionBytes(region *core.RegionInfo) uint64 {
+func (f *hotPeerCache) getPeerBytes(peer *core.PeerInfo) uint64 {
 	switch f.kind {
 	case WriteFlow:
-		return region.GetBytesWritten()
+		return peer.GetWrittenBytes()
 	case ReadFlow:
-		return region.GetBytesRead()
+		return peer.GetReadBytes()
 	}
 	return 0
 }
 
-func (f *hotPeerCache) getRegionKeys(region *core.RegionInfo) uint64 {
+func (f *hotPeerCache) getPeerKeys(peer *core.PeerInfo) uint64 {
 	switch f.kind {
 	case WriteFlow:
-		return region.GetKeysWritten()
+		return peer.GetWrittenBytes()
 	case ReadFlow:
-		return region.GetKeysRead()
+		return peer.GetReadKeys()
 	}
 	return 0
 }
@@ -260,7 +272,8 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 	return nil
 }
 
-func (f *hotPeerCache) isRegionExpired(region *core.RegionInfo, storeID uint64) bool {
+func (f *hotPeerCache) isPeerExpired(peer *core.PeerInfo, region *core.RegionInfo) bool {
+	storeID := peer.GetStoreID()
 	switch f.kind {
 	case WriteFlow:
 		return region.GetStorePeer(storeID) == nil
@@ -286,33 +299,6 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) [dimLen]float64 {
 	return ret
 }
 
-// gets the storeIDs, including old region and new region
-func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
-	storeIDs := make(map[uint64]struct{})
-	ret := make([]uint64, 0, len(region.GetPeers()))
-	// old stores
-	ids, ok := f.storesOfRegion[region.GetID()]
-	if ok {
-		for storeID := range ids {
-			storeIDs[storeID] = struct{}{}
-			ret = append(ret, storeID)
-		}
-	}
-
-	// new stores
-	for _, peer := range region.GetPeers() {
-		// ReadFlow no need consider the followers.
-		if f.kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
-			continue
-		}
-		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
-			storeIDs[peer.GetStoreId()] = struct{}{}
-			ret = append(ret, peer.GetStoreId())
-		}
-	}
-
-	return ret
-}
 func (f *hotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool {
 	isOldPeer := func() bool {
 		for _, id := range oldItem.peers {
@@ -336,16 +322,17 @@ func (f *hotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool 
 	return isOldPeer() && noInCache()
 }
 
-func (f *hotPeerCache) justTransferLeader(region *core.RegionInfo) bool {
-	ids, ok := f.storesOfRegion[region.GetID()]
+func (f *hotPeerCache) justTransferLeaderPeer(peer *core.PeerInfo, regionID uint64) bool {
+	currStoreID := peer.GetStoreID()
+	ids, ok := f.storesOfRegion[regionID]
 	if ok {
 		for storeID := range ids {
-			oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
+			oldItem := f.getOldHotPeerStat(regionID, storeID)
 			if oldItem == nil {
 				continue
 			}
 			if oldItem.isLeader {
-				return oldItem.StoreID != region.GetLeader().GetStoreId()
+				return oldItem.StoreID != currStoreID
 			}
 		}
 	}
@@ -449,4 +436,71 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		newItem.clearLastAverage()
 	}
 	return newItem
+}
+
+// TODO: remove it in future
+func (f *hotPeerCache) getRegionBytes(region *core.RegionInfo) uint64 {
+	switch f.kind {
+	case WriteFlow:
+		return region.GetBytesWritten()
+	case ReadFlow:
+		return region.GetBytesRead()
+	}
+	return 0
+}
+
+// TODO: remove it in future
+func (f *hotPeerCache) getRegionKeys(region *core.RegionInfo) uint64 {
+	switch f.kind {
+	case WriteFlow:
+		return region.GetKeysWritten()
+	case ReadFlow:
+		return region.GetKeysRead()
+	}
+	return 0
+}
+
+// TODO: remove it in future
+// gets the storeIDs, including old region and new region
+func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
+	storeIDs := make(map[uint64]struct{})
+	ret := make([]uint64, 0, len(region.GetPeers()))
+	// old stores
+	ids, ok := f.storesOfRegion[region.GetID()]
+	if ok {
+		for storeID := range ids {
+			storeIDs[storeID] = struct{}{}
+			ret = append(ret, storeID)
+		}
+	}
+
+	// new stores
+	for _, peer := range region.GetPeers() {
+		// ReadFlow no need consider the followers.
+		if f.kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
+			continue
+		}
+		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
+			storeIDs[peer.GetStoreId()] = struct{}{}
+			ret = append(ret, peer.GetStoreId())
+		}
+	}
+
+	return ret
+}
+
+// TODO: remove it in future
+func (f *hotPeerCache) collectRegionMetrics(byteRate, keyRate float64, interval uint64) {
+	regionHeartbeatIntervalHist.Observe(float64(interval))
+	if interval == 0 {
+		return
+	}
+	if f.kind == ReadFlow {
+		readByteHist.Observe(byteRate)
+		readKeyHist.Observe(keyRate)
+	}
+	if f.kind == WriteFlow {
+		writeByteHist.Observe(byteRate)
+		writeKeyHist.Observe(keyRate)
+	}
 }

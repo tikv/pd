@@ -72,3 +72,75 @@ func CountInJointState(peers ...*metapb.Peer) int {
 	}
 	return count
 }
+
+// PeerInfo provides peer information
+type PeerInfo struct {
+	peerID       uint64
+	StoreID      uint64
+	writtenBytes uint64
+	writtenKeys  uint64
+	readBytes    uint64
+	readKeys     uint64
+}
+
+// GetWrittenKeys provides peer written keys
+func (p *PeerInfo) GetWrittenKeys() uint64 {
+	return p.writtenKeys
+}
+
+// GetWrittenBytes provides peer written bytes
+func (p *PeerInfo) GetWrittenBytes() uint64 {
+	return p.writtenBytes
+}
+
+// GetReadBytes provides peer read bytes
+func (p *PeerInfo) GetReadBytes() uint64 {
+	return p.readBytes
+}
+
+// GetReadKeys provides read keys
+func (p *PeerInfo) GetReadKeys() uint64 {
+	return p.readKeys
+}
+
+// GetStoreID provides located storeID
+func (p *PeerInfo) GetStoreID() uint64 {
+	return p.StoreID
+}
+
+// GetPeerID provides peer id
+func (p *PeerInfo) GetPeerID() uint64 {
+	return p.peerID
+}
+
+// FromMetaPeer provides PeerInfo from metapb.Peer
+func FromMetaPeer(peer *metapb.Peer) *PeerInfo {
+	return &PeerInfo{
+		peerID:  peer.GetId(),
+		StoreID: peer.GetStoreId(),
+	}
+}
+
+// SetReadBytes sets read bytes
+func (p *PeerInfo) SetReadBytes(b uint64) *PeerInfo {
+	p.readBytes = b
+	return p
+}
+
+// SetReadKeys sets read keys
+func (p *PeerInfo) SetReadKeys(k uint64) *PeerInfo {
+	p.readKeys = k
+	return p
+}
+
+// SetWriteBytes sets write bytes
+func (p *PeerInfo) SetWriteBytes(b uint64) *PeerInfo {
+	p.writtenBytes = b
+	return p
+}
+
+// SetWriteKeys sets write keys
+func (p *PeerInfo) SetWriteKeys(k uint64) *PeerInfo {
+	p.writtenKeys = k
+	return p
+}
