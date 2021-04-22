@@ -257,6 +257,8 @@ func (gta *GlobalTSOAllocator) precheckLogical(maxTSO *pdpb.Timestamp, suffixBit
 const (
 	dialTimeout = 3 * time.Second
 	rpcTimeout  = 3 * time.Second
+	// TODO: maybe make syncMaxRetryCount configurable
+	syncMaxRetryCount = 2
 )
 
 type syncResp struct {
@@ -275,8 +277,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 	maxTSO *pdpb.Timestamp,
 	skipCheck bool,
 ) error {
-	// Retry once when synchronization is incomplete
-	for i := 0; i < 2; i++ {
+	for i := 0; i < syncMaxRetryCount; i++ {
 		// Collect all allocator leaders' client URLs
 		allocatorLeaders := make(map[string]*pdpb.Member)
 		for dcLocation := range dcLocationMap {
@@ -380,18 +381,20 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 		}
 		// Check whether all dc-locations have been considered during the synchronization and retry once if any dc-location missed.
 		if ok, unsyncedDCs := gta.checkSyncedDCs(dcLocationMap, syncedDCs); !ok {
-			log.Warn("unsynced dc-locations found", zap.Strings("unsynced-DCs", unsyncedDCs), zap.Strings("synced-DCs", syncedDCs))
-			// To make sure we have the latest dc-location info
-			gta.allocatorManager.ClusterDCLocationChecker()
-			continue
+			log.Info("unsynced dc-locations found, will retry", zap.Bool("skip-check", skipCheck), zap.Strings("synced-DCs", syncedDCs), zap.Strings("unsynced-DCs", unsyncedDCs))
+			if i < syncMaxRetryCount-1 {
+				// To make sure we have the latest dc-location info
+				gta.allocatorManager.ClusterDCLocationChecker()
+				continue
+			}
+			return errs.ErrSyncMaxTS.FastGenByArgs(fmt.Sprintf("unsynced dc-locations found, skip-check: %t, synced dc-locations: %+v, unsynced dc-locations: %+v", skipCheck, syncedDCs, unsyncedDCs))
 		}
 		// Update the sync RTT to help estimate MaxTS later.
 		if maxTSORtt != 0 {
 			gta.setSyncRTT(maxTSORtt.Milliseconds())
 		}
-		return nil
 	}
-	return errs.ErrSyncMaxTS.FastGenByArgs("maximum number of retries exceeded")
+	return nil
 }
 
 func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string]DCLocationInfo, syncedDCs []string) (bool, []string) {
