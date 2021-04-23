@@ -95,7 +95,8 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
 type AllocatorManager struct {
-	mu struct {
+	enableLocalTSO bool
+	mu             struct {
 		sync.RWMutex
 		// There are two kinds of TSO Allocators:
 		//   1. Global TSO Allocator, as a global single point to allocate
@@ -128,18 +129,17 @@ type AllocatorManager struct {
 func NewAllocatorManager(
 	m *member.Member,
 	rootPath string,
-	saveInterval time.Duration,
-	updatePhysicalInterval time.Duration,
+	cfg *config.Config,
 	maxResetTSGap func() time.Duration,
-	sc *grpcutil.TLSConfig,
 ) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
+		enableLocalTSO:         cfg.EnableLocalTSO,
 		member:                 m,
 		rootPath:               rootPath,
-		saveInterval:           saveInterval,
-		updatePhysicalInterval: updatePhysicalInterval,
+		saveInterval:           cfg.TSOSaveInterval.Duration,
+		updatePhysicalInterval: cfg.TSOUpdatePhysicalInterval.Duration,
 		maxResetTSGap:          maxResetTSGap,
-		securityConfig:         sc,
+		securityConfig:         &cfg.Security.TLSConfig,
 	}
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	allocatorManager.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
@@ -533,24 +533,38 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
 // any new local allocator that needs to be set up.
 func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
+	// Local TSO related daemon goroutines only work when enableLocalTSO is true.
+	if am.enableLocalTSO {
+		go func() {
+			patrolTicker := time.NewTicker(patrolStep)
+			defer patrolTicker.Stop()
+			checkerTicker := time.NewTicker(PriorityCheck)
+			defer checkerTicker.Stop()
+
+			for {
+				select {
+				case <-patrolTicker.C:
+					am.allocatorPatroller(serverCtx)
+				case <-checkerTicker.C:
+					// ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
+					// we should run them concurrently to speed up the progress.
+					go am.ClusterDCLocationChecker()
+					go am.PriorityChecker()
+				case <-serverCtx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	// Common daemon goroutine.
 	tsTicker := time.NewTicker(am.updatePhysicalInterval)
 	defer tsTicker.Stop()
-	patrolTicker := time.NewTicker(patrolStep)
-	defer patrolTicker.Stop()
-	checkerTicker := time.NewTicker(PriorityCheck)
-	defer checkerTicker.Stop()
 
 	for {
 		select {
 		case <-tsTicker.C:
 			am.allocatorUpdater()
-		case <-patrolTicker.C:
-			am.allocatorPatroller(serverCtx)
-		case <-checkerTicker.C:
-			// ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
-			// we should run them concurrently to speed up the progress.
-			go am.ClusterDCLocationChecker()
-			go am.PriorityChecker()
 		case <-serverCtx.Done():
 			return
 		}

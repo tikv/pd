@@ -362,9 +362,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocator(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
-		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
-		s.GetTLSConfig())
+		s.member, s.rootPath, s.cfg,
+		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
 	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
 	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
