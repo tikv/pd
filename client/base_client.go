@@ -280,20 +280,23 @@ func (c *baseClient) updateMember() error {
 	for _, u := range c.urls {
 		ctx, cancel := context.WithTimeout(c.ctx, updateMemberTimeout)
 		members, err := c.getMembers(ctx, u)
-		if err != nil {
-			log.Warn("[pd] cannot update member", zap.String("address", u), errs.ZapError(err))
-		}
 		cancel()
-		if err := c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders()); err != nil {
-			return err
+
+		if err == nil && (members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0) {
+			err = errs.ErrClientGetLeader.FastGenByArgs("leader address don't exist")
 		}
-		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
+		if err != nil {
+			log.Info("[pd] cannot update member from this address", zap.String("address", u), errs.ZapError(err))
 			select {
 			case <-c.ctx.Done():
 				return errors.WithStack(err)
 			default:
 				continue
 			}
+		}
+
+		if err := c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders()); err != nil {
+			return err
 		}
 		c.updateURLs(members.GetMembers())
 		c.updateFollowers(members.GetMembers(), members.GetLeader())
@@ -303,6 +306,7 @@ func (c *baseClient) updateMember() error {
 		c.scheduleCheckTSODispatcher()
 		return nil
 	}
+	log.Warn("[pd] cannot update member", zap.Strings("urls", c.urls))
 	return errs.ErrClientGetLeader.FastGenByArgs(c.urls)
 }
 
