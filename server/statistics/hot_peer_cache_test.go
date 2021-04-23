@@ -287,6 +287,7 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 		for {
 			thresholds := cache.calcHotThresholds(storeID)
 			newItem := &HotPeerStat{
+				Kind:       cache.kind,
 				StoreID:    storeID,
 				RegionID:   i,
 				needDelete: false,
@@ -294,6 +295,7 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 				Loads:      make([]float64, DimLen),
 			}
 			newItem.Loads[RegionReadBytes] = byteRate
+			newItem.Loads[RegionReadKeys] = 0
 			oldItem = cache.getOldHotPeerStat(i, storeID)
 			if oldItem != nil && oldItem.rollingLoads[RegionReadBytes].isHot(thresholds[RegionReadBytes]) == true {
 				break
