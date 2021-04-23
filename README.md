@@ -1,7 +1,7 @@
 # PD
 
-[![TravisCI Build Status](https://travis-ci.org/tikv/pd.svg?branch=master)](https://travis-ci.org/tikv/pd)
-![GitHub release](https://img.shields.io/github/release/tikv/pd.svg)
+[![Build & Test Status](https://github.com/tikv/pd/actions/workflows/pd-tests.yaml/badge.svg?branch=master)](https://github.com/tikv/pd/actions/workflows/pd-tests.yaml)
+[![GitHub release](https://img.shields.io/github/release/tikv/pd.svg)](https://github.com/tikv/pd/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tikv/pd)](https://goreportcard.com/report/github.com/tikv/pd)
 [![codecov](https://codecov.io/gh/tikv/pd/branch/master/graph/badge.svg)](https://codecov.io/gh/tikv/pd)
 
