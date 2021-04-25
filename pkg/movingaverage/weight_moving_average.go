@@ -41,6 +41,7 @@ func NewWMA(sizes ...int) *WMA {
 // Add adds a data point.
 func (w *WMA) Add(n float64) {
 	w.score = w.score - w.sum + n*float64(w.size)
+	// to avoid reset
 	if w.count < w.size {
 		w.sum = w.sum + n
 	} else {
