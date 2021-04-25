@@ -280,14 +280,22 @@ func (c *baseClient) updateMember() error {
 	for _, u := range c.urls {
 		ctx, cancel := context.WithTimeout(c.ctx, updateMemberTimeout)
 		members, err := c.getMembers(ctx, u)
-		if err != nil {
-			log.Warn("[pd] cannot update member", zap.String("address", u), errs.ZapError(err))
-		}
 		cancel()
-		if err := c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders()); err != nil {
-			return err
+
+		var errTSO error
+		if err == nil {
+			if members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
+				err = errs.ErrClientGetLeader.FastGenByArgs("leader address don't exist")
+			}
+			// Still need to update TsoAllocatorLeaders, even if there is no PD leader
+			errTSO = c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders())
 		}
-		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
+
+		// Failed to get PD leader
+		if err != nil {
+			log.Info("[pd] cannot update member from this address",
+				zap.String("address", u),
+				errs.ZapError(err))
 			select {
 			case <-c.ctx.Done():
 				return errors.WithStack(err)
@@ -295,13 +303,17 @@ func (c *baseClient) updateMember() error {
 				continue
 			}
 		}
+
 		c.updateURLs(members.GetMembers())
 		c.updateFollowers(members.GetMembers(), members.GetLeader())
 		if err := c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
 			return err
 		}
 		c.scheduleCheckTSODispatcher()
-		return nil
+
+		// If `switchLeader` succeeds but `switchTSOAllocatorLeader` has an error,
+		// the error of `switchTSOAllocatorLeader` will be returned.
+		return errTSO
 	}
 	return errs.ErrClientGetLeader.FastGenByArgs(c.urls)
 }
@@ -343,13 +355,14 @@ func (c *baseClient) switchLeader(addrs []string) error {
 		return nil
 	}
 
-	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
 	if _, err := c.getOrCreateGRPCConn(addr); err != nil {
+		log.Warn("[pd] failed to connect leader", zap.String("leader", addr), errs.ZapError(err))
 		return err
 	}
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
 	c.allocators.Store(globalDCLocation, addr)
+	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
 	return nil
 }
 
@@ -379,14 +392,18 @@ func (c *baseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Memb
 		if exist && addr == oldAddr {
 			continue
 		}
+		if _, err := c.getOrCreateGRPCConn(addr); err != nil {
+			log.Warn("[pd] failed to connect dc tso allocator leader",
+				zap.String("dc-location", dcLocation),
+				zap.String("leader", addr),
+				errs.ZapError(err))
+			return err
+		}
+		c.allocators.Store(dcLocation, addr)
 		log.Info("[pd] switch dc tso allocator leader",
 			zap.String("dc-location", dcLocation),
 			zap.String("new-leader", addr),
 			zap.String("old-leader", oldAddr))
-		if _, err := c.getOrCreateGRPCConn(addr); err != nil {
-			return err
-		}
-		c.allocators.Store(dcLocation, addr)
 	}
 	// Garbage collection of the old TSO allocator leaders
 	c.gcAllocatorLeaderAddr(allocatorMap)
