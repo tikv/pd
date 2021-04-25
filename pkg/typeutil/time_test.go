@@ -42,11 +42,19 @@ func (s *testTimeSuite) TestSubTimeByWallClock(c *C) {
 	for i := 0; i < 3; i++ {
 		r := rand.Int63n(1000)
 		t1 := time.Now()
+		// Add r seconds.
 		t2 := t1.Add(time.Second * time.Duration(r))
 		duration := SubRealTimeByWallClock(t2, t1)
 		c.Assert(duration, Equals, time.Second*time.Duration(r))
+		// Add r millionseconds.
 		t3 := t1.Add(time.Millisecond * time.Duration(r))
 		milliseconds := SubTSOPhysicalByWallClock(t3, t1)
 		c.Assert(milliseconds, Equals, r)
+		// Add r nanoseconds.
+		t4 := t1.Add(time.Duration(-r))
+		duration = SubRealTimeByWallClock(t4, t1)
+		c.Assert(duration, Equals, time.Duration(-r))
+		milliseconds = SubTSOPhysicalByWallClock(t4, t1)
+		c.Assert(milliseconds, Equals, int64(0))
 	}
 }
