@@ -60,25 +60,8 @@ func (s *testTSOSuite) TestLoadTimestamp(c *C) {
 	c.Assert(err, IsNil)
 
 	cluster.WaitAllLeaders(c, dcLocationConfig)
-	leaderServer := cluster.GetServer(cluster.GetLeader())
 
-	dcClientMap := make(map[string]pdpb.PDClient)
-	lastTSMap := make(map[string]*pdpb.Timestamp)
-	for _, dcLocation := range dcLocationConfig {
-		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
-	}
-	for _, dcLocation := range dcLocationConfig {
-		req := &pdpb.TsoRequest{
-			Header:     testutil.NewRequestHeader(leaderServer.GetClusterID()),
-			Count:      tsoCount,
-			DcLocation: dcLocation,
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
-		lastTSMap[dcLocation] = testGetLocalTimestamp(c, ctx, dcClientMap[dcLocation], req)
-		cancel()
-	}
+	lastTSMap := requestLocalTSOs(c, cluster, dcLocationConfig)
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/systemTimeSlow", `return(true)`), IsNil)
 
@@ -89,9 +72,23 @@ func (s *testTSOSuite) TestLoadTimestamp(c *C) {
 	c.Assert(err, IsNil)
 
 	cluster.WaitAllLeaders(c, dcLocationConfig)
-	leaderServer = cluster.GetServer(cluster.GetLeader())
 
-	// Re-create the PD client map.
+	// Re-request the Local TSOs.
+	newTSMap := requestLocalTSOs(c, cluster, dcLocationConfig)
+	for dcLocation, newTS := range newTSMap {
+		lastTS, ok := lastTSMap[dcLocation]
+		c.Assert(ok, IsTrue)
+		// The new physical time of TSO should be larger even if the system time is slow.
+		c.Assert(newTS.GetPhysical()-lastTS.GetPhysical(), Greater, int64(0))
+	}
+
+	failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow")
+}
+
+func requestLocalTSOs(c *C, cluster *tests.TestCluster, dcLocationConfig map[string]string) map[string]*pdpb.Timestamp {
+	dcClientMap := make(map[string]pdpb.PDClient)
+	tsMap := make(map[string]*pdpb.Timestamp)
+	leaderServer := cluster.GetServer(cluster.GetLeader())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
 		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
@@ -104,14 +101,8 @@ func (s *testTSOSuite) TestLoadTimestamp(c *C) {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
-		lastTS, ok := lastTSMap[dcLocation]
-		c.Assert(ok, IsTrue)
-		ts := testGetLocalTimestamp(c, ctx, dcClientMap[dcLocation], req)
+		tsMap[dcLocation] = testGetLocalTimestamp(c, ctx, dcClientMap[dcLocation], req)
 		cancel()
-
-		// The new physical time of TSO is at least as large as the previous DefaultTSOSaveInterval time interval
-		c.Assert(ts.GetPhysical()-lastTS.GetPhysical(), Greater, config.DefaultTSOSaveInterval.Milliseconds())
 	}
-
-	failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow")
+	return tsMap
 }
