@@ -1077,15 +1077,15 @@ func (am *AllocatorManager) getDCLocationInfoFromLeader(ctx context.Context, dcL
 func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp, error) {
 	// Sync the max local TSO from the other Local TSO Allocators who has been initialized
 	clusterDCLocations := am.GetClusterDCLocations()
-	maxTSO := &pdpb.Timestamp{}
-	if len(clusterDCLocations) == 0 {
-		return maxTSO, nil
-	}
 	for dcLocation := range clusterDCLocations {
 		allocatorGroup, ok := am.getAllocatorGroup(dcLocation)
 		if !(ok && allocatorGroup.leadership.Check()) {
 			delete(clusterDCLocations, dcLocation)
 		}
+	}
+	maxTSO := &pdpb.Timestamp{}
+	if len(clusterDCLocations) == 0 {
+		return maxTSO, nil
 	}
 	globalAllocator, err := am.GetAllocator(GlobalDCLocation)
 	if err != nil {
