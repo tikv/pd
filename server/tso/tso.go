@@ -87,6 +87,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time) {
 	// make sure the ts won't fall back
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 	if t.tsoMux.tso == nil || typeutil.SubTimeByWallClock(next, t.tsoMux.tso.physical) > 0 {
 		t.tsoMux.tso = &tsoObject{physical: next}
 =======
@@ -94,6 +95,9 @@ func (t *timestampOracle) setTSOPhysical(next time.Time) {
 =======
 	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) >= 0 {
 >>>>>>> Distinguish between two different time calculation functions
+=======
+	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
+>>>>>>> Fix the bug of setTSOPhysical
 		t.tsoMux.physical = next
 		t.tsoMux.logical = 0
 >>>>>>> Fix the TSO fallback caused by resetUserTimestamp
