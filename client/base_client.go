@@ -284,8 +284,19 @@ func (c *baseClient) updateMember() error {
 			log.Warn("[pd] cannot update member", zap.String("address", u), errs.ZapError(err))
 		}
 		cancel()
+<<<<<<< HEAD
 		if err := c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders()); err != nil {
 			return err
+=======
+
+		var errTSO error
+		if err == nil {
+			if members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
+				err = errs.ErrClientGetLeader.FastGenByArgs("leader address don't exist")
+			}
+			// Still need to update TsoAllocatorLeaders, even if there is no PD leader
+			errTSO = c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders())
+>>>>>>> client: fix comment typo
 		}
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			select {
