@@ -287,7 +287,7 @@ func (c *baseClient) updateMember() error {
 			if members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 				err = errs.ErrClientGetLeader.FastGenByArgs("leader address don't exist")
 			}
-			// Still need to update TsoAllocatorLeadersEven, even if there is no PD leader
+			// Still need to update TsoAllocatorLeaders, even if there is no PD leader
 			errTSO = c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders())
 		}
 
