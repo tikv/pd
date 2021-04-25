@@ -392,7 +392,7 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 			}
 			continue
 		}
-		if !ok || dcLocationInfo.Suffix <= 0 {
+		if !ok || dcLocationInfo.Suffix <= 0 || dcLocationInfo.MaxTs == nil {
 			log.Warn("pd leader is not aware of dc-location during allocatorLeaderLoop, wait next round",
 				zap.String("dc-location", allocator.GetDCLocation()),
 				zap.Any("dc-location-info", dcLocationInfo),
@@ -551,7 +551,7 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 		select {
 		case <-tsTicker.C:
 			am.allocatorUpdater()
-		case <-tsTicker.C:
+		case <-patrolTicker.C:
 			am.allocatorPatroller(serverCtx)
 		case <-checkerTicker.C:
 			// ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
@@ -1075,21 +1075,24 @@ func (am *AllocatorManager) getDCLocationInfoFromLeader(ctx context.Context, dcL
 // GetMaxLocalTSO will sync with the current Local TSO Allocators among the cluster to get the
 // max Local TSO.
 func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp, error) {
-	globalAllocator, err := am.GetAllocator(GlobalDCLocation)
-	if err != nil {
-		return &pdpb.Timestamp{}, err
-	}
 	// Sync the max local TSO from the other Local TSO Allocators who has been initialized
 	clusterDCLocations := am.GetClusterDCLocations()
+	maxTSO := &pdpb.Timestamp{}
+	if len(clusterDCLocations) == 0 {
+		return maxTSO, nil
+	}
 	for dcLocation := range clusterDCLocations {
 		allocatorGroup, ok := am.getAllocatorGroup(dcLocation)
 		if !(ok && allocatorGroup.leadership.Check()) {
 			delete(clusterDCLocations, dcLocation)
 		}
 	}
-	maxTSO := &pdpb.Timestamp{}
+	globalAllocator, err := am.GetAllocator(GlobalDCLocation)
+	if err != nil {
+		return nil, err
+	}
 	if err := globalAllocator.(*GlobalTSOAllocator).SyncMaxTS(ctx, clusterDCLocations, maxTSO); err != nil {
-		return &pdpb.Timestamp{}, err
+		return nil, err
 	}
 	return maxTSO, nil
 }
