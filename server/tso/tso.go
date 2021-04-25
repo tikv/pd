@@ -75,7 +75,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// make sure the ts won't fall back
-	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) >= 0 {
+	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
 		t.tsoMux.physical = next
 		t.tsoMux.logical = 0
 	}
