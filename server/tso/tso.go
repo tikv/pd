@@ -74,7 +74,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// make sure the ts won't fall back
-	if typeutil.SubTimeByWallClock(next, t.tsoMux.physical).Milliseconds() >= 0 {
+	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) >= 0 {
 		t.tsoMux.physical = next
 		t.tsoMux.logical = 0
 	}
@@ -176,7 +176,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	})
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
-	if typeutil.SubTimeByWallClock(next, last) < updateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(next, last) < updateTimestampGuard {
 		log.Error("system time may be incorrect", zap.Time("last", last), zap.Time("next", next), errs.ZapError(errs.ErrIncorrectSystemTime))
 		next = last.Add(updateTimestampGuard)
 	}
@@ -217,7 +217,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	var (
 		nextPhysical, nextLogical = tsoutil.ParseTS(tso)
 		logicalDifference         = int64(nextLogical) - t.tsoMux.logical
-		physicalDifference        = typeutil.SubTimeByWallClock(nextPhysical, t.tsoMux.physical).Milliseconds()
+		physicalDifference        = typeutil.SubTSOPhysicalByWallClock(nextPhysical, t.tsoMux.physical)
 	)
 	// do not update if next physical time is less/before than prev
 	if physicalDifference < 0 {
@@ -241,7 +241,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
 	}
 	// save into etcd only if nextPhysical is close to lastSavedTime
-	if typeutil.SubTimeByWallClock(t.lastSavedTime.Load().(time.Time), nextPhysical) <= updateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(t.lastSavedTime.Load().(time.Time), nextPhysical) <= updateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		if err := t.saveTimestamp(leadership, save); err != nil {
 			tsoCounter.WithLabelValues("err_save_reset_ts", t.dcLocation).Inc()
@@ -280,7 +280,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 
 	tsoCounter.WithLabelValues("save", t.dcLocation).Inc()
 
-	jetLag := typeutil.SubTimeByWallClock(now, prevPhysical)
+	jetLag := typeutil.SubRealTimeByWallClock(now, prevPhysical)
 	if jetLag > 3*t.updatePhysicalInterval {
 		log.Warn("clock offset", zap.Duration("jet-lag", jetLag), zap.Time("prev-physical", prevPhysical), zap.Time("now", now), zap.Duration("update-physical-interval", t.updatePhysicalInterval))
 		tsoCounter.WithLabelValues("slow_save", t.dcLocation).Inc()
@@ -307,7 +307,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 
 	// It is not safe to increase the physical time to `next`.
 	// The time window needs to be updated and saved to etcd.
-	if typeutil.SubTimeByWallClock(t.lastSavedTime.Load().(time.Time), next) <= updateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(t.lastSavedTime.Load().(time.Time), next) <= updateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		if err := t.saveTimestamp(leadership, save); err != nil {
 			tsoCounter.WithLabelValues("err_save_update_ts", t.dcLocation).Inc()

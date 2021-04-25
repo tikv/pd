@@ -40,10 +40,13 @@ func (s *testTimeSuite) TestParseTimestamp(c *C) {
 
 func (s *testTimeSuite) TestSubTimeByWallClock(c *C) {
 	for i := 0; i < 3; i++ {
-		r := rand.Int31n(1000)
+		r := rand.Int63n(1000)
 		t1 := time.Now()
 		t2 := t1.Add(time.Second * time.Duration(r))
-		duration := SubTimeByWallClock(t2, t1)
+		duration := SubRealTimeByWallClock(t2, t1)
 		c.Assert(duration, Equals, time.Second*time.Duration(r))
+		t3 := t1.Add(time.Millisecond * time.Duration(r))
+		milliseconds := SubTSOPhysicalByWallClock(t3, t1)
+		c.Assert(milliseconds, Equals, r)
 	}
 }
