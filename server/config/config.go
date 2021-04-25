@@ -245,6 +245,9 @@ const (
 	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
+
+	// DefaultTSOSaveInterval is the default value of the config `TSOSaveInterval`.
+	DefaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 )
 
 // Special keys for Labels
@@ -526,7 +529,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
-	adjustDuration(&c.TSOSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
+	adjustDuration(&c.TSOSaveInterval, DefaultTSOSaveInterval)
 
 	adjustDuration(&c.TSOUpdatePhysicalInterval, DefaultTSOUpdatePhysicalInterval)
 

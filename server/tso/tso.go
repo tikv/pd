@@ -16,6 +16,7 @@ package tso
 import (
 	"fmt"
 	"path"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -122,15 +123,33 @@ func (t *timestampOracle) getTimestampPath() string {
 	return path.Join(t.rootPath, timestampKey)
 }
 
+// loadTimestamp will get all time windows of Local/Global TSOs from etcd and return the biggest one.
+// For the Global TSO, loadTimestamp will get all Local and Global TSO time windows persisted in etcd and choose the biggest one.
+// For the Local TSO, loadTimestamp will only get its own dc-location time window persisted before.
 func (t *timestampOracle) loadTimestamp() (time.Time, error) {
-	data, err := etcdutil.GetValue(t.client, t.getTimestampPath())
+	resp, err := etcdutil.EtcdKVGet(
+		t.client,
+		t.rootPath,
+		clientv3.WithPrefix())
 	if err != nil {
 		return typeutil.ZeroTime, err
 	}
-	if len(data) == 0 {
-		return typeutil.ZeroTime, nil
+	maxTSWindow := typeutil.ZeroTime
+	for _, kv := range resp.Kvs {
+		key := strings.TrimSpace(string(kv.Key))
+		if !strings.HasSuffix(key, timestampKey) {
+			continue
+		}
+		tsWindow, err := typeutil.ParseTimestamp(kv.Value)
+		if err != nil {
+			log.Error("parse timestamp window that from etcd failed", zap.String("dc-location", t.dcLocation), zap.String("ts-window-key", key), zap.Time("max-ts-window", maxTSWindow), zap.Error(err))
+			continue
+		}
+		if typeutil.SubTimeByWallClock(tsWindow, maxTSWindow) > 0 {
+			maxTSWindow = tsWindow
+		}
 	}
-	return typeutil.ParseTimestamp(data)
+	return maxTSWindow, nil
 }
 
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
