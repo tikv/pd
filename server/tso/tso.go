@@ -34,7 +34,7 @@ import (
 
 const (
 	timestampKey = "timestamp"
-	// updateTimestampGuard is the min physical timestamp interval.
+	// updateTimestampGuard is the min physical timestamp updating interval for the TSO.
 	updateTimestampGuard = time.Millisecond
 	// maxLogical is the max upper limit for logical time.
 	// When a TSO's logical time reaches this limit,
@@ -48,8 +48,9 @@ const (
 type tsoObject struct {
 	sync.RWMutex
 	// time.Time has a minimum unit of nanoseconds,
-	// however the minimum unit of the physical part of TSO is milliseconds,
-	// so you MUST use updateTimestampGuard or millisecond as the minimum unit when comparing the Duration.
+	// however the minimum unit of the physical part of TSO is one millisecond, a.k.a 1ms,
+	// so you MUST use millisecond as the minimum unit when comparing two TSOs' physical times,
+	// and `typeutil.SubTSOPhysicalByWallClock` is used to do this SPECIFICALLY.
 	physical time.Time
 	logical  int64
 }
