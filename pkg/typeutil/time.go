@@ -37,5 +37,5 @@ func SubRealTimeByWallClock(after time.Time, before time.Time) time.Duration {
 
 // SubTSOPhysicalByWallClock returns the duration between two different TSOs' physical times with millisecond precision.
 func SubTSOPhysicalByWallClock(after time.Time, before time.Time) int64 {
-	return time.Duration(after.UnixNano() - before.UnixNano()).Milliseconds()
+	return SubRealTimeByWallClock(after, before).Milliseconds()
 }
