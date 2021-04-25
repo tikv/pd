@@ -534,11 +534,10 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 // any new local allocator that needs to be set up.
 func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	var (
-		tsTicker      = &time.Ticker{}
+		tsTicker      = time.NewTicker(am.updatePhysicalInterval)
 		patrolTicker  = &time.Ticker{}
 		checkerTicker = &time.Ticker{}
 	)
-	tsTicker = time.NewTicker(am.updatePhysicalInterval)
 	defer tsTicker.Stop()
 	// Local TSO related daemon goroutines only work when enableLocalTSO is true.
 	if am.enableLocalTSO {
@@ -552,7 +551,7 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 		select {
 		case <-tsTicker.C:
 			am.allocatorUpdater()
-		case <-patrolTicker.C:
+		case <-tsTicker.C:
 			am.allocatorPatroller(serverCtx)
 		case <-checkerTicker.C:
 			// ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
