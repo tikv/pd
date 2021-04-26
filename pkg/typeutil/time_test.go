@@ -56,7 +56,7 @@ func (s *testTimeSuite) TestSubTimeByWallClock(c *C) {
 		t4 := t1.Add(time.Duration(-r))
 		duration = SubRealTimeByWallClock(t4, t1)
 		c.Assert(duration, Equals, time.Duration(-r))
-		// For the millisecond comparsion, please see TestSmallTimeDifference.
+		// For the millisecond comparison, please see TestSmallTimeDifference.
 	}
 }
 
