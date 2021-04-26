@@ -46,7 +46,7 @@ type metaPeer struct {
 	RoleName string `json:"role_name"`
 	// IsLearner is `Role == "Learner"`.
 	// Since IsLearner was changed to Role in kvproto in 5.0, this field was introduced to ensure api compatibility.
-	IsLearner bool `json:"is_learner"`
+	IsLearner bool `json:"is_learner,omitempty"`
 }
 
 // pdPeerStats is api compatible with *pdpb.PeerStats.

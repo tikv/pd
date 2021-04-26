@@ -31,6 +31,54 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
+var _ = Suite(&testRegionStructSuite{})
+
+type testRegionStructSuite struct{}
+
+func (s *testRegionStructSuite) TestPeer(c *C) {
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 10, Role: metapb.PeerRole_Voter},
+		{Id: 2, StoreId: 20, Role: metapb.PeerRole_Learner},
+		{Id: 3, StoreId: 30, Role: metapb.PeerRole_IncomingVoter},
+		{Id: 4, StoreId: 40, Role: metapb.PeerRole_DemotingVoter},
+	}
+	// float64 is the default numeric type for JSON
+	expected := []map[string]interface{}{
+		{"id": float64(1), "store_id": float64(10), "role_name": "Voter"},
+		{"id": float64(2), "store_id": float64(20), "role": float64(1), "role_name": "Learner", "is_learner": true},
+		{"id": float64(3), "store_id": float64(30), "role": float64(2), "role_name": "IncomingVoter"},
+		{"id": float64(4), "store_id": float64(40), "role": float64(3), "role_name": "DemotingVoter"},
+	}
+
+	data, err := json.Marshal(fromPeerSlice(peers))
+	c.Assert(err, IsNil)
+	var ret []map[string]interface{}
+	err = json.Unmarshal(data, &ret)
+	c.Assert(ret, DeepEquals, expected)
+}
+
+func (s *testRegionStructSuite) TestPeerStats(c *C) {
+	peers := []*pdpb.PeerStats{
+		{Peer: &metapb.Peer{Id: 1, StoreId: 10, Role: metapb.PeerRole_Voter}, DownSeconds: 0},
+		{Peer: &metapb.Peer{Id: 2, StoreId: 20, Role: metapb.PeerRole_Learner}, DownSeconds: 1},
+		{Peer: &metapb.Peer{Id: 3, StoreId: 30, Role: metapb.PeerRole_IncomingVoter}, DownSeconds: 2},
+		{Peer: &metapb.Peer{Id: 4, StoreId: 40, Role: metapb.PeerRole_DemotingVoter}, DownSeconds: 3},
+	}
+	// float64 is the default numeric type for JSON
+	expected := []map[string]interface{}{
+		{"peer": map[string]interface{}{"id": float64(1), "store_id": float64(10), "role_name": "Voter"}},
+		{"peer": map[string]interface{}{"id": float64(2), "store_id": float64(20), "role": float64(1), "role_name": "Learner", "is_learner": true}, "down_seconds": float64(1)},
+		{"peer": map[string]interface{}{"id": float64(3), "store_id": float64(30), "role": float64(2), "role_name": "IncomingVoter"}, "down_seconds": float64(2)},
+		{"peer": map[string]interface{}{"id": float64(4), "store_id": float64(40), "role": float64(3), "role_name": "DemotingVoter"}, "down_seconds": float64(3)},
+	}
+
+	data, err := json.Marshal(fromPeerStatsSlice(peers))
+	c.Assert(err, IsNil)
+	var ret []map[string]interface{}
+	err = json.Unmarshal(data, &ret)
+	c.Assert(ret, DeepEquals, expected)
+}
+
 var _ = Suite(&testRegionSuite{})
 
 type testRegionSuite struct {
