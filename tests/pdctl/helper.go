@@ -98,6 +98,8 @@ func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) 
 func CheckRegionInfo(c *check.C, output *api.RegionInfo, expected *core.RegionInfo) {
 	region := api.NewRegionInfo(expected)
 	for _, peer := range output.DownPeers {
+		// Since api.PDPeerStats uses the api.MetaPeer type variable Peer to overwrite PeerStats.Peer,
+		// it needs to be restored after deserialization to be completely consistent with the original.
 		peer.PeerStats.Peer = peer.Peer.Peer
 	}
 	c.Assert(output, check.DeepEquals, region)
