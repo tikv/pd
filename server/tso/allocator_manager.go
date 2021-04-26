@@ -824,7 +824,7 @@ func (am *AllocatorManager) PriorityChecker() {
 					zap.String("old-dc-location", leaderServerDCLocation),
 					zap.Uint64("next-leader-id", serverID),
 					zap.String("next-dc-location", myServerDCLocation),
-					zap.Error(err))
+					errs.ZapError(err))
 				continue
 			}
 		}

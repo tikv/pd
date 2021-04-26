@@ -19,11 +19,11 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
 // Driver promotes the cluster status change.
@@ -74,7 +74,7 @@ func (d *Driver) Prepare() error {
 	err = d.client.Bootstrap(ctx, store, region)
 	cancel()
 	if err != nil {
-		simutil.Logger.Fatal("bootstrap error", zap.Error(err))
+		simutil.Logger.Fatal("bootstrap error", errs.ZapError(err))
 	} else {
 		simutil.Logger.Debug("bootstrap success")
 	}

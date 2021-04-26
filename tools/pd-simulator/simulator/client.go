@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -101,7 +102,7 @@ func (c *client) initClusterID() error {
 	for i := 0; i < maxInitClusterRetries; i++ {
 		members, err := c.getMembers(ctx)
 		if err != nil || members.GetHeader() == nil {
-			simutil.Logger.Error("failed to get cluster id", zap.String("tag", c.tag), zap.Error(err))
+			simutil.Logger.Error("failed to get cluster id", zap.String("tag", c.tag), errs.ZapError(err))
 			continue
 		}
 		c.clusterID = members.GetHeader().GetClusterId()
@@ -138,7 +139,7 @@ func (c *client) createHeartbeatStream() (pdpb.PD_RegionHeartbeatClient, context
 		ctx, cancel = context.WithCancel(c.ctx)
 		stream, err = c.pdClient().RegionHeartbeat(ctx)
 		if err != nil {
-			simutil.Logger.Error("create region heartbeat stream error", zap.String("tag", c.tag), zap.Error(err))
+			simutil.Logger.Error("create region heartbeat stream error", zap.String("tag", c.tag), errs.ZapError(err))
 			cancel()
 			select {
 			case <-time.After(time.Second):
@@ -167,7 +168,7 @@ func (c *client) heartbeatStreamLoop() {
 		go c.receiveRegionHeartbeat(ctx, stream, errCh, wg)
 		select {
 		case err := <-errCh:
-			simutil.Logger.Error("heartbeat stream get error", zap.String("tag", c.tag), zap.Error(err))
+			simutil.Logger.Error("heartbeat stream get error", zap.String("tag", c.tag), errs.ZapError(err))
 			cancel()
 		case <-c.ctx.Done():
 			simutil.Logger.Info("cancel heartbeat stream loop")
@@ -212,7 +213,7 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 			err := stream.Send(request)
 			if err != nil {
 				errCh <- err
-				simutil.Logger.Error("report regionHeartbeat error", zap.String("tag", c.tag), zap.Error(err))
+				simutil.Logger.Error("report regionHeartbeat error", zap.String("tag", c.tag), errs.ZapError(err))
 			}
 		case <-ctx.Done():
 			return
@@ -225,7 +226,7 @@ func (c *client) Close() {
 	c.wg.Wait()
 
 	if err := c.clientConn.Close(); err != nil {
-		simutil.Logger.Error("failed to close grpc client connection", zap.String("tag", c.tag), zap.Error(err))
+		simutil.Logger.Error("failed to close grpc client connection", zap.String("tag", c.tag), errs.ZapError(err))
 	}
 }
 
