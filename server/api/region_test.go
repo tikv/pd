@@ -54,6 +54,7 @@ func (s *testRegionStructSuite) TestPeer(c *C) {
 	c.Assert(err, IsNil)
 	var ret []map[string]interface{}
 	err = json.Unmarshal(data, &ret)
+	c.Assert(err, IsNil)
 	c.Assert(ret, DeepEquals, expected)
 }
 
@@ -76,6 +77,7 @@ func (s *testRegionStructSuite) TestPeerStats(c *C) {
 	c.Assert(err, IsNil)
 	var ret []map[string]interface{}
 	err = json.Unmarshal(data, &ret)
+	c.Assert(err, IsNil)
 	c.Assert(ret, DeepEquals, expected)
 }
 
