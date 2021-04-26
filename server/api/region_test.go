@@ -132,11 +132,10 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
 	r1 := &RegionInfo{}
 	r1m := make(map[string]interface{})
-	err := readJSON(testDialClient, url, r1)
-	c.Assert(err, IsNil)
+	c.Assert(readJSON(testDialClient, url, r1), IsNil)
+	r1.Adjust()
 	c.Assert(r1, DeepEquals, NewRegionInfo(r))
-	err = readJSON(testDialClient, url, &r1m)
-	c.Assert(err, IsNil)
+	c.Assert(readJSON(testDialClient, url, &r1m), IsNil)
 	c.Assert(r1m["written_bytes"].(float64), Equals, float64(r.GetBytesWritten()))
 	c.Assert(r1m["written_keys"].(float64), Equals, float64(r.GetKeysWritten()))
 	c.Assert(r1m["read_bytes"].(float64), Equals, float64(r.GetBytesRead()))
@@ -144,8 +143,8 @@ func (s *testRegionSuite) TestRegion(c *C) {
 
 	url = fmt.Sprintf("%s/region/key/%s", s.urlPrefix, "a")
 	r2 := &RegionInfo{}
-	err = readJSON(testDialClient, url, r2)
-	c.Assert(err, IsNil)
+	c.Assert(readJSON(testDialClient, url, r2), IsNil)
+	r2.Adjust()
 	c.Assert(r2, DeepEquals, NewRegionInfo(r))
 }
 
@@ -156,62 +155,50 @@ func (s *testRegionSuite) TestRegionCheck(c *C) {
 	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
 	r1 := &RegionInfo{}
-	err := readJSON(testDialClient, url, r1)
-	c.Assert(err, IsNil)
+	c.Assert(readJSON(testDialClient, url, r1), IsNil)
+	r1.Adjust()
 	c.Assert(r1, DeepEquals, NewRegionInfo(r))
 
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "down-peer")
 	r2 := &RegionsInfo{}
-	err = readJSON(testDialClient, url, r2)
-	c.Assert(err, IsNil)
+	c.Assert(readJSON(testDialClient, url, r2), IsNil)
+	r2.Adjust()
 	c.Assert(r2, DeepEquals, &RegionsInfo{Count: 1, Regions: []*RegionInfo{NewRegionInfo(r)}})
 
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "pending-peer")
 	r3 := &RegionsInfo{}
-	err = readJSON(testDialClient, url, r3)
-	c.Assert(err, IsNil)
+	c.Assert(readJSON(testDialClient, url, r3), IsNil)
+	r3.Adjust()
 	c.Assert(r3, DeepEquals, &RegionsInfo{Count: 1, Regions: []*RegionInfo{NewRegionInfo(r)}})
 
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "offline-peer")
 	r4 := &RegionsInfo{}
-	err = readJSON(testDialClient, url, r4)
-	c.Assert(err, IsNil)
+	c.Assert(readJSON(testDialClient, url, r4), IsNil)
+	r4.Adjust()
 	c.Assert(r4, DeepEquals, &RegionsInfo{Count: 0, Regions: []*RegionInfo{}})
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(c, s.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "empty-region")
 	r5 := &RegionsInfo{}
-	err = readJSON(testDialClient, url, r5)
-	c.Assert(err, IsNil)
+	c.Assert(readJSON(testDialClient, url, r5), IsNil)
+	r5.Adjust()
 	c.Assert(r5, DeepEquals, &RegionsInfo{Count: 1, Regions: []*RegionInfo{NewRegionInfo(r)}})
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(c, s.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "hist-size")
 	r6 := make([]*histItem, 1)
-	err = readJSON(testDialClient, url, &r6)
-	histSizes := make([]*histItem, 1)
-	histSize := &histItem{}
-	histSize.Start = 1
-	histSize.End = 1
-	histSize.Count = 1
-	histSizes[0] = histSize
-	c.Assert(err, IsNil)
+	c.Assert(readJSON(testDialClient, url, &r6), IsNil)
+	histSizes := []*histItem{{Start: 1, End: 1, Count: 1}}
 	c.Assert(r6, DeepEquals, histSizes)
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	mustRegionHeartbeat(c, s.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "hist-keys")
 	r7 := make([]*histItem, 1)
-	err = readJSON(testDialClient, url, &r7)
-	histKeys := make([]*histItem, 1)
-	histKey := &histItem{}
-	histKey.Start = 1000
-	histKey.End = 1999
-	histKey.Count = 1
-	histKeys[0] = histKey
-	c.Assert(err, IsNil)
+	c.Assert(readJSON(testDialClient, url, &r7), IsNil)
+	histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
 	c.Assert(r7, DeepEquals, histKeys)
 }
 
