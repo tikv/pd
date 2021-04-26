@@ -19,7 +19,6 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -130,7 +129,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 	for i := range ids {
 		ids[i], err = r.allocID(region.GetLeader().GetStoreId())
 		if err != nil {
-			simutil.Logger.Error("alloc id failed", errs.ZapError(err))
+			simutil.Logger.Error("alloc id failed", zap.Error(err))
 			return
 		}
 	}
@@ -139,7 +138,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 	if r.useTiDBEncodedKey {
 		splitKey, err = simutil.GenerateTiDBEncodedSplitKey(region.GetStartKey(), region.GetEndKey())
 		if err != nil {
-			simutil.Logger.Fatal("generate TiDB encoded split key failed", errs.ZapError(err))
+			simutil.Logger.Fatal("generate TiDB encoded split key failed", zap.Error(err))
 		}
 	} else {
 		splitKey = simutil.GenerateSplitKey(region.GetStartKey(), region.GetEndKey())

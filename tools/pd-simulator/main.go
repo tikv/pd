@@ -24,7 +24,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
@@ -34,6 +33,7 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 
 	// Register schedulers.
 	_ "github.com/tikv/pd/server/schedulers"
@@ -79,11 +79,11 @@ func run(simCase string) {
 	var err error
 	if *configFile != "" {
 		if meta, err = toml.DecodeFile(*configFile, simConfig); err != nil {
-			simutil.Logger.Fatal("failed to decode file ", errs.ZapError(err))
+			simutil.Logger.Fatal("failed to decode file ", zap.Error(err))
 		}
 	}
 	if err = simConfig.Adjust(&meta); err != nil {
-		simutil.Logger.Fatal("failed to adjust simulator configuration", errs.ZapError(err))
+		simutil.Logger.Fatal("failed to adjust simulator configuration", zap.Error(err))
 	}
 
 	if *pdAddr != "" {
@@ -92,7 +92,7 @@ func run(simCase string) {
 		local, clean := NewSingleServer(context.Background(), simConfig)
 		err = local.Run()
 		if err != nil {
-			simutil.Logger.Fatal("run server error", errs.ZapError(err))
+			simutil.Logger.Fatal("run server error", zap.Error(err))
 		}
 		for {
 			if !local.IsClosed() && local.GetMember().IsLeader() {
@@ -110,12 +110,12 @@ func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*serv
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.GetZapLogger(), simConfig.ServerConfig.GetZapLogProperties())
 	} else {
-		log.Fatal("setup logger error", errs.ZapError(err))
+		log.Fatal("setup logger error", zap.Error(err))
 	}
 
 	err = logutil.InitLogger(&simConfig.ServerConfig.Log)
 	if err != nil {
-		log.Fatal("initialize logger error", errs.ZapError(err))
+		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
 	s, err := server.CreateServer(ctx, simConfig.ServerConfig, api.NewHandler)
@@ -139,12 +139,12 @@ func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, cle
 	start := time.Now()
 	driver, err := simulator.NewDriver(pdAddr, simCase, simConfig)
 	if err != nil {
-		simutil.Logger.Fatal("create driver error", errs.ZapError(err))
+		simutil.Logger.Fatal("create driver error", zap.Error(err))
 	}
 
 	err = driver.Prepare()
 	if err != nil {
-		simutil.Logger.Fatal("simulator prepare error", errs.ZapError(err))
+		simutil.Logger.Fatal("simulator prepare error", zap.Error(err))
 	}
 
 	tickInterval := simConfig.SimTickInterval.Duration

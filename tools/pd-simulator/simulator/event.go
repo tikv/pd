@@ -16,7 +16,6 @@ package simulator
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -153,14 +152,14 @@ func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
 	}
 	n, err := NewNode(s, raft.conn.pdAddr, config.StoreIOMBPerSecond)
 	if err != nil {
-		simutil.Logger.Error("add node failed", zap.Uint64("node-id", id), errs.ZapError(err))
+		simutil.Logger.Error("add node failed", zap.Uint64("node-id", id), zap.Error(err))
 		return false
 	}
 	raft.conn.Nodes[id] = n
 	n.raftEngine = raft
 	err = n.Start()
 	if err != nil {
-		simutil.Logger.Error("start node failed", zap.Uint64("node-id", id), errs.ZapError(err))
+		simutil.Logger.Error("start node failed", zap.Uint64("node-id", id), zap.Error(err))
 	}
 	return false
 }

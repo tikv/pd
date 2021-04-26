@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -186,6 +185,6 @@ func renderPlot(name string, data [][3]int, len, minCount, maxCount int) {
 	f, _ := os.Create(name)
 	err := bar3d.Render(f)
 	if err != nil {
-		log.Error("Render error", errs.ZapError(err))
+		log.Error("Render error", zap.Error(err))
 	}
 }

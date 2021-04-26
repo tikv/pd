@@ -24,7 +24,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -175,7 +174,7 @@ func (n *Node) storeHeartBeat() {
 	if err != nil {
 		simutil.Logger.Info("report heartbeat error",
 			zap.Uint64("node-id", n.GetId()),
-			errs.ZapError(err))
+			zap.Error(err))
 	}
 	cancel()
 }
@@ -201,7 +200,7 @@ func (n *Node) regionHeartBeat() {
 				simutil.Logger.Info("report heartbeat error",
 					zap.Uint64("node-id", n.Id),
 					zap.Uint64("region-id", region.GetID()),
-					errs.ZapError(err))
+					zap.Error(err))
 			}
 			cancel()
 		}
@@ -218,7 +217,7 @@ func (n *Node) reportRegionChange() {
 			simutil.Logger.Info("report heartbeat error",
 				zap.Uint64("node-id", n.Id),
 				zap.Uint64("region-id", region.GetID()),
-				errs.ZapError(err))
+				zap.Error(err))
 		}
 		n.raftEngine.ResetRegionChange(n.Id, regionID)
 		cancel()

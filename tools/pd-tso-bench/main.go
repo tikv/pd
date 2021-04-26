@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 )
 
@@ -103,7 +102,7 @@ func bench(mainCtx context.Context) {
 	for idx, pdCli := range pdClients {
 		_, _, err := pdCli.GetLocalTS(ctx, *dcLocation)
 		if err != nil {
-			log.Fatal("get first time tso failed", zap.Int("client-number", idx), errs.ZapError(err))
+			log.Fatal("get first time tso failed", zap.Int("client-number", idx), zap.Error(err))
 		}
 	}
 
