@@ -37,8 +37,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// metaPeer is api compatible with *metapb.Peer.
-type metaPeer struct {
+// MetaPeer is api compatible with *metapb.Peer.
+type MetaPeer struct {
 	*metapb.Peer
 	// RoleName is `Role.String()`.
 	// Since Role is serialized as int by json by default,
@@ -49,43 +49,43 @@ type metaPeer struct {
 	IsLearner bool `json:"is_learner,omitempty"`
 }
 
-// pdPeerStats is api compatible with *pdpb.PeerStats.
-type pdPeerStats struct {
+// PDPeerStats is api compatible with *pdpb.PeerStats.
+type PDPeerStats struct {
 	*pdpb.PeerStats
-	Peer metaPeer `json:"peer"`
+	Peer MetaPeer `json:"peer"`
 }
 
-func fromPeer(peer *metapb.Peer) metaPeer {
-	return metaPeer{
+func fromPeer(peer *metapb.Peer) MetaPeer {
+	return MetaPeer{
 		Peer:      peer,
 		RoleName:  peer.GetRole().String(),
 		IsLearner: core.IsLearner(peer),
 	}
 }
 
-func fromPeerSlice(peers []*metapb.Peer) []metaPeer {
+func fromPeerSlice(peers []*metapb.Peer) []MetaPeer {
 	if peers == nil {
 		return nil
 	}
-	slice := make([]metaPeer, len(peers))
+	slice := make([]MetaPeer, len(peers))
 	for i, peer := range peers {
 		slice[i] = fromPeer(peer)
 	}
 	return slice
 }
 
-func fromPeerStats(peer *pdpb.PeerStats) pdPeerStats {
-	return pdPeerStats{
+func fromPeerStats(peer *pdpb.PeerStats) PDPeerStats {
+	return PDPeerStats{
 		PeerStats: peer,
 		Peer:      fromPeer(peer.Peer),
 	}
 }
 
-func fromPeerStatsSlice(peers []*pdpb.PeerStats) []pdPeerStats {
+func fromPeerStatsSlice(peers []*pdpb.PeerStats) []PDPeerStats {
 	if peers == nil {
 		return nil
 	}
-	slice := make([]pdPeerStats, len(peers))
+	slice := make([]PDPeerStats, len(peers))
 	for i, peer := range peers {
 		slice[i] = fromPeerStats(peer)
 	}
@@ -98,11 +98,11 @@ type RegionInfo struct {
 	StartKey    string              `json:"start_key"`
 	EndKey      string              `json:"end_key"`
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
-	Peers       []metaPeer          `json:"peers,omitempty"`
+	Peers       []MetaPeer          `json:"peers,omitempty"`
 
-	Leader          metaPeer      `json:"leader,omitempty"`
-	DownPeers       []pdPeerStats `json:"down_peers,omitempty"`
-	PendingPeers    []metaPeer    `json:"pending_peers,omitempty"`
+	Leader          MetaPeer      `json:"leader,omitempty"`
+	DownPeers       []PDPeerStats `json:"down_peers,omitempty"`
+	PendingPeers    []MetaPeer    `json:"pending_peers,omitempty"`
 	WrittenBytes    uint64        `json:"written_bytes"`
 	ReadBytes       uint64        `json:"read_bytes"`
 	WrittenKeys     uint64        `json:"written_keys"`
