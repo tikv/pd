@@ -159,10 +159,26 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	return s
 }
 
+// Adjust is only used in testing, in order to compare the data from json deserialization.
+func (r *RegionInfo) Adjust() {
+	for _, peer := range r.DownPeers {
+		// Since api.PDPeerStats uses the api.MetaPeer type variable Peer to overwrite PeerStats.Peer,
+		// it needs to be restored after deserialization to be completely consistent with the original.
+		peer.PeerStats.Peer = peer.Peer.Peer
+	}
+}
+
 // RegionsInfo contains some regions with the detailed region info.
 type RegionsInfo struct {
 	Count   int           `json:"count"`
 	Regions []*RegionInfo `json:"regions"`
+}
+
+// Adjust is only used in testing, in order to compare the data from json deserialization.
+func (s *RegionsInfo) Adjust() {
+	for _, r := range s.Regions {
+		r.Adjust()
+	}
 }
 
 type regionHandler struct {
