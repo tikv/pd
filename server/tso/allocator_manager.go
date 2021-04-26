@@ -1150,3 +1150,8 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID u
 func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
 	return path.Join(am.rootPath, dcLocation, "next-leader")
 }
+
+// EnableLocalTSO returns the value of AllocatorManager.enableLocalTSO.
+func (am *AllocatorManager) EnableLocalTSO() bool {
+	return am.enableLocalTSO
+}

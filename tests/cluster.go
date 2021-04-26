@@ -549,7 +549,7 @@ func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) 
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
-			if s.state == Running {
+			if s.state == Running && s.GetTSOAllocatorManager().EnableLocalTSO() {
 				running++
 			}
 			serverName := s.GetAllocatorLeader(dcLocation).GetName()
