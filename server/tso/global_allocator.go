@@ -167,6 +167,8 @@ const (
 // the max Local TSO and load it into maxTSO. If the maxTSO is not empty, it will set in-memory-TSO of the Local TSO Allocator leaders to
 // maxTSO if maxTSO is greater.
 func (gta *GlobalTSOAllocator) SyncMaxTS(ctx context.Context, dcLocationMap map[string]DCLocationInfo, maxTSO *pdpb.Timestamp) error {
+	// maxTSO may have been modified during the retry loop, we need to keep the original one at the beginning.
+	originalMaxTSO := *maxTSO
 	for i := 0; i < syncMaxRetryCount; i++ {
 		// Collect all allocator leaders' client URLs
 		allocatorLeaders := make(map[string]*pdpb.Member)
@@ -276,6 +278,8 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(ctx context.Context, dcLocationMap map[
 		if ok, unsyncedDCs := gta.checkSyncedDCs(dcLocationMap, syncedDCs); !ok {
 			log.Info("unsynced dc-locations found, will retry", zap.Bool("in-collecting-phase", inCollectingPhase), zap.Strings("synced-DCs", syncedDCs), zap.Strings("unsynced-DCs", unsyncedDCs))
 			if i < syncMaxRetryCount-1 {
+				// maxTSO should remain the same.
+				*maxTSO = originalMaxTSO
 				// To make sure we have the latest dc-location info
 				gta.allocatorManager.ClusterDCLocationChecker()
 				continue
