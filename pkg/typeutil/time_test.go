@@ -58,3 +58,14 @@ func (s *testTimeSuite) TestSubTimeByWallClock(c *C) {
 		c.Assert(milliseconds, Equals, int64(0))
 	}
 }
+
+func (s *testTimeSuite) TestSmallTimeDifference(c *C) {
+	t1, err := time.Parse("2006-01-02 15:04:05.999", "2021-04-26 00:44:25.682")
+	c.Assert(err, IsNil)
+	t2, err := time.Parse("2006-01-02 15:04:05.999", "2021-04-26 00:44:25.681918")
+	c.Assert(err, IsNil)
+	duration := SubRealTimeByWallClock(t1, t2)
+	c.Assert(duration, Equals, time.Duration(82)*time.Microsecond)
+	milliseconds := SubTSOPhysicalByWallClock(t1, t2)
+	c.Assert(milliseconds, Equals, int64(1))
+}
