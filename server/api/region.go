@@ -37,12 +37,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// metaPeer is api compatible with *metapb.Peer.
 type metaPeer struct {
 	*metapb.Peer
-	RoleName  string `json:"role_name"`
-	IsLearner bool   `json:"is_learner"`
+	// RoleName is `Role.String()`.
+	// Since Role is serialized as int by json by default,
+	// introducing it will make the output of pd-ctl easier to identify Role.
+	RoleName string `json:"role_name"`
+	// IsLearner is `Role == "Learner"`.
+	// Since IsLearner was changed to Role in kvproto in 5.0, this field was introduced to ensure api compatibility.
+	IsLearner bool `json:"is_learner"`
 }
 
+// pdPeerStats is api compatible with *pdpb.PeerStats.
 type pdPeerStats struct {
 	*pdpb.PeerStats
 	Peer metaPeer `json:"peer"`
