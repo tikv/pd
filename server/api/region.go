@@ -64,6 +64,9 @@ func fromPeer(peer *metapb.Peer) metaPeer {
 }
 
 func fromPeerSlice(peers []*metapb.Peer) []metaPeer {
+	if peers == nil {
+		return nil
+	}
 	slice := make([]metaPeer, len(peers))
 	for i, peer := range peers {
 		slice[i] = fromPeer(peer)
@@ -79,6 +82,9 @@ func fromPeerStats(peer *pdpb.PeerStats) pdPeerStats {
 }
 
 func fromPeerStatsSlice(peers []*pdpb.PeerStats) []pdPeerStats {
+	if peers == nil {
+		return nil
+	}
 	slice := make([]pdPeerStats, len(peers))
 	for i, peer := range peers {
 		slice[i] = fromPeerStats(peer)
