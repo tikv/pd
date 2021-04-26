@@ -170,8 +170,8 @@ func (r *RegionInfo) Adjust() {
 
 // RegionsInfo contains some regions with the detailed region info.
 type RegionsInfo struct {
-	Count   int           `json:"count"`
-	Regions []*RegionInfo `json:"regions"`
+	Count   int          `json:"count"`
+	Regions []RegionInfo `json:"regions"`
 }
 
 // Adjust is only used in testing, in order to compare the data from json deserialization.
@@ -248,17 +248,12 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 
 func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
 	regionInfos := make([]RegionInfo, len(regions))
-	regionInfosRefs := make([]*RegionInfo, len(regions))
-
-	for i := 0; i < len(regions); i++ {
-		regionInfosRefs[i] = &regionInfos[i]
-	}
 	for i, r := range regions {
-		regionInfosRefs[i] = InitRegion(r, regionInfosRefs[i])
+		InitRegion(r, &regionInfos[i])
 	}
 	return &RegionsInfo{
 		Count:   len(regions),
-		Regions: regionInfosRefs,
+		Regions: regionInfos,
 	}
 }
 
