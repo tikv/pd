@@ -53,8 +53,7 @@ func (s *testRegionStructSuite) TestPeer(c *C) {
 	data, err := json.Marshal(fromPeerSlice(peers))
 	c.Assert(err, IsNil)
 	var ret []map[string]interface{}
-	err = json.Unmarshal(data, &ret)
-	c.Assert(err, IsNil)
+	c.Assert(json.Unmarshal(data, &ret), IsNil)
 	c.Assert(ret, DeepEquals, expected)
 }
 
@@ -76,8 +75,7 @@ func (s *testRegionStructSuite) TestPeerStats(c *C) {
 	data, err := json.Marshal(fromPeerStatsSlice(peers))
 	c.Assert(err, IsNil)
 	var ret []map[string]interface{}
-	err = json.Unmarshal(data, &ret)
-	c.Assert(err, IsNil)
+	c.Assert(json.Unmarshal(data, &ret), IsNil)
 	c.Assert(ret, DeepEquals, expected)
 }
 
