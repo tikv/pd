@@ -112,7 +112,7 @@ func CheckRegionsInfo(c *check.C, output *api.RegionsInfo, expected []*core.Regi
 		return expected[i].GetID() < expected[j].GetID()
 	})
 	for i, region := range expected {
-		CheckRegionInfo(c, got[i], region)
+		CheckRegionInfo(c, &got[i], region)
 	}
 }
 
