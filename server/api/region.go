@@ -124,7 +124,7 @@ func fromPBReplicationStatus(s *replication_modepb.RegionReplicationStatus) *Rep
 		return nil
 	}
 	return &ReplicationStatus{
-		State:   replication_modepb.RegionReplicationState_name[int32(s.GetState())],
+		State:   s.GetState().String(),
 		StateID: s.GetStateId(),
 	}
 }
