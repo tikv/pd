@@ -37,23 +37,65 @@ import (
 	"go.uber.org/zap"
 )
 
+type metaPeer struct {
+	*metapb.Peer
+	RoleName  string `json:"role_name"`
+	IsLearner bool   `json:"is_learner"`
+}
+
+type pdPeerStats struct {
+	*pdpb.PeerStats
+	Peer metaPeer `json:"peer"`
+}
+
+func fromPeer(peer *metapb.Peer) metaPeer {
+	return metaPeer{
+		Peer:      peer,
+		RoleName:  peer.GetRole().String(),
+		IsLearner: core.IsLearner(peer),
+	}
+}
+
+func fromPeerSlice(peers []*metapb.Peer) []metaPeer {
+	slice := make([]metaPeer, len(peers))
+	for i, peer := range peers {
+		slice[i] = fromPeer(peer)
+	}
+	return slice
+}
+
+func fromPeerStats(peer *pdpb.PeerStats) pdPeerStats {
+	return pdPeerStats{
+		PeerStats: peer,
+		Peer:      fromPeer(peer.Peer),
+	}
+}
+
+func fromPeerStatsSlice(peers []*pdpb.PeerStats) []pdPeerStats {
+	slice := make([]pdPeerStats, len(peers))
+	for i, peer := range peers {
+		slice[i] = fromPeerStats(peer)
+	}
+	return slice
+}
+
 // RegionInfo records detail region info for api usage.
 type RegionInfo struct {
 	ID          uint64              `json:"id"`
 	StartKey    string              `json:"start_key"`
 	EndKey      string              `json:"end_key"`
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
-	Peers       []*metapb.Peer      `json:"peers,omitempty"`
+	Peers       []metaPeer          `json:"peers,omitempty"`
 
-	Leader          *metapb.Peer      `json:"leader,omitempty"`
-	DownPeers       []*pdpb.PeerStats `json:"down_peers,omitempty"`
-	PendingPeers    []*metapb.Peer    `json:"pending_peers,omitempty"`
-	WrittenBytes    uint64            `json:"written_bytes"`
-	ReadBytes       uint64            `json:"read_bytes"`
-	WrittenKeys     uint64            `json:"written_keys"`
-	ReadKeys        uint64            `json:"read_keys"`
-	ApproximateSize int64             `json:"approximate_size"`
-	ApproximateKeys int64             `json:"approximate_keys"`
+	Leader          metaPeer      `json:"leader,omitempty"`
+	DownPeers       []pdPeerStats `json:"down_peers,omitempty"`
+	PendingPeers    []metaPeer    `json:"pending_peers,omitempty"`
+	WrittenBytes    uint64        `json:"written_bytes"`
+	ReadBytes       uint64        `json:"read_bytes"`
+	WrittenKeys     uint64        `json:"written_keys"`
+	ReadKeys        uint64        `json:"read_keys"`
+	ApproximateSize int64         `json:"approximate_size"`
+	ApproximateKeys int64         `json:"approximate_keys"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
@@ -89,10 +131,10 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.StartKey = core.HexRegionKeyStr(r.GetStartKey())
 	s.EndKey = core.HexRegionKeyStr(r.GetEndKey())
 	s.RegionEpoch = r.GetRegionEpoch()
-	s.Peers = r.GetPeers()
-	s.Leader = r.GetLeader()
-	s.DownPeers = r.GetDownPeers()
-	s.PendingPeers = r.GetPendingPeers()
+	s.Peers = fromPeerSlice(r.GetPeers())
+	s.Leader = fromPeer(r.GetLeader())
+	s.DownPeers = fromPeerStatsSlice(r.GetDownPeers())
+	s.PendingPeers = fromPeerSlice(r.GetPendingPeers())
 	s.WrittenBytes = r.GetBytesWritten()
 	s.WrittenKeys = r.GetKeysWritten()
 	s.ReadBytes = r.GetBytesRead()
