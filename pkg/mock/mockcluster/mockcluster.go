@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -30,7 +31,6 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
-	"go.uber.org/zap"
 )
 
 const (
@@ -134,7 +134,7 @@ func (mc *Cluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.AllocID()
 	if err != nil {
-		log.Error("failed to alloc peer", zap.Error(err))
+		log.Error("failed to alloc peer", errs.ZapError(err))
 		return nil, err
 	}
 	peer := &metapb.Peer{

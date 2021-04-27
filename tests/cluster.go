@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -39,7 +40,6 @@ import (
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 )
 
 // TestServer states.
@@ -641,7 +641,7 @@ func (c *TestCluster) Destroy() {
 	for _, s := range c.servers {
 		err := s.Destroy()
 		if err != nil {
-			log.Error("failed to destroy the cluster:", zap.Error(err))
+			log.Error("failed to destroy the cluster:", errs.ZapError(err))
 		}
 	}
 }
