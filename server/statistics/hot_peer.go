@@ -34,7 +34,7 @@ type dimStat struct {
 }
 
 func newDimStat(typ int) *dimStat {
-	reportInterval := RegionHeartBeatReportInterval * time.Second
+	reportInterval := HotStatReportInterval * time.Second
 	return &dimStat{
 		typ:         typ,
 		Rolling:     movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
@@ -140,7 +140,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 
 // IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
 func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
-	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*RegionHeartBeatReportInterval)
+	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*HotStatReportInterval)
 }
 
 // IsNeedDelete to delete the item in cache.
