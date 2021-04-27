@@ -533,31 +533,36 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
 // any new local allocator that needs to be set up.
 func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
-	var (
-		tsTicker      = time.NewTicker(am.updatePhysicalInterval)
-		patrolTicker  = &time.Ticker{}
-		checkerTicker = &time.Ticker{}
-	)
-	defer tsTicker.Stop()
-	// Local TSO related daemon goroutines only work when enableLocalTSO is true.
+	// allocatorPatroller should only work when enableLocalTSO is true to
+	// set up the new Local TSO Allocator in time.
+	var patrolTicker = &time.Ticker{}
 	if am.enableLocalTSO {
 		patrolTicker = time.NewTicker(patrolStep)
 		defer patrolTicker.Stop()
-		checkerTicker = time.NewTicker(PriorityCheck)
-		defer checkerTicker.Stop()
 	}
+	tsTicker := time.NewTicker(am.updatePhysicalInterval)
+	defer tsTicker.Stop()
+	checkerTicker := time.NewTicker(PriorityCheck)
+	defer checkerTicker.Stop()
 
 	for {
 		select {
-		case <-tsTicker.C:
-			am.allocatorUpdater()
 		case <-patrolTicker.C:
+			// Inspect the cluster dc-location info and set up the new Local TSO Allocator in time.
 			am.allocatorPatroller(serverCtx)
+		case <-tsTicker.C:
+			// Update the initialized TSO Allocator to advance TSO.
+			am.allocatorUpdater()
 		case <-checkerTicker.C:
-			// ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
-			// we should run them concurrently to speed up the progress.
+			// Check and maintain the cluster's meta info about dc-location distribution.
 			go am.ClusterDCLocationChecker()
-			go am.PriorityChecker()
+			// We won't have any Local TSO Allocator set up in PD without enabling Local TSO.
+			if am.enableLocalTSO {
+				// Check the election priority of every Local TSO Allocator this PD is holding.
+				go am.PriorityChecker()
+			}
+			// PS: ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
+			// we should run them concurrently to speed up the progress.
 		case <-serverCtx.Done():
 			return
 		}
@@ -1149,4 +1154,9 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID u
 
 func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
 	return path.Join(am.rootPath, dcLocation, "next-leader")
+}
+
+// EnableLocalTSO returns the value of AllocatorManager.enableLocalTSO.
+func (am *AllocatorManager) EnableLocalTSO() bool {
+	return am.enableLocalTSO
 }
