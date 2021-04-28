@@ -149,7 +149,7 @@ func (t *timestampOracle) loadTimestamp() (time.Time, error) {
 			log.Error("parse timestamp window that from etcd failed", zap.String("dc-location", t.dcLocation), zap.String("ts-window-key", key), zap.Time("max-ts-window", maxTSWindow), zap.Error(err))
 			continue
 		}
-		if typeutil.SubTimeByWallClock(tsWindow, maxTSWindow) > 0 {
+		if typeutil.SubRealTimeByWallClock(tsWindow, maxTSWindow) > 0 {
 			maxTSWindow = tsWindow
 		}
 	}
