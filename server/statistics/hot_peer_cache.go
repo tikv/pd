@@ -420,11 +420,16 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 	}
 
 	newItem.lastTransferLeaderTime = oldItem.lastTransferLeaderTime
-	var isFull bool
+
 	for i, k := range regionStats {
 		newItem.rollingLoads[i].Add(deltaLoads[k], interval)
+	}
+
+	var isFull bool
+	for i := range regionStats {
 		if newItem.rollingLoads[i].isFull() {
 			isFull = true
+			break
 		}
 	}
 
