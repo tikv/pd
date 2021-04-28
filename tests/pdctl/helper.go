@@ -17,8 +17,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/gogo/protobuf/proto"
@@ -32,36 +30,11 @@ import (
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl"
-	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
 // InitCommand is used to initialize command.
 func InitCommand() *cobra.Command {
-	commandFlags := pdctl.CommandFlags{}
-	rootCmd := &cobra.Command{}
-	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "", "")
-	rootCmd.Flags().StringVar(&commandFlags.CAPath, "cacert", "", "")
-	rootCmd.Flags().StringVar(&commandFlags.CertPath, "cert", "", "")
-	rootCmd.Flags().StringVar(&commandFlags.KeyPath, "key", "", "")
-	rootCmd.AddCommand(
-		command.NewConfigCommand(),
-		command.NewRegionCommand(),
-		command.NewStoreCommand(),
-		command.NewStoresCommand(),
-		command.NewMemberCommand(),
-		command.NewExitCommand(),
-		command.NewLabelCommand(),
-		command.NewPingCommand(),
-		command.NewOperatorCommand(),
-		command.NewSchedulerCommand(),
-		command.NewTSOCommand(),
-		command.NewHotSpotCommand(),
-		command.NewClusterCommand(),
-		command.NewHealthCommand(),
-		command.NewLogCommand(),
-		command.NewPluginCommand(),
-		command.NewCompletionCommand(),
-	)
+	rootCmd := pdctl.GetRootCmd()
 	return rootCmd
 }
 
@@ -70,7 +43,6 @@ func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err err
 	buf := new(bytes.Buffer)
 	root.SetOutput(buf)
 	root.SetArgs(args)
-
 	err = root.Execute()
 	return buf.Bytes(), err
 }
@@ -137,18 +109,4 @@ func MustPutRegion(c *check.C, cluster *tests.TestCluster, regionID, storeID uin
 	err := cluster.HandleRegionHeartbeat(r)
 	c.Assert(err, check.IsNil)
 	return r
-}
-
-// GetEcho is used to get echo from stdout.
-func GetEcho(args []string) string {
-	filename := filepath.Join(os.TempDir(), "stdout")
-	old := os.Stdout
-	temp, _ := os.Create(filename)
-	os.Stdout = temp
-	pdctl.Start(args)
-	temp.Close()
-	os.Stdout = old
-	out, _ := os.ReadFile(filename)
-	_ = os.Remove(filename)
-	return string(out)
 }

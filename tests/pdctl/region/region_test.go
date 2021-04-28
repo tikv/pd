@@ -60,8 +60,10 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 
-	echo := pdctl.GetEcho([]string{"-u", url, "region", "key", "--format=raw", " "})
-	c.Assert(strings.Contains(echo, "unknown flag"), IsFalse)
+	cmd := pdctl.InitCommand()
+	output, e := pdctl.ExecuteCommand(cmd, "-u", url, "region", "key", "--format=raw", " ")
+	c.Assert(e, IsNil)
+	c.Assert(strings.Contains(string(output), "unknown flag"), IsFalse)
 }
 
 func (s *regionTestSuite) TestRegion(c *C) {
