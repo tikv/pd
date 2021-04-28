@@ -425,14 +425,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		newItem.rollingLoads[i].Add(deltaLoads[k], interval)
 	}
 
-	var isFull bool
-	for i := range regionStats {
-		if newItem.rollingLoads[i].isFull() {
-			isFull = true
-			break
-		}
-	}
-
+	isFull := newItem.rollingLoads[0].isFull() // The intervals of dims are the same, so it is only necessary to determine whether any of them
 	if !isFull {
 		// not update hot degree and anti count
 		newItem.HotDegree = oldItem.HotDegree
