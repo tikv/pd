@@ -28,7 +28,14 @@ func ParseTimestamp(data []byte) (time.Time, error) {
 	return time.Unix(0, int64(nano)), nil
 }
 
-// SubTimeByWallClock returns the duration between two different timestamps.
-func SubTimeByWallClock(after time.Time, before time.Time) time.Duration {
+// SubRealTimeByWallClock returns the duration between two different time.Time structs.
+// You should use it to compare the real-world system time.
+// And DO NOT USE IT TO COMPARE two TSOs' physical times directly in some cases.
+func SubRealTimeByWallClock(after, before time.Time) time.Duration {
 	return time.Duration(after.UnixNano() - before.UnixNano())
+}
+
+// SubTSOPhysicalByWallClock returns the duration between two different TSOs' physical times with millisecond precision.
+func SubTSOPhysicalByWallClock(after, before time.Time) int64 {
+	return after.UnixNano()/int64(time.Millisecond) - before.UnixNano()/int64(time.Millisecond)
 }
