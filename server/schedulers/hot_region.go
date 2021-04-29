@@ -1074,40 +1074,19 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []InfluenceSumm
 	}
 	if bs.rwTy == read {
 		infls.ReadInfluence = infl
-		infls.WriteInfluence = bs.getInfluence(bs.cur.srcStoreID, bs.cur.region.GetID(), write)
+		infls.WriteInfluence = bs.generateInfluence(bs.cur.srcStoreID, bs.cur.region.GetID(), write)
 	} else {
 		infls.WriteInfluence = infl
-		infls.ReadInfluence = bs.getInfluence(bs.cur.srcStoreID, bs.cur.region.GetID(), read)
+		infls.ReadInfluence = bs.generateInfluence(bs.cur.srcStoreID, bs.cur.region.GetID(), read)
 	}
 	return []*operator.Operator{op}, []InfluenceSummary{infls}
 }
 
-func (bs *balanceSolver) getInfluence(storeID, regionID uint64, rwType rwType) Influence {
+func (bs *balanceSolver) generateInfluence(storeID, regionID uint64, rwType rwType) Influence {
 	if rwType == read {
-		return getInfluence(storeID, regionID, bs.sche.regionReadStat)
-	} else {
-		return getInfluence(storeID, regionID, bs.sche.regionWriteStat)
+		return generateInfluence(storeID, regionID, bs.sche.regionReadStat)
 	}
-}
-
-func getInfluence(storeID, regionID uint64, storePeerStats map[uint64][]*statistics.HotPeerStat) Influence {
-	infl := Influence{
-		Loads: make([]float64, statistics.RegionStatCount),
-		Count: 0,
-	}
-	stats, ok := storePeerStats[storeID]
-	if !ok {
-		return infl
-	}
-	for _, stat := range stats {
-		if stat.RegionID == regionID {
-			return Influence{
-				Loads: append(stat.Loads[:0:0], stat.Loads...),
-				Count: 1,
-			}
-		}
-	}
-	return infl
+	return generateInfluence(storeID, regionID, bs.sche.regionWriteStat)
 }
 
 func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
@@ -1263,4 +1242,24 @@ func getRegionStatKind(rwTy rwType, dim int) statistics.RegionStatKind {
 		return statistics.RegionWriteKeys
 	}
 	return 0
+}
+
+func generateInfluence(storeID, regionID uint64, storePeerStats map[uint64][]*statistics.HotPeerStat) Influence {
+	infl := Influence{
+		Loads: make([]float64, statistics.RegionStatCount),
+		Count: 0,
+	}
+	stats, ok := storePeerStats[storeID]
+	if !ok {
+		return infl
+	}
+	for _, stat := range stats {
+		if stat.RegionID == regionID {
+			return Influence{
+				Loads: append(stat.Loads[:0:0], stat.Loads...),
+				Count: 1,
+			}
+		}
+	}
+	return infl
 }
