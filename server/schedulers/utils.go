@@ -145,6 +145,12 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 	return ranges, nil
 }
 
+// InfluenceSummary records influence by read and write
+type InfluenceSummary struct {
+	ReadInfluence  Influence
+	WriteInfluence Influence
+}
+
 // Influence records operator influence.
 type Influence struct {
 	Loads []float64

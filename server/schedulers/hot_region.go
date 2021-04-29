@@ -91,7 +91,7 @@ type hotScheduler struct {
 	r           *rand.Rand
 
 	// states across multiple `Schedule` calls
-	pendings [resourceTypeLen]map[*pendingInfluence]struct{}
+	pendings [rwTypeLen]map[*pendingInfluence]struct{}
 	// regionPendings stores regionID -> [opType]Operator
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
@@ -101,7 +101,11 @@ type hotScheduler struct {
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
 	// pendingSums indicates the [resourceType] storeID -> pending Influence
 	// This stores the pending Influence for each store by resource type.
-	pendingSums [resourceTypeLen]map[uint64]*Influence
+	pendingSums [rwTypeLen]map[uint64]*Influence
+	// regionReadStat records storeID -> []HotPeerStat for read type
+	regionReadStat map[uint64][]*statistics.HotPeerStat
+	// regionWriteStat records storeID -> []HotPeerStat for write type
+	regionWriteStat map[uint64][]*statistics.HotPeerStat
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
 }
@@ -118,8 +122,10 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 		regionPendings: make(map[uint64][2]*operator.Operator),
 		conf:           conf,
 	}
+	for rw := rwType(0); rw < rwTypeLen; rw++ {
+		ret.pendings[rw] = map[*pendingInfluence]struct{}{}
+	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
-		ret.pendings[ty] = map[*pendingInfluence]struct{}{}
 		ret.stLoadInfos[ty] = map[uint64]*storeLoadDetail{}
 	}
 	return ret
@@ -208,28 +214,28 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	h.summaryPendingInfluence()
 
 	storesLoads := cluster.GetStoresLoads()
+	h.regionReadStat = cluster.RegionReadStats()
+	h.regionWriteStat = cluster.RegionWriteStats()
 
 	{ // update read statistics
-		regionRead := cluster.RegionReadStats()
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
 			storesLoads,
-			h.pendingSums[readLeader],
-			regionRead,
+			h.pendingSums[read],
+			h.regionReadStat,
 			read, core.LeaderKind)
 	}
 
 	{ // update write statistics
-		regionWrite := cluster.RegionWriteStats()
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storesLoads,
-			h.pendingSums[writeLeader],
-			regionWrite,
+			h.pendingSums[write],
+			h.regionWriteStat,
 			write, core.LeaderKind)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storesLoads,
-			h.pendingSums[writePeer],
-			regionWrite,
+			h.pendingSums[write],
+			h.regionWriteStat,
 			write, core.RegionKind)
 	}
 }
@@ -237,7 +243,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 func (h *hotScheduler) summaryPendingInfluence() {
-	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+	for ty := rwType(0); ty < rwTypeLen; ty++ {
 		h.pendingSums[ty] = summaryPendingInfluence(h.pendings[ty], h.calcPendingWeight)
 	}
 	h.gcRegionPendings()
@@ -381,7 +387,7 @@ func filterHotPeers(
 	return ret
 }
 
-func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, rwTy rwType, opTy opType) bool {
+func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infls InfluenceSummary, opTy opType) bool {
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
 	if ok {
@@ -389,12 +395,12 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 		return false
 	}
 
-	influence := newPendingInfluence(op, srcStore, dstStore, infl)
-	rcTy := toResourceType(rwTy, opTy)
-	h.pendings[rcTy][influence] = struct{}{}
-
+	readPendingInfluence := newPendingInfluence(op, srcStore, dstStore, infls.ReadInfluence)
+	h.pendings[read][readPendingInfluence] = struct{}{}
+	writePendingInfluence := newPendingInfluence(op, srcStore, dstStore, infls.WriteInfluence)
+	h.pendings[write][writePendingInfluence] = struct{}{}
 	h.regionPendings[regionID] = [2]*operator.Operator{nil, nil}
-	{ // h.pendingOpInfos[regionID][ty] = influence
+	{
 		tmp := h.regionPendings[regionID]
 		tmp[opTy] = op
 		h.regionPendings[regionID] = tmp
@@ -547,7 +553,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	var (
 		best  *solution
 		ops   []*operator.Operator
-		infls []Influence
+		infls []InfluenceSummary
 	)
 
 	for srcStoreID := range bs.filterSrcStores() {
@@ -576,7 +582,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 
 	for i := 0; i < len(ops); i++ {
 		// TODO: multiple operators need to be atomic.
-		if !bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i], bs.rwTy, bs.opTy) {
+		if !bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i], bs.opTy) {
 			return nil
 		}
 	}
@@ -1006,7 +1012,7 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 	return true
 }
 
-func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
+func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []InfluenceSummary) {
 	if !bs.isReadyToBuild() {
 		return nil, nil
 	}
@@ -1061,12 +1067,47 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
 
+	infls := InfluenceSummary{}
 	infl := Influence{
 		Loads: append(bs.cur.srcPeerStat.Loads[:0:0], bs.cur.srcPeerStat.Loads...),
 		Count: 1,
 	}
+	if bs.rwTy == read {
+		infls.ReadInfluence = infl
+		infls.WriteInfluence = bs.getInfluence(bs.cur.srcStoreID, bs.cur.region.GetID(), write)
+	} else {
+		infls.WriteInfluence = infl
+		infls.ReadInfluence = bs.getInfluence(bs.cur.srcStoreID, bs.cur.region.GetID(), read)
+	}
+	return []*operator.Operator{op}, []InfluenceSummary{infls}
+}
 
-	return []*operator.Operator{op}, []Influence{infl}
+func (bs *balanceSolver) getInfluence(storeID, regionID uint64, rwType rwType) Influence {
+	if rwType == read {
+		return getInfluence(storeID, regionID, bs.sche.regionReadStat)
+	} else {
+		return getInfluence(storeID, regionID, bs.sche.regionWriteStat)
+	}
+}
+
+func getInfluence(storeID, regionID uint64, storePeerStats map[uint64][]*statistics.HotPeerStat) Influence {
+	infl := Influence{
+		Loads: make([]float64, statistics.RegionStatCount),
+		Count: 0,
+	}
+	stats, ok := storePeerStats[storeID]
+	if !ok {
+		return infl
+	}
+	for _, stat := range stats {
+		if stat.RegionID == regionID {
+			return Influence{
+				Loads: append(stat.Loads[:0:0], stat.Loads...),
+				Count: 1,
+			}
+		}
+	}
+	return infl
 }
 
 func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
@@ -1099,14 +1140,14 @@ func (h *hotScheduler) GetHotWriteStatus() *statistics.StoreHotPeersInfos {
 }
 
 func (h *hotScheduler) GetWritePendingInfluence() map[uint64]*Influence {
-	return h.copyPendingInfluence(writePeer)
+	return h.copyPendingInfluence(write)
 }
 
 func (h *hotScheduler) GetReadPendingInfluence() map[uint64]*Influence {
-	return h.copyPendingInfluence(readLeader)
+	return h.copyPendingInfluence(read)
 }
 
-func (h *hotScheduler) copyPendingInfluence(ty resourceType) map[uint64]*Influence {
+func (h *hotScheduler) copyPendingInfluence(ty rwType) map[uint64]*Influence {
 	h.RLock()
 	defer h.RUnlock()
 	pendingSum := h.pendingSums[ty]
@@ -1141,7 +1182,7 @@ func (h *hotScheduler) calcPendingWeight(op *operator.Operator) float64 {
 }
 
 func (h *hotScheduler) clearPendingInfluence() {
-	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+	for ty := rwType(0); ty < rwTypeLen; ty++ {
 		h.pendings[ty] = map[*pendingInfluence]struct{}{}
 		h.pendingSums[ty] = nil
 	}
@@ -1154,6 +1195,7 @@ type rwType int
 const (
 	write rwType = iota
 	read
+	rwTypeLen
 )
 
 func (rw rwType) String() string {

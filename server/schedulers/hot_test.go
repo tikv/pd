@@ -36,10 +36,16 @@ func init() {
 	schedulePeerPr = 1.0
 }
 
+type testHotSchedulerSuite struct{}
+type testInfluenceSerialSuite struct{}
+type testHotCacheSuite struct{}
+type testHotReadRegionSchedulerSuite struct{}
+
 var _ = Suite(&testHotWriteRegionSchedulerSuite{})
 var _ = Suite(&testHotSchedulerSuite{})
-
-type testHotSchedulerSuite struct{}
+var _ = Suite(&testHotReadRegionSchedulerSuite{})
+var _ = Suite(&testHotCacheSuite{})
+var _ = SerialSuites(&testInfluenceSerialSuite{})
 
 func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -624,10 +630,6 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithRuleEnabled(c *C) {
 	}
 }
 
-var _ = Suite(&testHotReadRegionSchedulerSuite{})
-
-type testHotReadRegionSchedulerSuite struct{}
-
 func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -884,10 +886,6 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 		}
 	}
 }
-
-var _ = Suite(&testHotCacheSuite{})
-
-type testHotCacheSuite struct{}
 
 func (s *testHotCacheSuite) TestUpdateCache(c *C) {
 	opt := config.NewTestOptions()
@@ -1172,4 +1170,89 @@ func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
 			c.Check(item.IsNeedDelete(), IsFalse)
 		}
 	}
+}
+
+func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
+	originValue := schedulePeerPr
+	defer func() {
+		schedulePeerPr = originValue
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+	tc := mockcluster.NewCluster(opt)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.AddRegionStore(4, 20)
+	tc.UpdateStorageWrittenStats(1, 99*MB*statistics.StoreHeartBeatReportInterval, 99*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 50*MB*statistics.StoreHeartBeatReportInterval, 98*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 2*MB*statistics.StoreHeartBeatReportInterval, 2*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 1*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	addRegionInfo(tc, write, []testRegionInfo{
+		{1, []uint64{2, 1, 3}, 0.5 * MB, 0.5 * MB},
+	})
+	addRegionInfo(tc, read, []testRegionInfo{
+		{1, []uint64{2, 1, 3}, 0.5 * MB, 0.5 * MB},
+	})
+	// must move peer
+	schedulePeerPr = 1.0
+	// must move peer from 1 to 4
+	op := hb.Schedule(tc)[0]
+	c.Assert(op, NotNil)
+	hb.(*hotScheduler).summaryPendingInfluence()
+	writePendingInfluence := hb.(*hotScheduler).pendingSums[write]
+	c.Assert(nearlyAbout(writePendingInfluence[1].Loads[statistics.RegionWriteKeys], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[1].Loads[statistics.RegionWriteBytes], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[4].Loads[statistics.RegionWriteKeys], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[4].Loads[statistics.RegionWriteBytes], 0.5*MB), IsTrue)
+	readPendingInfluence := hb.(*hotScheduler).pendingSums[read]
+	c.Assert(nearlyAbout(readPendingInfluence[1].Loads[statistics.RegionReadKeys], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(readPendingInfluence[1].Loads[statistics.RegionReadBytes], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(readPendingInfluence[4].Loads[statistics.RegionReadKeys], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(readPendingInfluence[4].Loads[statistics.RegionReadBytes], 0.5*MB), IsTrue)
+
+	addRegionInfo(tc, write, []testRegionInfo{
+		{2, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{3, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{4, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+	})
+	addRegionInfo(tc, read, []testRegionInfo{
+		{2, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{3, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{4, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+	})
+	// must transfer leader
+	schedulePeerPr = 0
+	// must transfer leader from 1 to 3
+	op = hb.Schedule(tc)[0]
+	c.Assert(op, NotNil)
+	hb.(*hotScheduler).summaryPendingInfluence()
+	writePendingInfluence = hb.(*hotScheduler).pendingSums[write]
+	// assert read/write influence is the sum of write peer and write leader
+	c.Assert(nearlyAbout(writePendingInfluence[1].Loads[statistics.RegionWriteKeys], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[1].Loads[statistics.RegionWriteBytes], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[3].Loads[statistics.RegionWriteKeys], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(writePendingInfluence[3].Loads[statistics.RegionWriteBytes], 0.7*MB), IsTrue)
+	readPendingInfluence = hb.(*hotScheduler).pendingSums[read]
+	c.Assert(nearlyAbout(readPendingInfluence[1].Loads[statistics.RegionReadKeys], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(readPendingInfluence[1].Loads[statistics.RegionReadBytes], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(readPendingInfluence[3].Loads[statistics.RegionReadKeys], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(readPendingInfluence[3].Loads[statistics.RegionReadBytes], 0.7*MB), IsTrue)
+}
+
+func nearlyAbout(f1, f2 float64) bool {
+	if f1-f2 < 0.1*KB {
+		return true
+	} else if f2-f1 < 0.1*KB {
+		return true
+	}
+	return false
 }
