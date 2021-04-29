@@ -426,8 +426,7 @@ func (c *coordinator) stop() {
 type hasHotStatus interface {
 	GetHotReadStatus() *statistics.StoreHotPeersInfos
 	GetHotWriteStatus() *statistics.StoreHotPeersInfos
-	GetWritePendingInfluence() map[uint64]*schedulers.Influence
-	GetReadPendingInfluence() map[uint64]*schedulers.Influence
+	GetPendingInfluence() map[uint64]*schedulers.Influence
 }
 
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
@@ -505,7 +504,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	c.RUnlock()
 	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
-	pendings := s.Scheduler.(hasHotStatus).GetWritePendingInfluence()
+	pendings := s.Scheduler.(hasHotStatus).GetPendingInfluence()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
@@ -542,7 +541,6 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 	// Collects hot read region metrics.
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
-	pendings = s.Scheduler.(hasHotStatus).GetReadPendingInfluence()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()

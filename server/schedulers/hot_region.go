@@ -1092,15 +1092,7 @@ func (h *hotScheduler) GetHotWriteStatus() *statistics.StoreHotPeersInfos {
 	}
 }
 
-func (h *hotScheduler) GetWritePendingInfluence() map[uint64]*Influence {
-	return h.copyPendingInfluence()
-}
-
-func (h *hotScheduler) GetReadPendingInfluence() map[uint64]*Influence {
-	return h.copyPendingInfluence()
-}
-
-func (h *hotScheduler) copyPendingInfluence() map[uint64]*Influence {
+func (h *hotScheduler) GetPendingInfluence() map[uint64]*Influence {
 	h.RLock()
 	defer h.RUnlock()
 	ret := make(map[uint64]*Influence, len(h.pendingSums))
