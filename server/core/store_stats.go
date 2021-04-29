@@ -136,13 +136,6 @@ func (ss *storeStats) GetReceivingSnapCount() uint32 {
 	return ss.rawStats.GetReceivingSnapCount()
 }
 
-// GetApplyingSnapCount returns the current applying snapshot count of the store.
-func (ss *storeStats) GetApplyingSnapCount() uint32 {
-	ss.mu.RLock()
-	defer ss.mu.RUnlock()
-	return ss.rawStats.GetApplyingSnapCount()
-}
-
 // GetAvgAvailable returns available size after the spike changes has been smoothed.
 func (ss *storeStats) GetAvgAvailable() uint64 {
 	ss.mu.RLock()

@@ -56,7 +56,6 @@ type StoreStatus struct {
 	RegionSize         int64              `json:"region_size"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
-	ApplyingSnapCount  uint32             `json:"applying_snap_count,omitempty"`
 	IsBusy             bool               `json:"is_busy,omitempty"`
 	StartTS            *time.Time         `json:"start_ts,omitempty"`
 	LastHeartbeatTS    *time.Time         `json:"last_heartbeat_ts,omitempty"`
@@ -94,7 +93,6 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			RegionSize:         store.GetRegionSize(),
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
-			ApplyingSnapCount:  store.GetApplyingSnapCount(),
 			IsBusy:             store.IsBusy(),
 		},
 	}
