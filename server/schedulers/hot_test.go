@@ -1208,16 +1208,15 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	op := hb.Schedule(tc)[0]
 	c.Assert(op, NotNil)
 	hb.(*hotScheduler).summaryPendingInfluence()
-	writePendingInfluence := hb.(*hotScheduler).pendingSums[write]
-	c.Assert(nearlyAbout(writePendingInfluence[1].Loads[statistics.RegionWriteKeys], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(writePendingInfluence[1].Loads[statistics.RegionWriteBytes], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(writePendingInfluence[4].Loads[statistics.RegionWriteKeys], 0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(writePendingInfluence[4].Loads[statistics.RegionWriteBytes], 0.5*MB), IsTrue)
-	readPendingInfluence := hb.(*hotScheduler).pendingSums[read]
-	c.Assert(nearlyAbout(readPendingInfluence[1].Loads[statistics.RegionReadKeys], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(readPendingInfluence[1].Loads[statistics.RegionReadBytes], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(readPendingInfluence[4].Loads[statistics.RegionReadKeys], 0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(readPendingInfluence[4].Loads[statistics.RegionReadBytes], 0.5*MB), IsTrue)
+	pendingInfluence := hb.(*hotScheduler).pendingSums
+	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteKeys], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteBytes], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionWriteKeys], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionWriteBytes], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadKeys], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadBytes], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionReadKeys], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionReadBytes], 0.5*MB), IsTrue)
 
 	addRegionInfo(tc, write, []testRegionInfo{
 		{2, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
@@ -1235,17 +1234,16 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	op = hb.Schedule(tc)[0]
 	c.Assert(op, NotNil)
 	hb.(*hotScheduler).summaryPendingInfluence()
-	writePendingInfluence = hb.(*hotScheduler).pendingSums[write]
+	pendingInfluence = hb.(*hotScheduler).pendingSums
 	// assert read/write influence is the sum of write peer and write leader
-	c.Assert(nearlyAbout(writePendingInfluence[1].Loads[statistics.RegionWriteKeys], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(writePendingInfluence[1].Loads[statistics.RegionWriteBytes], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(writePendingInfluence[3].Loads[statistics.RegionWriteKeys], 0.7*MB), IsTrue)
-	c.Assert(nearlyAbout(writePendingInfluence[3].Loads[statistics.RegionWriteBytes], 0.7*MB), IsTrue)
-	readPendingInfluence = hb.(*hotScheduler).pendingSums[read]
-	c.Assert(nearlyAbout(readPendingInfluence[1].Loads[statistics.RegionReadKeys], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(readPendingInfluence[1].Loads[statistics.RegionReadBytes], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(readPendingInfluence[3].Loads[statistics.RegionReadKeys], 0.7*MB), IsTrue)
-	c.Assert(nearlyAbout(readPendingInfluence[3].Loads[statistics.RegionReadBytes], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteKeys], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteBytes], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionWriteKeys], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionWriteBytes], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadKeys], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadBytes], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionReadKeys], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionReadBytes], 0.7*MB), IsTrue)
 }
 
 func nearlyAbout(f1, f2 float64) bool {
