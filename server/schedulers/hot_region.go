@@ -99,7 +99,6 @@ type hotScheduler struct {
 
 	// temporary states but exported to API or metrics
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
-	// pendingSums indicates the [resourceType] storeID -> pending Influence
 	// This stores the pending Influence for each store by resource type.
 	pendingSums map[uint64]*Influence
 	// config of hot scheduler
