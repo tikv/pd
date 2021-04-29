@@ -1247,9 +1247,7 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 }
 
 func nearlyAbout(f1, f2 float64) bool {
-	if f1-f2 < 0.1*KB {
-		return true
-	} else if f2-f1 < 0.1*KB {
+	if f1-f2 < 0.1*KB || f2-f1 < 0.1*KB {
 		return true
 	}
 	return false

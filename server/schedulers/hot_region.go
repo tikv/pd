@@ -102,10 +102,6 @@ type hotScheduler struct {
 	// pendingSums indicates the [resourceType] storeID -> pending Influence
 	// This stores the pending Influence for each store by resource type.
 	pendingSums map[uint64]*Influence
-	// regionReadStat records storeID -> []HotPeerStat for read type
-	regionReadStat map[uint64][]*statistics.HotPeerStat
-	// regionWriteStat records storeID -> []HotPeerStat for write type
-	regionWriteStat map[uint64][]*statistics.HotPeerStat
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
 }
@@ -212,28 +208,28 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	h.summaryPendingInfluence()
 
 	storesLoads := cluster.GetStoresLoads()
-	h.regionReadStat = cluster.RegionReadStats()
-	h.regionWriteStat = cluster.RegionWriteStats()
 
 	{ // update read statistics
+		regionRead := cluster.RegionReadStats()
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
 			storesLoads,
 			h.pendingSums,
-			h.regionReadStat,
+			regionRead,
 			read, core.LeaderKind)
 	}
 
 	{ // update write statistics
+		regionWrite := cluster.RegionWriteStats()
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storesLoads,
 			h.pendingSums,
-			h.regionWriteStat,
+			regionWrite,
 			write, core.LeaderKind)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storesLoads,
 			h.pendingSums,
-			h.regionWriteStat,
+			regionWrite,
 			write, core.RegionKind)
 	}
 }
