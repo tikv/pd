@@ -88,9 +88,19 @@ func (s *configTestSuite) TestConfig(c *C) {
 	cfg := config.Config{}
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	scheduleConfig := svr.GetScheduleConfig()
+
+	// hidden config
 	scheduleConfig.Schedulers = nil
 	scheduleConfig.SchedulersPayload = nil
 	scheduleConfig.StoreLimit = nil
+	scheduleConfig.SchedulerMaxWaitingOperator = 0
+	scheduleConfig.EnableRemoveDownReplica = false
+	scheduleConfig.EnableReplaceOfflineReplica = false
+	scheduleConfig.EnableMakeUpReplica = false
+	scheduleConfig.EnableRemoveExtraReplica = false
+	scheduleConfig.EnableLocationReplacement = false
+	scheduleConfig.StoreLimitMode = ""
+
 	c.Assert(&cfg.Schedule, DeepEquals, scheduleConfig)
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
 
