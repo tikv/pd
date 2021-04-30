@@ -83,7 +83,6 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 	return res
 }
 
-
 // Update updates the items in statistics.
 func (f *hotPeerCache) Update(item *HotPeerStat) {
 	if item.IsNeedDelete() {
@@ -171,8 +170,9 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		loads[i] = deltaLoads[i] / float64(interval)
 	}
 	f.collectPeerMetrics(loads, interval)
-	justTransferLeader := f.justTransferLeaderPeer(region)
-	isExpired := f.isPeerExpired(peer, region) // transfer read leader or remove write peer
+	justTransferLeader := f.justTransferLeader(region)
+	// transfer read leader or remove write peer
+	isExpired := f.isPeerExpired(peer, region)
 	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
 	if !isExpired && Denoising && interval < HotRegionReportMinInterval {
 		return nil
@@ -289,7 +289,7 @@ func (f *hotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool 
 	return isOldPeer() && noInCache()
 }
 
-func (f *hotPeerCache) justTransferLeaderPeer(region *core.RegionInfo) bool {
+func (f *hotPeerCache) justTransferLeader(region *core.RegionInfo) bool {
 	ids, ok := f.storesOfRegion[region.GetID()]
 	if ok {
 		for storeID := range ids {
@@ -414,28 +414,6 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 }
 
 // TODO: remove it in future
-func (f *hotPeerCache) getRegionBytes(region *core.RegionInfo) uint64 {
-	switch f.kind {
-	case WriteFlow:
-		return region.GetBytesWritten()
-	case ReadFlow:
-		return region.GetBytesRead()
-	}
-	return 0
-}
-
-// TODO: remove it in future
-func (f *hotPeerCache) getRegionKeys(region *core.RegionInfo) uint64 {
-	switch f.kind {
-	case WriteFlow:
-		return region.GetKeysWritten()
-	case ReadFlow:
-		return region.GetKeysRead()
-	}
-	return 0
-}
-
-// TODO: remove it in future
 func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
 	regionHeartbeatIntervalHist.Observe(float64(interval))
 	if interval == 0 {
@@ -456,7 +434,6 @@ func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
 	}
 }
 
-// TODO: remove it in future
 // gets the storeIDs, including old region and new region
 func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 	storeIDs := make(map[uint64]struct{})
@@ -491,6 +468,7 @@ func (f *hotPeerCache) markExpiredItem(regionID, storeID uint64) *HotPeerStat {
 	return item
 }
 
+// TODO: remove it in future
 func (f *hotPeerCache) getRegionDeltaLoads(region *core.RegionInfo) []float64 {
 	ret := make([]float64, RegionStatCount)
 	for k := RegionStatKind(0); k < RegionStatCount; k++ {
