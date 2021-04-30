@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/movingaverage"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
@@ -42,18 +43,12 @@ const (
 	hotRegionAntiCount = 2
 )
 
-var (
-	minHotThresholds = [2][dimLen]float64{
-		WriteFlow: {
-			byteDim: 1 * 1024,
-			keyDim:  32,
-		},
-		ReadFlow: {
-			byteDim: 8 * 1024,
-			keyDim:  128,
-		},
-	}
-)
+var minHotThresholds = [RegionStatCount]float64{
+	RegionWriteBytes: 1 * 1024,
+	RegionWriteKeys:  32,
+	RegionReadBytes:  8 * 1024,
+	RegionReadKeys:   128,
+}
 
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
@@ -102,7 +97,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	} else {
 		peers, ok := f.peersOfStore[item.StoreID]
 		if !ok {
-			peers = NewTopN(dimLen, TopNN, topNTTL)
+			peers = NewTopN(DimLen, TopNN, topNTTL)
 			f.peersOfStore[item.StoreID] = peers
 		}
 		peers.Put(item)
@@ -224,12 +219,13 @@ func (f *hotPeerCache) CollectMetrics(typ string) {
 		store := storeTag(storeID)
 		thresholds := f.calcHotThresholds(storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", store, typ).Set(float64(peers.Len()))
-		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[byteDim])
-		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[keyDim])
+		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[ByteDim])
+		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[KeyDim])
 		// for compatibility
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[byteDim])
+		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[ByteDim])
 	}
 }
+
 
 func (f *hotPeerCache) getPeerBytes(peer *core.PeerInfo) uint64 {
 	switch f.kind {
@@ -272,18 +268,19 @@ func (f *hotPeerCache) isPeerExpired(peer *core.PeerInfo, region *core.RegionInf
 	return false
 }
 
-func (f *hotPeerCache) calcHotThresholds(storeID uint64) [dimLen]float64 {
-	minThresholds := minHotThresholds[f.kind]
+func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
+	statKinds := f.kind.RegionStats()
+	mins := make([]float64, len(statKinds))
+	for i, k := range statKinds {
+		mins[i] = minHotThresholds[k]
+	}
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < TopNN {
-		return minThresholds
+		return mins
 	}
-	ret := [dimLen]float64{
-		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).GetByteRate(),
-		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).GetKeyRate(),
-	}
-	for k := 0; k < dimLen; k++ {
-		ret[k] = math.Max(ret[k]*HotThresholdRatio, minThresholds[k])
+	ret := make([]float64, len(statKinds))
+	for i := range ret {
+		ret[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(statKinds[i])*HotThresholdRatio, mins[i])
 	}
 	return ret
 }
@@ -353,16 +350,20 @@ func (f *hotPeerCache) getDefaultTimeMedian() *movingaverage.TimeMedian {
 	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, HotStatReportInterval*time.Second)
 }
 
-func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, keys float64, interval time.Duration) *HotPeerStat {
+func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
 	if newItem.needDelete {
 		return newItem
 	}
+
+	regionStats := f.kind.RegionStats()
 
 	if oldItem == nil {
 		if interval == 0 {
 			return nil
 		}
-		isHot := bytes/interval.Seconds() >= newItem.thresholds[byteDim] || keys/interval.Seconds() >= newItem.thresholds[keyDim]
+		isHot := slice.AnyOf(regionStats, func(i int) bool {
+			return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
+		})
 		if !isHot {
 			return nil
 		}
@@ -371,18 +372,19 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 			newItem.AntiCount = hotRegionAntiCount
 		}
 		newItem.isNew = true
-		newItem.rollingByteRate = newDimStat(byteDim)
-		newItem.rollingKeyRate = newDimStat(keyDim)
-		newItem.rollingByteRate.Add(bytes, interval)
-		newItem.rollingKeyRate.Add(keys, interval)
-		if newItem.rollingKeyRate.isFull() {
-			newItem.clearLastAverage()
+		newItem.rollingLoads = make([]*dimStat, len(regionStats))
+		for i, k := range regionStats {
+			ds := newDimStat(k)
+			ds.Add(deltaLoads[k], interval)
+			if ds.isFull() {
+				ds.clearLastAverage()
+			}
+			newItem.rollingLoads[i] = ds
 		}
 		return newItem
 	}
 
-	newItem.rollingByteRate = oldItem.rollingByteRate
-	newItem.rollingKeyRate = oldItem.rollingKeyRate
+	newItem.rollingLoads = oldItem.rollingLoads
 
 	// TODO: don't inherit hot degree after transfer leader when we report peer by store heartbeat.
 	if newItem.justTransferLeader {
@@ -395,10 +397,13 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 	}
 
 	newItem.lastTransferLeaderTime = oldItem.lastTransferLeaderTime
-	newItem.rollingByteRate.Add(bytes, interval)
-	newItem.rollingKeyRate.Add(keys, interval)
 
-	if !newItem.rollingKeyRate.isFull() {
+	for i, k := range regionStats {
+		newItem.rollingLoads[i].Add(deltaLoads[k], interval)
+	}
+
+	isFull := newItem.rollingLoads[0].isFull() // The intervals of dims are the same, so it is only necessary to determine whether any of them
+	if !isFull {
 		// not update hot degree and anti count
 		newItem.HotDegree = oldItem.HotDegree
 		newItem.AntiCount = oldItem.AntiCount
