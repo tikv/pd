@@ -83,23 +83,23 @@ type PeerInfo struct {
 	readKeys     uint64
 }
 
-// GetWrittenKeys provides peer written keys
-func (p *PeerInfo) GetWrittenKeys() uint64 {
+// GetKeysWritten provides peer written keys
+func (p *PeerInfo) GetKeysWritten() uint64 {
 	return p.writtenKeys
 }
 
-// GetWrittenBytes provides peer written bytes
-func (p *PeerInfo) GetWrittenBytes() uint64 {
+// GetBytesWritten provides peer written bytes
+func (p *PeerInfo) GetBytesWritten() uint64 {
 	return p.writtenBytes
 }
 
-// GetReadBytes provides peer read bytes
-func (p *PeerInfo) GetReadBytes() uint64 {
+// GetBytesRead provides peer read bytes
+func (p *PeerInfo) GetBytesRead() uint64 {
 	return p.readBytes
 }
 
-// GetReadKeys provides read keys
-func (p *PeerInfo) GetReadKeys() uint64 {
+// GetKeysRead provides read keys
+func (p *PeerInfo) GetKeysRead() uint64 {
 	return p.readKeys
 }
 
@@ -121,26 +121,26 @@ func FromMetaPeer(peer *metapb.Peer) *PeerInfo {
 	}
 }
 
-// SetReadBytes sets read bytes
-func (p *PeerInfo) SetReadBytes(b uint64) *PeerInfo {
+// SetBytesRead sets read bytes
+func (p *PeerInfo) SetBytesRead(b uint64) *PeerInfo {
 	p.readBytes = b
 	return p
 }
 
-// SetReadKeys sets read keys
-func (p *PeerInfo) SetReadKeys(k uint64) *PeerInfo {
+// SetKeysRead sets read keys
+func (p *PeerInfo) SetKeysRead(k uint64) *PeerInfo {
 	p.readKeys = k
 	return p
 }
 
-// SetWriteBytes sets write bytes
-func (p *PeerInfo) SetWriteBytes(b uint64) *PeerInfo {
+// SetBytesWrite sets write bytes
+func (p *PeerInfo) SetBytesWrite(b uint64) *PeerInfo {
 	p.writtenBytes = b
 	return p
 }
 
-// SetWriteKeys sets write keys
-func (p *PeerInfo) SetWriteKeys(k uint64) *PeerInfo {
+// SetKeysWrite sets write keys
+func (p *PeerInfo) SetKeysWrite(k uint64) *PeerInfo {
 	p.writtenKeys = k
 	return p
 }

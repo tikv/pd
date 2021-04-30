@@ -83,6 +83,7 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 	return res
 }
 
+
 // Update updates the items in statistics.
 func (f *hotPeerCache) Update(item *HotPeerStat) {
 	if item.IsNeedDelete() {
@@ -112,7 +113,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	}
 }
 
-func (f *hotPeerCache) collectPeerMetrics(byteRate, keyRate float64, interval uint64) {
+func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 	// TODO
 }
 
@@ -122,11 +123,12 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	{
 		// TODO: collect metrics by peer stat
-		bytes := float64(f.getRegionBytes(region))
-		keys := float64(f.getRegionKeys(region))
-		byteRate := bytes / float64(interval)
-		keyRate := keys / float64(interval)
-		f.collectRegionMetrics(byteRate, keyRate, interval)
+		deltaLoads := f.getRegionDeltaLoads(region)
+		loads := make([]float64, len(deltaLoads))
+		for i := range deltaLoads {
+			loads[i] = deltaLoads[i] / float64(interval)
+		}
+		f.collectRegionMetrics(loads, interval)
 	}
 	regionID := region.GetID()
 	storeIDs := f.getAllStoreIDs(region)
@@ -135,10 +137,10 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 		var item *HotPeerStat
 		if peer != nil {
 			peerInfo := core.FromMetaPeer(peer).
-				SetReadKeys(region.GetKeysRead()).
-				SetReadBytes(region.GetBytesRead()).
-				SetWriteKeys(region.GetKeysWritten()).
-				SetWriteBytes(region.GetBytesWritten())
+				SetKeysRead(region.GetKeysRead()).
+				SetBytesRead(region.GetBytesRead()).
+				SetKeysWrite(region.GetKeysWritten()).
+				SetBytesWrite(region.GetBytesWritten())
 			item = f.CheckPeerFlow(peerInfo, region, interval)
 		} else {
 			item = f.markExpiredItem(regionID, storeID)
@@ -163,11 +165,12 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 // CheckPeerFlow checks the flow information of a peer.
 func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *HotPeerStat {
 	storeID := peer.GetStoreID()
-	bytes := float64(f.getPeerBytes(peer))
-	keys := float64(f.getPeerKeys(peer))
-	byteRate := bytes / float64(interval)
-	keyRate := keys / float64(interval)
-	f.collectPeerMetrics(byteRate, keyRate, interval)
+	deltaLoads := f.getPeerDeltaLoads(peer)
+	loads := make([]float64, len(deltaLoads))
+	for i := range deltaLoads {
+		loads[i] = deltaLoads[i] / float64(interval)
+	}
+	f.collectPeerMetrics(loads, interval)
 	justTransferLeader := f.justTransferLeaderPeer(region)
 	isExpired := f.isPeerExpired(peer, region) // transfer read leader or remove write peer
 	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
@@ -183,8 +186,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		StoreID:            storeID,
 		RegionID:           region.GetID(),
 		Kind:               f.kind,
-		ByteRate:           byteRate,
-		KeyRate:            keyRate,
+		Loads:              loads,
 		LastUpdateTime:     time.Now(),
 		needDelete:         isExpired,
 		isLeader:           region.GetLeader().GetStoreId() == storeID,
@@ -201,7 +203,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 			}
 		}
 	}
-	return f.updateHotPeerStat(newItem, oldItem, bytes, keys, time.Duration(interval)*time.Second)
+	return f.updateHotPeerStat(newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
 }
 
 func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
@@ -224,27 +226,6 @@ func (f *hotPeerCache) CollectMetrics(typ string) {
 		// for compatibility
 		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[ByteDim])
 	}
-}
-
-
-func (f *hotPeerCache) getPeerBytes(peer *core.PeerInfo) uint64 {
-	switch f.kind {
-	case WriteFlow:
-		return peer.GetWrittenBytes()
-	case ReadFlow:
-		return peer.GetReadBytes()
-	}
-	return 0
-}
-
-func (f *hotPeerCache) getPeerKeys(peer *core.PeerInfo) uint64 {
-	switch f.kind {
-	case WriteFlow:
-		return peer.GetWrittenKeys()
-	case ReadFlow:
-		return peer.GetReadKeys()
-	}
-	return 0
 }
 
 func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat {
@@ -455,18 +436,23 @@ func (f *hotPeerCache) getRegionKeys(region *core.RegionInfo) uint64 {
 }
 
 // TODO: remove it in future
-func (f *hotPeerCache) collectRegionMetrics(byteRate, keyRate float64, interval uint64) {
+func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
 	regionHeartbeatIntervalHist.Observe(float64(interval))
 	if interval == 0 {
 		return
 	}
-	if f.kind == ReadFlow {
-		readByteHist.Observe(byteRate)
-		readKeyHist.Observe(keyRate)
-	}
-	if f.kind == WriteFlow {
-		writeByteHist.Observe(byteRate)
-		writeKeyHist.Observe(keyRate)
+	// TODO: use unified metrics. (keep backward compatibility at the same time)
+	for _, k := range f.kind.RegionStats() {
+		switch k {
+		case RegionReadBytes:
+			readByteHist.Observe(loads[int(k)])
+		case RegionReadKeys:
+			readKeyHist.Observe(loads[int(k)])
+		case RegionWriteBytes:
+			writeByteHist.Observe(loads[int(k)])
+		case RegionWriteKeys:
+			writeKeyHist.Observe(loads[int(k)])
+		}
 	}
 }
 
@@ -503,4 +489,38 @@ func (f *hotPeerCache) markExpiredItem(regionID, storeID uint64) *HotPeerStat {
 	item := f.getOldHotPeerStat(regionID, storeID)
 	item.needDelete = true
 	return item
+}
+
+func (f *hotPeerCache) getRegionDeltaLoads(region *core.RegionInfo) []float64 {
+	ret := make([]float64, RegionStatCount)
+	for k := RegionStatKind(0); k < RegionStatCount; k++ {
+		switch k {
+		case RegionReadBytes:
+			ret[k] = float64(region.GetBytesRead())
+		case RegionReadKeys:
+			ret[k] = float64(region.GetKeysRead())
+		case RegionWriteBytes:
+			ret[k] = float64(region.GetBytesWritten())
+		case RegionWriteKeys:
+			ret[k] = float64(region.GetKeysWritten())
+		}
+	}
+	return ret
+}
+
+func (f *hotPeerCache) getPeerDeltaLoads(peer *core.PeerInfo) []float64 {
+	ret := make([]float64, RegionStatCount)
+	for k := RegionStatKind(0); k < RegionStatCount; k++ {
+		switch k {
+		case RegionReadBytes:
+			ret[k] = float64(peer.GetBytesRead())
+		case RegionReadKeys:
+			ret[k] = float64(peer.GetKeysRead())
+		case RegionWriteBytes:
+			ret[k] = float64(peer.GetBytesWritten())
+		case RegionWriteKeys:
+			ret[k] = float64(peer.GetKeysWritten())
+		}
+	}
+	return ret
 }
