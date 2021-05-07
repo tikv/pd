@@ -38,13 +38,27 @@ func NewHotCache() *HotCache {
 }
 
 // CheckWrite checks the write status, returns update items.
-func (w *HotCache) CheckWrite(region *core.RegionInfo) []*HotPeerStat {
-	return w.writeFlow.CheckRegionFlow(region)
+func (w *HotCache) CheckWrite(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *HotPeerStat {
+	return w.writeFlow.CheckPeerFlow(peer, region, interval)
 }
 
 // CheckRead checks the read status, returns update items.
-func (w *HotCache) CheckRead(region *core.RegionInfo) []*HotPeerStat {
-	return w.readFlow.CheckRegionFlow(region)
+func (w *HotCache) CheckRead(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *HotPeerStat {
+	return w.readFlow.CheckPeerFlow(peer, region, interval)
+}
+
+// CollectExpiredStat collect expired hotPeerStat
+func (w *HotCache) CollectExpiredStat(region *core.RegionInfo) []*HotPeerStat {
+	expiredItems := make([]*HotPeerStat, 0)
+	expiredItems = append(expiredItems, w.writeFlow.CollectExpiredItem(region)...)
+	expiredItems = append(expiredItems, w.readFlow.CollectExpiredItem(region)...)
+	return expiredItems
+}
+
+// CollectRegionMetrics collect region metrics
+func (w *HotCache) CollectRegionMetrics(region *core.RegionInfo) {
+	w.writeFlow.CollectRegionMetrics(region)
+	w.readFlow.CollectRegionMetrics(region)
 }
 
 // Update updates the cache.

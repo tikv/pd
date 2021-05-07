@@ -339,10 +339,10 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckRead(r)
-		for _, item := range items {
-			mc.HotCache.Update(item)
-		}
+		leaderPeerInfo := core.FromMetaPeer(r.GetLeader())
+		item := mc.HotCache.CheckRead(leaderPeerInfo, r, statistics.StoreHeartBeatReportInterval)
+		mc.HotCache.Update(item)
+		items = append(items, item)
 	}
 	mc.PutRegion(r)
 	return items
@@ -366,7 +366,13 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckWrite(r)
+		for _, peer := range r.GetPeers() {
+			peerInfo := core.FromMetaPeer(peer)
+			peerInfo.SetBytesWrite(writtenBytes)
+			peerInfo.SetKeysWrite(writtenKeys)
+			item := mc.HotCache.CheckWrite(peerInfo, r, statistics.RegionHeartBeatReportInterval)
+			items = append(items, item)
+		}
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}

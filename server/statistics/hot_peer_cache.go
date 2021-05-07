@@ -22,7 +22,6 @@ import (
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
-	"go.uber.org/zap"
 )
 
 const (
@@ -114,49 +113,20 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	}
 }
 
-// CheckRegionFlow checks the flow information of region.
-func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	{
-		// TODO: collect metrics by peer stat
-		deltaLoads := f.getRegionDeltaLoads(region)
-		loads := make([]float64, len(deltaLoads))
-		for i := range deltaLoads {
-			loads[i] = deltaLoads[i] / float64(interval)
-		}
-		f.collectRegionMetrics(loads, interval)
+// CollectExpiredItem collects all the expired items
+func (f *hotPeerCache) CollectExpiredItem(region *core.RegionInfo) (ret []*HotPeerStat) {
+	storeIDs, ok := f.storesOfRegion[region.GetID()]
+	if !ok {
+		return
 	}
-	regionID := region.GetID()
-	storeIDs := f.getAllStoreIDs(region, f.kind == WriteFlow)
-	for _, storeID := range storeIDs {
-		peer := region.GetStorePeer(storeID)
-		var item *HotPeerStat
-		if peer != nil {
-			peerInfo := core.FromMetaPeer(peer).
-				SetKeysRead(region.GetKeysRead()).
-				SetBytesRead(region.GetBytesRead()).
-				SetKeysWrite(region.GetKeysWritten()).
-				SetBytesWrite(region.GetBytesWritten())
-			item = f.CheckPeerFlow(peerInfo, region, interval)
-		} else {
-			item = f.markExpiredItem(regionID, storeID)
-		}
-		if item != nil {
+	for storeID := range storeIDs {
+		if region.GetStorePeer(storeID) == nil {
+			item := f.getOldHotPeerStat(region.GetID(), storeID)
+			item.needDelete = true
 			ret = append(ret, item)
 		}
 	}
-	var peers []uint64
-	for _, peer := range region.GetPeers() {
-		peers = append(peers, peer.StoreId)
-	}
-	log.Debug("region heartbeat info",
-		zap.String("type", f.kind.String()),
-		zap.Uint64("region", region.GetID()),
-		zap.Uint64("leader", region.GetLeader().GetStoreId()),
-		zap.Uint64s("peers", peers),
-	)
-	return ret
+	return
 }
 
 // CheckPeerFlow checks the flow information of a peer.
@@ -194,7 +164,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		expectReportIntervalSecs: f.expectReportIntervalSecs,
 	}
 	if oldItem == nil {
-		for _, storeID := range f.getAllStoreIDs(region, true) {
+		for _, storeID := range f.getAllStoreIDs(region) {
 			oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
 			if oldItem != nil {
 				break
@@ -223,6 +193,34 @@ func (f *hotPeerCache) CollectMetrics(typ string) {
 		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[KeyDim])
 		// for compatibility
 		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[ByteDim])
+	}
+}
+
+// CollectRegionMetrics collects metrics from region.(keep backward compatibility at the same time)
+func (f *hotPeerCache) CollectRegionMetrics(region *core.RegionInfo) {
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	deltaLoads := f.getRegionDeltaLoads(region)
+	loads := make([]float64, len(deltaLoads))
+	for i := range deltaLoads {
+		loads[i] = deltaLoads[i] / float64(interval)
+	}
+	regionHeartbeatIntervalHist.Observe(float64(interval))
+	if interval == 0 {
+		return
+	}
+	// TODO: use unified metrics. (keep backward compatibility at the same time)
+	for _, k := range f.kind.RegionStats() {
+		switch k {
+		case RegionReadBytes:
+			readByteHist.Observe(loads[int(k)])
+		case RegionReadKeys:
+			readKeyHist.Observe(loads[int(k)])
+		case RegionWriteBytes:
+			writeByteHist.Observe(loads[int(k)])
+		case RegionWriteKeys:
+			writeKeyHist.Observe(loads[int(k)])
+		}
 	}
 }
 
@@ -279,10 +277,6 @@ func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 
 	// new stores
 	for _, peer := range region.GetPeers() {
-		// ReadFlow no need consider the followers.
-		if f.kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
-			continue
-		}
 		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
 			storeIDs[peer.GetStoreId()] = struct{}{}
 			ret = append(ret, peer.GetStoreId())
@@ -441,34 +435,6 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 	return newItem
 }
 
-// TODO: remove it in future
-func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
-	regionHeartbeatIntervalHist.Observe(float64(interval))
-	if interval == 0 {
-		return
-	}
-	// TODO: use unified metrics. (keep backward compatibility at the same time)
-	for _, k := range f.kind.RegionStats() {
-		switch k {
-		case RegionReadBytes:
-			readByteHist.Observe(loads[int(k)])
-		case RegionReadKeys:
-			readKeyHist.Observe(loads[int(k)])
-		case RegionWriteBytes:
-			writeByteHist.Observe(loads[int(k)])
-		case RegionWriteKeys:
-			writeKeyHist.Observe(loads[int(k)])
-		}
-	}
-}
-
-func (f *hotPeerCache) markExpiredItem(regionID, storeID uint64) *HotPeerStat {
-	item := f.getOldHotPeerStat(regionID, storeID)
-	item.needDelete = true
-	return item
-}
-
-// TODO: remove it in future
 func (f *hotPeerCache) getRegionDeltaLoads(region *core.RegionInfo) []float64 {
 	ret := make([]float64, RegionStatCount)
 	for k := RegionStatKind(0); k < RegionStatCount; k++ {

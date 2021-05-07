@@ -535,6 +535,31 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
+	readItems := make([]*statistics.HotPeerStat, 0)
+	for _, peerStat := range stats.GetPeerStats() {
+		regionID := peerStat.GetRegionId()
+		region := c.GetRegion(regionID)
+		// TODO: add metrics here
+		if region == nil {
+			continue
+		}
+		// TODO: add metrics here
+		peer := region.GetStorePeer(storeID)
+		if peer == nil {
+			continue
+		}
+		peerInfo := core.FromMetaPeer(peer)
+		peerInfo.SetBytesRead(region.GetBytesRead())
+		peerInfo.SetKeysRead(region.GetKeysRead())
+		readItem := c.CheckReadStatus(peerInfo, region, statistics.StoreHeartBeatReportInterval)
+		if readItem != nil {
+			readItems = append(readItems, readItem)
+		}
+	}
+	for _, readItem := range readItems {
+		c.hotStat.Update(readItem)
+	}
+
 	return nil
 }
 
@@ -546,8 +571,20 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.RUnlock()
 		return err
 	}
-	writeItems := c.CheckWriteStatus(region)
-	readItems := c.CheckReadStatus(region)
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	writeItems := make([]*statistics.HotPeerStat, 0)
+	for _, peer := range region.GetPeers() {
+		peerInfo := core.FromMetaPeer(peer)
+		peerInfo.SetBytesWrite(region.GetBytesWritten())
+		peerInfo.SetKeysWrite(region.GetKeysWritten())
+		writeItem := c.CheckWriteStatus(peerInfo, region, interval)
+		if writeItem != nil {
+			writeItems = append(writeItems, writeItem)
+		}
+	}
+	expiredItems := c.CollectExpiredStats(region)
+	c.CollectRegionMetrics(region)
 	c.RUnlock()
 
 	// Save to storage if meta is updated.
@@ -623,7 +660,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	if len(writeItems) == 0 && len(readItems) == 0 && !saveKV && !saveCache && !isNew {
+	if len(writeItems) == 0 && len(expiredItems) == 0 && !saveKV && !saveCache && !isNew {
 		return nil
 	}
 
@@ -686,8 +723,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	for _, writeItem := range writeItems {
 		c.hotStat.Update(writeItem)
 	}
-	for _, readItem := range readItems {
-		c.hotStat.Update(readItem)
+	for _, expiredItem := range expiredItems {
+		c.hotStat.Update(expiredItem)
 	}
 	c.Unlock()
 
@@ -1476,13 +1513,21 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 }
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
-func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotStat.CheckWrite(region)
+func (c *RaftCluster) CheckWriteStatus(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *statistics.HotPeerStat {
+	return c.hotStat.CheckWrite(peer, region, interval)
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
-func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotStat.CheckRead(region)
+func (c *RaftCluster) CheckReadStatus(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *statistics.HotPeerStat {
+	return c.hotStat.CheckRead(peer, region, interval)
+}
+
+func (c *RaftCluster) CollectExpiredStats(region *core.RegionInfo) []*statistics.HotPeerStat {
+	return c.hotStat.CollectExpiredStat(region)
+}
+
+func (c *RaftCluster) CollectRegionMetrics(region *core.RegionInfo) {
+	c.hotStat.CollectRegionMetrics(region)
 }
 
 // TODO: remove me.

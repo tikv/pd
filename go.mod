@@ -4,7 +4,7 @@ go 1.13
 
 require (
 	github.com/BurntSushi/toml v0.3.1
-	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
+	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751 // indirect
 	github.com/aws/aws-sdk-go v1.35.3
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
@@ -55,3 +55,5 @@ require (
 
 // Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
 replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
+
+replace github.com/pingcap/kvproto => github.com/yisaer/kvproto v0.0.0-20210507040058-bb7251f37abb
