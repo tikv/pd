@@ -15,7 +15,6 @@ package statistics
 
 import (
 	"math"
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -56,22 +55,15 @@ type hotPeerCache struct {
 	kind           FlowKind
 	peersOfStore   map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
-
-	inheritMu struct {
-		sync.RWMutex
-		inheritItems map[uint64]*HotPeerStat
-	}
 }
 
 // NewHotStoresStats creates a HotStoresStats
 func NewHotStoresStats(kind FlowKind) *hotPeerCache {
-	c := &hotPeerCache{
+	return &hotPeerCache{
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 	}
-	c.inheritMu.inheritItems = make(map[uint64]*HotPeerStat)
-	return c
 }
 
 // TODO: rename RegionStats as PeerStats
@@ -198,9 +190,6 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	// transfer read leader or remove write peer
 	isExpired := f.isPeerExpired(peer, region)
 	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
-	if isExpired && oldItem != nil && !f.isInheritItemExist(region.GetID()) {
-		f.putInheritItem(oldItem)
-	}
 	if !isExpired && Denoising && interval < HotRegionReportMinInterval {
 		return nil
 	}
@@ -223,9 +212,9 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		thresholds:         thresholds,
 	}
 	if oldItem == nil {
-		inheritItem := f.takeInheritItem(region.GetID())
-		if inheritItem != nil {
-			oldItem = inheritItem
+		leaderStat := f.getOldHotPeerStat(region.GetID(), region.GetLeader().GetStoreId())
+		if leaderStat != nil {
+			oldItem = leaderStat
 		} else {
 			for _, storeID := range f.getAllStoreIDs(region) {
 				oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
@@ -494,32 +483,4 @@ func (f *hotPeerCache) getFlowDeltaLoads(stat core.FlowStat) []float64 {
 		}
 	}
 	return ret
-}
-
-func (f *hotPeerCache) putInheritItem(item *HotPeerStat) {
-	f.inheritMu.Lock()
-	defer f.inheritMu.Unlock()
-	f.inheritMu.inheritItems[item.RegionID] = item
-}
-
-func (f *hotPeerCache) takeInheritItem(regionID uint64) *HotPeerStat {
-	f.inheritMu.Lock()
-	defer f.inheritMu.Unlock()
-	item, ok := f.inheritMu.inheritItems[regionID]
-	if !ok {
-		return nil
-	}
-	if item != nil {
-		ret := *item
-		f.inheritMu.inheritItems[regionID] = nil
-		return &ret
-	}
-	return nil
-}
-
-func (f *hotPeerCache) isInheritItemExist(regionID uint64) bool {
-	f.inheritMu.RLock()
-	defer f.inheritMu.RUnlock()
-	_, ok := f.inheritMu.inheritItems[regionID]
-	return ok
 }
