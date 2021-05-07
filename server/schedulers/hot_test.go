@@ -73,8 +73,6 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 			op, err = operator.CreateMovePeerOperator("move-peer-test", tc, region, operator.OpAdmin, 2, &metapb.Peer{Id: region.GetID()*10000 + 1, StoreId: 4})
 		case transferLeader:
 			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 1, 2, operator.OpAdmin)
-		case moveLeader:
-			op, err = operator.CreateMoveLeaderOperator("transfer-leader-test", tc, region, operator.OpAdmin, 2, &metapb.Peer{Id: region.GetID()*10000 + 1, StoreId: 4})
 		}
 		c.Assert(err, IsNil)
 		c.Assert(op, NotNil)
@@ -92,7 +90,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	}
 	opCreaters := [4]func(region *core.RegionInfo, ty opType) *operator.Operator{nilOp, shouldRemoveOp, notDoneOp, doneOp}
 
-	typs := []opType{movePeer, transferLeader, moveLeader}
+	typs := []opType{movePeer, transferLeader}
 
 	for i := 0; i < len(opCreaters); i++ {
 		for j, typ := range typs {
@@ -116,9 +114,6 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 				case transferLeader:
 					c.Assert(kind&operator.OpLeader != 0, IsTrue)
 					c.Assert(kind&operator.OpRegion == 0, IsTrue)
-				case moveLeader:
-					c.Assert(kind&operator.OpLeader != 0, IsTrue)
-					c.Assert(kind&operator.OpRegion != 0, IsTrue)
 				case movePeer:
 					c.Assert(kind&operator.OpLeader == 0, IsTrue)
 					c.Assert(kind&operator.OpRegion != 0, IsTrue)
