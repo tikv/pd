@@ -54,10 +54,11 @@ func (w *WMA) Add(n float64) {
 // Get returns the weight average of the data set.
 func (w *WMA) Get() float64 {
 	if w.count == 0 {
-		return w.score / float64(w.size)
+		return 0
 	}
 	if w.count < w.size {
-		return w.score / float64((2.0*w.size-w.count+1)*w.count/2.0)
+		// the weight = (the first element +the last element)*count/2
+		return w.score / float64((w.size+(w.size-w.count+1))*w.count/2.0)
 	}
 	return w.score / float64((w.size+1)*w.size/2)
 }
