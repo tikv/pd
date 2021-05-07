@@ -55,6 +55,7 @@ type hotPeerCache struct {
 	kind           FlowKind
 	peersOfStore   map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	inheritItem    map[uint64]*HotPeerStat        // regionID -> HotPeerStat
 }
 
 // NewHotStoresStats creates a HotStoresStats
@@ -63,6 +64,7 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
+		inheritItem:    make(map[uint64]*HotPeerStat),
 	}
 }
 
@@ -179,6 +181,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 }
 
 // CheckPeerFlow checks the flow information of a peer.
+// Notice: CheckPeerFlow couldn't be used concurrently.
 func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *HotPeerStat {
 	storeID := peer.GetStoreID()
 	deltaLoads := f.getFlowDeltaLoads(peer)
@@ -190,6 +193,9 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	// transfer read leader or remove write peer
 	isExpired := f.isPeerExpired(peer, region)
 	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
+	if isExpired && oldItem != nil && !f.isInheritExist(region.GetID()) {
+		f.putInheritItem(oldItem)
+	}
 	if !isExpired && Denoising && interval < HotRegionReportMinInterval {
 		return nil
 	}
@@ -212,9 +218,9 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		thresholds:         thresholds,
 	}
 	if oldItem == nil {
-		leaderStat := f.getOldHotPeerStat(region.GetID(), region.GetLeader().GetStoreId())
-		if leaderStat != nil {
-			oldItem = leaderStat
+		inheritItem := f.takeInheritItem(region.GetID())
+		if inheritItem != nil {
+			oldItem = inheritItem
 		} else {
 			for _, storeID := range f.getAllStoreIDs(region) {
 				oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
@@ -483,4 +489,26 @@ func (f *hotPeerCache) getFlowDeltaLoads(stat core.FlowStat) []float64 {
 		}
 	}
 	return ret
+}
+
+func (f *hotPeerCache) isInheritExist(regionID uint64) bool {
+	item, ok := f.inheritItem[regionID]
+	return ok && item != nil
+}
+
+func (f *hotPeerCache) putInheritItem(item *HotPeerStat) {
+	f.inheritItem[item.RegionID] = item
+}
+
+func (f *hotPeerCache) takeInheritItem(regionID uint64) *HotPeerStat {
+	item, ok := f.inheritItem[regionID]
+	if !ok {
+		return nil
+	}
+	if item != nil {
+		ret := *item
+		f.inheritItem[regionID] = nil
+		return &ret
+	}
+	return nil
 }
