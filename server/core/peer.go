@@ -82,6 +82,7 @@ type PeerInfo struct {
 	readKeys     uint64
 }
 
+// NewPeerInfo creates PeerInfo
 func NewPeerInfo(meta *metapb.Peer, writtenBytes, writtenKeys, readBytes, readKeys uint64) *PeerInfo {
 	return &PeerInfo{
 		Peer:         meta,
