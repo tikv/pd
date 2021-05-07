@@ -29,14 +29,8 @@ const (
 	// TopNN is the threshold which means we can get hot threshold from store.
 	TopNN = 60
 	// HotThresholdRatio is used to calculate hot thresholds
-	HotThresholdRatio = 0.8
-	// HotStatReportInterval indicates the interval between each data reporting
-	// TODO: change into StoreHeartBeatReportInterval when we use store heartbeat to report data
-	HotStatReportInterval = RegionHeartBeatReportInterval
-	topNTTL               = 3 * HotStatReportInterval * time.Second
-
+	HotThresholdRatio  = 0.8
 	rollingWindowsSize = 5
-
 	// HotRegionReportMinInterval is used for the simulator and test
 	HotRegionReportMinInterval = 3
 
@@ -52,18 +46,25 @@ var minHotThresholds = [RegionStatCount]float64{
 
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
-	kind           FlowKind
-	peersOfStore   map[uint64]*TopN               // storeID -> hot peers
-	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	kind                     FlowKind
+	peersOfStore             map[uint64]*TopN               // storeID -> hot peers
+	storesOfRegion           map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	expectReportIntervalSecs int
 }
 
 // NewHotStoresStats creates a HotStoresStats
 func NewHotStoresStats(kind FlowKind) *hotPeerCache {
-	return &hotPeerCache{
+	c := &hotPeerCache{
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 	}
+	if kind == WriteFlow {
+		c.expectReportIntervalSecs = RegionHeartBeatReportInterval
+	} else {
+		c.expectReportIntervalSecs = StoreHeartBeatReportInterval
+	}
+	return c
 }
 
 // TODO: rename RegionStats as PeerStats
@@ -97,6 +98,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	} else {
 		peers, ok := f.peersOfStore[item.StoreID]
 		if !ok {
+			topNTTL := 3 * time.Duration(f.expectReportIntervalSecs) * time.Second
 			peers = NewTopN(DimLen, TopNN, topNTTL)
 			f.peersOfStore[item.StoreID] = peers
 		}
@@ -130,7 +132,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 		f.collectRegionMetrics(loads, interval)
 	}
 	regionID := region.GetID()
-	storeIDs := f.getAllStoreIDs(region)
+	storeIDs := f.getAllStoreIDs(region, f.kind == WriteFlow)
 	for _, storeID := range storeIDs {
 		peer := region.GetStorePeer(storeID)
 		var item *HotPeerStat
@@ -183,20 +185,21 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		peers = append(peers, peer.StoreId)
 	}
 	newItem := &HotPeerStat{
-		StoreID:            storeID,
-		RegionID:           region.GetID(),
-		Kind:               f.kind,
-		Loads:              loads,
-		LastUpdateTime:     time.Now(),
-		needDelete:         isExpired,
-		isLeader:           region.GetLeader().GetStoreId() == storeID,
-		justTransferLeader: justTransferLeader,
-		interval:           interval,
-		peers:              peers,
-		thresholds:         thresholds,
+		StoreID:                  storeID,
+		RegionID:                 region.GetID(),
+		Kind:                     f.kind,
+		Loads:                    loads,
+		LastUpdateTime:           time.Now(),
+		needDelete:               isExpired,
+		isLeader:                 region.GetLeader().GetStoreId() == storeID,
+		justTransferLeader:       justTransferLeader,
+		interval:                 interval,
+		peers:                    peers,
+		thresholds:               thresholds,
+		expectReportIntervalSecs: f.expectReportIntervalSecs,
 	}
 	if oldItem == nil {
-		for _, storeID := range f.getAllStoreIDs(region) {
+		for _, storeID := range f.getAllStoreIDs(region, true) {
 			oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
 			if oldItem != nil {
 				break
@@ -328,7 +331,7 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 }
 
 func (f *hotPeerCache) getDefaultTimeMedian() *movingaverage.TimeMedian {
-	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, HotStatReportInterval*time.Second)
+	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, time.Duration(f.expectReportIntervalSecs)*time.Second)
 }
 
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
@@ -348,7 +351,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		if !isHot {
 			return nil
 		}
-		if interval.Seconds() >= HotStatReportInterval {
+		if interval.Seconds() >= float64(f.expectReportIntervalSecs) {
 			newItem.HotDegree = 1
 			newItem.AntiCount = hotRegionAntiCount
 		}
@@ -369,15 +372,17 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 
 	// TODO: don't inherit hot degree after transfer leader when we report peer by store heartbeat.
 	if newItem.justTransferLeader {
-		// skip the first heartbeat flow statistic after transfer leader, because its statistics are calculated by the last leader in this store and are inaccurate
-		// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.
-		newItem.HotDegree = oldItem.HotDegree
-		newItem.AntiCount = oldItem.AntiCount
 		newItem.lastTransferLeaderTime = time.Now()
-		return newItem
+		if newItem.Kind == WriteFlow {
+			// skip the first heartbeat flow statistic after transfer leader, because its statistics are calculated by the last leader in this store and are inaccurate
+			// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.
+			newItem.HotDegree = oldItem.HotDegree
+			newItem.AntiCount = oldItem.AntiCount
+			return newItem
+		}
+	} else {
+		newItem.lastTransferLeaderTime = oldItem.lastTransferLeaderTime
 	}
-
-	newItem.lastTransferLeaderTime = oldItem.lastTransferLeaderTime
 
 	for i, k := range regionStats {
 		newItem.rollingLoads[i].Add(deltaLoads[k], interval)
@@ -435,7 +440,7 @@ func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
 }
 
 // gets the storeIDs, including old region and new region
-func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
+func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo, includeFollowers bool) []uint64 {
 	storeIDs := make(map[uint64]struct{})
 	ret := make([]uint64, 0, len(region.GetPeers()))
 	// old stores
@@ -450,7 +455,7 @@ func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 	// new stores
 	for _, peer := range region.GetPeers() {
 		// ReadFlow no need consider the followers.
-		if f.kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
+		if !includeFollowers {
 			continue
 		}
 		if _, ok := storeIDs[peer.GetStoreId()]; !ok {

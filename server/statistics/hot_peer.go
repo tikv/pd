@@ -92,11 +92,12 @@ type HotPeerStat struct {
 	isLeader   bool
 	isNew      bool
 	//TODO: remove it when we send peer stat by store info
-	justTransferLeader     bool
-	interval               uint64
-	thresholds             []float64
-	peers                  []uint64
-	lastTransferLeaderTime time.Time
+	justTransferLeader       bool
+	interval                 uint64
+	thresholds               []float64
+	peers                    []uint64
+	lastTransferLeaderTime   time.Time
+	expectReportIntervalSecs int
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -129,7 +130,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 
 // IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
 func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
-	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*HotStatReportInterval)
+	return stat.Kind == WriteFlow && time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*stat.expectReportIntervalSecs)
 }
 
 // IsNeedDelete to delete the item in cache.
