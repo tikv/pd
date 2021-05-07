@@ -73,6 +73,8 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 			op, err = operator.CreateMovePeerOperator("move-peer-test", tc, region, operator.OpAdmin, 2, &metapb.Peer{Id: region.GetID()*10000 + 1, StoreId: 4})
 		case transferLeader:
 			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 1, 2, operator.OpAdmin)
+		case moveLeader:
+			op, err = operator.CreateMoveLeaderOperator("transfer-leader-test", tc, region, operator.OpAdmin, 2, &metapb.Peer{Id: region.GetID()*10000 + 1, StoreId: 4})
 		}
 		c.Assert(err, IsNil)
 		c.Assert(op, NotNil)
@@ -90,36 +92,37 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	}
 	opCreaters := [4]func(region *core.RegionInfo, ty opType) *operator.Operator{nilOp, shouldRemoveOp, notDoneOp, doneOp}
 
+	typs := []opType{movePeer, transferLeader, moveLeader}
+
 	for i := 0; i < len(opCreaters); i++ {
-		for j := 0; j < len(opCreaters); j++ {
+		for j, typ := range typs {
 			regionID := uint64(i*len(opCreaters) + j + 1)
 			region := newTestRegion(regionID)
-			hb.regionPendings[regionID] = [2]*operator.Operator{
-				movePeer:       opCreaters[i](region, movePeer),
-				transferLeader: opCreaters[j](region, transferLeader),
-			}
+			hb.regionPendings[regionID] = opCreaters[i](region, typ)
 		}
 	}
 
 	hb.gcRegionPendings()
 
 	for i := 0; i < len(opCreaters); i++ {
-		for j := 0; j < len(opCreaters); j++ {
+		for j, typ := range typs {
 			regionID := uint64(i*len(opCreaters) + j + 1)
-			if i < 2 && j < 2 {
+			if i < 2 { // nilOp, shouldRemoveOp
 				c.Assert(hb.regionPendings, Not(HasKey), regionID)
-			} else if i < 2 {
+			} else { // notDoneOp, doneOp
 				c.Assert(hb.regionPendings, HasKey, regionID)
-				c.Assert(hb.regionPendings[regionID][movePeer], IsNil)
-				c.Assert(hb.regionPendings[regionID][transferLeader], NotNil)
-			} else if j < 2 {
-				c.Assert(hb.regionPendings, HasKey, regionID)
-				c.Assert(hb.regionPendings[regionID][movePeer], NotNil)
-				c.Assert(hb.regionPendings[regionID][transferLeader], IsNil)
-			} else {
-				c.Assert(hb.regionPendings, HasKey, regionID)
-				c.Assert(hb.regionPendings[regionID][movePeer], NotNil)
-				c.Assert(hb.regionPendings[regionID][transferLeader], NotNil)
+				kind := hb.regionPendings[regionID].Kind()
+				switch typ {
+				case transferLeader:
+					c.Assert(kind&operator.OpLeader != 0, IsTrue)
+					c.Assert(kind&operator.OpRegion == 0, IsTrue)
+				case moveLeader:
+					c.Assert(kind&operator.OpLeader != 0, IsTrue)
+					c.Assert(kind&operator.OpRegion != 0, IsTrue)
+				case movePeer:
+					c.Assert(kind&operator.OpLeader == 0, IsTrue)
+					c.Assert(kind&operator.OpRegion != 0, IsTrue)
+				}
 			}
 		}
 	}
