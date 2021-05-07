@@ -75,8 +75,7 @@ func CountInJointState(peers ...*metapb.Peer) int {
 
 // PeerInfo provides peer information
 type PeerInfo struct {
-	peerID       uint64
-	storeID      uint64
+	meta         *metapb.Peer
 	writtenBytes uint64
 	writtenKeys  uint64
 	readBytes    uint64
@@ -105,19 +104,18 @@ func (p *PeerInfo) GetKeysRead() uint64 {
 
 // GetStoreID provides located storeID
 func (p *PeerInfo) GetStoreID() uint64 {
-	return p.storeID
+	return p.meta.StoreId
 }
 
 // GetPeerID provides peer id
 func (p *PeerInfo) GetPeerID() uint64 {
-	return p.peerID
+	return p.meta.GetId()
 }
 
 // FromMetaPeer provides PeerInfo from metapb.Peer
 func FromMetaPeer(peer *metapb.Peer) *PeerInfo {
 	return &PeerInfo{
-		peerID:  peer.GetId(),
-		storeID: peer.GetStoreId(),
+		meta: peer,
 	}
 }
 
