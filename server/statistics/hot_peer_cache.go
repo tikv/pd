@@ -15,6 +15,7 @@ package statistics
 
 import (
 	"math"
+	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -55,15 +56,22 @@ type hotPeerCache struct {
 	kind           FlowKind
 	peersOfStore   map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
+
+	inheritMu struct {
+		sync.RWMutex
+		inheritItems map[uint64]*HotPeerStat
+	}
 }
 
 // NewHotStoresStats creates a HotStoresStats
 func NewHotStoresStats(kind FlowKind) *hotPeerCache {
-	return &hotPeerCache{
+	c := &hotPeerCache{
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 	}
+	c.inheritMu.inheritItems = make(map[uint64]*HotPeerStat)
+	return c
 }
 
 // TODO: rename RegionStats as PeerStats
@@ -112,13 +120,34 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	}
 }
 
+// TODO: remove it in future
+func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
+	regionHeartbeatIntervalHist.Observe(float64(interval))
+	if interval == 0 {
+		return
+	}
+	// TODO: use unified metrics. (keep backward compatibility at the same time)
+	for _, k := range f.kind.RegionStats() {
+		switch k {
+		case RegionReadBytes:
+			readByteHist.Observe(loads[int(k)])
+		case RegionReadKeys:
+			readKeyHist.Observe(loads[int(k)])
+		case RegionWriteBytes:
+			writeByteHist.Observe(loads[int(k)])
+		case RegionWriteKeys:
+			writeKeyHist.Observe(loads[int(k)])
+		}
+	}
+}
+
 // CheckRegionFlow checks the flow information of region.
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	{
 		// TODO: collect metrics by peer stat
-		deltaLoads := f.getRegionDeltaLoads(region)
+		deltaLoads := f.getFlowDeltaLoads(region)
 		loads := make([]float64, len(deltaLoads))
 		for i := range deltaLoads {
 			loads[i] = deltaLoads[i] / float64(interval)
@@ -131,8 +160,8 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 		peer := region.GetStorePeer(storeID)
 		var item *HotPeerStat
 		if peer != nil {
-			peerInfo := core.FromMetaPeer(peer).
-				SetKeysRead(region.GetKeysRead()).
+			peerInfo := &core.PeerInfo{Peer: peer}
+			peerInfo.SetKeysRead(region.GetKeysRead()).
 				SetBytesRead(region.GetBytesRead()).
 				SetKeysWrite(region.GetKeysWritten()).
 				SetBytesWrite(region.GetBytesWritten())
@@ -160,7 +189,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 // CheckPeerFlow checks the flow information of a peer.
 func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *HotPeerStat {
 	storeID := peer.GetStoreID()
-	deltaLoads := f.getPeerDeltaLoads(peer)
+	deltaLoads := f.getFlowDeltaLoads(peer)
 	loads := make([]float64, len(deltaLoads))
 	for i := range deltaLoads {
 		loads[i] = deltaLoads[i] / float64(interval)
@@ -169,6 +198,9 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	// transfer read leader or remove write peer
 	isExpired := f.isPeerExpired(peer, region)
 	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
+	if isExpired && oldItem != nil && !f.isInheritItemExist(region.GetID()) {
+		f.putInheritItem(oldItem)
+	}
 	if !isExpired && Denoising && interval < HotRegionReportMinInterval {
 		return nil
 	}
@@ -191,10 +223,15 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		thresholds:         thresholds,
 	}
 	if oldItem == nil {
-		for _, storeID := range f.getAllStoreIDs(region) {
-			oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
-			if oldItem != nil {
-				break
+		inheritItem := f.takeInheritItem(region.GetID())
+		if inheritItem != nil {
+			oldItem = inheritItem
+		} else {
+			for _, storeID := range f.getAllStoreIDs(region) {
+				oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
+				if oldItem != nil {
+					break
+				}
 			}
 		}
 	}
@@ -436,64 +473,53 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 	return newItem
 }
 
-// TODO: remove it in future
-func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
-	regionHeartbeatIntervalHist.Observe(float64(interval))
-	if interval == 0 {
-		return
-	}
-	// TODO: use unified metrics. (keep backward compatibility at the same time)
-	for _, k := range f.kind.RegionStats() {
-		switch k {
-		case RegionReadBytes:
-			readByteHist.Observe(loads[int(k)])
-		case RegionReadKeys:
-			readKeyHist.Observe(loads[int(k)])
-		case RegionWriteBytes:
-			writeByteHist.Observe(loads[int(k)])
-		case RegionWriteKeys:
-			writeKeyHist.Observe(loads[int(k)])
-		}
-	}
-}
-
 func (f *hotPeerCache) markExpiredItem(regionID, storeID uint64) *HotPeerStat {
 	item := f.getOldHotPeerStat(regionID, storeID)
 	item.needDelete = true
 	return item
 }
 
-// TODO: remove it in future
-func (f *hotPeerCache) getRegionDeltaLoads(region *core.RegionInfo) []float64 {
+func (f *hotPeerCache) getFlowDeltaLoads(stat core.FlowStat) []float64 {
 	ret := make([]float64, RegionStatCount)
 	for k := RegionStatKind(0); k < RegionStatCount; k++ {
 		switch k {
 		case RegionReadBytes:
-			ret[k] = float64(region.GetBytesRead())
+			ret[k] = float64(stat.GetBytesRead())
 		case RegionReadKeys:
-			ret[k] = float64(region.GetKeysRead())
+			ret[k] = float64(stat.GetKeysRead())
 		case RegionWriteBytes:
-			ret[k] = float64(region.GetBytesWritten())
+			ret[k] = float64(stat.GetBytesWritten())
 		case RegionWriteKeys:
-			ret[k] = float64(region.GetKeysWritten())
+			ret[k] = float64(stat.GetKeysWritten())
 		}
 	}
 	return ret
 }
 
-func (f *hotPeerCache) getPeerDeltaLoads(peer *core.PeerInfo) []float64 {
-	ret := make([]float64, RegionStatCount)
-	for k := RegionStatKind(0); k < RegionStatCount; k++ {
-		switch k {
-		case RegionReadBytes:
-			ret[k] = float64(peer.GetBytesRead())
-		case RegionReadKeys:
-			ret[k] = float64(peer.GetKeysRead())
-		case RegionWriteBytes:
-			ret[k] = float64(peer.GetBytesWritten())
-		case RegionWriteKeys:
-			ret[k] = float64(peer.GetKeysWritten())
-		}
+func (f *hotPeerCache) putInheritItem(item *HotPeerStat) {
+	f.inheritMu.Lock()
+	defer f.inheritMu.Unlock()
+	f.inheritMu.inheritItems[item.RegionID] = item
+}
+
+func (f *hotPeerCache) takeInheritItem(regionID uint64) *HotPeerStat {
+	f.inheritMu.Lock()
+	defer f.inheritMu.Unlock()
+	item, ok := f.inheritMu.inheritItems[regionID]
+	if !ok {
+		return nil
 	}
-	return ret
+	if item != nil {
+		ret := *item
+		f.inheritMu.inheritItems[regionID] = nil
+		return &ret
+	}
+	return nil
+}
+
+func (f *hotPeerCache) isInheritItemExist(regionID uint64) bool {
+	f.inheritMu.RLock()
+	defer f.inheritMu.RUnlock()
+	_, ok := f.inheritMu.inheritItems[regionID]
+	return ok
 }
