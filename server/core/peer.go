@@ -82,6 +82,16 @@ type PeerInfo struct {
 	readKeys     uint64
 }
 
+func NewPeerInfo(meta *metapb.Peer, writtenBytes, writtenKeys, readBytes, readKeys uint64) *PeerInfo {
+	return &PeerInfo{
+		Peer:         meta,
+		writtenBytes: writtenBytes,
+		writtenKeys:  writtenKeys,
+		readBytes:    readBytes,
+		readKeys:     readKeys,
+	}
+}
+
 // GetKeysWritten provides peer written keys
 func (p *PeerInfo) GetKeysWritten() uint64 {
 	return p.writtenKeys
@@ -110,28 +120,4 @@ func (p *PeerInfo) GetStoreID() uint64 {
 // GetPeerID provides peer id
 func (p *PeerInfo) GetPeerID() uint64 {
 	return p.GetId()
-}
-
-// SetBytesRead sets read bytes
-func (p *PeerInfo) SetBytesRead(b uint64) *PeerInfo {
-	p.readBytes = b
-	return p
-}
-
-// SetKeysRead sets read keys
-func (p *PeerInfo) SetKeysRead(k uint64) *PeerInfo {
-	p.readKeys = k
-	return p
-}
-
-// SetBytesWrite sets write bytes
-func (p *PeerInfo) SetBytesWrite(b uint64) *PeerInfo {
-	p.writtenBytes = b
-	return p
-}
-
-// SetKeysWrite sets write keys
-func (p *PeerInfo) SetKeysWrite(k uint64) *PeerInfo {
-	p.writtenKeys = k
-	return p
 }

@@ -160,11 +160,11 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 		peer := region.GetStorePeer(storeID)
 		var item *HotPeerStat
 		if peer != nil {
-			peerInfo := &core.PeerInfo{Peer: peer}
-			peerInfo.SetKeysRead(region.GetKeysRead()).
-				SetBytesRead(region.GetBytesRead()).
-				SetKeysWrite(region.GetKeysWritten()).
-				SetBytesWrite(region.GetBytesWritten())
+			peerInfo := core.NewPeerInfo(peer,
+				region.GetBytesWritten(),
+				region.GetKeysWritten(),
+				region.GetBytesRead(),
+				region.GetKeysRead())
 			item = f.CheckPeerFlow(peerInfo, region, interval)
 		} else {
 			item = f.markExpiredItem(regionID, storeID)
