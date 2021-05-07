@@ -114,10 +114,6 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	}
 }
 
-func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
-	// TODO
-}
-
 // CheckRegionFlow checks the flow information of region.
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
 	reportInterval := region.GetInterval()
@@ -171,7 +167,6 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	for i := range deltaLoads {
 		loads[i] = deltaLoads[i] / float64(interval)
 	}
-	f.collectPeerMetrics(loads, interval)
 	justTransferLeader := f.justTransferLeader(region)
 	// transfer read leader or remove write peer
 	isExpired := f.isPeerExpired(peer, region)
@@ -266,6 +261,34 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 	for i := range ret {
 		ret[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(statKinds[i])*HotThresholdRatio, mins[i])
 	}
+	return ret
+}
+
+// gets the storeIDs, including old region and new region
+func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
+	storeIDs := make(map[uint64]struct{})
+	ret := make([]uint64, 0, len(region.GetPeers()))
+	// old stores
+	ids, ok := f.storesOfRegion[region.GetID()]
+	if ok {
+		for storeID := range ids {
+			storeIDs[storeID] = struct{}{}
+			ret = append(ret, storeID)
+		}
+	}
+
+	// new stores
+	for _, peer := range region.GetPeers() {
+		// ReadFlow no need consider the followers.
+		if f.kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
+			continue
+		}
+		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
+			storeIDs[peer.GetStoreId()] = struct{}{}
+			ret = append(ret, peer.GetStoreId())
+		}
+	}
+
 	return ret
 }
 
@@ -437,34 +460,6 @@ func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
 			writeKeyHist.Observe(loads[int(k)])
 		}
 	}
-}
-
-// gets the storeIDs, including old region and new region
-func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo, includeFollowers bool) []uint64 {
-	storeIDs := make(map[uint64]struct{})
-	ret := make([]uint64, 0, len(region.GetPeers()))
-	// old stores
-	ids, ok := f.storesOfRegion[region.GetID()]
-	if ok {
-		for storeID := range ids {
-			storeIDs[storeID] = struct{}{}
-			ret = append(ret, storeID)
-		}
-	}
-
-	// new stores
-	for _, peer := range region.GetPeers() {
-		// ReadFlow no need consider the followers.
-		if !includeFollowers {
-			continue
-		}
-		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
-			storeIDs[peer.GetStoreId()] = struct{}{}
-			ret = append(ret, peer.GetStoreId())
-		}
-	}
-
-	return ret
 }
 
 func (f *hotPeerCache) markExpiredItem(regionID, storeID uint64) *HotPeerStat {
