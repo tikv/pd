@@ -14,6 +14,7 @@
 package statistics
 
 import (
+	"context"
 	"math/rand"
 
 	"github.com/tikv/pd/server/core"
@@ -23,28 +24,49 @@ import (
 // only turned off by the simulator and the test.
 var Denoising = true
 
+const queueCap = 1000
+
 // HotCache is a cache hold hot regions.
 type HotCache struct {
-	writeFlow *hotPeerCache
-	readFlow  *hotPeerCache
+	writeFlowQueue chan *core.RegionInfo
+	readFlowQueue  chan *core.RegionInfo
+	writeFlow      *hotPeerCache
+	readFlow       *hotPeerCache
 }
 
 // NewHotCache creates a new hot spot cache.
-func NewHotCache() *HotCache {
-	return &HotCache{
-		writeFlow: NewHotStoresStats(WriteFlow),
-		readFlow:  NewHotStoresStats(ReadFlow),
+func NewHotCache(ctx context.Context) *HotCache {
+	w := &HotCache{
+		writeFlowQueue: make(chan *core.RegionInfo, queueCap),
+		readFlowQueue:  make(chan *core.RegionInfo, queueCap),
+		writeFlow:      NewHotStoresStats(WriteFlow),
+		readFlow:       NewHotStoresStats(ReadFlow),
 	}
+	go w.updateReadItems(ctx)
+	go w.updateWriteItems(ctx)
+	return w
 }
 
-// CheckWrite checks the write status, returns update items.
-func (w *HotCache) CheckWrite(region *core.RegionInfo) []*HotPeerStat {
+// CheckWriteSync checks the write status, returns update items.
+// This is used for mockcluster.
+func (w *HotCache) CheckWriteSync(region *core.RegionInfo) []*HotPeerStat {
 	return w.writeFlow.CheckRegionFlow(region)
 }
 
-// CheckRead checks the read status, returns update items.
-func (w *HotCache) CheckRead(region *core.RegionInfo) []*HotPeerStat {
+// CheckReadSync checks the read status, returns update items.
+// This is used for mockcluster.
+func (w *HotCache) CheckReadSync(region *core.RegionInfo) []*HotPeerStat {
 	return w.readFlow.CheckRegionFlow(region)
+}
+
+// CheckWriteAsync puts the region into queue, and check it asynchronously
+func (w *HotCache) CheckWriteAsync(region *core.RegionInfo) {
+	w.writeFlowQueue <- region
+}
+
+// CheckReadAsync puts the region into queue, and check it asynchronously
+func (w *HotCache) CheckReadAsync(region *core.RegionInfo) {
+	w.readFlowQueue <- region
 }
 
 // Update updates the cache.
@@ -120,4 +142,38 @@ func (w *HotCache) GetFilledPeriod(kind FlowKind) int {
 		return w.readFlow.getDefaultTimeMedian().GetFilledPeriod()
 	}
 	return 0
+}
+
+func (w *HotCache) updateReadItems(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			close(w.readFlowQueue)
+			return
+		case region, ok := <-w.readFlowQueue:
+			if ok && region != nil {
+				items := w.readFlow.CheckRegionFlow(region)
+				for _, item := range items {
+					w.Update(item)
+				}
+			}
+		}
+	}
+}
+
+func (w *HotCache) updateWriteItems(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			close(w.writeFlowQueue)
+			return
+		case region, ok := <-w.writeFlowQueue:
+			if ok && region != nil {
+				items := w.writeFlow.CheckRegionFlow(region)
+				for _, item := range items {
+					w.Update(item)
+				}
+			}
+		}
+	}
 }
