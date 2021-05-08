@@ -682,13 +682,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
-
-	//for _, writeItem := range writeItems {
-	//	c.hotStat.Update(writeItem)
-	//}
-	//for _, readItem := range readItems {
-	//	c.hotStat.Update(readItem)
-	//}
 	c.Unlock()
 
 	// If there are concurrent heartbeats from the same region, the last write will win even if

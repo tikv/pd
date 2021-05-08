@@ -193,7 +193,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	// transfer read leader or remove write peer
 	isExpired := f.isPeerExpired(peer, region)
 	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
-	if isExpired && oldItem != nil && !f.isInheritExist(region.GetID()) {
+	if isExpired && oldItem != nil {
 		f.putInheritItem(oldItem)
 	}
 	if !isExpired && Denoising && interval < HotRegionReportMinInterval {
@@ -491,11 +491,6 @@ func (f *hotPeerCache) getFlowDeltaLoads(stat core.FlowStat) []float64 {
 	return ret
 }
 
-func (f *hotPeerCache) isInheritExist(regionID uint64) bool {
-	item, ok := f.inheritItem[regionID]
-	return ok && item != nil
-}
-
 func (f *hotPeerCache) putInheritItem(item *HotPeerStat) {
 	f.inheritItem[item.RegionID] = item
 }
@@ -507,7 +502,7 @@ func (f *hotPeerCache) takeInheritItem(regionID uint64) *HotPeerStat {
 	}
 	if item != nil {
 		ret := *item
-		f.inheritItem[regionID] = nil
+		delete(f.inheritItem, regionID)
 		return &ret
 	}
 	return nil
