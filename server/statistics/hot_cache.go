@@ -28,22 +28,19 @@ const queueCap = 1000
 
 // HotCache is a cache hold hot regions.
 type HotCache struct {
-	writeFlowQueue chan *core.RegionInfo
-	readFlowQueue  chan *core.RegionInfo
-	writeFlow      *hotPeerCache
-	readFlow       *hotPeerCache
+	flowQueue chan *core.RegionInfo
+	writeFlow *hotPeerCache
+	readFlow  *hotPeerCache
 }
 
 // NewHotCache creates a new hot spot cache.
 func NewHotCache(ctx context.Context) *HotCache {
 	w := &HotCache{
-		writeFlowQueue: make(chan *core.RegionInfo, queueCap),
-		readFlowQueue:  make(chan *core.RegionInfo, queueCap),
-		writeFlow:      NewHotStoresStats(WriteFlow),
-		readFlow:       NewHotStoresStats(ReadFlow),
+		flowQueue: make(chan *core.RegionInfo, queueCap),
+		writeFlow: NewHotStoresStats(WriteFlow),
+		readFlow:  NewHotStoresStats(ReadFlow),
 	}
-	go w.updateReadItems(ctx)
-	go w.updateWriteItems(ctx)
+	go w.updateItems(ctx)
 	return w
 }
 
@@ -59,14 +56,9 @@ func (w *HotCache) CheckReadSync(region *core.RegionInfo) []*HotPeerStat {
 	return w.readFlow.CheckRegionFlow(region)
 }
 
-// CheckWriteAsync puts the region into queue, and check it asynchronously
-func (w *HotCache) CheckWriteAsync(region *core.RegionInfo) {
-	w.writeFlowQueue <- region
-}
-
-// CheckReadAsync puts the region into queue, and check it asynchronously
-func (w *HotCache) CheckReadAsync(region *core.RegionInfo) {
-	w.readFlowQueue <- region
+// CheckRWAsync puts the region into queue, and check it asynchronously
+func (w *HotCache) CheckRWAsync(region *core.RegionInfo) {
+	w.flowQueue <- region
 }
 
 // Update updates the cache.
@@ -144,30 +136,18 @@ func (w *HotCache) GetFilledPeriod(kind FlowKind) int {
 	return 0
 }
 
-func (w *HotCache) updateReadItems(ctx context.Context) {
+func (w *HotCache) updateItems(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case region, ok := <-w.readFlowQueue:
+		case region, ok := <-w.flowQueue:
 			if ok && region != nil {
 				items := w.readFlow.CheckRegionFlow(region)
 				for _, item := range items {
 					w.Update(item)
 				}
-			}
-		}
-	}
-}
-
-func (w *HotCache) updateWriteItems(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case region, ok := <-w.writeFlowQueue:
-			if ok && region != nil {
-				items := w.writeFlow.CheckRegionFlow(region)
+				items = w.writeFlow.CheckRegionFlow(region)
 				for _, item := range items {
 					w.Update(item)
 				}

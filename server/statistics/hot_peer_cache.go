@@ -501,9 +501,8 @@ func (f *hotPeerCache) takeInheritItem(regionID uint64) *HotPeerStat {
 		return nil
 	}
 	if item != nil {
-		ret := *item
 		delete(f.inheritItem, regionID)
-		return &ret
+		return item
 	}
 	return nil
 }

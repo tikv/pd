@@ -46,18 +46,7 @@ func (s *sequencer) next() uint64 {
 
 var _ = Suite(&testScatterRegionSuite{})
 
-type testScatterRegionSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testScatterRegionSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-}
-
-func (s *testScatterRegionSuite) TearDownTest(c *C) {
-	s.cancel()
-}
+type testScatterRegionSuite struct{}
 
 func (s *testScatterRegionSuite) TestSixStores(c *C) {
 	s.scatter(c, 6, 100, false)
@@ -97,8 +86,10 @@ func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
 }
 
 func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 
 	// Add ordinary stores.
@@ -111,7 +102,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 		// region distributed in same stores.
 		tc.AddLeaderRegion(i, 1, 2, 3)
 	}
-	scatterer := NewRegionScatterer(s.ctx, tc)
+	scatterer := NewRegionScatterer(ctx, tc)
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
@@ -150,8 +141,10 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 }
 
 func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpecialStores, numRegions uint64) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 
 	// Add ordinary stores.
@@ -177,8 +170,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 			[]uint64{numOrdinaryStores + 1, numOrdinaryStores + 2, numOrdinaryStores + 3},
 		)
 	}
-
-	scatterer := NewRegionScatterer(s.ctx, tc)
+	scatterer := NewRegionScatterer(ctx, tc)
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
@@ -224,10 +216,12 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 }
 
 func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(s.ctx, tc.ID, tc, false)
-	oc := NewOperatorController(s.ctx, tc, stream)
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
 
 	// Add stores 1~6.
 	for i := uint64(1); i <= 5; i++ {
@@ -242,7 +236,7 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
 	}
 
-	scatterer := NewRegionScatterer(s.ctx, tc)
+	scatterer := NewRegionScatterer(ctx, tc)
 
 	for i := uint64(1); i <= 5; i++ {
 		region := tc.GetRegion(i)
@@ -253,8 +247,10 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 }
 
 func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
@@ -282,7 +278,7 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 	}
 	for _, testcase := range testcases {
 		c.Logf(testcase.name)
-		scatterer := NewRegionScatterer(s.ctx, tc)
+		scatterer := NewRegionScatterer(ctx, tc)
 		_, err := scatterer.Scatter(testcase.checkRegion, "")
 		if testcase.needFix {
 			c.Assert(err, NotNil)
@@ -296,8 +292,10 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 }
 
 func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
@@ -324,7 +322,7 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
 	for _, testcase := range testcases {
 		c.Logf(testcase.name)
-		scatterer := NewRegionScatterer(s.ctx, tc)
+		scatterer := NewRegionScatterer(ctx, tc)
 		regionID := 1
 		for i := 0; i < 100; i++ {
 			for j := 0; j < testcase.groupCount; j++ {
@@ -361,8 +359,10 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 }
 
 func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
@@ -382,7 +382,7 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 	}
 	group := "group"
 	for _, testcase := range testcases {
-		scatterer := NewRegionScatterer(s.ctx, tc)
+		scatterer := NewRegionScatterer(ctx, tc)
 		regions := map[uint64]*core.RegionInfo{}
 		for i := 1; i <= 100; i++ {
 			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
@@ -443,14 +443,16 @@ func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
 // TestRegionFromDifferentGroups test the multi regions. each region have its own group.
 // After scatter, the distribution for the whole cluster should be well.
 func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	// Add 6 stores.
 	storeCount := 6
 	for i := uint64(1); i <= uint64(storeCount); i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	scatterer := NewRegionScatterer(s.ctx, tc)
+	scatterer := NewRegionScatterer(ctx, tc)
 	regionCount := 50
 	for i := 1; i <= regionCount; i++ {
 		p := rand.Perm(storeCount)

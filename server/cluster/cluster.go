@@ -546,8 +546,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.RUnlock()
 		return err
 	}
-	c.CheckWriteStatus(region)
-	c.CheckReadStatus(region)
+	c.CheckRWStatus(region)
 	c.RUnlock()
 
 	// Save to storage if meta is updated.
@@ -1468,14 +1467,9 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	return c.hotStat.RegionStats(statistics.WriteFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
 }
 
-// CheckWriteStatus checks the write status.
-func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) {
-	c.hotStat.CheckWriteAsync(region)
-}
-
-// CheckReadStatus checks the read status.
-func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) {
-	c.hotStat.CheckReadAsync(region)
+// CheckRWStatus checks the read/write status.
+func (c *RaftCluster) CheckRWStatus(region *core.RegionInfo) {
+	c.hotStat.CheckRWAsync(region)
 }
 
 // TODO: remove me.
