@@ -148,7 +148,6 @@ func (w *HotCache) updateReadItems(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			close(w.readFlowQueue)
 			return
 		case region, ok := <-w.readFlowQueue:
 			if ok && region != nil {
@@ -165,7 +164,6 @@ func (w *HotCache) updateWriteItems(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			close(w.writeFlowQueue)
 			return
 		case region, ok := <-w.writeFlowQueue:
 			if ok && region != nil {
