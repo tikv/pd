@@ -14,13 +14,13 @@
 package operator
 
 import (
+	"context"
 	"strings"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -33,11 +33,14 @@ var _ = Suite(&testCreateOperatorSuite{})
 
 type testCreateOperatorSuite struct {
 	cluster *mockcluster.Cluster
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (s *testCreateOperatorSuite) SetUpTest(c *C) {
 	opts := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(opts)
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.cluster = mockcluster.NewCluster(s.ctx, opts)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
@@ -52,6 +55,10 @@ func (s *testCreateOperatorSuite) SetUpTest(c *C) {
 	s.cluster.AddLabelsStore(8, 0, map[string]string{"zone": "z2", "host": "h1"})
 	s.cluster.AddLabelsStore(9, 0, map[string]string{"zone": "z2", "host": "h2"})
 	s.cluster.AddLabelsStore(10, 0, map[string]string{"zone": "z3", "host": "h1", "noleader": "true"})
+}
+
+func (s *testCreateOperatorSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testCreateOperatorSuite) TestCreateSplitRegionOperator(c *C) {

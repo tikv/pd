@@ -61,32 +61,42 @@ func (m *mockSplitRegionsHandler) ScanRegionsByKeyRange(groupKeys *regionGroupKe
 
 var _ = Suite(&testRegionSplitterSuite{})
 
-type testRegionSplitterSuite struct{}
+type testRegionSplitterSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testRegionSplitterSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testRegionSplitterSuite) TearDownTest(c *C) {
+	s.cancel()
+}
 
 func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
-	ctx := context.Background()
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	handler := newMockSplitRegionsHandler()
 	tc.AddLeaderRegionWithRange(1, "eee", "hhh", 2, 3, 4)
 	splitter := NewRegionSplitter(tc, handler)
 	newRegions := map[uint64]struct{}{}
 	// assert success
-	failureKeys := splitter.splitRegionsByKeys(ctx, [][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
+	failureKeys := splitter.splitRegionsByKeys(s.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
 	c.Assert(len(failureKeys), Equals, 0)
 	c.Assert(len(newRegions), Equals, 2)
 
-	percentage, newRegionsID := splitter.SplitRegions(ctx, [][]byte{[]byte("fff"), []byte("ggg")}, 1)
+	percentage, newRegionsID := splitter.SplitRegions(s.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, 1)
 	c.Assert(percentage, Equals, 100)
 	c.Assert(len(newRegionsID), Equals, 2)
 	// assert out of range
 	newRegions = map[uint64]struct{}{}
-	failureKeys = splitter.splitRegionsByKeys(ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
+	failureKeys = splitter.splitRegionsByKeys(s.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
 	c.Assert(len(failureKeys), Equals, 2)
 	c.Assert(len(newRegions), Equals, 0)
 
-	percentage, newRegionsID = splitter.SplitRegions(ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, 1)
+	percentage, newRegionsID = splitter.SplitRegions(s.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, 1)
 	c.Assert(percentage, Equals, 0)
 	c.Assert(len(newRegionsID), Equals, 0)
 }
@@ -94,7 +104,7 @@ func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	handler := newMockSplitRegionsHandler()
 	tc.AddLeaderRegionWithRange(1, "aaa", "ccc", 2, 3, 4)
 	tc.AddLeaderRegionWithRange(2, "ccc", "eee", 2, 3, 4)

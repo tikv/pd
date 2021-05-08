@@ -53,8 +53,7 @@ type Cluster struct {
 }
 
 // NewCluster creates a new Cluster
-func NewCluster(opts *config.PersistOptions) *Cluster {
-	ctx := context.Background()
+func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
 		BasicCluster:     core.NewBasicCluster(),
 		IDAllocator:      mockid.NewIDAllocator(),

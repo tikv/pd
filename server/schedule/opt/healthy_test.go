@@ -14,6 +14,7 @@
 package opt
 
 import (
+	"context"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -30,7 +31,18 @@ func TestOpt(t *testing.T) {
 
 var _ = Suite(&testRegionHealthySuite{})
 
-type testRegionHealthySuite struct{}
+type testRegionHealthySuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testRegionHealthySuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testRegionHealthySuite) TearDownSuite(c *C) {
+	s.cancel()
+}
 
 func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
 	peers := func(ids ...uint64) []*metapb.Peer {
@@ -71,7 +83,7 @@ func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
 	}
 
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 	tc.AddRegionStore(3, 1)
