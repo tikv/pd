@@ -66,11 +66,11 @@ LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDEdition=$(PD_EDITION)"
 
 ifneq ($(DASHBOARD), 0)
 	# Note: LDFLAGS must be evaluated lazily for these scripts to work correctly
-	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.InternalVersion=$(shell scripts/describe-dashboard.sh internal-version)"
-	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.Standalone=No"
-	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.PDVersion=$(shell git describe --tags --dirty --always)"
-	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.BuildTime=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
-	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.BuildGitHash=$(shell scripts/describe-dashboard.sh git-hash)"
+	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.InternalVersion=$(shell scripts/describe-dashboard.sh internal-version)"
+	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.Standalone=No"
+	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.PDVersion=$(shell git describe --tags --dirty --always)"
+	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.BuildTime=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
+	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.BuildGitHash=$(shell scripts/describe-dashboard.sh git-hash)"
 endif
 
 GOVER_MAJOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\1/")
@@ -116,7 +116,7 @@ install-go-tools:
 swagger-spec: export GO111MODULE=on
 swagger-spec: install-go-tools
 	go mod vendor
-	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
+	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap/tidb-dashboard --output docs/swagger
 	go mod tidy
 	rm -rf vendor
 

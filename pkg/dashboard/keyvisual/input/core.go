@@ -14,8 +14,8 @@
 package input
 
 import (
-	regionpkg "github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
 	"github.com/pingcap/log"
+	regionpkg "github.com/pingcap/tidb-dashboard/pkg/keyvisual/region"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"

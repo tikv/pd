@@ -14,7 +14,7 @@
 package keyvisual
 
 import (
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
+	"github.com/pingcap/tidb-dashboard/pkg/keyvisual/region"
 
 	"github.com/tikv/pd/pkg/dashboard/keyvisual/input"
 	"github.com/tikv/pd/server"
