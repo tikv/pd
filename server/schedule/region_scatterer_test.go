@@ -43,7 +43,7 @@ func (s *sequencer) next() uint64 {
 	return s.curID
 }
 
-var _ = SerialSuites(&testScatterRegionSuite{})
+var _ = Suite(&testScatterRegionSuite{})
 
 type testScatterRegionSuite struct{}
 
