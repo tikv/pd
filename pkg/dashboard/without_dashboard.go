@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
+	"github.com/pingcap/tidb-dashboard/pkg/config"
 
 	"github.com/tikv/pd/server"
 )

@@ -408,6 +408,8 @@ type StoreStateFilter struct {
 	TransferLeader bool
 	// Set true if the schedule involves any move region operation.
 	MoveRegion bool
+	// Set true if the scatter move the region
+	ScatterRegion bool
 	// Reason is used to distinguish the reason of store state filter
 	Reason string
 }
@@ -485,6 +487,10 @@ func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
 			f.Reason = "reject-leader"
 			return false
 		}
+	}
+
+	if f.ScatterRegion {
+		return true
 	}
 
 	if f.MoveRegion {

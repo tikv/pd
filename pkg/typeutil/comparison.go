@@ -1,4 +1,4 @@
-// Copyright 2020 TiKV Project Authors.
+// Copyright 2021 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,18 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package keyvisual
+package typeutil
 
-import (
-	"github.com/pingcap/tidb-dashboard/pkg/keyvisual/region"
+import "time"
 
-	"github.com/tikv/pd/pkg/dashboard/keyvisual/input"
-	"github.com/tikv/pd/server"
-)
-
-// GenCustomDataProvider generates a custom DataProvider for the dashboard keyvisual package.
-func GenCustomDataProvider(srv *server.Server) *region.DataProvider {
-	return &region.DataProvider{
-		PeriodicGetter: input.NewCorePeriodicGetter(srv),
+// MinDuration returns the min value between two variables whose type are time.Duration.
+func MinDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
 	}
+	return b
 }
