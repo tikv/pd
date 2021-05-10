@@ -107,37 +107,22 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region, ""); op != nil {
+		if op, _ := scatterer.Scatter(region, "mock-group"); op != nil {
 			s.checkOperator(op, c)
 			ApplyOperator(tc, op)
 		}
 	}
-
-	countPeers := make(map[uint64]uint64)
-	countLeader := make(map[uint64]uint64)
-	for i := uint64(1); i <= numRegions; i++ {
-		region := tc.GetRegion(i)
-		leaderStoreID := region.GetLeader().GetStoreId()
-		for _, peer := range region.GetPeers() {
-			countPeers[peer.GetStoreId()]++
-			if peer.GetStoreId() == leaderStoreID {
-				countLeader[peer.GetStoreId()]++
-			}
-		}
+	groupDistribution, ok := scatterer.ordinaryEngine.selectedLeader.GetGroupDistribution("mock-group")
+	c.Assert(ok, IsTrue)
+	for _, leaderCount := range groupDistribution {
+		c.Assert(float64(leaderCount), LessEqual, 1.1*float64(numRegions)/float64(numStores))
+		c.Assert(float64(leaderCount), GreaterEqual, 0.9*float64(numRegions)/float64(numStores))
 	}
-
-	// Each store should have the same number of peers.
-	for _, count := range countPeers {
-		c.Assert(float64(count), LessEqual, 1.3*float64(numRegions*3)/float64(numStores))
-		c.Assert(float64(count), GreaterEqual, 0.7*float64(numRegions*3)/float64(numStores))
-	}
-
-	// Each store should have the same number of leaders.
-	c.Assert(len(countPeers), Equals, int(numStores))
-	c.Assert(len(countLeader), Equals, int(numStores))
-	for _, count := range countLeader {
-		c.Assert(float64(count), LessEqual, 1.3*float64(numRegions)/float64(numStores))
-		c.Assert(float64(count), GreaterEqual, 0.7*float64(numRegions)/float64(numStores))
+	groupDistribution, ok = scatterer.ordinaryEngine.selectedPeer.GetGroupDistribution("mock-group")
+	c.Assert(ok, IsTrue)
+	for _, peerCount := range groupDistribution {
+		c.Assert(float64(peerCount), LessEqual, 1.1*float64(numRegions*3)/float64(numStores))
+		c.Assert(float64(peerCount), GreaterEqual, 0.9*float64(numRegions*3)/float64(numStores))
 	}
 }
 
@@ -177,44 +162,28 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region, ""); op != nil {
+		if op, _ := scatterer.Scatter(region, "mock-group"); op != nil {
 			s.checkOperator(op, c)
 			ApplyOperator(tc, op)
 		}
 	}
-
-	countOrdinaryPeers := make(map[uint64]uint64)
-	countSpecialPeers := make(map[uint64]uint64)
-	countOrdinaryLeaders := make(map[uint64]uint64)
-	for i := uint64(1); i <= numRegions; i++ {
-		region := tc.GetRegion(i)
-		leaderStoreID := region.GetLeader().GetStoreId()
-		for _, peer := range region.GetPeers() {
-			storeID := peer.GetStoreId()
-			store := tc.Stores.GetStore(storeID)
-			if store.GetLabelValue("engine") == "tiflash" {
-				countSpecialPeers[storeID]++
-			} else {
-				countOrdinaryPeers[storeID]++
-			}
-			if peer.GetStoreId() == leaderStoreID {
-				countOrdinaryLeaders[storeID]++
-			}
-		}
+	groupDistribution, ok := scatterer.ordinaryEngine.selectedLeader.GetGroupDistribution("mock-group")
+	c.Assert(ok, IsTrue)
+	for _, leaderCount := range groupDistribution {
+		c.Assert(float64(leaderCount), LessEqual, 1.1*float64(numRegions)/float64(numOrdinaryStores))
+		c.Assert(float64(leaderCount), GreaterEqual, 0.9*float64(numRegions)/float64(numOrdinaryStores))
 	}
-
-	// Each store should have the same number of peers.
-	for _, count := range countOrdinaryPeers {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numOrdinaryStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numOrdinaryStores))
+	groupDistribution, ok = scatterer.ordinaryEngine.selectedPeer.GetGroupDistribution("mock-group")
+	c.Assert(ok, IsTrue)
+	for _, peerCount := range groupDistribution {
+		c.Assert(float64(peerCount), LessEqual, 1.1*float64(numRegions*3)/float64(numOrdinaryStores))
+		c.Assert(float64(peerCount), GreaterEqual, 0.9*float64(numRegions*3)/float64(numOrdinaryStores))
 	}
-	for _, count := range countSpecialPeers {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numSpecialStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numSpecialStores))
-	}
-	for _, count := range countOrdinaryLeaders {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions)/float64(numOrdinaryStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions)/float64(numOrdinaryStores))
+	groupDistribution, ok = scatterer.specialEngines["tiflash"].selectedPeer.GetGroupDistribution("mock-group")
+	c.Assert(ok, IsTrue)
+	for _, peerCount := range groupDistribution {
+		c.Assert(float64(peerCount), LessEqual, 1.1*float64(numRegions*3)/float64(numSpecialStores))
+		c.Assert(float64(peerCount), GreaterEqual, 0.9*float64(numRegions*3)/float64(numSpecialStores))
 	}
 }
 
