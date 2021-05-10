@@ -299,3 +299,34 @@ func (s *testRuleCheckerSuite) TestIssue2419(c *C) {
 	c.Assert(op.Step(1).(operator.PromoteLearner).ToStore, Equals, uint64(4))
 	c.Assert(op.Step(2).(operator.RemovePeer).FromStore, Equals, uint64(3))
 }
+
+// Ref https://github.com/tikv/pd/issues/3521
+// The problem is when offline a store, we may add learner multiple times if
+// the operator is timeout.
+func (s *testRuleCheckerSuite) TestIssue3521_PriorityFixOrphanPeer(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+	var add operator.AddLearner
+	var remove operator.RemovePeer
+	s.cluster.SetStoreOffline(2)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Step(0), FitsTypeOf, add)
+	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
+	r := s.cluster.GetRegion(1).Clone(core.WithAddPeer(
+		&metapb.Peer{
+			Id:        5,
+			StoreId:   4,
+			IsLearner: true,
+		}))
+	s.cluster.PutRegion(r)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op.Step(0), FitsTypeOf, remove)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+}
