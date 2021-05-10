@@ -85,7 +85,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
 		return op
 	}
-	opCreaters := [4]func(region *core.RegionInfo, ty opType) *operator.Operator{shouldRemoveOp, notDoneOp, doneOp}
+	opCreaters := [3]func(region *core.RegionInfo, ty opType) *operator.Operator{shouldRemoveOp, notDoneOp, doneOp}
 
 	typs := []opType{movePeer, transferLeader}
 
@@ -102,7 +102,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	for i := 0; i < len(opCreaters); i++ {
 		for j, typ := range typs {
 			regionID := uint64(i*len(opCreaters) + j + 1)
-			if i < 2 { // nilOp, shouldRemoveOp
+			if i < 1 { // shouldRemoveOp
 				c.Assert(hb.regionPendings, Not(HasKey), regionID)
 			} else { // notDoneOp, doneOp
 				c.Assert(hb.regionPendings, HasKey, regionID)
