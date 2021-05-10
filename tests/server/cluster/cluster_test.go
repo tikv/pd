@@ -1025,8 +1025,8 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 
 func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	tc, err := tests.NewTestCluster(s.ctx, 1)
-	defer tc.Destroy()
 	c.Assert(err, IsNil)
+	defer tc.Destroy()
 
 	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -1081,6 +1081,15 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	regionReq.Term = 6
 	regionReq.Leader = peers[1]
 	region = core.RegionFromHeartbeat(regionReq)
+	err = rc.HandleRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+
+	// issue #3379
+	regionReq.KeysWritten = uint64(18446744073709551615)  // -1
+	regionReq.BytesWritten = uint64(18446744073709550602) // -1024
+	region = core.RegionFromHeartbeat(regionReq)
+	c.Assert(region.GetKeysWritten(), Equals, uint64(0))
+	c.Assert(region.GetBytesWritten(), Equals, uint64(0))
 	err = rc.HandleRegionHeartbeat(region)
 	c.Assert(err, IsNil)
 
