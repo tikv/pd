@@ -15,6 +15,8 @@ package operator
 
 import (
 	"fmt"
+	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"sort"
 
 	"github.com/pingcap/errors"
@@ -271,6 +273,11 @@ func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
 	for b.toAdd.Len() > 0 || b.toRemove.Len() > 0 || b.toPromote.Len() > 0 {
 		plan := b.peerPlan()
 		if plan.empty() {
+			log.Info("plan is empty, maybe no valid leader",
+				zap.String("origin-peer", b.originPeers.String()),
+				zap.String("target-peer", b.targetPeers.String()),
+				zap.Uint64("origin-leader", b.originLeader),
+				zap.Uint64("target-leader", b.targetLeader))
 			return kind, errors.New("fail to build operator: plan is empty, maybe no valid leader")
 		}
 		if plan.leaderAdd != 0 && plan.leaderAdd != b.currentLeader {

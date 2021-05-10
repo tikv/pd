@@ -289,7 +289,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 			targetPeers[peer.GetStoreId()] = peer
 		}
 		r.Put(targetPeers, region.GetLeader().GetStoreId(), group)
-		log.Info("fail to create scatter region operator", errs.ZapError(err))
+		log.Debug("fail to create scatter region operator", errs.ZapError(err))
 		return nil
 	}
 	r.Put(targetPeers, targetLeader, group)
