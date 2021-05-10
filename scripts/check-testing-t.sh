@@ -13,7 +13,7 @@ fi
 
 # Check if there are duplicated `TestingT` in package.
 
-res=$(grep -r "TestingT(" . | grep -v ".sh:" | cut -f1 | xargs -L 1 dirname | sort | uniq -cd)
+res=$(grep -r --include=\*_test.go "TestingT(" . | cut -f1 | xargs -L 1 dirname | sort | uniq -cd)
 
 if [ "$res" ]; then
   echo "following packages may have duplicated TestingT:"
