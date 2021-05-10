@@ -177,53 +177,9 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 	return b
 }
 
-<<<<<<< HEAD
 // SetLightWeight marks the region as light weight. It is used for scatter regions.
 func (b *Builder) SetLightWeight() *Builder {
 	b.isLigthWeight = true
-=======
-// SetExpectedRoles records expected roles of target peers.
-// It may update `targetLeaderStoreID` if there is a peer has role `leader` or `follower`.
-func (b *Builder) SetExpectedRoles(roles map[uint64]placement.PeerRoleType) *Builder {
-	if b.err != nil {
-		return b
-	}
-	var leaderCount, voterCount int
-	for id, role := range roles {
-		switch role {
-		case placement.Leader:
-			if leaderCount > 0 {
-				b.err = errors.Errorf("region cannot have multiple leaders")
-				return b
-			}
-			b.targetLeaderStoreID = id
-			leaderCount++
-		case placement.Voter:
-			voterCount++
-		case placement.Follower, placement.Learner:
-			if b.targetLeaderStoreID == id {
-				b.targetLeaderStoreID = 0
-			}
-		}
-	}
-	if leaderCount+voterCount == 0 {
-		b.err = errors.Errorf("region need at least 1 voter or leader")
-		return b
-	}
-	b.expectedRoles = roles
-	return b
-}
-
-// EnableLightWeight marks the region as light weight. It is used for scatter regions.
-func (b *Builder) EnableLightWeight() *Builder {
-	b.lightWeight = true
-	return b
-}
-
-// EnableForceTargetLeader marks the step of transferring leader to target is forcible.
-func (b *Builder) EnableForceTargetLeader() *Builder {
-	b.forceTargetLeader = true
->>>>>>> 9e60f4d3... schedule: revise region_scatter distribution for multi groups  (#3422)
 	return b
 }
 
