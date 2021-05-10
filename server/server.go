@@ -290,10 +290,13 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
 	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
 
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdTimeout,
 		TLS:         tlsConfig,
+		LogConfig:   &lgc,
 	})
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
