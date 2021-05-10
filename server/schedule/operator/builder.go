@@ -48,7 +48,8 @@ type Builder struct {
 	err          error
 
 	// flags
-	isLigthWeight bool
+	isLigthWeight     bool
+	forceTargetLeader bool
 
 	// intermediate states
 	currentPeers               peersMap
@@ -179,6 +180,12 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 // SetLightWeight marks the region as light weight. It is used for scatter regions.
 func (b *Builder) SetLightWeight() *Builder {
 	b.isLigthWeight = true
+	return b
+}
+
+// EnableForceTargetLeader enable force leader
+func (b *Builder) EnableForceTargetLeader() *Builder {
+	b.forceTargetLeader = true
 	return b
 }
 
@@ -340,7 +347,7 @@ func (b *Builder) execRemovePeer(p *metapb.Peer) {
 }
 
 // check if a peer can become leader.
-func (b *Builder) allowLeader(peer *metapb.Peer) bool {
+func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 	if peer.GetStoreId() == b.currentLeader {
 		return true
 	}
@@ -350,6 +357,9 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 	store := b.cluster.GetStore(peer.GetStoreId())
 	if store == nil {
 		return false
+	}
+	if ignoreClusterLimit {
+		return true
 	}
 	stateFilter := &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 	if !stateFilter.Target(b.cluster, store) {
@@ -441,21 +451,21 @@ func (b *Builder) planReplace() stepPlan {
 func (b *Builder) planReplaceLeaders(best, next stepPlan) stepPlan {
 	// Brute force all possible leader combinations to find the best plan.
 	for _, leaderAdd := range b.currentPeers.IDs() {
-		if !b.allowLeader(b.currentPeers.Get(leaderAdd)) {
+		if !b.allowLeader(b.currentPeers.Get(leaderAdd), b.forceTargetLeader) {
 			continue
 		}
 		next.leaderAdd = leaderAdd
 		for _, leaderRemove := range b.currentPeers.IDs() {
-			if b.allowLeader(b.currentPeers.Get(leaderRemove)) && leaderRemove != next.remove.GetStoreId() {
+			if b.allowLeader(b.currentPeers.Get(leaderRemove), b.forceTargetLeader) && leaderRemove != next.remove.GetStoreId() {
 				next.leaderRemove = leaderRemove
 				best = b.comparePlan(best, next)
 			}
 		}
-		if next.promote != nil && b.allowLeader(next.promote) && next.promote.GetStoreId() != next.remove.GetStoreId() {
+		if next.promote != nil && b.allowLeader(next.promote, b.forceTargetLeader) && next.promote.GetStoreId() != next.remove.GetStoreId() {
 			next.leaderRemove = next.promote.GetStoreId()
 			best = b.comparePlan(best, next)
 		}
-		if next.add != nil && b.allowLeader(next.add) && next.add.GetStoreId() != next.remove.GetStoreId() {
+		if next.add != nil && b.allowLeader(next.add, b.forceTargetLeader) && next.add.GetStoreId() != next.remove.GetStoreId() {
 			next.leaderRemove = next.add.GetStoreId()
 			best = b.comparePlan(best, next)
 		}
@@ -476,7 +486,7 @@ func (b *Builder) planRemovePeer() stepPlan {
 	for _, i := range b.toRemove.IDs() {
 		r := b.toRemove.Get(i)
 		for _, leader := range b.currentPeers.IDs() {
-			if b.allowLeader(b.currentPeers.Get(leader)) && leader != r.GetStoreId() {
+			if b.allowLeader(b.currentPeers.Get(leader), b.forceTargetLeader) && leader != r.GetStoreId() {
 				best = b.comparePlan(best, stepPlan{remove: r, leaderRemove: leader})
 			}
 		}
@@ -489,7 +499,7 @@ func (b *Builder) planAddPeer() stepPlan {
 	for _, i := range b.toAdd.IDs() {
 		a := b.toAdd.Get(i)
 		for _, leader := range b.currentPeers.IDs() {
-			if b.allowLeader(b.currentPeers.Get(leader)) {
+			if b.allowLeader(b.currentPeers.Get(leader), b.forceTargetLeader) {
 				best = b.comparePlan(best, stepPlan{add: a, leaderAdd: leader})
 			}
 		}
