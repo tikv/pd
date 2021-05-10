@@ -29,8 +29,10 @@ const (
 	// TopNN is the threshold which means we can get hot threshold from store.
 	TopNN = 60
 	// HotThresholdRatio is used to calculate hot thresholds
-	HotThresholdRatio   = 0.8
+	HotThresholdRatio = 0.8
+	// WriteReportInterval indicates the interval between write interval
 	WriteReportInterval = RegionHeartBeatReportInterval
+	// ReadReportInterval indicates the interval between read stats report
 	// TODO: use StoreHeartBeatReportInterval in future
 	ReadReportInterval = RegionHeartBeatReportInterval
 
