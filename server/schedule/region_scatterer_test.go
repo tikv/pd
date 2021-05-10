@@ -14,6 +14,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/storelimit"
 )
 
 type sequencer struct {
@@ -42,35 +43,35 @@ func (s *sequencer) next() uint64 {
 	return s.curID
 }
 
-var _ = SerialSuites(&testScatterRegionSerialSuite{})
+var _ = Suite(&testScatterRegionSuite{})
 
-type testScatterRegionSerialSuite struct{}
+type testScatterRegionSuite struct{}
 
-func (s *testScatterRegionSerialSuite) TestSixStores(c *C) {
+func (s *testScatterRegionSuite) TestSixStores(c *C) {
 	s.scatter(c, 6, 100, false)
 	s.scatter(c, 6, 100, true)
 	s.scatter(c, 6, 1000, false)
 	s.scatter(c, 6, 1000, true)
 }
 
-func (s *testScatterRegionSerialSuite) TestFiveStores(c *C) {
+func (s *testScatterRegionSuite) TestFiveStores(c *C) {
 	s.scatter(c, 5, 100, false)
 	s.scatter(c, 5, 100, true)
 	s.scatter(c, 5, 1000, false)
 	s.scatter(c, 5, 1000, true)
 }
 
-func (s *testScatterRegionSerialSuite) TestSixSpecialStores(c *C) {
+func (s *testScatterRegionSuite) TestSixSpecialStores(c *C) {
 	s.scatterSpecial(c, 3, 6, 100)
 	s.scatterSpecial(c, 3, 6, 1000)
 }
 
-func (s *testScatterRegionSerialSuite) TestFiveSpecialStores(c *C) {
+func (s *testScatterRegionSuite) TestFiveSpecialStores(c *C) {
 	s.scatterSpecial(c, 5, 5, 100)
 	s.scatterSpecial(c, 5, 5, 1000)
 }
 
-func (s *testScatterRegionSerialSuite) checkOperator(op *operator.Operator, c *C) {
+func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
 	for i := 0; i < op.Len(); i++ {
 		if rp, ok := op.Step(i).(operator.RemovePeer); ok {
 			for j := i + 1; j < op.Len(); j++ {
@@ -83,8 +84,10 @@ func (s *testScatterRegionSerialSuite) checkOperator(op *operator.Operator, c *C
 	}
 }
 
-func (s *testScatterRegionSerialSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
+func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
 	opt := mockoption.NewScheduleOptions()
+	c.Assert(opt.SetAllStoresLimit(storelimit.AddPeer, 99999), IsNil)
+	c.Assert(opt.SetAllStoresLimit(storelimit.RemovePeer, 99999), IsNil)
 	tc := mockcluster.NewCluster(opt)
 
 	// Add ordinary stores.
@@ -138,8 +141,10 @@ func (s *testScatterRegionSerialSuite) scatter(c *C, numStores, numRegions uint6
 	}
 }
 
-func (s *testScatterRegionSerialSuite) scatterSpecial(c *C, numOrdinaryStores, numSpecialStores, numRegions uint64) {
+func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpecialStores, numRegions uint64) {
 	opt := mockoption.NewScheduleOptions()
+	c.Assert(opt.SetAllStoresLimit(storelimit.AddPeer, 99999), IsNil)
+	c.Assert(opt.SetAllStoresLimit(storelimit.RemovePeer, 99999), IsNil)
 	tc := mockcluster.NewCluster(opt)
 
 	// Add ordinary stores.
@@ -213,7 +218,7 @@ func (s *testScatterRegionSerialSuite) scatterSpecial(c *C, numOrdinaryStores, n
 	}
 }
 
-func (s *testScatterRegionSerialSuite) TestStoreLimit(c *C) {
+func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := mockoption.NewScheduleOptions()
@@ -243,8 +248,10 @@ func (s *testScatterRegionSerialSuite) TestStoreLimit(c *C) {
 	}
 }
 
-func (s *testScatterRegionSerialSuite) TestScatterGroup(c *C) {
+func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 	opt := mockoption.NewScheduleOptions()
+	c.Assert(opt.SetAllStoresLimit(storelimit.AddPeer, 99999), IsNil)
+	c.Assert(opt.SetAllStoresLimit(storelimit.RemovePeer, 99999), IsNil)
 	tc := mockcluster.NewCluster(opt)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -311,8 +318,10 @@ func (s *testScatterRegionSerialSuite) TestScatterGroup(c *C) {
 	}
 }
 
-func (s *testScatterRegionSerialSuite) TestScattersGroup(c *C) {
+func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 	opt := mockoption.NewScheduleOptions()
+	c.Assert(opt.SetAllStoresLimit(storelimit.AddPeer, 99999), IsNil)
+	c.Assert(opt.SetAllStoresLimit(storelimit.RemovePeer, 99999), IsNil)
 	tc := mockcluster.NewCluster(opt)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -374,7 +383,7 @@ func (s *testScatterRegionSerialSuite) TestScattersGroup(c *C) {
 	}
 }
 
-func (s *testScatterRegionSerialSuite) TestSelectedStoreGC(c *C) {
+func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
 	// use a shorter gcTTL and gcInterval during the test
 	gcInterval = time.Second
 	gcTTL = time.Second * 3
