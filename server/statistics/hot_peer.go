@@ -35,8 +35,8 @@ type dimStat struct {
 	LastAverage *movingaverage.AvgOverTime // it's used to obtain the average speed in last second as instantaneous speed.
 }
 
-func newDimStat(typ RegionStatKind) *dimStat {
-	reportInterval := RegionHeartBeatReportInterval * time.Second
+func newDimStat(typ RegionStatKind, interval int) *dimStat {
+	reportInterval := time.Duration(interval) * time.Second
 	return &dimStat{
 		typ:         typ,
 		Rolling:     movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),

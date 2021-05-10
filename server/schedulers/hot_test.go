@@ -1109,21 +1109,21 @@ func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, h
 
 	tc.AddRegionStore(2, 20)
 	tc.UpdateStorageReadStats(2, 9.5*MB*statistics.StoreHeartBeatReportInterval, 9.5*MB*statistics.StoreHeartBeatReportInterval)
-	reportInterval := statistics.WriteReportInterval
+	reportInterval := uint64(statistics.WriteReportInterval)
 	if kind == read {
-		reportInterval = statistics.ReadReportInterval
+		reportInterval = uint64(statistics.ReadReportInterval)
 	}
 	// hot degree increase
-	heartbeat(1, 1, 512*KB*uint64(reportInterval), 0, uint64(reportInterval), []uint64{2, 3}, 1)
-	heartbeat(1, 1, 512*KB*uint64(reportInterval), 0, uint64(reportInterval), []uint64{2, 3}, 1)
-	items := heartbeat(1, 1, 512*KB*uint64(reportInterval), 0, uint64(reportInterval), []uint64{2, 3}, 1)
+	heartbeat(1, 1, 512*KB*reportInterval, 0, reportInterval, []uint64{2, 3}, 1)
+	heartbeat(1, 1, 512*KB*reportInterval, 0, reportInterval, []uint64{2, 3}, 1)
+	items := heartbeat(1, 1, 512*KB*reportInterval, 0, reportInterval, []uint64{2, 3}, 1)
 	c.Check(len(items), Greater, 0)
 	for _, item := range items {
 		c.Check(item.HotDegree, Equals, 3)
 	}
 
 	// transfer leader, skip the first heartbeat and schedule.
-	items = heartbeat(1, 2, 512*KB*uint64(reportInterval), 0, uint64(reportInterval), []uint64{1, 3}, 1)
+	items = heartbeat(1, 2, 512*KB*reportInterval, 0, reportInterval, []uint64{1, 3}, 1)
 	for _, item := range items {
 		if !item.IsNeedDelete() {
 			c.Check(item.HotDegree, Equals, 3)
@@ -1141,12 +1141,12 @@ func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, h
 	tc.SetHotRegionCacheHitsThreshold(threshold)
 
 	// move peer: add peer and remove peer
-	items = heartbeat(1, 2, 512*KB*uint64(reportInterval), 0, uint64(reportInterval), []uint64{1, 3, 4}, 1)
+	items = heartbeat(1, 2, 512*KB*reportInterval, 0, reportInterval, []uint64{1, 3, 4}, 1)
 	c.Check(len(items), Greater, 0)
 	for _, item := range items {
 		c.Check(item.HotDegree, Equals, 4)
 	}
-	items = heartbeat(1, 2, 512*KB*uint64(reportInterval), 0, uint64(reportInterval), []uint64{1, 4}, 1)
+	items = heartbeat(1, 2, 512*KB*reportInterval, 0, reportInterval, []uint64{1, 4}, 1)
 	c.Check(len(items), Greater, 0)
 	for _, item := range items {
 		if item.StoreID == 3 {
