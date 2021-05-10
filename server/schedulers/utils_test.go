@@ -14,7 +14,6 @@
 package schedulers
 
 import (
-	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -24,10 +23,6 @@ const (
 	KB = 1024
 	MB = 1024 * KB
 )
-
-func TestSchedulers(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testMinMaxSuite{})
 
