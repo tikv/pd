@@ -30,7 +30,7 @@ import (
 )
 
 // errRegionIsStale is error info for region is stale.
-var errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
+func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 	return errors.Errorf("region is stale: region %v origin %v", region, origin)
 }
 
@@ -83,9 +83,16 @@ func classifyVoterAndLearner(region *RegionInfo) {
 	region.voters = voters
 }
 
-// EmptyRegionApproximateSize is the region approximate size of an empty region
-// (heartbeat size <= 1MB).
-const EmptyRegionApproximateSize = 1
+const (
+	// EmptyRegionApproximateSize is the region approximate size of an empty region
+	// (heartbeat size <= 1MB).
+	EmptyRegionApproximateSize = 1
+	// ImpossibleFlowSize is an impossible flow size (such as written_bytes, read_keys, etc.)
+	// It may be caused by overflow, refer to https://github.com/tikv/pd/issues/3379.
+	// They need to be filtered so as not to affect downstream.
+	// (flow size >= 1024TB)
+	ImpossibleFlowSize = 1 << 50
+)
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
@@ -110,6 +117,15 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
+	}
+
+	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
+		region.writtenKeys = 0
+		region.writtenBytes = 0
+	}
+	if region.readKeys >= ImpossibleFlowSize || region.readBytes >= ImpossibleFlowSize {
+		region.readKeys = 0
+		region.readBytes = 0
 	}
 
 	sort.Sort(peerStatsSlice(region.downPeers))
