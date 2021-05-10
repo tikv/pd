@@ -543,36 +543,11 @@ const (
 	BlacklistTarget
 )
 
-<<<<<<< HEAD
 // BlacklistStoreFilter filters the store according to the blacklist.
 type BlacklistStoreFilter struct {
 	scope     string
 	blacklist map[uint64]struct{}
 	flag      BlacklistType
-=======
-func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions, store *core.StoreInfo) bool {
-	var funcs []conditionFunc
-	switch typ {
-	case leaderSource:
-		funcs = []conditionFunc{f.isTombstone, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
-	case regionSource:
-		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
-	case leaderTarget:
-		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.pauseLeaderTransfer,
-			f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
-	case regionTarget:
-		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy,
-			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
-	case scatterRegionTarget:
-		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy}
-	}
-	for _, cf := range funcs {
-		if cf(opt, store) {
-			return true
-		}
-	}
-	return false
->>>>>>> b8c3d144... schedule: add metrcis for region scatter (#3582)
 }
 
 // NewBlacklistStoreFilter creates a blacklist filter.
