@@ -107,7 +107,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region, "mock-group"); op != nil {
+		if op := scatterer.scatterRegion(region, "mock-group"); op != nil {
 			s.checkOperator(op, c)
 			ApplyOperator(tc, op)
 		}
@@ -162,7 +162,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region, "mock-group"); op != nil {
+		if op := scatterer.scatterRegion(region, "mock-group"); op != nil {
 			s.checkOperator(op, c)
 			ApplyOperator(tc, op)
 		}
