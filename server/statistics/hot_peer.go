@@ -36,7 +36,6 @@ type dimStat struct {
 }
 
 func newDimStat(typ RegionStatKind, reportInterval time.Duration) *dimStat {
-	//reportInterval := RegionHeartBeatReportInterval * time.Second
 	return &dimStat{
 		typ:         typ,
 		Rolling:     movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
