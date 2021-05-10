@@ -62,9 +62,6 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 
-	nilOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
-		return nil
-	}
 	notDoneOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
 		var op *operator.Operator
 		var err error
@@ -88,7 +85,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
 		return op
 	}
-	opCreaters := [4]func(region *core.RegionInfo, ty opType) *operator.Operator{nilOp, shouldRemoveOp, notDoneOp, doneOp}
+	opCreaters := [4]func(region *core.RegionInfo, ty opType) *operator.Operator{shouldRemoveOp, notDoneOp, doneOp}
 
 	typs := []opType{movePeer, transferLeader}
 

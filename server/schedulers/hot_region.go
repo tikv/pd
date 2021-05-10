@@ -244,10 +244,6 @@ func (h *hotScheduler) summaryPendingInfluence() {
 // ended operator
 func (h *hotScheduler) gcRegionPendings() {
 	for regionID, op := range h.regionPendings {
-		if op == nil {
-			delete(h.regionPendings, regionID)
-			continue
-		}
 		if op != nil && op.IsEnd() {
 			if time.Now().After(op.GetCreateTime().Add(h.conf.GetMaxZombieDuration())) {
 				log.Debug("gc pending influence in hot region scheduler", zap.Uint64("region-id", regionID), zap.Time("create", op.GetCreateTime()), zap.Time("now", time.Now()), zap.Duration("zombie", h.conf.GetMaxZombieDuration()))
