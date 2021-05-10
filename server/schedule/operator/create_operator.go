@@ -1,3 +1,4 @@
+
 // Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -165,13 +166,8 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 	return NewBuilder(desc, cluster, origin).
 		SetPeers(targetPeers).
 		SetLeader(leader).
-<<<<<<< HEAD
 		SetLightWeight().
-=======
-		EnableLightWeight().
-		// EnableForceTargetLeader in order to ignore the leader schedule limit
 		EnableForceTargetLeader().
->>>>>>> 9e60f4d3... schedule: revise region_scatter distribution for multi groups  (#3422)
 		Build(0)
 }
 
