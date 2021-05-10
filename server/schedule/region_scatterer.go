@@ -360,12 +360,17 @@ func (r *RegionScatterer) selectStore(group string, peer *metapb.Peer, sourceSto
 // selectAvailableLeaderStores select the target leader store from the candidates. The candidates would be collected by
 // the existed peers store depended on the leader counts in the group level.
 func (r *RegionScatterer) selectAvailableLeaderStores(group string, peers map[uint64]*metapb.Peer, context engineContext) uint64 {
+	leaderCandidateStores := make([]uint64, 0)
+	for storeID := range peers {
+		store := r.cluster.GetStore(storeID)
+		engine := store.GetLabelValue(filter.EngineKey)
+		if len(engine) < 1 {
+			leaderCandidateStores = append(leaderCandidateStores, storeID)
+		}
+	}
 	minStoreGroupLeader := uint64(math.MaxUint64)
 	id := uint64(0)
-	for storeID := range peers {
-		if id == 0 {
-			id = storeID
-		}
+	for _, storeID := range leaderCandidateStores {
 		storeGroupLeaderCount := context.selectedLeader.Get(storeID, group)
 		if minStoreGroupLeader > storeGroupLeaderCount {
 			minStoreGroupLeader = storeGroupLeaderCount

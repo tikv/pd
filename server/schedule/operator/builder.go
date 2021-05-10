@@ -15,15 +15,15 @@ package operator
 
 import (
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"go.uber.org/zap"
 	"sort"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/placement"
+	"go.uber.org/zap"
 )
 
 // Builder is used to create operators. Usage:
