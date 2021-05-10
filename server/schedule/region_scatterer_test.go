@@ -42,35 +42,35 @@ func (s *sequencer) next() uint64 {
 	return s.curID
 }
 
-var _ = Suite(&testScatterRegionSuite{})
+var _ = SerialSuites(&testScatterRegionSerialSuite{})
 
-type testScatterRegionSuite struct{}
+type testScatterRegionSerialSuite struct{}
 
-func (s *testScatterRegionSuite) TestSixStores(c *C) {
+func (s *testScatterRegionSerialSuite) TestSixStores(c *C) {
 	s.scatter(c, 6, 100, false)
 	s.scatter(c, 6, 100, true)
 	s.scatter(c, 6, 1000, false)
 	s.scatter(c, 6, 1000, true)
 }
 
-func (s *testScatterRegionSuite) TestFiveStores(c *C) {
+func (s *testScatterRegionSerialSuite) TestFiveStores(c *C) {
 	s.scatter(c, 5, 100, false)
 	s.scatter(c, 5, 100, true)
 	s.scatter(c, 5, 1000, false)
 	s.scatter(c, 5, 1000, true)
 }
 
-func (s *testScatterRegionSuite) TestSixSpecialStores(c *C) {
+func (s *testScatterRegionSerialSuite) TestSixSpecialStores(c *C) {
 	s.scatterSpecial(c, 3, 6, 100)
 	s.scatterSpecial(c, 3, 6, 1000)
 }
 
-func (s *testScatterRegionSuite) TestFiveSpecialStores(c *C) {
+func (s *testScatterRegionSerialSuite) TestFiveSpecialStores(c *C) {
 	s.scatterSpecial(c, 5, 5, 100)
 	s.scatterSpecial(c, 5, 5, 1000)
 }
 
-func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
+func (s *testScatterRegionSerialSuite) checkOperator(op *operator.Operator, c *C) {
 	for i := 0; i < op.Len(); i++ {
 		if rp, ok := op.Step(i).(operator.RemovePeer); ok {
 			for j := i + 1; j < op.Len(); j++ {
@@ -83,7 +83,7 @@ func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
 	}
 }
 
-func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
+func (s *testScatterRegionSerialSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
@@ -138,7 +138,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 	}
 }
 
-func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpecialStores, numRegions uint64) {
+func (s *testScatterRegionSerialSuite) scatterSpecial(c *C, numOrdinaryStores, numSpecialStores, numRegions uint64) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
@@ -213,7 +213,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 	}
 }
 
-func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
+func (s *testScatterRegionSerialSuite) TestStoreLimit(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := mockoption.NewScheduleOptions()
@@ -243,7 +243,7 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 	}
 }
 
-func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
+func (s *testScatterRegionSerialSuite) TestScatterGroup(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	// Add 5 stores.
@@ -311,7 +311,7 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 	}
 }
 
-func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
+func (s *testScatterRegionSerialSuite) TestScattersGroup(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	// Add 5 stores.
@@ -374,7 +374,7 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 	}
 }
 
-func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
+func (s *testScatterRegionSerialSuite) TestSelectedStoreGC(c *C) {
 	// use a shorter gcTTL and gcInterval during the test
 	gcInterval = time.Second
 	gcTTL = time.Second * 3
