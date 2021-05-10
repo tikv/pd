@@ -228,11 +228,6 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		peers:              peers,
 		thresholds:         thresholds,
 	}
-	if f.kind == WriteFlow {
-		newItem.expectReportIntervalSecs = WriteReportInterval
-	} else {
-		newItem.expectReportIntervalSecs = ReadReportInterval
-	}
 	if oldItem == nil {
 		inheritItem := f.takeInheritItem(region.GetID())
 		if inheritItem != nil {
@@ -426,7 +421,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		newItem.isNew = true
 		newItem.rollingLoads = make([]*dimStat, len(regionStats))
 		for i, k := range regionStats {
-			ds := newDimStat(k, newItem.expectReportIntervalSecs)
+			ds := newDimStat(k, time.Duration(newItem.expectedInterval())*time.Second)
 			ds.Add(deltaLoads[k], interval)
 			if ds.isFull() {
 				ds.clearLastAverage()
