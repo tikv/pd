@@ -51,6 +51,7 @@ type Builder struct {
 
 	// flags
 	isLigthWeight bool
+	isForceLeader bool
 
 	// intermediate states
 	currentPeers               peersMap
@@ -184,6 +185,11 @@ func (b *Builder) SetLightWeight() *Builder {
 	return b
 }
 
+func (b *Builder) SetForceLeader() *Builder {
+	b.isForceLeader = true
+	return b
+}
+
 // Build creates the Operator.
 func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	if b.err != nil {
@@ -271,7 +277,7 @@ func (b *Builder) brief() string {
 
 func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
 	for b.toAdd.Len() > 0 || b.toRemove.Len() > 0 || b.toPromote.Len() > 0 {
-		plan := b.peerPlan()
+		plan := b.()
 		if plan.empty() {
 			log.Info("plan is empty, maybe no valid leader",
 				zap.String("origin-peer", b.originPeers.String()),
@@ -280,7 +286,9 @@ func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
 				zap.Uint64("target-leader", b.targetLeader),
 				zap.String("toAdd", b.toAdd.String()),
 				zap.String("toRemove", b.toRemove.String()),
-				zap.String("toPromote", b.toPromote.String()))
+				zap.String("toPromote", b.toPromote.String()),
+				zap.String("currentPeer", b.currentPeers.String()),
+				zap.Uint64("currentLeader", b.currentLeader))
 			return kind, errors.New("fail to build operator: plan is empty, maybe no valid leader")
 		}
 		if plan.leaderAdd != 0 && plan.leaderAdd != b.currentLeader {
@@ -402,7 +410,7 @@ func (p stepPlan) empty() bool {
 	return p.promote == nil && p.add == nil && p.remove == nil
 }
 
-func (b *Builder) peerPlan() stepPlan {
+func (b *Builder) peerPlpeerPlanan() stepPlan {
 	// Replace has the highest priority because it does not change region's
 	// voter/learner count.
 	if p := b.planReplace(); !p.empty() {
