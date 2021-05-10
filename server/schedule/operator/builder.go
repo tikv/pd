@@ -277,7 +277,10 @@ func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
 				zap.String("origin-peer", b.originPeers.String()),
 				zap.String("target-peer", b.targetPeers.String()),
 				zap.Uint64("origin-leader", b.originLeader),
-				zap.Uint64("target-leader", b.targetLeader))
+				zap.Uint64("target-leader", b.targetLeader),
+				zap.String("toAdd", b.toAdd.String()),
+				zap.String("toRemove", b.toRemove.String()),
+				zap.String("toPromote", b.toPromote.String()))
 			return kind, errors.New("fail to build operator: plan is empty, maybe no valid leader")
 		}
 		if plan.leaderAdd != 0 && plan.leaderAdd != b.currentLeader {
