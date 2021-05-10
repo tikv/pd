@@ -71,11 +71,10 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 	}
 	if kind == WriteFlow {
 		c.reportIntervalSecs = WriteReportInterval
-		c.topNTTL = 3 * WriteReportInterval * time.Second
 	} else {
 		c.reportIntervalSecs = ReadReportInterval
-		c.topNTTL = 3 * ReadReportInterval * time.Second
 	}
+	c.topNTTL = 3 * time.Duration(c.reportIntervalSecs) * time.Second
 	return c
 }
 
