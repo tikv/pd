@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
+	"go.uber.org/zap"
 )
 
 const (
@@ -113,10 +114,13 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   strings.Split(cfg.Join, ","),
 		DialTimeout: etcdutil.DefaultDialTimeout,
 		TLS:         tlsConfig,
+		LogConfig:   &lgc,
 	})
 	if err != nil {
 		return errors.WithStack(err)
