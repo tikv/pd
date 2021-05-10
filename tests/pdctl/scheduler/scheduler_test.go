@@ -240,7 +240,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler"}, &roles)
 	c.Assert(roles, DeepEquals, []string{"learner"})
 
-	// test echo
+	// test balance region config
 	echo := mustExec([]string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
