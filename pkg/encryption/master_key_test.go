@@ -16,15 +16,10 @@ package encryption
 import (
 	"encoding/hex"
 	"io/ioutil"
-	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 )
-
-func TestMasterKey(t *testing.T) {
-	TestingT(t)
-}
 
 type testMasterKeySuite struct{}
 

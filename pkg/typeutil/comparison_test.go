@@ -20,7 +20,7 @@ import (
 	. "github.com/pingcap/check"
 )
 
-func TestComparison(t *testing.T) {
+func TestTypeUtil(t *testing.T) {
 	TestingT(t)
 }
 

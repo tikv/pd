@@ -14,14 +14,8 @@
 package typeutil
 
 import (
-	"testing"
-
 	. "github.com/pingcap/check"
 )
-
-func TestConversion(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testUint64BytesSuite{})
 
