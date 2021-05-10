@@ -82,6 +82,8 @@ type HotPeerStat struct {
 	Kind  FlowKind  `json:"-"`
 	Loads []float64 `json:"loads"`
 
+	expectReportIntervalSecs int
+
 	// rolling statistics, recording some recently added records.
 	rollingLoads []*dimStat
 
@@ -129,7 +131,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 
 // IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
 func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
-	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*HotStatReportInterval)
+	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*stat.expectReportIntervalSecs)
 }
 
 // IsNeedDelete to delete the item in cache.
