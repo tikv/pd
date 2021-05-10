@@ -22,7 +22,6 @@ require (
 	github.com/opentracing/opentracing-go v1.1.0
 	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
-	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20210104140916-41a0a3a87e75
 	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20201126102027-b0a155152ca3
@@ -30,6 +29,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20200907074027-32a3a0accf7d
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
 	github.com/pingcap/sysutil v0.0.0-20201130064824-f0c8aa6a6966
+	github.com/pingcap/tidb-dashboard v0.0.0-20210312062513-eef5d6404638
 	github.com/prometheus/client_golang v1.2.1
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/sirupsen/logrus v1.4.2
