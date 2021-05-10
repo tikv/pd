@@ -11,4 +11,14 @@ if [ "$res" ]; then
   exit 1
 fi
 
+# Check if there are duplicated `TestingT` in package.
+
+res=$(grep -r "TestingT(" | grep -v ".sh:" | cut -f1 | xargs -n1 dirname | sort | uniq -cd)
+
+if [ "$res" ]; then
+  echo "following packages may have duplicated TestingT:"
+  echo "$res"
+  exit 1
+fi
+
 exit 0
