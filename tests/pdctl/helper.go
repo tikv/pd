@@ -29,14 +29,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
-
-// InitCommand is used to initialize command.
-func InitCommand() *cobra.Command {
-	rootCmd := pdctl.GetRootCmd()
-	return rootCmd
-}
 
 // ExecuteCommand is used for test purpose.
 func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err error) {

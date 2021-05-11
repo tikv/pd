@@ -26,6 +26,7 @@ import (
 	clusterpkg "github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -53,7 +54,7 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	i := strings.Index(pdAddr, "//")
 	pdAddr = pdAddr[i+2:]
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 	defer cluster.Destroy()
 
 	// cluster

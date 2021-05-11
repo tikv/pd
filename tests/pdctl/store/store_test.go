@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -50,7 +51,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := cmd.GetRootCmd()
 
 	stores := []*metapb.Store{
 		{
