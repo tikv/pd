@@ -93,15 +93,11 @@ func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
 	s.Lock()
 	defer s.Unlock()
 	for storeID := range s.rollingStoresStats {
-		if storeIsUnhealthy(cluster, storeID) {
+		store := cluster.GetStore(storeID)
+		if store.IsTombstone() || store.IsUnhealthy() || store.IsPhysicallyDestroyed() {
 			delete(s.rollingStoresStats, storeID)
 		}
 	}
-}
-
-func storeIsUnhealthy(cluster core.StoreSetInformer, storeID uint64) bool {
-	store := cluster.GetStore(storeID)
-	return store.IsTombstone() || store.IsUnhealthy() || store.IsPhysicallyDestroyed()
 }
 
 // UpdateStoreHeartbeatMetrics is used to update store heartbeat interval metrics
