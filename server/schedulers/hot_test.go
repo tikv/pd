@@ -1121,7 +1121,23 @@ func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, h
 	items = heartbeat(1, 2, 512*KB*reportInterval, 0, reportInterval, []uint64{1, 3}, 1)
 	for _, item := range items {
 		if !item.IsNeedDelete() {
-			c.Check(item.HotDegree, Equals, 3)
+			if kind == read {
+				// transfer leader won't skip the first heartbeat for read stat
+				c.Check(item.HotDegree, Equals, 1)
+			} else {
+				c.Check(item.HotDegree, Equals, 3)
+			}
+		}
+	}
+
+	// heartbeat twice for read stat in order to let hot degree become 3
+	if kind == read {
+		heartbeat(1, 2, 512*KB*reportInterval, 0, reportInterval, []uint64{1, 3}, 1)
+		items = heartbeat(1, 2, 512*KB*reportInterval, 0, reportInterval, []uint64{1, 3}, 1)
+		for _, item := range items {
+			if !item.IsNeedDelete() {
+				c.Check(item.HotDegree, Equals, 3)
+			}
 		}
 	}
 

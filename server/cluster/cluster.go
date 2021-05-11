@@ -529,10 +529,29 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.hotStat.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.hotStat.UpdateTotalLoad(c.core.GetStores())
 	c.hotStat.FilterUnhealthyStore(c)
+	reportInterval := stats.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
 	// c.limiter is nil before "start" is called
 	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
 		c.limiter.Collect(newStore.GetStoreStats())
+	}
+
+	for _, peerStat := range stats.GetPeerStats() {
+		regionID := peerStat.GetRegionId()
+		region := c.GetRegion(regionID)
+		if region == nil {
+			// TODO: log.warn
+			continue
+		}
+		peer := region.GetStorePeer(storeID)
+		if peer == nil {
+			// TODO:: log.warn
+			continue
+		}
+		peerInfo := core.NewPeerInfo(peer, 0, 0,
+			peerStat.GetReadBytes(), peerStat.GetReadKeys(), interval, region)
+		c.CheckReadStatus(peerInfo)
 	}
 
 	return nil
@@ -546,7 +565,16 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.RUnlock()
 		return err
 	}
-	c.CheckRWStatus(region)
+	expiredItems := c.hotStat.ExpiredItems(region)
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	for _, peer := range region.GetPeers() {
+		peerInfo := core.NewPeerInfo(peer,
+			region.GetBytesWritten(), region.GetKeysWritten(),
+			0, 0,
+			interval, region)
+		c.CheckWriteStatus(peerInfo)
+	}
 	c.RUnlock()
 
 	// Save to storage if meta is updated.
@@ -622,7 +650,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	if !saveKV && !saveCache && !isNew {
+	if len(expiredItems) == 0 && !saveKV && !saveCache && !isNew {
 		return nil
 	}
 
@@ -680,6 +708,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
+	}
+	for _, item := range expiredItems {
+		c.hotStat.Update(item)
 	}
 	c.Unlock()
 
@@ -1467,9 +1498,14 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	return c.hotStat.RegionStats(statistics.WriteFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
 }
 
-// CheckRWStatus checks the read/write status.
-func (c *RaftCluster) CheckRWStatus(region *core.RegionInfo) {
-	c.hotStat.CheckRWAsync(region)
+// CheckWriteStatus checks the write status.
+func (c *RaftCluster) CheckWriteStatus(peerInfo *core.PeerInfo) {
+	c.hotStat.CheckWriteAsync(peerInfo)
+}
+
+// CheckReadStatus checks the read status
+func (c *RaftCluster) CheckReadStatus(peerInfo *core.PeerInfo) {
+	c.hotStat.CheckReadAsync(peerInfo)
 }
 
 // TODO: remove me.

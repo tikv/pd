@@ -80,16 +80,23 @@ type PeerInfo struct {
 	writtenKeys  uint64
 	readBytes    uint64
 	readKeys     uint64
+	intervals    uint64
+	regionInfo   *RegionInfo
 }
 
 // NewPeerInfo creates PeerInfo
-func NewPeerInfo(meta *metapb.Peer, writtenBytes, writtenKeys, readBytes, readKeys uint64) *PeerInfo {
+func NewPeerInfo(meta *metapb.Peer,
+	writtenBytes, writtenKeys, readBytes, readKeys uint64,
+	intervals uint64,
+	region *RegionInfo) *PeerInfo {
 	return &PeerInfo{
 		Peer:         meta,
 		writtenBytes: writtenBytes,
 		writtenKeys:  writtenKeys,
 		readBytes:    readBytes,
 		readKeys:     readKeys,
+		intervals:    intervals,
+		regionInfo:   region,
 	}
 }
 
@@ -121,4 +128,14 @@ func (p *PeerInfo) GetStoreID() uint64 {
 // GetPeerID provides peer id
 func (p *PeerInfo) GetPeerID() uint64 {
 	return p.GetId()
+}
+
+// GetIntervals returns reporting intervals
+func (p *PeerInfo) GetIntervals() uint64 {
+	return p.intervals
+}
+
+// GetBelongedRegion returns the belonged region for this peer
+func (p *PeerInfo) GetBelongedRegion() *RegionInfo {
+	return p.regionInfo
 }

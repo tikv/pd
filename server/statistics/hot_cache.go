@@ -28,20 +28,29 @@ const queueCap = 1000
 
 // HotCache is a cache hold hot regions.
 type HotCache struct {
-	flowQueue chan *core.RegionInfo
-	writeFlow *hotPeerCache
-	readFlow  *hotPeerCache
+	writeFlowQueue chan *core.PeerInfo
+	readFlowQueue  chan *core.PeerInfo
+	writeFlow      *hotPeerCache
+	readFlow       *hotPeerCache
 }
 
 // NewHotCache creates a new hot spot cache.
 func NewHotCache(ctx context.Context) *HotCache {
 	w := &HotCache{
-		flowQueue: make(chan *core.RegionInfo, queueCap),
-		writeFlow: NewHotStoresStats(WriteFlow),
-		readFlow:  NewHotStoresStats(ReadFlow),
+		writeFlowQueue: make(chan *core.PeerInfo, queueCap),
+		readFlowQueue:  make(chan *core.PeerInfo, queueCap),
+		writeFlow:      NewHotStoresStats(WriteFlow),
+		readFlow:       NewHotStoresStats(ReadFlow),
 	}
 	go w.updateItems(ctx)
 	return w
+}
+
+// ExpiredItems returns the items which are already expired.
+func (w *HotCache) ExpiredItems(region *core.RegionInfo) (expiredItems []*HotPeerStat) {
+	expiredItems = append(expiredItems, w.writeFlow.ExpiredItems(region)...)
+	expiredItems = append(expiredItems, w.readFlow.ExpiredItems(region)...)
+	return
 }
 
 // CheckWriteSync checks the write status, returns update items.
@@ -56,9 +65,14 @@ func (w *HotCache) CheckReadSync(region *core.RegionInfo) []*HotPeerStat {
 	return w.readFlow.CheckRegionFlow(region)
 }
 
-// CheckRWAsync puts the region into queue, and check it asynchronously
-func (w *HotCache) CheckRWAsync(region *core.RegionInfo) {
-	w.flowQueue <- region
+// CheckWriteAsync puts the peerInfo into queue, and check it asynchronously
+func (w *HotCache) CheckWriteAsync(peer *core.PeerInfo) {
+	w.writeFlowQueue <- peer
+}
+
+// CheckReadAsync puts the peerInfo into queue, and check it asynchronously
+func (w *HotCache) CheckReadAsync(peer *core.PeerInfo) {
+	w.readFlowQueue <- peer
 }
 
 // Update updates the cache.
@@ -141,14 +155,17 @@ func (w *HotCache) updateItems(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case region, ok := <-w.flowQueue:
-			if ok && region != nil {
-				items := w.readFlow.CheckRegionFlow(region)
-				for _, item := range items {
+		case peer, ok := <-w.writeFlowQueue:
+			if ok && peer != nil {
+				item := w.writeFlow.CheckPeerFlow(peer, peer.GetBelongedRegion(), peer.GetIntervals())
+				if item != nil {
 					w.Update(item)
 				}
-				items = w.writeFlow.CheckRegionFlow(region)
-				for _, item := range items {
+			}
+		case peer, ok := <-w.readFlowQueue:
+			if ok && peer != nil {
+				item := w.readFlow.CheckPeerFlow(peer, peer.GetBelongedRegion(), peer.GetIntervals())
+				if item != nil {
 					w.Update(item)
 				}
 			}

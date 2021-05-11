@@ -34,7 +34,7 @@ const (
 	WriteReportInterval = RegionHeartBeatReportInterval
 	// ReadReportInterval indicates the interval between read stats report
 	// TODO: use StoreHeartBeatReportInterval in future
-	ReadReportInterval = RegionHeartBeatReportInterval
+	ReadReportInterval = StoreHeartBeatReportInterval
 
 	rollingWindowsSize = 5
 
@@ -124,8 +124,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	}
 }
 
-// TODO: remove it in future
-func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
+func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 	regionHeartbeatIntervalHist.Observe(float64(interval))
 	if interval == 0 {
 		return
@@ -145,19 +144,26 @@ func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
 	}
 }
 
+func (f *hotPeerCache) ExpiredItems(region *core.RegionInfo) []*HotPeerStat {
+	regionID := region.GetID()
+	items := make([]*HotPeerStat, 0)
+	for _, storeID := range f.getAllStoreIDs(region) {
+		if region.GetStorePeer(storeID) == nil {
+			item := f.getOldHotPeerStat(regionID, storeID)
+			if item != nil {
+				item.needDelete = true
+				items = append(items, item)
+			}
+		}
+	}
+	return items
+}
+
 // CheckRegionFlow checks the flow information of region.
+// it is only used for test.
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	{
-		// TODO: collect metrics by peer stat
-		deltaLoads := f.getFlowDeltaLoads(region)
-		loads := make([]float64, len(deltaLoads))
-		for i := range deltaLoads {
-			loads[i] = deltaLoads[i] / float64(interval)
-		}
-		f.collectRegionMetrics(loads, interval)
-	}
 	regionID := region.GetID()
 	storeIDs := f.getAllStoreIDs(region)
 	for _, storeID := range storeIDs {
@@ -168,7 +174,8 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 				region.GetBytesWritten(),
 				region.GetKeysWritten(),
 				region.GetBytesRead(),
-				region.GetKeysRead())
+				region.GetKeysRead(),
+				interval, region)
 			item = f.CheckPeerFlow(peerInfo, region, interval)
 		} else {
 			item = f.markExpiredItem(regionID, storeID)
@@ -195,6 +202,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *HotPeerStat {
 	storeID := peer.GetStoreID()
 	deltaLoads := f.getFlowDeltaLoads(peer)
+	f.collectPeerMetrics(deltaLoads, interval)
 	loads := make([]float64, len(deltaLoads))
 	for i := range deltaLoads {
 		loads[i] = deltaLoads[i] / float64(interval)
@@ -432,17 +440,18 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 
 	newItem.rollingLoads = oldItem.rollingLoads
 
-	// TODO: don't inherit hot degree after transfer leader when we report peer by store heartbeat.
 	if newItem.justTransferLeader {
+		newItem.lastTransferLeaderTime = time.Now()
 		// skip the first heartbeat flow statistic after transfer leader, because its statistics are calculated by the last leader in this store and are inaccurate
 		// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.
-		newItem.HotDegree = oldItem.HotDegree
-		newItem.AntiCount = oldItem.AntiCount
-		newItem.lastTransferLeaderTime = time.Now()
-		return newItem
+		if newItem.Kind == WriteFlow {
+			newItem.HotDegree = oldItem.HotDegree
+			newItem.AntiCount = oldItem.AntiCount
+			return newItem
+		}
+	} else {
+		newItem.lastTransferLeaderTime = oldItem.lastTransferLeaderTime
 	}
-
-	newItem.lastTransferLeaderTime = oldItem.lastTransferLeaderTime
 
 	for i, k := range regionStats {
 		newItem.rollingLoads[i].Add(deltaLoads[k], interval)
