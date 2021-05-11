@@ -773,7 +773,6 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		filters    []filter.Filter
 		candidates []*core.StoreInfo
 	)
-
 	switch bs.opTy {
 	case movePeer:
 		var scoreGuard filter.Filter
@@ -795,7 +794,9 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 			scoreGuard,
 		}
 
-		candidates = bs.cluster.GetStores()
+		for storeID := range bs.stLoadDetail {
+			candidates = append(candidates, bs.cluster.GetStore(storeID))
+		}
 
 	case transferLeader:
 		filters = []filter.Filter{
@@ -804,7 +805,11 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
 
-		candidates = bs.cluster.GetFollowerStores(bs.cur.region)
+		for _, store := range bs.cluster.GetFollowerStores(bs.cur.region) {
+			if _, ok := bs.stLoadDetail[store.GetID()]; ok {
+				candidates = append(candidates, store)
+			}
+		}
 
 	default:
 		return nil

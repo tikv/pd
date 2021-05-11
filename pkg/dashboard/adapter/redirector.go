@@ -20,8 +20,8 @@ import (
 	"net/url"
 	"sync"
 
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/utils"
+	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
+	"github.com/pingcap/tidb-dashboard/pkg/utils"
 )
 
 const (

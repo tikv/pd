@@ -166,6 +166,7 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 		SetPeers(targetPeers).
 		SetLeader(leader).
 		SetLightWeight().
+		EnableForceTargetLeader().
 		Build(0)
 }
 

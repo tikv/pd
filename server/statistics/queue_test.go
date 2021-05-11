@@ -1,4 +1,4 @@
-// Copyright 2020 TiKV Project Authors.
+// Copyright 2021 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,18 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package keyvisual
+package statistics
 
 import (
-	"github.com/pingcap/tidb-dashboard/pkg/keyvisual/region"
-
-	"github.com/tikv/pd/pkg/dashboard/keyvisual/input"
-	"github.com/tikv/pd/server"
+	. "github.com/pingcap/check"
 )
 
-// GenCustomDataProvider generates a custom DataProvider for the dashboard keyvisual package.
-func GenCustomDataProvider(srv *server.Server) *region.DataProvider {
-	return &region.DataProvider{
-		PeriodicGetter: input.NewCorePeriodicGetter(srv),
-	}
+func (t *testMovingAvg) TestQueue(c *C) {
+	sq := NewSafeQueue()
+	sq.PushBack(1)
+	sq.PushBack(2)
+	v1 := sq.PopFront()
+	v2 := sq.PopFront()
+	c.Assert(1, Equals, v1.(int))
+	c.Assert(2, Equals, v2.(int))
 }
