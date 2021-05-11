@@ -30,10 +30,11 @@ const (
 	TopNN = 60
 	// HotThresholdRatio is used to calculate hot thresholds
 	HotThresholdRatio = 0.8
-	// HotStatReportInterval indicates the interval between each data reporting
-	// TODO: change into StoreHeartBeatReportInterval when we use store heartbeat to report data
-	HotStatReportInterval = RegionHeartBeatReportInterval
-	topNTTL               = 3 * HotStatReportInterval * time.Second
+	// WriteReportInterval indicates the interval between write interval
+	WriteReportInterval = RegionHeartBeatReportInterval
+	// ReadReportInterval indicates the interval between read stats report
+	// TODO: use StoreHeartBeatReportInterval in future
+	ReadReportInterval = RegionHeartBeatReportInterval
 
 	rollingWindowsSize = 5
 
@@ -52,20 +53,29 @@ var minHotThresholds = [RegionStatCount]float64{
 
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
-	kind           FlowKind
-	peersOfStore   map[uint64]*TopN               // storeID -> hot peers
-	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
-	inheritItem    map[uint64]*HotPeerStat        // regionID -> HotPeerStat
+	kind               FlowKind
+	peersOfStore       map[uint64]*TopN               // storeID -> hot peers
+	storesOfRegion     map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	inheritItem        map[uint64]*HotPeerStat        // regionID -> HotPeerStat
+	topNTTL            time.Duration
+	reportIntervalSecs int
 }
 
 // NewHotStoresStats creates a HotStoresStats
 func NewHotStoresStats(kind FlowKind) *hotPeerCache {
-	return &hotPeerCache{
+	c := &hotPeerCache{
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 		inheritItem:    make(map[uint64]*HotPeerStat),
 	}
+	if kind == WriteFlow {
+		c.reportIntervalSecs = WriteReportInterval
+	} else {
+		c.reportIntervalSecs = ReadReportInterval
+	}
+	c.topNTTL = 3 * time.Duration(c.reportIntervalSecs) * time.Second
+	return c
 }
 
 // TODO: rename RegionStats as PeerStats
@@ -99,7 +109,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	} else {
 		peers, ok := f.peersOfStore[item.StoreID]
 		if !ok {
-			peers = NewTopN(DimLen, TopNN, topNTTL)
+			peers = NewTopN(DimLen, TopNN, f.topNTTL)
 			f.peersOfStore[item.StoreID] = peers
 		}
 		peers.Put(item)
@@ -383,7 +393,7 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 }
 
 func (f *hotPeerCache) getDefaultTimeMedian() *movingaverage.TimeMedian {
-	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, HotStatReportInterval*time.Second)
+	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, time.Duration(f.reportIntervalSecs)*time.Second)
 }
 
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
@@ -403,14 +413,14 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		if !isHot {
 			return nil
 		}
-		if interval.Seconds() >= HotStatReportInterval {
+		if interval.Seconds() >= float64(f.reportIntervalSecs) {
 			newItem.HotDegree = 1
 			newItem.AntiCount = hotRegionAntiCount
 		}
 		newItem.isNew = true
 		newItem.rollingLoads = make([]*dimStat, len(regionStats))
 		for i, k := range regionStats {
-			ds := newDimStat(k)
+			ds := newDimStat(k, time.Duration(newItem.hotStatReportInterval())*time.Second)
 			ds.Add(deltaLoads[k], interval)
 			if ds.isFull() {
 				ds.clearLastAverage()

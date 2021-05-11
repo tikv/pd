@@ -35,8 +35,7 @@ type dimStat struct {
 	LastAverage *movingaverage.AvgOverTime // it's used to obtain the average speed in last second as instantaneous speed.
 }
 
-func newDimStat(typ RegionStatKind) *dimStat {
-	reportInterval := RegionHeartBeatReportInterval * time.Second
+func newDimStat(typ RegionStatKind, reportInterval time.Duration) *dimStat {
 	return &dimStat{
 		typ:         typ,
 		Rolling:     movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
@@ -129,7 +128,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 
 // IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
 func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
-	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*HotStatReportInterval)
+	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*stat.hotStatReportInterval())
 }
 
 // IsNeedDelete to delete the item in cache.
@@ -191,4 +190,11 @@ func (stat *HotPeerStat) clearLastAverage() {
 	for _, l := range stat.rollingLoads {
 		l.clearLastAverage()
 	}
+}
+
+func (stat *HotPeerStat) hotStatReportInterval() int {
+	if stat.Kind == ReadFlow {
+		return ReadReportInterval
+	}
+	return WriteReportInterval
 }
