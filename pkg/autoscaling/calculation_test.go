@@ -208,7 +208,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 		c.Log(testcase.name)
 		plans, err := getScaledTiKVGroups(testcase.informer, testcase.healthyInstances)
 		if testcase.expectedPlan == nil {
-			c.Assert(plans, IsNil)
+			c.Assert(plans, HasLen, 0)
 			c.Assert(err, testcase.errChecker)
 		} else {
 			c.Assert(plans, DeepEquals, testcase.expectedPlan)
