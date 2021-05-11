@@ -128,7 +128,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 
 // IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
 func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
-	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*stat.expectedInterval())
+	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*stat.hotStatReportInterval())
 }
 
 // IsNeedDelete to delete the item in cache.
@@ -192,7 +192,7 @@ func (stat *HotPeerStat) clearLastAverage() {
 	}
 }
 
-func (stat *HotPeerStat) expectedInterval() int {
+func (stat *HotPeerStat) hotStatReportInterval() int {
 	if stat.Kind == ReadFlow {
 		return ReadReportInterval
 	}

@@ -420,7 +420,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		newItem.isNew = true
 		newItem.rollingLoads = make([]*dimStat, len(regionStats))
 		for i, k := range regionStats {
-			ds := newDimStat(k, time.Duration(newItem.expectedInterval())*time.Second)
+			ds := newDimStat(k, time.Duration(newItem.hotStatReportInterval())*time.Second)
 			ds.Add(deltaLoads[k], interval)
 			if ds.isFull() {
 				ds.clearLastAverage()

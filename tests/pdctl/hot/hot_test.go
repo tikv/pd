@@ -117,41 +117,47 @@ func (s *hotTestSuite) TestHot(c *C) {
 			c.Assert(hotRegion.AsLeader[hotStoreID].Stats[count-1].RegionID, Equals, hotRegionID)
 		}
 	}
-	reportIntervalsFunc := []func(reportInterval uint64) uint64{
-		func(reportInterval uint64) uint64 {
-			return statistics.HotRegionReportMinInterval
-		},
-		func(reportInterval uint64) uint64 {
-			return statistics.HotRegionReportMinInterval + 1
-		},
-		func(reportInterval uint64) uint64 {
-			return reportInterval
-		},
-		func(reportInterval uint64) uint64 {
-			return reportInterval + 1
-		},
-		func(reportInterval uint64) uint64 {
-			return reportInterval * 2
-		},
-		func(reportInterval uint64) uint64 {
-			return reportInterval*2 + 1
-		},
-	}
+
 	regionIDCounter := uint64(1)
-	for _, reportIntervalFunc := range reportIntervalsFunc {
-		hotReadRegionID := regionIDCounter
-		regionIDCounter++
-		hotWriteRegionID := regionIDCounter
-		regionIDCounter++
-		readReportInterval := reportIntervalFunc(statistics.ReadReportInterval)
-		writeReadReportInterval := reportIntervalFunc(statistics.WriteReportInterval)
-		pdctl.MustPutRegion(c, cluster, hotReadRegionID, hotStoreID, []byte("b"), []byte("c"), core.SetReadBytes(1000000000), core.SetReportInterval(readReportInterval))
-		pdctl.MustPutRegion(c, cluster, hotWriteRegionID, hotStoreID, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000), core.SetReportInterval(writeReadReportInterval))
-		time.Sleep(5000 * time.Millisecond)
-		if readReportInterval >= statistics.ReadReportInterval || writeReadReportInterval >= statistics.WriteReportInterval {
-			count++
+	testCommand := func(reportIntervals []uint64, hotType string) {
+		for _, reportInterval := range reportIntervals {
+			hotRegionID := regionIDCounter
+			regionIDCounter++
+			switch hotType {
+			case "read":
+				pdctl.MustPutRegion(c, cluster, hotRegionID, hotStoreID, []byte("b"), []byte("c"), core.SetReadBytes(1000000000), core.SetReportInterval(reportInterval))
+				time.Sleep(5000 * time.Millisecond)
+				if reportInterval >= statistics.RegionHeartBeatReportInterval {
+					count++
+				}
+				testHot(hotRegionID, hotStoreID, "read")
+			case "write":
+				pdctl.MustPutRegion(c, cluster, hotRegionID, hotStoreID, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000), core.SetReportInterval(reportInterval))
+				time.Sleep(5000 * time.Millisecond)
+				if reportInterval >= statistics.RegionHeartBeatReportInterval {
+					count++
+				}
+				testHot(hotRegionID, hotStoreID, "write")
+			}
 		}
-		testHot(hotReadRegionID, hotStoreID, "read")
-		testHot(hotWriteRegionID, hotStoreID, "write")
 	}
+	reportIntervals := []uint64{
+		statistics.HotRegionReportMinInterval,
+		statistics.HotRegionReportMinInterval + 1,
+		statistics.WriteReportInterval,
+		statistics.WriteReportInterval + 1,
+		statistics.WriteReportInterval * 2,
+		statistics.WriteReportInterval*2 + 1,
+	}
+	testCommand(reportIntervals, "write")
+	count = 0
+	reportIntervals = []uint64{
+		statistics.HotRegionReportMinInterval,
+		statistics.HotRegionReportMinInterval + 1,
+		statistics.ReadReportInterval,
+		statistics.ReadReportInterval + 1,
+		statistics.ReadReportInterval * 2,
+		statistics.ReadReportInterval*2 + 1,
+	}
+	testCommand(reportIntervals, "read")
 }
