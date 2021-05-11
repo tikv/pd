@@ -318,7 +318,7 @@ func (m *KeyManager) loadKeysImpl() (keys *encryptionpb.KeyDictionary, err error
 }
 
 // loadKeys reload keys from etcd storage.
-func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, err error) {
+func (m *KeyManager) loadKeys() (*encryptionpb.KeyDictionary, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.loadKeysImpl()
