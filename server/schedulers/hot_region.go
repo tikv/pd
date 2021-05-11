@@ -1000,14 +1000,23 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
 		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
 		desc := "move-hot-" + bs.rwTy.String() + "-peer"
-		op, err = operator.CreateMovePeerOperator(
-			desc,
-			bs.cluster,
-			bs.cur.region,
-			operator.OpHotRegion,
-			bs.cur.srcStoreID,
-			dstPeer)
-
+		if bs.rwTy == read && bs.cur.region.GetLeader().StoreId == bs.cur.srcStoreID { // move read leader
+			op, err = operator.CreateMoveLeaderOperator(
+				desc,
+				bs.cluster,
+				bs.cur.region,
+				operator.OpHotRegion,
+				bs.cur.srcStoreID,
+				dstPeer)
+		} else {
+			op, err = operator.CreateMovePeerOperator(
+				desc,
+				bs.cluster,
+				bs.cur.region,
+				operator.OpHotRegion,
+				bs.cur.srcStoreID,
+				dstPeer)
+		}
 		counters = append(counters,
 			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
 			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
