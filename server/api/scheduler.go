@@ -286,6 +286,7 @@ func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) e
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}

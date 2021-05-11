@@ -147,6 +147,7 @@ func changeLeaderPeerUrls(c *C, leader *pdpb.Member, id uint64, urls []string) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := testDialClient.Do(req)
 	c.Assert(err, IsNil)
+	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, 204)
 }
 
