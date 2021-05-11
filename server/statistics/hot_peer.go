@@ -88,9 +88,10 @@ type HotPeerStat struct {
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
 
-	needDelete             bool
-	isLeader               bool
-	isNew                  bool
+	needDelete bool
+	isLeader   bool
+	isNew      bool
+	//TODO: remove it when we send peer stat by store info
 	justTransferLeader     bool
 	interval               uint64
 	thresholds             []float64
@@ -128,7 +129,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 
 // IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
 func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
-	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*RegionHeartBeatReportInterval)
+	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*HotStatReportInterval)
 }
 
 // IsNeedDelete to delete the item in cache.

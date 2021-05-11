@@ -14,6 +14,8 @@
 package checker
 
 import (
+	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -27,10 +29,20 @@ var _ = Suite(&testJointStateCheckerSuite{})
 type testJointStateCheckerSuite struct {
 	cluster *mockcluster.Cluster
 	jsc     *JointStateChecker
+	ctx     context.Context
+	cancel  context.CancelFunc
+}
+
+func (s *testJointStateCheckerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testJointStateCheckerSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testJointStateCheckerSuite) SetUpTest(c *C) {
-	s.cluster = mockcluster.NewCluster(config.NewTestOptions())
+	s.cluster = mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	s.jsc = NewJointStateChecker(s.cluster)
 	for id := uint64(1); id <= 10; id++ {
 		s.cluster.PutStoreWithLabels(id)

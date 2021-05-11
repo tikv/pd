@@ -51,7 +51,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	for id := uint64(1); id <= 10; id++ {
@@ -134,7 +134,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	opt := config.NewTestOptions()
 	// TODO: enable palcement rules
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
@@ -319,7 +319,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 20)
@@ -373,7 +373,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 20)
@@ -418,7 +418,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestLeader(c *C) {
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
@@ -477,7 +477,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	for i := 0; i < 2; i++ {
 		// 0: byte rate
 		// 1: key rate
-		tc := mockcluster.NewCluster(opt)
+		tc := mockcluster.NewCluster(ctx, opt)
 		tc.SetHotRegionCacheHitsThreshold(0)
 		tc.SetLeaderScheduleLimit(0)
 		tc.DisableFeature(versioninfo.JointConsensus)
@@ -556,7 +556,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithRuleEnabled(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetEnablePlacementRules(true)
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -629,7 +629,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -739,7 +739,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
@@ -796,7 +796,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	for i := 0; i < 2; i++ {
 		// 0: byte rate
 		// 1: key rate
-		tc := mockcluster.NewCluster(opt)
+		tc := mockcluster.NewCluster(ctx, opt)
 		tc.SetHotRegionCacheHitsThreshold(0)
 		tc.DisableFeature(versioninfo.JointConsensus)
 		tc.AddRegionStore(1, 20)
@@ -883,8 +883,10 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 }
 
 func (s *testHotCacheSuite) TestUpdateCache(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 
 	/// For read flow
@@ -931,9 +933,11 @@ func (s *testHotCacheSuite) TestUpdateCache(c *C) {
 }
 
 func (s *testHotCacheSuite) TestKeyThresholds(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
 	{ // only a few regions
-		tc := mockcluster.NewCluster(opt)
+		tc := mockcluster.NewCluster(ctx, opt)
 		tc.SetHotRegionCacheHitsThreshold(0)
 		addRegionInfo(tc, read, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 0, 1},
@@ -951,7 +955,7 @@ func (s *testHotCacheSuite) TestKeyThresholds(c *C) {
 		c.Assert(stats[6], HasLen, 1)
 	}
 	{ // many regions
-		tc := mockcluster.NewCluster(opt)
+		tc := mockcluster.NewCluster(ctx, opt)
 		regions := []testRegionInfo{}
 		for i := 1; i <= 1000; i += 2 {
 			regions = append(regions,
@@ -1002,8 +1006,10 @@ func (s *testHotCacheSuite) TestKeyThresholds(c *C) {
 }
 
 func (s *testHotCacheSuite) TestByteAndKey(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	regions := []testRegionInfo{}
 	for i := 1; i <= 500; i++ {
@@ -1075,7 +1081,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
@@ -1139,8 +1145,10 @@ func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, h
 }
 
 func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
@@ -1180,7 +1188,7 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 20)

@@ -49,7 +49,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 
 	sl, err := schedule.CreateScheduler(ShuffleLeaderType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ShuffleLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
@@ -84,7 +84,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	opts.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
-	tc := mockcluster.NewCluster(opts)
+	tc := mockcluster.NewCluster(ctx, opts)
 
 	// Add 3 stores 1,2,3.
 	tc.AddLabelsStore(1, 1, map[string]string{"noleader": "true"})
@@ -142,7 +142,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
@@ -203,7 +203,7 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetLeaderScheduleLimit(0)
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -233,7 +233,7 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 
 	// Add stores 1, 2, 3
 	tc.AddLeaderStore(1, 0)
@@ -259,7 +259,7 @@ func (s *testShuffleRegionSuite) TestShuffle(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 
 	sl, err := schedule.CreateScheduler(ShuffleRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
@@ -288,7 +288,7 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 
 	// update rule to 1leader+1follower+1learner
@@ -355,7 +355,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	c.Assert(err, IsNil)
 
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 10)
@@ -406,7 +406,7 @@ func (s *testSpecialUseSuite) TestSpecialUseReserved(c *C) {
 	c.Assert(err, IsNil)
 
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 10)
@@ -444,7 +444,7 @@ type testBalanceLeaderSchedulerWithRuleEnabledSuite struct {
 func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) SetUpTest(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.opt = config.NewTestOptions()
-	s.tc = mockcluster.NewCluster(s.opt)
+	s.tc = mockcluster.NewCluster(s.ctx, s.opt)
 	s.tc.SetEnablePlacementRules(true)
 	s.oc = schedule.NewOperatorController(s.ctx, nil, nil)
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))

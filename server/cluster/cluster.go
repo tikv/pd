@@ -205,7 +205,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.storage = storage
 	c.id = id
 	c.labelLevelStats = statistics.NewLabelStatistics()
-	c.hotStat = statistics.NewHotStat()
+	c.hotStat = statistics.NewHotStat(c.ctx)
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
@@ -546,8 +546,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.RUnlock()
 		return err
 	}
-	writeItems := c.CheckWriteStatus(region)
-	readItems := c.CheckReadStatus(region)
+	c.CheckRWStatus(region)
 	c.RUnlock()
 
 	// Save to storage if meta is updated.
@@ -623,7 +622,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	if len(writeItems) == 0 && len(readItems) == 0 && !saveKV && !saveCache && !isNew {
+	if !saveKV && !saveCache && !isNew {
 		return nil
 	}
 
@@ -681,13 +680,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
-	}
-
-	for _, writeItem := range writeItems {
-		c.hotStat.Update(writeItem)
-	}
-	for _, readItem := range readItems {
-		c.hotStat.Update(readItem)
 	}
 	c.Unlock()
 
@@ -1475,14 +1467,9 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	return c.hotStat.RegionStats(statistics.WriteFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
 }
 
-// CheckWriteStatus checks the write status, returns whether need update statistics and item.
-func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotStat.CheckWrite(region)
-}
-
-// CheckReadStatus checks the read status, returns whether need update statistics and item.
-func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotStat.CheckRead(region)
+// CheckRWStatus checks the read/write status.
+func (c *RaftCluster) CheckRWStatus(region *core.RegionInfo) {
+	c.hotStat.CheckRWAsync(region)
 }
 
 // TODO: remove me.

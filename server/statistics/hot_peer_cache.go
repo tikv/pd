@@ -30,7 +30,10 @@ const (
 	TopNN = 60
 	// HotThresholdRatio is used to calculate hot thresholds
 	HotThresholdRatio = 0.8
-	topNTTL           = 3 * RegionHeartBeatReportInterval * time.Second
+	// HotStatReportInterval indicates the interval between each data reporting
+	// TODO: change into StoreHeartBeatReportInterval when we use store heartbeat to report data
+	HotStatReportInterval = RegionHeartBeatReportInterval
+	topNTTL               = 3 * HotStatReportInterval * time.Second
 
 	rollingWindowsSize = 5
 
@@ -52,6 +55,7 @@ type hotPeerCache struct {
 	kind           FlowKind
 	peersOfStore   map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	inheritItem    map[uint64]*HotPeerStat        // regionID -> HotPeerStat
 }
 
 // NewHotStoresStats creates a HotStoresStats
@@ -60,9 +64,11 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
+		inheritItem:    make(map[uint64]*HotPeerStat),
 	}
 }
 
+// TODO: rename RegionStats as PeerStats
 // RegionStats returns hot items
 func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 	res := make(map[uint64][]*HotPeerStat)
@@ -108,6 +114,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	}
 }
 
+// TODO: remove it in future
 func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
 	regionHeartbeatIntervalHist.Observe(float64(interval))
 	if interval == 0 {
@@ -128,93 +135,42 @@ func (f *hotPeerCache) collectRegionMetrics(loads []float64, interval uint64) {
 	}
 }
 
-func (f *hotPeerCache) getRegionDeltaLoads(region *core.RegionInfo) []float64 {
-	ret := make([]float64, RegionStatCount)
-	for k := RegionStatKind(0); k < RegionStatCount; k++ {
-		switch k {
-		case RegionReadBytes:
-			ret[k] = float64(region.GetBytesRead())
-		case RegionReadKeys:
-			ret[k] = float64(region.GetKeysRead())
-		case RegionWriteBytes:
-			ret[k] = float64(region.GetBytesWritten())
-		case RegionWriteKeys:
-			ret[k] = float64(region.GetKeysWritten())
-		}
-	}
-	return ret
-}
-
 // CheckRegionFlow checks the flow information of region.
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-
-	deltaLoads := f.getRegionDeltaLoads(region)
-	loads := make([]float64, len(deltaLoads))
-	for i := range deltaLoads {
-		loads[i] = deltaLoads[i] / float64(interval)
+	{
+		// TODO: collect metrics by peer stat
+		deltaLoads := f.getFlowDeltaLoads(region)
+		loads := make([]float64, len(deltaLoads))
+		for i := range deltaLoads {
+			loads[i] = deltaLoads[i] / float64(interval)
+		}
+		f.collectRegionMetrics(loads, interval)
 	}
-	f.collectRegionMetrics(loads, interval)
-
-	// old region is in the front and new region is in the back
-	// which ensures it will hit the cache if moving peer or transfer leader occurs with the same replica number
-
+	regionID := region.GetID()
+	storeIDs := f.getAllStoreIDs(region)
+	for _, storeID := range storeIDs {
+		peer := region.GetStorePeer(storeID)
+		var item *HotPeerStat
+		if peer != nil {
+			peerInfo := core.NewPeerInfo(peer,
+				region.GetBytesWritten(),
+				region.GetKeysWritten(),
+				region.GetBytesRead(),
+				region.GetKeysRead())
+			item = f.CheckPeerFlow(peerInfo, region, interval)
+		} else {
+			item = f.markExpiredItem(regionID, storeID)
+		}
+		if item != nil {
+			ret = append(ret, item)
+		}
+	}
 	var peers []uint64
 	for _, peer := range region.GetPeers() {
 		peers = append(peers, peer.StoreId)
 	}
-
-	var tmpItem *HotPeerStat
-	storeIDs := f.getAllStoreIDs(region)
-	justTransferLeader := f.justTransferLeader(region)
-	for _, storeID := range storeIDs {
-		isExpired := f.isRegionExpired(region, storeID) // transfer read leader or remove write peer
-		oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
-		if isExpired && oldItem != nil { // it may has been moved to other store, we save it to tmpItem
-			tmpItem = oldItem
-		}
-
-		// This is used for the simulator and test. Ignore if report too fast.
-		if !isExpired && Denoising && interval < HotRegionReportMinInterval {
-			continue
-		}
-
-		thresholds := f.calcHotThresholds(storeID)
-
-		newItem := &HotPeerStat{
-			StoreID:            storeID,
-			RegionID:           region.GetID(),
-			Kind:               f.kind,
-			Loads:              loads,
-			LastUpdateTime:     time.Now(),
-			needDelete:         isExpired,
-			isLeader:           region.GetLeader().GetStoreId() == storeID,
-			justTransferLeader: justTransferLeader,
-			interval:           interval,
-			peers:              peers,
-			thresholds:         thresholds,
-		}
-
-		if oldItem == nil {
-			if tmpItem != nil { // use the tmpItem cached from the store where this region was in before
-				oldItem = tmpItem
-			} else { // new item is new peer after adding replica
-				for _, storeID := range storeIDs {
-					oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
-					if oldItem != nil {
-						break
-					}
-				}
-			}
-		}
-
-		newItem = f.updateHotPeerStat(newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
-		if newItem != nil {
-			ret = append(ret, newItem)
-		}
-	}
-
 	log.Debug("region heartbeat info",
 		zap.String("type", f.kind.String()),
 		zap.Uint64("region", region.GetID()),
@@ -222,6 +178,59 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 		zap.Uint64s("peers", peers),
 	)
 	return ret
+}
+
+// CheckPeerFlow checks the flow information of a peer.
+// Notice: CheckPeerFlow couldn't be used concurrently.
+func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *HotPeerStat {
+	storeID := peer.GetStoreID()
+	deltaLoads := f.getFlowDeltaLoads(peer)
+	loads := make([]float64, len(deltaLoads))
+	for i := range deltaLoads {
+		loads[i] = deltaLoads[i] / float64(interval)
+	}
+	justTransferLeader := f.justTransferLeader(region)
+	// transfer read leader or remove write peer
+	isExpired := f.isPeerExpired(peer, region)
+	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
+	if isExpired && oldItem != nil {
+		f.putInheritItem(oldItem)
+	}
+	if !isExpired && Denoising && interval < HotRegionReportMinInterval {
+		return nil
+	}
+	thresholds := f.calcHotThresholds(storeID)
+	var peers []uint64
+	for _, peer := range region.GetPeers() {
+		peers = append(peers, peer.StoreId)
+	}
+	newItem := &HotPeerStat{
+		StoreID:            storeID,
+		RegionID:           region.GetID(),
+		Kind:               f.kind,
+		Loads:              loads,
+		LastUpdateTime:     time.Now(),
+		needDelete:         isExpired,
+		isLeader:           region.GetLeader().GetStoreId() == storeID,
+		justTransferLeader: justTransferLeader,
+		interval:           interval,
+		peers:              peers,
+		thresholds:         thresholds,
+	}
+	if oldItem == nil {
+		inheritItem := f.takeInheritItem(region.GetID())
+		if inheritItem != nil {
+			oldItem = inheritItem
+		} else {
+			for _, storeID := range f.getAllStoreIDs(region) {
+				oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
+				if oldItem != nil {
+					break
+				}
+			}
+		}
+	}
+	return f.updateHotPeerStat(newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
 }
 
 func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
@@ -255,10 +264,12 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 	return nil
 }
 
-func (f *hotPeerCache) isRegionExpired(region *core.RegionInfo, storeID uint64) bool {
+func (f *hotPeerCache) isPeerExpired(peer *core.PeerInfo, region *core.RegionInfo) bool {
+	storeID := peer.GetStoreID()
 	switch f.kind {
 	case WriteFlow:
 		return region.GetStorePeer(storeID) == nil
+	//TODO: make readFlow isPeerExpired condition as same as the writeFlow
 	case ReadFlow:
 		return region.GetLeader().GetStoreId() != storeID
 	}
@@ -309,6 +320,7 @@ func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 
 	return ret
 }
+
 func (f *hotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool {
 	isOldPeer := func() bool {
 		for _, id := range oldItem.peers {
@@ -371,7 +383,7 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 }
 
 func (f *hotPeerCache) getDefaultTimeMedian() *movingaverage.TimeMedian {
-	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, RegionHeartBeatReportInterval*time.Second)
+	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, HotStatReportInterval*time.Second)
 }
 
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
@@ -391,7 +403,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		if !isHot {
 			return nil
 		}
-		if interval.Seconds() >= RegionHeartBeatReportInterval {
+		if interval.Seconds() >= HotStatReportInterval {
 			newItem.HotDegree = 1
 			newItem.AntiCount = hotRegionAntiCount
 		}
@@ -410,6 +422,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 
 	newItem.rollingLoads = oldItem.rollingLoads
 
+	// TODO: don't inherit hot degree after transfer leader when we report peer by store heartbeat.
 	if newItem.justTransferLeader {
 		// skip the first heartbeat flow statistic after transfer leader, because its statistics are calculated by the last leader in this store and are inaccurate
 		// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.
@@ -453,4 +466,43 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		newItem.clearLastAverage()
 	}
 	return newItem
+}
+
+func (f *hotPeerCache) markExpiredItem(regionID, storeID uint64) *HotPeerStat {
+	item := f.getOldHotPeerStat(regionID, storeID)
+	item.needDelete = true
+	return item
+}
+
+func (f *hotPeerCache) getFlowDeltaLoads(stat core.FlowStat) []float64 {
+	ret := make([]float64, RegionStatCount)
+	for k := RegionStatKind(0); k < RegionStatCount; k++ {
+		switch k {
+		case RegionReadBytes:
+			ret[k] = float64(stat.GetBytesRead())
+		case RegionReadKeys:
+			ret[k] = float64(stat.GetKeysRead())
+		case RegionWriteBytes:
+			ret[k] = float64(stat.GetBytesWritten())
+		case RegionWriteKeys:
+			ret[k] = float64(stat.GetKeysWritten())
+		}
+	}
+	return ret
+}
+
+func (f *hotPeerCache) putInheritItem(item *HotPeerStat) {
+	f.inheritItem[item.RegionID] = item
+}
+
+func (f *hotPeerCache) takeInheritItem(regionID uint64) *HotPeerStat {
+	item, ok := f.inheritItem[regionID]
+	if !ok {
+		return nil
+	}
+	if item != nil {
+		delete(f.inheritItem, regionID)
+		return item
+	}
+	return nil
 }

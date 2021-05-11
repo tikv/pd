@@ -11,4 +11,14 @@ if [ "$res" ]; then
   exit 1
 fi
 
+# Check if there are duplicated `TestingT` in package.
+
+res=$(grep -r --include=\*_test.go "TestingT(" . | cut -f1 | xargs -L 1 dirname | sort | uniq -d)
+
+if [ "$res" ]; then
+  echo "following packages may have duplicated TestingT:"
+  echo "$res"
+  exit 1
+fi
+
 exit 0
