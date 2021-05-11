@@ -124,8 +124,8 @@ func (conf *grantLeaderSchedulerConfig) getSchedulerName() string {
 func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	var res []string
 	ranges := conf.StoreIDWithRanges[id]
+	res := make([]string, 0, len(ranges)*2)
 	for index := range ranges {
 		res = append(res, (string)(ranges[index].StartKey), (string)(ranges[index].EndKey))
 	}
@@ -211,9 +211,9 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 
 func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	var ops []*operator.Operator
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
+	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
 	for id, ranges := range s.conf.StoreIDWithRanges {
 		region := cluster.RandFollowerRegion(id, ranges, opt.HealthRegion(cluster))
 		if region == nil {

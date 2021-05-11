@@ -357,7 +357,7 @@ func filterHotPeers(
 	kind core.ResourceKind,
 	peers []*statistics.HotPeerStat,
 ) []*statistics.HotPeerStat {
-	var ret []*statistics.HotPeerStat
+	ret := make([]*statistics.HotPeerStat, 0, len(peers))
 	for _, peer := range peers {
 		if kind == core.LeaderKind && !peer.IsLeader() {
 			continue

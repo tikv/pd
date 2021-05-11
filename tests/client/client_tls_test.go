@@ -145,8 +145,9 @@ func (s *clientTLSTestSuite) testTLSReload(
 	c.Assert(err, IsNil)
 	clus.WaitLeader()
 
-	var endpoints []string
-	for _, s := range clus.GetServers() {
+	testServers := clus.GetServers()
+	endpoints := make([]string, 0, len(testServers))
+	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
 	// 2. concurrent client dialing while certs become expired

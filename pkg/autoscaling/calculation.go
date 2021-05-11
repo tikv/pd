@@ -392,7 +392,7 @@ func buildPlanMap(planMap map[string]map[string]struct{}, groupName, address str
 }
 
 func buildPlans(planMap map[string]map[string]struct{}, resourceTypeMap map[string]string, componentType ComponentType) []*Plan {
-	var plans []*Plan
+	plans := make([]*Plan, 0, len(planMap))
 	for groupName, groupInstances := range planMap {
 		resourceType := resourceTypeMap[groupName]
 		plans = append(plans, &Plan{
