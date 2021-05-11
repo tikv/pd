@@ -198,7 +198,7 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 			Address:    storeInfo.GetAddress(),
 			State:      metapb.StoreState_Up,
 			Version:    storeInfo.GetVersion(),
-			DeployPath: fmt.Sprintf("test/store%d", storeID),
+			DeployPath: getTestDeployPath(storeID),
 		}
 
 		if storeInfo.IsPhysicallyDestroyed() || storeInfo.IsTombstone() {
@@ -208,7 +208,10 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 			c.Assert(cluster.PutStore(newStore), NotNil)
 		}
 	}
+}
 
+func getTestDeployPath(storeID uint64) string {
+	return fmt.Sprintf("test/store%d", storeID)
 }
 
 func (s *testClusterInfoSuite) TestUpStore(c *C) {
@@ -962,7 +965,7 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 			Address:    fmt.Sprintf("127.0.0.1:%d", i),
 			State:      metapb.StoreState_Up,
 			Version:    version,
-			DeployPath: fmt.Sprintf("test/store%d", i),
+			DeployPath: getTestDeployPath(i),
 		}
 		stores = append(stores, core.NewStoreInfo(store))
 	}
