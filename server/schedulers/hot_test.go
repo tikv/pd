@@ -718,7 +718,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	})
 
 	// We will move leader peer of region 1 from 1 to 5
-	testutil.CheckTransferPeerWithLeaderTransfer(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 5)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, hb.Schedule(tc)[0], operator.OpHotRegion|operator.OpLeader, 1, 5)
 	hb.(*hotScheduler).clearPendingInfluence()
 
 	// Should not panic if region not found.

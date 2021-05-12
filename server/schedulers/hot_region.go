@@ -999,18 +999,32 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
 		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
-		desc := "move-hot-" + bs.rwTy.String() + "-peer"
-		op, err = operator.CreateMovePeerOperator(
-			desc,
-			bs.cluster,
-			bs.cur.region,
-			operator.OpHotRegion,
-			bs.cur.srcStoreID,
-			dstPeer)
-
+		typ := "move-peer"
+		if bs.rwTy == read && bs.cur.region.GetLeader().StoreId == bs.cur.srcStoreID { // move read leader
+			if !bs.sche.allowBalanceLeader(bs.cluster) {
+				return nil, nil
+			}
+			op, err = operator.CreateMoveLeaderOperator(
+				"move-hot-read-leader",
+				bs.cluster,
+				bs.cur.region,
+				operator.OpHotRegion,
+				bs.cur.srcStoreID,
+				dstPeer)
+			typ = "move-leader"
+		} else {
+			desc := "move-hot-" + bs.rwTy.String() + "-peer"
+			op, err = operator.CreateMovePeerOperator(
+				desc,
+				bs.cluster,
+				bs.cur.region,
+				operator.OpHotRegion,
+				bs.cur.srcStoreID,
+				dstPeer)
+		}
 		counters = append(counters,
-			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
-			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
+			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
+			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
 	case transferLeader:
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
 			return nil, nil
