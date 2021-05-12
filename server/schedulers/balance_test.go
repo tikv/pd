@@ -638,12 +638,12 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
-	s.checkReplica3(c, tc, opt, sb)
+	s.checkReplica3(c, tc, sb)
 	tc.SetEnablePlacementRules(true)
-	s.checkReplica3(c, tc, opt, sb)
+	s.checkReplica3(c, tc, sb)
 }
 
-func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cluster, opt *config.PersistOptions, sb schedule.Scheduler) {
+func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cluster, sb schedule.Scheduler) {
 	// Store 1 has the largest region score, so the balance scheduler tries to replace peer in store 1.
 	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 15, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -703,12 +703,12 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
-	s.checkReplica5(c, tc, opt, sb)
+	s.checkReplica5(c, tc, sb)
 	tc.SetEnablePlacementRules(true)
-	s.checkReplica5(c, tc, opt, sb)
+	s.checkReplica5(c, tc, sb)
 }
 
-func (s *testBalanceRegionSchedulerSuite) checkReplica5(c *C, tc *mockcluster.Cluster, opt *config.PersistOptions, sb schedule.Scheduler) {
+func (s *testBalanceRegionSchedulerSuite) checkReplica5(c *C, tc *mockcluster.Cluster, sb schedule.Scheduler) {
 	tc.AddLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 5, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(3, 6, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
