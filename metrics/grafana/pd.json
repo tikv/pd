@@ -5471,6 +5471,21 @@
               "intervalFactor": 1,
               "legendFormat": "store-{{store}}-in",
               "refId": "B"
+            },
+            {
+              "expr": "- sum(delta(pd_scheduler_hot_region_direction{tidb_cluster=\"$tidb_cluster\", store=~\"$store\",type=\"move-leader\",direction=\"out\",rw=\"read\"}[1m]))by (store)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "store-{{store}}-out",
+              "refId": "C",
+              "step": 4
+            },
+            {
+              "expr": "sum(delta(pd_scheduler_hot_region_direction{tidb_cluster=\"$tidb_cluster\", store=~\"$store\",type=\"move-leader\",direction=\"in\",rw=\"read\"}[1m]))by (store)",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "store-{{store}}-in",
+              "refId": "D"
             }
           ],
           "thresholds": [],
