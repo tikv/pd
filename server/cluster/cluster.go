@@ -541,12 +541,16 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		regionID := peerStat.GetRegionId()
 		region := c.GetRegion(regionID)
 		if region == nil {
-			// TODO: log.warn
+			log.Warn("discard unknown region hot peer stat read info",
+				zap.Uint64("region-id", regionID),
+				zap.Uint64("store-id", storeID))
 			continue
 		}
 		peer := region.GetStorePeer(storeID)
 		if peer == nil {
-			// TODO:: log.warn
+			log.Warn("discard unknown region hot peer stat read info",
+				zap.Uint64("region-id", regionID),
+				zap.Uint64("store-id", storeID))
 			continue
 		}
 		peerInfo := core.NewPeerInfo(peer, 0, 0,
