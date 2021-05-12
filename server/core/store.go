@@ -248,7 +248,7 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64, deviation int) float64 {
 	switch version {
 	case "v2":
-		return s.regionScoreV2(delta, deviation)
+		return s.regionScoreV2(delta, deviation, lowSpaceRatio)
 	case "v1":
 		fallthrough
 	default:
@@ -301,15 +301,16 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 	return score / math.Max(s.GetRegionWeight(), minWeight)
 }
 
-func (s *StoreInfo) regionScoreV2(delta int64, deviation int) float64 {
+func (s *StoreInfo) regionScoreV2(delta int64, deviation int, lowSpaceRatio float64) float64 {
 	A := float64(float64(s.GetAvgAvailable())-float64(deviation)*float64(s.GetAvailableDeviation())) / gb
 	C := float64(s.GetCapacity()) / gb
 	R := float64(s.GetRegionSize() + delta)
 	var (
 		K, M float64 = 1, 256 // Experience value to control the weight of the available influence on score
-		F    float64 = 20     // Experience value to prevent some nodes from running out of disk space prematurely.
+		F    float64 = 50     // Experience value to prevent some nodes from running out of disk space prematurely.
+		B            = 1e7
 	)
-
+	F = math.Max(F, C*(1-lowSpaceRatio))
 	var score float64
 	if A >= C || C < 1 {
 		score = R
@@ -319,7 +320,8 @@ func (s *StoreInfo) regionScoreV2(delta int64, deviation int) float64 {
 		score = (K + M*(math.Log(C)-math.Log(A-F+1))/(C-A+F-1)) * R
 	} else {
 		// When remaining space is less then F, the score is mainly determined by available space.
-		score = (K+M*math.Log(C)/C)*R + (F-A)*(K+M*math.Log(F)/F)
+		// store's score will increase rapidly after it has few space. and it will reach similar score when they has no space
+		score = (K+M*math.Log(C)/C)*R + B*(F-A)/F
 	}
 	return score / math.Max(s.GetRegionWeight(), minWeight)
 }
@@ -506,15 +508,6 @@ func NewStoresInfo() *StoresInfo {
 
 // GetStore returns a copy of the StoreInfo with the specified storeID.
 func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
-	store, ok := s.stores[storeID]
-	if !ok {
-		return nil
-	}
-	return store
-}
-
-// TakeStore returns the point of the origin StoreInfo with the specified storeID.
-func (s *StoresInfo) TakeStore(storeID uint64) *StoreInfo {
 	store, ok := s.stores[storeID]
 	if !ok {
 		return nil

@@ -187,7 +187,7 @@ func (s *storeStatistics) Collect() {
 		placementStatusGauge.WithLabelValues(labelType, name).Set(float64(value))
 	}
 
-	for storeID, limit := range s.opt.GetScheduleConfig().StoreLimit {
+	for storeID, limit := range s.opt.GetStoresLimit() {
 		id := strconv.FormatUint(storeID, 10)
 		StoreLimitGauge.WithLabelValues(id, "add-peer").Set(limit.AddPeer)
 		StoreLimitGauge.WithLabelValues(id, "remove-peer").Set(limit.RemovePeer)

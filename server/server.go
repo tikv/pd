@@ -362,9 +362,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocator(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
-		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
-		s.GetTLSConfig())
+		s.member, s.rootPath, s.cfg,
+		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
 	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
 	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
@@ -785,9 +784,7 @@ func (s *Server) GetConfig() *config.Config {
 
 // GetScheduleConfig gets the balance config information.
 func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
-	cfg := &config.ScheduleConfig{}
-	*cfg = *s.persistOptions.GetScheduleConfig()
-	return cfg
+	return s.persistOptions.GetScheduleConfig().Clone()
 }
 
 // SetScheduleConfig sets the balance config information.
@@ -815,9 +812,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 
 // GetReplicationConfig get the replication config.
 func (s *Server) GetReplicationConfig() *config.ReplicationConfig {
-	cfg := &config.ReplicationConfig{}
-	*cfg = *s.persistOptions.GetReplicationConfig()
-	return cfg
+	return s.persistOptions.GetReplicationConfig().Clone()
 }
 
 // SetReplicationConfig sets the replication config.
@@ -905,9 +900,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 
 // GetPDServerConfig gets the balance config information.
 func (s *Server) GetPDServerConfig() *config.PDServerConfig {
-	cfg := &config.PDServerConfig{}
-	*cfg = *s.persistOptions.GetPDServerConfig()
-	return cfg
+	return s.persistOptions.GetPDServerConfig().Clone()
 }
 
 // SetPDServerConfig sets the server config.
@@ -1344,6 +1337,8 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
 			return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
 		}
+		// Since we don't read the body, we can close it immediately.
+		res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
 			return errs.ErrSendRequest.FastGenByArgs()

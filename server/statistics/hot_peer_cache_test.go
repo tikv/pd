@@ -219,57 +219,57 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 	cache := NewHotStoresStats(ReadFlow)
 
 	// skip interval=0
-	newItem := &HotPeerStat{needDelete: false, thresholds: [2]float64{0.0, 0.0}}
-	newItem = cache.updateHotPeerStat(newItem, nil, 0, 0, 0)
+	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0}}
+	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0}, 0)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is larger than report interval, but no hot
-	newItem = &HotPeerStat{needDelete: false, thresholds: [2]float64{1.0, 1.0}}
-	newItem = cache.updateHotPeerStat(newItem, nil, 0, 0, 60*time.Second)
+	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0}}
+	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0}, 60*time.Second)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is less than report interval
-	newItem = &HotPeerStat{needDelete: false, thresholds: [2]float64{0.0, 0.0}}
-	newItem = cache.updateHotPeerStat(newItem, nil, 60, 60, 30*time.Second)
+	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0}}
+	newItem = cache.updateHotPeerStat(newItem, nil, []float64{60.0, 60.0}, 30*time.Second)
 	c.Check(newItem, NotNil)
 	c.Check(newItem.HotDegree, Equals, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
 	// sum of interval is less than report interval
 	oldItem := newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 10*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 30*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 30*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
 	c.Check(newItem.AntiCount, Equals, 2)
 	// sum of interval is less than report interval
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 10*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
 	c.Check(newItem.AntiCount, Equals, 2)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 50*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 50*time.Second)
 	c.Check(newItem.HotDegree, Equals, 2)
 	c.Check(newItem.AntiCount, Equals, 2)
 	// sum of interval is larger than report interval, and cold
 	oldItem = newItem
-	newItem.thresholds = [2]float64{10.0, 10.0}
-	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 60*time.Second)
+	newItem.thresholds = []float64{10.0, 10.0}
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 60*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
 	c.Check(newItem.AntiCount, Equals, 1)
 	// sum of interval is larger than report interval, and cold
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, 60, 60, 60*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 60*time.Second)
 	c.Check(newItem.HotDegree, Equals, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
 	c.Check(newItem.needDelete, Equals, true)
 }
 
 func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
-	byteRate := minHotThresholds[ReadFlow][byteDim] * 2
+	byteRate := minHotThresholds[RegionReadBytes] * 2
 	expectThreshold := byteRate * HotThresholdRatio
 	t.testMetrics(c, 120., byteRate, expectThreshold)
 	t.testMetrics(c, 60., byteRate, expectThreshold)
@@ -277,35 +277,37 @@ func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
 	t.testMetrics(c, 17., byteRate, expectThreshold)
 	t.testMetrics(c, 1., byteRate, expectThreshold)
 }
+
 func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold float64) {
 	cache := NewHotStoresStats(ReadFlow)
-	minThresholds := minHotThresholds[cache.kind]
 	storeID := uint64(1)
-	c.Assert(byteRate, GreaterEqual, minThresholds[byteDim])
+	c.Assert(byteRate, GreaterEqual, minHotThresholds[RegionReadBytes])
 	for i := uint64(1); i < TopNN+10; i++ {
 		var oldItem *HotPeerStat
 		for {
 			thresholds := cache.calcHotThresholds(storeID)
 			newItem := &HotPeerStat{
+				Kind:       cache.kind,
 				StoreID:    storeID,
 				RegionID:   i,
 				needDelete: false,
 				thresholds: thresholds,
-				ByteRate:   byteRate,
-				KeyRate:    0,
+				Loads:      make([]float64, DimLen),
 			}
+			newItem.Loads[RegionReadBytes] = byteRate
+			newItem.Loads[RegionReadKeys] = 0
 			oldItem = cache.getOldHotPeerStat(i, storeID)
-			if oldItem != nil && oldItem.rollingByteRate.isHot(thresholds) == true {
+			if oldItem != nil && oldItem.rollingLoads[RegionReadBytes].isHot(thresholds[RegionReadBytes]) == true {
 				break
 			}
-			item := cache.updateHotPeerStat(newItem, oldItem, byteRate*interval, 0, time.Duration(interval)*time.Second)
+			item := cache.updateHotPeerStat(newItem, oldItem, []float64{byteRate * interval, 0.0}, time.Duration(interval)*time.Second)
 			cache.Update(item)
 		}
 		thresholds := cache.calcHotThresholds(storeID)
 		if i < TopNN {
-			c.Assert(thresholds[byteDim], Equals, minThresholds[byteDim])
+			c.Assert(thresholds[RegionReadBytes], Equals, minHotThresholds[RegionReadBytes])
 		} else {
-			c.Assert(thresholds[byteDim], Equals, expectThreshold)
+			c.Assert(thresholds[RegionReadBytes], Equals, expectThreshold)
 		}
 	}
 }

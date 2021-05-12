@@ -304,7 +304,7 @@ func (b *Builder) EnableLightWeight() *Builder {
 	return b
 }
 
-// EnableForceTargetLeader marks the step of transferring leader to target is forcible. It is used for grant leader.
+// EnableForceTargetLeader marks the step of transferring leader to target is forcible.
 func (b *Builder) EnableForceTargetLeader() *Builder {
 	b.forceTargetLeader = true
 	return b

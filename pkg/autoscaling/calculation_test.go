@@ -14,6 +14,7 @@
 package autoscaling
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -32,11 +33,22 @@ func Test(t *testing.T) {
 
 var _ = Suite(&calculationTestSuite{})
 
-type calculationTestSuite struct{}
+type calculationTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *calculationTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *calculationTestSuite) TearDownTest(c *C) {
+	s.cancel()
+}
 
 func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	// case1 indicates the tikv cluster with not any group existed
-	case1 := mockcluster.NewCluster(config.NewTestOptions())
+	case1 := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	case1.AddLabelsStore(1, 1, map[string]string{})
 	case1.AddLabelsStore(2, 1, map[string]string{
 		"foo": "bar",
@@ -46,7 +58,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	})
 
 	// case2 indicates the tikv cluster with 1 auto-scaling group existed
-	case2 := mockcluster.NewCluster(config.NewTestOptions())
+	case2 := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	case2.AddLabelsStore(1, 1, map[string]string{})
 	case2.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
@@ -58,7 +70,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	})
 
 	// case3 indicates the tikv cluster with other group existed
-	case3 := mockcluster.NewCluster(config.NewTestOptions())
+	case3 := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	case3.AddLabelsStore(1, 1, map[string]string{})
 	case3.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey: "foo",
@@ -323,7 +335,7 @@ func (s *calculationTestSuite) TestStrategyChangeCount(c *C) {
 	}
 
 	// tikv cluster with 1 auto-scaling group existed
-	cluster := mockcluster.NewCluster(config.NewTestOptions())
+	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	cluster.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
