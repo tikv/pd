@@ -106,7 +106,7 @@ func testCache(c *C, t *testCacheCase) {
 }
 
 func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect int) []*HotPeerStat {
-	res := cache.CheckRegionFlow(region)
+	res := cache.CheckRegionFlow(region, true)
 	c.Assert(res, HasLen, expect)
 	for _, p := range res {
 		cache.Update(p)
@@ -331,7 +331,7 @@ func BenchmarkCheckRegionFlow(b *testing.B) {
 		core.SetReadKeys(300000*10))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rets := cache.CheckRegionFlow(newRegion)
+		rets := cache.CheckRegionFlow(newRegion, true)
 		for _, ret := range rets {
 			cache.Update(ret)
 		}

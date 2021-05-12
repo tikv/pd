@@ -146,7 +146,7 @@ func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerStat {
 	regionID := region.GetID()
 	items := make([]*HotPeerStat, 0)
-	for _, storeID := range f.getAllStoreIDs(region, true) {
+	for _, storeID := range f.getAllStoreIDs(region, true, true) {
 		if region.GetStorePeer(storeID) == nil {
 			item := f.getOldHotPeerStat(regionID, storeID)
 			if item != nil {
@@ -161,10 +161,10 @@ func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 
 // CheckRegionFlow checks the flow information of region.
 // it is only used for test.
-func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
+func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, includeFollowers bool) (ret []*HotPeerStat) {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	storeIDs := f.getAllStoreIDs(region, false)
+	storeIDs := f.getAllStoreIDs(region, false, includeFollowers)
 	for _, storeID := range storeIDs {
 		peer := region.GetStorePeer(storeID)
 		var item *HotPeerStat
@@ -223,7 +223,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		if inheritItem != nil {
 			oldItem = inheritItem
 		} else {
-			for _, storeID := range f.getAllStoreIDs(region, true) {
+			for _, storeID := range f.getAllStoreIDs(region, true, true) {
 				oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
 				if oldItem != nil {
 					break
@@ -283,7 +283,7 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 }
 
 // gets the storeIDs, including old region and new region
-func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo, includeOldStores bool) []uint64 {
+func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo, includeOldStores, includeFollowers bool) []uint64 {
 	storeIDs := make(map[uint64]struct{})
 	ret := make([]uint64, 0, len(region.GetPeers()))
 	// old stores
@@ -297,9 +297,9 @@ func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo, includeOldStores 
 
 	// new stores
 	for _, peer := range region.GetPeers() {
-		//if region.GetLeader().StoreId != peer.StoreId && !includeFollower {
-		//	continue
-		//}
+		if region.GetLeader().StoreId != peer.StoreId && !includeFollowers {
+			continue
+		}
 		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
 			storeIDs[peer.GetStoreId()] = struct{}{}
 			ret = append(ret, peer.GetStoreId())

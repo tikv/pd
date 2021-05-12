@@ -24,21 +24,29 @@ var Denoising = true
 
 const queueCap = 1000
 
+type rwType int
+
+const (
+	write rwType = iota
+	read
+	rwTypeLen
+)
+
 // HotCache is a cache hold hot regions.
 type HotCache struct {
-	writeFlowQueue chan *core.PeerInfo
-	readFlowQueue  chan *core.PeerInfo
-	writeFlow      *hotPeerCache
-	readFlow       *hotPeerCache
+	flowQueue [rwTypeLen]chan *core.PeerInfo
+	writeFlow *hotPeerCache
+	readFlow  *hotPeerCache
 }
 
 // NewHotCache creates a new hot spot cache.
 func NewHotCache(ctx context.Context) *HotCache {
 	w := &HotCache{
-		writeFlowQueue: make(chan *core.PeerInfo, queueCap),
-		readFlowQueue:  make(chan *core.PeerInfo, queueCap),
-		writeFlow:      NewHotStoresStats(WriteFlow),
-		readFlow:       NewHotStoresStats(ReadFlow),
+		writeFlow: NewHotStoresStats(WriteFlow),
+		readFlow:  NewHotStoresStats(ReadFlow),
+	}
+	for t := rwType(0); t < rwTypeLen; t++ {
+		w.flowQueue[t] = make(chan *core.PeerInfo, queueCap)
 	}
 	go w.updateItems(ctx)
 	return w
@@ -54,23 +62,28 @@ func (w *HotCache) ExpiredItems(region *core.RegionInfo) (expiredItems []*HotPee
 // CheckWriteSync checks the write status, returns update items.
 // This is used for mockcluster.
 func (w *HotCache) CheckWriteSync(region *core.RegionInfo) []*HotPeerStat {
-	return w.writeFlow.CheckRegionFlow(region)
+	return w.writeFlow.CheckRegionFlow(region, true)
 }
 
 // CheckReadSync checks the read status, returns update items.
 // This is used for mockcluster.
 func (w *HotCache) CheckReadSync(region *core.RegionInfo) []*HotPeerStat {
-	return w.readFlow.CheckRegionFlow(region)
+	return w.readFlow.CheckRegionFlow(region, true)
+}
+
+// CheckReadLeaderSync checks the read leader read info
+func (w *HotCache) CheckReadLeaderSync(region *core.RegionInfo) []*HotPeerStat {
+	return w.readFlow.CheckRegionFlow(region, false)
 }
 
 // CheckWriteAsync puts the peerInfo into queue, and check it asynchronously
 func (w *HotCache) CheckWriteAsync(peer *core.PeerInfo) {
-	w.writeFlowQueue <- peer
+	w.flowQueue[write] <- peer
 }
 
 // CheckReadAsync puts the peerInfo into queue, and check it asynchronously
 func (w *HotCache) CheckReadAsync(peer *core.PeerInfo) {
-	w.readFlowQueue <- peer
+	w.flowQueue[read] <- peer
 }
 
 // Update updates the cache.
@@ -153,14 +166,14 @@ func (w *HotCache) updateItems(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case peer, ok := <-w.writeFlowQueue:
+		case peer, ok := <-w.flowQueue[write]:
 			if ok && peer != nil {
 				item := w.writeFlow.CheckPeerFlow(peer, peer.GetBelongedRegion(), peer.GetIntervals())
 				if item != nil {
 					w.Update(item)
 				}
 			}
-		case peer, ok := <-w.readFlowQueue:
+		case peer, ok := <-w.flowQueue[read]:
 			if ok && peer != nil {
 				item := w.readFlow.CheckPeerFlow(peer, peer.GetBelongedRegion(), peer.GetIntervals())
 				if item != nil {

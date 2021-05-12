@@ -353,7 +353,33 @@ func (mc *Cluster) AddRegionWithReadInfo(
 	return items
 }
 
-// AddLeaderRegionWithWriteInfo adds region with specified leader, followers and write info.
+// AddRegionLeaderWithReadInfo add region leader read info
+func (mc *Cluster) AddRegionLeaderWithReadInfo(
+	regionID uint64, leaderID uint64,
+	readBytes, readKeys uint64,
+	reportInterval uint64,
+	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	r = r.Clone(core.SetReadBytes(readBytes))
+	r = r.Clone(core.SetReadKeys(readKeys))
+	r = r.Clone(core.SetReportInterval(reportInterval))
+	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
+	if len(filledNums) > 0 {
+		filledNum = filledNums[0]
+	}
+
+	var items []*statistics.HotPeerStat
+	for i := 0; i < filledNum; i++ {
+		items = mc.HotCache.CheckReadLeaderSync(r)
+		for _, item := range items {
+			mc.HotCache.Update(item)
+		}
+	}
+	mc.PutRegion(r)
+	return items
+}
+
+// AddLeaderRegionWithWriteInfo adds region with specified leader and read info.
 func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	regionID uint64, leaderID uint64,
 	writtenBytes, writtenKeys uint64,
