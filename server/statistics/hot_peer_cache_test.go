@@ -67,19 +67,19 @@ const (
 )
 
 type testCacheCase struct {
-	kind     FlowKind
-	operator operator
-	expect   int
+	kind       FlowKind
+	operator   operator
+	expect     int
+	needDelete bool
 }
 
 func (t *testHotPeerCache) TestCache(c *C) {
 	tests := []*testCacheCase{
-		{ReadFlow, transferLeader, 2},
-		{ReadFlow, movePeer, 1},
-		{ReadFlow, addReplica, 1},
-		{WriteFlow, transferLeader, 3},
-		{WriteFlow, movePeer, 4},
-		{WriteFlow, addReplica, 4},
+		{ReadFlow, movePeer, 1, false},
+		{ReadFlow, addReplica, 1, true},
+		{WriteFlow, transferLeader, 3, true},
+		{WriteFlow, movePeer, 4, true},
+		{WriteFlow, addReplica, 4, true},
 	}
 	for _, t := range tests {
 		testCache(c, t)
@@ -100,7 +100,7 @@ func testCache(c *C, t *testCacheCase) {
 	res := checkAndUpdate(c, cache, region, t.expect)
 	checkHit(c, cache, region, t.kind, true) // hit cache
 	if t.expect != defaultSize[t.kind] {
-		checkNeedDelete(c, res, srcStore)
+		checkNeedDelete(c, res, srcStore, t.needDelete)
 	}
 }
 
@@ -127,10 +127,10 @@ func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind FlowKind,
 	}
 }
 
-func checkNeedDelete(c *C, ret []*HotPeerStat, storeID uint64) {
+func checkNeedDelete(c *C, ret []*HotPeerStat, storeID uint64, needDelete bool) {
 	for _, item := range ret {
 		if item.StoreID == storeID {
-			c.Assert(item.needDelete, IsTrue)
+			c.Assert(item.needDelete, Equals, needDelete)
 			return
 		}
 	}

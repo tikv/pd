@@ -46,7 +46,7 @@ func NewHotCache(ctx context.Context) *HotCache {
 	return w
 }
 
-// ExpiredItems returns the items which are already expired.
+// ExpiredItems returns the items which are already expired.:
 func (w *HotCache) ExpiredItems(region *core.RegionInfo) (expiredItems []*HotPeerStat) {
 	expiredItems = append(expiredItems, w.writeFlow.ExpiredItems(region)...)
 	expiredItems = append(expiredItems, w.readFlow.ExpiredItems(region)...)

@@ -33,7 +33,6 @@ const (
 	// WriteReportInterval indicates the interval between write interval
 	WriteReportInterval = RegionHeartBeatReportInterval
 	// ReadReportInterval indicates the interval between read stats report
-	// TODO: use StoreHeartBeatReportInterval in future
 	ReadReportInterval = StoreHeartBeatReportInterval
 
 	rollingWindowsSize = 5
@@ -208,7 +207,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		loads[i] = deltaLoads[i] / float64(interval)
 	}
 	justTransferLeader := f.justTransferLeader(region)
-	// transfer read leader or remove write peer
+	// remove peer
 	isExpired := f.isPeerExpired(peer, region)
 	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
 	if isExpired && oldItem != nil {
@@ -284,14 +283,7 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 
 func (f *hotPeerCache) isPeerExpired(peer *core.PeerInfo, region *core.RegionInfo) bool {
 	storeID := peer.GetStoreID()
-	switch f.kind {
-	case WriteFlow:
-		return region.GetStorePeer(storeID) == nil
-	//TODO: make readFlow isPeerExpired condition as same as the writeFlow
-	case ReadFlow:
-		return region.GetLeader().GetStoreId() != storeID
-	}
-	return false
+	return region.GetStorePeer(storeID) == nil
 }
 
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
@@ -444,6 +436,8 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		newItem.lastTransferLeaderTime = time.Now()
 		// skip the first heartbeat flow statistic after transfer leader, because its statistics are calculated by the last leader in this store and are inaccurate
 		// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.
+		// For write stat, as the stat is send by region heartbeat, the first heartbeat will be skipped.
+		// For read stat, as the stat is send by store heartbeat, the first heartbeat won't be skipped.
 		if newItem.Kind == WriteFlow {
 			newItem.HotDegree = oldItem.HotDegree
 			newItem.AntiCount = oldItem.AntiCount
