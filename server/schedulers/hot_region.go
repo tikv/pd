@@ -1001,6 +1001,9 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
 		typ := "move-peer"
 		if bs.rwTy == read && bs.cur.region.GetLeader().StoreId == bs.cur.srcStoreID { // move read leader
+			if !bs.sche.allowBalanceLeader(bs.cluster) {
+				return nil, nil
+			}
 			op, err = operator.CreateMoveLeaderOperator(
 				"move-hot-read-leader",
 				bs.cluster,
