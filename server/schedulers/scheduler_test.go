@@ -149,12 +149,12 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
-	s.checkBalance(c, tc, opt, hb)
+	s.checkBalance(c, tc, hb)
 	tc.SetEnablePlacementRules(true)
-	s.checkBalance(c, tc, opt, hb)
+	s.checkBalance(c, tc, hb)
 }
 
-func (s *testShuffleHotRegionSchedulerSuite) checkBalance(c *C, tc *mockcluster.Cluster, opt *config.PersistOptions, hb schedule.Scheduler) {
+func (s *testShuffleHotRegionSchedulerSuite) checkBalance(c *C, tc *mockcluster.Cluster, hb schedule.Scheduler) {
 	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "host": "h2"})

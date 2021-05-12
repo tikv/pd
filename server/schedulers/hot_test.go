@@ -142,12 +142,12 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	c.Assert(err, IsNil)
 	tc.SetHotRegionCacheHitsThreshold(0)
 
-	s.checkByteRateOnly(c, tc, opt, hb)
+	s.checkByteRateOnly(c, tc, hb)
 	tc.SetEnablePlacementRules(true)
-	s.checkByteRateOnly(c, tc, opt, hb)
+	s.checkByteRateOnly(c, tc, hb)
 }
 
-func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockcluster.Cluster, opt *config.PersistOptions, hb schedule.Scheduler) {
+func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockcluster.Cluster, hb schedule.Scheduler) {
 	// Add stores 1, 2, 3, 4, 5, 6  with region counts 3, 2, 2, 2, 0, 0.
 
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
