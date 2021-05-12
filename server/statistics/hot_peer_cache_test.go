@@ -75,8 +75,9 @@ type testCacheCase struct {
 
 func (t *testHotPeerCache) TestCache(c *C) {
 	tests := []*testCacheCase{
-		{ReadFlow, movePeer, 1, false},
-		{ReadFlow, addReplica, 1, true},
+		{ReadFlow, transferLeader, 3, false},
+		{ReadFlow, movePeer, 4, true},
+		{ReadFlow, addReplica, 4, false},
 		{WriteFlow, transferLeader, 3, true},
 		{WriteFlow, movePeer, 4, true},
 		{WriteFlow, addReplica, 4, true},
@@ -88,7 +89,7 @@ func (t *testHotPeerCache) TestCache(c *C) {
 
 func testCache(c *C, t *testCacheCase) {
 	defaultSize := map[FlowKind]int{
-		ReadFlow:  1, // only leader
+		ReadFlow:  3, // all peers
 		WriteFlow: 3, // all peers
 	}
 	cache := NewHotStoresStats(t.kind)

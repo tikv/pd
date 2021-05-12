@@ -217,9 +217,9 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	tc.UpdateStorageReadBytes(2, 4.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
 
-	tc.AddLeaderRegionWithReadInfo(1, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2})
-	tc.AddLeaderRegionWithReadInfo(2, 2, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{1, 3})
-	tc.AddLeaderRegionWithReadInfo(3, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2, 3})
+	tc.AddRegionWithReadInfo(1, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2})
+	tc.AddRegionWithReadInfo(2, 2, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{1, 3})
+	tc.AddRegionWithReadInfo(3, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2, 3})
 	tc.SetHotRegionCacheHitsThreshold(0)
 	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
 	c.Assert(hb.Schedule(tc), IsNil)

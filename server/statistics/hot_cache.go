@@ -15,8 +15,6 @@ package statistics
 
 import (
 	"context"
-	"math/rand"
-
 	"github.com/tikv/pd/server/core"
 )
 
@@ -48,8 +46,8 @@ func NewHotCache(ctx context.Context) *HotCache {
 
 // ExpiredItems returns the items which are already expired.:
 func (w *HotCache) ExpiredItems(region *core.RegionInfo) (expiredItems []*HotPeerStat) {
-	expiredItems = append(expiredItems, w.writeFlow.ExpiredItems(region)...)
-	expiredItems = append(expiredItems, w.readFlow.ExpiredItems(region)...)
+	expiredItems = append(expiredItems, w.writeFlow.CollectExpiredItems(region)...)
+	expiredItems = append(expiredItems, w.readFlow.CollectExpiredItems(region)...)
 	return
 }
 
@@ -104,12 +102,12 @@ func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*Ho
 	return nil
 }
 
-// RandHotRegionFromStore random picks a hot region in specify store.
-func (w *HotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, minHotDegree int) *HotPeerStat {
+// HotRegionsFromStore picks hot region in specify store.
+func (w *HotCache) HotRegionsFromStore(storeID uint64, kind FlowKind, minHotDegree int) []*HotPeerStat {
 	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
-		return stats[rand.Intn(len(stats))]
+		return stats
 	}
-	return nil
+	return []*HotPeerStat{}
 }
 
 // IsRegionHot checks if the region is hot.

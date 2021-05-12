@@ -672,12 +672,12 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
 	c.Assert(tc.IsRegionHot(tc.GetRegion(11)), IsFalse)
 	// check randomly pick hot region
-	r := tc.RandHotRegionFromStore(2, statistics.ReadFlow)
+	r := tc.HotRegionsFromStore(2, statistics.ReadFlow)
 	c.Assert(r, NotNil)
-	c.Assert(r.GetID(), Equals, uint64(2))
+	c.Assert(len(r), Equals, 3)
 	// check hot items
 	stats := tc.HotCache.RegionStats(statistics.ReadFlow, 0)
-	c.Assert(len(stats), Equals, 2)
+	c.Assert(len(stats), Equals, 3)
 	for _, ss := range stats {
 		for _, s := range ss {
 			c.Assert(s.GetLoad(statistics.RegionReadBytes), Equals, 512.0*KB)
@@ -687,7 +687,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	testutil.CheckTransferLeader(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 3)
 	hb.(*hotScheduler).clearPendingInfluence()
 	// assume handle the operator
-	tc.AddLeaderRegionWithReadInfo(3, 3, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{1, 2})
+	tc.AddRegionWithReadInfo(3, 3, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{1, 2})
 	// After transfer a hot region leader from store 1 to store 3
 	// the three region leader will be evenly distributed in three stores
 
@@ -898,18 +898,18 @@ func (s *testHotCacheSuite) TestUpdateCache(c *C) {
 		{11, []uint64{1, 2, 3}, 7 * KB, 0},
 	})
 	stats := tc.RegionStats(statistics.ReadFlow, 0)
-	c.Assert(len(stats[1]), Equals, 2)
-	c.Assert(len(stats[2]), Equals, 1)
-	c.Assert(len(stats[3]), Equals, 0)
+	c.Assert(len(stats[1]), Equals, 3)
+	c.Assert(len(stats[2]), Equals, 3)
+	c.Assert(len(stats[3]), Equals, 3)
 
 	addRegionInfo(tc, read, []testRegionInfo{
 		{3, []uint64{2, 1, 3}, 20 * KB, 0},
 		{11, []uint64{1, 2, 3}, 7 * KB, 0},
 	})
 	stats = tc.RegionStats(statistics.ReadFlow, 0)
-	c.Assert(len(stats[1]), Equals, 1)
-	c.Assert(len(stats[2]), Equals, 2)
-	c.Assert(len(stats[3]), Equals, 0)
+	c.Assert(len(stats[1]), Equals, 3)
+	c.Assert(len(stats[2]), Equals, 3)
+	c.Assert(len(stats[3]), Equals, 3)
 
 	addRegionInfo(tc, write, []testRegionInfo{
 		{4, []uint64{1, 2, 3}, 512 * KB, 0},
@@ -1062,7 +1062,7 @@ type testRegionInfo struct {
 }
 
 func addRegionInfo(tc *mockcluster.Cluster, rwTy rwType, regions []testRegionInfo) {
-	addFunc := tc.AddLeaderRegionWithReadInfo
+	addFunc := tc.AddRegionWithReadInfo
 	if rwTy == write {
 		addFunc = tc.AddLeaderRegionWithWriteInfo
 	}
@@ -1093,7 +1093,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 	s.checkRegionFlowTest(c, tc, hb, write, tc.AddLeaderRegionWithWriteInfo)
-	s.checkRegionFlowTest(c, tc, hb, read, tc.AddLeaderRegionWithReadInfo)
+	s.checkRegionFlowTest(c, tc, hb, read, tc.AddRegionWithReadInfo)
 }
 
 func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, hb *hotScheduler, kind rwType, heartbeat func(
@@ -1123,20 +1123,19 @@ func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, h
 		if !item.IsNeedDelete() {
 			if kind == read {
 				// transfer leader won't skip the first heartbeat for read stat
-				c.Check(item.HotDegree, Equals, 1)
+				c.Check(item.HotDegree, Equals, 4)
 			} else {
 				c.Check(item.HotDegree, Equals, 3)
 			}
 		}
 	}
 
-	// heartbeat twice for read stat in order to let hot degree become 3
-	if kind == read {
-		heartbeat(1, 2, 512*KB*reportInterval, 0, reportInterval, []uint64{1, 3}, 1)
+	// heartbeat once for write stat in order to let hot degree become 4
+	if kind == write {
 		items = heartbeat(1, 2, 512*KB*reportInterval, 0, reportInterval, []uint64{1, 3}, 1)
 		for _, item := range items {
 			if !item.IsNeedDelete() {
-				c.Check(item.HotDegree, Equals, 3)
+				c.Check(item.HotDegree, Equals, 4)
 			}
 		}
 	}
@@ -1155,7 +1154,7 @@ func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, h
 	items = heartbeat(1, 2, 512*KB*reportInterval, 0, reportInterval, []uint64{1, 3, 4}, 1)
 	c.Check(len(items), Greater, 0)
 	for _, item := range items {
-		c.Check(item.HotDegree, Equals, 4)
+		c.Check(item.HotDegree, Equals, 5)
 	}
 	items = heartbeat(1, 2, 512*KB*reportInterval, 0, reportInterval, []uint64{1, 4}, 1)
 	c.Check(len(items), Greater, 0)
@@ -1164,7 +1163,7 @@ func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, h
 			c.Check(item.IsNeedDelete(), IsTrue)
 			continue
 		}
-		c.Check(item.HotDegree, Equals, 5)
+		c.Check(item.HotDegree, Equals, 6)
 	}
 }
 

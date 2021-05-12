@@ -122,13 +122,17 @@ func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	return mc.HotCache.RegionStats(statistics.WriteFlow, mc.GetHotRegionCacheHitsThreshold())
 }
 
-// RandHotRegionFromStore random picks a hot region in specify store.
-func (mc *Cluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo {
-	r := mc.HotCache.RandHotRegionFromStore(store, kind, mc.GetHotRegionCacheHitsThreshold())
-	if r == nil {
-		return nil
+// HotRegionsFromStore picks hot regions in specify store.
+func (mc *Cluster) HotRegionsFromStore(store uint64, kind statistics.FlowKind) []*core.RegionInfo {
+	stats := mc.HotCache.HotRegionsFromStore(store, kind, mc.GetHotRegionCacheHitsThreshold())
+	regions := make([]*core.RegionInfo, 0)
+	for _, stat := range stats {
+		region := mc.GetRegion(stat.RegionID)
+		if region != nil {
+			regions = append(regions, region)
+		}
 	}
-	return mc.GetRegion(r.RegionID)
+	return regions
 }
 
 // AllocPeer allocs a new peer on a store.
@@ -323,8 +327,8 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 	mc.PutRegion(r)
 }
 
-// AddLeaderRegionWithReadInfo adds region with specified leader, followers and read info.
-func (mc *Cluster) AddLeaderRegionWithReadInfo(
+// AddRegionWithReadInfo adds region with specified leader, followers and read info.
+func (mc *Cluster) AddRegionWithReadInfo(
 	regionID uint64, leaderID uint64,
 	readBytes, readKeys uint64,
 	reportInterval uint64,

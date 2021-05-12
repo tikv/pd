@@ -828,15 +828,16 @@ func (c *RaftCluster) RandLearnerRegion(storeID uint64, ranges []core.KeyRange, 
 	return c.core.RandLearnerRegion(storeID, ranges, opts...)
 }
 
-// RandHotRegionFromStore randomly picks a hot region in specified store.
-func (c *RaftCluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo {
+// HotRegionsFromStore picks hot regions in specified store.
+func (c *RaftCluster) HotRegionsFromStore(store uint64, kind statistics.FlowKind) []*core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	r := c.hotStat.RandHotRegionFromStore(store, kind, c.opt.GetHotRegionCacheHitsThreshold())
-	if r == nil {
-		return nil
+	r := c.hotStat.HotRegionsFromStore(store, kind, c.opt.GetHotRegionCacheHitsThreshold())
+	regions := make([]*core.RegionInfo, 0)
+	for _, stat := range r {
+		regions = append(regions, c.GetRegion(stat.RegionID))
 	}
-	return c.GetRegion(r.RegionID)
+	return regions
 }
 
 // GetLeaderStore returns all stores that contains the region's leader peer.

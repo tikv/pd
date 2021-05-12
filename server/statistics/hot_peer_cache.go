@@ -22,7 +22,6 @@ import (
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
-	"go.uber.org/zap"
 )
 
 const (
@@ -143,13 +142,15 @@ func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 	}
 }
 
-func (f *hotPeerCache) ExpiredItems(region *core.RegionInfo) []*HotPeerStat {
+// CollectExpiredItems collects expired items, mark them as needDelete and puts them into inherit items
+func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerStat {
 	regionID := region.GetID()
 	items := make([]*HotPeerStat, 0)
-	for _, storeID := range f.getAllStoreIDs(region) {
+	for _, storeID := range f.getAllStoreIDs(region, true) {
 		if region.GetStorePeer(storeID) == nil {
 			item := f.getOldHotPeerStat(regionID, storeID)
 			if item != nil {
+				f.putInheritItem(item)
 				item.needDelete = true
 				items = append(items, item)
 			}
@@ -163,8 +164,7 @@ func (f *hotPeerCache) ExpiredItems(region *core.RegionInfo) []*HotPeerStat {
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	regionID := region.GetID()
-	storeIDs := f.getAllStoreIDs(region)
+	storeIDs := f.getAllStoreIDs(region, false)
 	for _, storeID := range storeIDs {
 		peer := region.GetStorePeer(storeID)
 		var item *HotPeerStat
@@ -176,23 +176,12 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 				region.GetKeysRead(),
 				interval, region)
 			item = f.CheckPeerFlow(peerInfo, region, interval)
-		} else {
-			item = f.markExpiredItem(regionID, storeID)
 		}
 		if item != nil {
 			ret = append(ret, item)
 		}
 	}
-	var peers []uint64
-	for _, peer := range region.GetPeers() {
-		peers = append(peers, peer.StoreId)
-	}
-	log.Debug("region heartbeat info",
-		zap.String("type", f.kind.String()),
-		zap.Uint64("region", region.GetID()),
-		zap.Uint64("leader", region.GetLeader().GetStoreId()),
-		zap.Uint64s("peers", peers),
-	)
+	ret = append(ret, f.CollectExpiredItems(region)...)
 	return ret
 }
 
@@ -207,13 +196,8 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		loads[i] = deltaLoads[i] / float64(interval)
 	}
 	justTransferLeader := f.justTransferLeader(region)
-	// remove peer
-	isExpired := f.isPeerExpired(peer, region)
 	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
-	if isExpired && oldItem != nil {
-		f.putInheritItem(oldItem)
-	}
-	if !isExpired && Denoising && interval < HotRegionReportMinInterval {
+	if Denoising && interval < HotRegionReportMinInterval {
 		return nil
 	}
 	thresholds := f.calcHotThresholds(storeID)
@@ -227,7 +211,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		Kind:               f.kind,
 		Loads:              loads,
 		LastUpdateTime:     time.Now(),
-		needDelete:         isExpired,
+		needDelete:         false,
 		isLeader:           region.GetLeader().GetStoreId() == storeID,
 		justTransferLeader: justTransferLeader,
 		interval:           interval,
@@ -239,7 +223,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		if inheritItem != nil {
 			oldItem = inheritItem
 		} else {
-			for _, storeID := range f.getAllStoreIDs(region) {
+			for _, storeID := range f.getAllStoreIDs(region, true) {
 				oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
 				if oldItem != nil {
 					break
@@ -281,11 +265,6 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 	return nil
 }
 
-func (f *hotPeerCache) isPeerExpired(peer *core.PeerInfo, region *core.RegionInfo) bool {
-	storeID := peer.GetStoreID()
-	return region.GetStorePeer(storeID) == nil
-}
-
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 	statKinds := f.kind.RegionStats()
 	mins := make([]float64, len(statKinds))
@@ -304,12 +283,12 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 }
 
 // gets the storeIDs, including old region and new region
-func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
+func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo, includeOldStores bool) []uint64 {
 	storeIDs := make(map[uint64]struct{})
 	ret := make([]uint64, 0, len(region.GetPeers()))
 	// old stores
 	ids, ok := f.storesOfRegion[region.GetID()]
-	if ok {
+	if ok && includeOldStores {
 		for storeID := range ids {
 			storeIDs[storeID] = struct{}{}
 			ret = append(ret, storeID)
@@ -318,10 +297,9 @@ func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 
 	// new stores
 	for _, peer := range region.GetPeers() {
-		// ReadFlow no need consider the followers.
-		if f.kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
-			continue
-		}
+		//if region.GetLeader().StoreId != peer.StoreId && !includeFollower {
+		//	continue
+		//}
 		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
 			storeIDs[peer.GetStoreId()] = struct{}{}
 			ret = append(ret, peer.GetStoreId())
@@ -479,12 +457,6 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		newItem.clearLastAverage()
 	}
 	return newItem
-}
-
-func (f *hotPeerCache) markExpiredItem(regionID, storeID uint64) *HotPeerStat {
-	item := f.getOldHotPeerStat(regionID, storeID)
-	item.needDelete = true
-	return item
 }
 
 func (f *hotPeerCache) getFlowDeltaLoads(stat core.FlowStat) []float64 {

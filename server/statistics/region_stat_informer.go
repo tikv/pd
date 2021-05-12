@@ -24,5 +24,5 @@ type RegionStatInformer interface {
 	// RegionReadStats return the storeID -> read stat of peers on this store.
 	// The result only includes peers that are hot enough.
 	RegionReadStats() map[uint64][]*HotPeerStat
-	RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo
+	HotRegionsFromStore(store uint64, kind FlowKind) []*core.RegionInfo
 }
