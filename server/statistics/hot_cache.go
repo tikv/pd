@@ -15,6 +15,7 @@ package statistics
 
 import (
 	"context"
+
 	"github.com/tikv/pd/server/core"
 )
 
@@ -34,9 +35,23 @@ const (
 
 // HotCache is a cache hold hot regions.
 type HotCache struct {
-	flowQueue [rwTypeLen]chan *core.PeerInfo
+	flowQueue [rwTypeLen]chan *FlowItem
 	writeFlow *hotPeerCache
 	readFlow  *hotPeerCache
+}
+
+// FlowItem indicates the item in the flow, it is a wrapper for peerInfo or expiredItems
+type FlowItem struct {
+	peerInfo    *core.PeerInfo
+	expiredStat *HotPeerStat
+}
+
+// NewFlowItem creates FlowItem
+func NewFlowItem(peerInfo *core.PeerInfo, expiredStat *HotPeerStat) *FlowItem {
+	return &FlowItem{
+		peerInfo:    peerInfo,
+		expiredStat: expiredStat,
+	}
 }
 
 // NewHotCache creates a new hot spot cache.
@@ -46,7 +61,7 @@ func NewHotCache(ctx context.Context) *HotCache {
 		readFlow:  NewHotStoresStats(ReadFlow),
 	}
 	for t := rwType(0); t < rwTypeLen; t++ {
-		w.flowQueue[t] = make(chan *core.PeerInfo, queueCap)
+		w.flowQueue[t] = make(chan *FlowItem, queueCap)
 	}
 	go w.updateItems(ctx)
 	return w
@@ -76,14 +91,14 @@ func (w *HotCache) CheckReadLeaderSync(region *core.RegionInfo) []*HotPeerStat {
 	return w.readFlow.CheckRegionFlow(region, false)
 }
 
-// CheckWriteAsync puts the peerInfo into queue, and check it asynchronously
-func (w *HotCache) CheckWriteAsync(peer *core.PeerInfo) {
-	w.flowQueue[write] <- peer
+// CheckWriteAsync puts the flowItem into queue, and check it asynchronously
+func (w *HotCache) CheckWriteAsync(item *FlowItem) {
+	w.flowQueue[write] <- item
 }
 
-// CheckReadAsync puts the peerInfo into queue, and check it asynchronously
-func (w *HotCache) CheckReadAsync(peer *core.PeerInfo) {
-	w.flowQueue[read] <- peer
+// CheckReadAsync puts the flowItem into queue, and check it asynchronously
+func (w *HotCache) CheckReadAsync(item *FlowItem) {
+	w.flowQueue[read] <- item
 }
 
 // Update updates the cache.
@@ -166,20 +181,27 @@ func (w *HotCache) updateItems(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case peer, ok := <-w.flowQueue[write]:
-			if ok && peer != nil {
-				item := w.writeFlow.CheckPeerFlow(peer, peer.GetBelongedRegion(), peer.GetIntervals())
-				if item != nil {
-					w.Update(item)
-				}
+		case item, ok := <-w.flowQueue[write]:
+			if ok && item != nil {
+				w.updateItem(item, w.writeFlow)
 			}
-		case peer, ok := <-w.flowQueue[read]:
-			if ok && peer != nil {
-				item := w.readFlow.CheckPeerFlow(peer, peer.GetBelongedRegion(), peer.GetIntervals())
-				if item != nil {
-					w.Update(item)
-				}
+		case item, ok := <-w.flowQueue[read]:
+			if ok && item != nil {
+				w.updateItem(item, w.readFlow)
 			}
 		}
+	}
+}
+
+func (w *HotCache) updateItem(item *FlowItem, flow *hotPeerCache) {
+	if item.peerInfo != nil {
+		peer := item.peerInfo
+		stat := flow.CheckPeerFlow(peer, peer.GetBelongedRegion(), peer.GetIntervals())
+		if stat != nil {
+			w.Update(stat)
+		}
+	} else if item.expiredStat != nil {
+		expiredStat := item.expiredStat
+		w.Update(expiredStat)
 	}
 }

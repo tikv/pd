@@ -555,7 +555,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		}
 		peerInfo := core.NewPeerInfo(peer, 0, 0,
 			peerStat.GetReadBytes(), peerStat.GetReadKeys(), interval, region)
-		c.CheckReadStatus(peerInfo)
+		item := statistics.NewFlowItem(peerInfo, nil)
+		c.CheckReadStatus(item)
 	}
 
 	return nil
@@ -569,7 +570,15 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.RUnlock()
 		return err
 	}
-	expiredItems := c.hotStat.ExpiredItems(region)
+	expiredStats := c.hotStat.ExpiredItems(region)
+	// Put expiredStats into read/write queue to update stats
+	if len(expiredStats) > 0 {
+		for _, stat := range expiredStats {
+			item := statistics.NewFlowItem(nil, stat)
+			c.CheckReadStatus(item)
+			c.CheckWriteStatus(item)
+		}
+	}
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
@@ -577,7 +586,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetBytesWritten(), region.GetKeysWritten(),
 			0, 0,
 			interval, region)
-		c.CheckWriteStatus(peerInfo)
+		item := statistics.NewFlowItem(peerInfo, nil)
+		c.CheckWriteStatus(item)
 	}
 	c.RUnlock()
 
@@ -654,7 +664,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	if len(expiredItems) == 0 && !saveKV && !saveCache && !isNew {
+	if !saveKV && !saveCache && !isNew {
 		return nil
 	}
 
@@ -712,9 +722,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
-	}
-	for _, item := range expiredItems {
-		c.hotStat.Update(item)
 	}
 	c.Unlock()
 
@@ -1504,13 +1511,13 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 }
 
 // CheckWriteStatus checks the write status.
-func (c *RaftCluster) CheckWriteStatus(peerInfo *core.PeerInfo) {
-	c.hotStat.CheckWriteAsync(peerInfo)
+func (c *RaftCluster) CheckWriteStatus(item *statistics.FlowItem) {
+	c.hotStat.CheckWriteAsync(item)
 }
 
 // CheckReadStatus checks the read status
-func (c *RaftCluster) CheckReadStatus(peerInfo *core.PeerInfo) {
-	c.hotStat.CheckReadAsync(peerInfo)
+func (c *RaftCluster) CheckReadStatus(item *statistics.FlowItem) {
+	c.hotStat.CheckReadAsync(item)
 }
 
 // TODO: remove me.
