@@ -541,22 +541,22 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		regionID := peerStat.GetRegionId()
 		region := c.GetRegion(regionID)
 		if region == nil {
-			log.Warn("discard unknown region hot peer stat read info",
+			log.Warn("discard hot peer stat for unknown region",
 				zap.Uint64("region-id", regionID),
 				zap.Uint64("store-id", storeID))
 			continue
 		}
 		peer := region.GetStorePeer(storeID)
 		if peer == nil {
-			log.Warn("discard unknown region hot peer stat read info",
+			log.Warn("discard hot peer stat for unknown region peer",
 				zap.Uint64("region-id", regionID),
 				zap.Uint64("store-id", storeID))
 			continue
 		}
 		peerInfo := core.NewPeerInfo(peer, 0, 0,
-			peerStat.GetReadBytes(), peerStat.GetReadKeys(), interval, region)
-		item := statistics.NewFlowItem(peerInfo, nil)
-		c.CheckReadStatus(item)
+			peerStat.GetReadBytes(), peerStat.GetReadKeys(), interval)
+		item := statistics.NewFlowItem(peerInfo, region, nil)
+		c.hotStat.CheckReadAsync(item)
 	}
 
 	return nil
@@ -574,9 +574,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Put expiredStats into read/write queue to update stats
 	if len(expiredStats) > 0 {
 		for _, stat := range expiredStats {
-			item := statistics.NewFlowItem(nil, stat)
-			c.CheckReadStatus(item)
-			c.CheckWriteStatus(item)
+			item := statistics.NewFlowItem(nil, nil, stat)
+			c.hotStat.CheckReadAsync(item)
+			c.hotStat.CheckWriteAsync(item)
 		}
 	}
 	reportInterval := region.GetInterval()
@@ -585,9 +585,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		peerInfo := core.NewPeerInfo(peer,
 			region.GetBytesWritten(), region.GetKeysWritten(),
 			0, 0,
-			interval, region)
-		item := statistics.NewFlowItem(peerInfo, nil)
-		c.CheckWriteStatus(item)
+			interval)
+		item := statistics.NewFlowItem(peerInfo, region, nil)
+		c.hotStat.CheckWriteAsync(item)
 	}
 	c.RUnlock()
 
@@ -833,18 +833,6 @@ func (c *RaftCluster) RandPendingRegion(storeID uint64, ranges []core.KeyRange, 
 // RandLearnerRegion returns a random region that has a learner peer on the store.
 func (c *RaftCluster) RandLearnerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
 	return c.core.RandLearnerRegion(storeID, ranges, opts...)
-}
-
-// HotRegionsFromStore picks hot regions in specified store.
-func (c *RaftCluster) HotRegionsFromStore(store uint64, kind statistics.FlowKind) []*core.RegionInfo {
-	c.RLock()
-	defer c.RUnlock()
-	r := c.hotStat.HotRegionsFromStore(store, kind, c.opt.GetHotRegionCacheHitsThreshold())
-	regions := make([]*core.RegionInfo, 0)
-	for _, stat := range r {
-		regions = append(regions, c.GetRegion(stat.RegionID))
-	}
-	return regions
 }
 
 // GetLeaderStore returns all stores that contains the region's leader peer.
@@ -1508,16 +1496,6 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
 	return c.hotStat.RegionStats(statistics.WriteFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
-}
-
-// CheckWriteStatus checks the write status.
-func (c *RaftCluster) CheckWriteStatus(item *statistics.FlowItem) {
-	c.hotStat.CheckWriteAsync(item)
-}
-
-// CheckReadStatus checks the read status
-func (c *RaftCluster) CheckReadStatus(item *statistics.FlowItem) {
-	c.hotStat.CheckReadAsync(item)
 }
 
 // TODO: remove me.

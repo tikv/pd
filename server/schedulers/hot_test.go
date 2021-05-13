@@ -931,7 +931,7 @@ func (s *testHotCacheSuite) TestUpdateCache(c *C) {
 	c.Assert(len(stats[3]), Equals, 1)
 	c.Assert(len(stats[5]), Equals, 1)
 
-	/// For leader read flow
+	// For leader read flow
 	addRegionLeaderReadInfo(tc, []testRegionInfo{
 		{21, []uint64{4, 5, 6}, 512 * KB, 0},
 		{22, []uint64{5, 4, 6}, 512 * KB, 0},

@@ -160,7 +160,7 @@ func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 }
 
 // CheckRegionFlow checks the flow information of region.
-// it is only used for test.
+// it is only used in test for mockCluster.
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, includeFollowers bool) (ret []*HotPeerStat) {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
@@ -174,7 +174,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, includeFollowers
 				region.GetKeysWritten(),
 				region.GetBytesRead(),
 				region.GetKeysRead(),
-				interval, region)
+				interval)
 			item = f.CheckPeerFlow(peerInfo, region, interval)
 		}
 		if item != nil {

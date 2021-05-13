@@ -25,31 +25,26 @@ var Denoising = true
 
 const queueCap = 1000
 
-type rwType int
-
-const (
-	write rwType = iota
-	read
-	rwTypeLen
-)
-
 // HotCache is a cache hold hot regions.
 type HotCache struct {
-	flowQueue [rwTypeLen]chan *FlowItem
-	writeFlow *hotPeerCache
-	readFlow  *hotPeerCache
+	readFlowQueue  chan *FlowItem
+	writeFlowQueue chan *FlowItem
+	writeFlow      *hotPeerCache
+	readFlow       *hotPeerCache
 }
 
 // FlowItem indicates the item in the flow, it is a wrapper for peerInfo or expiredItems
 type FlowItem struct {
 	peerInfo    *core.PeerInfo
+	regionInfo  *core.RegionInfo
 	expiredStat *HotPeerStat
 }
 
 // NewFlowItem creates FlowItem
-func NewFlowItem(peerInfo *core.PeerInfo, expiredStat *HotPeerStat) *FlowItem {
+func NewFlowItem(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo, expiredStat *HotPeerStat) *FlowItem {
 	return &FlowItem{
 		peerInfo:    peerInfo,
+		regionInfo:  regionInfo,
 		expiredStat: expiredStat,
 	}
 }
@@ -57,11 +52,10 @@ func NewFlowItem(peerInfo *core.PeerInfo, expiredStat *HotPeerStat) *FlowItem {
 // NewHotCache creates a new hot spot cache.
 func NewHotCache(ctx context.Context) *HotCache {
 	w := &HotCache{
-		writeFlow: NewHotStoresStats(WriteFlow),
-		readFlow:  NewHotStoresStats(ReadFlow),
-	}
-	for t := rwType(0); t < rwTypeLen; t++ {
-		w.flowQueue[t] = make(chan *FlowItem, queueCap)
+		readFlowQueue:  make(chan *FlowItem, queueCap),
+		writeFlowQueue: make(chan *FlowItem, queueCap),
+		writeFlow:      NewHotStoresStats(WriteFlow),
+		readFlow:       NewHotStoresStats(ReadFlow),
 	}
 	go w.updateItems(ctx)
 	return w
@@ -93,12 +87,12 @@ func (w *HotCache) CheckReadLeaderSync(region *core.RegionInfo) []*HotPeerStat {
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckWriteAsync(item *FlowItem) {
-	w.flowQueue[write] <- item
+	w.writeFlowQueue <- item
 }
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckReadAsync(item *FlowItem) {
-	w.flowQueue[read] <- item
+	w.readFlowQueue <- item
 }
 
 // Update updates the cache.
@@ -135,7 +129,7 @@ func (w *HotCache) HotRegionsFromStore(storeID uint64, kind FlowKind, minHotDegr
 	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
 		return stats
 	}
-	return []*HotPeerStat{}
+	return nil
 }
 
 // IsRegionHot checks if the region is hot.
@@ -181,11 +175,11 @@ func (w *HotCache) updateItems(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case item, ok := <-w.flowQueue[write]:
+		case item, ok := <-w.writeFlowQueue:
 			if ok && item != nil {
 				w.updateItem(item, w.writeFlow)
 			}
-		case item, ok := <-w.flowQueue[read]:
+		case item, ok := <-w.readFlowQueue:
 			if ok && item != nil {
 				w.updateItem(item, w.readFlow)
 			}
@@ -194,9 +188,8 @@ func (w *HotCache) updateItems(ctx context.Context) {
 }
 
 func (w *HotCache) updateItem(item *FlowItem, flow *hotPeerCache) {
-	if item.peerInfo != nil {
-		peer := item.peerInfo
-		stat := flow.CheckPeerFlow(peer, peer.GetBelongedRegion(), peer.GetIntervals())
+	if item.peerInfo != nil && item.regionInfo != nil {
+		stat := flow.CheckPeerFlow(item.peerInfo, item.regionInfo, item.peerInfo.GetIntervals())
 		if stat != nil {
 			w.Update(stat)
 		}
