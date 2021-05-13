@@ -674,10 +674,10 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	// check randomly pick hot region
 	r := tc.HotRegionsFromStore(2, statistics.ReadFlow)
 	c.Assert(r, NotNil)
-	c.Assert(len(r), Equals, 3)
+	c.Assert(r, HasLen, 3)
 	// check hot items
 	stats := tc.HotCache.RegionStats(statistics.ReadFlow, 0)
-	c.Assert(len(stats), Equals, 3)
+	c.Assert(stats, HasLen, 3)
 	for _, ss := range stats {
 		for _, s := range ss {
 			c.Assert(s.GetLoad(statistics.RegionReadBytes), Equals, 512.0*KB)

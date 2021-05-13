@@ -80,20 +80,20 @@ type PeerInfo struct {
 	writtenKeys  uint64
 	readBytes    uint64
 	readKeys     uint64
-	intervals    uint64
+	interval     uint64
 }
 
 // NewPeerInfo creates PeerInfo
 func NewPeerInfo(meta *metapb.Peer,
 	writtenBytes, writtenKeys, readBytes, readKeys uint64,
-	intervals uint64) *PeerInfo {
+	interval uint64) *PeerInfo {
 	return &PeerInfo{
 		Peer:         meta,
 		writtenBytes: writtenBytes,
 		writtenKeys:  writtenKeys,
 		readBytes:    readBytes,
 		readKeys:     readKeys,
-		intervals:    intervals,
+		interval:     interval,
 	}
 }
 
@@ -127,7 +127,7 @@ func (p *PeerInfo) GetPeerID() uint64 {
 	return p.GetId()
 }
 
-// GetIntervals returns reporting intervals
-func (p *PeerInfo) GetIntervals() uint64 {
-	return p.intervals
+// GetInterval returns reporting interval
+func (p *PeerInfo) GetInterval() uint64 {
+	return p.interval
 }

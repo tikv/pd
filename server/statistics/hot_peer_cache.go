@@ -159,37 +159,12 @@ func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 	return items
 }
 
-// CheckRegionFlow checks the flow information of region.
-// it is only used in test for mockCluster.
-func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, includeFollowers bool) (ret []*HotPeerStat) {
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	storeIDs := f.getAllStoreIDs(region, false, includeFollowers)
-	for _, storeID := range storeIDs {
-		peer := region.GetStorePeer(storeID)
-		var item *HotPeerStat
-		if peer != nil {
-			peerInfo := core.NewPeerInfo(peer,
-				region.GetBytesWritten(),
-				region.GetKeysWritten(),
-				region.GetBytesRead(),
-				region.GetKeysRead(),
-				interval)
-			item = f.CheckPeerFlow(peerInfo, region, interval)
-		}
-		if item != nil {
-			ret = append(ret, item)
-		}
-	}
-	ret = append(ret, f.CollectExpiredItems(region)...)
-	return ret
-}
-
 // CheckPeerFlow checks the flow information of a peer.
 // Notice: CheckPeerFlow couldn't be used concurrently.
-func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo, interval uint64) *HotPeerStat {
+func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
 	storeID := peer.GetStoreID()
 	deltaLoads := f.getFlowDeltaLoads(peer)
+	interval := peer.GetInterval()
 	f.collectPeerMetrics(deltaLoads, interval)
 	loads := make([]float64, len(deltaLoads))
 	for i := range deltaLoads {
@@ -297,7 +272,7 @@ func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo, includeOldStores,
 
 	// new stores
 	for _, peer := range region.GetPeers() {
-		if region.GetLeader().StoreId != peer.StoreId && !includeFollowers {
+		if region.GetLeader() != nil && region.GetLeader().StoreId != peer.StoreId && !includeFollowers {
 			continue
 		}
 		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
@@ -375,12 +350,7 @@ func (f *hotPeerCache) getDefaultTimeMedian() *movingaverage.TimeMedian {
 }
 
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
-	if newItem.needDelete {
-		return newItem
-	}
-
 	regionStats := f.kind.RegionStats()
-
 	if oldItem == nil {
 		if interval == 0 {
 			return nil

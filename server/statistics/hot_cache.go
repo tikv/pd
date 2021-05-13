@@ -61,28 +61,33 @@ func NewHotCache(ctx context.Context) *HotCache {
 	return w
 }
 
-// ExpiredItems returns the items which are already expired.:
+// ExpiredItems returns the items which are already expired.
 func (w *HotCache) ExpiredItems(region *core.RegionInfo) (expiredItems []*HotPeerStat) {
-	expiredItems = append(expiredItems, w.writeFlow.CollectExpiredItems(region)...)
-	expiredItems = append(expiredItems, w.readFlow.CollectExpiredItems(region)...)
+	expiredItems = append(expiredItems, w.ExpiredReadItems(region)...)
+	expiredItems = append(expiredItems, w.ExpiredWriteItems(region)...)
 	return
 }
 
-// CheckWriteSync checks the write status, returns update items.
-// This is used for mockcluster.
-func (w *HotCache) CheckWriteSync(region *core.RegionInfo) []*HotPeerStat {
-	return w.writeFlow.CheckRegionFlow(region, true)
+// ExpiredReadItems returns the read items which are already expired.
+func (w *HotCache) ExpiredReadItems(region *core.RegionInfo) []*HotPeerStat {
+	return w.readFlow.CollectExpiredItems(region)
 }
 
-// CheckReadSync checks the read status, returns update items.
-// This is used for mockcluster.
-func (w *HotCache) CheckReadSync(region *core.RegionInfo) []*HotPeerStat {
-	return w.readFlow.CheckRegionFlow(region, true)
+// ExpiredWriteItems returns the write items which are already expired.
+func (w *HotCache) ExpiredWriteItems(region *core.RegionInfo) []*HotPeerStat {
+	return w.writeFlow.CollectExpiredItems(region)
 }
 
-// CheckReadLeaderSync checks the read leader read info
-func (w *HotCache) CheckReadLeaderSync(region *core.RegionInfo) []*HotPeerStat {
-	return w.readFlow.CheckRegionFlow(region, false)
+// CheckWritePeerSync checks the write status, returns update items.
+// This is used for mockcluster.
+func (w *HotCache) CheckWritePeerSync(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
+	return w.writeFlow.CheckPeerFlow(peer, region)
+}
+
+// CheckReadPeerSync checks the read status, returns update items.
+// This is used for mockcluster.
+func (w *HotCache) CheckReadPeerSync(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
+	return w.readFlow.CheckPeerFlow(peer, region)
 }
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
@@ -189,12 +194,11 @@ func (w *HotCache) updateItems(ctx context.Context) {
 
 func (w *HotCache) updateItem(item *FlowItem, flow *hotPeerCache) {
 	if item.peerInfo != nil && item.regionInfo != nil {
-		stat := flow.CheckPeerFlow(item.peerInfo, item.regionInfo, item.peerInfo.GetIntervals())
+		stat := flow.CheckPeerFlow(item.peerInfo, item.regionInfo)
 		if stat != nil {
 			w.Update(stat)
 		}
 	} else if item.expiredStat != nil {
-		expiredStat := item.expiredStat
-		w.Update(expiredStat)
+		w.Update(item.expiredStat)
 	}
 }

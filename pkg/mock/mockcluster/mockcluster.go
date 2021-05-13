@@ -125,7 +125,7 @@ func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 // HotRegionsFromStore picks hot regions in specify store.
 func (mc *Cluster) HotRegionsFromStore(store uint64, kind statistics.FlowKind) []*core.RegionInfo {
 	stats := mc.HotCache.HotRegionsFromStore(store, kind, mc.GetHotRegionCacheHitsThreshold())
-	regions := make([]*core.RegionInfo, 0)
+	regions := make([]*core.RegionInfo, 0, len(stats))
 	for _, stat := range stats {
 		region := mc.GetRegion(stat.RegionID)
 		if region != nil {
@@ -344,7 +344,7 @@ func (mc *Cluster) AddRegionWithReadInfo(
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckReadSync(r)
+		items = mc.CheckRegionRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
@@ -370,7 +370,7 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckReadLeaderSync(r)
+		items = mc.CheckRegionLeaderRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
@@ -379,7 +379,7 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 	return items
 }
 
-// AddLeaderRegionWithWriteInfo adds region with specified leader and read info.
+// AddLeaderRegionWithWriteInfo adds region with specified leader and peers write info.
 func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	regionID uint64, leaderID uint64,
 	writtenBytes, writtenKeys uint64,
@@ -397,7 +397,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckWriteSync(r)
+		items = mc.CheckRegionWrite(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
@@ -722,4 +722,69 @@ func (mc *Cluster) SetStoreLastHeartbeatInterval(storeID uint64, interval time.D
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-interval)))
 	mc.PutStore(newStore)
+}
+
+// CheckRegionRead checks region read info with all peers
+func (mc *Cluster) CheckRegionRead(region *core.RegionInfo) []*statistics.HotPeerStat {
+	items := make([]*statistics.HotPeerStat, 0)
+	expiredItems := mc.HotCache.ExpiredReadItems(region)
+	items = append(items, expiredItems...)
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	for _, peer := range region.GetPeers() {
+		peerInfo := core.NewPeerInfo(peer,
+			region.GetBytesWritten(),
+			region.GetKeysWritten(),
+			region.GetBytesRead(),
+			region.GetKeysRead(),
+			interval)
+		item := mc.HotCache.CheckReadPeerSync(peerInfo, region)
+		if item != nil {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+// CheckRegionWrite checks region write info with all peers
+func (mc *Cluster) CheckRegionWrite(region *core.RegionInfo) []*statistics.HotPeerStat {
+	items := make([]*statistics.HotPeerStat, 0)
+	expiredItems := mc.HotCache.ExpiredWriteItems(region)
+	items = append(items, expiredItems...)
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	for _, peer := range region.GetPeers() {
+		peerInfo := core.NewPeerInfo(peer,
+			region.GetBytesWritten(),
+			region.GetKeysWritten(),
+			region.GetBytesRead(),
+			region.GetKeysRead(),
+			interval)
+		item := mc.HotCache.CheckWritePeerSync(peerInfo, region)
+		if item != nil {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+// CheckRegionLeaderRead checks region read info with leader peer
+func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.HotPeerStat {
+	items := make([]*statistics.HotPeerStat, 0)
+	expiredItems := mc.HotCache.ExpiredReadItems(region)
+	items = append(items, expiredItems...)
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	peer := region.GetLeader()
+	peerInfo := core.NewPeerInfo(peer,
+		region.GetBytesWritten(),
+		region.GetKeysWritten(),
+		region.GetBytesRead(),
+		region.GetKeysRead(),
+		interval)
+	item := mc.HotCache.CheckReadPeerSync(peerInfo, region)
+	if item != nil {
+		items = append(items, item)
+	}
+	return items
 }

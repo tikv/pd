@@ -105,8 +105,22 @@ func testCache(c *C, t *testCacheCase) {
 	}
 }
 
-func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect int) []*HotPeerStat {
-	res := cache.CheckRegionFlow(region, true)
+func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect int) (res []*HotPeerStat) {
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	res = append(res, cache.CollectExpiredItems(region)...)
+	for _, peer := range region.GetPeers() {
+		peerInfo := core.NewPeerInfo(peer,
+			region.GetBytesWritten(),
+			region.GetKeysWritten(),
+			region.GetBytesRead(),
+			region.GetKeysRead(),
+			interval)
+		item := cache.CheckPeerFlow(peerInfo, region)
+		if item != nil {
+			res = append(res, item)
+		}
+	}
 	c.Assert(res, HasLen, expect)
 	for _, p := range res {
 		cache.Update(p)
@@ -329,10 +343,26 @@ func BenchmarkCheckRegionFlow(b *testing.B) {
 		core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}),
 		core.SetReadBytes(30000*10),
 		core.SetReadKeys(300000*10))
+	peerInfos := make([]*core.PeerInfo, 0)
+	for _, peer := range newRegion.GetPeers() {
+		peerInfo := core.NewPeerInfo(peer,
+			region.GetBytesWritten(),
+			region.GetKeysWritten(),
+			region.GetBytesRead(),
+			region.GetKeysRead(),
+			10)
+		peerInfos = append(peerInfos, peerInfo)
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rets := cache.CheckRegionFlow(newRegion, true)
-		for _, ret := range rets {
+		items := make([]*HotPeerStat, 0)
+		for _, peerInfo := range peerInfos {
+			item := cache.CheckPeerFlow(peerInfo, region)
+			if item != nil {
+				items = append(items, item)
+			}
+		}
+		for _, ret := range items {
 			cache.Update(ret)
 		}
 	}
