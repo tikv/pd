@@ -29,7 +29,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20200907074027-32a3a0accf7d
 	github.com/pingcap/log v0.0.0-20210317133921-96f4fcab92a4
 	github.com/pingcap/sysutil v0.0.0-20201130064824-f0c8aa6a6966
-	github.com/pingcap/tidb-dashboard v0.0.0-20210318164227-2baddeb3c504
+	github.com/pingcap/tidb-dashboard v0.0.0-20210512074702-4ee3e3909d5e
 	github.com/prometheus/client_golang v1.2.1
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/sirupsen/logrus v1.4.2
@@ -41,9 +41,9 @@ require (
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
-	go.uber.org/goleak v0.10.0
+	go.uber.org/goleak v1.1.10
 	go.uber.org/zap v1.15.0
-	golang.org/x/tools v0.0.0-20200527183253-8e7acdbce89d
+	golang.org/x/tools v0.0.0-20210112230658-8b4aab62c064
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
