@@ -96,6 +96,7 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 // Update updates the items in statistics.
 func (f *hotPeerCache) Update(item *HotPeerStat) {
 	if item.IsNeedDelete() {
+		f.putInheritItem(item)
 		if peers, ok := f.peersOfStore[item.StoreID]; ok {
 			peers.Remove(item.RegionID)
 		}
@@ -150,7 +151,6 @@ func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 		if region.GetStorePeer(storeID) == nil {
 			item := f.getOldHotPeerStat(regionID, storeID)
 			if item != nil {
-				f.putInheritItem(item)
 				item.needDelete = true
 				items = append(items, item)
 			}
