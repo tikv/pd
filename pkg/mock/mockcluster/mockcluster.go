@@ -14,6 +14,7 @@
 package mockcluster
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -30,7 +32,6 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
-	"go.uber.org/zap"
 )
 
 const (
@@ -52,11 +53,11 @@ type Cluster struct {
 }
 
 // NewCluster creates a new Cluster
-func NewCluster(opts *config.PersistOptions) *Cluster {
+func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
 		BasicCluster:     core.NewBasicCluster(),
 		IDAllocator:      mockid.NewIDAllocator(),
-		HotStat:          statistics.NewHotStat(),
+		HotStat:          statistics.NewHotStat(ctx),
 		PersistOptions:   opts,
 		suspectRegions:   map[uint64]struct{}{},
 		disabledFeatures: make(map[versioninfo.Feature]struct{}),
@@ -134,7 +135,7 @@ func (mc *Cluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.AllocID()
 	if err != nil {
-		log.Error("failed to alloc peer", zap.Error(err))
+		log.Error("failed to alloc peer", errs.ZapError(err))
 		return nil, err
 	}
 	peer := &metapb.Peer{
@@ -339,7 +340,7 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckRead(r)
+		items = mc.HotCache.CheckReadSync(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
@@ -366,7 +367,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckWrite(r)
+		items = mc.HotCache.CheckWriteSync(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
