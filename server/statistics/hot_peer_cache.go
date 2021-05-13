@@ -243,16 +243,6 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	return f.updateHotPeerStat(newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
 }
 
-func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
-	switch f.kind {
-	case WriteFlow:
-		return f.isRegionHotWithAnyPeers(region, hotDegree)
-	case ReadFlow:
-		return f.isRegionHotWithPeer(region, region.GetLeader(), hotDegree)
-	}
-	return false
-}
-
 func (f *hotPeerCache) CollectMetrics(typ string) {
 	for storeID, peers := range f.peersOfStore {
 		store := storeTag(storeID)
