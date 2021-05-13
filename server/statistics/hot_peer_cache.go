@@ -15,6 +15,7 @@ package statistics
 
 import (
 	"math"
+	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -51,6 +52,7 @@ var minHotThresholds = [RegionStatCount]float64{
 
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
+	sync.RWMutex
 	kind               FlowKind
 	peersOfStore       map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion     map[uint64]map[uint64]struct{} // regionID -> storeIDs
@@ -79,6 +81,8 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 // TODO: rename RegionStats as PeerStats
 // RegionStats returns hot items
 func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
+	f.RLock()
+	defer f.RUnlock()
 	res := make(map[uint64][]*HotPeerStat)
 	for storeID, peers := range f.peersOfStore {
 		values := peers.GetAll()
@@ -95,6 +99,8 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 
 // Update updates the items in statistics.
 func (f *hotPeerCache) Update(item *HotPeerStat) {
+	f.Lock()
+	defer f.Unlock()
 	if item.IsNeedDelete() {
 		f.putInheritItem(item)
 		if peers, ok := f.peersOfStore[item.StoreID]; ok {
@@ -145,6 +151,8 @@ func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 
 // CollectExpiredItems collects expired items, mark them as needDelete and puts them into inherit items
 func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerStat {
+	f.RLock()
+	defer f.RUnlock()
 	regionID := region.GetID()
 	items := make([]*HotPeerStat, 0)
 	for _, storeID := range f.getAllStoreIDs(region, true, true) {
@@ -162,6 +170,8 @@ func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 // CheckPeerFlow checks the flow information of a peer.
 // Notice: CheckPeerFlow couldn't be used concurrently.
 func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
+	f.Lock()
+	defer f.Unlock()
 	storeID := peer.GetStoreID()
 	deltaLoads := f.getFlowDeltaLoads(peer)
 	interval := peer.GetInterval()
@@ -210,6 +220,8 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 }
 
 func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
+	f.RLock()
+	defer f.RUnlock()
 	switch f.kind {
 	case WriteFlow:
 		return f.isRegionHotWithAnyPeers(region, hotDegree)
@@ -220,6 +232,8 @@ func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool 
 }
 
 func (f *hotPeerCache) CollectMetrics(typ string) {
+	f.RLock()
+	defer f.RUnlock()
 	for storeID, peers := range f.peersOfStore {
 		store := storeTag(storeID)
 		thresholds := f.calcHotThresholds(storeID)

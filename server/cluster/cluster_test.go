@@ -43,10 +43,8 @@ func Test(t *testing.T) {
 }
 
 var _ = Suite(&testClusterInfoSuite{})
-var _ = SerialSuites(&testClusterInfoSerialSuite{})
 
 type testClusterInfoSuite struct{}
-type testClusterInfoSerialSuite struct{}
 
 func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
@@ -269,7 +267,7 @@ func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	c.Assert(cluster.GetClusterVersion(), Equals, "5.0.0")
 }
 
-func (s *testClusterInfoSerialSuite) TestRegionHeartbeatHotStat(c *C) {
+func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
