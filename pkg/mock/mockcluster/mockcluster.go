@@ -438,7 +438,7 @@ func (mc *Cluster) UpdateRegionCount(storeID uint64, regionCount int) {
 func (mc *Cluster) UpdateSnapshotCount(storeID uint64, snapshotCount int) {
 	store := mc.GetStore(storeID)
 	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.ApplyingSnapCount = uint32(snapshotCount)
+	newStats.ReceivingSnapCount = uint32(snapshotCount)
 	newStore := store.Clone(core.SetStoreStats(newStats))
 	mc.PutStore(newStore)
 }
