@@ -170,10 +170,10 @@ func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 // CheckPeerFlow checks the flow information of a peer.
 // Notice: CheckPeerFlow couldn't be used concurrently.
 func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
-	f.Lock()
-	defer f.Unlock()
+	f.RLock()
+	defer f.RUnlock()
 	storeID := peer.GetStoreID()
-	deltaLoads := f.getFlowDeltaLoads(peer)
+	deltaLoads := getFlowDeltaLoads(peer)
 	interval := peer.GetInterval()
 	f.collectPeerMetrics(deltaLoads, interval)
 	loads := make([]float64, len(deltaLoads))
@@ -443,7 +443,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 	return newItem
 }
 
-func (f *hotPeerCache) getFlowDeltaLoads(stat core.FlowStat) []float64 {
+func getFlowDeltaLoads(stat core.FlowStat) []float64 {
 	ret := make([]float64, RegionStatCount)
 	for k := RegionStatKind(0); k < RegionStatCount; k++ {
 		switch k {
