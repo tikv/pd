@@ -240,7 +240,7 @@ func (s *testRejectLeaderSuite) TestRemoveRejectLeader(c *C) {
 	el, err := schedule.CreateScheduler(EvictLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	tc.DeleteStore(tc.GetStore(1))
-	succ, _ := el.(*evictLeaderScheduler).conf.mayBeRemoveStoreFromConfig(1)
+	succ, _ := el.(*evictLeaderScheduler).conf.removeStore(1)
 	c.Assert(succ, IsTrue)
 }
 
