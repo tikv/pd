@@ -68,52 +68,10 @@ func (s *testLocalTSOSuite) TestLocalTSO(c *C) {
 	c.Assert(err, IsNil)
 
 	cluster.WaitAllLeaders(c, dcLocationConfig)
-
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	dcClientMap := make(map[string]pdpb.PDClient)
-	for _, dcLocation := range dcLocationConfig {
-		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
-	}
-
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			lastList := make(map[string]*pdpb.Timestamp)
-			for _, dcLocation := range dcLocationConfig {
-				lastList[dcLocation] = &pdpb.Timestamp{
-					Physical: 0,
-					Logical:  0,
-				}
-			}
-			for j := 0; j < 30; j++ {
-				for _, dcLocation := range dcLocationConfig {
-					req := &pdpb.TsoRequest{
-						Header:     testutil.NewRequestHeader(leaderServer.GetClusterID()),
-						Count:      tsoCount,
-						DcLocation: dcLocation,
-					}
-					ctx, cancel := context.WithCancel(context.Background())
-					ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
-					ts := testGetLocalTimestamp(c, ctx, dcClientMap[dcLocation], req)
-					cancel()
-					lastTS := lastList[dcLocation]
-					// Check whether the TSO fallbacks
-					c.Assert(tsoutil.CompareTimestamp(ts, lastTS), Equals, 1)
-					lastList[dcLocation] = ts
-					// Check whether the TSO is not unique
-					c.Assert(s.checkTSOUnique(ts), IsTrue)
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-		}()
-	}
-	wg.Wait()
+	s.testTSO(c, cluster, dcLocationConfig, nil)
 }
 
-func testGetLocalTimestamp(c *C, ctx context.Context, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdpb.Timestamp {
+func testGetTimestamp(c *C, ctx context.Context, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdpb.Timestamp {
 	tsoClient, err := pdCli.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -167,7 +125,7 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = grpcutil.BuildForwardContext(ctx, leaderServer.GetAddr())
-	globalTS := testGetLocalTimestamp(c, ctx, leaderCli, req)
+	globalTS := testGetTimestamp(c, ctx, leaderCli, req)
 	cancel()
 
 	// Wait for all nodes becoming healthy.
@@ -190,12 +148,19 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 		leaderName := cluster.WaitAllocatorLeader("dc-4")
 		return leaderName != ""
 	})
+	s.testTSO(c, cluster, dcLocationConfig, globalTS)
 
+	failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow")
+}
+
+func (s *testLocalTSOSuite) testTSO(c *C, cluster *tests.TestCluster, dcLocationConfig map[string]string, globalTS *pdpb.Timestamp) {
+	leaderServer := cluster.GetServer(cluster.GetLeader())
 	dcClientMap := make(map[string]pdpb.PDClient)
 	for _, dcLocation := range dcLocationConfig {
 		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
 		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
 	}
+
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -211,20 +176,22 @@ func (s *testLocalTSOSuite) TestLocalTSOAfterMemberChanged(c *C) {
 			for j := 0; j < 30; j++ {
 				for _, dcLocation := range dcLocationConfig {
 					req := &pdpb.TsoRequest{
-						Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId()),
+						Header:     testutil.NewRequestHeader(leaderServer.GetClusterID()),
 						Count:      tsoCount,
 						DcLocation: dcLocation,
 					}
 					ctx, cancel := context.WithCancel(context.Background())
 					ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
-					ts := testGetLocalTimestamp(c, ctx, dcClientMap[dcLocation], req)
+					ts := testGetTimestamp(c, ctx, dcClientMap[dcLocation], req)
 					cancel()
 					lastTS := lastList[dcLocation]
 					// Check whether the TSO fallbacks
 					c.Assert(tsoutil.CompareTimestamp(ts, lastTS), Equals, 1)
-					// Because we have a Global TSO synchronization, even though the system time
-					// of the PD nodes in dc-4 is slower, its TSO will still be big enough.
-					c.Assert(tsoutil.CompareTimestamp(ts, globalTS), Equals, 1)
+					if globalTS != nil {
+						// Because we have a Global TSO synchronization, even though the system time
+						// of the PD nodes in dc-4 is slower, its TSO will still be big enough.
+						c.Assert(tsoutil.CompareTimestamp(ts, globalTS), Equals, 1)
+					}
 					lastList[dcLocation] = ts
 					// Check whether the TSO is not unique
 					c.Assert(s.checkTSOUnique(ts), IsTrue)

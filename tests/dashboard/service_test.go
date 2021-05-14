@@ -43,15 +43,15 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-var _ = Suite(&serverTestSuite{})
+var _ = Suite(&dashboardTestSuite{})
 
-type serverTestSuite struct {
+type dashboardTestSuite struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	httpClient *http.Client
 }
 
-func (s *serverTestSuite) SetUpSuite(c *C) {
+func (s *dashboardTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
 	dashboard.SetCheckInterval(10 * time.Millisecond)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
@@ -66,22 +66,22 @@ func (s *serverTestSuite) SetUpSuite(c *C) {
 	}
 }
 
-func (s *serverTestSuite) TearDownSuite(c *C) {
+func (s *dashboardTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 	s.httpClient.CloseIdleConnections()
 	server.EnableZap = false
 	dashboard.SetCheckInterval(time.Second)
 }
 
-func (s *serverTestSuite) TestDashboardRedirect(c *C) {
+func (s *dashboardTestSuite) TestDashboardRedirect(c *C) {
 	s.testDashboard(c, false)
 }
 
-func (s *serverTestSuite) TestDashboardProxy(c *C) {
+func (s *dashboardTestSuite) TestDashboardProxy(c *C) {
 	s.testDashboard(c, true)
 }
 
-func (s *serverTestSuite) checkRespCode(c *C, url string, code int) {
+func (s *dashboardTestSuite) checkRespCode(c *C, url string, code int) {
 	resp, err := s.httpClient.Get(url) //nolint:gosec
 	c.Assert(err, IsNil)
 	_, err = ioutil.ReadAll(resp.Body)
@@ -90,11 +90,11 @@ func (s *serverTestSuite) checkRespCode(c *C, url string, code int) {
 	c.Assert(resp.StatusCode, Equals, code)
 }
 
-func (s *serverTestSuite) waitForConfigSync() {
+func (s *dashboardTestSuite) waitForConfigSync() {
 	time.Sleep(time.Second)
 }
 
-func (s *serverTestSuite) checkServiceIsStarted(c *C, internalProxy bool, servers map[string]*tests.TestServer, leader *tests.TestServer) string {
+func (s *dashboardTestSuite) checkServiceIsStarted(c *C, internalProxy bool, servers map[string]*tests.TestServer, leader *tests.TestServer) string {
 	s.waitForConfigSync()
 	dashboardAddress := leader.GetServer().GetPersistOptions().GetDashboardAddress()
 	hasServiceNode := false
@@ -116,7 +116,7 @@ func (s *serverTestSuite) checkServiceIsStarted(c *C, internalProxy bool, server
 	return dashboardAddress
 }
 
-func (s *serverTestSuite) checkServiceIsStopped(c *C, servers map[string]*tests.TestServer) {
+func (s *dashboardTestSuite) checkServiceIsStopped(c *C, servers map[string]*tests.TestServer) {
 	s.waitForConfigSync()
 	for _, srv := range servers {
 		c.Assert(srv.GetPersistOptions().GetDashboardAddress(), Equals, "none")
@@ -126,7 +126,7 @@ func (s *serverTestSuite) checkServiceIsStopped(c *C, servers map[string]*tests.
 	}
 }
 
-func (s *serverTestSuite) testDashboard(c *C, internalProxy bool) {
+func (s *dashboardTestSuite) testDashboard(c *C, internalProxy bool) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, serverName string) {
 		conf.Dashboard.InternalProxy = internalProxy
 	})
