@@ -538,7 +538,7 @@ func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
 func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
-		log.Fatal("try to clean a store's pause state, but it is not found",
+		log.Warn("try to clean a store's pause state, but it is not found. It may be cleanup",
 			zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrStoreNotFound.FastGenByArgs(storeID)))
 	}
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
