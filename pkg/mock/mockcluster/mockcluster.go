@@ -14,6 +14,7 @@
 package mockcluster
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
@@ -52,11 +53,11 @@ type Cluster struct {
 }
 
 // NewCluster creates a new Cluster
-func NewCluster(opts *config.PersistOptions) *Cluster {
+func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
 		BasicCluster:     core.NewBasicCluster(),
 		IDAllocator:      mockid.NewIDAllocator(),
-		HotStat:          statistics.NewHotStat(),
+		HotStat:          statistics.NewHotStat(ctx),
 		PersistOptions:   opts,
 		suspectRegions:   map[uint64]struct{}{},
 		disabledFeatures: make(map[versioninfo.Feature]struct{}),
@@ -339,7 +340,7 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckRead(r)
+		items = mc.HotCache.CheckReadSync(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
@@ -366,7 +367,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 
 	var items []*statistics.HotPeerStat
 	for i := 0; i < filledNum; i++ {
-		items = mc.HotCache.CheckWrite(r)
+		items = mc.HotCache.CheckWriteSync(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}

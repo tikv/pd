@@ -14,6 +14,7 @@
 package statistics
 
 import (
+	"context"
 	"math/rand"
 
 	"github.com/tikv/pd/server/core"
@@ -23,28 +24,41 @@ import (
 // only turned off by the simulator and the test.
 var Denoising = true
 
+const queueCap = 1000
+
 // HotCache is a cache hold hot regions.
 type HotCache struct {
+	flowQueue chan *core.RegionInfo
 	writeFlow *hotPeerCache
 	readFlow  *hotPeerCache
 }
 
 // NewHotCache creates a new hot spot cache.
-func NewHotCache() *HotCache {
-	return &HotCache{
+func NewHotCache(ctx context.Context) *HotCache {
+	w := &HotCache{
+		flowQueue: make(chan *core.RegionInfo, queueCap),
 		writeFlow: NewHotStoresStats(WriteFlow),
 		readFlow:  NewHotStoresStats(ReadFlow),
 	}
+	go w.updateItems(ctx)
+	return w
 }
 
-// CheckWrite checks the write status, returns update items.
-func (w *HotCache) CheckWrite(region *core.RegionInfo) []*HotPeerStat {
+// CheckWriteSync checks the write status, returns update items.
+// This is used for mockcluster.
+func (w *HotCache) CheckWriteSync(region *core.RegionInfo) []*HotPeerStat {
 	return w.writeFlow.CheckRegionFlow(region)
 }
 
-// CheckRead checks the read status, returns update items.
-func (w *HotCache) CheckRead(region *core.RegionInfo) []*HotPeerStat {
+// CheckReadSync checks the read status, returns update items.
+// This is used for mockcluster.
+func (w *HotCache) CheckReadSync(region *core.RegionInfo) []*HotPeerStat {
 	return w.readFlow.CheckRegionFlow(region)
+}
+
+// CheckRWAsync puts the region into queue, and check it asynchronously
+func (w *HotCache) CheckRWAsync(region *core.RegionInfo) {
+	w.flowQueue <- region
 }
 
 // Update updates the cache.
@@ -86,8 +100,8 @@ func (w *HotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, minHotD
 
 // IsRegionHot checks if the region is hot.
 func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
-	return w.writeFlow.IsRegionHot(region, minHotDegree) ||
-		w.readFlow.IsRegionHot(region, minHotDegree)
+	return w.writeFlow.isRegionHotWithAnyPeers(region, minHotDegree) ||
+		w.readFlow.isRegionHotWithPeer(region, region.GetLeader(), minHotDegree)
 }
 
 // CollectMetrics collects the hot cache metrics.
@@ -120,4 +134,24 @@ func (w *HotCache) GetFilledPeriod(kind FlowKind) int {
 		return w.readFlow.getDefaultTimeMedian().GetFilledPeriod()
 	}
 	return 0
+}
+
+func (w *HotCache) updateItems(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case region, ok := <-w.flowQueue:
+			if ok && region != nil {
+				items := w.readFlow.CheckRegionFlow(region)
+				for _, item := range items {
+					w.Update(item)
+				}
+				items = w.writeFlow.CheckRegionFlow(region)
+				for _, item := range items {
+					w.Update(item)
+				}
+			}
+		}
+	}
 }

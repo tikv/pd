@@ -14,6 +14,7 @@
 package checker
 
 import (
+	"context"
 	"encoding/hex"
 
 	. "github.com/pingcap/check"
@@ -34,11 +35,21 @@ type testRuleCheckerSuite struct {
 	cluster     *mockcluster.Cluster
 	ruleManager *placement.RuleManager
 	rc          *RuleChecker
+	ctx         context.Context
+	cancel      context.CancelFunc
+}
+
+func (s *testRuleCheckerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testRuleCheckerSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testRuleCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.cluster.SetEnablePlacementRules(true)
 	s.ruleManager = s.cluster.RuleManager
