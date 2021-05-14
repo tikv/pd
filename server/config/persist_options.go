@@ -495,6 +495,11 @@ func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
 }
 
+// GetStoresLimit gets the stores' limit.
+func (o *PersistOptions) GetStoresLimit() map[uint64]StoreLimitConfig {
+	return o.GetScheduleConfig().StoreLimit
+}
+
 // GetSchedulers gets the scheduler configurations.
 func (o *PersistOptions) GetSchedulers() SchedulerConfigs {
 	return o.GetScheduleConfig().Schedulers

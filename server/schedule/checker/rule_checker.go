@@ -107,7 +107,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
 			return c.replaceRulePeer(region, rf, peer, downStatus)
 		}
-		if c.isOfflinePeer(region, peer) {
+		if c.isOfflinePeer(peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
 			return c.replaceRulePeer(region, rf, peer, offlineStatus)
 		}
@@ -256,7 +256,7 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 	return false
 }
 
-func (c *RuleChecker) isOfflinePeer(region *core.RegionInfo, peer *metapb.Peer) bool {
+func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
 	store := c.cluster.GetStore(peer.GetStoreId())
 	if store == nil {
 		log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", peer.StoreId))

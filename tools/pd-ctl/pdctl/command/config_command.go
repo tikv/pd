@@ -219,9 +219,10 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	delete(scheduleConfig, "schedulers-v2")
-	delete(scheduleConfig, "schedulers-payload")
-	delete(scheduleConfig, "store-limit")
+	for _, config := range hideConfig {
+		delete(scheduleConfig, config)
+	}
+
 	data["schedule"] = scheduleConfig
 	r, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -229,6 +230,21 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(string(r))
+}
+
+var hideConfig = []string{
+	"schedulers-v2",
+	"schedulers-payload",
+	"store-limit",
+	"enable-remove-down-replica",
+	"enable-replace-offline-replica",
+	"enable-make-up-replica",
+	"enable-remove-extra-replica",
+	"enable-location-replacement",
+	"enable-one-way-merge",
+	"enable-debug-metrics",
+	"store-limit-mode",
+	"scheduler-max-waiting-operator",
 }
 
 func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {

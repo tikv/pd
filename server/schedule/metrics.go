@@ -57,6 +57,22 @@ var (
 			Name:      "store_limit_cost",
 			Help:      "limit rate cost of store.",
 		}, []string{"store", "limit_type"})
+
+	scatterCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "scatter_operators_count",
+			Help:      "Counter of region scatter operators.",
+		}, []string{"type", "event"})
+
+	scatterDistributionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "scatter_distribution",
+			Help:      "Counter of the distribution in scatter.",
+		}, []string{"store", "is_leader", "engine"})
 )
 
 func init() {
@@ -65,4 +81,6 @@ func init() {
 	prometheus.MustRegister(operatorWaitDuration)
 	prometheus.MustRegister(storeLimitCostCounter)
 	prometheus.MustRegister(operatorWaitCounter)
+	prometheus.MustRegister(scatterCounter)
+	prometheus.MustRegister(scatterDistributionCounter)
 }

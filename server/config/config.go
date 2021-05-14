@@ -241,6 +241,7 @@ const (
 	defaultDRWaitSyncTimeout  = time.Minute
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
 
+	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
@@ -526,7 +527,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
-	adjustDuration(&c.TSOSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
+	adjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 
 	adjustDuration(&c.TSOUpdatePhysicalInterval, DefaultTSOUpdatePhysicalInterval)
 

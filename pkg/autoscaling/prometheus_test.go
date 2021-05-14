@@ -23,7 +23,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -40,10 +39,6 @@ const (
 
 	instanceCount = 3
 )
-
-func TestPrometheus(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testPrometheusQuerierSuite{})
 

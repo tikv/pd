@@ -14,6 +14,8 @@
 package operator
 
 import (
+	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -27,11 +29,14 @@ var _ = Suite(&testBuilderSuite{})
 
 type testBuilderSuite struct {
 	cluster *mockcluster.Cluster
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (s *testBuilderSuite) SetUpTest(c *C) {
 	opts := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(opts)
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.cluster = mockcluster.NewCluster(s.ctx, opts)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
@@ -46,6 +51,10 @@ func (s *testBuilderSuite) SetUpTest(c *C) {
 	s.cluster.AddLabelsStore(8, 0, map[string]string{"zone": "z2", "host": "h1"})
 	s.cluster.AddLabelsStore(9, 0, map[string]string{"zone": "z2", "host": "h2"})
 	s.cluster.AddLabelsStore(10, 0, map[string]string{"zone": "z3", "host": "h1", "noleader": "true"})
+}
+
+func (s *testBuilderSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testBuilderSuite) TestNewBuilder(c *C) {

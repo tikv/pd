@@ -214,7 +214,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 func isDataExist(d string) bool {
 	dir, err := os.Open(d)
 	if err != nil {
-		log.Error("failed to open directory", errs.ZapError(errs.ErrOSOpen, err))
+		log.Info("failed to open directory, maybe start for the first time", errs.ZapError(err))
 		return false
 	}
 	defer dir.Close()
