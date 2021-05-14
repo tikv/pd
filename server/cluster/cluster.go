@@ -523,11 +523,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		}
 	}
 	if store := c.core.GetStore(newStore.GetID()); store != nil {
-		c.hotStat.UpdateStoreHeartbeatMetrics(store)
+		statistics.UpdateStoreHeartbeatMetrics(store)
 	}
 	c.core.PutStore(newStore)
 	c.hotStat.Observe(newStore.GetID(), newStore.GetStoreStats())
-	c.hotStat.UpdateTotalLoad(c.core.GetStores())
 	c.hotStat.FilterUnhealthyStore(c)
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
@@ -1107,7 +1106,9 @@ func (c *RaftCluster) buryStore(storeID uint64) error {
 	err := c.putStoreLocked(newStore)
 	c.onStoreVersionChangeLocked()
 	if err == nil {
+		// clean up the residual information.
 		c.RemoveStoreLimit(storeID)
+		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
 }
@@ -1267,7 +1268,6 @@ func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
 		}
 	}
 	c.core.DeleteStore(store)
-	c.hotStat.RemoveRollingStoreStats(store.GetID())
 	return nil
 }
 
