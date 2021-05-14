@@ -169,9 +169,10 @@ func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 
 // CheckPeerFlow checks the flow information of a peer.
 // Notice: CheckPeerFlow couldn't be used concurrently.
+// CheckPeerFlow will update oldItem's rollingLoads into newItem, thus we should use write lock here.
 func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
-	f.RLock()
-	defer f.RUnlock()
+	f.Lock()
+	defer f.Unlock()
 	interval := peer.GetInterval()
 	if Denoising && interval < HotRegionReportMinInterval {
 		return nil

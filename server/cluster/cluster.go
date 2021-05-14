@@ -574,8 +574,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if len(expiredStats) > 0 {
 		for _, stat := range expiredStats {
 			item := statistics.NewFlowItem(nil, nil, stat)
-			c.hotStat.CheckReadAsync(item)
-			c.hotStat.CheckWriteAsync(item)
+			if stat.Kind == statistics.WriteFlow {
+				c.hotStat.CheckWriteAsync(item)
+			} else {
+				c.hotStat.CheckReadAsync(item)
+			}
 		}
 	}
 	reportInterval := region.GetInterval()
