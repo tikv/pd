@@ -14,7 +14,6 @@
 package api
 
 import (
-	"context"
 	"net/http"
 	"net/http/pprof"
 	"strings"
@@ -47,7 +46,7 @@ func createIndentRender() *render.Render {
 // @license.name Apache 2.0
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
 // @BasePath /pd/api/v1
-func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.Router {
+func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()

@@ -304,9 +304,9 @@ func (s *calculationTestSuite) TestScaleOutGroupLabel(c *C) {
 	strategy := &Strategy{}
 	err := json.Unmarshal(jsonStr, strategy)
 	c.Assert(err, IsNil)
-	plan := findBestGroupToScaleOut(strategy, 0, nil, TiKV)
+	plan := findBestGroupToScaleOut(strategy, nil, TiKV)
 	c.Assert(plan.Labels["specialUse"], Equals, "hotRegion")
-	plan = findBestGroupToScaleOut(strategy, 0, nil, TiDB)
+	plan = findBestGroupToScaleOut(strategy, nil, TiDB)
 	c.Assert(plan.Labels["specialUse"], Equals, "")
 }
 
@@ -357,20 +357,20 @@ func (s *calculationTestSuite) TestStrategyChangeCount(c *C) {
 	// exist two scaled TiKVs and plan does not change due to the limit of resource count
 	groups, err := getScaledTiKVGroups(cluster, instances)
 	c.Assert(err, IsNil)
-	plans := calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, instances, groups)
+	plans := calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, groups)
 	c.Assert(plans[0].Count, Equals, uint64(2))
 
 	// change the resource count to 3 and plan increates one more tikv
 	groups, err = getScaledTiKVGroups(cluster, instances)
 	c.Assert(err, IsNil)
 	*strategy.Resources[0].Count = 3
-	plans = calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, instances, groups)
+	plans = calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, groups)
 	c.Assert(plans[0].Count, Equals, uint64(3))
 
 	// change the resource count to 1 and plan decreases to 1 tikv due to the limit of resource count
 	groups, err = getScaledTiKVGroups(cluster, instances)
 	c.Assert(err, IsNil)
 	*strategy.Resources[0].Count = 1
-	plans = calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, instances, groups)
+	plans = calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, groups)
 	c.Assert(plans[0].Count, Equals, uint64(1))
 }

@@ -134,6 +134,21 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
 }
 
+func (s *testRejectLeaderSuite) TestRemoveRejectLeader(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opts := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opts)
+	tc.AddRegionStore(1, 0)
+	tc.AddRegionStore(2, 1)
+	oc := schedule.NewOperatorController(ctx, tc, nil)
+	el, err := schedule.CreateScheduler(EvictLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
+	c.Assert(err, IsNil)
+	tc.DeleteStore(tc.GetStore(1))
+	succ, _ := el.(*evictLeaderScheduler).conf.removeStore(1)
+	c.Assert(succ, IsTrue)
+}
+
 var _ = Suite(&testShuffleHotRegionSchedulerSuite{})
 
 type testShuffleHotRegionSchedulerSuite struct{}
@@ -149,12 +164,12 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
-	s.checkBalance(c, tc, opt, hb)
+	s.checkBalance(c, tc, hb)
 	tc.SetEnablePlacementRules(true)
-	s.checkBalance(c, tc, opt, hb)
+	s.checkBalance(c, tc, hb)
 }
 
-func (s *testShuffleHotRegionSchedulerSuite) checkBalance(c *C, tc *mockcluster.Cluster, opt *config.PersistOptions, hb schedule.Scheduler) {
+func (s *testShuffleHotRegionSchedulerSuite) checkBalance(c *C, tc *mockcluster.Cluster, hb schedule.Scheduler) {
 	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "host": "h2"})
@@ -217,9 +232,9 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	tc.UpdateStorageReadBytes(2, 4.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
 
-	tc.AddLeaderRegionWithReadInfo(1, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2})
-	tc.AddLeaderRegionWithReadInfo(2, 2, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{1, 3})
-	tc.AddLeaderRegionWithReadInfo(3, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2, 3})
+	tc.AddRegionWithReadInfo(1, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2})
+	tc.AddRegionWithReadInfo(2, 2, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{1, 3})
+	tc.AddRegionWithReadInfo(3, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2, 3})
 	tc.SetHotRegionCacheHitsThreshold(0)
 	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
 	c.Assert(hb.Schedule(tc), IsNil)

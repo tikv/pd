@@ -367,7 +367,7 @@ func filterHotPeers(
 	return ret
 }
 
-func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, opTy opType) bool {
+func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence) bool {
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
 	if ok {
@@ -555,7 +555,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 
 	for i := 0; i < len(ops); i++ {
 		// TODO: multiple operators need to be atomic.
-		if !bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i], bs.opTy) {
+		if !bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i]) {
 			return nil
 		}
 	}
@@ -999,18 +999,32 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
 		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
-		desc := "move-hot-" + bs.rwTy.String() + "-peer"
-		op, err = operator.CreateMovePeerOperator(
-			desc,
-			bs.cluster,
-			bs.cur.region,
-			operator.OpHotRegion,
-			bs.cur.srcStoreID,
-			dstPeer)
-
+		typ := "move-peer"
+		if bs.rwTy == read && bs.cur.region.GetLeader().StoreId == bs.cur.srcStoreID { // move read leader
+			if !bs.sche.allowBalanceLeader(bs.cluster) {
+				return nil, nil
+			}
+			op, err = operator.CreateMoveLeaderOperator(
+				"move-hot-read-leader",
+				bs.cluster,
+				bs.cur.region,
+				operator.OpHotRegion,
+				bs.cur.srcStoreID,
+				dstPeer)
+			typ = "move-leader"
+		} else {
+			desc := "move-hot-" + bs.rwTy.String() + "-peer"
+			op, err = operator.CreateMovePeerOperator(
+				desc,
+				bs.cluster,
+				bs.cur.region,
+				operator.OpHotRegion,
+				bs.cur.srcStoreID,
+				dstPeer)
+		}
 		counters = append(counters,
-			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
-			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
+			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
+			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
 	case transferLeader:
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
 			return nil, nil
