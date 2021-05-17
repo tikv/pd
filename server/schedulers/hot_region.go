@@ -1072,11 +1072,16 @@ func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
 	h.RLock()
 	defer h.RUnlock()
 	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[readLeader]))
+	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[readPeer]))
 	for id, detail := range h.stLoadInfos[readLeader] {
 		asLeader[id] = detail.toHotPeersStat()
 	}
+	for id, detail := range h.stLoadInfos[readPeer] {
+		asPeer[id] = detail.toHotPeersStat()
+	}
 	return &statistics.StoreHotPeersInfos{
 		AsLeader: asLeader,
+		AsPeer:   asPeer,
 	}
 }
 

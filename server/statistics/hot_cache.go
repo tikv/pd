@@ -140,7 +140,7 @@ func (w *HotCache) HotRegionsFromStore(storeID uint64, kind FlowKind, minHotDegr
 // IsRegionHot checks if the region is hot.
 func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 	return w.writeFlow.isRegionHotWithAnyPeers(region, minHotDegree) ||
-		w.readFlow.isRegionHotWithPeer(region, region.GetLeader(), minHotDegree)
+		w.readFlow.isRegionHotWithAnyPeers(region, minHotDegree)
 }
 
 // CollectMetrics collects the hot cache metrics.
