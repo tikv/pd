@@ -15,6 +15,11 @@ package schedulers
 
 import "github.com/prometheus/client_golang/prometheus"
 
+const (
+	KB = 1024
+	MB = 1024 * KB
+)
+
 var schedulerCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",
@@ -111,6 +116,24 @@ var scatterRangeRegionCounter = prometheus.NewCounterVec(
 		Help:      "Counter of scatter range region scheduler.",
 	}, []string{"type", "store"})
 
+var peerKeysRate = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "peer_keys_rate",
+		Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
+		Buckets:   prometheus.ExponentialBuckets(32, 2, 10),
+	}, []string{"type", "store"})
+
+var peerBytesRate = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "peer_bytes_rate",
+		Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
+		Buckets:   prometheus.ExponentialBuckets(2*KB, 2, 10),
+	}, []string{"type", "store"})
+
 func init() {
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(schedulerStatus)
@@ -124,4 +147,6 @@ func init() {
 	prometheus.MustRegister(scatterRangeRegionCounter)
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
+	prometheus.MustRegister(peerKeysRate)
+	prometheus.MustRegister(peerBytesRate)
 }

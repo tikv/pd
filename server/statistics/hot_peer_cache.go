@@ -46,8 +46,8 @@ const (
 var minHotThresholds = [RegionStatCount]float64{
 	RegionWriteBytes: 1 * 1024,
 	RegionWriteKeys:  32,
-	RegionReadBytes:  8 * 1024,
-	RegionReadKeys:   128,
+	RegionReadBytes:  2 * 1024,
+	RegionReadKeys:   32,
 }
 
 // hotPeerCache saves the hot peer's statistics.
