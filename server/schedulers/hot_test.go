@@ -845,7 +845,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
 
 			op2 := hb.Schedule(tc)[0]
-			testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
 			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
 
 			ops := hb.Schedule(tc)
@@ -860,20 +860,20 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
 
 			op2 := hb.Schedule(tc)[0]
-			testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
 			// store bytekey rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
 			c.Assert(op2.Cancel(), IsTrue)
 			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
 
 			op2 = hb.Schedule(tc)[0]
-			testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
 			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
 
 			c.Assert(op1.Cancel(), IsTrue)
 			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
 			op3 := hb.Schedule(tc)[0]
-			testutil.CheckTransferPeerWithLeaderTransfer(c, op3, operator.OpHotRegion, 1, 4)
+			testutil.CheckTransferPeer(c, op3, operator.OpHotRegion, 1, 4)
 			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 
 			ops := hb.Schedule(tc)
@@ -1074,6 +1074,15 @@ type testRegionInfo struct {
 	keyRate  float64
 }
 
+type testRegionPeerInfo struct {
+	id                uint64
+	targetPeerStoreID uint64
+	// the storeID list for the peers, the leader is stored in the first store
+	peers    []uint64
+	byteRate float64
+	keyRate  float64
+}
+
 func addRegionInfo(tc *mockcluster.Cluster, rwTy rwType, regions []testRegionInfo) {
 	addFunc := tc.AddRegionWithReadInfo
 	if rwTy == write {
@@ -1104,6 +1113,21 @@ func addRegionLeaderReadInfo(tc *mockcluster.Cluster, regions []testRegionInfo) 
 			uint64(r.keyRate*float64(reportIntervalSecs)),
 			uint64(reportIntervalSecs),
 			r.peers[1:],
+		)
+	}
+}
+
+func addRegionPeerReadInfo(tc *mockcluster.Cluster, regions []testRegionPeerInfo) {
+	addFunc := tc.AddRegionWithPeerReadInfo
+	reportIntervalSecs := statistics.ReadReportInterval
+	for _, r := range regions {
+		addFunc(
+			r.id, r.peers[0], r.targetPeerStoreID,
+			uint64(r.byteRate*float64(reportIntervalSecs)),
+			uint64(r.keyRate*float64(reportIntervalSecs)),
+			uint64(reportIntervalSecs),
+			r.peers[1:],
+			3,
 		)
 	}
 }
@@ -1313,4 +1337,31 @@ func nearlyAbout(f1, f2 float64) bool {
 		return true
 	}
 	return false
+}
+
+func (s *testHotSchedulerSuite) TestHotReadPeerSchedule(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetMaxReplicas(3)
+	tc.SetLocationLabels([]string{"zone", "host"})
+	for id := uint64(1); id <= 6; id++ {
+		tc.PutStoreWithLabels(id)
+	}
+
+	sche, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
+	c.Assert(err, IsNil)
+	hb := sche.(*hotScheduler)
+
+	tc.UpdateStorageReadStats(1, 20*MB, 20*MB)
+	tc.UpdateStorageReadStats(2, 19*MB, 19*MB)
+	tc.UpdateStorageReadStats(3, 19*MB, 19*MB)
+	tc.UpdateStorageReadStats(4, 0*MB, 0*MB)
+	addRegionPeerReadInfo(tc, []testRegionPeerInfo{
+		{1, 1, []uint64{3, 1, 2}, 0.94 * KB, 0.94 * KB},
+	})
+	op := hb.Schedule(tc)[0]
+	testutil.CheckTransferPeer(c, op, operator.OpHotRegion, 1, 4)
 }
