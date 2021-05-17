@@ -45,7 +45,7 @@ func (w *WMA) Add(n float64) {
 	if w.count < w.size {
 		w.sum = w.sum + n
 	} else {
-		w.sum = w.sum - w.records[(w.count)%w.size] + n
+		w.sum = w.sum - w.records[w.count%w.size] + n
 	}
 	w.records[w.count%w.size] = n
 	w.count++
