@@ -343,9 +343,9 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	tc.AddLabelsStore(5, 3, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 5)
 	// Store 5 has too many snapshots, choose store 4
-	tc.UpdateSnapshotCount(5, 10)
+	tc.UpdateSnapshotCount(5, 100)
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 4)
-	tc.UpdatePendingPeerCount(4, 30)
+	tc.UpdatePendingPeerCount(4, 100)
 	c.Assert(rc.Check(region), IsNil)
 }
 
