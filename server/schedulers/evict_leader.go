@@ -129,8 +129,8 @@ func (conf *evictLeaderSchedulerConfig) getSchedulerName() string {
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	var res []string
 	ranges := conf.StoreIDWithRanges[id]
+	res := make([]string, 0, len(ranges)*2)
 	for index := range ranges {
 		res = append(res, (string)(ranges[index].StartKey), (string)(ranges[index].EndKey))
 	}
@@ -216,7 +216,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Operator {
-	var ops []*operator.Operator
+	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
 	for id, ranges := range s.conf.StoreIDWithRanges {
 		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
 		if region == nil {

@@ -971,8 +971,9 @@ func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
 
 // GetAllocators get all allocators with some filters.
 func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []Allocator {
-	var allocators []Allocator
-	for _, ag := range am.getAllocatorGroups(filters...) {
+	allocatorGroups := am.getAllocatorGroups(filters...)
+	allocators := make([]Allocator, 0, len(allocatorGroups))
+	for _, ag := range allocatorGroups {
 		allocators = append(allocators, ag.allocator)
 	}
 	return allocators
