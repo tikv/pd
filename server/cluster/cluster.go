@@ -536,8 +536,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
+	regionIDs := make(map[uint64]struct{}, 0)
 	for _, peerStat := range stats.GetPeerStats() {
 		regionID := peerStat.GetRegionId()
+		regionIDs[regionID] = struct{}{}
 		region := c.GetRegion(regionID)
 		if region == nil {
 			log.Warn("discard hot peer stat for unknown region",
@@ -554,10 +556,11 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		}
 		peerInfo := core.NewPeerInfo(peer, 0, 0,
 			peerStat.GetReadBytes(), peerStat.GetReadKeys(), interval)
-		item := statistics.NewFlowItem(peerInfo, region, nil)
+		item := statistics.NewFlowItem(peerInfo, region, nil, nil)
 		c.hotStat.CheckReadAsync(item)
 	}
-
+	coldItem := statistics.NewFlowItem(nil, nil, nil, statistics.NewStoreColdItem(storeID, regionIDs, interval))
+	c.hotStat.CheckReadAsync(coldItem)
 	return nil
 }
 
@@ -573,7 +576,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Put expiredStats into read/write queue to update stats
 	if len(expiredStats) > 0 {
 		for _, stat := range expiredStats {
-			item := statistics.NewFlowItem(nil, nil, stat)
+			item := statistics.NewFlowItem(nil, nil, stat, nil)
 			if stat.Kind == statistics.WriteFlow {
 				c.hotStat.CheckWriteAsync(item)
 			} else {
@@ -588,7 +591,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetBytesWritten(), region.GetKeysWritten(),
 			0, 0,
 			interval)
-		item := statistics.NewFlowItem(peerInfo, region, nil)
+		item := statistics.NewFlowItem(peerInfo, region, nil, nil)
 		c.hotStat.CheckWriteAsync(item)
 	}
 	c.RUnlock()

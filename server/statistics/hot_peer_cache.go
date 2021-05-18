@@ -56,6 +56,7 @@ type hotPeerCache struct {
 	kind               FlowKind
 	peersOfStore       map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion     map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	regionsOfStore     map[uint64]map[uint64]struct{} // storeID -> regionIDs
 	inheritItem        map[uint64]*HotPeerStat        // regionID -> HotPeerStat
 	topNTTL            time.Duration
 	reportIntervalSecs int
@@ -67,6 +68,7 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
+		regionsOfStore: make(map[uint64]map[uint64]struct{}),
 		inheritItem:    make(map[uint64]*HotPeerStat),
 	}
 	if kind == WriteFlow {
@@ -106,10 +108,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 		if peers, ok := f.peersOfStore[item.StoreID]; ok {
 			peers.Remove(item.RegionID)
 		}
-
-		if stores, ok := f.storesOfRegion[item.RegionID]; ok {
-			delete(stores, item.StoreID)
-		}
+		f.removeItem(item)
 		item.Log("region heartbeat delete from cache", log.Debug)
 	} else {
 		peers, ok := f.peersOfStore[item.StoreID]
@@ -118,13 +117,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 			f.peersOfStore[item.StoreID] = peers
 		}
 		peers.Put(item)
-
-		stores, ok := f.storesOfRegion[item.RegionID]
-		if !ok {
-			stores = make(map[uint64]struct{})
-			f.storesOfRegion[item.RegionID] = stores
-		}
-		stores[item.StoreID] = struct{}{}
+		f.putItem(item)
 		item.Log("region heartbeat update", log.Debug)
 	}
 }
@@ -219,6 +212,47 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		}
 	}
 	return f.updateHotPeerStat(newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
+}
+
+// CheckColdPeer checks the collect the un-heartbeat peer and maintain it.
+func (f *hotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]struct{}, interval uint64) (ret []*HotPeerStat) {
+	f.Lock()
+	defer f.Unlock()
+	if Denoising && interval < HotRegionReportMinInterval {
+		return
+	}
+	previousHotStat, ok := f.regionsOfStore[storeID]
+	if !ok {
+		return
+	}
+	emptyLoads := make([]float64, RegionStatCount)
+	for regionID := range previousHotStat {
+		if _, ok := reportRegions[regionID]; !ok {
+			oldItem := f.getOldHotPeerStat(regionID, storeID)
+			if oldItem == nil {
+				continue
+			}
+			newItem := &HotPeerStat{
+				StoreID:  storeID,
+				RegionID: regionID,
+				Kind:     f.kind,
+				// use emptyLoads to make stat cold
+				Loads:              emptyLoads,
+				LastUpdateTime:     time.Now(),
+				needDelete:         false,
+				isLeader:           oldItem.isLeader,
+				justTransferLeader: oldItem.justTransferLeader,
+				interval:           interval,
+				peers:              oldItem.peers,
+				thresholds:         oldItem.thresholds,
+			}
+			stat := f.updateHotPeerStat(newItem, oldItem, emptyLoads, time.Duration(interval)*time.Second)
+			if stat != nil {
+				ret = append(ret, stat)
+			}
+		}
+	}
+	return
 }
 
 func (f *hotPeerCache) CollectMetrics(typ string) {
@@ -462,4 +496,28 @@ func (f *hotPeerCache) takeInheritItem(regionID uint64) *HotPeerStat {
 		return item
 	}
 	return nil
+}
+
+func (f *hotPeerCache) putItem(item *HotPeerStat) {
+	stores, ok := f.storesOfRegion[item.RegionID]
+	if !ok {
+		stores = make(map[uint64]struct{})
+		f.storesOfRegion[item.RegionID] = stores
+	}
+	stores[item.StoreID] = struct{}{}
+	regions, ok := f.regionsOfStore[item.StoreID]
+	if !ok {
+		regions = make(map[uint64]struct{})
+		f.regionsOfStore[item.StoreID] = regions
+	}
+	regions[item.RegionID] = struct{}{}
+}
+
+func (f *hotPeerCache) removeItem(item *HotPeerStat) {
+	if stores, ok := f.storesOfRegion[item.RegionID]; ok {
+		delete(stores, item.StoreID)
+	}
+	if regions, ok := f.regionsOfStore[item.StoreID]; ok {
+		delete(regions, item.RegionID)
+	}
 }

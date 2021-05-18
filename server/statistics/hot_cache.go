@@ -35,17 +35,35 @@ type HotCache struct {
 
 // FlowItem indicates the item in the flow, it is a wrapper for peerInfo or expiredItems
 type FlowItem struct {
-	peerInfo    *core.PeerInfo
-	regionInfo  *core.RegionInfo
-	expiredStat *HotPeerStat
+	peerInfo      *core.PeerInfo
+	regionInfo    *core.RegionInfo
+	expiredStat   *HotPeerStat
+	storeColdItem *StoreColdItem
+}
+
+// StoreColdItem contains information to check store cold items
+type StoreColdItem struct {
+	storeID   uint64
+	regionIDs map[uint64]struct{}
+	interval  uint64
+}
+
+// NewStoreColdItem creates StoreColdItem
+func NewStoreColdItem(storeID uint64, regionIDs map[uint64]struct{}, interval uint64) *StoreColdItem {
+	return &StoreColdItem{
+		storeID:   storeID,
+		regionIDs: regionIDs,
+		interval:  interval,
+	}
 }
 
 // NewFlowItem creates FlowItem
-func NewFlowItem(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo, expiredStat *HotPeerStat) *FlowItem {
+func NewFlowItem(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo, expiredStat *HotPeerStat, coldItem *StoreColdItem) *FlowItem {
 	return &FlowItem{
-		peerInfo:    peerInfo,
-		regionInfo:  regionInfo,
-		expiredStat: expiredStat,
+		peerInfo:      peerInfo,
+		regionInfo:    regionInfo,
+		expiredStat:   expiredStat,
+		storeColdItem: coldItem,
 	}
 }
 
@@ -200,5 +218,10 @@ func (w *HotCache) updateItem(item *FlowItem, flow *hotPeerCache) {
 		}
 	} else if item.expiredStat != nil {
 		w.Update(item.expiredStat)
+	} else if item.storeColdItem != nil {
+		stats := flow.CheckColdPeer(item.storeColdItem.storeID, item.storeColdItem.regionIDs, item.storeColdItem.interval)
+		for _, stat := range stats {
+			w.Update(stat)
+		}
 	}
 }

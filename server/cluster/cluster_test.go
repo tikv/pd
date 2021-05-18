@@ -93,6 +93,40 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(tmp, DeepEquals, storeMetasAfterHeartbeat[i])
 	}
+	hotHeartBeat := &pdpb.StoreStats{
+		StoreId:     1,
+		RegionCount: 1,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: 0,
+			EndTimestamp:   10,
+		},
+		PeerStats: []*pdpb.PeerStat{
+			{
+				RegionId:  1,
+				ReadKeys:  9999999,
+				ReadBytes: 9999999,
+			},
+		},
+	}
+	coldHeartBeat := &pdpb.StoreStats{
+		StoreId:     1,
+		RegionCount: 1,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: 0,
+			EndTimestamp:   10,
+		},
+		PeerStats: []*pdpb.PeerStat{
+		},
+	}
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(100 * time.Millisecond)
+	storeStats := cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	time.Sleep(100 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	c.Assert(storeStats[1], HasLen, 0)
 }
 
 func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
