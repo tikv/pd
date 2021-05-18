@@ -210,15 +210,6 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 
 	{ // update read statistics
 		regionRead := cluster.RegionReadStats()
-		for storeID, stats := range regionRead {
-			storeIDStr := strconv.Itoa(int(storeID))
-			for _, stat := range stats {
-				readBytes := stat.GetLoad(statistics.RegionReadBytes)
-				readKeys := stat.GetLoad(statistics.RegionReadKeys)
-				peerBytesRate.WithLabelValues("read", storeIDStr).Observe(readBytes)
-				peerKeysRate.WithLabelValues("read", storeIDStr).Observe(readKeys)
-			}
-		}
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
 			storesLoads,
 			h.pendingSums,
@@ -844,18 +835,12 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			// If belong to the case, byte rate will be more balanced, ignore the key rate.
 			rank = -1
 		}
-		log.Debug("calcProgressiveRank",
-			zap.Uint64("region-id", bs.cur.region.GetID()),
-			zap.Uint64("from-store-id", bs.cur.srcStoreID),
-			zap.Uint64("to-store-id", bs.cur.dstStoreID),
-			zap.Bool("is-key-hot", keyHot),
-			zap.Bool("is-byte-hot", byteHot),
-			zap.Int64("rank", rank),
-			zap.Float64("byteDecRatio", byteDecRatio),
-			zap.Float64("keyDecRatio", keyDecRatio),
-			zap.Float64("greatDecRatio", greatDecRatio),
-			zap.Float64("minorDecRatio", minorDecRatio))
 	}
+	log.Debug("calcProgressiveRank",
+		zap.Uint64("region-id", bs.cur.region.GetID()),
+		zap.Uint64("from-store-id", bs.cur.srcStoreID),
+		zap.Uint64("to-store-id", bs.cur.dstStoreID),
+		zap.Int64("rank", rank))
 	bs.cur.progressiveRank = rank
 }
 
