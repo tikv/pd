@@ -95,7 +95,8 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
 type AllocatorManager struct {
-	mu struct {
+	enableLocalTSO bool
+	mu             struct {
 		sync.RWMutex
 		// There are two kinds of TSO Allocators:
 		//   1. Global TSO Allocator, as a global single point to allocate
@@ -128,18 +129,17 @@ type AllocatorManager struct {
 func NewAllocatorManager(
 	m *member.Member,
 	rootPath string,
-	saveInterval time.Duration,
-	updatePhysicalInterval time.Duration,
+	cfg *config.Config,
 	maxResetTSGap func() time.Duration,
-	sc *grpcutil.TLSConfig,
 ) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
+		enableLocalTSO:         cfg.EnableLocalTSO,
 		member:                 m,
 		rootPath:               rootPath,
-		saveInterval:           saveInterval,
-		updatePhysicalInterval: updatePhysicalInterval,
+		saveInterval:           cfg.TSOSaveInterval.Duration,
+		updatePhysicalInterval: cfg.TSOUpdatePhysicalInterval.Duration,
 		maxResetTSGap:          maxResetTSGap,
-		securityConfig:         sc,
+		securityConfig:         &cfg.Security.TLSConfig,
 	}
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	allocatorManager.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
@@ -392,7 +392,7 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 			}
 			continue
 		}
-		if !ok || dcLocationInfo.Suffix <= 0 {
+		if !ok || dcLocationInfo.Suffix <= 0 || dcLocationInfo.MaxTs == nil {
 			log.Warn("pd leader is not aware of dc-location during allocatorLeaderLoop, wait next round",
 				zap.String("dc-location", allocator.GetDCLocation()),
 				zap.Any("dc-location-info", dcLocationInfo),
@@ -533,24 +533,36 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
 // any new local allocator that needs to be set up.
 func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
+	// allocatorPatroller should only work when enableLocalTSO is true to
+	// set up the new Local TSO Allocator in time.
+	var patrolTicker = &time.Ticker{}
+	if am.enableLocalTSO {
+		patrolTicker = time.NewTicker(patrolStep)
+		defer patrolTicker.Stop()
+	}
 	tsTicker := time.NewTicker(am.updatePhysicalInterval)
 	defer tsTicker.Stop()
-	patrolTicker := time.NewTicker(patrolStep)
-	defer patrolTicker.Stop()
 	checkerTicker := time.NewTicker(PriorityCheck)
 	defer checkerTicker.Stop()
 
 	for {
 		select {
-		case <-tsTicker.C:
-			am.allocatorUpdater()
 		case <-patrolTicker.C:
+			// Inspect the cluster dc-location info and set up the new Local TSO Allocator in time.
 			am.allocatorPatroller(serverCtx)
+		case <-tsTicker.C:
+			// Update the initialized TSO Allocator to advance TSO.
+			am.allocatorUpdater()
 		case <-checkerTicker.C:
-			// ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
-			// we should run them concurrently to speed up the progress.
+			// Check and maintain the cluster's meta info about dc-location distribution.
 			go am.ClusterDCLocationChecker()
-			go am.PriorityChecker()
+			// We won't have any Local TSO Allocator set up in PD without enabling Local TSO.
+			if am.enableLocalTSO {
+				// Check the election priority of every Local TSO Allocator this PD is holding.
+				go am.PriorityChecker()
+			}
+			// PS: ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
+			// we should run them concurrently to speed up the progress.
 		case <-serverCtx.Done():
 			return
 		}
@@ -748,7 +760,7 @@ func (am *AllocatorManager) getMaxLocalTSOSuffix() (int32, error) {
 	// Try to get the suffix from etcd
 	dcLocationSuffix, err := am.getDCLocationSuffixMapFromEtcd()
 	if err != nil {
-		return -1, nil
+		return -1, err
 	}
 	var maxSuffix int32
 	for _, suffix := range dcLocationSuffix {
@@ -778,13 +790,7 @@ func (am *AllocatorManager) GetLocalTSOSuffixPath(dcLocation string) string {
 // of DC could be elected.
 func (am *AllocatorManager) PriorityChecker() {
 	serverID := am.member.ID()
-	myServerDCLocation, err := am.getServerDCLocation(serverID)
-	if err != nil {
-		log.Error("skip checking allocator priority, failed to get server's dc-location",
-			zap.Uint64("server-id", serverID),
-			errs.ZapError(err))
-		return
-	}
+	myServerDCLocation := am.getServerDCLocation(serverID)
 	// Check all Local TSO Allocator followers to see if their priorities is higher than the leaders
 	// Filter out allocators with leadership and initialized
 	allocatorGroups := am.getAllocatorGroups(FilterDCLocation(GlobalDCLocation), FilterAvailableLeadership())
@@ -795,13 +801,7 @@ func (am *AllocatorManager) PriorityChecker() {
 		if leaderServerID == 0 {
 			continue
 		}
-		leaderServerDCLocation, err := am.getServerDCLocation(leaderServerID)
-		if err != nil {
-			log.Error("failed to get local tso allocator leader's dc-location",
-				zap.Uint64("server-id", serverID),
-				errs.ZapError(err))
-			continue
-		}
+		leaderServerDCLocation := am.getServerDCLocation(leaderServerID)
 		// For example, an allocator leader for dc-1 is elected by a server of dc-2, then the server of dc-1 will
 		// find this allocator's dc-location isn't the same with server of dc-2 but is same with itself.
 		if allocatorGroup.dcLocation != leaderServerDCLocation && allocatorGroup.dcLocation == myServerDCLocation {
@@ -810,14 +810,13 @@ func (am *AllocatorManager) PriorityChecker() {
 				zap.String("old-dc-location", leaderServerDCLocation),
 				zap.Uint64("next-leader-id", serverID),
 				zap.String("next-dc-location", myServerDCLocation))
-			err = am.transferLocalAllocator(allocatorGroup.dcLocation, am.member.ID())
-			if err != nil {
+			if err := am.transferLocalAllocator(allocatorGroup.dcLocation, am.member.ID()); err != nil {
 				log.Error("move the local tso allocator failed",
 					zap.Uint64("old-leader-id", leaderServerID),
 					zap.String("old-dc-location", leaderServerDCLocation),
 					zap.Uint64("next-leader-id", serverID),
 					zap.String("next-dc-location", myServerDCLocation),
-					zap.Error(err))
+					errs.ZapError(err))
 				continue
 			}
 		}
@@ -863,15 +862,15 @@ func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, me
 	return am.transferLocalAllocator(dcLocation, memberID)
 }
 
-func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error) {
+func (am *AllocatorManager) getServerDCLocation(serverID uint64) string {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	for dcLocation, info := range am.mu.clusterDCLocations {
 		if slice.AnyOf(info.ServerIDs, func(i int) bool { return info.ServerIDs[i] == serverID }) {
-			return dcLocation, nil
+			return dcLocation
 		}
 	}
-	return "", nil
+	return ""
 }
 
 func (am *AllocatorManager) getNextLeaderID(dcLocation string) (uint64, error) {
@@ -972,8 +971,9 @@ func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
 
 // GetAllocators get all allocators with some filters.
 func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []Allocator {
-	var allocators []Allocator
-	for _, ag := range am.getAllocatorGroups(filters...) {
+	allocatorGroups := am.getAllocatorGroups(filters...)
+	allocators := make([]Allocator, 0, len(allocatorGroups))
+	for _, ag := range allocatorGroups {
 		allocators = append(allocators, ag.allocator)
 	}
 	return allocators
@@ -1068,10 +1068,6 @@ func (am *AllocatorManager) getDCLocationInfoFromLeader(ctx context.Context, dcL
 // GetMaxLocalTSO will sync with the current Local TSO Allocators among the cluster to get the
 // max Local TSO.
 func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp, error) {
-	globalAllocator, err := am.GetAllocator(GlobalDCLocation)
-	if err != nil {
-		return &pdpb.Timestamp{}, err
-	}
 	// Sync the max local TSO from the other Local TSO Allocators who has been initialized
 	clusterDCLocations := am.GetClusterDCLocations()
 	for dcLocation := range clusterDCLocations {
@@ -1081,8 +1077,15 @@ func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp
 		}
 	}
 	maxTSO := &pdpb.Timestamp{}
+	if len(clusterDCLocations) == 0 {
+		return maxTSO, nil
+	}
+	globalAllocator, err := am.GetAllocator(GlobalDCLocation)
+	if err != nil {
+		return nil, err
+	}
 	if err := globalAllocator.(*GlobalTSOAllocator).SyncMaxTS(ctx, clusterDCLocations, maxTSO); err != nil {
-		return &pdpb.Timestamp{}, err
+		return nil, err
 	}
 	return maxTSO, nil
 }
@@ -1139,4 +1142,9 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID u
 
 func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
 	return path.Join(am.rootPath, dcLocation, "next-leader")
+}
+
+// EnableLocalTSO returns the value of AllocatorManager.enableLocalTSO.
+func (am *AllocatorManager) EnableLocalTSO() bool {
+	return am.enableLocalTSO
 }

@@ -14,16 +14,11 @@
 package encryption
 
 import (
-	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/typeutil"
 )
-
-func TestConfig(t *testing.T) {
-	TestingT(t)
-}
 
 type testConfigSuite struct{}
 

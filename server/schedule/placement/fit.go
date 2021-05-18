@@ -135,8 +135,9 @@ type fitWorker struct {
 }
 
 func newFitWorker(stores StoreSet, region *core.RegionInfo, rules []*Rule) *fitWorker {
-	var peers []*fitPeer
-	for _, p := range region.GetPeers() {
+	regionPeers := region.GetPeers()
+	peers := make([]*fitPeer, 0, len(regionPeers))
+	for _, p := range regionPeers {
 		peers = append(peers, &fitPeer{
 			Peer:     p,
 			store:    stores.GetStore(p.GetStoreId()),

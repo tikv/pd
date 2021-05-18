@@ -56,6 +56,11 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 		core.SetRegionConfVer(100),
 		core.SetRegionVersion(100),
 	)
+	region = region.Clone(core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}), core.SetPeers([]*metapb.Peer{
+		{
+			Id: 109, StoreId: 2,
+		},
+	}))
 	err := cluster.HandleRegionHeartbeat(region)
 	c.Assert(err, IsNil)
 

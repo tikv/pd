@@ -294,9 +294,10 @@ func (s *testRegionSuite) TestScatterRegions(c *C) {
 	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body))
 	c.Assert(err, IsNil)
 	op1 := s.svr.GetRaftCluster().GetOperatorController().GetOperator(601)
-	c.Assert(op1 != nil, Equals, true)
 	op2 := s.svr.GetRaftCluster().GetOperatorController().GetOperator(602)
-	c.Assert(op2 != nil, Equals, true)
+	op3 := s.svr.GetRaftCluster().GetOperatorController().GetOperator(603)
+	// At least one operator used to scatter region
+	c.Assert(op1 != nil || op2 != nil || op3 != nil, IsTrue)
 }
 
 func (s *testRegionSuite) TestSplitRegions(c *C) {

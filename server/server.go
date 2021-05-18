@@ -362,9 +362,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocator(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
-		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
-		s.GetTLSConfig())
+		s.member, s.rootPath, s.cfg,
+		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
 	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
 	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
@@ -845,16 +844,15 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	var rule *placement.Rule
 	if cfg.EnablePlacementRules {
 		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
-		rules := s.GetRaftCluster().GetRuleManager().GetAllRules()
+		defaultRule := s.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
 
 		CheckInDefaultRule := func() error {
 			// replication config  won't work when placement rule is enabled and exceeds one default rule
-			if !(len(rules) == 1 &&
-				len(rules[0].StartKey) == 0 && len(rules[0].EndKey) == 0 &&
-				rules[0].GroupID == "pd" && rules[0].ID == "default") {
+			if !(defaultRule != nil &&
+				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
 				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			rule = rules[0]
+			rule = defaultRule
 			if !(rule.Count == int(old.MaxReplicas) && reflect.DeepEqual(rule.LocationLabels, []string(old.LocationLabels))) {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
@@ -866,7 +864,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
-			rule = rules[0]
+			rule = defaultRule
 		}
 	}
 
@@ -1338,6 +1336,8 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
 			return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
 		}
+		// Since we don't read the body, we can close it immediately.
+		res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
 			return errs.ErrSendRequest.FastGenByArgs()
