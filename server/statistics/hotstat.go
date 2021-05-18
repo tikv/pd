@@ -13,6 +13,8 @@
 
 package statistics
 
+import "context"
+
 // HotStat contains cluster's hotspot statistics.
 type HotStat struct {
 	*HotCache
@@ -20,9 +22,9 @@ type HotStat struct {
 }
 
 // NewHotStat creates the container to hold cluster's hotspot statistics.
-func NewHotStat() *HotStat {
+func NewHotStat(ctx context.Context) *HotStat {
 	return &HotStat{
-		HotCache:    NewHotCache(),
+		HotCache:    NewHotCache(ctx),
 		StoresStats: NewStoresStats(),
 	}
 }

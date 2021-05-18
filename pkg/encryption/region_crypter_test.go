@@ -16,17 +16,12 @@ package encryption
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
-
-func TestRegionCrypter(t *testing.T) {
-	TestingT(t)
-}
 
 type testRegionCrypterSuite struct{}
 

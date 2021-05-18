@@ -128,7 +128,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 				}
 				// TODO: change it to the info level once the TiKV doesn't use it in a unary way.
 				log.Debug("create TSO forward stream", zap.String("forwarded-host", forwardedHost))
-				forwardStream, cancel, err = s.createTsoForwardStream(client, forwardedHost)
+				forwardStream, cancel, err = s.createTsoForwardStream(client)
 				if err != nil {
 					return err
 				}
@@ -536,7 +536,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 					return err
 				}
 				log.Info("create region heartbeat forward stream", zap.String("forwarded-host", forwardedHost))
-				forwardStream, cancel, err = s.createHeartbeatForwardStream(client, forwardedHost)
+				forwardStream, cancel, err = s.createHeartbeatForwardStream(client)
 				if err != nil {
 					return err
 				}
@@ -1468,7 +1468,7 @@ func (s *Server) isLocalRequest(forwardedHost string) bool {
 	return false
 }
 
-func (s *Server) createTsoForwardStream(client *grpc.ClientConn, addr string) (pdpb.PD_TsoClient, context.CancelFunc, error) {
+func (s *Server) createTsoForwardStream(client *grpc.ClientConn) (pdpb.PD_TsoClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	go checkStream(ctx, cancel, done)
@@ -1477,7 +1477,7 @@ func (s *Server) createTsoForwardStream(client *grpc.ClientConn, addr string) (p
 	return forwardStream, cancel, err
 }
 
-func (s *Server) createHeartbeatForwardStream(client *grpc.ClientConn, addr string) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
+func (s *Server) createHeartbeatForwardStream(client *grpc.ClientConn) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	go checkStream(ctx, cancel, done)

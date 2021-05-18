@@ -22,7 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 )
 
-func TestCrypter(t *testing.T) {
+func Test(t *testing.T) {
 	TestingT(t)
 }
 

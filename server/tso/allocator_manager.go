@@ -760,7 +760,7 @@ func (am *AllocatorManager) getMaxLocalTSOSuffix() (int32, error) {
 	// Try to get the suffix from etcd
 	dcLocationSuffix, err := am.getDCLocationSuffixMapFromEtcd()
 	if err != nil {
-		return -1, nil
+		return -1, err
 	}
 	var maxSuffix int32
 	for _, suffix := range dcLocationSuffix {
@@ -790,13 +790,7 @@ func (am *AllocatorManager) GetLocalTSOSuffixPath(dcLocation string) string {
 // of DC could be elected.
 func (am *AllocatorManager) PriorityChecker() {
 	serverID := am.member.ID()
-	myServerDCLocation, err := am.getServerDCLocation(serverID)
-	if err != nil {
-		log.Error("skip checking allocator priority, failed to get server's dc-location",
-			zap.Uint64("server-id", serverID),
-			errs.ZapError(err))
-		return
-	}
+	myServerDCLocation := am.getServerDCLocation(serverID)
 	// Check all Local TSO Allocator followers to see if their priorities is higher than the leaders
 	// Filter out allocators with leadership and initialized
 	allocatorGroups := am.getAllocatorGroups(FilterDCLocation(GlobalDCLocation), FilterAvailableLeadership())
@@ -807,13 +801,7 @@ func (am *AllocatorManager) PriorityChecker() {
 		if leaderServerID == 0 {
 			continue
 		}
-		leaderServerDCLocation, err := am.getServerDCLocation(leaderServerID)
-		if err != nil {
-			log.Error("failed to get local tso allocator leader's dc-location",
-				zap.Uint64("server-id", serverID),
-				errs.ZapError(err))
-			continue
-		}
+		leaderServerDCLocation := am.getServerDCLocation(leaderServerID)
 		// For example, an allocator leader for dc-1 is elected by a server of dc-2, then the server of dc-1 will
 		// find this allocator's dc-location isn't the same with server of dc-2 but is same with itself.
 		if allocatorGroup.dcLocation != leaderServerDCLocation && allocatorGroup.dcLocation == myServerDCLocation {
@@ -822,8 +810,7 @@ func (am *AllocatorManager) PriorityChecker() {
 				zap.String("old-dc-location", leaderServerDCLocation),
 				zap.Uint64("next-leader-id", serverID),
 				zap.String("next-dc-location", myServerDCLocation))
-			err = am.transferLocalAllocator(allocatorGroup.dcLocation, am.member.ID())
-			if err != nil {
+			if err := am.transferLocalAllocator(allocatorGroup.dcLocation, am.member.ID()); err != nil {
 				log.Error("move the local tso allocator failed",
 					zap.Uint64("old-leader-id", leaderServerID),
 					zap.String("old-dc-location", leaderServerDCLocation),
@@ -875,15 +862,15 @@ func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, me
 	return am.transferLocalAllocator(dcLocation, memberID)
 }
 
-func (am *AllocatorManager) getServerDCLocation(serverID uint64) (string, error) {
+func (am *AllocatorManager) getServerDCLocation(serverID uint64) string {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	for dcLocation, info := range am.mu.clusterDCLocations {
 		if slice.AnyOf(info.ServerIDs, func(i int) bool { return info.ServerIDs[i] == serverID }) {
-			return dcLocation, nil
+			return dcLocation
 		}
 	}
-	return "", nil
+	return ""
 }
 
 func (am *AllocatorManager) getNextLeaderID(dcLocation string) (uint64, error) {
@@ -984,8 +971,9 @@ func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
 
 // GetAllocators get all allocators with some filters.
 func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []Allocator {
-	var allocators []Allocator
-	for _, ag := range am.getAllocatorGroups(filters...) {
+	allocatorGroups := am.getAllocatorGroups(filters...)
+	allocators := make([]Allocator, 0, len(allocatorGroups))
+	for _, ag := range allocatorGroups {
 		allocators = append(allocators, ag.allocator)
 	}
 	return allocators
