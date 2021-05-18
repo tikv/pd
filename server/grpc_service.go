@@ -1302,8 +1302,8 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
-	var maxLocalTS *pdpb.Timestamp
 	if !request.GetSkipCheck() {
+		var maxLocalTS *pdpb.Timestamp
 		syncedDCs := make([]string, 0, len(allocatorLeaders))
 		for _, allocator := range allocatorLeaders {
 			// No longer leader, just skip here because
