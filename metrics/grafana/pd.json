@@ -4944,14 +4944,22 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": 0,
-          "description": "The total number of leader Regions under hot read on each TiKV instance",
+          "description": "The total number of peer Regions under hot read on each TiKV instance",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 53
+            "y": 18
           },
+          "hiddenSeries": false,
           "id": 60,
           "legend": {
             "alignAsTable": true,
@@ -4972,6 +4980,9 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
           "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
@@ -4983,19 +4994,27 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"hot_read_region_as_leader\"}",
+              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"hot_read_region_as_peer\"}",
               "format": "time_series",
+              "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "{{address}}-store-{{store}}",
+              "legendFormat": "{{address}}-store-{{store}}-peer",
               "refId": "A",
               "step": 4
+            },
+            {
+              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"hot_read_region_as_leader\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "{{address}}-store-{{store}}-leader",
+              "refId": "B"
             }
           ],
           "thresholds": [],
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Hot Region's leader distribution",
+          "title": "Hot Region's peer distribution",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -5040,14 +5059,22 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": 2,
-          "description": "The total bytes of hot read on leader Regions for each TiKV instance",
+          "description": "The total bytes of hot read on peer Regions for each TiKV instance",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 53
+            "y": 18
           },
+          "hiddenSeries": false,
           "id": 62,
           "legend": {
             "alignAsTable": true,
@@ -5068,8 +5095,12 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
           "paceLength": 10,
           "percentage": false,
+          "pluginVersion": "7.3.4",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -5079,20 +5110,28 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"total_read_bytes_as_leader\"}",
+              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"total_read_bytes_as_peer\"}",
               "format": "time_series",
+              "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "{{address}}-store-{{store}}",
+              "legendFormat": "{{address}}-store-{{store}}-peer",
               "metric": "pd_hotspot_status",
               "refId": "A",
               "step": 4
+            },
+            {
+              "expr": "pd_hotspot_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"total_read_bytes_as_leader\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "{{address}}-store-{{store}}-leader",
+              "refId": "B"
             }
           ],
           "thresholds": [],
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Total read bytes on hot leader Regions",
+          "title": "Total read bytes on hot peer Regions",
           "tooltip": {
             "shared": true,
             "sort": 0,
