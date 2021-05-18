@@ -844,16 +844,15 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	var rule *placement.Rule
 	if cfg.EnablePlacementRules {
 		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
-		rules := s.GetRaftCluster().GetRuleManager().GetAllRules()
+		defaultRule := s.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
 
 		CheckInDefaultRule := func() error {
 			// replication config  won't work when placement rule is enabled and exceeds one default rule
-			if !(len(rules) == 1 &&
-				len(rules[0].StartKey) == 0 && len(rules[0].EndKey) == 0 &&
-				rules[0].GroupID == "pd" && rules[0].ID == "default") {
+			if !(defaultRule != nil &&
+				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
 				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			rule = rules[0]
+			rule = defaultRule
 			if !(rule.Count == int(old.MaxReplicas) && reflect.DeepEqual(rule.LocationLabels, []string(old.LocationLabels))) {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
@@ -865,7 +864,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
-			rule = rules[0]
+			rule = defaultRule
 		}
 	}
 

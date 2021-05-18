@@ -112,7 +112,7 @@ func (c *clusterConfig) GetClientURL() string {
 }
 
 func (c *clusterConfig) GetClientURLs() []string {
-	var urls []string
+	urls := make([]string, 0, len(c.InitialServers))
 	for _, svr := range c.InitialServers {
 		urls = append(urls, svr.ClientURLs)
 	}

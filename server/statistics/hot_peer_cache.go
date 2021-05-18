@@ -187,8 +187,9 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	justTransferLeader := f.justTransferLeader(region)
 	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
 	thresholds := f.calcHotThresholds(storeID)
-	var peers []uint64
-	for _, peer := range region.GetPeers() {
+	regionPeers := region.GetPeers()
+	peers := make([]uint64, 0, len(regionPeers))
+	for _, peer := range regionPeers {
 		peers = append(peers, peer.StoreId)
 	}
 	newItem := &HotPeerStat{
@@ -263,7 +264,8 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 // gets the storeIDs, including old region and new region
 func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 	storeIDs := make(map[uint64]struct{})
-	ret := make([]uint64, 0, len(region.GetPeers()))
+	regionPeers := region.GetPeers()
+	ret := make([]uint64, 0, len(regionPeers))
 	// old stores
 	ids, ok := f.storesOfRegion[region.GetID()]
 	if ok {

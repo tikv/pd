@@ -1306,7 +1306,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
-	var processedDCs []string
+	processedDCs := make([]string, 0, len(allocatorLeaders))
 	if request.GetMaxTs() == nil || request.GetMaxTs().GetPhysical() == 0 {
 		// The first phase of synchronization: collect the max local ts
 		var maxLocalTS pdpb.Timestamp

@@ -739,7 +739,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			if !s.AllowSchedule() {
 				continue
 			}
-			if op := s.Schedule(); op != nil {
+			if op := s.Schedule(); len(op) > 0 {
 				added := c.opController.AddWaitingOperator(op...)
 				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
 			}
