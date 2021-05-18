@@ -1074,15 +1074,6 @@ type testRegionInfo struct {
 	keyRate  float64
 }
 
-type testRegionPeerInfo struct {
-	id                uint64
-	targetPeerStoreID uint64
-	// the storeID list for the peers, the leader is stored in the first store
-	peers    []uint64
-	byteRate float64
-	keyRate  float64
-}
-
 func addRegionInfo(tc *mockcluster.Cluster, rwTy rwType, regions []testRegionInfo) {
 	addFunc := tc.AddRegionWithReadInfo
 	if rwTy == write {
@@ -1113,21 +1104,6 @@ func addRegionLeaderReadInfo(tc *mockcluster.Cluster, regions []testRegionInfo) 
 			uint64(r.keyRate*float64(reportIntervalSecs)),
 			uint64(reportIntervalSecs),
 			r.peers[1:],
-		)
-	}
-}
-
-func addRegionPeerReadInfo(tc *mockcluster.Cluster, regions []testRegionPeerInfo) {
-	addFunc := tc.AddRegionWithPeerReadInfo
-	reportIntervalSecs := statistics.ReadReportInterval
-	for _, r := range regions {
-		addFunc(
-			r.id, r.peers[0], r.targetPeerStoreID,
-			uint64(r.byteRate*float64(reportIntervalSecs)),
-			uint64(r.keyRate*float64(reportIntervalSecs)),
-			uint64(reportIntervalSecs),
-			r.peers[1:],
-			3,
 		)
 	}
 }
@@ -1359,9 +1335,7 @@ func (s *testHotSchedulerSuite) TestHotReadPeerSchedule(c *C) {
 	tc.UpdateStorageReadStats(2, 19*MB, 19*MB)
 	tc.UpdateStorageReadStats(3, 19*MB, 19*MB)
 	tc.UpdateStorageReadStats(4, 0*MB, 0*MB)
-	addRegionPeerReadInfo(tc, []testRegionPeerInfo{
-		{1, 1, []uint64{3, 1, 2}, 0.94 * KB, 0.94 * KB},
-	})
+	tc.AddRegionWithPeerReadInfo(1, 3, 1, uint64(0.9*KB*float64(10)), uint64(0.9*KB*float64(10)), 10, []uint64{1, 2}, 3)
 	op := hb.Schedule(tc)[0]
 	testutil.CheckTransferPeer(c, op, operator.OpHotRegion, 1, 4)
 }
