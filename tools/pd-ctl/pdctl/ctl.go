@@ -45,7 +45,6 @@ func GetRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().String("cacert", "", "path of file that contains list of trusted SSL CAs")
 	rootCmd.PersistentFlags().String("cert", "", "path of file that contains X509 certificate in PEM format")
 	rootCmd.PersistentFlags().String("key", "", "path of file that contains X509 key in PEM format")
-	rootCmd.PersistentFlags().BoolP("help", "h", false, "help message")
 
 	rootCmd.AddCommand(
 		command.NewConfigCommand(),
