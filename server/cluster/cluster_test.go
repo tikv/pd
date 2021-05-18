@@ -270,6 +270,63 @@ func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	c.Assert(cluster.GetClusterVersion(), Equals, "5.0.0")
 }
 
+func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	newTestStores(4, "2.0.0")
+	peers := []*metapb.Peer{
+		{
+			Id:      1,
+			StoreId: 1,
+		},
+		{
+			Id:      2,
+			StoreId: 2,
+		},
+		{
+			Id:      3,
+			StoreId: 3,
+		},
+	}
+	leader := &metapb.Peer{
+		Id:      1,
+		StoreId: 1,
+	}
+	regionMeta := &metapb.Region{
+		Id:          1,
+		Peers:       peers,
+		StartKey:    []byte{byte(1)},
+		EndKey:      []byte{byte(1 + 1)},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+	}
+	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}),
+		core.SetWrittenBytes(30000*10),
+		core.SetWrittenKeys(300000*10))
+	err = cluster.processRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+	// wait HotStat to update items
+	time.Sleep(1 * time.Second)
+	stats := cluster.hotStat.RegionStats(statistics.WriteFlow, 0)
+	c.Assert(stats[1], HasLen, 1)
+	c.Assert(stats[2], HasLen, 1)
+	c.Assert(stats[3], HasLen, 1)
+	newPeer := &metapb.Peer{
+		Id:      4,
+		StoreId: 4,
+	}
+	region = region.Clone(core.WithRemoveStorePeer(2), core.WithAddPeer(newPeer))
+	err = cluster.processRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+	// wait HotStat to update items
+	time.Sleep(1 * time.Second)
+	stats = cluster.hotStat.RegionStats(statistics.WriteFlow, 0)
+	c.Assert(stats[1], HasLen, 1)
+	c.Assert(stats[2], HasLen, 0)
+	c.Assert(stats[3], HasLen, 1)
+	c.Assert(stats[4], HasLen, 1)
+}
+
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)

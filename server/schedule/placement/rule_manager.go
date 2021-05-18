@@ -453,7 +453,7 @@ func (m *RuleManager) GetRuleGroup(id string) *RuleGroup {
 func (m *RuleManager) GetRuleGroups() []*RuleGroup {
 	m.RLock()
 	defer m.RUnlock()
-	var groups []*RuleGroup
+	groups := make([]*RuleGroup, 0, len(m.ruleConfig.groups))
 	for _, g := range m.ruleConfig.groups {
 		groups = append(groups, g)
 	}
@@ -495,7 +495,7 @@ func (m *RuleManager) DeleteRuleGroup(id string) error {
 func (m *RuleManager) GetAllGroupBundles() []GroupBundle {
 	m.RLock()
 	defer m.RUnlock()
-	var bundles []GroupBundle
+	bundles := make([]GroupBundle, 0, len(m.ruleConfig.groups))
 	for _, g := range m.ruleConfig.groups {
 		bundles = append(bundles, GroupBundle{
 			ID:       g.ID,
