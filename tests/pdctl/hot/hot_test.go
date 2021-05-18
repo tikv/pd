@@ -101,7 +101,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 
-	statistics.Denoising = false
+	statistics.SetDenoising(false)
 	hotStoreID := uint64(1)
 	count := 0
 

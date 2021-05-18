@@ -115,8 +115,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 			StartTimestamp: 0,
 			EndTimestamp:   10,
 		},
-		PeerStats: []*pdpb.PeerStat{
-		},
+		PeerStats: []*pdpb.PeerStat{},
 	}
 	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
 	time.Sleep(100 * time.Millisecond)

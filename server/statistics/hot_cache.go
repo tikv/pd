@@ -17,11 +17,17 @@ import (
 	"context"
 
 	"github.com/tikv/pd/server/core"
+	"go.uber.org/atomic"
 )
 
 // Denoising is an option to calculate flow base on the real heartbeats. Should
 // only turned off by the simulator and the test.
-var Denoising = true
+var Denoising = atomic.NewBool(true)
+
+// SetDenoising set Denoising
+func SetDenoising(enabled bool) {
+	Denoising.Store(enabled)
+}
 
 const queueCap = 1000
 

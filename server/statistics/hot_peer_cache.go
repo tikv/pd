@@ -105,18 +105,9 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	defer f.Unlock()
 	if item.IsNeedDelete() {
 		f.putInheritItem(item)
-		if peers, ok := f.peersOfStore[item.StoreID]; ok {
-			peers.Remove(item.RegionID)
-		}
 		f.removeItem(item)
 		item.Log("region heartbeat delete from cache", log.Debug)
 	} else {
-		peers, ok := f.peersOfStore[item.StoreID]
-		if !ok {
-			peers = NewTopN(DimLen, TopNN, f.topNTTL)
-			f.peersOfStore[item.StoreID] = peers
-		}
-		peers.Put(item)
 		f.putItem(item)
 		item.Log("region heartbeat update", log.Debug)
 	}
@@ -167,7 +158,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	f.Lock()
 	defer f.Unlock()
 	interval := peer.GetInterval()
-	if Denoising && interval < HotRegionReportMinInterval {
+	if Denoising.Load() && interval < HotRegionReportMinInterval {
 		return nil
 	}
 	storeID := peer.GetStoreID()
@@ -218,7 +209,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 func (f *hotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]struct{}, interval uint64) (ret []*HotPeerStat) {
 	f.Lock()
 	defer f.Unlock()
-	if Denoising && interval < HotRegionReportMinInterval {
+	if Denoising.Load() && interval < HotRegionReportMinInterval {
 		return
 	}
 	previousHotStat, ok := f.regionsOfStore[storeID]
@@ -499,6 +490,12 @@ func (f *hotPeerCache) takeInheritItem(regionID uint64) *HotPeerStat {
 }
 
 func (f *hotPeerCache) putItem(item *HotPeerStat) {
+	peers, ok := f.peersOfStore[item.StoreID]
+	if !ok {
+		peers = NewTopN(DimLen, TopNN, f.topNTTL)
+		f.peersOfStore[item.StoreID] = peers
+	}
+	peers.Put(item)
 	stores, ok := f.storesOfRegion[item.RegionID]
 	if !ok {
 		stores = make(map[uint64]struct{})
@@ -514,6 +511,9 @@ func (f *hotPeerCache) putItem(item *HotPeerStat) {
 }
 
 func (f *hotPeerCache) removeItem(item *HotPeerStat) {
+	if peers, ok := f.peersOfStore[item.StoreID]; ok {
+		peers.Remove(item.RegionID)
+	}
 	if stores, ok := f.storesOfRegion[item.RegionID]; ok {
 		delete(stores, item.StoreID)
 	}

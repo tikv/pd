@@ -56,7 +56,7 @@ func main() {
 
 	simutil.InitLogger(*simLogLevel, *simLogFile)
 	simutil.InitCaseConfig(*storeNum, *regionNum, *enableTransferRegionCounter)
-	statistics.Denoising = false
+	statistics.SetDenoising(false)
 	if simutil.CaseConfigure.EnableTransferRegionCounter {
 		analysis.GetTransferCounter().Init(simutil.CaseConfigure.StoreNum, simutil.CaseConfigure.RegionNum)
 	}

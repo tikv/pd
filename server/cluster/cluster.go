@@ -536,7 +536,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
-	regionIDs := make(map[uint64]struct{}, 0)
+	regionIDs := make(map[uint64]struct{}, len(stats.GetPeerStats()))
 	for _, peerStat := range stats.GetPeerStats() {
 		regionID := peerStat.GetRegionId()
 		regionIDs[regionID] = struct{}{}
