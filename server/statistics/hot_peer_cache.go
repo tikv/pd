@@ -395,7 +395,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		// For write stat, as the stat is send by region heartbeat, the first heartbeat will be skipped.
 		// For read stat, as the stat is send by store heartbeat, the first heartbeat won't be skipped.
 		if newItem.Kind == WriteFlow {
-			succeedItemDegree(newItem, oldItem)
+			inheritItemDegree(newItem, oldItem)
 			return newItem
 		}
 	} else {
@@ -409,7 +409,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 	isFull := newItem.rollingLoads[0].isFull() // The intervals of dims are the same, so it is only necessary to determine whether any of them
 	if !isFull {
 		// not update hot degree and anti count
-		succeedItemDegree(newItem, oldItem)
+		inheritItemDegree(newItem, oldItem)
 	} else {
 		// If item is inCold, it means the pd didn't recv this item in the store heartbeat,
 		// thus we make it colder
@@ -546,7 +546,7 @@ func initItemDegree(item *HotPeerStat) {
 	item.AntiCount = hotRegionAntiCount
 }
 
-func succeedItemDegree(newItem, oldItem *HotPeerStat) {
+func inheritItemDegree(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree
 	newItem.AntiCount = oldItem.AntiCount
 }
