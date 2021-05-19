@@ -556,10 +556,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		}
 		peerInfo := core.NewPeerInfo(peer, 0, 0,
 			peerStat.GetReadBytes(), peerStat.GetReadKeys(), interval)
-		item := statistics.NewFlowItem(peerInfo, region, nil, nil)
+		item := statistics.NewPeerInfoItem(peerInfo, region)
 		c.hotStat.CheckReadAsync(item)
 	}
-	coldItem := statistics.NewFlowItem(nil, nil, nil, statistics.NewStoreColdItem(storeID, regionIDs, interval))
+	coldItem := statistics.NewColdItem(storeID, regionIDs, interval)
 	c.hotStat.CheckReadAsync(coldItem)
 	return nil
 }
@@ -576,7 +576,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Put expiredStats into read/write queue to update stats
 	if len(expiredStats) > 0 {
 		for _, stat := range expiredStats {
-			item := statistics.NewFlowItem(nil, nil, stat, nil)
+			item := statistics.NewExpiredStatItem(stat)
 			if stat.Kind == statistics.WriteFlow {
 				c.hotStat.CheckWriteAsync(item)
 			} else {
@@ -591,7 +591,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetBytesWritten(), region.GetKeysWritten(),
 			0, 0,
 			interval)
-		item := statistics.NewFlowItem(peerInfo, region, nil, nil)
+		item := statistics.NewPeerInfoItem(peerInfo, region)
 		c.hotStat.CheckWriteAsync(item)
 	}
 	c.RUnlock()

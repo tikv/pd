@@ -46,7 +46,6 @@ require (
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
-	go.uber.org/atomic v1.6.0
 	go.uber.org/goleak v1.1.10
 	go.uber.org/zap v1.15.0
 	golang.org/x/tools v0.0.0-20210112230658-8b4aab62c064

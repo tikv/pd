@@ -15,18 +15,27 @@ package statistics
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/tikv/pd/server/core"
-	"go.uber.org/atomic"
 )
 
 // Denoising is an option to calculate flow base on the real heartbeats. Should
 // only turned off by the simulator and the test.
-var Denoising = atomic.NewBool(true)
+var Denoising = uint32(1)
 
 // SetDenoising set Denoising
 func SetDenoising(enabled bool) {
-	Denoising.Store(enabled)
+	if enabled {
+		atomic.StoreUint32(&Denoising, 1)
+	} else {
+		atomic.StoreUint32(&Denoising, 0)
+	}
+}
+
+// GetDenoising get Denoising
+func GetDenoising() bool {
+	return atomic.LoadUint32(&Denoising) > 0
 }
 
 const queueCap = 1000
@@ -39,37 +48,51 @@ type HotCache struct {
 	readFlow       *hotPeerCache
 }
 
-// FlowItem indicates the item in the flow, it is a wrapper for peerInfo or expiredItems
+// FlowItem indicates the item in the flow, it is a wrapper for peerInfo, expiredItems or coldItem.
 type FlowItem struct {
-	peerInfo      *core.PeerInfo
-	regionInfo    *core.RegionInfo
-	expiredStat   *HotPeerStat
-	storeColdItem *StoreColdItem
+	peerInfo    *core.PeerInfo
+	regionInfo  *core.RegionInfo
+	expiredStat *HotPeerStat
+	coldItem    *coldItem
 }
 
-// StoreColdItem contains information to check store cold items
-type StoreColdItem struct {
+type coldItem struct {
 	storeID   uint64
 	regionIDs map[uint64]struct{}
 	interval  uint64
 }
 
-// NewStoreColdItem creates StoreColdItem
-func NewStoreColdItem(storeID uint64, regionIDs map[uint64]struct{}, interval uint64) *StoreColdItem {
-	return &StoreColdItem{
-		storeID:   storeID,
-		regionIDs: regionIDs,
-		interval:  interval,
+// NewColdItem creates coldItem
+func NewColdItem(storeID uint64, regionIDs map[uint64]struct{}, interval uint64) *FlowItem {
+	return &FlowItem{
+		peerInfo:    nil,
+		regionInfo:  nil,
+		expiredStat: nil,
+		coldItem: &coldItem{
+			storeID:   storeID,
+			regionIDs: regionIDs,
+			interval:  interval,
+		},
 	}
 }
 
-// NewFlowItem creates FlowItem
-func NewFlowItem(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo, expiredStat *HotPeerStat, coldItem *StoreColdItem) *FlowItem {
+// NewPeerInfoItem creates FlowItem for PeerInfo
+func NewPeerInfoItem(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) *FlowItem {
 	return &FlowItem{
-		peerInfo:      peerInfo,
-		regionInfo:    regionInfo,
-		expiredStat:   expiredStat,
-		storeColdItem: coldItem,
+		peerInfo:    peerInfo,
+		regionInfo:  regionInfo,
+		expiredStat: nil,
+		coldItem:    nil,
+	}
+}
+
+// NewExpiredStatItem creates Expired stat
+func NewExpiredStatItem(expiredStat *HotPeerStat) *FlowItem {
+	return &FlowItem{
+		peerInfo:    nil,
+		regionInfo:  nil,
+		expiredStat: expiredStat,
+		coldItem:    nil,
 	}
 }
 
@@ -224,8 +247,8 @@ func (w *HotCache) updateItem(item *FlowItem, flow *hotPeerCache) {
 		}
 	} else if item.expiredStat != nil {
 		w.Update(item.expiredStat)
-	} else if item.storeColdItem != nil {
-		stats := flow.CheckColdPeer(item.storeColdItem.storeID, item.storeColdItem.regionIDs, item.storeColdItem.interval)
+	} else if item.coldItem != nil {
+		stats := flow.CheckColdPeer(item.coldItem.storeID, item.coldItem.regionIDs, item.coldItem.interval)
 		for _, stat := range stats {
 			w.Update(stat)
 		}

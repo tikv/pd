@@ -90,7 +90,7 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 		values := peers.GetAll()
 		stat := make([]*HotPeerStat, 0, len(values))
 		for _, v := range values {
-			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree {
+			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold {
 				stat = append(stat, peer)
 			}
 		}
@@ -158,7 +158,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	f.Lock()
 	defer f.Unlock()
 	interval := peer.GetInterval()
-	if Denoising.Load() && interval < HotRegionReportMinInterval {
+	if GetDenoising() && interval < HotRegionReportMinInterval {
 		return nil
 	}
 	storeID := peer.GetStoreID()
@@ -209,14 +209,13 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 func (f *hotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]struct{}, interval uint64) (ret []*HotPeerStat) {
 	f.Lock()
 	defer f.Unlock()
-	if Denoising.Load() && interval < HotRegionReportMinInterval {
+	if GetDenoising() && interval < HotRegionReportMinInterval {
 		return
 	}
 	previousHotStat, ok := f.regionsOfStore[storeID]
 	if !ok {
 		return
 	}
-	emptyLoads := make([]float64, RegionStatCount)
 	for regionID := range previousHotStat {
 		if _, ok := reportRegions[regionID]; !ok {
 			oldItem := f.getOldHotPeerStat(regionID, storeID)
@@ -227,8 +226,8 @@ func (f *hotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]st
 				StoreID:  storeID,
 				RegionID: regionID,
 				Kind:     f.kind,
-				// use emptyLoads to make stat cold
-				Loads:              emptyLoads,
+				// use oldItem.thresholds to make the newItem won't affect the threshold
+				Loads:              oldItem.thresholds,
 				LastUpdateTime:     time.Now(),
 				needDelete:         false,
 				isLeader:           oldItem.isLeader,
@@ -236,8 +235,13 @@ func (f *hotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]st
 				interval:           interval,
 				peers:              oldItem.peers,
 				thresholds:         oldItem.thresholds,
+				inCold:             true,
 			}
-			stat := f.updateHotPeerStat(newItem, oldItem, emptyLoads, time.Duration(interval)*time.Second)
+			deltaLoads := make([]float64, RegionStatCount)
+			for i, loads := range oldItem.thresholds {
+				deltaLoads[i] = loads * float64(interval)
+			}
+			stat := f.updateHotPeerStat(newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
 			if stat != nil {
 				ret = append(ret, stat)
 			}
@@ -432,22 +436,30 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		newItem.HotDegree = oldItem.HotDegree
 		newItem.AntiCount = oldItem.AntiCount
 	} else {
-		if f.isOldColdPeer(oldItem, newItem.StoreID) {
-			if newItem.isFullAndHot() {
-				newItem.HotDegree = 1
-				newItem.AntiCount = hotRegionAntiCount
-			} else {
+		if newItem.inCold {
+			newItem.HotDegree = oldItem.HotDegree - 1
+			newItem.AntiCount = oldItem.AntiCount - 1
+			if newItem.AntiCount <= 0 {
 				newItem.needDelete = true
 			}
 		} else {
-			if newItem.isFullAndHot() {
-				newItem.HotDegree = oldItem.HotDegree + 1
-				newItem.AntiCount = hotRegionAntiCount
-			} else {
-				newItem.HotDegree = oldItem.HotDegree - 1
-				newItem.AntiCount = oldItem.AntiCount - 1
-				if newItem.AntiCount <= 0 {
+			if f.isOldColdPeer(oldItem, newItem.StoreID) {
+				if newItem.isFullAndHot() {
+					newItem.HotDegree = 1
+					newItem.AntiCount = hotRegionAntiCount
+				} else {
 					newItem.needDelete = true
+				}
+			} else {
+				if newItem.isFullAndHot() {
+					newItem.HotDegree = oldItem.HotDegree + 1
+					newItem.AntiCount = hotRegionAntiCount
+				} else {
+					newItem.HotDegree = oldItem.HotDegree - 1
+					newItem.AntiCount = oldItem.AntiCount - 1
+					if newItem.AntiCount <= 0 {
+						newItem.needDelete = true
+					}
 				}
 			}
 		}
