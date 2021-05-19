@@ -35,7 +35,7 @@ func Test(t *testing.T) {
 	TestingT(t)
 }
 
-var _ = Suite(&hotTestSuite{})
+var _ = SerialSuites(&hotTestSuite{})
 
 type hotTestSuite struct{}
 
@@ -44,6 +44,7 @@ func (s *hotTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *hotTestSuite) TestHot(c *C) {
+	statistics.Denoising = false
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
@@ -101,7 +102,6 @@ func (s *hotTestSuite) TestHot(c *C) {
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 
-	statistics.Denoising = false
 	hotStoreID := uint64(1)
 	count := 0
 
