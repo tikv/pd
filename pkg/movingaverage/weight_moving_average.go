@@ -41,10 +41,11 @@ func NewWMA(sizes ...int) *WMA {
 // Add adds a data point.
 func (w *WMA) Add(n float64) {
 	w.score = w.score - w.sum + n*float64(w.size)
+	// to avoid reset
 	if w.count < w.size {
 		w.sum = w.sum + n
 	} else {
-		w.sum = w.sum - w.records[(w.count)%w.size] + n
+		w.sum = w.sum - w.records[w.count%w.size] + n
 	}
 	w.records[w.count%w.size] = n
 	w.count++
@@ -56,7 +57,8 @@ func (w *WMA) Get() float64 {
 		return w.score / float64(w.size)
 	}
 	if w.count < w.size {
-		return w.score / float64((2.0*w.size-w.count+1)*w.count/2.0)
+		// the weight = (the first element +the last element)*count/2
+		return w.score / float64((w.size+(w.size-w.count+1))*w.count/2.0)
 	}
 	return w.score / float64((w.size+1)*w.size/2)
 }

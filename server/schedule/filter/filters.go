@@ -338,8 +338,7 @@ func (f *StoreStateFilter) exceedAddLimit(opt *config.PersistOptions, store *cor
 func (f *StoreStateFilter) tooManySnapshots(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	f.Reason = "too-many-snapshot"
 	return !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount())
+		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount())
 }
 
 func (f *StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store *core.StoreInfo) bool {

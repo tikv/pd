@@ -468,7 +468,7 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
 	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
-	var stores []*metapb.Store
+	stores := make([]*metapb.Store, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
 		storeID, err := id.Alloc()
@@ -1045,7 +1045,7 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
 	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
-	var peers []*metapb.Peer
+	peers := make([]*metapb.Peer, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
 		storeID, err := id.Alloc()

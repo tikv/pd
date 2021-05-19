@@ -75,7 +75,7 @@ func GenerateTableKeys(tableCount, size int) []string {
 
 // GenerateSplitKey generate the split key.
 func GenerateSplitKey(start, end []byte) []byte {
-	var key []byte
+	key := make([]byte, 0, len(start))
 	// lessThanEnd is set as true when the key is already less than end key.
 	lessThanEnd := len(end) == 0
 	for i, s := range start {
