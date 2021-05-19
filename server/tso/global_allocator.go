@@ -52,9 +52,6 @@ type Allocator interface {
 	Reset()
 }
 
-// TODO: make enableGlobalTSOEstimation become a config field.
-const enableGlobalTSOEstimation = true
-
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalTSOAllocator struct {
 	// for global TSO synchronization
@@ -180,16 +177,15 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		err                    error
 	)
 	for i := 0; i < maxRetryCount; i++ {
+		// TODO: add a switch to control whether to enable the MaxTSO estimation.
 		// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT if enableGlobalTSOEstimation.
-		if enableGlobalTSOEstimation {
-			estimatedMaxTSO, shouldRetry, err = gta.estimateMaxTS(count, suffixBits)
-			if err != nil {
-				return pdpb.Timestamp{}, err
-			}
-			if shouldRetry {
-				time.Sleep(gta.timestampOracle.updatePhysicalInterval)
-				continue
-			}
+		estimatedMaxTSO, shouldRetry, err = gta.estimateMaxTS(count, suffixBits)
+		if err != nil {
+			return pdpb.Timestamp{}, err
+		}
+		if shouldRetry {
+			time.Sleep(gta.timestampOracle.updatePhysicalInterval)
+			continue
 		}
 	SETTING_PHASE:
 		// 2. Send the MaxTSO to all Local TSO Allocators leaders to make sure the subsequent Local TSOs will be bigger than it.
