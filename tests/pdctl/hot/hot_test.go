@@ -35,7 +35,7 @@ func Test(t *testing.T) {
 	TestingT(t)
 }
 
-var _ = SerialSuites(&hotTestSuite{})
+var _ = Suite(&hotTestSuite{})
 
 type hotTestSuite struct{}
 
