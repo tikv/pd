@@ -33,6 +33,7 @@ type CommandFlags struct {
 	CertPath string
 	KeyPath  string
 	Help     bool
+	// Deprecated: the default mode is detach mode now.
 	Detach   bool
 	Interact bool
 	Version  bool
@@ -122,6 +123,7 @@ func getMainCmd(args []string) *cobra.Command {
 	rootCmd.SetOutput(os.Stdout)
 
 	readlineCompleter = readline.NewPrefixCompleter(genCompleter(rootCmd)...)
+	rootCmd.LocalFlags().MarkHidden("detach")
 	return rootCmd
 }
 
