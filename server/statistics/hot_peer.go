@@ -98,7 +98,7 @@ type HotPeerStat struct {
 	lastTransferLeaderTime time.Time
 	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
 	// we will handle it as cold peer and mark the inCold flag
-	inCold                 bool
+	inCold bool
 }
 
 // ID returns region ID. Implementing TopNItem.

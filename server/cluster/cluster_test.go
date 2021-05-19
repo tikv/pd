@@ -135,6 +135,27 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
 	c.Assert(storeStats[1], HasLen, 1)
 	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	//  after several cold heartbeats, and one hot heartbeat, we also can't find region 1 peer
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 0)
+	c.Assert(storeStats[1], HasLen, 0)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 0)
+	// after 2 hot heartbeats, wo can find region 1 peer again
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
 }
 
 func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
