@@ -383,30 +383,7 @@ func (f *hotPeerCache) getDefaultTimeMedian() *movingaverage.TimeMedian {
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
 	if oldItem == nil {
-		if interval == 0 {
-			return nil
-		}
-		isHot := slice.AnyOf(regionStats, func(i int) bool {
-			return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
-		})
-		if !isHot {
-			return nil
-		}
-		if interval.Seconds() >= float64(f.reportIntervalSecs) {
-			newItem.HotDegree = 1
-			newItem.AntiCount = hotRegionAntiCount
-		}
-		newItem.isNew = true
-		newItem.rollingLoads = make([]*dimStat, len(regionStats))
-		for i, k := range regionStats {
-			ds := newDimStat(k, time.Duration(newItem.hotStatReportInterval())*time.Second)
-			ds.Add(deltaLoads[k], interval)
-			if ds.isFull() {
-				ds.clearLastAverage()
-			}
-			newItem.rollingLoads[i] = ds
-		}
-		return newItem
+		return f.updateNewHotPeerStat(newItem, deltaLoads, interval)
 	}
 
 	newItem.rollingLoads = oldItem.rollingLoads
@@ -418,8 +395,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		// For write stat, as the stat is send by region heartbeat, the first heartbeat will be skipped.
 		// For read stat, as the stat is send by store heartbeat, the first heartbeat won't be skipped.
 		if newItem.Kind == WriteFlow {
-			newItem.HotDegree = oldItem.HotDegree
-			newItem.AntiCount = oldItem.AntiCount
+			succeedItemDegree(newItem, oldItem)
 			return newItem
 		}
 	} else {
@@ -433,37 +409,55 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 	isFull := newItem.rollingLoads[0].isFull() // The intervals of dims are the same, so it is only necessary to determine whether any of them
 	if !isFull {
 		// not update hot degree and anti count
-		newItem.HotDegree = oldItem.HotDegree
-		newItem.AntiCount = oldItem.AntiCount
+		succeedItemDegree(newItem, oldItem)
 	} else {
+		// If item is inCold, it means the pd didn't recv this item in the store heartbeat,
+		// thus we make it colder
 		if newItem.inCold {
-			newItem.HotDegree = oldItem.HotDegree - 1
-			newItem.AntiCount = oldItem.AntiCount - 1
-			if newItem.AntiCount <= 0 {
-				newItem.needDelete = true
-			}
+			coldItem(newItem, oldItem)
 		} else {
 			if f.isOldColdPeer(oldItem, newItem.StoreID) {
 				if newItem.isFullAndHot() {
-					newItem.HotDegree = 1
-					newItem.AntiCount = hotRegionAntiCount
+					initItemDegree(newItem)
 				} else {
 					newItem.needDelete = true
 				}
 			} else {
 				if newItem.isFullAndHot() {
-					newItem.HotDegree = oldItem.HotDegree + 1
-					newItem.AntiCount = hotRegionAntiCount
+					hotItem(newItem, oldItem)
 				} else {
-					newItem.HotDegree = oldItem.HotDegree - 1
-					newItem.AntiCount = oldItem.AntiCount - 1
-					if newItem.AntiCount <= 0 {
-						newItem.needDelete = true
-					}
+					coldItem(newItem, oldItem)
 				}
 			}
 		}
 		newItem.clearLastAverage()
+	}
+	return newItem
+}
+
+func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
+	regionStats := f.kind.RegionStats()
+	if interval == 0 {
+		return nil
+	}
+	isHot := slice.AnyOf(regionStats, func(i int) bool {
+		return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
+	})
+	if !isHot {
+		return nil
+	}
+	if interval.Seconds() >= float64(f.reportIntervalSecs) {
+		initItemDegree(newItem)
+	}
+	newItem.isNew = true
+	newItem.rollingLoads = make([]*dimStat, len(regionStats))
+	for i, k := range regionStats {
+		ds := newDimStat(k, time.Duration(newItem.hotStatReportInterval())*time.Second)
+		ds.Add(deltaLoads[k], interval)
+		if ds.isFull() {
+			ds.clearLastAverage()
+		}
+		newItem.rollingLoads[i] = ds
 	}
 	return newItem
 }
@@ -532,4 +526,27 @@ func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	if regions, ok := f.regionsOfStore[item.StoreID]; ok {
 		delete(regions, item.RegionID)
 	}
+}
+
+func coldItem(newItem, oldItem *HotPeerStat) {
+	newItem.HotDegree = oldItem.HotDegree - 1
+	newItem.AntiCount = oldItem.AntiCount - 1
+	if newItem.AntiCount <= 0 {
+		newItem.needDelete = true
+	}
+}
+
+func hotItem(newItem, oldItem *HotPeerStat) {
+	newItem.HotDegree = oldItem.HotDegree + 1
+	newItem.AntiCount = hotRegionAntiCount
+}
+
+func initItemDegree(item *HotPeerStat) {
+	item.HotDegree = 1
+	item.AntiCount = hotRegionAntiCount
+}
+
+func succeedItemDegree(newItem, oldItem *HotPeerStat) {
+	newItem.HotDegree = oldItem.HotDegree
+	newItem.AntiCount = oldItem.AntiCount
 }
