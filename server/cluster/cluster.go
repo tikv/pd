@@ -559,7 +559,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		item := statistics.NewPeerInfoItem(peerInfo, region)
 		c.hotStat.CheckReadAsync(item)
 	}
-	coldItem := statistics.NewColdItem(storeID, regionIDs, interval)
+	coldItem := statistics.NewUnReportStatsHandle(storeID, regionIDs, interval)
 	c.hotStat.CheckReadAsync(coldItem)
 	return nil
 }

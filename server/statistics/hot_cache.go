@@ -50,25 +50,25 @@ type HotCache struct {
 
 // FlowItem indicates the item in the flow, it is a wrapper for peerInfo, expiredItems or coldItem.
 type FlowItem struct {
-	peerInfo    *core.PeerInfo
-	regionInfo  *core.RegionInfo
-	expiredStat *HotPeerStat
-	coldItem    *coldItem
+	peerInfo            *core.PeerInfo
+	regionInfo          *core.RegionInfo
+	expiredStat         *HotPeerStat
+	unReportStatsHandle *unReportStatsHandle
 }
 
-type coldItem struct {
+type unReportStatsHandle struct {
 	storeID   uint64
 	regionIDs map[uint64]struct{}
 	interval  uint64
 }
 
-// NewColdItem creates coldItem
-func NewColdItem(storeID uint64, regionIDs map[uint64]struct{}, interval uint64) *FlowItem {
+// NewUnReportStatsHandle creates information for unreported stats
+func NewUnReportStatsHandle(storeID uint64, regionIDs map[uint64]struct{}, interval uint64) *FlowItem {
 	return &FlowItem{
 		peerInfo:    nil,
 		regionInfo:  nil,
 		expiredStat: nil,
-		coldItem: &coldItem{
+		unReportStatsHandle: &unReportStatsHandle{
 			storeID:   storeID,
 			regionIDs: regionIDs,
 			interval:  interval,
@@ -79,20 +79,20 @@ func NewColdItem(storeID uint64, regionIDs map[uint64]struct{}, interval uint64)
 // NewPeerInfoItem creates FlowItem for PeerInfo
 func NewPeerInfoItem(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) *FlowItem {
 	return &FlowItem{
-		peerInfo:    peerInfo,
-		regionInfo:  regionInfo,
-		expiredStat: nil,
-		coldItem:    nil,
+		peerInfo:            peerInfo,
+		regionInfo:          regionInfo,
+		expiredStat:         nil,
+		unReportStatsHandle: nil,
 	}
 }
 
 // NewExpiredStatItem creates Expired stat
 func NewExpiredStatItem(expiredStat *HotPeerStat) *FlowItem {
 	return &FlowItem{
-		peerInfo:    nil,
-		regionInfo:  nil,
-		expiredStat: expiredStat,
-		coldItem:    nil,
+		peerInfo:            nil,
+		regionInfo:          nil,
+		expiredStat:         expiredStat,
+		unReportStatsHandle: nil,
 	}
 }
 
@@ -247,8 +247,9 @@ func (w *HotCache) updateItem(item *FlowItem, flow *hotPeerCache) {
 		}
 	} else if item.expiredStat != nil {
 		w.Update(item.expiredStat)
-	} else if item.coldItem != nil {
-		stats := flow.CheckColdPeer(item.coldItem.storeID, item.coldItem.regionIDs, item.coldItem.interval)
+	} else if item.unReportStatsHandle != nil {
+		handle := item.unReportStatsHandle
+		stats := flow.CheckColdPeer(handle.storeID, handle.regionIDs, handle.interval)
 		for _, stat := range stats {
 			w.Update(stat)
 		}
