@@ -35,13 +35,23 @@ func TestHeaertbeatStreams(t *testing.T) {
 var _ = Suite(&testHeartbeatStreamSuite{})
 
 type testHeartbeatStreamSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testHeartbeatStreamSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testHeartbeatStreamSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cluster := mockcluster.NewCluster(config.NewTestOptions())
+	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	cluster.AddRegionStore(1, 1)
 	cluster.AddRegionStore(2, 0)
 	cluster.AddLeaderRegion(1, 1)

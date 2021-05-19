@@ -121,12 +121,12 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	// TODO: add metrics to show why it triggers scale in/out.
 	if usage > maxThreshold {
 		scaleOutQuota := (totalCPUUseTime - totalCPUTime*maxThreshold) / MetricsTimeDuration.Seconds()
-		return calculateScaleOutPlan(strategy, component, scaleOutQuota, instances, groups)
+		return calculateScaleOutPlan(strategy, component, scaleOutQuota, groups)
 	}
 
 	if usage < minThreshold {
 		scaleInQuota := (totalCPUTime*minThreshold - totalCPUUseTime) / MetricsTimeDuration.Seconds()
-		return calculateScaleInPlan(strategy, component, scaleInQuota, instances, groups)
+		return calculateScaleInPlan(strategy, scaleInQuota, groups)
 	}
 
 	return groups
@@ -225,8 +225,8 @@ func getResourcesByComponent(strategy *Strategy, component ComponentType) []*Res
 	return resources
 }
 
-func calculateScaleOutPlan(strategy *Strategy, component ComponentType, scaleOutQuota float64, instances []instance, groups []*Plan) []*Plan {
-	group := findBestGroupToScaleOut(strategy, scaleOutQuota, groups, component)
+func calculateScaleOutPlan(strategy *Strategy, component ComponentType, scaleOutQuota float64, groups []*Plan) []*Plan {
+	group := findBestGroupToScaleOut(strategy, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
 	if math.Abs(resCPU) <= 1e-6 {
@@ -260,7 +260,7 @@ func calculateScaleOutPlan(strategy *Strategy, component ComponentType, scaleOut
 	return groups
 }
 
-func calculateScaleInPlan(strategy *Strategy, component ComponentType, scaleInQuota float64, instances []instance, groups []*Plan) []*Plan {
+func calculateScaleInPlan(strategy *Strategy, scaleInQuota float64, groups []*Plan) []*Plan {
 	if len(groups) == 0 {
 		return nil
 	}
@@ -392,7 +392,7 @@ func buildPlanMap(planMap map[string]map[string]struct{}, groupName, address str
 }
 
 func buildPlans(planMap map[string]map[string]struct{}, resourceTypeMap map[string]string, componentType ComponentType) []*Plan {
-	var plans []*Plan
+	plans := make([]*Plan, 0, len(planMap))
 	for groupName, groupInstances := range planMap {
 		resourceType := resourceTypeMap[groupName]
 		plans = append(plans, &Plan{
@@ -414,7 +414,7 @@ func findBestGroupToScaleIn(strategy *Strategy, scaleInQuota float64, groups []*
 }
 
 // TODO: implement heterogeneous logic and take cluster information into consideration.
-func findBestGroupToScaleOut(strategy *Strategy, scaleOutQuota float64, groups []*Plan, component ComponentType) Plan {
+func findBestGroupToScaleOut(strategy *Strategy, groups []*Plan, component ComponentType) Plan {
 	if len(groups) != 0 {
 		return *groups[0]
 	}

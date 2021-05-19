@@ -128,7 +128,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 				}
 				// TODO: change it to the info level once the TiKV doesn't use it in a unary way.
 				log.Debug("create TSO forward stream", zap.String("forwarded-host", forwardedHost))
-				forwardStream, cancel, err = s.createTsoForwardStream(client, forwardedHost)
+				forwardStream, cancel, err = s.createTsoForwardStream(client)
 				if err != nil {
 					return err
 				}
@@ -536,7 +536,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 					return err
 				}
 				log.Info("create region heartbeat forward stream", zap.String("forwarded-host", forwardedHost))
-				forwardStream, cancel, err = s.createHeartbeatForwardStream(client, forwardedHost)
+				forwardStream, cancel, err = s.createHeartbeatForwardStream(client)
 				if err != nil {
 					return err
 				}
@@ -1283,16 +1283,6 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 //    with its current TSO in memory to make sure their local TSOs are not less
 //    than MaxTS by writing MaxTS into memory to finish the global TSO synchronization.
 func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
-		return pdpb.NewPDClient(client).SyncMaxTS(ctx, request)
-	}
-
 	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
 		return nil, err
 	}
@@ -1306,7 +1296,7 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
-	var processedDCs []string
+	processedDCs := make([]string, 0, len(allocatorLeaders))
 	if request.GetMaxTs() == nil || request.GetMaxTs().GetPhysical() == 0 {
 		// The first phase of synchronization: collect the max local ts
 		var maxLocalTS pdpb.Timestamp
@@ -1373,16 +1363,6 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager, and will collect current max
 // Local TSO if the NeedSyncMaxTSO flag in dc-location info is true.
 func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
-		return pdpb.NewPDClient(client).GetDCLocationInfo(ctx, request)
-	}
-
 	var err error
 	if err = s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
@@ -1471,7 +1451,7 @@ func (s *Server) isLocalRequest(forwardedHost string) bool {
 	return false
 }
 
-func (s *Server) createTsoForwardStream(client *grpc.ClientConn, addr string) (pdpb.PD_TsoClient, context.CancelFunc, error) {
+func (s *Server) createTsoForwardStream(client *grpc.ClientConn) (pdpb.PD_TsoClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	go checkStream(ctx, cancel, done)
@@ -1480,7 +1460,7 @@ func (s *Server) createTsoForwardStream(client *grpc.ClientConn, addr string) (p
 	return forwardStream, cancel, err
 }
 
-func (s *Server) createHeartbeatForwardStream(client *grpc.ClientConn, addr string) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
+func (s *Server) createHeartbeatForwardStream(client *grpc.ClientConn) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	go checkStream(ctx, cancel, done)

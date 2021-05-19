@@ -148,6 +148,7 @@ func changeLeaderPeerUrls(c *C, leader *pdpb.Member, id uint64, urls []string) {
 	resp, err := testDialClient.Do(req)
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, 204)
+	resp.Body.Close()
 }
 
 type testResignAPISuite struct {

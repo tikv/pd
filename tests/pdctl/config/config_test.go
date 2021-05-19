@@ -88,9 +88,19 @@ func (s *configTestSuite) TestConfig(c *C) {
 	cfg := config.Config{}
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	scheduleConfig := svr.GetScheduleConfig()
+
+	// hidden config
 	scheduleConfig.Schedulers = nil
 	scheduleConfig.SchedulersPayload = nil
 	scheduleConfig.StoreLimit = nil
+	scheduleConfig.SchedulerMaxWaitingOperator = 0
+	scheduleConfig.EnableRemoveDownReplica = false
+	scheduleConfig.EnableReplaceOfflineReplica = false
+	scheduleConfig.EnableMakeUpReplica = false
+	scheduleConfig.EnableRemoveExtraReplica = false
+	scheduleConfig.EnableLocationReplacement = false
+	scheduleConfig.StoreLimitMode = ""
+
 	c.Assert(&cfg.Schedule, DeepEquals, scheduleConfig)
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
 
@@ -669,11 +679,10 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	checkMaxReplicas(3)
 	checkRuleCount(3)
 
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "4")
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "4")
 	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "please update rule instead"), IsTrue)
-	checkMaxReplicas(3)
-	checkRuleCount(3)
+	checkMaxReplicas(4)
+	checkRuleCount(4)
 	checkLocaltionLabels(1)
 	checkRuleLocationLabels(1)
 }

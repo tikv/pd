@@ -14,6 +14,7 @@
 package checker
 
 import (
+	"context"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -39,11 +40,21 @@ var _ = Suite(&testReplicaCheckerSuite{})
 type testReplicaCheckerSuite struct {
 	cluster *mockcluster.Cluster
 	rc      *ReplicaChecker
+	ctx     context.Context
+	cancel  context.CancelFunc
+}
+
+func (s *testReplicaCheckerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testReplicaCheckerSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testReplicaCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.rc = NewReplicaChecker(s.cluster, cache.NewDefaultCache(10))
 	stats := &pdpb.StoreStats{
@@ -196,7 +207,7 @@ func (s *testReplicaCheckerSuite) downPeerAndCheck(c *C, aliveRole metapb.PeerRo
 
 func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMaxSnapshotCount(2)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
@@ -269,7 +280,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 
 func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 1)
@@ -288,7 +299,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 
 func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
@@ -340,7 +351,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 
 func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
@@ -419,7 +430,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 
 func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetMaxReplicas(5)
 	tc.SetLocationLabels([]string{"zone", "host"})
@@ -449,7 +460,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 
 func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetLocationLabels([]string{"zone"})
 	tc.DisableFeature(versioninfo.JointConsensus)
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
@@ -485,7 +496,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 
 func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 

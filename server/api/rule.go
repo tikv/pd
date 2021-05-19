@@ -78,6 +78,12 @@ func (h *ruleHandler) SetAll(w http.ResponseWriter, r *http.Request) {
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &rules); err != nil {
 		return
 	}
+	for _, v := range rules {
+		if err := h.syncReplicateConfigWithDefaultRule(v); err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
 		SetRules(rules); err != nil {
 		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
@@ -207,6 +213,10 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	oldRule := cluster.GetRuleManager().GetRule(rule.GroupID, rule.ID)
+	if err := h.syncReplicateConfigWithDefaultRule(&rule); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := cluster.GetRuleManager().SetKeyType(h.svr.GetConfig().PDServerCfg.KeyType).
 		SetRule(&rule); err != nil {
 		if errs.ErrRuleContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
@@ -221,6 +231,19 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		cluster.AddSuspectKeyRange(oldRule.StartKey, oldRule.EndKey)
 	}
 	h.rd.JSON(w, http.StatusOK, "Update rule successfully.")
+}
+
+// sync replicate config with default-rule
+func (h *ruleHandler) syncReplicateConfigWithDefaultRule(rule *placement.Rule) error {
+	// sync default rule with replicate config
+	if rule.GroupID == "pd" && rule.ID == "default" {
+		cfg := h.svr.GetReplicationConfig().Clone()
+		cfg.MaxReplicas = uint64(rule.Count)
+		if err := h.svr.SetReplicationConfig(*cfg); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // @Tags rule
