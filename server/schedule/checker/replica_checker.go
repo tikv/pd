@@ -56,6 +56,11 @@ func NewReplicaChecker(cluster opt.Cluster, regionWaitingList cache.Cache) *Repl
 	}
 }
 
+// GetType return ReplicaChecker's type
+func (r *ReplicaChecker) GetType() string {
+	return "replica-checker"
+}
+
 // Check verifies a region's replicas, creating an operator.Operator if need.
 func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("replica_checker", "check").Inc()

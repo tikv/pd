@@ -47,7 +47,7 @@ func (s *tsoTestSuite) TestTSO(c *C) {
 	// tso command
 	ts := "395181938313123110"
 	args := []string{"-u", "127.0.0.1", "tso", ts}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	t, e := strconv.ParseUint(ts, 10, 64)
 	c.Assert(e, IsNil)

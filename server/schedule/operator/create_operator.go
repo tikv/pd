@@ -21,10 +21,12 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
+	"go.uber.org/zap"
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
@@ -50,14 +52,14 @@ func CreateRemovePeerOperator(desc string, cluster opt.Cluster, kind OpKind, reg
 
 // CreateTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store.
 func CreateTransferLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
-	return NewBuilder(desc, cluster, region).
+	return NewBuilder(desc, cluster, region, SkipOriginJointStateCheck).
 		SetLeader(targetStoreID).
 		Build(kind)
 }
 
 // CreateForceTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store forcible.
 func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
-	return NewBuilder(desc, cluster, region).
+	return NewBuilder(desc, cluster, region, SkipOriginJointStateCheck).
 		SetLeader(targetStoreID).
 		EnableForceTargetLeader().
 		Build(kind)
@@ -193,6 +195,8 @@ func CreateScatterRegionOperator(desc string, cluster opt.Cluster, origin *core.
 		SetPeers(targetPeers).
 		SetLeader(leader).
 		EnableLightWeight().
+		// EnableForceTargetLeader in order to ignore the leader schedule limit
+		EnableForceTargetLeader().
 		Build(0)
 }
 
@@ -221,7 +225,7 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 	}
 
 	leader := b.originPeers[b.originLeaderStoreID]
-	if leader == nil || (leader.GetRole() == metapb.PeerRole_DemotingVoter || core.IsLearner(leader)) {
+	if leader == nil || !b.allowLeader(leader, true) {
 		b.targetLeaderStoreID = 0
 	} else {
 		b.targetLeaderStoreID = b.originLeaderStoreID
@@ -236,6 +240,17 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
+		// Because the demote leader will be rejected by TiKV,
+		// when the target leader cannot be found, we need to force a target to be found.
+		b.forceTargetLeader = true
+		b.setTargetLeaderIfNotExist()
+	}
+
+	if b.targetLeaderStoreID == 0 {
+		log.Error(
+			"unable to find target leader",
+			zap.Reflect("region", origin),
+			errs.ZapError(errs.ErrCreateOperator.FastGenByArgs("no target leader")))
 		b.originLeaderStoreID = 0
 	} else if b.originLeaderStoreID != b.targetLeaderStoreID {
 		kind |= OpLeader

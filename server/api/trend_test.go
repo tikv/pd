@@ -100,7 +100,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 
 func (s *testTrendSuite) newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, voters []uint64, learners []uint64, leaderStore uint64) *core.RegionInfo {
 	var (
-		peers  []*metapb.Peer
+		peers  = make([]*metapb.Peer, 0, len(voters)+len(learners))
 		leader *metapb.Peer
 	)
 	for _, id := range voters {

@@ -91,6 +91,11 @@ error = '''
 store %v is paused for leader transfer
 '''
 
+["PD:core:ErrStoreDestroyed"]
+error = '''
+store %v has been physically destroyed
+'''
+
 ["PD:core:ErrStoreNotFound"]
 error = '''
 store %v not found
@@ -256,9 +261,14 @@ error = '''
 etcd TLS config error
 '''
 
-["PD:etcd:ErrEtcdTxn"]
+["PD:etcd:ErrEtcdTxnConflict"]
 error = '''
-etcd Txn failed
+etcd transaction failed, conflicted and rolled back
+'''
+
+["PD:etcd:ErrEtcdTxnInternal"]
+error = '''
+internal etcd transaction error occurred
 '''
 
 ["PD:etcd:ErrEtcdURLMap"]
@@ -381,11 +391,6 @@ error = '''
 init file log error, %s
 '''
 
-["PD:main:ErrParseFlags"]
-error = '''
-parse flags error
-'''
-
 ["PD:member:ErrEtcdLeaderNotFound"]
 error = '''
 etcd leader not found
@@ -459,6 +464,11 @@ failed to marshal proto
 ["PD:proto:ErrProtoUnmarshal"]
 error = '''
 failed to unmarshal proto
+'''
+
+["PD:schedule:ErrCreateOperator"]
+error = '''
+unable to create operator, %s
 '''
 
 ["PD:schedule:ErrMergeOperator"]

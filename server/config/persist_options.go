@@ -245,14 +245,14 @@ func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, rate
 	switch typ {
 	case storelimit.AddPeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
 		} else {
 			rate = v.StoreLimit[storeID].RemovePeer
 		}
 		sc = StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
 	case storelimit.RemovePeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 		} else {
 			rate = v.StoreLimit[storeID].AddPeer
 		}
@@ -493,6 +493,11 @@ func (o *PersistOptions) IsUseJointConsensus() bool {
 // GetHotRegionCacheHitsThreshold is a threshold to decide if a region is hot.
 func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
+}
+
+// GetStoresLimit gets the stores' limit.
+func (o *PersistOptions) GetStoresLimit() map[uint64]StoreLimitConfig {
+	return o.GetScheduleConfig().StoreLimit
 }
 
 // GetSchedulers gets the scheduler configurations.

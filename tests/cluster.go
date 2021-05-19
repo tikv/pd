@@ -21,13 +21,16 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/swaggerserver"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/cluster"
@@ -37,7 +40,6 @@ import (
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 )
 
 // TestServer states.
@@ -133,6 +135,7 @@ func (s *TestServer) Destroy() error {
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
+	s.server.GetMember().ResetLeader()
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
 }
 
@@ -158,7 +161,7 @@ func (s *TestServer) GetPersistOptions() *config.PersistOptions {
 }
 
 // GetAllocator returns the current TestServer's ID allocator.
-func (s *TestServer) GetAllocator() *id.AllocatorImpl {
+func (s *TestServer) GetAllocator() id.Allocator {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetAllocator()
@@ -196,7 +199,7 @@ func (s *TestServer) GetLeader() *pdpb.Member {
 // of PD cluster for given dc-location.
 func (s *TestServer) GetAllocatorLeader(dcLocation string) *pdpb.Member {
 	// For the leader of Global TSO Allocator, it's the PD leader
-	if dcLocation == config.GlobalDCLocation {
+	if dcLocation == tso.GlobalDCLocation {
 		return s.GetLeader()
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
@@ -237,7 +240,7 @@ func (s *TestServer) IsLeader() bool {
 
 // IsAllocatorLeader returns whether the server is a TSO Allocator leader or not.
 func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
-	if dcLocation == config.GlobalDCLocation {
+	if dcLocation == tso.GlobalDCLocation {
 		return s.IsLeader()
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
@@ -380,6 +383,11 @@ func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
 type TestCluster struct {
 	config  *clusterConfig
 	servers map[string]*TestServer
+	// tsPool is used to check the TSO uniqueness among the test cluster
+	tsPool struct {
+		sync.Mutex
+		pool map[uint64]struct{}
+	}
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -406,6 +414,12 @@ func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigO
 	return &TestCluster{
 		config:  config,
 		servers: servers,
+		tsPool: struct {
+			sync.Mutex
+			pool map[uint64]struct{}
+		}{
+			pool: make(map[uint64]struct{}),
+		},
 	}, nil
 }
 
@@ -481,8 +495,15 @@ func (c *TestCluster) GetFollower() string {
 
 // WaitLeader is used to get leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
-func (c *TestCluster) WaitLeader() string {
-	for i := 0; i < 100; i++ {
+func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
+	option := &WaitOp{
+		retryTimes:   100,
+		waitInterval: WaitLeaderCheckInterval,
+	}
+	for _, op := range ops {
+		op(option)
+	}
+	for i := 0; i < option.retryTimes; i++ {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
@@ -500,7 +521,7 @@ func (c *TestCluster) WaitLeader() string {
 				return name
 			}
 		}
-		time.Sleep(WaitLeaderCheckInterval)
+		time.Sleep(option.waitInterval)
 	}
 	return ""
 }
@@ -508,7 +529,7 @@ func (c *TestCluster) WaitLeader() string {
 // ResignLeader resigns the leader of the cluster.
 func (c *TestCluster) ResignLeader() error {
 	leader := c.GetLeader()
-	if len(leader) != 0 {
+	if leader != "" {
 		return c.servers[leader].ResignLeader()
 	}
 	return errors.New("no leader")
@@ -516,12 +537,19 @@ func (c *TestCluster) ResignLeader() error {
 
 // WaitAllocatorLeader is used to get the Local TSO Allocator leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
-func (c *TestCluster) WaitAllocatorLeader(dcLocation string) string {
-	for i := 0; i < 100; i++ {
+func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) string {
+	option := &WaitOp{
+		retryTimes:   100,
+		waitInterval: WaitLeaderCheckInterval,
+	}
+	for _, op := range ops {
+		op(option)
+	}
+	for i := 0; i < option.retryTimes; i++ {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
-			if s.state == Running {
+			if s.state == Running && s.GetTSOAllocatorManager().EnableLocalTSO() {
 				running++
 			}
 			serverName := s.GetAllocatorLeader(dcLocation).GetName()
@@ -531,13 +559,31 @@ func (c *TestCluster) WaitAllocatorLeader(dcLocation string) string {
 		}
 		for serverName, num := range counter {
 			if num == running && c.GetServer(serverName).IsAllocatorLeader(dcLocation) {
-				time.Sleep(WaitLeaderReturnDelay)
 				return serverName
 			}
 		}
-		time.Sleep(WaitLeaderCheckInterval)
+		time.Sleep(option.waitInterval)
 	}
 	return ""
+}
+
+// WaitAllLeaders will block and wait for the election of PD leader and all Local TSO Allocator leaders.
+func (c *TestCluster) WaitAllLeaders(testC *check.C, dcLocations map[string]string) {
+	c.WaitLeader()
+	c.CheckClusterDCLocation()
+	// Wait for each DC's Local TSO Allocator leader
+	wg := sync.WaitGroup{}
+	for _, dcLocation := range dcLocations {
+		wg.Add(1)
+		go func(dc string) {
+			testutil.WaitUntil(testC, func(testC *check.C) bool {
+				leaderName := c.WaitAllocatorLeader(dc)
+				return leaderName != ""
+			})
+			wg.Done()
+		}(dcLocation)
+	}
+	wg.Wait()
 }
 
 // GetCluster returns PD cluster.
@@ -595,7 +641,50 @@ func (c *TestCluster) Destroy() {
 	for _, s := range c.servers {
 		err := s.Destroy()
 		if err != nil {
-			log.Error("failed to destroy the cluster:", zap.Error(err))
+			log.Error("failed to destroy the cluster:", errs.ZapError(err))
 		}
 	}
+}
+
+// CheckClusterDCLocation will force the cluster to do the dc-location check in order to speed up the test.
+func (c *TestCluster) CheckClusterDCLocation() {
+	wg := sync.WaitGroup{}
+	for _, server := range c.GetServers() {
+		wg.Add(1)
+		go func(ser *TestServer) {
+			ser.GetTSOAllocatorManager().ClusterDCLocationChecker()
+			wg.Done()
+		}(server)
+	}
+	wg.Wait()
+}
+
+// CheckTSOUnique will check whether the TSO is unique among the cluster in the past and present.
+func (c *TestCluster) CheckTSOUnique(ts uint64) bool {
+	c.tsPool.Lock()
+	defer c.tsPool.Unlock()
+	if _, exist := c.tsPool.pool[ts]; exist {
+		return false
+	}
+	c.tsPool.pool[ts] = struct{}{}
+	return true
+}
+
+// WaitOp represent the wait configuration
+type WaitOp struct {
+	retryTimes   int
+	waitInterval time.Duration
+}
+
+// WaitOption represent the wait configuration
+type WaitOption func(*WaitOp)
+
+// WithRetryTimes indicates the retry times
+func WithRetryTimes(r int) WaitOption {
+	return func(op *WaitOp) { op.retryTimes = r }
+}
+
+// WithWaitInterval indicates the wait interval
+func WithWaitInterval(i time.Duration) WaitOption {
+	return func(op *WaitOp) { op.waitInterval = i }
 }

@@ -15,6 +15,7 @@ package pd
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sort"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -36,12 +38,15 @@ type baseClient struct {
 	clusterID uint64
 	// PD leader URL
 	leader atomic.Value // Store as string
+	// PD follower URLs
+	followers atomic.Value // Store as []string
 	// dc-location -> TSO allocator leader gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 	// dc-location -> TSO allocator leader URL
 	allocators sync.Map // Store as map[string]string
 
-	checkLeaderCh chan struct{}
+	checkLeaderCh        chan struct{}
+	checkTSODispatcherCh chan struct{}
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -49,9 +54,10 @@ type baseClient struct {
 
 	security SecurityOption
 
-	gRPCDialOptions []grpc.DialOption
-	timeout         time.Duration
-	maxRetryTimes   int
+	gRPCDialOptions  []grpc.DialOption
+	timeout          time.Duration
+	maxRetryTimes    int
+	enableForwarding bool
 }
 
 // SecurityOption records options about tls
@@ -78,6 +84,13 @@ func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
 	}
 }
 
+// WithForwardingOption configures the client with forwarding option.
+func WithForwardingOption(enableForwarding bool) ClientOption {
+	return func(c *baseClient) {
+		c.enableForwarding = enableForwarding
+	}
+}
+
 // WithMaxErrorRetry configures the client max retry times when connect meets error.
 func WithMaxErrorRetry(count int) ClientOption {
 	return func(c *baseClient) {
@@ -89,13 +102,14 @@ func WithMaxErrorRetry(count int) ClientOption {
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption, opts ...ClientOption) (*baseClient, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	c := &baseClient{
-		urls:          urls,
-		checkLeaderCh: make(chan struct{}, 1),
-		ctx:           ctx1,
-		cancel:        cancel,
-		security:      security,
-		timeout:       defaultPDTimeout,
-		maxRetryTimes: maxInitClusterRetries,
+		urls:                 urls,
+		checkLeaderCh:        make(chan struct{}, 1),
+		checkTSODispatcherCh: make(chan struct{}, 1),
+		ctx:                  ctx1,
+		cancel:               cancel,
+		security:             security,
+		timeout:              defaultPDTimeout,
+		maxRetryTimes:        maxInitClusterRetries,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -105,14 +119,14 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption, 
 		c.cancel()
 		return nil, err
 	}
-	if err := c.initRetry(c.updateLeader); err != nil {
+	if err := c.initRetry(c.updateMember); err != nil {
 		c.cancel()
 		return nil, err
 	}
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
 	c.wg.Add(1)
-	go c.leaderLoop()
+	go c.memberLoop()
 
 	return c, nil
 }
@@ -132,7 +146,7 @@ func (c *baseClient) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
-func (c *baseClient) leaderLoop() {
+func (c *baseClient) memberLoop() {
 	defer c.wg.Done()
 
 	ctx, cancel := context.WithCancel(c.ctx)
@@ -145,9 +159,11 @@ func (c *baseClient) leaderLoop() {
 		case <-ctx.Done():
 			return
 		}
-
-		if err := c.updateLeader(); err != nil {
-			log.Error("[pd] failed updateLeader", errs.ZapError(err))
+		failpoint.Inject("skipUpdateMember", func() {
+			failpoint.Continue()
+		})
+		if err := c.updateMember(); err != nil {
+			log.Error("[pd] failed updateMember", errs.ZapError(err))
 		}
 	}
 }
@@ -160,19 +176,34 @@ func (c *baseClient) ScheduleCheckLeader() {
 	}
 }
 
+func (c *baseClient) scheduleCheckTSODispatcher() {
+	select {
+	case c.checkTSODispatcherCh <- struct{}{}:
+	default:
+	}
+}
+
 // GetClusterID returns the ClusterID.
 func (c *baseClient) GetClusterID(context.Context) uint64 {
 	return c.clusterID
 }
 
 // GetLeaderAddr returns the leader address.
-// For testing use.
 func (c *baseClient) GetLeaderAddr() string {
 	leaderAddr := c.leader.Load()
 	if leaderAddr == nil {
 		return ""
 	}
 	return leaderAddr.(string)
+}
+
+// GetLeaderAddr returns the follower address.
+func (c *baseClient) GetFollowerAddr() []string {
+	followerAddrs := c.followers.Load()
+	if followerAddrs == nil {
+		return []string{}
+	}
+	return followerAddrs.([]string)
 }
 
 // GetURLs returns the URLs.
@@ -198,28 +229,30 @@ func (c *baseClient) getAllocatorLeaderAddrByDCLocation(dcLocation string) (stri
 	return url.(string), true
 }
 
-func (c *baseClient) getClientConnByDCLocation(dcLocation string) *grpc.ClientConn {
+func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string) {
 	url, ok := c.allocators.Load(dcLocation)
 	if !ok {
-		return nil
+		panic(fmt.Sprintf("the allocator leader in %s should exist", dcLocation))
 	}
 	cc, ok := c.clientConns.Load(url)
 	if !ok {
-		return nil
+		panic(fmt.Sprintf("the client connection of %s in %s should exist", url, dcLocation))
 	}
-	return cc.(*grpc.ClientConn)
+	return cc.(*grpc.ClientConn), url.(string)
 }
 
 const globalDCLocation = "global"
 
 func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
 	// Clean up the old TSO allocators
-	c.allocators.Range(func(dcLocation, _ interface{}) bool {
+	c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
+		dcLocation := dcLocationKey.(string)
 		// Skip the Global TSO Allocator
-		if dcLocation.(string) == globalDCLocation {
+		if dcLocation == globalDCLocation {
 			return true
 		}
-		if _, exist := curAllocatorMap[dcLocation.(string)]; !exist {
+		if _, exist := curAllocatorMap[dcLocation]; !exist {
+			log.Info("[pd] delete unused tso allocator", zap.String("dc-location", dcLocation))
 			c.allocators.Delete(dcLocation)
 		}
 		return true
@@ -243,18 +276,26 @@ func (c *baseClient) initClusterID() error {
 	return errors.WithStack(errFailInitClusterID)
 }
 
-func (c *baseClient) updateLeader() error {
+func (c *baseClient) updateMember() error {
 	for _, u := range c.urls {
-		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
+		ctx, cancel := context.WithTimeout(c.ctx, updateMemberTimeout)
 		members, err := c.getMembers(ctx, u)
-		if err != nil {
-			log.Warn("[pd] cannot update leader", zap.String("address", u), errs.ZapError(err))
-		}
 		cancel()
-		if err := c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders()); err != nil {
-			return err
+
+		var errTSO error
+		if err == nil {
+			if members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
+				err = errs.ErrClientGetLeader.FastGenByArgs("leader address don't exist")
+			}
+			// Still need to update TsoAllocatorLeaders, even if there is no PD leader
+			errTSO = c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders())
 		}
-		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
+
+		// Failed to get PD leader
+		if err != nil {
+			log.Info("[pd] cannot update member from this address",
+				zap.String("address", u),
+				errs.ZapError(err))
 			select {
 			case <-c.ctx.Done():
 				return errors.WithStack(err)
@@ -262,8 +303,17 @@ func (c *baseClient) updateLeader() error {
 				continue
 			}
 		}
+
 		c.updateURLs(members.GetMembers())
-		return c.switchLeader(members.GetLeader().GetClientUrls())
+		c.updateFollowers(members.GetMembers(), members.GetLeader())
+		if err := c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
+			return err
+		}
+		c.scheduleCheckTSODispatcher()
+
+		// If `switchLeader` succeeds but `switchTSOAllocatorLeader` has an error,
+		// the error of `switchTSOAllocatorLeader` will be returned.
+		return errTSO
 	}
 	return errs.ErrClientGetLeader.FastGenByArgs(c.urls)
 }
@@ -305,14 +355,27 @@ func (c *baseClient) switchLeader(addrs []string) error {
 		return nil
 	}
 
-	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
 	if _, err := c.getOrCreateGRPCConn(addr); err != nil {
+		log.Warn("[pd] failed to connect leader", zap.String("leader", addr), errs.ZapError(err))
 		return err
 	}
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
 	c.allocators.Store(globalDCLocation, addr)
+	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
 	return nil
+}
+
+func (c *baseClient) updateFollowers(members []*pdpb.Member, leader *pdpb.Member) {
+	var addrs []string
+	for _, member := range members {
+		if member.GetMemberId() != leader.GetMemberId() {
+			if len(member.GetClientUrls()) > 0 {
+				addrs = append(addrs, member.GetClientUrls()...)
+			}
+		}
+	}
+	c.followers.Store(addrs)
 }
 
 func (c *baseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Member) error {
@@ -329,14 +392,18 @@ func (c *baseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Memb
 		if exist && addr == oldAddr {
 			continue
 		}
+		if _, err := c.getOrCreateGRPCConn(addr); err != nil {
+			log.Warn("[pd] failed to connect dc tso allocator leader",
+				zap.String("dc-location", dcLocation),
+				zap.String("leader", addr),
+				errs.ZapError(err))
+			return err
+		}
+		c.allocators.Store(dcLocation, addr)
 		log.Info("[pd] switch dc tso allocator leader",
 			zap.String("dc-location", dcLocation),
 			zap.String("new-leader", addr),
 			zap.String("old-leader", oldAddr))
-		if _, err := c.getOrCreateGRPCConn(addr); err != nil {
-			return err
-		}
-		c.allocators.Store(dcLocation, addr)
 	}
 	// Garbage collection of the old TSO allocator leaders
 	c.gcAllocatorLeaderAddr(allocatorMap)

@@ -304,7 +304,7 @@ func (b *Builder) EnableLightWeight() *Builder {
 	return b
 }
 
-// EnableForceTargetLeader marks the step of transferring leader to target is forcible. It is used for grant leader.
+// EnableForceTargetLeader marks the step of transferring leader to target is forcible.
 func (b *Builder) EnableForceTargetLeader() *Builder {
 	b.forceTargetLeader = true
 	return b
@@ -537,7 +537,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 
 	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[targetLeaderStoreID]
-		if !b.allowLeader(peer, false) {
+		if !b.allowLeader(peer, b.forceTargetLeader) {
 			continue
 		}
 		// if role info is given, store having role follower should not be target leader.

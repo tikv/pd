@@ -19,9 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"path/filepath"
+	"path"
 	"sort"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -34,13 +33,16 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 )
+
+const tsoRequestConcurrentNumber = 10
 
 func Test(t *testing.T) {
 	TestingT(t)
@@ -78,26 +80,21 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
+	endpoints := s.runServer(c, cluster)
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
-	var p1, l1 int64
+	var ts1, ts2 uint64
 	testutil.WaitUntil(c, func(c *C) bool {
-		p1, l1, err = cli.GetTS(context.TODO())
+		p1, l1, err := cli.GetTS(context.TODO())
 		if err == nil {
+			ts1 = tsoutil.ComposeTS(p1, l1)
 			return true
 		}
 		c.Log(err)
 		return false
 	})
+	c.Assert(cluster.CheckTSOUnique(ts1), IsTrue)
 
 	leader := cluster.GetLeader()
 	s.waitLeader(c, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
@@ -111,13 +108,15 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	// Check TS won't fall back after leader changed.
 	testutil.WaitUntil(c, func(c *C) bool {
 		p2, l2, err := cli.GetTS(context.TODO())
-		if err != nil {
-			c.Log(err)
-			return false
+		if err == nil {
+			ts2 = tsoutil.ComposeTS(p2, l2)
+			return true
 		}
-		c.Assert(p1<<18+l1, Less, p2<<18+l2)
-		return true
+		c.Log(err)
+		return false
 	})
+	c.Assert(cluster.CheckTSOUnique(ts2), IsTrue)
+	c.Assert(ts1, Less, ts2)
 
 	// Check URL list.
 	cli.Close()
@@ -132,27 +131,21 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
+	endpoints := s.runServer(c, cluster)
+	cli := s.setupCli(c, endpoints, false)
 
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
-	c.Assert(err, IsNil)
-
-	var physical, logical int64
+	var lastTS uint64
 	testutil.WaitUntil(c, func(c *C) bool {
-		physical, logical, err = cli.GetTS(context.TODO())
+		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
 			return true
 		}
 		c.Log(err)
 		return false
 	})
-	lastTS := s.makeTS(physical, logical)
+	c.Assert(cluster.CheckTSOUnique(lastTS), IsTrue)
+
 	// Start a goroutine the make sure TS won't fall back.
 	quit := make(chan struct{})
 	var wg sync.WaitGroup
@@ -166,28 +159,24 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 			default:
 			}
 
-			physical, logical, err1 := cli.GetTS(context.TODO())
-			if err1 == nil {
-				ts := s.makeTS(physical, logical)
+			physical, logical, err := cli.GetTS(context.TODO())
+			if err == nil {
+				ts := tsoutil.ComposeTS(physical, logical)
+				c.Assert(cluster.CheckTSOUnique(ts), IsTrue)
 				c.Assert(lastTS, Less, ts)
 				lastTS = ts
 			}
 			time.Sleep(time.Millisecond)
 		}
 	}()
+
 	// Transfer leader.
-	etcdCli, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: time.Second,
-	})
-	c.Assert(err, IsNil)
-	leaderPath := filepath.Join("/pd", strconv.FormatUint(cli.GetClusterID(context.Background()), 10), "leader")
-	for i := 0; i < 10; i++ {
-		cluster.WaitLeader()
-		_, err = etcdCli.Delete(context.TODO(), leaderPath)
+	for i := 0; i < 5; i++ {
+		oldLeaderName := cluster.WaitLeader()
+		err := cluster.GetServer(oldLeaderName).ResignLeader()
 		c.Assert(err, IsNil)
-		// Sleep to make sure all servers are notified and starts campaign.
-		time.Sleep(time.Second)
+		newLeaderName := cluster.WaitLeader()
+		c.Assert(newLeaderName, Not(Equals), oldLeaderName)
 	}
 	close(quit)
 	wg.Wait()
@@ -201,21 +190,22 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-	cluster.WaitLeader()
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	var (
-		endpoints    []string
+		testServers  = cluster.GetServers()
+		endpoints    = make([]string, 0, len(testServers))
 		endpointsMap = make(map[string]string)
 	)
-	for _, s := range cluster.GetServers() {
+	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 		endpointsMap[s.GetServer().GetMemberInfo().GetName()] = s.GetConfig().AdvertiseClientUrls
 	}
@@ -234,7 +224,7 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	// Check allocator leaders URL map.
 	cli.Close()
 	for dcLocation, url := range cli.(client).GetAllocatorLeaderURLs() {
-		if dcLocation == config.GlobalDCLocation {
+		if dcLocation == tso.GlobalDCLocation {
 			urls := cli.(client).GetURLs()
 			sort.Strings(urls)
 			sort.Strings(endpoints)
@@ -251,7 +241,7 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	}
 }
 
-func (s *clientTestSuite) TestLocalTSO(c *C) {
+func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
@@ -259,94 +249,76 @@ func (s *clientTestSuite) TestLocalTSO(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	for _, dcLocation := range dcLocationConfig {
-		testutil.WaitUntil(c, func(c *C) bool {
-			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
-			return len(pdLeader) > 0
-		})
-	}
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
+	endpoints := s.runServer(c, cluster)
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
+
+	// Wait for all nodes becoming healthy.
+	time.Sleep(time.Second * 5)
+
+	// Join a new dc-location
+	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = "dc-4"
+	})
+	c.Assert(err, IsNil)
+	err = pd4.Run()
+	c.Assert(err, IsNil)
+	dcLocationConfig["pd4"] = "dc-4"
+	cluster.CheckClusterDCLocation()
+	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	wg := sync.WaitGroup{}
 	for _, dcLocation := range dcLocationConfig {
-		wg.Add(1)
-		go func(dc string) {
-			defer wg.Done()
-			var err error
-			var p1, l1 int64
-			testutil.WaitUntil(c, func(c *C) bool {
-				p1, l1, err = cli.GetLocalTS(context.TODO(), dc)
-				if err == nil {
-					return true
+		wg.Add(tsoRequestConcurrentNumber)
+		for i := 0; i < tsoRequestConcurrentNumber; i++ {
+			go func(dc string) {
+				defer wg.Done()
+				var lastTS uint64
+				for i := 0; i < 100; i++ {
+					globalPhysical1, globalLogical1, err := cli.GetTS(context.TODO())
+					c.Assert(err, IsNil)
+					globalTS1 := tsoutil.ComposeTS(globalPhysical1, globalLogical1)
+					localPhysical, localLogical, err := cli.GetLocalTS(context.TODO(), dc)
+					c.Assert(err, IsNil)
+					localTS := tsoutil.ComposeTS(localPhysical, localLogical)
+					globalPhysical2, globalLogical2, err := cli.GetTS(context.TODO())
+					c.Assert(err, IsNil)
+					globalTS2 := tsoutil.ComposeTS(globalPhysical2, globalLogical2)
+					c.Assert(lastTS, Less, globalTS1)
+					c.Assert(globalTS1, Less, localTS)
+					c.Assert(localTS, Less, globalTS2)
+					lastTS = globalTS2
 				}
-				c.Log(err)
-				return false
-			})
-			time.Sleep(10 * time.Millisecond)
-			testutil.WaitUntil(c, func(c *C) bool {
-				p2, l2, err := cli.GetLocalTS(context.TODO(), dc)
-				if err != nil {
-					c.Log(err)
-					return false
-				}
-				c.Assert(p1<<18+l1, Less, p2<<18+l2)
-				return true
-			})
-		}(dcLocation)
+				c.Assert(lastTS, Greater, uint64(0))
+			}(dcLocation)
+		}
 	}
 	wg.Wait()
-}
 
-func (s *clientTestSuite) TestNonexistentLocalTSO(c *C) {
-	dcLocationConfig := map[string]string{
-		"pd1": "dc-1",
-		"pd2": "dc-2",
-		"pd3": "dc-3",
-	}
-	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
-	})
-	c.Assert(err, IsNil)
-	defer cluster.Destroy()
-
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	for _, dcLocation := range dcLocationConfig {
-		testutil.WaitUntil(c, func(c *C) bool {
-			pdLeader := cluster.WaitAllocatorLeader(dcLocation)
-			return len(pdLeader) > 0
-		})
-	}
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
-	c.Assert(err, IsNil)
-
+	// Test a nonexistent dc-location for Local TSO
 	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
 	c.Assert(p, Equals, int64(0))
 	c.Assert(l, Equals, int64(0))
 	c.Assert(err, NotNil)
+
+	// assert global tso after resign leader
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember")
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, NotNil)
+	c.Assert(pd.IsLeaderChange(err), Equals, true)
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, IsNil)
 }
 
 func (s *clientTestSuite) TestCustomTimeout(c *C) {
@@ -354,14 +326,7 @@ func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
+	endpoints := s.runServer(c, cluster)
 	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithCustomTimeoutOption(1*time.Second))
 	c.Assert(err, IsNil)
 
@@ -374,15 +339,127 @@ func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	c.Assert(time.Since(start), Less, 2*time.Second)
 }
 
+func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
+	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	endpoints := s.runServer(c, cluster)
+	cli := s.setupCli(c, endpoints, true)
+
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"), IsNil)
+	time.Sleep(200 * time.Millisecond)
+	r, err := cli.GetRegion(context.Background(), []byte("a"))
+	c.Assert(err, IsNil)
+	c.Assert(r, NotNil)
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"), IsNil)
+	time.Sleep(200 * time.Millisecond)
+	r, err = cli.GetRegion(context.Background(), []byte("a"))
+	c.Assert(err, IsNil)
+	c.Assert(r, NotNil)
+}
+
+// case 1: unreachable -> normal
+func (s *clientTestSuite) TestGetTsoFromFollowerClient1(c *C) {
+	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	endpoints := s.runServer(c, cluster)
+	cli := s.setupCli(c, endpoints, true)
+
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
+	var lastTS uint64
+	testutil.WaitUntil(c, func(c *C) bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		c.Log(err)
+		return false
+	})
+
+	lastTS = checkTS(c, cli, lastTS)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"), IsNil)
+	time.Sleep(2 * time.Second)
+	checkTS(c, cli, lastTS)
+}
+
+// case 2: unreachable -> leader transfer -> normal
+func (s *clientTestSuite) TestGetTsoFromFollowerClient2(c *C) {
+	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	endpoints := s.runServer(c, cluster)
+	cli := s.setupCli(c, endpoints, true)
+
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
+	var lastTS uint64
+	testutil.WaitUntil(c, func(c *C) bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		c.Log(err)
+		return false
+	})
+
+	lastTS = checkTS(c, cli, lastTS)
+	c.Assert(cluster.GetServer(cluster.GetLeader()).ResignLeader(), IsNil)
+	cluster.WaitLeader()
+	lastTS = checkTS(c, cli, lastTS)
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"), IsNil)
+	time.Sleep(5 * time.Second)
+	checkTS(c, cli, lastTS)
+}
+
+func checkTS(c *C, cli pd.Client, lastTS uint64) uint64 {
+	for i := 0; i < 100; i++ {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			ts := tsoutil.ComposeTS(physical, logical)
+			c.Assert(lastTS, Less, ts)
+			lastTS = ts
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return lastTS
+}
+
+func (s *clientTestSuite) runServer(c *C, cluster *tests.TestCluster) []string {
+	err := cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+
+	testServers := cluster.GetServers()
+	endpoints := make([]string, 0, len(testServers))
+	for _, s := range testServers {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	return endpoints
+}
+
+func (s *clientTestSuite) setupCli(c *C, endpoints []string, enableForwarding bool) pd.Client {
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithForwardingOption(enableForwarding))
+	c.Assert(err, IsNil)
+	return cli
+}
+
 func (s *clientTestSuite) waitLeader(c *C, cli client, leader string) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		cli.ScheduleCheckLeader()
 		return cli.GetLeaderAddr() == leader
 	})
-}
-
-func (s *clientTestSuite) makeTS(physical, logical int64) uint64 {
-	return uint64(physical<<18 + logical)
 }
 
 var _ = Suite(&testClientSuite{})
@@ -512,37 +589,22 @@ func bootstrapServer(c *C, header *pdpb.RequestHeader, client pdpb.PDClient) {
 	c.Assert(err, IsNil)
 }
 
-func (s *testClientSuite) TestTSO(c *C) {
-	var tss []int64
-	for i := 0; i < 100; i++ {
-		p, l, err := s.client.GetTS(context.Background())
-		c.Assert(err, IsNil)
-		tss = append(tss, p<<18+l)
-	}
-
-	var last int64
-	for _, ts := range tss {
-		c.Assert(ts, Greater, last)
-		last = ts
-	}
-}
-
-func (s *testClientSuite) TestTSORace(c *C) {
+func (s *testClientSuite) TestNormalTSO(c *C) {
 	var wg sync.WaitGroup
-	begin := make(chan struct{})
-	count := 10
-	wg.Add(count)
-	for i := 0; i < count; i++ {
+	wg.Add(tsoRequestConcurrentNumber)
+	for i := 0; i < tsoRequestConcurrentNumber; i++ {
 		go func() {
-			<-begin
+			var lastTS uint64
 			for i := 0; i < 100; i++ {
-				_, _, err := s.client.GetTS(context.Background())
+				physical, logical, err := s.client.GetTS(context.Background())
 				c.Assert(err, IsNil)
+				ts := tsoutil.ComposeTS(physical, logical)
+				c.Assert(lastTS, Less, ts)
+				lastTS = ts
 			}
 			wg.Done()
 		}()
 	}
-	close(begin)
 	wg.Wait()
 }
 
@@ -735,7 +797,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(stores, DeepEquals, stores)
 
 	// Mark the store as offline.
-	err = cluster.RemoveStore(store.GetId())
+	err = cluster.RemoveStore(store.GetId(), false)
 	c.Assert(err, IsNil)
 	offlineStore := proto.Clone(store).(*metapb.Store)
 	offlineStore.State = metapb.StoreState_Offline
@@ -757,25 +819,28 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	}
 	c.Assert(contains, IsTrue)
 
-	// Mark the store as tombstone.
-	err = cluster.BuryStore(store.GetId(), true)
+	// Mark the store as physically destroyed and offline.
+	err = cluster.RemoveStore(store.GetId(), true)
 	c.Assert(err, IsNil)
-	tombstoneStore := proto.Clone(store).(*metapb.Store)
-	tombstoneStore.State = metapb.StoreState_Tombstone
+	physicallyDestroyedStoreID := store.GetId()
 
-	// Get a tombstone store should fail.
-	n, err = s.client.GetStore(context.Background(), store.GetId())
+	// Get a physically destroyed and offline store
+	// It should be Tombstone(become Tombstone automically) or Offline
+	n, err = s.client.GetStore(context.Background(), physicallyDestroyedStoreID)
 	c.Assert(err, IsNil)
-	c.Assert(n, IsNil)
-
+	if n != nil { // store is still offline and physically destroyed
+		c.Assert(n.GetState(), Equals, metapb.StoreState_Offline)
+		c.Assert(n.PhysicallyDestroyed, IsTrue)
+	}
 	// Should return tombstone stores.
 	contains = false
 	stores, err = s.client.GetAllStores(context.Background())
 	c.Assert(err, IsNil)
 	for _, store := range stores {
-		if store.GetId() == tombstoneStore.GetId() {
+		if store.GetId() == physicallyDestroyedStoreID {
 			contains = true
-			c.Assert(store, DeepEquals, tombstoneStore)
+			c.Assert(store.GetState(), Not(Equals), metapb.StoreState_Up)
+			c.Assert(store.PhysicallyDestroyed, IsTrue)
 		}
 	}
 	c.Assert(contains, IsTrue)
@@ -784,7 +849,10 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	stores, err = s.client.GetAllStores(context.Background(), pd.WithExcludeTombstone())
 	c.Assert(err, IsNil)
 	for _, store := range stores {
-		c.Assert(store, Not(Equals), tombstoneStore)
+		if store.GetId() == physicallyDestroyedStoreID {
+			c.Assert(store.GetState(), Equals, metapb.StoreState_Offline)
+			c.Assert(store.PhysicallyDestroyed, IsTrue)
+		}
 	}
 }
 
@@ -911,6 +979,56 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"", 1000, 15)
 	c.Assert(err, NotNil)
+
+	// Put some other safepoints to test fixing gc_worker's safepoint when there exists other safepoints.
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"a", 1000, 11)
+	c.Assert(err, IsNil)
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"b", 1000, 12)
+	c.Assert(err, IsNil)
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", 1000, 13)
+	c.Assert(err, IsNil)
+
+	// Force set invalid ttl to gc_worker
+	gcWorkerKey := path.Join("gc", "safe_point", "service", "gc_worker")
+	{
+		gcWorkerSsp := &core.ServiceSafePoint{
+			ServiceID: "gc_worker",
+			ExpiredAt: -12345,
+			SafePoint: 10,
+		}
+		value, err := json.Marshal(gcWorkerSsp)
+		c.Assert(err, IsNil)
+		err = s.srv.GetStorage().Save(gcWorkerKey, string(value))
+		c.Assert(err, IsNil)
+	}
+
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.ServiceID, Equals, "gc_worker")
+	c.Assert(minSsp.SafePoint, Equals, uint64(10))
+	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
+
+	// Force delete gc_worker, then the min service safepoint is 11 of "a".
+	err = s.srv.GetStorage().Remove(gcWorkerKey)
+	c.Assert(err, IsNil)
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.SafePoint, Equals, uint64(11))
+	// After calling LoadMinServiceGCS when "gc_worker"'s service safepoint is missing, "gc_worker"'s service safepoint
+	// will be newly created.
+	// Increase "a" so that "gc_worker" is the only minimum that will be returned by LoadMinServiceGCSafePoint.
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"a", 1000, 14)
+	c.Assert(err, IsNil)
+
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.ServiceID, Equals, "gc_worker")
+	c.Assert(minSsp.SafePoint, Equals, uint64(11))
+	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {

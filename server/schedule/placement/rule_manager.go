@@ -34,21 +34,23 @@ import (
 // RuleManager is responsible for the lifecycle of all placement Rules.
 // It is thread safe.
 type RuleManager struct {
-	store *core.Storage
+	storage *core.Storage
 	sync.RWMutex
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
 
 	// used for rule validation
-	keyType string
+	keyType          string
+	storeSetInformer core.StoreSetInformer
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(store *core.Storage) *RuleManager {
+func NewRuleManager(storage *core.Storage, storeSetInformer core.StoreSetInformer) *RuleManager {
 	return &RuleManager{
-		store:      store,
-		ruleConfig: newRuleConfig(),
+		storage:          storage,
+		storeSetInformer: storeSetInformer,
+		ruleConfig:       newRuleConfig(),
 	}
 }
 
@@ -76,7 +78,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 			Count:          maxReplica,
 			LocationLabels: locationLabels,
 		}
-		if err := m.store.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
+		if err := m.storage.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
 			return err
 		}
 		m.ruleConfig.setRule(defaultRule)
@@ -94,7 +96,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 func (m *RuleManager) loadRules() error {
 	var toSave []*Rule
 	var toDelete []string
-	err := m.store.LoadRules(func(k, v string) {
+	err := m.storage.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
 			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
@@ -122,12 +124,12 @@ func (m *RuleManager) loadRules() error {
 		return err
 	}
 	for _, s := range toSave {
-		if err = m.store.SaveRule(s.StoreKey(), s); err != nil {
+		if err = m.storage.SaveRule(s.StoreKey(), s); err != nil {
 			return err
 		}
 	}
 	for _, d := range toDelete {
-		if err = m.store.DeleteRule(d); err != nil {
+		if err = m.storage.DeleteRule(d); err != nil {
 			return err
 		}
 	}
@@ -135,7 +137,7 @@ func (m *RuleManager) loadRules() error {
 }
 
 func (m *RuleManager) loadGroups() error {
-	return m.store.LoadRuleGroups(func(k, v string) {
+	return m.storage.LoadRuleGroups(func(k, v string) {
 		var g RuleGroup
 		if err := json.Unmarshal([]byte(v), &g); err != nil {
 			log.Error("failed to unmarshal rule group", zap.String("group-id", k), errs.ZapError(errs.ErrLoadRuleGroup, err))
@@ -197,6 +199,13 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
+		}
+	}
+
+	if m.storeSetInformer != nil {
+		stores := m.storeSetInformer.GetStores()
+		if len(stores) > 0 && !checkRule(r, stores) {
+			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("rule '%s' from rule group '%s' can not match any store", r.ID, r.GroupID))
 		}
 	}
 
@@ -329,9 +338,9 @@ func (m *RuleManager) savePatch(p *ruleConfig) error {
 	for key, r := range p.rules {
 		if r == nil {
 			r = &Rule{GroupID: key[0], ID: key[1]}
-			err = m.store.DeleteRule(r.StoreKey())
+			err = m.storage.DeleteRule(r.StoreKey())
 		} else {
-			err = m.store.SaveRule(r.StoreKey(), r)
+			err = m.storage.SaveRule(r.StoreKey(), r)
 		}
 		if err != nil {
 			return err
@@ -339,9 +348,9 @@ func (m *RuleManager) savePatch(p *ruleConfig) error {
 	}
 	for id, g := range p.groups {
 		if g.isDefault() {
-			err = m.store.DeleteRuleGroup(id)
+			err = m.storage.DeleteRuleGroup(id)
 		} else {
-			err = m.store.SaveRuleGroup(id, g)
+			err = m.storage.SaveRuleGroup(id, g)
 		}
 		if err != nil {
 			return err
@@ -444,7 +453,7 @@ func (m *RuleManager) GetRuleGroup(id string) *RuleGroup {
 func (m *RuleManager) GetRuleGroups() []*RuleGroup {
 	m.RLock()
 	defer m.RUnlock()
-	var groups []*RuleGroup
+	groups := make([]*RuleGroup, 0, len(m.ruleConfig.groups))
 	for _, g := range m.ruleConfig.groups {
 		groups = append(groups, g)
 	}
@@ -486,7 +495,7 @@ func (m *RuleManager) DeleteRuleGroup(id string) error {
 func (m *RuleManager) GetAllGroupBundles() []GroupBundle {
 	m.RLock()
 	defer m.RUnlock()
-	var bundles []GroupBundle
+	bundles := make([]GroupBundle, 0, len(m.ruleConfig.groups))
 	for _, g := range m.ruleConfig.groups {
 		bundles = append(bundles, GroupBundle{
 			ID:       g.ID,

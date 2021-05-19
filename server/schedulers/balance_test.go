@@ -34,7 +34,18 @@ import (
 
 var _ = Suite(&testBalanceSuite{})
 
-type testBalanceSuite struct{}
+type testBalanceSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testBalanceSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testBalanceSuite) TearDownTest(c *C) {
+	s.cancel()
+}
 
 type testBalanceSpeedCase struct {
 	sourceCount    uint64
@@ -99,7 +110,7 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 	}
 
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetTolerantSizeRatio(2.5)
 	tc.SetRegionScoreFormulaVersion("v1")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -138,7 +149,7 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 
 func (s *testBalanceSuite) TestBalanceLimit(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.AddLeaderStore(1, 10)
 	tc.AddLeaderStore(2, 20)
 	tc.AddLeaderStore(3, 30)
@@ -153,7 +164,7 @@ func (s *testBalanceSuite) TestBalanceLimit(c *C) {
 
 func (s *testBalanceSuite) TestTolerantRatio(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	// create a region to control average region size.
 	c.Assert(tc.AddLeaderRegion(1, 1, 2), NotNil)
 	regionSize := int64(96 * KB)
@@ -186,7 +197,7 @@ type testBalanceLeaderSchedulerSuite struct {
 func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.opt = config.NewTestOptions()
-	s.tc = mockcluster.NewCluster(s.opt)
+	s.tc = mockcluster.NewCluster(s.ctx, s.opt)
 	s.oc = schedule.NewOperatorController(s.ctx, s.tc, nil)
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
@@ -483,7 +494,7 @@ type testBalanceLeaderRangeSchedulerSuite struct {
 func (s *testBalanceLeaderRangeSchedulerSuite) SetUpTest(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	opt := config.NewTestOptions()
-	s.tc = mockcluster.NewCluster(opt)
+	s.tc = mockcluster.NewCluster(s.ctx, opt)
 	s.oc = schedule.NewOperatorController(s.ctx, nil, nil)
 }
 
@@ -582,7 +593,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	opt := config.NewTestOptions()
 	// TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
@@ -618,7 +629,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	opt := config.NewTestOptions()
 	//TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
@@ -627,12 +638,12 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
-	s.checkReplica3(c, tc, opt, sb)
+	s.checkReplica3(c, tc, sb)
 	tc.SetEnablePlacementRules(true)
-	s.checkReplica3(c, tc, opt, sb)
+	s.checkReplica3(c, tc, sb)
 }
 
-func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cluster, opt *config.PersistOptions, sb schedule.Scheduler) {
+func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cluster, sb schedule.Scheduler) {
 	// Store 1 has the largest region score, so the balance scheduler tries to replace peer in store 1.
 	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 15, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -682,7 +693,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	opt := config.NewTestOptions()
 	//TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMaxReplicas(5)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 
@@ -692,12 +703,12 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
-	s.checkReplica5(c, tc, opt, sb)
+	s.checkReplica5(c, tc, sb)
 	tc.SetEnablePlacementRules(true)
-	s.checkReplica5(c, tc, opt, sb)
+	s.checkReplica5(c, tc, sb)
 }
 
-func (s *testBalanceRegionSchedulerSuite) checkReplica5(c *C, tc *mockcluster.Cluster, opt *config.PersistOptions, sb schedule.Scheduler) {
+func (s *testBalanceRegionSchedulerSuite) checkReplica5(c *C, tc *mockcluster.Cluster, sb schedule.Scheduler) {
 	tc.AddLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 5, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(3, 6, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
@@ -746,7 +757,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica5(c *C, tc *mockcluster.Cl
 func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetTolerantSizeRatio(1)
 	tc.SetRegionScheduleLimit(1)
@@ -822,7 +833,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	// TODO: enable placementrules
 	tc.SetPlacementRuleEnabled(false)
 	tc.DisableFeature(versioninfo.JointConsensus)
@@ -850,7 +861,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
@@ -866,7 +877,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	//TODO: enable placementrules
 	tc.SetEnablePlacementRules(false)
 	tc.DisableFeature(versioninfo.JointConsensus)
@@ -917,7 +928,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplacePendingRegion(c *C, tc *mo
 
 func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -932,9 +943,57 @@ func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
 	}
 }
 
+func (s *testBalanceRegionSchedulerSuite) TestEmptyRegion(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
+	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	c.Assert(err, IsNil)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 9)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+	region := core.NewRegionInfo(
+		&metapb.Region{
+			Id:       5,
+			StartKey: []byte("a"),
+			EndKey:   []byte("b"),
+			Peers: []*metapb.Peer{
+				{Id: 6, StoreId: 1},
+				{Id: 7, StoreId: 3},
+				{Id: 8, StoreId: 4},
+			},
+		},
+		&metapb.Peer{Id: 7, StoreId: 3},
+		core.SetApproximateSize(1),
+		core.SetApproximateKeys(1),
+	)
+	tc.PutRegion(region)
+	operators := sb.Schedule(tc)
+	c.Assert(operators, NotNil)
+
+	for i := uint64(10); i < 60; i++ {
+		tc.PutRegionStores(i, 1, 3, 4)
+	}
+	operators = sb.Schedule(tc)
+	c.Assert(operators, IsNil)
+}
+
 var _ = Suite(&testRandomMergeSchedulerSuite{})
 
-type testRandomMergeSchedulerSuite struct{}
+type testRandomMergeSchedulerSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testRandomMergeSchedulerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testRandomMergeSchedulerSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
 
 func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -942,7 +1001,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	opt := config.NewTestOptions()
 	//TODO: enable palcementrules
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMergeScheduleLimit(1)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, true /* need to run */)
 	oc := schedule.NewOperatorController(ctx, tc, stream)
@@ -989,7 +1048,7 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	opt := config.NewTestOptions()
 	// TODO: enable palcementrules
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetTolerantSizeRatio(2.5)
 	// Add stores 1,2,3,4,5.
@@ -1040,18 +1099,8 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 
 	hb, err := schedule.CreateScheduler(ScatterRangeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_50", "t"}))
 	c.Assert(err, IsNil)
-	limit := 0
-	for {
-		if limit > 100 {
-			break
-		}
-		ops := hb.Schedule(tc)
-		if ops == nil {
-			limit++
-			continue
-		}
-		schedule.ApplyOperator(tc, ops[0])
-	}
+
+	scheduleAndApplyOperator(tc, hb, 100)
 	for i := 1; i <= 5; i++ {
 		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
 		c.Check(leaderCount, LessEqual, 12)
@@ -1060,9 +1109,85 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	}
 }
 
+func (s *testScatterRangeLeaderSuite) TestBalanceLeaderLimit(c *C) {
+	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
+	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetTolerantSizeRatio(2.5)
+	// Add stores 1,2,3,4,5.
+	tc.AddRegionStore(1, 0)
+	tc.AddRegionStore(2, 0)
+	tc.AddRegionStore(3, 0)
+	tc.AddRegionStore(4, 0)
+	tc.AddRegionStore(5, 0)
+	var (
+		id      uint64
+		regions []*metapb.Region
+	)
+	for i := 0; i < 50; i++ {
+		peers := []*metapb.Peer{
+			{Id: id + 1, StoreId: 1},
+			{Id: id + 2, StoreId: 2},
+			{Id: id + 3, StoreId: 3},
+		}
+		regions = append(regions, &metapb.Region{
+			Id:       id + 4,
+			Peers:    peers,
+			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
+			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
+		})
+		id += 4
+	}
+
+	// empty case
+	regions[49].EndKey = []byte("")
+	for _, meta := range regions {
+		leader := rand.Intn(4) % 3
+		regionInfo := core.NewRegionInfo(
+			meta,
+			meta.Peers[leader],
+			core.SetApproximateKeys(96),
+			core.SetApproximateSize(96),
+		)
+
+		tc.Regions.SetRegion(regionInfo)
+	}
+
+	for i := 0; i < 100; i++ {
+		_, err := tc.AllocPeer(1)
+		c.Assert(err, IsNil)
+	}
+	for i := 1; i <= 5; i++ {
+		tc.UpdateStoreStatus(uint64(i))
+	}
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
+
+	// test not allow schedule leader
+	tc.SetLeaderScheduleLimit(0)
+	hb, err := schedule.CreateScheduler(ScatterRangeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_50", "t"}))
+	c.Assert(err, IsNil)
+
+	scheduleAndApplyOperator(tc, hb, 100)
+	maxLeaderCount := 0
+	minLeaderCount := 99
+	for i := 1; i <= 5; i++ {
+		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
+		if leaderCount < minLeaderCount {
+			minLeaderCount = leaderCount
+		}
+		if leaderCount > maxLeaderCount {
+			maxLeaderCount = leaderCount
+		}
+		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
+		c.Check(regionCount, LessEqual, 32)
+	}
+	c.Check(maxLeaderCount-minLeaderCount, Greater, 10)
+}
+
 func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	hb, err := schedule.CreateScheduler(ScatterRangeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_50", "t"}))
 	sche := hb.(*scatterRangeScheduler)
@@ -1088,7 +1213,7 @@ func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
 
 func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	// Add stores 1,2,3.
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 0)
@@ -1139,9 +1264,14 @@ func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 	hb, err := schedule.CreateScheduler(ScatterRangeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_09", "t"}))
 	c.Assert(err, IsNil)
 
+	scheduleAndApplyOperator(tc, hb, 100)
+}
+
+// scheduleAndApplyOperator will try to schedule for `count` times and apply the operator if the operator is created.
+func scheduleAndApplyOperator(tc *mockcluster.Cluster, hb schedule.Scheduler, count int) {
 	limit := 0
 	for {
-		if limit > 100 {
+		if limit > count {
 			break
 		}
 		ops := hb.Schedule(tc)

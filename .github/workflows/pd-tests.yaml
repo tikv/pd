@@ -3,10 +3,12 @@ on:
     branches:
       - master
       - release-4.0
+      - release-5.0
   pull_request:
     branches:
       - master
       - release-4.0
+      - release-5.0
 name: PD Tests
 jobs:
   chunks:

@@ -52,6 +52,11 @@ func NewMergeChecker(ctx context.Context, cluster opt.Cluster) *MergeChecker {
 	}
 }
 
+// GetType return MergeChecker's type
+func (m *MergeChecker) GetType() string {
+	return "merge-checker"
+}
+
 // RecordRegionSplit put the recently split region into cache. MergeChecker
 // will skip check it for a while.
 func (m *MergeChecker) RecordRegionSplit(regionIDs []uint64) {
@@ -147,8 +152,9 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 }
 
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
-	return adjacent != nil && !m.cluster.IsRegionHot(adjacent) && AllowMerge(m.cluster, region, adjacent) &&
-		opt.IsRegionHealthy(m.cluster, adjacent) && opt.IsRegionReplicated(m.cluster, adjacent)
+	return adjacent != nil && !m.splitCache.Exists(adjacent.GetID()) && !m.cluster.IsRegionHot(adjacent) &&
+		AllowMerge(m.cluster, region, adjacent) && opt.IsRegionHealthy(m.cluster, adjacent) &&
+		opt.IsRegionReplicated(m.cluster, adjacent)
 }
 
 // AllowMerge returns true if two regions can be merged according to the key type.

@@ -13,7 +13,12 @@
 
 package opt
 
-import "github.com/tikv/pd/server/core"
+import (
+	"github.com/tikv/pd/server/core"
+)
+
+// BalanceEmptyRegionThreshold is a threshold which allow balance the empty region if the region number is less than this threshold.
+var balanceEmptyRegionThreshold = 50
 
 // IsRegionHealthy checks if a region is healthy for scheduling. It requires the
 // region does not have any down or pending peers. And when placement rules
@@ -31,6 +36,11 @@ func IsHealthyAllowPending(cluster Cluster, region *core.RegionInfo) bool {
 	return len(region.GetDownPeers()) == 0
 }
 
+// IsEmptyRegionAllowBalance checks if a region is an empty region and can be balanced.
+func IsEmptyRegionAllowBalance(cluster Cluster, region *core.RegionInfo) bool {
+	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < balanceEmptyRegionThreshold
+}
+
 // HealthRegion returns a function that checks if a region is healthy for
 // scheduling. It requires the region does not have any down or pending peers,
 // and does not have any learner peers when placement rules is disabled.
@@ -43,6 +53,11 @@ func HealthRegion(cluster Cluster) func(*core.RegionInfo) bool {
 // to have pending peers.
 func HealthAllowPending(cluster Cluster) func(*core.RegionInfo) bool {
 	return func(region *core.RegionInfo) bool { return IsHealthyAllowPending(cluster, region) }
+}
+
+// AllowBalanceEmptyRegion returns a function that checks if a region is an empty region and can be balanced.
+func AllowBalanceEmptyRegion(cluster Cluster) func(*core.RegionInfo) bool {
+	return func(region *core.RegionInfo) bool { return IsEmptyRegionAllowBalance(cluster, region) }
 }
 
 // IsRegionReplicated checks if a region is fully replicated. When placement

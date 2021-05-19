@@ -50,9 +50,17 @@ type testMergeCheckerSuite struct {
 	regions []*core.RegionInfo
 }
 
+func (s *testMergeCheckerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testMergeCheckerSuite) TearDownTest(c *C) {
+	s.cancel()
+}
+
 func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
@@ -122,20 +130,15 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 				},
 			},
 			&metapb.Peer{Id: 109, StoreId: 4},
-			core.SetApproximateSize(10),
-			core.SetApproximateKeys(10),
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1),
 		),
 	}
 
 	for _, region := range s.regions {
 		s.cluster.PutRegion(region)
 	}
-	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.mc = NewMergeChecker(s.ctx, s.cluster)
-}
-
-func (s *testMergeCheckerSuite) TearDownTest(c *C) {
-	s.cancel()
 }
 
 func (s *testMergeCheckerSuite) TestBasic(c *C) {
@@ -191,10 +194,19 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops, NotNil)
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
-	s.cluster.RuleManager.DeleteRule("test", "test")
+	s.cluster.RuleManager.DeleteRule("pd", "test")
 
 	// Skip recently split regions.
 	s.cluster.SetSplitMergeInterval(time.Hour)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+
+	s.mc.startTime = time.Now().Add(-2 * time.Hour)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	ops = s.mc.Check(s.regions[3])
+	c.Assert(ops, NotNil)
+
 	s.mc.RecordRegionSplit([]uint64{s.regions[2].GetID()})
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
@@ -425,7 +437,7 @@ type testSplitMergeSuite struct{}
 
 func (s *testMergeCheckerSuite) TestCache(c *C) {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetSplitMergeInterval(time.Hour)

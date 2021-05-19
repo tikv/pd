@@ -245,7 +245,20 @@ func (s *testKVSuite) TestLoadMinServiceGCSafePoint(c *C) {
 		c.Assert(storage.SaveServiceGCSafePoint(ssp), IsNil)
 	}
 
+	// gc_worker's safepoint will be automatically inserted when loading service safepoints. Here the returned
+	// safepoint can be either of "gc_worker" or "2".
 	ssp, err := storage.LoadMinServiceGCSafePoint(time.Now())
+	c.Assert(err, IsNil)
+	c.Assert(ssp.SafePoint, Equals, uint64(2))
+
+	// Advance gc_worker's safepoint
+	c.Assert(storage.SaveServiceGCSafePoint(&ServiceSafePoint{
+		ServiceID: "gc_worker",
+		ExpiredAt: math.MaxInt64,
+		SafePoint: 10,
+	}), IsNil)
+
+	ssp, err = storage.LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(ssp.ServiceID, Equals, "2")
 	c.Assert(ssp.ExpiredAt, Equals, expireAt)

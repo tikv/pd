@@ -1,7 +1,7 @@
-name: 'Auto Assignee'
-on: 
+name: "Auto Assignee"
+on:
   pull_request:
-    types: ['opened', 'synchronize']
+    types: ["opened", "synchronize"]
 
 jobs:
   add-assignee:

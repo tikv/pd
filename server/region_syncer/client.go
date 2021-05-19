@@ -40,22 +40,22 @@ const (
 // StopSyncWithLeader stop to sync the region with leader.
 func (s *RegionSyncer) StopSyncWithLeader() {
 	s.reset()
-	s.Lock()
-	close(s.closed)
-	s.closed = make(chan struct{})
-	s.Unlock()
+	s.mu.Lock()
+	close(s.mu.closed)
+	s.mu.closed = make(chan struct{})
+	s.mu.Unlock()
 	s.wg.Wait()
 }
 
 func (s *RegionSyncer) reset() {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if s.regionSyncerCancel == nil {
+	if s.mu.regionSyncerCancel == nil {
 		return
 	}
-	s.regionSyncerCancel()
-	s.regionSyncerCancel, s.regionSyncerCtx = nil, nil
+	s.mu.regionSyncerCancel()
+	s.mu.regionSyncerCancel, s.mu.regionSyncerCtx = nil, nil
 }
 
 func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
@@ -92,15 +92,22 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 		return nil, errors.WithStack(err)
 	}
 
-	s.Lock()
-	s.regionSyncerCtx, s.regionSyncerCancel = ctx, cancel
-	s.Unlock()
+	s.mu.Lock()
+	s.mu.regionSyncerCtx, s.mu.regionSyncerCancel = ctx, cancel
+	s.mu.Unlock()
 	return cc, nil
 }
 
 func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 	cli := pdpb.NewPDClient(conn)
-	syncStream, err := cli.SyncRegions(s.regionSyncerCtx)
+	var ctx context.Context
+	s.mu.RLock()
+	ctx = s.mu.regionSyncerCtx
+	s.mu.RUnlock()
+	if ctx == nil {
+		return nil, errors.New("syncRegion failed due to regionSyncerCtx is nil")
+	}
+	syncStream, err := cli.SyncRegions(ctx)
 	if err != nil {
 		return syncStream, errs.ErrGRPCCreateStream.Wrap(err).FastGenWithCause()
 	}
@@ -119,9 +126,9 @@ func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 // StartSyncWithLeader starts to sync with leader.
 func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	s.wg.Add(1)
-	s.RLock()
-	closed := s.closed
-	s.RUnlock()
+	s.mu.RLock()
+	closed := s.mu.closed
+	s.mu.RUnlock()
 	go func() {
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.

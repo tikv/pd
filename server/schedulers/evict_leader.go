@@ -129,15 +129,15 @@ func (conf *evictLeaderSchedulerConfig) getSchedulerName() string {
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	var res []string
 	ranges := conf.StoreIDWithRanges[id]
+	res := make([]string, 0, len(ranges)*2)
 	for index := range ranges {
 		res = append(res, (string)(ranges[index].StartKey), (string)(ranges[index].EndKey))
 	}
 	return res
 }
 
-func (conf *evictLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (succ bool, last bool) {
+func (conf *evictLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last bool) {
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
 	_, exists := conf.StoreIDWithRanges[id]
@@ -208,11 +208,15 @@ func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 }
 
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+	}
+	return allowed
 }
 
 func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Operator {
-	var ops []*operator.Operator
+	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
 	for id, ranges := range s.conf.StoreIDWithRanges {
 		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
 		if region == nil {
@@ -331,7 +335,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	}
 
 	var resp interface{}
-	succ, last := handler.config.mayBeRemoveStoreFromConfig(id)
+	succ, last := handler.config.removeStore(id)
 	if succ {
 		err = handler.config.Persist()
 		if err != nil {
