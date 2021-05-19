@@ -15,28 +15,13 @@ package statistics
 
 import (
 	"context"
-	"sync/atomic"
 
 	"github.com/tikv/pd/server/core"
 )
 
 // Denoising is an option to calculate flow base on the real heartbeats. Should
 // only turned off by the simulator and the test.
-var Denoising = uint32(1)
-
-// SetDenoising set Denoising
-func SetDenoising(enabled bool) {
-	if enabled {
-		atomic.StoreUint32(&Denoising, 1)
-	} else {
-		atomic.StoreUint32(&Denoising, 0)
-	}
-}
-
-// GetDenoising get Denoising
-func GetDenoising() bool {
-	return atomic.LoadUint32(&Denoising) > 0
-}
+var Denoising = true
 
 const queueCap = 1000
 

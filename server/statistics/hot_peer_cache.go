@@ -158,7 +158,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	f.Lock()
 	defer f.Unlock()
 	interval := peer.GetInterval()
-	if GetDenoising() && interval < HotRegionReportMinInterval {
+	if Denoising && interval < HotRegionReportMinInterval {
 		return nil
 	}
 	storeID := peer.GetStoreID()
@@ -209,7 +209,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 func (f *hotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]struct{}, interval uint64) (ret []*HotPeerStat) {
 	f.Lock()
 	defer f.Unlock()
-	if GetDenoising() && interval < HotRegionReportMinInterval {
+	if Denoising && interval < HotRegionReportMinInterval {
 		return
 	}
 	previousHotStat, ok := f.regionsOfStore[storeID]

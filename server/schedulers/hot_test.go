@@ -130,7 +130,7 @@ type testHotWriteRegionSchedulerSuite struct{}
 func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	statistics.SetDenoising(false)
+	statistics.Denoising = false
 	opt := config.NewTestOptions()
 	// TODO: enable palcement rules
 	opt.SetPlacementRuleEnabled(false)
@@ -312,7 +312,7 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	statistics.SetDenoising(false)
+	statistics.Denoising = false
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -366,7 +366,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	statistics.SetDenoising(false)
+	statistics.Denoising = false
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -413,7 +413,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
 func (s *testHotWriteRegionSchedulerSuite) TestLeader(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	statistics.SetDenoising(false)
+	statistics.Denoising = false
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -470,7 +470,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestLeader(c *C) {
 func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	statistics.SetDenoising(false)
+	statistics.Denoising = false
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -554,7 +554,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 func (s *testHotWriteRegionSchedulerSuite) TestWithRuleEnabled(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	statistics.SetDenoising(false)
+	statistics.Denoising = false
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetEnablePlacementRules(true)
@@ -732,7 +732,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	statistics.SetDenoising(false)
+	statistics.Denoising = false
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -1241,7 +1241,7 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	statistics.SetDenoising(false)
+	statistics.Denoising = false
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
