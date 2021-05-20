@@ -33,8 +33,8 @@ var (
 	regionCount       = flag.Int("region", 1000000, "region count")
 	keyLen            = flag.Int("key-len", 56, "key length")
 	replica           = flag.Int("replica", 3, "replica count")
-	leaderUpdateRatio = flag.Float64("leader", 0.03, "ratio of the region leader need to update, they need save-cache")
-	epochUpdateRatio  = flag.Float64("epoch", 0.02, "ratio of the region epoch need to update, they need save-kv")
+	leaderUpdateRatio = flag.Float64("leader", 0.06, "ratio of the region leader need to update, they need save-tree")
+	epochUpdateRatio  = flag.Float64("epoch", 0.04, "ratio of the region epoch need to update, they need save-kv")
 	spaceUpdateRatio  = flag.Float64("space", 0.15, "ratio of the region space need to update")
 	flowUpdateRatio   = flag.Float64("flow", 0.35, "ratio of the region flow need to update")
 	sample            = flag.Bool("sample", false, "sample per second")
@@ -290,7 +290,7 @@ func (rs *Regions) result(sec float64) string {
 
 	ret := "Update speed of each category:\n"
 	ret += fmt.Sprintf("  Requests/sec:   %12.4f\n", float64(*regionCount)/sec)
-	ret += fmt.Sprintf("  Save-Cache/sec: %12.4f\n", float64(len(rs.updateLeader))/sec)
+	ret += fmt.Sprintf("  Save-Tree/sec:  %12.4f\n", float64(len(rs.updateLeader))/sec)
 	ret += fmt.Sprintf("  Save-KV/sec:    %12.4f\n", float64(len(rs.updateEpoch))/sec)
 	ret += fmt.Sprintf("  Save-Space/sec: %12.4f\n", float64(len(rs.updateSpace))/sec)
 	ret += fmt.Sprintf("  Save-Flow/sec:  %12.4f\n", float64(len(rs.updateFlow))/sec)
