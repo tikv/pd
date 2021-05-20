@@ -335,10 +335,10 @@ func main() {
 		for storeID := 1; storeID <= *storeCount; storeID++ {
 			<-groupEndNotify[storeID]
 		}
-		endTime := time.Now()
+		since := time.Since(startTime).Seconds()
 		close(repo.Results())
 		log.Println(<-rs)
-		log.Println(regions.result(endTime.Sub(startTime).Seconds()))
+		log.Println(regions.result(since))
 		regions.update()
 	}
 }
