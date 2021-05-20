@@ -122,7 +122,7 @@ func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 		c.Assert(SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()), Equals, t.isEqual)
 	}
 
-	// test Region
+	// test RegionFromHeartbeat
 	for _, t := range testcases {
 		regionA := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
 			Region:       &metapb.Region{Id: 100, Peers: pickPeers(t.idsA)},
