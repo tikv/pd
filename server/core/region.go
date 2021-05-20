@@ -60,7 +60,6 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 		meta:   region,
 		leader: leader,
 	}
-
 	for _, opt := range opts {
 		opt(regionInfo)
 	}
@@ -79,6 +78,8 @@ func classifyVoterAndLearner(region *RegionInfo) {
 			voters = append(voters, p)
 		}
 	}
+	sort.Sort(peerSlice(learners))
+	sort.Sort(peerSlice(voters))
 	region.learners = learners
 	region.voters = voters
 }
@@ -95,7 +96,7 @@ const (
 )
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
-func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
+func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
 	// Convert unit to MB.
 	// If region is empty or less than 1MB, use 1MB instead.
 	regionSize := heartbeat.GetApproximateSize() / (1 << 20)
@@ -117,6 +118,10 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
+	}
+
+	for _, opt := range opts {
+		opt(region)
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -793,13 +798,11 @@ func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *Region
 		if len(origin) != len(other) {
 			return true
 		}
-		sort.Sort(peerSlice(origin))
-		sort.Sort(peerSlice(other))
+		// The peers have been sorted when they are created, so they can be compared directly in order.
 		for index, peer := range origin {
-			if peer.GetStoreId() == other[index].GetStoreId() && peer.GetId() == other[index].GetId() {
-				continue
+			if peer.GetStoreId() != other[index].GetStoreId() || peer.GetId() != other[index].GetId() {
+				return true
 			}
-			return true
 		}
 		return false
 	}
