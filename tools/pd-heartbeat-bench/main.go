@@ -247,9 +247,9 @@ func (rs *Regions) send(storeID uint64, startNotifier chan report.Report, endNot
 		log.Fatal(err)
 	}
 
-	count := 0
 	for r := range startNotifier {
 		startTime := time.Now()
+		count := 0
 		for _, region := range rs.regions {
 			if region.Leader.StoreId != storeID {
 				continue
