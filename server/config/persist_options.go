@@ -495,6 +495,16 @@ func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
 }
 
+// GetHotReadRegionCacheHitsThreshold is a threshold to decide if a region is read hot
+func (o *PersistOptions) GetHotReadRegionCacheHitsThreshold() int {
+	return int(o.GetScheduleConfig().HotReadRegionCacheHitsThreshold)
+}
+
+// GetHotWriteRegionCacheHitsThreshold is a threshold to decide if a region is write hot
+func (o *PersistOptions) GetHotWriteRegionCacheHitsThreshold() int {
+	return int(o.GetScheduleConfig().HotWriteRegionCacheHitsThreshold)
+}
+
 // GetStoresLimit gets the stores' limit.
 func (o *PersistOptions) GetStoresLimit() map[uint64]StoreLimitConfig {
 	return o.GetScheduleConfig().StoreLimit

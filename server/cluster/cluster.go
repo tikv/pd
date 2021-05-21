@@ -920,7 +920,15 @@ func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
 func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
+	readDegree := c.opt.GetHotReadRegionCacheHitsThreshold()
+	if readDegree < 1 {
+		readDegree = c.opt.GetHotRegionCacheHitsThreshold()
+	}
+	writeDegree := c.opt.GetHotWriteRegionCacheHitsThreshold()
+	if writeDegree < 1 {
+		writeDegree = c.opt.GetHotWriteRegionCacheHitsThreshold()
+	}
+	return c.hotStat.IsRegionHot(region, readDegree, writeDegree)
 }
 
 // GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.

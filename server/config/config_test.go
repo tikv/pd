@@ -186,6 +186,8 @@ leader-schedule-limit = 0
 	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
 	c.Assert(cfg.Schedule.EnableOneWayMerge, Equals, true)
 	c.Assert(cfg.Schedule.LeaderScheduleLimit, Equals, uint64(0))
+	c.Assert(cfg.Schedule.HotReadRegionCacheHitsThreshold, Equals, uint64(defaultHotReadRegionCacheHitsThreshold))
+	c.Assert(cfg.Schedule.HotWriteRegionCacheHitsThreshold, Equals, uint64(defaultHotWriteRegionCacheHitsThreshold))
 	// When undefined, use default values.
 	c.Assert(cfg.PreVote, IsTrue)
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
@@ -289,12 +291,16 @@ disable-remove-down-replica = true
 enable-make-up-replica = false
 disable-remove-extra-replica = true
 enable-remove-extra-replica = false
+hot-read-region-cache-hits-threshold = 6
+hot-write-region-cache-hits-threshold = 4
 `)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.Schedule.EnableReplaceOfflineReplica, IsTrue)
 	c.Assert(cfg.Schedule.EnableRemoveDownReplica, IsFalse)
 	c.Assert(cfg.Schedule.EnableMakeUpReplica, IsFalse)
 	c.Assert(cfg.Schedule.EnableRemoveExtraReplica, IsFalse)
+	c.Assert(cfg.Schedule.HotReadRegionCacheHitsThreshold, Equals, uint64(6))
+	c.Assert(cfg.Schedule.HotWriteRegionCacheHitsThreshold, Equals, uint64(4))
 	b, err := json.Marshal(cfg)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(b), "disable-replace-offline-replica"), IsFalse)

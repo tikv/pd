@@ -110,6 +110,16 @@ func (mc *Cluster) SetHotRegionCacheHitsThreshold(v int) {
 	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.HotRegionCacheHitsThreshold = uint64(v) })
 }
 
+// SetHotReadRegionCacheHitsThreshold updates the HotReadRegionCacheHitsThreshold configuration
+func (mc *Cluster) SetHotReadRegionCacheHitsThreshold(v int) {
+	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.HotReadRegionCacheHitsThreshold = uint64(v) })
+}
+
+// SetHotWriteRegionCacheHitsThreshold updates theHotWriteRegionCacheHitsThreshold configuration
+func (mc *Cluster) SetHotWriteRegionCacheHitsThreshold(v int) {
+	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.HotWriteRegionCacheHitsThreshold = uint64(v) })
+}
+
 // SetEnablePlacementRules updates the EnablePlacementRules configuration.
 func (mc *Cluster) SetEnablePlacementRules(v bool) {
 	mc.updateReplicationConfig(func(r *config.ReplicationConfig) { r.EnablePlacementRules = v })

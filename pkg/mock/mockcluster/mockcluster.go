@@ -107,7 +107,15 @@ func (mc *Cluster) GetStore(storeID uint64) *core.StoreInfo {
 
 // IsRegionHot checks if the region is hot.
 func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
-	return mc.HotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
+	readDegree := mc.GetHotReadRegionCacheHitsThreshold()
+	writeDegree := mc.GetHotWriteRegionCacheHitsThreshold()
+	if readDegree < 1 {
+		readDegree = mc.GetHotRegionCacheHitsThreshold()
+	}
+	if writeDegree < 1 {
+		writeDegree = mc.GetHotWriteRegionCacheHitsThreshold()
+	}
+	return mc.HotCache.IsRegionHot(region, readDegree, writeDegree)
 }
 
 // RegionReadStats returns hot region's read stats.

@@ -652,6 +652,14 @@ type ScheduleConfig struct {
 	// If the number of times a region hits the hot cache is greater than this
 	// threshold, it is considered a hot region.
 	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
+	// HotReadRegionCacheHitsThreshold is the cache hits threshold of the hot read region.
+	// If the number of times a region hits the hot cache is greater than this
+	// threshold, it is considered a hot read region.
+	HotReadRegionCacheHitsThreshold uint64 `toml:"hot-read-region-cache-hits-threshold" json:"hot-read-region-cache-hits-threshold"`
+	// HotWriteRegionCacheHitsThreshold is the cache hits threshold of the hot write region.
+	// If the number of times a region hits the hot cache is greater than this
+	// threshold, it is considered a hot write region.
+	HotWriteRegionCacheHitsThreshold uint64 `toml:"hot-write-region-cache-hits-threshold" json:"hot-write-region-cache-hits-threshold"`
 	// StoreBalanceRate is the maximum of balance rate for each store.
 	// WARN: StoreBalanceRate is deprecated.
 	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
@@ -766,12 +774,14 @@ const (
 	defaultRegionScoreFormulaVersion = "v2"
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
-	defaultHotRegionCacheHitsThreshold = 3
-	defaultSchedulerMaxWaitingOperator = 5
-	defaultLeaderSchedulePolicy        = "count"
-	defaultStoreLimitMode              = "manual"
-	defaultEnableJointConsensus        = true
-	defaultEnableCrossTableMerge       = true
+	defaultHotRegionCacheHitsThreshold      = 3
+	defaultHotReadRegionCacheHitsThreshold  = 0
+	defaultHotWriteRegionCacheHitsThreshold = 0
+	defaultSchedulerMaxWaitingOperator      = 5
+	defaultLeaderSchedulePolicy             = "count"
+	defaultStoreLimitMode                   = "manual"
+	defaultEnableJointConsensus             = true
+	defaultEnableCrossTableMerge            = true
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -807,6 +817,12 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("hot-region-cache-hits-threshold") {
 		adjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)
+	}
+	if !meta.IsDefined("hot-read-region-cache-hits-threshold") {
+		adjustUint64(&c.HotReadRegionCacheHitsThreshold, defaultHotReadRegionCacheHitsThreshold)
+	}
+	if !meta.IsDefined("hot-write-region-cache-hits-threshold") {
+		adjustUint64(&c.HotWriteRegionCacheHitsThreshold, defaultHotWriteRegionCacheHitsThreshold)
 	}
 	if !meta.IsDefined("tolerant-size-ratio") {
 		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
