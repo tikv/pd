@@ -530,6 +530,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 			if bytes.Equal(regionOld.region.GetStartKey(), region.GetStartKey()) &&
 				bytes.Equal(regionOld.region.GetEndKey(), region.GetEndKey()) &&
 				regionOld.region.GetID() == region.GetID() {
+				r.tree.updateStat(regionOld.region, region)
 				regionOld.region = region
 				treeNeedAdd = false
 			}

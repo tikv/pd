@@ -115,6 +115,12 @@ func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
 	return overlaps
 }
 
+// updateStat is used to update statistics when regionItem.region is directly replaced.
+func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
+	t.totalSize += region.approximateSize
+	t.totalSize -= origin.approximateSize
+}
+
 // remove removes a region if the region is in the tree.
 // It will do nothing if it cannot find the region or the found region
 // is not the same with the region.
