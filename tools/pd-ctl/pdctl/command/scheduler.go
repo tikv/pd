@@ -134,6 +134,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewBalanceHotRegionSchedulerCommand())
 	c.AddCommand(NewRandomMergeSchedulerCommand())
 	c.AddCommand(NewLabelSchedulerCommand())
+	c.AddCommand(NewRandomSplitSchedulerCommand())
 	return c
 }
 
@@ -301,6 +302,16 @@ func NewLabelSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "label-scheduler",
 		Short: "add a scheduler to schedule regions according to the label",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewRandomSplitSchedulerCommand returns a command to add a random-split-scheduler.
+func NewRandomSplitSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "random-split-scheduler",
+		Short: "add a scheduler to split regions randomly",
 		Run:   addSchedulerCommandFunc,
 	}
 	return c

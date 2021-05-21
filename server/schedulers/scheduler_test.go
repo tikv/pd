@@ -570,3 +570,30 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 		}
 	}
 }
+
+var _ = Suite(&testRandomSplitSuite{})
+
+type testRandomSplitSuite struct{}
+
+func (s *testRandomSplitSuite) TestRandomSplit(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+
+	sl, err := schedule.CreateScheduler(RandomSplitType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(RandomSplitType, []string{"", ""}))
+	c.Assert(err, IsNil)
+	c.Assert(sl.Schedule(tc), IsNil)
+
+	tc.AddLeaderStore(1, 1)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 2, 1, 3)
+	tc.AddLeaderRegion(3, 3, 1, 2)
+	for i := 0; i < 3; i++ {
+		op := sl.Schedule(tc)
+		c.Assert(op, NotNil)
+		c.Assert(op[0].Kind(), Equals, operator.OpSplit|operator.OpAdmin)
+	}
+}
