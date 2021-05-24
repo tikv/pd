@@ -123,8 +123,18 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
 		return nil, errors.New("no store to add peer")
 	}
+<<<<<<< HEAD
 	peer := &metapb.Peer{StoreId: store.GetID(), IsLearner: rf.Rule.Role == placement.Learner}
 	return operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
+=======
+	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
+	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
+	if err != nil {
+		return nil, err
+	}
+	op.SetPriorityLevel(core.HighPriority)
+	return op, nil
+>>>>>>> 172a89c7a (checker: fix the operator priority (#3694))
 }
 
 func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
@@ -133,8 +143,18 @@ func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, fit *placement.Re
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
 		return nil, errors.New("no store to replace peer")
 	}
+<<<<<<< HEAD
 	newPeer := &metapb.Peer{StoreId: store.GetID(), IsLearner: rf.Rule.Role == placement.Learner}
 	return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+=======
+	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
+	op, err := operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+	if err != nil {
+		return nil, err
+	}
+	op.SetPriorityLevel(core.HighPriority)
+	return op, nil
+>>>>>>> 172a89c7a (checker: fix the operator priority (#3694))
 }
 
 func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer) (*operator.Operator, error) {
