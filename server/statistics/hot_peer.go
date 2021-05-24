@@ -26,8 +26,14 @@ import (
 const (
 	ByteDim int = iota
 	KeyDim
+	QueryDim
 	DimLen
 )
+
+func IsSelectedDim(dim int) bool {
+	// TODO: configure
+	return dim == ByteDim || dim == KeyDim
+}
 
 type dimStat struct {
 	typ         RegionStatKind

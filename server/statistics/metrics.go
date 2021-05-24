@@ -120,6 +120,22 @@ var (
 			Help:      "The distribution of region write keys",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 18),
 		})
+	readQueryHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "read_qps_hist",
+			Help:      "The distribution of region read query",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+		})
+	writeQueryHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "write_qps_hist",
+			Help:      "The distribution of region write query",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+		})
 	regionHeartbeatIntervalHist = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",

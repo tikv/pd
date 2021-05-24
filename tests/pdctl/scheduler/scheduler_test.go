@@ -261,6 +261,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"max-peer-number":           float64(1000),
 		"byte-rate-rank-step-ratio": 0.05,
 		"key-rate-rank-step-ratio":  0.05,
+		"qps-rank-step-ratio":       0.05,
 		"count-rank-step-ratio":     0.01,
 		"great-dec-ratio":           0.95,
 		"minor-dec-ratio":           0.99,

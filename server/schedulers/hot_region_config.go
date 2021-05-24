@@ -38,6 +38,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MaxZombieRounds:       3,
 		ByteRateRankStepRatio: 0.05,
 		KeyRateRankStepRatio:  0.05,
+		QPSRankStepRatio:      0.05,
 		CountRankStepRatio:    0.01,
 		GreatDecRatio:         0.95,
 		MinorDecRatio:         0.99,
@@ -60,6 +61,7 @@ type hotRegionSchedulerConfig struct {
 	// step = max current * rank step ratio
 	ByteRateRankStepRatio float64 `json:"byte-rate-rank-step-ratio"`
 	KeyRateRankStepRatio  float64 `json:"key-rate-rank-step-ratio"`
+	QPSRankStepRatio      float64 `json:"qps-rank-step-ratio"`
 	CountRankStepRatio    float64 `json:"count-rank-step-ratio"`
 	GreatDecRatio         float64 `json:"great-dec-ratio"`
 	MinorDecRatio         float64 `json:"minor-dec-ratio"`
@@ -119,6 +121,12 @@ func (conf *hotRegionSchedulerConfig) GetKeyRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.KeyRateRankStepRatio
+}
+
+func (conf *hotRegionSchedulerConfig) GetQPSRankStepRatio() float64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.QPSRankStepRatio
 }
 
 func (conf *hotRegionSchedulerConfig) GetCountRankStepRatio() float64 {

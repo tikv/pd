@@ -535,6 +535,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		if infl := pendings[storeID]; infl != nil {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_qps").Set(infl.Loads[statistics.QueryDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_count").Set(infl.Count)
 		}
 	}
@@ -549,6 +550,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(stat.TotalLoads[statistics.RegionReadBytes])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_keys_as_leader").Set(stat.TotalLoads[statistics.RegionReadKeys])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_query_as_leader").Set(stat.TotalLoads[statistics.RegionReadQuery])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
@@ -560,6 +562,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_peer").Set(stat.TotalLoads[statistics.RegionReadBytes])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_keys_as_peer").Set(stat.TotalLoads[statistics.RegionReadKeys])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_query_as_peer").Set(stat.TotalLoads[statistics.RegionReadQuery])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_peer").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_peer").Set(0)
@@ -570,6 +573,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		if infl := pendings[storeID]; infl != nil {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_qps").Set(infl.Loads[statistics.QueryDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_count").Set(infl.Count)
 		}
 	}

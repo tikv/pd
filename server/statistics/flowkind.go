@@ -36,6 +36,17 @@ func (k FlowKind) String() string {
 func (k FlowKind) RegionStats() []RegionStatKind {
 	switch k {
 	case WriteFlow:
+		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
+	case ReadFlow:
+		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
+	}
+	return nil
+}
+
+// FilterRegionStats returns hot items according to kind
+func (k FlowKind) FilterRegionStats() []RegionStatKind {
+	switch k {
+	case WriteFlow:
 		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys}
 	case ReadFlow:
 		return []RegionStatKind{RegionReadBytes, RegionReadKeys}

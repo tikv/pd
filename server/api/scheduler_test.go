@@ -113,6 +113,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 					"max-peer-number":           1000,
 					"byte-rate-rank-step-ratio": 0.05,
 					"key-rate-rank-step-ratio":  0.05,
+					"qps-rank-step-ratio":       0.05,
 					"count-rank-step-ratio":     0.01,
 					"great-dec-ratio":           0.95,
 					"minor-dec-ratio":           0.99,

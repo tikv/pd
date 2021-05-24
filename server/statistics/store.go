@@ -128,8 +128,10 @@ func newRollingStoreStats() *RollingStoreStats {
 	interval := StoreHeartBeatReportInterval * time.Second
 	timeMedians[StoreReadBytes] = movingaverage.NewTimeMedian(DefaultAotSize, defaultReadMfSize, interval)
 	timeMedians[StoreReadKeys] = movingaverage.NewTimeMedian(DefaultAotSize, defaultReadMfSize, interval)
+	timeMedians[StoreReadQuery] = movingaverage.NewTimeMedian(DefaultAotSize, defaultReadMfSize, interval)
 	timeMedians[StoreWriteBytes] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval)
 	timeMedians[StoreWriteKeys] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval)
+	timeMedians[StoreWriteQuery] = movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval)
 
 	movingAvgs := make(map[StoreStatKind]movingaverage.MovingAvg)
 	movingAvgs[StoreCPUUsage] = movingaverage.NewMedianFilter(storeStatsRollingWindows)
@@ -159,8 +161,10 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	defer r.Unlock()
 	r.timeMedians[StoreWriteBytes].Add(float64(stats.BytesWritten), interval)
 	r.timeMedians[StoreWriteKeys].Add(float64(stats.KeysWritten), interval)
+	r.timeMedians[StoreWriteQuery].Add(float64(getWriteQueryNum(stats.QueryStats)), interval)
 	r.timeMedians[StoreReadBytes].Add(float64(stats.BytesRead), interval)
 	r.timeMedians[StoreReadKeys].Add(float64(stats.KeysRead), interval)
+	r.timeMedians[StoreReadQuery].Add(float64(getReadQueryNum(stats.QueryStats)), interval)
 
 	// Updates the cpu usages and disk rw rates of store.
 	r.movingAvgs[StoreCPUUsage].Add(collect(stats.GetCpuUsages()))
@@ -181,6 +185,8 @@ func (r *RollingStoreStats) Set(stats *pdpb.StoreStats) {
 	r.timeMedians[StoreReadBytes].Set(float64(stats.BytesRead) / interval)
 	r.timeMedians[StoreWriteKeys].Set(float64(stats.KeysWritten) / interval)
 	r.timeMedians[StoreReadKeys].Set(float64(stats.KeysRead) / interval)
+	r.timeMedians[StoreReadQuery].Set(float64(getReadQueryNum(stats.QueryStats)) / interval)
+	r.timeMedians[StoreWriteQuery].Set(float64(getWriteQueryNum(stats.QueryStats)) / interval)
 	r.movingAvgs[StoreCPUUsage].Set(collect(stats.GetCpuUsages()))
 	r.movingAvgs[StoreDiskReadRate].Set(collect(stats.GetReadIoRates()))
 	r.movingAvgs[StoreDiskWriteRate].Set(collect(stats.GetWriteIoRates()))
@@ -195,10 +201,14 @@ func (r *RollingStoreStats) GetLoad(k StoreStatKind) float64 {
 		return r.timeMedians[StoreReadBytes].Get()
 	case StoreReadKeys:
 		return r.timeMedians[StoreReadKeys].Get()
+	case StoreReadQuery:
+		return r.timeMedians[StoreReadQuery].Get()
 	case StoreWriteBytes:
 		return r.timeMedians[StoreWriteBytes].Get()
 	case StoreWriteKeys:
 		return r.timeMedians[StoreWriteKeys].Get()
+	case StoreWriteQuery:
+		return r.timeMedians[StoreWriteQuery].Get()
 	case StoreCPUUsage:
 		return r.movingAvgs[StoreCPUUsage].Get()
 	case StoreDiskReadRate:
@@ -219,10 +229,14 @@ func (r *RollingStoreStats) GetInstantLoad(k StoreStatKind) float64 {
 		return r.timeMedians[StoreReadBytes].GetInstantaneous()
 	case StoreReadKeys:
 		return r.timeMedians[StoreReadKeys].GetInstantaneous()
+	case StoreReadQuery:
+		return r.timeMedians[StoreReadQuery].GetInstantaneous()
 	case StoreWriteBytes:
 		return r.timeMedians[StoreWriteBytes].GetInstantaneous()
 	case StoreWriteKeys:
 		return r.timeMedians[StoreWriteKeys].GetInstantaneous()
+	case StoreWriteQuery:
+		return r.timeMedians[StoreWriteQuery].GetInstantaneous()
 	case StoreCPUUsage:
 		return r.movingAvgs[StoreCPUUsage].Get()
 	case StoreDiskReadRate:

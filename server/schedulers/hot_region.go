@@ -280,9 +280,11 @@ func summaryStoresLoad(
 		case read:
 			loads[statistics.ByteDim] = storeLoads[statistics.StoreReadBytes]
 			loads[statistics.KeyDim] = storeLoads[statistics.StoreReadKeys]
+			loads[statistics.QueryDim] = storeLoads[statistics.StoreReadQuery]
 		case write:
 			loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
 			loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
+			loads[statistics.QueryDim] = storeLoads[statistics.StoreWriteQuery]
 		}
 		// Find all hot peers first
 		var hotPeers []*statistics.HotPeerStat
@@ -311,6 +313,10 @@ func summaryStoresLoad(
 			{
 				ty := "key-rate-" + rwTy.String() + "-" + kind.String()
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.KeyDim])
+			}
+			{
+				ty := "qps-" + rwTy.String() + "-" + kind.String()
+				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.QueryDim])
 			}
 		}
 		for i := range allLoadSum {
@@ -348,6 +354,10 @@ func summaryStoresLoad(
 		{
 			ty := "exp-key-rate-" + rwTy.String() + "-" + kind.String()
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.KeyDim])
+		}
+		{
+			ty := "exp-qps-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.QueryDim])
 		}
 		{
 			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
@@ -484,7 +494,7 @@ func (bs *balanceSolver) init() {
 		maxCur = maxLoad(maxCur, &detail.LoadPred.Current)
 	}
 
-	rankStepRatios := []float64{bs.sche.conf.GetByteRankStepRatio(), bs.sche.conf.GetKeyRankStepRatio()}
+	rankStepRatios := []float64{bs.sche.conf.GetByteRankStepRatio(), bs.sche.conf.GetKeyRankStepRatio(), bs.sche.conf.GetQPSRankStepRatio()}
 	stepLoads := make([]float64, statistics.DimLen)
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
@@ -595,7 +605,10 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		}
 		minLoad := detail.LoadPred.min()
 		if slice.AllOf(minLoad.Loads, func(i int) bool {
-			return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.Loads[i]
+			if statistics.IsSelectedDim(i) {
+				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.Loads[i]
+			}
+			return true
 		}) {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
@@ -776,7 +789,10 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 			detail := bs.stLoadDetail[store.GetID()]
 			maxLoads := detail.LoadPred.max().Loads
 			if slice.AllOf(maxLoads, func(i int) bool {
-				return maxLoads[i]*dstToleranceRatio < detail.LoadPred.Expect.Loads[i]
+				if statistics.IsSelectedDim(i) {
+					return maxLoads[i]*dstToleranceRatio < detail.LoadPred.Expect.Loads[i]
+				}
+				return true
 			}) {
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
@@ -1223,6 +1239,10 @@ func getRegionStatKind(rwTy rwType, dim int) statistics.RegionStatKind {
 		return statistics.RegionWriteBytes
 	case rwTy == write && dim == statistics.KeyDim:
 		return statistics.RegionWriteKeys
+	case rwTy == write && dim == statistics.QueryDim:
+		return statistics.RegionWriteQuery
+	case rwTy == read && dim == statistics.QueryDim:
+		return statistics.RegionReadQuery
 	}
 	return 0
 }
