@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package joinfailtest
+package join_fail_test
 
 import (
 	"context"

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package configtest
+package config_test
 
 import (
 	"context"
@@ -585,14 +585,14 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
-	store := metapb.Store{
+	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	checkMaxReplicas := func(expect uint64) {
