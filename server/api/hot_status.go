@@ -32,8 +32,8 @@ type HotStoreStats struct {
 	BytesReadStats  map[uint64]float64 `json:"bytes-read-rate,omitempty"`
 	KeysWriteStats  map[uint64]float64 `json:"keys-write-rate,omitempty"`
 	KeysReadStats   map[uint64]float64 `json:"keys-read-rate,omitempty"`
-	QPSWriteStats   map[uint64]float64 `json:"write-qps,omitempty"`
-	QPSReadStats    map[uint64]float64 `json:"read-qps,omitempty"`
+	QueryWriteStats map[uint64]float64 `json:"write-qps,omitempty"`
+	QueryReadStats  map[uint64]float64 `json:"read-qps,omitempty"`
 }
 
 func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusHandler {
@@ -72,16 +72,16 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 		BytesReadStats:  make(map[uint64]float64),
 		KeysWriteStats:  make(map[uint64]float64),
 		KeysReadStats:   make(map[uint64]float64),
-		QPSWriteStats:   make(map[uint64]float64),
-		QPSReadStats:    make(map[uint64]float64),
+		QueryWriteStats: make(map[uint64]float64),
+		QueryReadStats:  make(map[uint64]float64),
 	}
 	for id, loads := range h.GetStoresLoads() {
 		stats.BytesWriteStats[id] = loads[statistics.StoreWriteBytes]
 		stats.BytesReadStats[id] = loads[statistics.StoreReadBytes]
 		stats.KeysWriteStats[id] = loads[statistics.StoreWriteKeys]
 		stats.KeysReadStats[id] = loads[statistics.StoreReadKeys]
-		stats.QPSWriteStats[id] = loads[statistics.StoreWriteQuery]
-		stats.QPSReadStats[id] = loads[statistics.StoreReadQuery]
+		stats.QueryWriteStats[id] = loads[statistics.StoreWriteQuery]
+		stats.QueryReadStats[id] = loads[statistics.StoreReadQuery]
 	}
 	h.rd.JSON(w, http.StatusOK, stats)
 }

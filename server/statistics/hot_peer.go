@@ -30,6 +30,7 @@ const (
 	DimLen
 )
 
+// IsSelectedDim return whether the dim is selected for hot scheduler
 func IsSelectedDim(dim int) bool {
 	// TODO: configure
 	return dim == ByteDim || dim == KeyDim

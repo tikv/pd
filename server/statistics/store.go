@@ -197,24 +197,10 @@ func (r *RollingStoreStats) GetLoad(k StoreStatKind) float64 {
 	r.RLock()
 	defer r.RUnlock()
 	switch k {
-	case StoreReadBytes:
-		return r.timeMedians[StoreReadBytes].Get()
-	case StoreReadKeys:
-		return r.timeMedians[StoreReadKeys].Get()
-	case StoreReadQuery:
-		return r.timeMedians[StoreReadQuery].Get()
-	case StoreWriteBytes:
-		return r.timeMedians[StoreWriteBytes].Get()
-	case StoreWriteKeys:
-		return r.timeMedians[StoreWriteKeys].Get()
-	case StoreWriteQuery:
-		return r.timeMedians[StoreWriteQuery].Get()
-	case StoreCPUUsage:
-		return r.movingAvgs[StoreCPUUsage].Get()
-	case StoreDiskReadRate:
-		return r.movingAvgs[StoreDiskReadRate].Get()
-	case StoreDiskWriteRate:
-		return r.movingAvgs[StoreDiskWriteRate].Get()
+	case StoreReadBytes, StoreReadKeys, StoreReadQuery, StoreWriteBytes, StoreWriteKeys, StoreWriteQuery:
+		return r.timeMedians[k].Get()
+	case StoreCPUUsage, StoreDiskReadRate, StoreDiskWriteRate:
+		return r.movingAvgs[k].Get()
 	}
 	return 0
 }
@@ -225,24 +211,10 @@ func (r *RollingStoreStats) GetInstantLoad(k StoreStatKind) float64 {
 	r.RLock()
 	defer r.RUnlock()
 	switch k {
-	case StoreReadBytes:
-		return r.timeMedians[StoreReadBytes].GetInstantaneous()
-	case StoreReadKeys:
-		return r.timeMedians[StoreReadKeys].GetInstantaneous()
-	case StoreReadQuery:
-		return r.timeMedians[StoreReadQuery].GetInstantaneous()
-	case StoreWriteBytes:
-		return r.timeMedians[StoreWriteBytes].GetInstantaneous()
-	case StoreWriteKeys:
-		return r.timeMedians[StoreWriteKeys].GetInstantaneous()
-	case StoreWriteQuery:
-		return r.timeMedians[StoreWriteQuery].GetInstantaneous()
-	case StoreCPUUsage:
-		return r.movingAvgs[StoreCPUUsage].Get()
-	case StoreDiskReadRate:
-		return r.movingAvgs[StoreDiskReadRate].Get()
-	case StoreDiskWriteRate:
-		return r.movingAvgs[StoreDiskWriteRate].Get()
+	case StoreReadBytes,StoreReadKeys,StoreReadQuery,StoreWriteBytes,StoreWriteKeys,StoreWriteQuery:
+		return r.timeMedians[k].GetInstantaneous()
+	case StoreCPUUsage,StoreDiskReadRate,StoreDiskWriteRate:
+		return r.movingAvgs[k].Get()
 	}
 	return 0
 }

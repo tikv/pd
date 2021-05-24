@@ -190,15 +190,13 @@ func SetReadKeys(v uint64) RegionCreateOption {
 	}
 }
 
-// SetReadQueryNum sets the read query num for the region.
-func SetReadQueryNum(v uint64) RegionCreateOption {
+// SetCoprocessorQueryNum sets the coprocessor query num for the region.
+func SetCoprocessorQueryNum(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		if region.queryStats == nil {
 			region.queryStats = &pdpb.QueryStats{}
 		}
-		region.queryStats.Coprocessor = v / 3
-		region.queryStats.Get = v / 3
-		region.queryStats.Scan = v - region.queryStats.Get - region.queryStats.Coprocessor
+		region.queryStats.Coprocessor = v
 	}
 }
 
