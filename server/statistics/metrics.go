@@ -145,6 +145,14 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
 			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
 		}, []string{"type"})
+
+	hotCacheFlowQueueStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "hotcache_flow_queue",
+			Name:      "status",
+			Help:      "Status of the hotspot flow queue.",
+		}, []string{"type"})
 )
 
 var (
@@ -170,4 +178,5 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatIntervalHist)
 	prometheus.MustRegister(storeHeartbeatIntervalHist)
 	prometheus.MustRegister(regionAbnormalPeerDuration)
+	prometheus.MustRegister(hotCacheFlowQueueStatusGauge)
 }
