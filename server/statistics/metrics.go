@@ -149,8 +149,8 @@ var (
 	hotCacheFlowQueueStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
-			Subsystem: "hotcache_flow_queue",
-			Name:      "status",
+			Subsystem: "hotcache",
+			Name:      "flow_queue_status",
 			Help:      "Status of the hotspot flow queue.",
 		}, []string{"type"})
 )
