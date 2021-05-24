@@ -391,11 +391,6 @@ error = '''
 init file log error, %s
 '''
 
-["PD:main:ErrParseFlags"]
-error = '''
-parse flags error
-'''
-
 ["PD:member:ErrEtcdLeaderNotFound"]
 error = '''
 etcd leader not found
@@ -469,6 +464,11 @@ failed to marshal proto
 ["PD:proto:ErrProtoUnmarshal"]
 error = '''
 failed to unmarshal proto
+'''
+
+["PD:schedule:ErrCreateOperator"]
+error = '''
+unable to create operator, %s
 '''
 
 ["PD:schedule:ErrMergeOperator"]

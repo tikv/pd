@@ -21,21 +21,3 @@ type StoreHotPeersInfos struct {
 
 // StoreHotPeersStat is used to record the hot region statistics group by store.
 type StoreHotPeersStat map[uint64]*HotPeersStat
-
-// GetStoreStatAsPeer returns stat as peer from the corresponding store.
-func (info *StoreHotPeersInfos) GetStoreStatAsPeer(storeID uint64) (string, *HotPeersStat) {
-	stat, ok := info.AsPeer[storeID]
-	if !ok {
-		stat = &HotPeersStat{}
-	}
-	return "as_peer", stat
-}
-
-// GetStoreStatAsLeader returns stat stat as leader from the corresponding store.
-func (info *StoreHotPeersInfos) GetStoreStatAsLeader(storeID uint64) (string, *HotPeersStat) {
-	stat, ok := info.AsLeader[storeID]
-	if !ok {
-		stat = &HotPeersStat{}
-	}
-	return "as_leader", stat
-}

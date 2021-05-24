@@ -93,7 +93,7 @@ func (s *testCandidatesSuite) TestCandidates(c *C) {
 }
 
 func (s *testCandidatesSuite) newCandidates(ids ...uint64) *StoreCandidates {
-	var stores []*core.StoreInfo
+	stores := make([]*core.StoreInfo, 0, len(ids))
 	for _, id := range ids {
 		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: id}))
 	}

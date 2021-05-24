@@ -23,7 +23,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -40,10 +39,6 @@ const (
 
 	instanceCount = 3
 )
-
-func TestPrometheus(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testPrometheusQuerierSuite{})
 
@@ -307,11 +302,11 @@ func (s *testPrometheusQuerierSuite) TestGetInstanceNameFromAddress(c *C) {
 			expectedInstanceName: "",
 		},
 		{
-			address:              "1.2.3.4:2333",
+			address:              "127.0.0.1:2333",
 			expectedInstanceName: "",
 		},
 		{
-			address:              "1.2.3.4",
+			address:              "127.0.0.1",
 			expectedInstanceName: "",
 		},
 	}

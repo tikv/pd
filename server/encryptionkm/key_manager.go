@@ -113,7 +113,7 @@ func saveKeys(
 		Then(clientv3.OpPut(EncryptionKeysPath, string(value))).
 		Commit()
 	if err != nil {
-		log.Warn("fail to save encryption keys.", zap.Error(err))
+		log.Warn("fail to save encryption keys.", errs.ZapError(err))
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStack("fail to save encryption keys")
 	}
 	if !resp.Succeeded {
@@ -234,7 +234,7 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 				}
 				_, err := m.loadKeysFromKV(event.Kv)
 				if err != nil {
-					log.Warn("fail to get encryption keys from watcher result", zap.Error(err))
+					log.Warn("fail to get encryption keys from watcher result", errs.ZapError(err))
 				}
 			}
 			m.helper.eventAfterReloadByWatcher()
@@ -255,13 +255,13 @@ func (m *KeyManager) checkOnTick(watcherEnabled bool) {
 	// Check data key rotation in case we are the PD leader.
 	err := m.rotateKeyIfNeeded(false /*forceUpdate*/)
 	if err != nil {
-		log.Warn("fail to rotate data encryption key", zap.Error(err))
+		log.Warn("fail to rotate data encryption key", errs.ZapError(err))
 	}
 	// Fallback mechanism to reload keys if watcher failed.
 	if !watcherEnabled {
 		_, err = m.loadKeysImpl()
 		if err != nil {
-			log.Warn("fail to reload keys after watcher failed", zap.Error(err))
+			log.Warn("fail to reload keys after watcher failed", errs.ZapError(err))
 		}
 	}
 }
@@ -318,7 +318,7 @@ func (m *KeyManager) loadKeysImpl() (keys *encryptionpb.KeyDictionary, err error
 }
 
 // loadKeys reload keys from etcd storage.
-func (m *KeyManager) loadKeys() (keys *encryptionpb.KeyDictionary, err error) {
+func (m *KeyManager) loadKeys() (*encryptionpb.KeyDictionary, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.loadKeysImpl()
@@ -404,7 +404,7 @@ func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {
 	err = saveKeys(m.mu.leadership, m.masterKeyMeta, keys, m.helper)
 	if err != nil {
 		m.helper.eventSaveKeysFailure()
-		log.Error("failed to save keys", zap.Error(err))
+		log.Error("failed to save keys", errs.ZapError(err))
 		return err
 	}
 	// Reload keys.

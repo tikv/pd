@@ -30,7 +30,7 @@ import (
 )
 
 // errRegionIsStale is error info for region is stale.
-var errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
+func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 	return errors.Errorf("region is stale: region %v origin %v", region, origin)
 }
 
@@ -83,9 +83,16 @@ func classifyVoterAndLearner(region *RegionInfo) {
 	region.voters = voters
 }
 
-// EmptyRegionApproximateSize is the region approximate size of an empty region
-// (heartbeat size <= 1MB).
-const EmptyRegionApproximateSize = 1
+const (
+	// EmptyRegionApproximateSize is the region approximate size of an empty region
+	// (heartbeat size <= 1MB).
+	EmptyRegionApproximateSize = 1
+	// ImpossibleFlowSize is an impossible flow size (such as written_bytes, read_keys, etc.)
+	// It may be caused by overflow, refer to https://github.com/tikv/pd/issues/3379.
+	// They need to be filtered so as not to affect downstream.
+	// (flow size >= 1024TB)
+	ImpossibleFlowSize = 1 << 50
+)
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
@@ -111,6 +118,18 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
 	}
+
+	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
+		region.writtenKeys = 0
+		region.writtenBytes = 0
+	}
+	if region.readKeys >= ImpossibleFlowSize || region.readBytes >= ImpossibleFlowSize {
+		region.readKeys = 0
+		region.readBytes = 0
+	}
+
+	sort.Sort(peerStatsSlice(region.downPeers))
+	sort.Sort(peerSlice(region.pendingPeers))
 
 	classifyVoterAndLearner(region)
 	return region
@@ -729,6 +748,44 @@ func (s peerSlice) Less(i, j int) bool {
 	return s[i].GetId() < s[j].GetId()
 }
 
+// SortedPeersEqual judges whether two sorted `peerSlice` are equal
+func SortedPeersEqual(peersA, peersB []*metapb.Peer) bool {
+	if len(peersA) != len(peersB) {
+		return false
+	}
+	for i, peer := range peersA {
+		if peer.GetId() != peersB[i].GetId() {
+			return false
+		}
+	}
+	return true
+}
+
+type peerStatsSlice []*pdpb.PeerStats
+
+func (s peerStatsSlice) Len() int {
+	return len(s)
+}
+func (s peerStatsSlice) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s peerStatsSlice) Less(i, j int) bool {
+	return s[i].GetPeer().GetId() < s[j].GetPeer().GetId()
+}
+
+// SortedPeersStatsEqual judges whether two sorted `peerStatsSlice` are equal
+func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
+	if len(peersA) != len(peersB) {
+		return false
+	}
+	for i, peerStats := range peersA {
+		if peerStats.GetPeer().GetId() != peersB[i].GetPeer().GetId() {
+			return false
+		}
+	}
+	return true
+}
+
 // shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
 // new peer was created, learners changed, pendingPeers changed, and so on.
 func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
@@ -1065,9 +1122,6 @@ func RegionToHexMeta(meta *metapb.Region) HexRegionMeta {
 	if meta == nil {
 		return HexRegionMeta{}
 	}
-	meta = proto.Clone(meta).(*metapb.Region)
-	meta.StartKey = HexRegionKey(meta.StartKey)
-	meta.EndKey = HexRegionKey(meta.EndKey)
 	return HexRegionMeta{meta}
 }
 
@@ -1077,20 +1131,17 @@ type HexRegionMeta struct {
 }
 
 func (h HexRegionMeta) String() string {
-	return strings.TrimSpace(proto.CompactTextString(h.Region))
+	var meta = proto.Clone(h.Region).(*metapb.Region)
+	meta.StartKey = HexRegionKey(meta.StartKey)
+	meta.EndKey = HexRegionKey(meta.EndKey)
+	return strings.TrimSpace(proto.CompactTextString(meta))
 }
 
 // RegionsToHexMeta converts regions' meta keys to hex format. Used for formating
 // region in logs.
 func RegionsToHexMeta(regions []*metapb.Region) HexRegionsMeta {
 	hexRegionMetas := make([]*metapb.Region, len(regions))
-	for i, region := range regions {
-		meta := proto.Clone(region).(*metapb.Region)
-		meta.StartKey = HexRegionKey(meta.StartKey)
-		meta.EndKey = HexRegionKey(meta.EndKey)
-
-		hexRegionMetas[i] = meta
-	}
+	copy(hexRegionMetas, regions)
 	return hexRegionMetas
 }
 
@@ -1101,7 +1152,11 @@ type HexRegionsMeta []*metapb.Region
 func (h HexRegionsMeta) String() string {
 	var b strings.Builder
 	for _, r := range h {
-		b.WriteString(proto.CompactTextString(r))
+		meta := proto.Clone(r).(*metapb.Region)
+		meta.StartKey = HexRegionKey(meta.StartKey)
+		meta.EndKey = HexRegionKey(meta.EndKey)
+
+		b.WriteString(proto.CompactTextString(meta))
 	}
 	return strings.TrimSpace(b.String())
 }

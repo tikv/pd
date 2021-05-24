@@ -14,6 +14,7 @@
 package checker
 
 import (
+	"context"
 	"encoding/hex"
 
 	. "github.com/pingcap/check"
@@ -34,11 +35,21 @@ type testRuleCheckerSuite struct {
 	cluster     *mockcluster.Cluster
 	ruleManager *placement.RuleManager
 	rc          *RuleChecker
+	ctx         context.Context
+	cancel      context.CancelFunc
+}
+
+func (s *testRuleCheckerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testRuleCheckerSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testRuleCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.cluster.SetEnablePlacementRules(true)
 	s.ruleManager = s.cluster.RuleManager
@@ -338,6 +349,37 @@ func (s *testRuleCheckerSuite) TestIssue2419(c *C) {
 	c.Assert(op.Step(2).(operator.RemovePeer).FromStore, Equals, uint64(3))
 }
 
+// Ref https://github.com/tikv/pd/issues/3521
+// The problem is when offline a store, we may add learner multiple times if
+// the operator is timeout.
+func (s *testRuleCheckerSuite) TestPriorityFixOrphanPeer(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+	var add operator.AddLearner
+	var remove operator.RemovePeer
+	s.cluster.SetStoreOffline(2)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Step(0), FitsTypeOf, add)
+	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
+	r := s.cluster.GetRegion(1).Clone(core.WithAddPeer(
+		&metapb.Peer{
+			Id:      5,
+			StoreId: 4,
+			Role:    metapb.PeerRole_Learner,
+		}))
+	s.cluster.PutRegion(r)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op.Step(0), FitsTypeOf, remove)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+}
+
 func (s *testRuleCheckerSuite) TestIssue3293(c *C) {
 	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
@@ -361,7 +403,7 @@ func (s *testRuleCheckerSuite) TestIssue3293(c *C) {
 		},
 	})
 	c.Assert(err, IsNil)
-	s.cluster.DeleteStore(s.cluster.TakeStore(5))
+	s.cluster.DeleteStore(s.cluster.GetStore(5))
 	err = s.ruleManager.SetRule(&placement.Rule{
 		GroupID: "TiDB_DDL_51",
 		ID:      "default",

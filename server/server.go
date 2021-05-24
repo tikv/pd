@@ -140,6 +140,9 @@ type Server struct {
 
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
 	serviceSafePointLock sync.Mutex
+
+	// Store as map[string]*grpc.ClientConn
+	clientConns sync.Map
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -293,10 +296,13 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
 	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
 
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdTimeout,
 		TLS:         tlsConfig,
+		LogConfig:   &lgc,
 	})
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
@@ -356,11 +362,14 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocator(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.member, s.rootPath, s.cfg.TSOSaveInterval.Duration, s.cfg.TSOUpdatePhysicalInterval.Duration,
-		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
-		s.GetTLSConfig())
-	if err = s.tsoAllocatorManager.SetLocalTSOConfig(s.cfg.LocalTSO); err != nil {
-		return err
+		s.member, s.rootPath, s.cfg,
+		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
+	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
+	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
+	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
+			return err
+		}
 	}
 	encryptionKeyManager, err := encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
@@ -775,9 +784,7 @@ func (s *Server) GetConfig() *config.Config {
 
 // GetScheduleConfig gets the balance config information.
 func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
-	cfg := &config.ScheduleConfig{}
-	*cfg = *s.persistOptions.GetScheduleConfig()
-	return cfg
+	return s.persistOptions.GetScheduleConfig().Clone()
 }
 
 // SetScheduleConfig sets the balance config information.
@@ -805,9 +812,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 
 // GetReplicationConfig get the replication config.
 func (s *Server) GetReplicationConfig() *config.ReplicationConfig {
-	cfg := &config.ReplicationConfig{}
-	*cfg = *s.persistOptions.GetReplicationConfig()
-	return cfg
+	return s.persistOptions.GetReplicationConfig().Clone()
 }
 
 // SetReplicationConfig sets the replication config.
@@ -839,21 +844,33 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	var rule *placement.Rule
 	if cfg.EnablePlacementRules {
 		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
-		if cfg.MaxReplicas != old.MaxReplicas {
-			rules := s.GetRaftCluster().GetRuleManager().GetAllRules()
-			if !(len(rules) == 1 && len(rules[0].StartKey) == 0 && len(rules[0].EndKey) == 0) {
-				return errors.New("cannot update MaxReplicas when placement rules feature is enabled and not only default rule exists, please update rule instead")
+		defaultRule := s.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
+
+		CheckInDefaultRule := func() error {
+			// replication config  won't work when placement rule is enabled and exceeds one default rule
+			if !(defaultRule != nil &&
+				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
+				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			rule = rules[0]
+			rule = defaultRule
+			if !(rule.Count == int(old.MaxReplicas) && reflect.DeepEqual(rule.LocationLabels, []string(old.LocationLabels))) {
+				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
+			}
+
+			return nil
 		}
-		// replication.LocationLabels won't work when placement rule is enabled
-		if !reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels) {
-			return errors.New("cannot update LocationLabels when placement rules feature is enabled, please update rule instead")
+
+		if !(cfg.MaxReplicas == old.MaxReplicas && reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels)) {
+			if err := CheckInDefaultRule(); err != nil {
+				return err
+			}
+			rule = defaultRule
 		}
 	}
 
 	if rule != nil {
 		rule.Count = int(cfg.MaxReplicas)
+		rule.LocationLabels = cfg.LocationLabels
 		if err := s.GetRaftCluster().GetRuleManager().SetRule(rule); err != nil {
 			log.Error("failed to update rule count",
 				errs.ZapError(err))
@@ -882,9 +899,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 
 // GetPDServerConfig gets the balance config information.
 func (s *Server) GetPDServerConfig() *config.PDServerConfig {
-	cfg := &config.PDServerConfig{}
-	*cfg = *s.persistOptions.GetPDServerConfig()
-	return cfg
+	return s.persistOptions.GetPDServerConfig().Clone()
 }
 
 // SetPDServerConfig sets the server config.
@@ -1195,7 +1210,6 @@ func (s *Server) campaignLeader() {
 	// TSO service is strictly enabled/disabled by PD leader lease for 2 reasons:
 	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
-
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 	defer s.member.ResetLeader()
@@ -1203,11 +1217,17 @@ func (s *Server) campaignLeader() {
 	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
-	log.Info("setting up the global TSO allocator")
-	if err := s.tsoAllocatorManager.SetUpAllocator(ctx, config.GlobalDCLocation, s.member.GetLeadership()); err != nil {
-		log.Error("failed to set up the global TSO allocator", errs.ZapError(err))
+	alllocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
 		return
 	}
+	log.Info("initializing the global TSO allocator")
+	if err := alllocator.Initialize(0); err != nil {
+		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
+		return
+	}
+	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
 	// Check the cluster dc-location after the PD leader is elected
 	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 
@@ -1316,6 +1336,8 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
 			return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
 		}
+		// Since we don't read the body, we can close it immediately.
+		res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
 			return errs.ErrSendRequest.FastGenByArgs()

@@ -93,8 +93,11 @@ type Config struct {
 	// be automatically clamped to the range.
 	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
 
-	// Local TSO service related configuration.
-	LocalTSO LocalTSOConfig `toml:"local-tso" json:"local-tso"`
+	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
+	// which allows the PD server to generate Local TSO for certain DC-level transactions.
+	// To make this feature meaningful, user has to set the "zone" label for the PD server
+	// to indicate which DC this PD belongs to.
+	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -105,6 +108,13 @@ type Config struct {
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
 	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
+
+	// Labels indicates the labels set for **this** PD server. The labels describe some specific properties
+	// like `zone`/`rack`/`host`. Currently, labels won't affect the PD server except for some special
+	// label keys. Now we have following special keys:
+	// 1. 'zone' is a special key that indicates the DC location of this PD server. If it is set, the value for this
+	// will be used to determine which DC's Local TSO service this PD will provide with if EnableLocalTSO is true.
+	Labels map[string]string `toml:"labels" json:"labels"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
@@ -231,10 +241,17 @@ const (
 	defaultDRWaitSyncTimeout  = time.Minute
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
 
+	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
+)
+
+// Special keys for Labels
+const (
+	// ZoneLabel is the name of the key which indicates DC location of this PD server.
+	ZoneLabel = "zone"
 )
 
 var (
@@ -510,7 +527,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
-	adjustDuration(&c.TSOSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
+	adjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 
 	adjustDuration(&c.TSOUpdatePhysicalInterval, DefaultTSOUpdatePhysicalInterval)
 
@@ -520,8 +537,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		c.TSOUpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
 	}
 
-	if err := c.LocalTSO.Validate(); err != nil {
-		return err
+	if c.Labels == nil {
+		c.Labels = make(map[string]string)
 	}
 
 	if c.nextRetryDelay == 0 {
@@ -1339,31 +1356,6 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-async-timeout") {
 		c.WaitAsyncTimeout = typeutil.NewDuration(defaultDRWaitAsyncTimeout)
 	}
-}
-
-// GlobalDCLocation is the Global TSO Allocator's dc-location label.
-const GlobalDCLocation = "global"
-
-// LocalTSOConfig is the configuration for Local TSO service.
-type LocalTSOConfig struct {
-	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
-	// which allows the PD server to generate local TSO for certain DC-level transactions.
-	// To make this feature meaningful, user has to set the dc-location configuration for
-	// each PD server.
-	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
-	// DCLocation indicates that which data center a PD server is in. According to it,
-	// the PD cluster can elect a TSO allocator to generate local TSO for
-	// DC-level transactions. It shouldn't be the same with GlobalDCLocation.
-	DCLocation string `toml:"dc-location" json:"dc-location"`
-}
-
-// Validate is used to validate if some TSO configurations are right.
-func (c *LocalTSOConfig) Validate() error {
-	if c.DCLocation == GlobalDCLocation {
-		errMsg := fmt.Sprintf("dc-location %s is the PD reserved label to represent the PD leader, please try another one.", GlobalDCLocation)
-		return errors.New(errMsg)
-	}
-	return nil
 }
 
 // SecurityConfig indicates the security configuration for pd server

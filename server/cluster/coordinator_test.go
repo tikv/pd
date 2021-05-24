@@ -120,7 +120,7 @@ func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 func (c *testCluster) setStoreDown(storeID uint64) error {
 	store := c.GetStore(storeID)
 	newStore := store.Clone(
-		core.SetStoreState(metapb.StoreState_Up),
+		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Time{}),
 	)
 	c.Lock()
@@ -130,7 +130,7 @@ func (c *testCluster) setStoreDown(storeID uint64) error {
 
 func (c *testCluster) setStoreOffline(storeID uint64) error {
 	store := c.GetStore(storeID)
-	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
+	newStore := store.Clone(core.OfflineStore(false))
 	c.Lock()
 	defer c.Unlock()
 	return c.putStoreLocked(newStore)
@@ -300,7 +300,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	}
 }
 
-func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy bool, expectAddOperator int) {
+func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectAddOperator int) {
 	ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
 	if ops == nil {
 		c.Assert(expectAddOperator, Equals, 0)
@@ -319,10 +319,10 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
-	s.checkRegion(c, tc, co, 1, false, 1)
+	s.checkRegion(c, tc, co, 1, 1)
 	waitOperator(c, co, 1)
 	testutil.CheckAddPeer(c, co.opController.GetOperator(1), operator.OpReplica, 1)
-	s.checkRegion(c, tc, co, 1, false, 0)
+	s.checkRegion(c, tc, co, 1, 0)
 
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}
@@ -331,7 +331,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
 	)
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, 0)
+	s.checkRegion(c, tc, co, 1, 0)
 	co.stop()
 	co.wg.Wait()
 
@@ -344,15 +344,15 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, 0)
+	s.checkRegion(c, tc, co, 1, 0)
 	r = r.Clone(core.WithPendingPeers(nil))
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, 1)
+	s.checkRegion(c, tc, co, 1, 1)
 	waitOperator(c, co, 1)
 	op := co.opController.GetOperator(1)
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
-	s.checkRegion(c, tc, co, 1, false, 0)
+	s.checkRegion(c, tc, co, 1, 0)
 }
 
 func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
@@ -385,7 +385,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 
 		}
 	}
-	s.checkRegion(c, tc, co, num, true, 0)
+	s.checkRegion(c, tc, co, num, 0)
 }
 
 func (s *testCoordinatorSuite) TestReplica(c *C) {

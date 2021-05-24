@@ -115,7 +115,7 @@ func (s *clientTLSTestSuite) TestTLSReloadAtomicReplace(c *C) {
 		c.Assert(err, IsNil)
 
 	}
-	s.testTLSReload(c, cloneFunc, replaceFunc, revertFunc, false)
+	s.testTLSReload(c, cloneFunc, replaceFunc, revertFunc)
 
 }
 
@@ -123,8 +123,7 @@ func (s *clientTLSTestSuite) testTLSReload(
 	c *C,
 	cloneFunc func() transport.TLSInfo,
 	replaceFunc func(),
-	revertFunc func(),
-	useIP bool) {
+	revertFunc func()) {
 	tlsInfo := cloneFunc()
 	// 1. start cluster with valid certs
 	clus, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) {
@@ -145,8 +144,9 @@ func (s *clientTLSTestSuite) testTLSReload(
 	c.Assert(err, IsNil)
 	clus.WaitLeader()
 
-	var endpoints []string
-	for _, s := range clus.GetServers() {
+	testServers := clus.GetServers()
+	endpoints := make([]string, 0, len(testServers))
+	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
 	// 2. concurrent client dialing while certs become expired

@@ -55,7 +55,7 @@ func (s *clusterWorkerTestSuite) TestValidRequestRegion(c *C) {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
-	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
+	bootstrapCluster(c, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 
 	r1 := core.NewRegionInfo(&metapb.Region{
@@ -96,7 +96,7 @@ func (s *clusterWorkerTestSuite) TestAskSplit(c *C) {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
-	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
+	bootstrapCluster(c, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	opt := rc.GetOpts()
 	opt.SetSplitMergeInterval(time.Hour)
@@ -141,7 +141,7 @@ func (s *clusterWorkerTestSuite) TestSuspectRegions(c *C) {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
-	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
+	bootstrapCluster(c, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	opt := rc.GetOpts()
 	opt.SetSplitMergeInterval(time.Hour)

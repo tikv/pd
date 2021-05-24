@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -55,7 +56,6 @@ type StoreStatus struct {
 	RegionSize         int64              `json:"region_size"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
-	ApplyingSnapCount  uint32             `json:"applying_snap_count,omitempty"`
 	IsBusy             bool               `json:"is_busy,omitempty"`
 	StartTS            *time.Time         `json:"start_ts,omitempty"`
 	LastHeartbeatTS    *time.Time         `json:"last_heartbeat_ts,omitempty"`
@@ -93,7 +93,6 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			RegionSize:         store.GetRegionSize(),
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
-			ApplyingSnapCount:  store.GetApplyingSnapCount(),
 			IsBusy:             store.IsBusy(),
 		},
 	}
@@ -200,7 +199,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Tags store
 // @Summary Set the store's state.
 // @Param id path integer true "Store Id"
-// @Param state query string true "state" Enums(Up, Offline, Tombstone)
+// @Param state query string true "state" Enums(Up, Offline)
 // @Produce json
 // @Success 200 {string} string "The store's state is updated."
 // @Failure 400 {string} string "The input is invalid."
@@ -217,15 +216,17 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stateStr := r.URL.Query().Get("state")
-	state, ok := metapb.StoreState_value[stateStr]
-	if !ok {
-		h.rd.JSON(w, http.StatusBadRequest, "invalid state")
-		return
+	var err error
+	if strings.EqualFold(stateStr, metapb.StoreState_Up.String()) {
+		err = rc.UpStore(storeID)
+	} else if strings.EqualFold(stateStr, metapb.StoreState_Offline.String()) {
+		err = rc.RemoveStore(storeID, false)
+	} else {
+		err = errors.Errorf("invalid state %v", stateStr)
 	}
 
-	err := rc.SetStoreState(storeID, metapb.StoreState(state))
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.responseStoreErr(w, err, storeID)
 		return
 	}
 

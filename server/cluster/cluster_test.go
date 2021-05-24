@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -33,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -91,6 +93,69 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(tmp, DeepEquals, storeMetasAfterHeartbeat[i])
 	}
+	hotHeartBeat := &pdpb.StoreStats{
+		StoreId:     1,
+		RegionCount: 1,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: 0,
+			EndTimestamp:   10,
+		},
+		PeerStats: []*pdpb.PeerStat{
+			{
+				RegionId:  1,
+				ReadKeys:  9999999,
+				ReadBytes: 9999999,
+			},
+		},
+	}
+	coldHeartBeat := &pdpb.StoreStats{
+		StoreId:     1,
+		RegionCount: 1,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: 0,
+			EndTimestamp:   10,
+		},
+		PeerStats: []*pdpb.PeerStat{},
+	}
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats := cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	// After cold heartbeat, we won't find region 1 peer in regionStats
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	c.Assert(storeStats[1], HasLen, 0)
+	// After hot heartbeat, we can find region 1 peer again
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	//  after several cold heartbeats, and one hot heartbeat, we also can't find region 1 peer
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 0)
+	c.Assert(storeStats[1], HasLen, 0)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 0)
+	// after 2 hot heartbeats, wo can find region 1 peer again
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
 }
 
 func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
@@ -118,7 +183,7 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 			Available:   50,
 			RegionCount: 1,
 		}
-		newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+		newStore := store.Clone(core.TombstoneStore())
 		c.Assert(cluster.putStoreLocked(newStore), IsNil)
 		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
 		c.Assert(cluster.hotStat.GetRollingStoreStats(store.GetID()), IsNil)
@@ -196,7 +261,7 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 			Address:    storeInfo.GetAddress(),
 			State:      metapb.StoreState_Up,
 			Version:    storeInfo.GetVersion(),
-			DeployPath: fmt.Sprintf("test/store%d", storeID),
+			DeployPath: getTestDeployPath(storeID),
 		}
 
 		if storeInfo.IsPhysicallyDestroyed() || storeInfo.IsTombstone() {
@@ -206,32 +271,43 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 			c.Assert(cluster.PutStore(newStore), NotNil)
 		}
 	}
-
 }
 
-func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
+func getTestDeployPath(storeID uint64) string {
+	return fmt.Sprintf("test/store%d", storeID)
+}
+
+func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
-	// Put 4 stores.
-	for _, store := range newTestStores(4, "2.0.0") {
+	// Put 3 stores.
+	for _, store := range newTestStores(3, "2.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
-	// Store 3 and 4 offline with physically destroyed.
-	for _, id := range []uint64{3, 4} {
-		c.Assert(cluster.RemoveStore(id, true), IsNil)
-	}
-	cluster.checkStores()
 
-	// Change the status of 3 directly back to Up.
-	c.Assert(cluster.SetStoreState(3, metapb.StoreState_Up), IsNil)
-	// Update store 1 2 3
-	for _, store := range newTestStores(3, "3.0.0") {
-		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
-	}
-	// Since the store 4 version is too low, setting it to Up should fail.
-	c.Assert(cluster.SetStoreState(4, metapb.StoreState_Up), NotNil)
+	// set store 1 offline
+	c.Assert(cluster.RemoveStore(1, false), IsNil)
+	// up a offline store should be success.
+	c.Assert(cluster.UpStore(1), IsNil)
+
+	// set store 2 offline and physically destroyed
+	c.Assert(cluster.RemoveStore(2, true), IsNil)
+	c.Assert(cluster.UpStore(2), NotNil)
+
+	// bury store 2
+	cluster.checkStores()
+	// store is tombstone
+	err = cluster.UpStore(2)
+	c.Assert(errors.ErrorEqual(err, errs.ErrStoreTombstone.FastGenByArgs(2)), IsTrue)
+
+	// store 3 is up
+	c.Assert(cluster.UpStore(3), IsNil)
+
+	// store 4 not exist
+	err = cluster.UpStore(4)
+	c.Assert(errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(4)), IsTrue)
 }
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
@@ -255,6 +331,63 @@ func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	c.Assert(cluster.RemoveStore(3, true), IsNil)
 	cluster.checkStores()
 	c.Assert(cluster.GetClusterVersion(), Equals, "5.0.0")
+}
+
+func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	newTestStores(4, "2.0.0")
+	peers := []*metapb.Peer{
+		{
+			Id:      1,
+			StoreId: 1,
+		},
+		{
+			Id:      2,
+			StoreId: 2,
+		},
+		{
+			Id:      3,
+			StoreId: 3,
+		},
+	}
+	leader := &metapb.Peer{
+		Id:      1,
+		StoreId: 1,
+	}
+	regionMeta := &metapb.Region{
+		Id:          1,
+		Peers:       peers,
+		StartKey:    []byte{byte(1)},
+		EndKey:      []byte{byte(1 + 1)},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+	}
+	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}),
+		core.SetWrittenBytes(30000*10),
+		core.SetWrittenKeys(300000*10))
+	err = cluster.processRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+	// wait HotStat to update items
+	time.Sleep(1 * time.Second)
+	stats := cluster.hotStat.RegionStats(statistics.WriteFlow, 0)
+	c.Assert(stats[1], HasLen, 1)
+	c.Assert(stats[2], HasLen, 1)
+	c.Assert(stats[3], HasLen, 1)
+	newPeer := &metapb.Peer{
+		Id:      4,
+		StoreId: 4,
+	}
+	region = region.Clone(core.WithRemoveStorePeer(2), core.WithAddPeer(newPeer))
+	err = cluster.processRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+	// wait HotStat to update items
+	time.Sleep(1 * time.Second)
+	stats = cluster.hotStat.RegionStats(statistics.WriteFlow, 0)
+	c.Assert(stats[1], HasLen, 1)
+	c.Assert(stats[2], HasLen, 0)
+	c.Assert(stats[3], HasLen, 1)
+	c.Assert(stats[4], HasLen, 1)
 }
 
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
@@ -642,6 +775,68 @@ func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	storage := core.NewStorage(kv.NewMemoryKV())
+	cluster.ruleManager = placement.NewRuleManager(storage, cluster)
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		if err != nil {
+			panic(err)
+		}
+	}
+	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
+
+	// Put 3 stores.
+	for _, store := range newTestStores(4, "5.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+
+	peers := []*metapb.Peer{
+		{
+			Id:      4,
+			StoreId: 1,
+		}, {
+			Id:      5,
+			StoreId: 2,
+		}, {
+			Id:      6,
+			StoreId: 3,
+		},
+	}
+	origin := core.NewRegionInfo(
+		&metapb.Region{
+			StartKey:    []byte{},
+			EndKey:      []byte{},
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+			Id:          1,
+			Peers:       peers}, peers[0])
+	regions := []*core.RegionInfo{origin}
+
+	// store 1: up -> offline
+	c.Assert(cluster.RemoveStore(1, false), IsNil)
+	store := cluster.GetStore(1)
+	c.Assert(store.IsOffline(), IsTrue)
+
+	// Split.
+	n := 7
+	for i := 0; i < n; i++ {
+		regions = core.SplitRegions(regions)
+	}
+	heartbeatRegions(c, cluster, regions)
+	c.Assert(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), HasLen, len(regions))
+
+	// Merge.
+	for i := 0; i < n; i++ {
+		regions = core.MergeRegions(regions)
+		heartbeatRegions(c, cluster, regions)
+		c.Assert(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), HasLen, len(regions))
+	}
+}
+
 func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
@@ -890,7 +1085,7 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 			Address:    fmt.Sprintf("127.0.0.1:%d", i),
 			State:      metapb.StoreState_Up,
 			Version:    version,
-			DeployPath: fmt.Sprintf("test/store%d", i),
+			DeployPath: getTestDeployPath(i),
 		}
 		stores = append(stores, core.NewStoreInfo(store))
 	}

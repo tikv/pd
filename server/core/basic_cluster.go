@@ -282,13 +282,6 @@ func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 	bc.Stores.DeleteStore(store)
 }
 
-// TakeStore returns the point of the origin StoreInfo with the specified storeID.
-func (bc *BasicCluster) TakeStore(storeID uint64) *StoreInfo {
-	bc.RLock()
-	defer bc.RUnlock()
-	return bc.Stores.TakeStore(storeID)
-}
-
 // PreCheckPutRegion checks if the region is valid to put.
 func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
 	bc.RLock()

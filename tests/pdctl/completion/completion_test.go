@@ -33,11 +33,11 @@ func (s *completionTestSuite) TestCompletion(c *C) {
 
 	// completion command
 	args := []string{"completion", "bash"}
-	_, _, err := pdctl.ExecuteCommandC(cmd, args...)
+	_, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 
 	// completion command
 	args = []string{"completion", "zsh"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 }

@@ -73,21 +73,30 @@ func SetStoreDeployPath(deployPath string) StoreCreateOption {
 	}
 }
 
-// SetStoreState sets the state for the store.
-func SetStoreState(state metapb.StoreState) StoreCreateOption {
-	return func(store *StoreInfo) {
-		meta := proto.Clone(store.meta).(*metapb.Store)
-		meta.State = state
-		store.meta = meta
-	}
-}
-
 // OfflineStore offline a store
 func OfflineStore(physicallyDestroyed bool) StoreCreateOption {
 	return func(store *StoreInfo) {
 		meta := proto.Clone(store.meta).(*metapb.Store)
 		meta.State = metapb.StoreState_Offline
 		meta.PhysicallyDestroyed = physicallyDestroyed
+		store.meta = meta
+	}
+}
+
+// UpStore up a store
+func UpStore() StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.State = metapb.StoreState_Up
+		store.meta = meta
+	}
+}
+
+// TombstoneStore set a store to tombstone.
+func TombstoneStore() StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.State = metapb.StoreState_Tombstone
 		store.meta = meta
 	}
 }
@@ -175,6 +184,17 @@ func SetLastPersistTime(lastPersist time.Time) StoreCreateOption {
 func SetStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.storeStats.updateRawStats(stats)
+	}
+}
+
+// SetNewStoreStats sets the raw statistics information for the store.
+func SetNewStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
+	return func(store *StoreInfo) {
+		// There is no clone in default store stats, we create new one to avoid to modify others.
+		// And range cluster cannot use HMA because the last value is not cached
+		store.storeStats = &storeStats{
+			rawStats: stats,
+		}
 	}
 }
 

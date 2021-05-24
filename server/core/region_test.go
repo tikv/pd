@@ -22,12 +22,105 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/id"
 )
 
 func TestCore(t *testing.T) {
 	TestingT(t)
+}
+
+var _ = Suite(&testRegionInfoSuite{})
+
+type testRegionInfoSuite struct{}
+
+func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
+	testcases := []struct {
+		idsA    []uint64
+		idsB    []uint64
+		isEqual bool
+	}{
+		{
+			[]uint64{},
+			[]uint64{},
+			true,
+		},
+		{
+			[]uint64{},
+			[]uint64{1, 2},
+			false,
+		},
+		{
+			[]uint64{1, 2},
+			[]uint64{1, 2},
+			true,
+		},
+		{
+			[]uint64{1, 2},
+			[]uint64{2, 1},
+			true,
+		},
+		{
+			[]uint64{1, 2},
+			[]uint64{1, 2, 3},
+			false,
+		},
+		{
+			[]uint64{1, 2, 3},
+			[]uint64{2, 3, 1},
+			true,
+		},
+		{
+			[]uint64{1, 3},
+			[]uint64{1, 2},
+			false,
+		},
+	}
+
+	meta := &metapb.Region{
+		Id: 100,
+		Peers: []*metapb.Peer{
+			{
+				Id:      1,
+				StoreId: 10,
+			},
+			{
+				Id:      3,
+				StoreId: 30,
+			},
+			{
+				Id:      2,
+				StoreId: 20,
+			},
+			{
+				Id:      4,
+				StoreId: 40,
+			},
+		},
+	}
+
+	region := NewRegionInfo(meta, meta.Peers[0])
+
+	for _, t := range testcases {
+		downPeersA := make([]*pdpb.PeerStats, 0)
+		downPeersB := make([]*pdpb.PeerStats, 0)
+		pendingPeersA := make([]*metapb.Peer, 0)
+		pendingPeersB := make([]*metapb.Peer, 0)
+		for _, i := range t.idsA {
+			downPeersA = append(downPeersA, &pdpb.PeerStats{Peer: meta.Peers[i]})
+			pendingPeersA = append(pendingPeersA, meta.Peers[i])
+		}
+		for _, i := range t.idsB {
+			downPeersB = append(downPeersB, &pdpb.PeerStats{Peer: meta.Peers[i]})
+			pendingPeersB = append(pendingPeersB, meta.Peers[i])
+		}
+
+		regionA := region.Clone(WithDownPeers(downPeersA), WithPendingPeers(pendingPeersA))
+		regionB := region.Clone(WithDownPeers(downPeersB), WithPendingPeers(pendingPeersB))
+		c.Assert(SortedPeersStatsEqual(regionA.GetDownPeers(), regionB.GetDownPeers()), Equals, t.isEqual)
+		c.Assert(SortedPeersEqual(regionA.GetPendingPeers(), regionB.GetPendingPeers()), Equals, t.isEqual)
+	}
 }
 
 var _ = Suite(&testRegionMapSuite{})

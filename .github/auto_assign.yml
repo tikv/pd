@@ -6,12 +6,15 @@ useReviewGroups: false
 useAssigneeGroups: true
 assigneeGroups:
   scheduling:
+    # Tech Leaders
+    - rleungx
+    # Committers
     - nolouch
     - disksing
     - lhy1024
-    - shafreeck
+    - Yisaer
     - HunDunDM
-    - rleungx
+    - JmPotato
 filterLabels:
   # Run
   include:

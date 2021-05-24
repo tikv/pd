@@ -43,23 +43,23 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-var _ = Suite(&serverTestSuite{})
+var _ = Suite(&memberTestSuite{})
 
-type serverTestSuite struct {
+type memberTestSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func (s *serverTestSuite) SetUpSuite(c *C) {
+func (s *memberTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
 }
 
-func (s *serverTestSuite) TearDownSuite(c *C) {
+func (s *memberTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
 
-func (s *serverTestSuite) TestMemberDelete(c *C) {
+func (s *memberTestSuite) TestMemberDelete(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
@@ -67,8 +67,8 @@ func (s *serverTestSuite) TestMemberDelete(c *C) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.LocalTSO.EnableLocalTSO = true
-		conf.LocalTSO.DCLocation = dcLocationConfig[serverName]
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -134,7 +134,7 @@ func (s *serverTestSuite) TestMemberDelete(c *C) {
 	}
 }
 
-func (s *serverTestSuite) checkMemberList(c *C, clientURL string, configs []*config.Config) error {
+func (s *memberTestSuite) checkMemberList(c *C, clientURL string, configs []*config.Config) error {
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 	addr := clientURL + "/pd/api/v1/members"
 	res, err := httpClient.Get(addr)
@@ -161,7 +161,7 @@ func (s *serverTestSuite) checkMemberList(c *C, clientURL string, configs []*con
 	return nil
 }
 
-func (s *serverTestSuite) TestLeaderPriority(c *C) {
+func (s *memberTestSuite) TestLeaderPriority(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -189,7 +189,7 @@ func (s *serverTestSuite) TestLeaderPriority(c *C) {
 	})
 }
 
-func (s *serverTestSuite) post(c *C, url string, body string) {
+func (s *memberTestSuite) post(c *C, url string, body string) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		res, err := http.Post(url, "", bytes.NewBufferString(body))
 		c.Assert(err, IsNil)
@@ -201,7 +201,7 @@ func (s *serverTestSuite) post(c *C, url string, body string) {
 	})
 }
 
-func (s *serverTestSuite) waitEtcdLeaderChange(c *C, server *tests.TestServer, old string) string {
+func (s *memberTestSuite) waitEtcdLeaderChange(c *C, server *tests.TestServer, old string) string {
 	var leader string
 	testutil.WaitUntil(c, func(c *C) bool {
 		var err error
@@ -218,7 +218,7 @@ func (s *serverTestSuite) waitEtcdLeaderChange(c *C, server *tests.TestServer, o
 	return leader
 }
 
-func (s *serverTestSuite) TestLeaderResign(c *C) {
+func (s *memberTestSuite) TestLeaderResign(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -238,7 +238,7 @@ func (s *serverTestSuite) TestLeaderResign(c *C) {
 	c.Assert(leader3, Equals, leader1)
 }
 
-func (s *serverTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old string) string {
+func (s *memberTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old string) string {
 	var leader string
 	testutil.WaitUntil(c, func(c *C) bool {
 		leader = cluster.GetLeader()
@@ -251,7 +251,7 @@ func (s *serverTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old
 	return leader
 }
 
-func (s *serverTestSuite) TestMoveLeader(c *C) {
+func (s *memberTestSuite) TestMoveLeader(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 5)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -333,9 +333,7 @@ func (s *leaderTestSuite) TestGetLeader(c *C) {
 func (s *leaderTestSuite) sendRequest(c *C, addr string) {
 	defer s.wg.Done()
 
-	req := &pdpb.AllocIDRequest{
-		Header: testutil.NewRequestHeader(0),
-	}
+	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(0)}
 
 	for {
 		select {

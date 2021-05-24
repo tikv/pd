@@ -50,7 +50,7 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /members [get]
 func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
-	members, err := h.getMembers()
+	members, err := getMembers(h.svr)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -58,39 +58,57 @@ func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, members)
 }
 
-func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: h.svr.ClusterID()}}
-	members, err := h.svr.GetMembers(context.Background(), req)
+func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
+	members, err := svr.GetMembers(context.Background(), req)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	dclocationDistribution, err := svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 	for _, m := range members.GetMembers() {
-		binaryVersion, e := h.svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
+		m.DcLocation = ""
+		binaryVersion, e := svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
 		m.BinaryVersion = binaryVersion
-		deployPath, e := h.svr.GetMember().GetMemberDeployPath(m.GetMemberId())
+		deployPath, e := svr.GetMember().GetMemberDeployPath(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
 		m.DeployPath = deployPath
-		if h.svr.GetMember().GetEtcdLeader() == 0 {
+		if svr.GetMember().GetEtcdLeader() == 0 {
 			log.Warn("no etcd leader, skip get leader priority", zap.Uint64("member", m.GetMemberId()))
 			continue
 		}
-		leaderPriority, e := h.svr.GetMember().GetMemberLeaderPriority(m.GetMemberId())
+		leaderPriority, e := svr.GetMember().GetMemberLeaderPriority(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 			continue
 		}
 		m.LeaderPriority = int32(leaderPriority)
-		gitHash, e := h.svr.GetMember().GetMemberGitHash(m.GetMemberId())
+		gitHash, e := svr.GetMember().GetMemberGitHash(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 			continue
 		}
 		m.GitHash = gitHash
+		found := false
+		for dcLocation, serverIDs := range dclocationDistribution {
+			for _, serverID := range serverIDs {
+				if serverID == m.MemberId {
+					m.DcLocation = dcLocation
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
 	}
 	return members, nil
 }
@@ -201,7 +219,7 @@ func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /members/name/{name} [post]
 func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.Request) {
-	members, membersErr := h.getMembers()
+	members, membersErr := getMembers(h.svr)
 	if membersErr != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, membersErr.Error())
 		return
@@ -257,7 +275,7 @@ func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
 // @Tags leader
 // @Summary Get the leader PD server of the cluster.
 // @Produce json
-// @Success 200 {string} string "The transfer command is submitted."
+// @Success 200 {object} pdpb.Member
 // @Router /leader [get]
 func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLeader())
@@ -266,7 +284,7 @@ func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Tags leader
 // @Summary Transfer etcd leadership to another PD server.
 // @Produce json
-// @Success 200 {string} string "The transfer command is submitted."
+// @Success 200 {string} string "The resign command is submitted."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /leader/resign [post]
 func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +294,7 @@ func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, "The transfer command is submitted.")
+	h.rd.JSON(w, http.StatusOK, "The resign command is submitted.")
 }
 
 // @Tags leader

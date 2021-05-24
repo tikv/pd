@@ -14,6 +14,8 @@
 package checker
 
 import (
+	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -28,15 +30,22 @@ var _ = Suite(&testLearnerCheckerSuite{})
 type testLearnerCheckerSuite struct {
 	cluster *mockcluster.Cluster
 	lc      *LearnerChecker
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (s *testLearnerCheckerSuite) SetUpTest(c *C) {
-	s.cluster = mockcluster.NewCluster(config.NewTestOptions())
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.cluster = mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.lc = NewLearnerChecker(s.cluster)
 	for id := uint64(1); id <= 10; id++ {
 		s.cluster.PutStoreWithLabels(id)
 	}
+}
+
+func (s *testLearnerCheckerSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testLearnerCheckerSuite) TestPromoteLearner(c *C) {

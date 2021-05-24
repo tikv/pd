@@ -66,14 +66,14 @@ func InitCommand() *cobra.Command {
 	return rootCmd
 }
 
-// ExecuteCommandC is used for test purpose.
-func ExecuteCommandC(root *cobra.Command, args ...string) (c *cobra.Command, output []byte, err error) {
+// ExecuteCommand is used for test purpose.
+func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err error) {
 	buf := new(bytes.Buffer)
 	root.SetOutput(buf)
 	root.SetArgs(args)
 
-	c, err = root.ExecuteC()
-	return c, buf.Bytes(), err
+	err = root.Execute()
+	return buf.Bytes(), err
 }
 
 // CheckStoresInfo is used to check the test results.

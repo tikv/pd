@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -204,7 +205,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.storage = storage
 	c.id = id
 	c.labelLevelStats = statistics.NewLabelStatistics()
-	c.hotStat = statistics.NewHotStat()
+	c.hotStat = statistics.NewHotStat(c.ctx)
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
@@ -522,18 +523,44 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		}
 	}
 	if store := c.core.GetStore(newStore.GetID()); store != nil {
-		c.hotStat.UpdateStoreHeartbeatMetrics(store)
+		statistics.UpdateStoreHeartbeatMetrics(store)
 	}
 	c.core.PutStore(newStore)
 	c.hotStat.Observe(newStore.GetID(), newStore.GetStoreStats())
-	c.hotStat.UpdateTotalLoad(c.core.GetStores())
 	c.hotStat.FilterUnhealthyStore(c)
+	reportInterval := stats.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
 	// c.limiter is nil before "start" is called
 	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
+	regionIDs := make(map[uint64]struct{}, len(stats.GetPeerStats()))
+	for _, peerStat := range stats.GetPeerStats() {
+		regionID := peerStat.GetRegionId()
+		regionIDs[regionID] = struct{}{}
+		region := c.GetRegion(regionID)
+		if region == nil {
+			log.Warn("discard hot peer stat for unknown region",
+				zap.Uint64("region-id", regionID),
+				zap.Uint64("store-id", storeID))
+			continue
+		}
+		peer := region.GetStorePeer(storeID)
+		if peer == nil {
+			log.Warn("discard hot peer stat for unknown region peer",
+				zap.Uint64("region-id", regionID),
+				zap.Uint64("store-id", storeID))
+			continue
+		}
+		peerInfo := core.NewPeerInfo(peer, 0, 0,
+			peerStat.GetReadBytes(), peerStat.GetReadKeys(), interval)
+		item := statistics.NewPeerInfoItem(peerInfo, region)
+		c.hotStat.CheckReadAsync(item)
+	}
+	collect := statistics.NewUnReportStatsCollect(storeID, regionIDs, interval)
+	c.hotStat.CheckReadAsync(collect)
 	return nil
 }
 
@@ -545,8 +572,28 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.RUnlock()
 		return err
 	}
-	writeItems := c.CheckWriteStatus(region)
-	readItems := c.CheckReadStatus(region)
+	expiredStats := c.hotStat.ExpiredItems(region)
+	// Put expiredStats into read/write queue to update stats
+	if len(expiredStats) > 0 {
+		for _, stat := range expiredStats {
+			item := statistics.NewExpiredStatItem(stat)
+			if stat.Kind == statistics.WriteFlow {
+				c.hotStat.CheckWriteAsync(item)
+			} else {
+				c.hotStat.CheckReadAsync(item)
+			}
+		}
+	}
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	for _, peer := range region.GetPeers() {
+		peerInfo := core.NewPeerInfo(peer,
+			region.GetBytesWritten(), region.GetKeysWritten(),
+			0, 0,
+			interval)
+		item := statistics.NewPeerInfoItem(peerInfo, region)
+		c.hotStat.CheckWriteAsync(item)
+	}
 	c.RUnlock()
 
 	// Save to storage if meta is updated.
@@ -591,11 +638,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			}
 			saveCache, needSync = true, true
 		}
-		if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 {
-			saveCache = true
+		if !core.SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
+			log.Debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+			saveCache, needSync = true, true
 		}
-		if len(origin.GetDownPeers()) > 0 || len(origin.GetPendingPeers()) > 0 {
-			saveCache = true
+		if !core.SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
+			log.Debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
+			saveCache, needSync = true, true
 		}
 		if len(region.GetPeers()) != len(origin.GetPeers()) {
 			saveKV, saveCache = true, true
@@ -620,7 +669,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	if len(writeItems) == 0 && len(readItems) == 0 && !saveKV && !saveCache && !isNew {
+	if !saveKV && !saveCache && !isNew {
 		return nil
 	}
 
@@ -653,7 +702,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			if c.regionStats != nil {
 				c.regionStats.ClearDefunctRegion(item.GetID())
 			}
-			c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.opt.GetLocationLabels())
+			c.labelLevelStats.ClearDefunctRegion(item.GetID())
 		}
 
 		// Update related stores.
@@ -677,14 +726,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if c.regionStats != nil {
-		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
-	}
-
-	for _, writeItem := range writeItems {
-		c.hotStat.Update(writeItem)
-	}
-	for _, readItem := range readItems {
-		c.hotStat.Update(readItem)
+		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
 	c.Unlock()
 
@@ -796,17 +838,6 @@ func (c *RaftCluster) RandPendingRegion(storeID uint64, ranges []core.KeyRange, 
 // RandLearnerRegion returns a random region that has a learner peer on the store.
 func (c *RaftCluster) RandLearnerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
 	return c.core.RandLearnerRegion(storeID, ranges, opts...)
-}
-
-// RandHotRegionFromStore randomly picks a hot region in specified store.
-func (c *RaftCluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo {
-	c.RLock()
-	defer c.RUnlock()
-	r := c.hotStat.RandHotRegionFromStore(store, kind, c.opt.GetHotRegionCacheHitsThreshold())
-	if r == nil {
-		return nil
-	}
-	return c.GetRegion(r.RegionID)
 }
 
 // GetLeaderStore returns all stores that contains the region's leader peer.
@@ -1072,7 +1103,7 @@ func (c *RaftCluster) buryStore(storeID uint64) error {
 		return errs.ErrStoreIsUp.FastGenByArgs()
 	}
 
-	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	newStore := store.Clone(core.TombstoneStore())
 	log.Warn("store has been Tombstone",
 		zap.Uint64("store-id", newStore.GetID()),
 		zap.String("store-address", newStore.GetAddress()),
@@ -1081,7 +1112,9 @@ func (c *RaftCluster) buryStore(storeID uint64) error {
 	err := c.putStoreLocked(newStore)
 	c.onStoreVersionChangeLocked()
 	if err == nil {
+		// clean up the residual information.
 		c.RemoveStoreLimit(storeID)
+		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
 }
@@ -1103,26 +1136,31 @@ func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.T
 	c.core.AttachAvailableFunc(storeID, limitType, f)
 }
 
-// SetStoreState sets up a store's state.
-func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) error {
+// UpStore up a store from offline
+func (c *RaftCluster) UpStore(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
-
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	if store.GetState() == metapb.StoreState_Tombstone && state != metapb.StoreState_Tombstone {
-		if err := c.checkStoreVersion(store.GetMeta()); err != nil {
-			return err
-		}
+	if store.IsTombstone() {
+		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
 	}
 
-	newStore := store.Clone(core.SetStoreState(state))
-	log.Warn("store update state",
+	if store.IsPhysicallyDestroyed() {
+		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
+	}
+
+	if store.IsUp() {
+		return nil
+	}
+
+	newStore := store.Clone(core.UpStore())
+	log.Warn("store has been up",
 		zap.Uint64("store-id", storeID),
-		zap.Stringer("new-state", state))
+		zap.String("store-address", newStore.GetAddress()))
 	return c.putStoreLocked(newStore)
 }
 
@@ -1236,7 +1274,6 @@ func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
 		}
 	}
 	c.core.DeleteStore(store)
-	c.hotStat.RemoveRollingStoreStats(store.GetID())
 	return nil
 }
 
@@ -1250,7 +1287,6 @@ func (c *RaftCluster) collectMetrics() {
 
 	c.coordinator.collectSchedulerMetrics()
 	c.coordinator.collectHotSpotMetrics()
-	c.coordinator.opController.CollectStoreLimitMetrics()
 	c.collectClusterMetrics()
 	c.collectHealthStatus()
 }
@@ -1332,14 +1368,14 @@ func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	c.Lock()
 	defer c.Unlock()
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.takeRegionStoresLocked(region), c.opt.GetLocationLabels())
+		c.labelLevelStats.Observe(region, c.getRegionStoresLocked(region), c.opt.GetLocationLabels())
 	}
 }
 
-func (c *RaftCluster) takeRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
+func (c *RaftCluster) getRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
 	for _, p := range region.GetPeers() {
-		if store := c.core.TakeStore(p.StoreId); store != nil {
+		if store := c.core.GetStore(p.StoreId); store != nil {
 			stores = append(stores, store)
 		}
 	}
@@ -1466,16 +1502,6 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
 	return c.hotStat.RegionStats(statistics.WriteFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
-}
-
-// CheckWriteStatus checks the write status, returns whether need update statistics and item.
-func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotStat.CheckWrite(region)
-}
-
-// CheckReadStatus checks the read status, returns whether need update statistics and item.
-func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotStat.CheckRead(region)
 }
 
 // TODO: remove me.
@@ -1673,6 +1699,9 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	for i := 0; i < persistLimitRetryTimes; i++ {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
+			id := strconv.FormatUint(storeID, 10)
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
 			return
 		}
 		time.Sleep(persistLimitWaitTime)

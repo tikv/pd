@@ -22,7 +22,7 @@ var (
 			Subsystem: "tso",
 			Name:      "events",
 			Help:      "Counter of tso events",
-		}, []string{"type"})
+		}, []string{"type", "dc"})
 
 	tsoGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -30,10 +30,19 @@ var (
 			Subsystem: "cluster",
 			Name:      "tso",
 			Help:      "Record of tso metadata.",
-		}, []string{"type"})
+		}, []string{"type", "dc"})
+
+	tsoAllocatorRole = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "tso",
+			Name:      "role",
+			Help:      "Indicate the PD server role info, whether it's a TSO allocator.",
+		}, []string{"dc"})
 )
 
 func init() {
 	prometheus.MustRegister(tsoCounter)
 	prometheus.MustRegister(tsoGauge)
+	prometheus.MustRegister(tsoAllocatorRole)
 }
