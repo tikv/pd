@@ -53,20 +53,24 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 
 	stores := []*metapb.Store{
 		{
-			Id:    1,
-			State: metapb.StoreState_Up,
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:    2,
-			State: metapb.StoreState_Up,
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:    3,
-			State: metapb.StoreState_Up,
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:    4,
-			State: metapb.StoreState_Up,
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
 
@@ -102,7 +106,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 	}
 
 	pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"))

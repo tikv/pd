@@ -353,6 +353,28 @@ func (mc *Cluster) AddRegionWithReadInfo(
 	return items
 }
 
+// AddRegionWithPeerReadInfo adds region with specified peer read info.
+func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderID, targetStoreID, readBytes, readKeys, reportInterval uint64,
+	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	r = r.Clone(core.SetReadBytes(readBytes), core.SetReadKeys(readKeys), core.SetReportInterval(reportInterval))
+	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
+	if len(filledNums) > 0 {
+		filledNum = filledNums[0]
+	}
+	var items []*statistics.HotPeerStat
+	for i := 0; i < filledNum; i++ {
+		items = mc.CheckRegionRead(r)
+		for _, item := range items {
+			if item.StoreID == targetStoreID {
+				mc.HotCache.Update(item)
+			}
+		}
+	}
+	mc.PutRegion(r)
+	return items
+}
+
 // AddRegionLeaderWithReadInfo add region leader read info
 func (mc *Cluster) AddRegionLeaderWithReadInfo(
 	regionID uint64, leaderID uint64,
