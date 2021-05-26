@@ -447,6 +447,47 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	waitNoResponse(c, stream)
 }
 
+func (s *testCoordinatorSuite) TestFixLessPeer(c *C) {
+	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
+		// Turn off replica scheduling.
+		cfg.ReplicaScheduleLimit = 1
+	}, nil, nil, c)
+	defer cleanup()
+
+	c.Assert(tc.addRegionStore(1, 0), IsNil)
+	c.Assert(tc.addRegionStore(2, 0), IsNil)
+	c.Assert(tc.addRegionStore(3, 0), IsNil)
+
+	// Add a peer with three replicas.
+	c.Assert(tc.addLeaderRegion(1, 2), IsNil)
+	c.Assert(tc.addLeaderRegion(2, 2, 3), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`), IsNil)
+
+	// case 1: region-1 should be add first because of it's regions is less than region-2
+	co.wg.Add(1)
+	tc.AddSuspectRegions(1)
+	co.patrolRegions()
+	oc := co.opController
+	c.Assert(len(oc.GetOperators()), Equals, 1)
+	c.Assert(oc.GetOperators()[0].RegionID(), Equals, uint64(1))
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+
+	// case2: add region3 that has 1 replicas ,so it should be elect first
+	c.Assert(tc.addLeaderRegion(3, 2), IsNil)
+	co.checkers.AddWaitingRegion(tc.GetRegion(3))
+	opt := tc.GetOpts()
+	cfg := opt.GetScheduleConfig()
+	co.wg.Add(1)
+	cfg.ReplicaScheduleLimit = 2
+	co.patrolRegions()
+	c.Assert(len(oc.GetOperators()), Equals, 2)
+	c.Assert(oc.GetOperators()[1].RegionID(), Equals, uint64(3))
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+
+	co.wg.Wait()
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"), IsNil)
+}
+
 func (s *testCoordinatorSuite) TestCheckCache(c *C) {
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		// Turn off replica scheduling.

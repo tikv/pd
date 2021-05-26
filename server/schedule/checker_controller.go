@@ -15,6 +15,7 @@ package schedule
 
 import (
 	"context"
+	"sort"
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/config"
@@ -108,9 +109,19 @@ func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 	return c.mergeChecker
 }
 
+func (c *CheckerController) GetRuleChecker() *checker.RuleChecker {
+	return c.ruleChecker
+}
+
 // GetWaitingRegions returns the regions in the waiting list.
 func (c *CheckerController) GetWaitingRegions() []*cache.Item {
-	return c.regionWaitingList.Elems()
+	items := c.regionWaitingList.Elems()
+	sort.Slice(items, func(i, j int) bool {
+		regionA := c.cluster.GetRegion(items[i].Key)
+		regionB := c.cluster.GetRegion(items[j].Key)
+		return c.GetRuleChecker().GetMissPeer(regionA) > c.GetRuleChecker().GetMissPeer(regionB)
+	})
+	return items
 }
 
 // AddWaitingRegion returns the regions in the waiting list.

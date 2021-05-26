@@ -51,6 +51,21 @@ func (c *RuleChecker) GetType() string {
 	return "rule-checker"
 }
 
+// GetMissPeer get miss peers of region
+func (c *RuleChecker) GetMissPeer(region *core.RegionInfo) int {
+	fit := c.cluster.FitRegion(region)
+	if len(fit.RuleFits) == 0 {
+		return 0
+	}
+	missPeers := 0
+	for _, rf := range fit.RuleFits {
+		if len(rf.Peers) < rf.Rule.Count {
+			missPeers = missPeers + rf.Rule.Count - len(rf.Peers)
+		}
+	}
+	return missPeers
+}
+
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
