@@ -245,10 +245,10 @@ func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) []*operator
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), plan.cluster, plan.region, plan.source); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
-	plan.target = filter.NewCandidates([]*core.StoreInfo{plan.target}).
+	target := filter.NewCandidates([]*core.StoreInfo{plan.target}).
 		FilterTarget(plan.cluster.GetOpts(), finalFilters...).
 		PickFirst()
-	if plan.target == nil {
+	if target == nil {
 		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", plan.region.GetID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
 		return nil
