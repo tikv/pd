@@ -148,25 +148,22 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return stores[i].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp, -1) >
 			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp, -1)
 	})
-	for _, source := range stores {
-		plan.source = source
-		sourceID := source.GetID()
-
+	for _, plan.source = range stores {
 		for i := 0; i < balanceRegionRetryLimit; i++ {
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
-			plan.region = cluster.RandPendingRegion(sourceID, s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
+			plan.region = cluster.RandPendingRegion(plan.SourceStoreID(), s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
 			if plan.region == nil {
 				// Then pick the region that has a follower in the source store.
-				plan.region = cluster.RandFollowerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
+				plan.region = cluster.RandFollowerRegion(plan.SourceStoreID(), s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
 			}
 			if plan.region == nil {
 				// Then pick the region has the leader in the source store.
-				plan.region = cluster.RandLeaderRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
+				plan.region = cluster.RandLeaderRegion(plan.SourceStoreID(), s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
 			}
 			if plan.region == nil {
 				// Finally pick learner.
-				plan.region = cluster.RandLearnerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
+				plan.region = cluster.RandLearnerRegion(plan.SourceStoreID(), s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
 			}
 			if plan.region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
@@ -198,11 +195,6 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Operator {
-	// scoreGuard guarantees that the distinct score will not decrease.
-	if plan.source == nil {
-		return nil
-	}
-
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.GetName(), nil, plan.region.GetStoreIds()),
 		filter.NewPlacementSafeguard(s.GetName(), plan.cluster, plan.region, plan.source),
