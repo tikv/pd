@@ -459,7 +459,13 @@ func (c *RaftCluster) GetSuspectRegions() []uint64 {
 	c.RUnlock()
 	sort.Slice(regions, func(i, j int) bool {
 		regionA := c.GetRegion(regions[i])
+		if regionA == nil {
+			return false
+		}
 		regionB := c.GetRegion(regions[j])
+		if regionB == nil {
+			return false
+		}
 		return c.coordinator.checkers.GetRuleChecker().GetMissPeer(regionA) >
 			c.coordinator.checkers.GetRuleChecker().GetMissPeer(regionB)
 	})

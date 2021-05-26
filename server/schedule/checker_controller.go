@@ -119,7 +119,13 @@ func (c *CheckerController) GetWaitingRegions() []*cache.Item {
 	items := c.regionWaitingList.Elems()
 	sort.Slice(items, func(i, j int) bool {
 		regionA := c.cluster.GetRegion(items[i].Key)
+		if regionA == nil {
+			return false
+		}
 		regionB := c.cluster.GetRegion(items[j].Key)
+		if regionA == nil {
+			return false
+		}
 		return c.GetRuleChecker().GetMissPeer(regionA) > c.GetRuleChecker().GetMissPeer(regionB)
 	})
 	return items
