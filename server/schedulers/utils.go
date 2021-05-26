@@ -36,24 +36,65 @@ const (
 	minTolerantSizeRatio    float64 = 1.0
 )
 
-func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) (shouldBalance bool, sourceScore float64, targetScore float64) {
+type balancePlan struct {
+	kind        core.ScheduleKind
+	cluster     opt.Cluster
+	opInfluence operator.OpInfluence
+
+	source *core.StoreInfo
+	target *core.StoreInfo
+	region *core.RegionInfo
+
+	sourceScore float64
+	targetScore float64
+}
+
+func newBalancePlan(kind core.ScheduleKind, cluster opt.Cluster, opInfluence operator.OpInfluence) *balancePlan {
+	return &balancePlan{
+		kind:        kind,
+		cluster:     cluster,
+		opInfluence: opInfluence,
+	}
+}
+
+func (p *balancePlan) GetOpInfluence(storeID uint64) int64 {
+	return p.opInfluence.GetStoreInfluence(storeID).ResourceProperty(p.kind)
+}
+
+func (p *balancePlan) SourceStoreID() uint64 {
+	return p.source.GetID()
+}
+
+func (p *balancePlan) SourceStoreLabel() string {
+	return strconv.FormatUint(p.SourceStoreID(), 10)
+}
+
+func (p *balancePlan) TargetStoreID() uint64 {
+	return p.target.GetID()
+}
+
+func (p *balancePlan) TargetStoreLabel() string {
+	return strconv.FormatUint(p.TargetStoreID(), 10)
+}
+
+func (p *balancePlan) shouldBalance(scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
-	sourceID := source.GetID()
-	targetID := target.GetID()
-	tolerantResource := getTolerantResource(cluster, region, kind)
-	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceProperty(kind)
-	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
+	sourceID := p.source.GetID()
+	targetID := p.target.GetID()
+	tolerantResource := p.getTolerantResource()
+	sourceInfluence := p.GetOpInfluence(sourceID)
+	targetInfluence := p.GetOpInfluence(targetID)
 	sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
-	opts := cluster.GetOpts()
-	switch kind.Resource {
+	opts := p.cluster.GetOpts()
+	switch p.kind.Resource {
 	case core.LeaderKind:
-		sourceScore = source.LeaderScore(kind.Policy, sourceDelta)
-		targetScore = target.LeaderScore(kind.Policy, targetDelta)
+		p.sourceScore = p.source.LeaderScore(p.kind.Policy, sourceDelta)
+		p.targetScore = p.target.LeaderScore(p.kind.Policy, targetDelta)
 	case core.RegionKind:
-		sourceScore = source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta, -1)
-		targetScore = target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta, 1)
+		p.sourceScore = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta, -1)
+		p.targetScore = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta, 1)
 	}
 	if opts.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
@@ -61,24 +102,24 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 		tolerantResourceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), strconv.FormatUint(targetID, 10)).Set(float64(tolerantResource))
 	}
 	// Make sure after move, source score is still greater than target score.
-	shouldBalance = sourceScore > targetScore
+	shouldBalance := p.sourceScore > p.targetScore
 
 	if !shouldBalance {
-		log.Debug("skip balance "+kind.Resource.String(),
-			zap.String("scheduler", scheduleName), zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
-			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", sourceScore),
+		log.Debug("skip balance "+p.kind.Resource.String(),
+			zap.String("scheduler", scheduleName), zap.Uint64("region-id", p.region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
+			zap.Int64("source-size", p.source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
 			zap.Int64("source-influence", sourceInfluence),
-			zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", targetScore),
+			zap.Int64("target-size", p.target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
 			zap.Int64("target-influence", targetInfluence),
-			zap.Int64("average-region-size", cluster.GetAverageRegionSize()),
+			zap.Int64("average-region-size", p.cluster.GetAverageRegionSize()),
 			zap.Int64("tolerant-resource", tolerantResource))
 	}
-	return shouldBalance, sourceScore, targetScore
+	return shouldBalance
 }
 
-func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
-	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
-		tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
+func (p *balancePlan) getTolerantResource() int64 {
+	if p.kind.Resource == core.LeaderKind && p.kind.Policy == core.ByCount {
+		tolerantSizeRatio := p.cluster.GetOpts().GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
 			tolerantSizeRatio = leaderTolerantSizeRatio
 		}
@@ -86,11 +127,11 @@ func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core
 		return leaderCount
 	}
 
-	regionSize := region.GetApproximateSize()
-	if regionSize < cluster.GetAverageRegionSize() {
-		regionSize = cluster.GetAverageRegionSize()
+	regionSize := p.region.GetApproximateSize()
+	if regionSize < p.cluster.GetAverageRegionSize() {
+		regionSize = p.cluster.GetAverageRegionSize()
 	}
-	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
+	regionSize = int64(float64(regionSize) * adjustTolerantRatio(p.cluster))
 	return regionSize
 }
 
