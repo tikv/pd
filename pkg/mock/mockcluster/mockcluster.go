@@ -113,6 +113,7 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 // RegionReadStats returns hot region's read stats.
 // The result only includes peers that are hot enough.
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
+	// We directly use threshold for read stats for mockCluster
 	return mc.HotCache.RegionStats(statistics.ReadFlow, mc.GetHotRegionCacheHitsThreshold())
 }
 
