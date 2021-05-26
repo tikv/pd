@@ -224,32 +224,32 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) []*operato
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) []*operator.Operator {
-	region := plan.cluster.RandFollowerRegion(plan.TargetStoreID(), l.conf.Ranges, opt.HealthRegion(plan.cluster))
-	if region == nil {
+	plan.region = plan.cluster.RandFollowerRegion(plan.TargetStoreID(), l.conf.Ranges, opt.HealthRegion(plan.cluster))
+	if plan.region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.TargetStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()
 		return nil
 	}
-	leaderStoreID := region.GetLeader().GetStoreId()
+	leaderStoreID := plan.region.GetLeader().GetStoreId()
 	plan.source = plan.cluster.GetStore(leaderStoreID)
 	if plan.source == nil {
 		log.Debug("region has no leader or leader store cannot be found",
 			zap.String("scheduler", l.GetName()),
-			zap.Uint64("region-id", region.GetID()),
+			zap.Uint64("region-id", plan.region.GetID()),
 			zap.Uint64("store-id", leaderStoreID),
 		)
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader").Inc()
 		return nil
 	}
 	finalFilters := l.filters
-	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), plan.cluster, region, plan.source); leaderFilter != nil {
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), plan.cluster, plan.region, plan.source); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	plan.target = filter.NewCandidates([]*core.StoreInfo{plan.target}).
 		FilterTarget(plan.cluster.GetOpts(), finalFilters...).
 		PickFirst()
 	if plan.target == nil {
-		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
+		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", plan.region.GetID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
 		return nil
 	}
