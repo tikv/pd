@@ -469,7 +469,7 @@ func (s *testCoordinatorSuite) TestFixLessPeer(c *C) {
 	co.patrolRegions()
 	oc := co.opController
 	c.Assert(len(oc.GetOperators()), Equals, 1)
-	c.Assert(oc.GetOperators()[0].RegionID(), Equals, uint64(1))
+	c.Assert(oc.GetOperator(uint64(1)), NotNil)
 	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
 
 	// case2: add region3 that has 1 replicas ,so it should be elect first
@@ -481,7 +481,7 @@ func (s *testCoordinatorSuite) TestFixLessPeer(c *C) {
 	cfg.ReplicaScheduleLimit = 2
 	co.patrolRegions()
 	c.Assert(len(oc.GetOperators()), Equals, 2)
-	c.Assert(oc.GetOperators()[1].RegionID(), Equals, uint64(3))
+	c.Assert(oc.GetOperator(uint64(3)), NotNil)
 	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
 
 	co.wg.Wait()
