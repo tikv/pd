@@ -109,6 +109,7 @@ func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 	return c.mergeChecker
 }
 
+// GetRuleChecker return the rule checker
 func (c *CheckerController) GetRuleChecker() *checker.RuleChecker {
 	return c.ruleChecker
 }
