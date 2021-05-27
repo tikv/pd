@@ -73,7 +73,7 @@ type coordinator struct {
 func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstream.HeartbeatStreams) *coordinator {
 	ctx, cancel := context.WithCancel(ctx)
 	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
-	return &coordinator{
+	co := &coordinator{
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
@@ -85,6 +85,8 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		hbStreams:       hbStreams,
 		pluginInterface: schedule.NewPluginInterface(),
 	}
+	co.cluster.coordinator = co
+	return co
 }
 
 // patrolRegions is used to scan regions.
