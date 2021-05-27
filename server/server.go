@@ -17,9 +17,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
+	"os"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -1360,7 +1360,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
-	return ioutil.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
+	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
 }
 
 // SaveTTLConfig save ttl config

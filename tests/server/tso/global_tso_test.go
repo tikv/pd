@@ -493,23 +493,31 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSO(c *C) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// Get some local TSOs first
-	oldLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
-	for _, dcLocation := range dcLocationConfig {
-		oldLocalTSOs = append(oldLocalTSOs, s.testGetTimestamp(ctx, c, cluster, tsoCount, dcLocation))
-	}
-	// Get a global TSO then
-	globalTSO := s.testGetTimestamp(ctx, c, cluster, tsoCount, tso.GlobalDCLocation)
-	for _, oldLocalTSO := range oldLocalTSOs {
-		c.Assert(tsoutil.CompareTimestamp(globalTSO, oldLocalTSO), Equals, 1)
-	}
-	// Get some local TSOs again
-	newLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
-	for _, dcLocation := range dcLocationConfig {
-		newLocalTSOs = append(newLocalTSOs, s.testGetTimestamp(ctx, c, cluster, tsoCount, dcLocation))
-	}
-	for _, newLocalTSO := range newLocalTSOs {
-		c.Assert(tsoutil.CompareTimestamp(globalTSO, newLocalTSO), Equals, -1)
+	maxGlobalTSO := &pdpb.Timestamp{}
+	for i := 0; i < 100; i++ {
+		// Get some local TSOs first
+		oldLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
+		for _, dcLocation := range dcLocationConfig {
+			localTSO := s.testGetTimestamp(ctx, c, cluster, tsoCount, dcLocation)
+			oldLocalTSOs = append(oldLocalTSOs, localTSO)
+			c.Assert(tsoutil.CompareTimestamp(maxGlobalTSO, localTSO), Equals, -1)
+		}
+		// Get a global TSO then
+		globalTSO := s.testGetTimestamp(ctx, c, cluster, tsoCount, tso.GlobalDCLocation)
+		for _, oldLocalTSO := range oldLocalTSOs {
+			c.Assert(tsoutil.CompareTimestamp(globalTSO, oldLocalTSO), Equals, 1)
+		}
+		if tsoutil.CompareTimestamp(maxGlobalTSO, globalTSO) < 0 {
+			maxGlobalTSO = globalTSO
+		}
+		// Get some local TSOs again
+		newLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
+		for _, dcLocation := range dcLocationConfig {
+			newLocalTSOs = append(newLocalTSOs, s.testGetTimestamp(ctx, c, cluster, tsoCount, dcLocation))
+		}
+		for _, newLocalTSO := range newLocalTSOs {
+			c.Assert(tsoutil.CompareTimestamp(maxGlobalTSO, newLocalTSO), Equals, -1)
+		}
 	}
 }
 

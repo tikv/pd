@@ -15,7 +15,7 @@ package api
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,7 +50,7 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 		resp, err := testDialClient.Get(addr)
 		c.Assert(err, IsNil)
 		defer resp.Body.Close()
-		_, err = ioutil.ReadAll(resp.Body)
+		_, err = io.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
 	}()
 
@@ -68,7 +68,7 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 
 	svr := <-ch
 	close(ch)
-	out, _ := ioutil.ReadFile(fname)
+	out, _ := os.ReadFile(fname)
 	c.Assert(strings.Contains(string(out), "PANIC"), IsFalse)
 
 	// clean up
