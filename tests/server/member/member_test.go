@@ -239,10 +239,7 @@ func (s *serverTestSuite) TestLeaderResign(c *C) {
 	c.Assert(leader3, Equals, leader1)
 }
 
-<<<<<<< HEAD
-func (s *serverTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old string) string {
-=======
-func (s *memberTestSuite) TestLeaderResignWithBlock(c *C) {
+func (s *serverTestSuite) TestLeaderResignWithBlock(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -262,8 +259,7 @@ func (s *memberTestSuite) TestLeaderResignWithBlock(c *C) {
 	c.Assert(leader2, Not(Equals), leader1)
 }
 
-func (s *memberTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old string) string {
->>>>>>> 71b12e40a (server: make leader can lost lease as soon as possible (#3712))
+func (s *serverTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old string) string {
 	var leader string
 	testutil.WaitUntil(c, func(c *C) bool {
 		leader = cluster.GetLeader()
