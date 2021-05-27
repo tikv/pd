@@ -16,8 +16,6 @@ package schedule
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/config"
@@ -26,6 +24,7 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
+	"go.uber.org/zap"
 )
 
 // DefaultCacheSize is the default length of waiting list.
@@ -129,7 +128,7 @@ func (c *CheckerController) SortRegionInfoByMissPeers(regionIds []*core.RegionIn
 func (c *CheckerController) SortRegionIdByMissPeers(regionIds []uint64) []uint64 {
 	levels := c.ruleChecker.GetMaxMissPeer() + 1
 	buckets := make([][]uint64, levels)
-	for i, _ := range buckets {
+	for i := range buckets {
 		buckets[i] = make([]uint64, 0)
 	}
 	result := make([]uint64, len(regionIds))

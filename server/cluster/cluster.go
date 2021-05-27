@@ -456,7 +456,6 @@ func (c *RaftCluster) GetSuspectRegions() []uint64 {
 	c.RLock()
 	regions := c.suspectRegions.GetAllID()
 	c.RUnlock()
-	log.Info("aaa", zap.Bool("checker is nil", c.coordinator == nil))
 	return c.coordinator.checkers.SortRegionIdByMissPeers(regions)
 }
 
@@ -675,9 +674,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		return nil
 	}
 
-	if _, _err_ := failpoint.Eval(_curpkg_("concurrentRegionHeartbeat")); _err_ == nil {
+	failpoint.Inject("concurrentRegionHeartbeat", func() {
 		time.Sleep(500 * time.Millisecond)
-	}
+	})
 
 	c.Lock()
 	if saveCache {
@@ -1412,9 +1411,9 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
-	if _, _err_ := failpoint.Eval(_curpkg_("versionChangeConcurrency")); _err_ == nil {
+	failpoint.Inject("versionChangeConcurrency", func() {
 		time.Sleep(500 * time.Millisecond)
-	}
+	})
 
 	if minVersion != nil && clusterVersion.LessThan(*minVersion) {
 		if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
