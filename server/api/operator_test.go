@@ -17,7 +17,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"strings"
 
 	. "github.com/pingcap/check"
@@ -404,7 +403,7 @@ func mustReadURL(c *C, url string) string {
 	res, err := testDialClient.Get(url)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()
-	data, err := ioutil.ReadAll(res.Body)
+	data, err := io.ReadAll(res.Body)
 	c.Assert(err, IsNil)
 	return string(data)
 }

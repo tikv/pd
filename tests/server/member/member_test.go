@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"sync"
 	"testing"
@@ -140,7 +139,7 @@ func (s *memberTestSuite) checkMemberList(c *C, clientURL string, configs []*con
 	res, err := httpClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()
-	buf, err := ioutil.ReadAll(res.Body)
+	buf, err := io.ReadAll(res.Body)
 	c.Assert(err, IsNil)
 	if res.StatusCode != http.StatusOK {
 		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
@@ -193,7 +192,7 @@ func (s *memberTestSuite) post(c *C, url string, body string) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		res, err := http.Post(url, "", bytes.NewBufferString(body))
 		c.Assert(err, IsNil)
-		b, err := ioutil.ReadAll(res.Body)
+		b, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		c.Assert(err, IsNil)
 		c.Logf("post %s, status: %v res: %s", url, res.StatusCode, string(b))

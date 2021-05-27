@@ -16,7 +16,6 @@ package dashboard_test
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"testing"
 	"time"
@@ -84,7 +83,7 @@ func (s *dashboardTestSuite) TestDashboardProxy(c *C) {
 func (s *dashboardTestSuite) checkRespCode(c *C, url string, code int) {
 	resp, err := s.httpClient.Get(url) //nolint:gosec
 	c.Assert(err, IsNil)
-	_, err = ioutil.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, code)

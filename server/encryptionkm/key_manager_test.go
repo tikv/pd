@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"sync/atomic"
@@ -60,7 +59,7 @@ func getTestDataKey() []byte {
 func newTestEtcd(c *C) (client *clientv3.Client, cleanup func()) {
 	cfg := embed.NewConfig()
 	cfg.Name = "test_etcd"
-	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_etcd")
+	cfg.Dir, _ = os.MkdirTemp("/tmp", "test_etcd")
 	cfg.Logger = "zap"
 	pu, err := url.Parse(tempurl.Alloc())
 	c.Assert(err, IsNil)
@@ -95,10 +94,10 @@ func newTestKeyFile(c *C, key ...string) (keyFilePath string, cleanup func()) {
 	for _, k := range key {
 		testKey = k
 	}
-	tempDir, err := ioutil.TempDir("/tmp", "test_key_file")
+	tempDir, err := os.MkdirTemp("/tmp", "test_key_file")
 	c.Assert(err, IsNil)
 	keyFilePath = tempDir + "/key"
-	err = ioutil.WriteFile(keyFilePath, []byte(testKey), 0644)
+	err = os.WriteFile(keyFilePath, []byte(testKey), 0644)
 	c.Assert(err, IsNil)
 
 	cleanup = func() {
