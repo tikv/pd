@@ -138,7 +138,7 @@ func (s *testRejectLeaderSuite) TestRemoveRejectLeader(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opts := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opts)
+	tc := mockcluster.NewCluster(opts)
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 1)
 	oc := schedule.NewOperatorController(ctx, tc, nil)
