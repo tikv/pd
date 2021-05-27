@@ -2,7 +2,7 @@ package simulator
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -51,7 +51,7 @@ func NewSimConfig(serverLogLevel string) *SimConfig {
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls
 	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
+	cfg.DataDir, _ = os.MkdirTemp("/tmp", "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.Log.Level = serverLogLevel
 	return &SimConfig{ServerConfig: cfg}

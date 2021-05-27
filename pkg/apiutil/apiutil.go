@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"strconv"
 
@@ -57,7 +56,7 @@ func tagJSONError(err error) error {
 func ReadJSON(r io.ReadCloser, data interface{}) error {
 	var err error
 	defer DeferClose(r, &err)
-	b, err := ioutil.ReadAll(r)
+	b, err := io.ReadAll(r)
 	if err != nil {
 		return errors.WithStack(err)
 	}

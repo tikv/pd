@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -149,7 +148,7 @@ func GetEcho(args []string) string {
 	pdctl.Start(args)
 	temp.Close()
 	os.Stdout = old
-	out, _ := ioutil.ReadFile(filename)
+	out, _ := os.ReadFile(filename)
 	_ = os.Remove(filename)
 	return string(out)
 }
