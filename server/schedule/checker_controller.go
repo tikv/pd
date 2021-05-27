@@ -16,8 +16,9 @@ package schedule
 import (
 	"context"
 
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -126,14 +127,12 @@ func (c *CheckerController) SortRegionInfoByMissPeers(regionIds []*core.RegionIn
 
 // SortMissRegion return regions order by miss count,it will only scan
 func (c *CheckerController) SortRegionIdByMissPeers(regionIds []uint64) []uint64 {
-	log.Info("aaa")
 	levels := c.ruleChecker.GetMaxMissPeer() + 1
 	buckets := make([][]uint64, levels)
 	for i, _ := range buckets {
 		buckets[i] = make([]uint64, 0)
 	}
 	result := make([]uint64, len(regionIds))
-
 	for _, id := range regionIds {
 		region := c.cluster.GetRegion(id)
 		if region == nil {
@@ -144,12 +143,18 @@ func (c *CheckerController) SortRegionIdByMissPeers(regionIds []uint64) []uint64
 		buckets[missPeer] = append(buckets[missPeer], id)
 	}
 	idx := 0
+	log.Info("aaa", zap.Any("buckets", buckets))
 	for i := range buckets {
-		for j := range buckets[i] {
-			result[idx] = buckets[levels-i][j]
+		index := levels - i - 1
+		if len(buckets[index]) == 0 {
+			continue
+		}
+		for j := range buckets[index] {
+			result[idx] = buckets[index][j]
 			idx = idx + 1
 		}
 	}
+	log.Info("bbb", zap.Any("result", result))
 	return result
 }
 

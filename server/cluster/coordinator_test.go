@@ -292,6 +292,8 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	if run != nil {
 		run(co)
 	}
+	tc.coordinator = co
+	// c.coordinator
 	return tc, co, func() {
 		co.stop()
 		co.wg.Wait()
@@ -463,13 +465,27 @@ func (s *testCoordinatorSuite) TestFixLessPeer(c *C) {
 	c.Assert(tc.addLeaderRegion(2, 2, 3), IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`), IsNil)
 
-	// case 1: region-1 should be add first because of it's regions is less than region-2
+	// case 1: region-1 has high priority than region-2
 	co.wg.Add(1)
 	tc.AddSuspectRegions(1, 2)
+
 	co.patrolRegions()
 	oc := co.opController
 	c.Assert(len(oc.GetOperators()), Equals, 1)
 	c.Assert(oc.GetOperator(uint64(1)), NotNil)
+	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+
+	// case 2: region-3 enter into cluster,region-2 is deleted by suspect regions and waiting regions
+	c.Assert(tc.addLeaderRegion(3, 2), IsNil)
+	tc.RemoveSuspectRegion(uint64(2))
+	co.checkers.RemoveWaitingRegion(uint64(2))
+	opt := tc.GetOpts()
+	cfg := opt.GetScheduleConfig()
+	cfg.ReplicaScheduleLimit = 2
+	co.wg.Add(1)
+	co.patrolRegions()
+	c.Assert(len(oc.GetOperators()), Equals, 2)
+	c.Assert(oc.GetOperator(uint64(3)), NotNil)
 	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
 
 	co.wg.Wait()
