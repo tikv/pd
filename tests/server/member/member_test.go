@@ -251,8 +251,8 @@ func (s *memberTestSuite) TestLeaderResignWithBlock(c *C) {
 	addr1 := cluster.GetServer(leader1).GetConfig().ClientUrls
 
 	err = failpoint.Enable("github.com/tikv/pd/server/raftclusterIsBusy", `pause`)
-	defer failpoint.Disable("github.com/tikv/pd/server/raftclusterIsBusy")
 	c.Assert(err, IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/server/raftclusterIsBusy")
 	s.post(c, addr1+"/pd/api/v1/leader/resign", "")
 	leader2 := s.waitLeaderChange(c, cluster, leader1)
 	c.Log("leader2:", leader2)

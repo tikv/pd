@@ -1257,7 +1257,7 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	// Check the cluster dc-location after the PD leader is elected
+	// Check the cluster dc-location after the PD leader is elected.
 	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	defer func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
