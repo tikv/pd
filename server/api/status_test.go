@@ -15,9 +15,10 @@ package api
 
 import (
 	"encoding/json"
+	"io"
+
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/versioninfo"
-	"io"
 )
 
 var _ = Suite(&testStatusAPISuite{})
