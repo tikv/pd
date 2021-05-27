@@ -16,7 +16,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"testing"
 
@@ -221,7 +221,7 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	bodyString := string(bodyBytes)
 	c.Assert(bodyString, Equals, "Hello World\n")
