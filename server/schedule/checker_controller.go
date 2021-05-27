@@ -155,8 +155,7 @@ func (c *CheckerController) SortRegionIdByMissPeers(regionIds []uint64) []uint64
 
 // GetWaitingRegions returns the regions in the waiting list.
 func (c *CheckerController) GetWaitingRegions() []*cache.Item {
-	items := c.regionWaitingList.Elems()
-	return items
+	return c.regionWaitingList.Elems()
 }
 
 // AddWaitingRegion returns the regions in the waiting list.

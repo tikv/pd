@@ -28,7 +28,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const MaxMissPeer = 2 // if region has miss peer,it will has max miss peer limit
+const MaxMissPeer = 2 // it is a miss region limit  if region has miss peer exceed max miss peer
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
@@ -71,6 +71,7 @@ func (c *RuleChecker) GetMissPeer(region *core.RegionInfo) int {
 	return missPeers
 }
 
+// GetMaxMissPeer return max miss peer
 func (c *RuleChecker) GetMaxMissPeer() int {
 	return MaxMissPeer
 }
