@@ -1215,7 +1215,7 @@ func (s *Server) campaignLeader() {
 	defer cancel()
 	defer s.member.ResetLeader()
 
-	// maintain the PD leader
+	// maintain the PD leadership, after this, TSO can be service.
 	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
@@ -1230,8 +1230,6 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-	// Check the cluster dc-location after the PD leader is elected
-	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
@@ -1257,11 +1255,15 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
 	}
+	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
+	// Check the cluster dc-location after the PD leader is elected
+	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	defer func() {
-		s.member.ResetLeader()
-		// as soon as cancel the keepalive.
+		// as soon as cancel the leadership keepalive, then other member have chance
+		// to be new leader.
 		cancel()
+		s.member.ResetLeader()
 	}()
 
 	CheckPDVersion(s.persistOptions)
