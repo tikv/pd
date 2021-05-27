@@ -28,6 +28,8 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*Server).handleRawConn"),
 	goleak.IgnoreTopFunction("go.etcd.io/etcd/pkg/logutil.(*MergeLogger).outputLoop"),
+	// FIXME: Go 1.16 changes call stack, I have no idea where this comes from.
+	goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),
 	// TODO: remove the below options once we fixed the http connection leak problems
 	goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 	goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
