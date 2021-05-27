@@ -1212,8 +1212,11 @@ func (s *Server) campaignLeader() {
 	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-	defer s.member.ResetLeader()
+	var resetLeaderOnce sync.Once
+	defer resetLeaderOnce.Do(func() {
+		cancel()
+		s.member.ResetLeader()
+	})
 
 	// maintain the PD leadership, after this, TSO can be service.
 	go s.member.KeepLeader(ctx)
@@ -1259,12 +1262,12 @@ func (s *Server) campaignLeader() {
 	s.member.EnableLeader()
 	// Check the cluster dc-location after the PD leader is elected.
 	go s.tsoAllocatorManager.ClusterDCLocationChecker()
-	defer func() {
+	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
 		cancel()
 		s.member.ResetLeader()
-	}()
+	})
 
 	CheckPDVersion(s.persistOptions)
 	log.Info("PD cluster leader is ready to serve", zap.String("pd-leader-name", s.Name()))
