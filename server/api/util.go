@@ -18,7 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -61,7 +61,7 @@ func readJSON(client *http.Client, url string, data interface{}) error {
 	}
 
 	defer resp.Body.Close()
-	b, err := ioutil.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -83,7 +83,7 @@ func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]
 		return errors.WithStack(err)
 	}
 	defer resp.Body.Close()
-	res, err := ioutil.ReadAll(resp.Body)
+	res, err := io.ReadAll(resp.Body)
 
 	if err != nil {
 		return err
