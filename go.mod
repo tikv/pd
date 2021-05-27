@@ -28,7 +28,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20201126102027-b0a155152ca3
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20210510050259-8f2b3a06beef
+	github.com/pingcap/kvproto v0.0.0-20210527074428-73468940541b
 	github.com/pingcap/log v0.0.0-20210317133921-96f4fcab92a4
 	github.com/pingcap/sysutil v0.0.0-20210315073920-cc0985d983a3
 	github.com/pingcap/tidb-dashboard v0.0.0-20210512074702-4ee3e3909d5e
@@ -53,8 +53,5 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
-replace (
-	github.com/pingcap/kvproto v0.0.0-20210510050259-8f2b3a06beef => github.com/JmPotato/kvproto v0.0.0-20210518041145-1908e41697c5
-	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
-	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
-)
+// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
+replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
