@@ -26,6 +26,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
@@ -238,12 +239,31 @@ func (s *memberTestSuite) TestLeaderResign(c *C) {
 	c.Assert(leader3, Equals, leader1)
 }
 
+func (s *memberTestSuite) TestLeaderResignWithBlock(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	leader1 := cluster.WaitLeader()
+	addr1 := cluster.GetServer(leader1).GetConfig().ClientUrls
+
+	err = failpoint.Enable("github.com/tikv/pd/server/raftclusterIsBusy", `pause`)
+	defer failpoint.Disable("github.com/tikv/pd/server/raftclusterIsBusy")
+	c.Assert(err, IsNil)
+	s.post(c, addr1+"/pd/api/v1/leader/resign", "")
+	leader2 := s.waitLeaderChange(c, cluster, leader1)
+	c.Log("leader2:", leader2)
+	c.Assert(leader2, Not(Equals), leader1)
+}
+
 func (s *memberTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old string) string {
 	var leader string
 	testutil.WaitUntil(c, func(c *C) bool {
 		leader = cluster.GetLeader()
 		if leader == old || leader == "" {
-			time.Sleep(time.Second)
 			return false
 		}
 		return true

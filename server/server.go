@@ -646,6 +646,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
+	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
 }
 
@@ -1213,6 +1214,7 @@ func (s *Server) campaignLeader() {
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 	defer s.member.ResetLeader()
+
 	// maintain the PD leader
 	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
@@ -1256,6 +1258,11 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	s.member.EnableLeader()
+	defer func() {
+		s.member.ResetLeader()
+		// as soon as cancel the keepalive.
+		cancel()
+	}()
 
 	CheckPDVersion(s.persistOptions)
 	log.Info("PD cluster leader is ready to serve", zap.String("pd-leader-name", s.Name()))
