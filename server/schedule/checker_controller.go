@@ -15,7 +15,8 @@ package schedule
 
 import (
 	"context"
-	"sort"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/config"
@@ -114,20 +115,47 @@ func (c *CheckerController) GetRuleChecker() *checker.RuleChecker {
 	return c.ruleChecker
 }
 
+// SortRegionInfoByMissPeers regions should be sorted by miss peers
+func (c *CheckerController) SortRegionInfoByMissPeers(regionIds []*core.RegionInfo) []uint64 {
+	ids := make([]uint64, len(regionIds))
+	for i, v := range regionIds {
+		ids[i] = v.GetID()
+	}
+	return c.SortRegionIdByMissPeers(ids)
+}
+
+// SortMissRegion return regions order by miss count,it will only scan
+func (c *CheckerController) SortRegionIdByMissPeers(regionIds []uint64) []uint64 {
+	log.Info("aaa")
+	levels := c.ruleChecker.GetMaxMissPeer() + 1
+	buckets := make([][]uint64, levels)
+	for i, _ := range buckets {
+		buckets[i] = make([]uint64, 0)
+	}
+	result := make([]uint64, len(regionIds))
+
+	for _, id := range regionIds {
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			buckets[0] = append(buckets[0], id)
+			continue
+		}
+		missPeer := c.ruleChecker.GetMissPeer(region)
+		buckets[missPeer] = append(buckets[missPeer], id)
+	}
+	idx := 0
+	for i := range buckets {
+		for j := range buckets[i] {
+			result[idx] = buckets[levels-i][j]
+			idx = idx + 1
+		}
+	}
+	return result
+}
+
 // GetWaitingRegions returns the regions in the waiting list.
 func (c *CheckerController) GetWaitingRegions() []*cache.Item {
 	items := c.regionWaitingList.Elems()
-	sort.Slice(items, func(i, j int) bool {
-		regionA := c.cluster.GetRegion(items[i].Key)
-		if regionA == nil {
-			return false
-		}
-		regionB := c.cluster.GetRegion(items[j].Key)
-		if regionB == nil {
-			return true
-		}
-		return c.GetRuleChecker().GetMissPeer(regionA) > c.GetRuleChecker().GetMissPeer(regionB)
-	})
 	return items
 }
 

@@ -122,12 +122,15 @@ func (c *coordinator) patrolRegions() {
 			continue
 		}
 
-		for _, region := range regions {
+		for _, regionId := range c.checkers.SortRegionInfoByMissPeers(regions) {
 			// Skips the region if there is already a pending operator.
-			if c.opController.GetOperator(region.GetID()) != nil {
+			if c.opController.GetOperator(regionId) != nil {
 				continue
 			}
-
+			region := c.cluster.GetRegion(regionId)
+			if region == nil {
+				continue
+			}
 			ops := c.checkers.CheckRegion(region)
 
 			key = region.GetEndKey()

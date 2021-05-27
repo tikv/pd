@@ -28,6 +28,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const MaxMissPeer = 3
+
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	cluster           opt.Cluster
@@ -63,7 +65,14 @@ func (c *RuleChecker) GetMissPeer(region *core.RegionInfo) int {
 			missPeers = missPeers + rf.Rule.Count - len(rf.Peers)
 		}
 	}
+	if missPeers > MaxMissPeer {
+		return MaxMissPeer
+	}
 	return missPeers
+}
+
+func (c *RuleChecker) GetMaxMissPeer() int {
+	return MaxMissPeer
 }
 
 // Check checks if the region matches placement rules and returns Operator to

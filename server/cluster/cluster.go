@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -457,19 +456,8 @@ func (c *RaftCluster) GetSuspectRegions() []uint64 {
 	c.RLock()
 	regions := c.suspectRegions.GetAllID()
 	c.RUnlock()
-	sort.Slice(regions, func(i, j int) bool {
-		regionA := c.GetRegion(regions[i])
-		if regionA == nil {
-			return false
-		}
-		regionB := c.GetRegion(regions[j])
-		if regionB == nil {
-			return false
-		}
-		return c.coordinator.checkers.GetRuleChecker().GetMissPeer(regionA) >
-			c.coordinator.checkers.GetRuleChecker().GetMissPeer(regionB)
-	})
-	return regions
+	log.Info("aaa", zap.Bool("checker is nil", c.coordinator == nil))
+	return c.coordinator.checkers.SortRegionIdByMissPeers(regions)
 }
 
 // RemoveSuspectRegion removes region from suspect list.
@@ -687,9 +675,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		return nil
 	}
 
-	failpoint.Inject("concurrentRegionHeartbeat", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("concurrentRegionHeartbeat")); _err_ == nil {
 		time.Sleep(500 * time.Millisecond)
-	})
+	}
 
 	c.Lock()
 	if saveCache {
@@ -1424,9 +1412,9 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
-	failpoint.Inject("versionChangeConcurrency", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("versionChangeConcurrency")); _err_ == nil {
 		time.Sleep(500 * time.Millisecond)
-	})
+	}
 
 	if minVersion != nil && clusterVersion.LessThan(*minVersion) {
 		if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
