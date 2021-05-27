@@ -15,6 +15,7 @@ package api_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"testing"
 	"time"

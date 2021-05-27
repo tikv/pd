@@ -15,6 +15,7 @@ package tests
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/tikv/pd/pkg/tempurl"

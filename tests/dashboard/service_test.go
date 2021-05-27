@@ -16,6 +16,7 @@ package dashboard_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"

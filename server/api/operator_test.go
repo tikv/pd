@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	. "github.com/pingcap/check"

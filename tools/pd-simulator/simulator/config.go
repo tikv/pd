@@ -2,6 +2,7 @@ package simulator
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/BurntSushi/toml"
