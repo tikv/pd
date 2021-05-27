@@ -136,12 +136,12 @@ func (lta *LocalTSOAllocator) GetMember() *pdpb.Member {
 }
 
 // GetCurrentTSO returns current TSO in memory.
-func (lta *LocalTSOAllocator) GetCurrentTSO() (pdpb.Timestamp, error) {
+func (lta *LocalTSOAllocator) GetCurrentTSO() (*pdpb.Timestamp, error) {
 	currentPhysical, currentLogical := lta.timestampOracle.getTSO()
 	if currentPhysical == typeutil.ZeroTime {
-		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
+		return &pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 	}
-	return *tsoutil.GenerateTimestamp(currentPhysical, uint64(currentLogical)), nil
+	return tsoutil.GenerateTimestamp(currentPhysical, uint64(currentLogical)), nil
 }
 
 // WriteTSO is used to set the maxTS as current TSO in memory.
@@ -151,7 +151,7 @@ func (lta *LocalTSOAllocator) WriteTSO(maxTS *pdpb.Timestamp) error {
 		return err
 	}
 	// If current local TSO has already been greater or equal to maxTS, then do not update it.
-	if tsoutil.CompareTimestamp(&currentTSO, maxTS) >= 0 {
+	if tsoutil.CompareTimestamp(currentTSO, maxTS) >= 0 {
 		return nil
 	}
 	return lta.timestampOracle.resetUserTimestamp(lta.leadership, tsoutil.GenerateTS(maxTS), true)

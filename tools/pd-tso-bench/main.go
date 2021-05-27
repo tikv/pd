@@ -17,7 +17,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -53,7 +53,7 @@ var promServer *httptest.Server
 func collectMetrics(server *httptest.Server) string {
 	time.Sleep(1100 * time.Millisecond)
 	res, _ := http.Get(server.URL)
-	body, _ := ioutil.ReadAll(res.Body)
+	body, _ := io.ReadAll(res.Body)
 	res.Body.Close()
 	return string(body)
 }
