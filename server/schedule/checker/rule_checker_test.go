@@ -85,6 +85,7 @@ func (s *testRuleCheckerSuite) TestAddRulePeer(c *C) {
 	op := s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "add-rule-peer")
+	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(3))
 }
 
@@ -137,6 +138,7 @@ func (s *testRuleCheckerSuite) TestFixPeer(c *C) {
 	op = s.rc.Check(r)
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "replace-rule-down-peer")
+	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	var add operator.AddLearner
 	c.Assert(op.Step(0), FitsTypeOf, add)
 	s.cluster.SetStoreUp(2)
@@ -144,6 +146,7 @@ func (s *testRuleCheckerSuite) TestFixPeer(c *C) {
 	op = s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
+	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	c.Assert(op.Step(0), FitsTypeOf, add)
 }
 

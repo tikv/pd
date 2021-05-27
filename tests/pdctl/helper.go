@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -110,21 +109,13 @@ func CheckRegionsInfo(c *check.C, output api.RegionsInfo, expected []*core.Regio
 }
 
 // MustPutStore is used for test purpose.
-func MustPutStore(c *check.C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {
+func MustPutStore(c *check.C, svr *server.Server, store *metapb.Store) {
+	store.Address = fmt.Sprintf("tikv%d", store.GetId())
+	store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
+
 	_, err := svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
-		Store: &metapb.Store{
-			Id:      id,
-			Address: fmt.Sprintf("tikv%d", id),
-			State:   state,
-			Labels:  labels,
-			Version: versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
-		},
-	})
-	c.Assert(err, check.IsNil)
-	_, err = svr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
-		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
-		Stats:  &pdpb.StoreStats{StoreId: id},
+		Store:  store,
 	})
 	c.Assert(err, check.IsNil)
 }
@@ -157,7 +148,7 @@ func GetEcho(args []string) string {
 	pdctl.Start(args)
 	temp.Close()
 	os.Stdout = old
-	out, _ := ioutil.ReadFile(filename)
+	out, _ := os.ReadFile(filename)
 	_ = os.Remove(filename)
 	return string(out)
 }
