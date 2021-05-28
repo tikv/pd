@@ -41,7 +41,8 @@ func NewHotCache(ctx context.Context) *HotCache {
 		writeFlow:      NewHotStoresStats(WriteFlow),
 		readFlow:       NewHotStoresStats(ReadFlow),
 	}
-	go w.updateItems(ctx)
+	go w.updateItems(ctx, w.readFlowQueue, w.runReadTask)
+	go w.updateItems(ctx, w.writeFlowQueue, w.runWriteTask)
 	return w
 }
 
@@ -150,23 +151,29 @@ func (w *HotCache) GetFilledPeriod(kind FlowKind) int {
 	return 0
 }
 
-func (w *HotCache) updateItems(ctx context.Context) {
+func (w *HotCache) updateItems(ctx context.Context, queue chan FlowItemTask, runTask func(task FlowItemTask, ok bool)) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case task, ok := <-w.writeFlowQueue:
-			if ok && task != nil {
-				task.runTask(w.writeFlow)
-			}
-			hotCacheFlowQueueStatusGauge.WithLabelValues(WriteFlow.String()).Set(float64(len(w.writeFlowQueue)))
-		case task, ok := <-w.readFlowQueue:
-			if ok && task != nil {
-				task.runTask(w.readFlow)
-			}
-			hotCacheFlowQueueStatusGauge.WithLabelValues(ReadFlow.String()).Set(float64(len(w.readFlowQueue)))
+		case task, ok := <-queue:
+			runTask(task, ok)
 		}
 	}
+}
+
+func (w *HotCache) runReadTask(task FlowItemTask, ok bool) {
+	if ok && task != nil {
+		task.runTask(w.readFlow)
+	}
+	hotCacheFlowQueueStatusGauge.WithLabelValues(ReadFlow.String()).Set(float64(len(w.readFlowQueue)))
+}
+
+func (w *HotCache) runWriteTask(task FlowItemTask, ok bool) {
+	if ok && task != nil {
+		task.runTask(w.writeFlow)
+	}
+	hotCacheFlowQueueStatusGauge.WithLabelValues(WriteFlow.String()).Set(float64(len(w.writeFlowQueue)))
 }
 
 func update(item *HotPeerStat, flow *hotPeerCache) {
