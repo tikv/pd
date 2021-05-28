@@ -849,7 +849,7 @@ func (bs *balanceSolver) getMinRate(dim int) float64 {
 	case statistics.KeyDim:
 		return bs.sche.conf.GetMinHotKeyRate()
 	case statistics.ByteDim:
-		return bs.sche.conf.GetMinHotKeyRate()
+		return bs.sche.conf.GetMinHotByteRate()
 	}
 	return -1
 }
