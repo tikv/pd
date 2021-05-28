@@ -812,12 +812,16 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			}
 			return a - b
 		}
-		checkHot := func(dim int) (bool, float64) {
+		checkHot := func(dim int) (isHot bool, decRatio float64) {
 			srcRate := srcLd.Loads[dim]
 			dstRate := dstLd.Loads[dim]
 			peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, dim))
-			decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
-			isHot := peerRate >= bs.sche.conf.GetMinHotKeyRate()
+			decRatio = (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
+			if dim == statistics.KeyDim {
+				isHot = peerRate >= bs.sche.conf.GetMinHotKeyRate()
+			} else {
+				isHot = peerRate >= bs.sche.conf.GetMinHotByteRate()
+			}
 			return isHot, decRatio
 		}
 		keyHot, keyDecRatio := checkHot(statistics.KeyDim)
