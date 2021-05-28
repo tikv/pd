@@ -18,7 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"sync"
 	"testing"
@@ -26,6 +26,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
@@ -140,7 +141,7 @@ func (s *memberTestSuite) checkMemberList(c *C, clientURL string, configs []*con
 	res, err := httpClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()
-	buf, err := ioutil.ReadAll(res.Body)
+	buf, err := io.ReadAll(res.Body)
 	c.Assert(err, IsNil)
 	if res.StatusCode != http.StatusOK {
 		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
@@ -193,7 +194,7 @@ func (s *memberTestSuite) post(c *C, url string, body string) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		res, err := http.Post(url, "", bytes.NewBufferString(body))
 		c.Assert(err, IsNil)
-		b, err := ioutil.ReadAll(res.Body)
+		b, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		c.Assert(err, IsNil)
 		c.Logf("post %s, status: %v res: %s", url, res.StatusCode, string(b))
@@ -238,12 +239,31 @@ func (s *memberTestSuite) TestLeaderResign(c *C) {
 	c.Assert(leader3, Equals, leader1)
 }
 
+func (s *memberTestSuite) TestLeaderResignWithBlock(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	leader1 := cluster.WaitLeader()
+	addr1 := cluster.GetServer(leader1).GetConfig().ClientUrls
+
+	err = failpoint.Enable("github.com/tikv/pd/server/raftclusterIsBusy", `pause`)
+	c.Assert(err, IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/server/raftclusterIsBusy")
+	s.post(c, addr1+"/pd/api/v1/leader/resign", "")
+	leader2 := s.waitLeaderChange(c, cluster, leader1)
+	c.Log("leader2:", leader2)
+	c.Assert(leader2, Not(Equals), leader1)
+}
+
 func (s *memberTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old string) string {
 	var leader string
 	testutil.WaitUntil(c, func(c *C) bool {
 		leader = cluster.GetLeader()
 		if leader == old || leader == "" {
-			time.Sleep(time.Second)
 			return false
 		}
 		return true

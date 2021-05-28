@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -112,14 +111,14 @@ func dial(req *http.Request) (string, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		var msg []byte
-		msg, err = ioutil.ReadAll(resp.Body)
+		msg, err = io.ReadAll(resp.Body)
 		if err != nil {
 			return "", err
 		}
 		return "", errors.Errorf("[%d] %s", resp.StatusCode, msg)
 	}
 
-	content, err := ioutil.ReadAll(resp.Body)
+	content, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
@@ -193,7 +192,7 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 		}
 		defer r.Body.Close()
 		if r.StatusCode != http.StatusOK {
-			msg, err = ioutil.ReadAll(r.Body)
+			msg, err = io.ReadAll(r.Body)
 			if err != nil {
 				return err
 			}

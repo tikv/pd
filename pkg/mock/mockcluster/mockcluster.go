@@ -113,6 +113,7 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 // RegionReadStats returns hot region's read stats.
 // The result only includes peers that are hot enough.
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
+	// We directly use threshold for read stats for mockCluster
 	return mc.HotCache.RegionStats(statistics.ReadFlow, mc.GetHotRegionCacheHitsThreshold())
 }
 
@@ -347,6 +348,28 @@ func (mc *Cluster) AddRegionWithReadInfo(
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item)
+		}
+	}
+	mc.PutRegion(r)
+	return items
+}
+
+// AddRegionWithPeerReadInfo adds region with specified peer read info.
+func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderID, targetStoreID, readBytes, readKeys, reportInterval uint64,
+	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	r = r.Clone(core.SetReadBytes(readBytes), core.SetReadKeys(readKeys), core.SetReportInterval(reportInterval))
+	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
+	if len(filledNums) > 0 {
+		filledNum = filledNums[0]
+	}
+	var items []*statistics.HotPeerStat
+	for i := 0; i < filledNum; i++ {
+		items = mc.CheckRegionRead(r)
+		for _, item := range items {
+			if item.StoreID == targetStoreID {
+				mc.HotCache.Update(item)
+			}
 		}
 	}
 	mc.PutRegion(r)

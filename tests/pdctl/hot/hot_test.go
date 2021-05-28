@@ -55,16 +55,15 @@ func (s *hotTestSuite) TestHot(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
-	store := metapb.Store{
-		Id:      1,
-		Address: "tikv1",
-		State:   metapb.StoreState_Up,
-		Version: "2.0.0",
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 	defer cluster.Destroy()
 
 	// test hot store
