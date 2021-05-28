@@ -39,6 +39,8 @@ type FlowItem struct {
 	regionInfo           *core.RegionInfo
 	expiredStat          *HotPeerStat
 	unReportStatsCollect *unReportStatsCollect
+	minDegree            int
+	ret                  chan map[uint64][]*HotPeerStat
 }
 
 type unReportStatsCollect struct {
@@ -78,6 +80,13 @@ func NewExpiredStatItem(expiredStat *HotPeerStat) *FlowItem {
 		regionInfo:           nil,
 		expiredStat:          expiredStat,
 		unReportStatsCollect: nil,
+	}
+}
+
+func newMinDegreeStats(minDegree int) *FlowItem {
+	return &FlowItem{
+		minDegree: minDegree,
+		ret:       make(chan map[uint64][]*HotPeerStat),
 	}
 }
 
@@ -154,9 +163,13 @@ func (w *HotCache) Update(item *HotPeerStat) {
 func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*HotPeerStat {
 	switch kind {
 	case WriteFlow:
-		return w.writeFlow.RegionStats(minHotDegree)
+		item := newMinDegreeStats(minHotDegree)
+		w.writeFlowQueue <- item
+		return <-item.ret
 	case ReadFlow:
-		return w.readFlow.RegionStats(minHotDegree)
+		item := newMinDegreeStats(minHotDegree)
+		w.readFlowQueue <- item
+		return <-item.ret
 	}
 	return nil
 }
@@ -240,5 +253,7 @@ func (w *HotCache) updateItem(item *FlowItem, flow *hotPeerCache) {
 		for _, stat := range stats {
 			w.Update(stat)
 		}
+	} else if item.ret != nil {
+		item.ret <- flow.RegionStats(item.minDegree)
 	}
 }
