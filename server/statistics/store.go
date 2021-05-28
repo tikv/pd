@@ -211,9 +211,9 @@ func (r *RollingStoreStats) GetInstantLoad(k StoreStatKind) float64 {
 	r.RLock()
 	defer r.RUnlock()
 	switch k {
-	case StoreReadBytes,StoreReadKeys,StoreReadQuery,StoreWriteBytes,StoreWriteKeys,StoreWriteQuery:
+	case StoreReadBytes, StoreReadKeys, StoreReadQuery, StoreWriteBytes, StoreWriteKeys, StoreWriteQuery:
 		return r.timeMedians[k].GetInstantaneous()
-	case StoreCPUUsage,StoreDiskReadRate,StoreDiskWriteRate:
+	case StoreCPUUsage, StoreDiskReadRate, StoreDiskWriteRate:
 		return r.movingAvgs[k].Get()
 	}
 	return 0
