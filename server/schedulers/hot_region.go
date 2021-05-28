@@ -812,16 +812,12 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			}
 			return a - b
 		}
-		checkHot := func(dim int) (isHot bool, decRatio float64) {
+		checkHot := func(dim int) (bool, float64) {
 			srcRate := srcLd.Loads[dim]
 			dstRate := dstLd.Loads[dim]
 			peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, dim))
-			decRatio = (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
-			if dim == statistics.KeyDim {
-				isHot = peerRate >= bs.sche.conf.GetMinHotKeyRate()
-			} else {
-				isHot = peerRate >= bs.sche.conf.GetMinHotByteRate()
-			}
+			decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
+			isHot := peerRate >= bs.getMinRate(dim)
 			return isHot, decRatio
 		}
 		keyHot, keyDecRatio := checkHot(statistics.KeyDim)
@@ -846,6 +842,16 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		zap.Uint64("to-store-id", bs.cur.dstStoreID),
 		zap.Int64("rank", rank))
 	bs.cur.progressiveRank = rank
+}
+
+func (bs *balanceSolver) getMinRate(dim int) float64 {
+	switch dim {
+	case statistics.KeyDim:
+		return bs.sche.conf.GetMinHotKeyRate()
+	case statistics.ByteDim:
+		return bs.sche.conf.GetMinHotKeyRate()
+	}
+	return -1
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
