@@ -557,11 +557,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		}
 		peerInfo := core.NewPeerInfo(peer, 0, 0,
 			peerStat.GetReadBytes(), peerStat.GetReadKeys(), interval)
-		item := statistics.NewPeerInfoItem(peerInfo, region)
-		c.hotStat.CheckReadAsync(item)
+		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
-	collect := statistics.NewUnReportStatsCollect(storeID, regionIDs, interval)
-	c.hotStat.CheckReadAsync(collect)
+	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regionIDs, interval))
 	return nil
 }
 
@@ -573,18 +571,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.RUnlock()
 		return err
 	}
-	expiredStats := c.hotStat.ExpiredItems(region)
-	// Put expiredStats into read/write queue to update stats
-	if len(expiredStats) > 0 {
-		for _, stat := range expiredStats {
-			item := statistics.NewExpiredStatItem(stat)
-			if stat.Kind == statistics.WriteFlow {
-				c.hotStat.CheckWriteAsync(item)
-			} else {
-				c.hotStat.CheckReadAsync(item)
-			}
-		}
-	}
+	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
+	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
@@ -592,8 +580,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetBytesWritten(), region.GetKeysWritten(),
 			0, 0,
 			interval)
-		item := statistics.NewPeerInfoItem(peerInfo, region)
-		c.hotStat.CheckWriteAsync(item)
+		c.hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
 	c.RUnlock()
 
