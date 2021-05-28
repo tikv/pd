@@ -17,7 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -42,16 +42,16 @@ type testStoreSuite struct {
 	stores    []*metapb.Store
 }
 
-func requestStatusBody(c *C, client *http.Client, method string, url string) (int, []byte) {
+func requestStatusBody(c *C, client *http.Client, method string, url string) int {
 	req, err := http.NewRequest(method, url, nil)
 	c.Assert(err, IsNil)
 	resp, err := client.Do(req)
 	c.Assert(err, IsNil)
-	body, err := ioutil.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	err = resp.Body.Close()
 	c.Assert(err, IsNil)
-	return resp.StatusCode, body
+	return resp.StatusCode
 }
 
 func (s *testStoreSuite) SetUpSuite(c *C) {
@@ -251,7 +251,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	}
 	for _, t := range table {
 		url := fmt.Sprintf("%s/store/%d", s.urlPrefix, t.id)
-		status, _ := requestStatusBody(c, testDialClient, http.MethodDelete, url)
+		status := requestStatusBody(c, testDialClient, http.MethodDelete, url)
 		c.Assert(status, Equals, t.status)
 	}
 	// store 6 origin status:offline
@@ -263,10 +263,10 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	c.Assert(store.Store.State, Equals, metapb.StoreState_Offline)
 
 	// up store success because it is offline but not physically destroyed
-	status, _ := requestStatusBody(c, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
+	status := requestStatusBody(c, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
 	c.Assert(status, Equals, http.StatusOK)
 
-	status, _ = requestStatusBody(c, testDialClient, http.MethodGet, url)
+	status = requestStatusBody(c, testDialClient, http.MethodGet, url)
 	c.Assert(status, Equals, http.StatusOK)
 	store = new(StoreInfo)
 	err = readJSON(testDialClient, url, store)
@@ -275,7 +275,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	c.Assert(store.Store.PhysicallyDestroyed, Equals, false)
 
 	// offline store with physically destroyed
-	status, _ = requestStatusBody(c, testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
+	status = requestStatusBody(c, testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
 	c.Assert(status, Equals, http.StatusOK)
 	err = readJSON(testDialClient, url, store)
 	c.Assert(err, IsNil)
@@ -283,7 +283,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	c.Assert(store.Store.PhysicallyDestroyed, Equals, true)
 
 	// try to up store again failed because it is physically destroyed
-	status, _ = requestStatusBody(c, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
+	status = requestStatusBody(c, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
 	c.Assert(status, Equals, http.StatusBadRequest)
 	// reset store 6
 	s.cleanup()

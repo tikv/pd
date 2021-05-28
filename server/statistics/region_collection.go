@@ -218,6 +218,9 @@ func (r *RegionStatistics) ClearDefunctRegion(regionID uint64) {
 	if oldIndex, ok := r.index[regionID]; ok {
 		r.deleteEntry(oldIndex, regionID)
 	}
+	if oldIndex, ok := r.offlineIndex[regionID]; ok {
+		r.deleteOfflineEntry(oldIndex, regionID)
+	}
 }
 
 // Collect collects the metrics of the regions' status.

@@ -195,6 +195,8 @@ func CreateScatterRegionOperator(desc string, cluster opt.Cluster, origin *core.
 		SetPeers(targetPeers).
 		SetLeader(leader).
 		EnableLightWeight().
+		// EnableForceTargetLeader in order to ignore the leader schedule limit
+		EnableForceTargetLeader().
 		Build(0)
 }
 

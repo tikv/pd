@@ -14,14 +14,8 @@
 package analysis
 
 import (
-	"testing"
-
 	. "github.com/pingcap/check"
 )
-
-func TestCounter(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testTransferRegionCounter{})
 

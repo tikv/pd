@@ -15,16 +15,11 @@ package encryption
 
 import (
 	"encoding/hex"
-	"io/ioutil"
-	"testing"
+	"os"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 )
-
-func TestMasterKey(t *testing.T) {
-	TestingT(t)
-}
 
 type testMasterKeySuite struct{}
 
@@ -96,7 +91,7 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyMissingPath(c *C) {
 }
 
 func (s *testMasterKeySuite) TestNewFileMasterKeyMissingFile(c *C) {
-	dir, err := ioutil.TempDir("", "test_key_files")
+	dir, err := os.MkdirTemp("", "test_key_files")
 	c.Assert(err, IsNil)
 	path := dir + "/key"
 	config := &encryptionpb.MasterKey{
@@ -111,10 +106,10 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyMissingFile(c *C) {
 }
 
 func (s *testMasterKeySuite) TestNewFileMasterKeyNotHexString(c *C) {
-	dir, err := ioutil.TempDir("", "test_key_files")
+	dir, err := os.MkdirTemp("", "test_key_files")
 	c.Assert(err, IsNil)
 	path := dir + "/key"
-	ioutil.WriteFile(path, []byte("not-a-hex-string"), 0644)
+	os.WriteFile(path, []byte("not-a-hex-string"), 0644)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{
@@ -127,10 +122,10 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyNotHexString(c *C) {
 }
 
 func (s *testMasterKeySuite) TestNewFileMasterKeyLengthMismatch(c *C) {
-	dir, err := ioutil.TempDir("", "test_key_files")
+	dir, err := os.MkdirTemp("", "test_key_files")
 	c.Assert(err, IsNil)
 	path := dir + "/key"
-	ioutil.WriteFile(path, []byte("2f07ec61e5a50284f47f2b402a962ec6"), 0644)
+	os.WriteFile(path, []byte("2f07ec61e5a50284f47f2b402a962ec6"), 0644)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{
@@ -144,10 +139,10 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyLengthMismatch(c *C) {
 
 func (s *testMasterKeySuite) TestNewFileMasterKey(c *C) {
 	key := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
-	dir, err := ioutil.TempDir("", "test_key_files")
+	dir, err := os.MkdirTemp("", "test_key_files")
 	c.Assert(err, IsNil)
 	path := dir + "/key"
-	ioutil.WriteFile(path, []byte(key), 0644)
+	os.WriteFile(path, []byte(key), 0644)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{

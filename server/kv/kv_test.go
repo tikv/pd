@@ -15,7 +15,6 @@ package kv
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path"
@@ -57,7 +56,7 @@ func (s *testKVSuite) TestEtcd(c *C) {
 }
 
 func (s *testKVSuite) TestLevelDB(c *C) {
-	dir, err := ioutil.TempDir("/tmp", "leveldb_kv")
+	dir, err := os.MkdirTemp("/tmp", "leveldb_kv")
 	c.Assert(err, IsNil)
 	defer os.RemoveAll(dir)
 	kv, err := NewLeveldbKV(dir)
@@ -129,7 +128,7 @@ func (s *testKVSuite) testRange(c *C, kv Base) {
 func newTestSingleConfig() *embed.Config {
 	cfg := embed.NewConfig()
 	cfg.Name = "test_etcd"
-	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_etcd")
+	cfg.Dir, _ = os.MkdirTemp("/tmp", "test_etcd")
 	cfg.WalDir = ""
 	cfg.Logger = "zap"
 	cfg.LogOutputs = []string{"stdout"}

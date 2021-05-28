@@ -57,7 +57,7 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 	newStats.UsedSize = uint64(float64(regionSize)/amplification) * (1 << 20)
 	newStats.Available = s.GetCapacity() - newStats.UsedSize
 	newStore := s.Clone(
-		core.SetStoreStats(newStats),
+		core.SetNewStoreStats(newStats), // it means to use instant value directly
 		core.SetLeaderCount(leaderCount),
 		core.SetRegionCount(regionCount),
 		core.SetPendingPeerCount(pendingPeerCount),

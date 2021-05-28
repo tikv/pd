@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -53,40 +54,37 @@ func (s *labelTestSuite) TestLabel(c *C) {
 
 	stores := []*metapb.Store{
 		{
-			Id:      1,
-			Address: "tikv1",
-			State:   metapb.StoreState_Up,
+			Id:    1,
+			State: metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
 					Value: "us-west",
 				},
 			},
-			Version: "2.0.0",
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:      2,
-			Address: "tikv2",
-			State:   metapb.StoreState_Up,
+			Id:    2,
+			State: metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
 					Value: "us-east",
 				},
 			},
-			Version: "2.0.0",
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:      3,
-			Address: "tikv3",
-			State:   metapb.StoreState_Up,
+			Id:    3,
+			State: metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
 					Value: "us-west",
 				},
 			},
-			Version: "2.0.0",
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
 
@@ -94,7 +92,7 @@ func (s *labelTestSuite) TestLabel(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
 

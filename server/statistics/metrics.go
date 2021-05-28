@@ -72,6 +72,15 @@ var (
 			Help:      "Status of the scheduling configurations.",
 		}, []string{"type"})
 
+	// StoreLimitGauge is used to record the current store limit.
+	StoreLimitGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "store_limit",
+			Help:      "Status of the store limit.",
+		}, []string{"store", "type"})
+
 	regionLabelLevelGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -136,6 +145,14 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
 			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
 		}, []string{"type"})
+
+	hotCacheFlowQueueStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "hotcache",
+			Name:      "flow_queue_status",
+			Help:      "Status of the hotspot flow queue.",
+		}, []string{"type"})
 )
 
 var (
@@ -152,6 +169,7 @@ func init() {
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)
+	prometheus.MustRegister(StoreLimitGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
 	prometheus.MustRegister(readByteHist)
 	prometheus.MustRegister(readKeyHist)
@@ -160,4 +178,5 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatIntervalHist)
 	prometheus.MustRegister(storeHeartbeatIntervalHist)
 	prometheus.MustRegister(regionAbnormalPeerDuration)
+	prometheus.MustRegister(hotCacheFlowQueueStatusGauge)
 }

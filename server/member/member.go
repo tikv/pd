@@ -275,6 +275,12 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	if err != nil {
 		return err
 	}
+
+	// Do nothing when I am the only member of cluster.
+	if len(res.Members) == 1 && res.Members[0].ID == m.id && nextEtcdLeader == "" {
+		return nil
+	}
+
 	for _, member := range res.Members {
 		if (nextEtcdLeader == "" && member.ID != m.id) || (nextEtcdLeader != "" && member.Name == nextEtcdLeader) {
 			etcdLeaderIDs = append(etcdLeaderIDs, member.GetID())

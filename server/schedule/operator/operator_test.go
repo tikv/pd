@@ -14,6 +14,7 @@
 package operator
 
 import (
+	"context"
 	"encoding/json"
 	"sync/atomic"
 	"testing"
@@ -36,11 +37,14 @@ var _ = Suite(&testOperatorSuite{})
 
 type testOperatorSuite struct {
 	cluster *mockcluster.Cluster
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (s *testOperatorSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(cfg)
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
@@ -54,6 +58,10 @@ func (s *testOperatorSuite) SetUpTest(c *C) {
 	for storeID, labels := range stores {
 		s.cluster.PutStoreWithLabels(storeID, labels...)
 	}
+}
+
+func (s *testOperatorSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {

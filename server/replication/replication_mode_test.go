@@ -34,12 +34,23 @@ func TestReplicationMode(t *testing.T) {
 
 var _ = Suite(&testReplicationMode{})
 
-type testReplicationMode struct{}
+type testReplicationMode struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testReplicationMode) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testReplicationMode) TearDownTest(c *C) {
+	s.cancel()
+}
 
 func (s *testReplicationMode) TestInitial(c *C) {
 	store := core.NewStorage(kv.NewMemoryKV())
 	conf := config.ReplicationModeConfig{ReplicationMode: modeMajority}
-	cluster := mockcluster.NewCluster(config.NewTestOptions())
+	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{Mode: pb.ReplicationMode_MAJORITY})
@@ -72,7 +83,7 @@ func (s *testReplicationMode) TestStatus(c *C) {
 		LabelKey:        "dr-label",
 		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(config.NewTestOptions())
+	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{
@@ -147,7 +158,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(config.NewTestOptions())
+	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	var replicator mockFileReplicator
 	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
 	c.Assert(err, IsNil)
@@ -251,7 +262,7 @@ func (s *testReplicationMode) TestAsynctimeout(c *C) {
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 		WaitAsyncTimeout: typeutil.Duration{Duration: 2 * time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(config.NewTestOptions())
+	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	var replicator mockFileReplicator
 	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
 	c.Assert(err, IsNil)
@@ -302,7 +313,7 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(config.NewTestOptions())
+	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
 	c.Assert(err, IsNil)

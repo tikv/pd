@@ -275,7 +275,7 @@ func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
 // @Tags leader
 // @Summary Get the leader PD server of the cluster.
 // @Produce json
-// @Success 200 {string} string "The transfer command is submitted."
+// @Success 200 {object} pdpb.Member
 // @Router /leader [get]
 func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLeader())
@@ -284,7 +284,7 @@ func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Tags leader
 // @Summary Transfer etcd leadership to another PD server.
 // @Produce json
-// @Success 200 {string} string "The transfer command is submitted."
+// @Success 200 {string} string "The resign command is submitted."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /leader/resign [post]
 func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
@@ -294,7 +294,7 @@ func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, "The transfer command is submitted.")
+	h.rd.JSON(w, http.StatusOK, "The resign command is submitted.")
 }
 
 // @Tags leader

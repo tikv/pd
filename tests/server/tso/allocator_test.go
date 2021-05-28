@@ -50,14 +50,16 @@ func (s *testAllocatorSuite) TearDownSuite(c *C) {
 func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	// There will be three Local TSO Allocator leaders elected
 	dcLocationConfig := map[string]string{
-		"pd1": "dc-1",
-		"pd2": "dc-2",
-		"pd3": "dc-3",
+		"pd2": "dc-1",
+		"pd4": "dc-2",
+		"pd6": "dc-3",
 	}
 	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.EnableLocalTSO = true
-		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum*2, func(conf *config.Config, serverName string) {
+		if zoneLabel, ok := dcLocationConfig[serverName]; ok {
+			conf.EnableLocalTSO = true
+			conf.Labels[config.ZoneLabel] = zoneLabel
+		}
 	})
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -101,6 +103,10 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	for _, server := range cluster.GetServers() {
 		// Filter out Global TSO Allocator
 		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(tso.GlobalDCLocation))
+		if _, ok := dcLocationConfig[server.GetServer().Name()]; !ok {
+			c.Assert(len(allocators), Equals, 0)
+			continue
+		}
 		c.Assert(len(allocators), Equals, dcLocationNum)
 		for _, allocator := range allocators {
 			allocatorFollower, _ := allocator.(*tso.LocalTSOAllocator)

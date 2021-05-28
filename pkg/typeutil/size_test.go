@@ -15,14 +15,9 @@ package typeutil
 
 import (
 	"encoding/json"
-	"testing"
 
 	. "github.com/pingcap/check"
 )
-
-func TestSize(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testSizeSuite{})
 

@@ -140,7 +140,7 @@ func (c *TransferCounter) prepare() {
 // to the stack. If there is an edge of `v->u`, then the corresponding looped flow
 // is marked and removed. When all the output edges of the point v are traversed,
 // pop the point v out of the stack.
-func (c *TransferCounter) dfs(cur int, curFlow uint64, path []int) {
+func (c *TransferCounter) dfs(cur int, path []int) {
 	// push stack
 	path = append(path, cur)
 	c.visited[cur] = true
@@ -169,7 +169,7 @@ func (c *TransferCounter) dfs(cur int, curFlow uint64, path []int) {
 				c.graphMat[cur][target] -= curMinFlow
 			}
 		} else if !c.visited[target] {
-			c.dfs(target, flow, path)
+			c.dfs(target, path)
 		}
 	}
 	// pop stack
@@ -183,7 +183,7 @@ func (c *TransferCounter) Result() {
 	}
 
 	for i := 0; i < c.scheduledStoreNum; i++ {
-		c.dfs(i, 1<<16, make([]int, 0))
+		c.dfs(i, make([]int, 0))
 	}
 
 	for _, value := range c.loopResultCount {
