@@ -170,6 +170,9 @@ func (w *HotCache) updateItems(ctx context.Context) {
 }
 
 func update(item *HotPeerStat, flow *hotPeerCache) {
+	if item == nil {
+		return
+	}
 	flow.Update(item)
 	if item.IsNeedDelete() {
 		incMetrics("remove_item", item.StoreID, item.Kind)
