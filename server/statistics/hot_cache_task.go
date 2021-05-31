@@ -18,12 +18,13 @@ import "github.com/tikv/pd/server/core"
 type flowItemTaskKind uint32
 
 const (
-	CheckPeerTaskType flowItemTaskKind = iota
-	CheckExpiredTaskType
-	CollectUnReportedPeerTaskType
-	CollectRegionStatsTaskType
+	checkPeerTaskType flowItemTaskKind = iota
+	checkExpiredTaskType
+	collectUnReportedPeerTaskType
+	collectRegionStatsTaskType
 )
 
+// FlowItemTask indicates the task in flowItem queue
 type FlowItemTask interface {
 	taskType() flowItemTaskKind
 	runTask(flow *hotPeerCache)
@@ -43,7 +44,7 @@ func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) Flow
 }
 
 func (t *checkPeerTask) taskType() flowItemTaskKind {
-	return CheckPeerTaskType
+	return checkPeerTaskType
 }
 
 func (t *checkPeerTask) runTask(flow *hotPeerCache) {
@@ -65,7 +66,7 @@ func NewCheckExpiredItemTask(region *core.RegionInfo) FlowItemTask {
 }
 
 func (t *checkExpiredTask) taskType() flowItemTaskKind {
-	return CheckExpiredTaskType
+	return checkExpiredTaskType
 }
 
 func (t *checkExpiredTask) runTask(flow *hotPeerCache) {
@@ -91,7 +92,7 @@ func NewCollectUnReportedPeerTask(storeID uint64, regionIDs map[uint64]struct{},
 }
 
 func (t *collectUnReportedPeerTask) taskType() flowItemTaskKind {
-	return CollectUnReportedPeerTaskType
+	return collectUnReportedPeerTaskType
 }
 
 func (t *collectUnReportedPeerTask) runTask(flow *hotPeerCache) {
@@ -114,7 +115,7 @@ func newCollectRegionStatsTask(minDegree int) FlowItemTask {
 }
 
 func (t *collectRegionStatsTask) taskType() flowItemTaskKind {
-	return CollectRegionStatsTaskType
+	return collectRegionStatsTaskType
 }
 
 func (t *collectRegionStatsTask) runTask(flow *hotPeerCache) {
