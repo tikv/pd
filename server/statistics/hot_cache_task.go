@@ -22,6 +22,8 @@ const (
 	checkExpiredTaskType
 	collectUnReportedPeerTaskType
 	collectRegionStatsTaskType
+	isRegionHotTaskType
+	collectMetricsTaskType
 )
 
 // FlowItemTask indicates the task in flowItem queue
@@ -107,7 +109,7 @@ type collectRegionStatsTask struct {
 	ret       chan map[uint64][]*HotPeerStat
 }
 
-func newCollectRegionStatsTask(minDegree int) FlowItemTask {
+func newCollectRegionStatsTask(minDegree int) *collectRegionStatsTask {
 	return &collectRegionStatsTask{
 		minDegree: minDegree,
 		ret:       make(chan map[uint64][]*HotPeerStat),
@@ -120,4 +122,47 @@ func (t *collectRegionStatsTask) taskType() flowItemTaskKind {
 
 func (t *collectRegionStatsTask) runTask(flow *hotPeerCache) {
 	t.ret <- flow.RegionStats(t.minDegree)
+}
+
+type isRegionHotTask struct {
+	region       *core.RegionInfo
+	minHotDegree int
+	ret          chan bool
+}
+
+func newIsRegionHotTask(region *core.RegionInfo, minDegree int) *isRegionHotTask {
+	return &isRegionHotTask{
+		region:       region,
+		minHotDegree: minDegree,
+		ret:          make(chan bool),
+	}
+}
+
+func (t *isRegionHotTask) taskType() flowItemTaskKind {
+	return isRegionHotTaskType
+}
+
+func (t *isRegionHotTask) runTask(flow *hotPeerCache) {
+	t.ret <- flow.isRegionHotWithAnyPeers(t.region, t.minHotDegree)
+}
+
+type collectMetricsTask struct {
+	typ  string
+	done chan struct{}
+}
+
+func newCollectMetricsTask(typ string) *collectMetricsTask {
+	return &collectMetricsTask{
+		typ:  typ,
+		done: make(chan struct{}),
+	}
+}
+
+func (t *collectMetricsTask) taskType() flowItemTaskKind {
+	return collectMetricsTaskType
+}
+
+func (t *collectMetricsTask) runTask(flow *hotPeerCache) {
+	flow.CollectMetrics(t.typ)
+	t.done <- struct{}{}
 }

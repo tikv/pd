@@ -15,6 +15,7 @@ package statistics
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/tikv/pd/server/core"
 )
@@ -23,26 +24,30 @@ import (
 // only turned off by the simulator and the test.
 var Denoising = true
 
-const queueCap = 1000
+const queueCap = 5000
 
 // HotCache is a cache hold hot regions.
 type HotCache struct {
+	ctx            context.Context
 	readFlowQueue  chan FlowItemTask
 	writeFlowQueue chan FlowItemTask
 	writeFlow      *hotPeerCache
 	readFlow       *hotPeerCache
+	closed         uint32
 }
 
 // NewHotCache creates a new hot spot cache.
 func NewHotCache(ctx context.Context) *HotCache {
 	w := &HotCache{
+		ctx:            ctx,
 		readFlowQueue:  make(chan FlowItemTask, queueCap),
 		writeFlowQueue: make(chan FlowItemTask, queueCap),
 		writeFlow:      NewHotStoresStats(WriteFlow),
 		readFlow:       NewHotStoresStats(ReadFlow),
 	}
-	go w.updateItems(ctx, w.readFlowQueue, w.runReadTask)
-	go w.updateItems(ctx, w.writeFlowQueue, w.runWriteTask)
+	go w.watchClose()
+	go w.updateItems(w.readFlowQueue, w.runReadTask)
+	go w.updateItems(w.writeFlowQueue, w.runWriteTask)
 	return w
 }
 
@@ -60,15 +65,22 @@ func (w *HotCache) CheckReadPeerSync(peer *core.PeerInfo, region *core.RegionInf
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckWriteAsync(task FlowItemTask) {
+	if w.isClosed() {
+		return
+	}
 	w.writeFlowQueue <- task
 }
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckReadAsync(task FlowItemTask) {
+	if w.isClosed() {
+		return
+	}
 	w.readFlowQueue <- task
 }
 
 // Update updates the cache.
+// This is used for mockcluster.
 func (w *HotCache) Update(item *HotPeerStat) {
 	switch item.Kind {
 	case WriteFlow:
@@ -80,15 +92,18 @@ func (w *HotCache) Update(item *HotPeerStat) {
 
 // RegionStats returns hot items according to kind
 func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*HotPeerStat {
+	if w.isClosed() {
+		return nil
+	}
 	switch kind {
 	case WriteFlow:
 		task := newCollectRegionStatsTask(minHotDegree)
-		w.writeFlowQueue <- task
-		return <-task.(*collectRegionStatsTask).ret
+		w.CheckWriteAsync(task)
+		return <-task.ret
 	case ReadFlow:
 		task := newCollectRegionStatsTask(minHotDegree)
-		w.readFlowQueue <- task
-		return <-task.(*collectRegionStatsTask).ret
+		w.CheckReadAsync(task)
+		return <-task.ret
 	}
 	return nil
 }
@@ -103,14 +118,27 @@ func (w *HotCache) HotRegionsFromStore(storeID uint64, kind FlowKind, minHotDegr
 
 // IsRegionHot checks if the region is hot.
 func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
-	return w.writeFlow.isRegionHotWithAnyPeers(region, minHotDegree) ||
-		w.readFlow.isRegionHotWithAnyPeers(region, minHotDegree)
+	if w.isClosed() {
+		return false
+	}
+	writeIsRegionHotTask := newIsRegionHotTask(region, minHotDegree)
+	readIsRegionHotTask := newIsRegionHotTask(region, minHotDegree)
+	w.CheckWriteAsync(writeIsRegionHotTask)
+	w.CheckReadAsync(readIsRegionHotTask)
+	return <-writeIsRegionHotTask.ret || <-readIsRegionHotTask.ret
 }
 
 // CollectMetrics collects the hot cache metrics.
 func (w *HotCache) CollectMetrics() {
-	w.writeFlow.CollectMetrics("write")
-	w.readFlow.CollectMetrics("read")
+	if w.isClosed() {
+		return
+	}
+	writeMetricsTask := newCollectMetricsTask("write")
+	readMetricsTask := newCollectMetricsTask("read")
+	w.CheckWriteAsync(writeMetricsTask)
+	w.CheckReadAsync(readMetricsTask)
+	<-writeMetricsTask.done
+	<-readMetricsTask.done
 }
 
 // ResetMetrics resets the hot cache metrics.
@@ -151,29 +179,27 @@ func (w *HotCache) GetFilledPeriod(kind FlowKind) int {
 	return 0
 }
 
-func (w *HotCache) updateItems(ctx context.Context, queue chan FlowItemTask, runTask func(task FlowItemTask, ok bool)) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case task, ok := <-queue:
-			runTask(task, ok)
-		}
+func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task FlowItemTask)) {
+	for task := range queue {
+		runTask(task)
+	}
+	if w.isClosed() {
+		return
 	}
 }
 
-func (w *HotCache) runReadTask(task FlowItemTask, ok bool) {
-	if ok && task != nil {
+func (w *HotCache) runReadTask(task FlowItemTask) {
+	if task != nil {
 		task.runTask(w.readFlow)
+		hotCacheFlowQueueStatusGauge.WithLabelValues(ReadFlow.String()).Set(float64(len(w.readFlowQueue)))
 	}
-	hotCacheFlowQueueStatusGauge.WithLabelValues(ReadFlow.String()).Set(float64(len(w.readFlowQueue)))
 }
 
-func (w *HotCache) runWriteTask(task FlowItemTask, ok bool) {
-	if ok && task != nil {
+func (w *HotCache) runWriteTask(task FlowItemTask) {
+	if task != nil {
 		task.runTask(w.writeFlow)
+		hotCacheFlowQueueStatusGauge.WithLabelValues(WriteFlow.String()).Set(float64(len(w.writeFlowQueue)))
 	}
-	hotCacheFlowQueueStatusGauge.WithLabelValues(WriteFlow.String()).Set(float64(len(w.writeFlowQueue)))
 }
 
 func update(item *HotPeerStat, flow *hotPeerCache) {
@@ -188,4 +214,15 @@ func update(item *HotPeerStat, flow *hotPeerCache) {
 	} else {
 		incMetrics("update_item", item.StoreID, item.Kind)
 	}
+}
+
+func (w *HotCache) isClosed() bool {
+	return atomic.LoadUint32(&w.closed) > 0
+}
+
+func (w *HotCache) watchClose() {
+	<-w.ctx.Done()
+	atomic.StoreUint32(&w.closed, 1)
+	close(w.readFlowQueue)
+	close(w.writeFlowQueue)
 }
