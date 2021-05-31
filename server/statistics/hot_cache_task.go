@@ -35,7 +35,7 @@ type checkPeerTask struct {
 	regionInfo *core.RegionInfo
 }
 
-// NewCheckPeerTask ...
+// NewCheckPeerTask creates task to update peerInfo
 func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) FlowItemTask {
 	return &checkPeerTask{
 		peerInfo:   peerInfo,
@@ -58,7 +58,7 @@ type checkExpiredTask struct {
 	region *core.RegionInfo
 }
 
-// NewCheckExpiredItemTask ...
+// NewCheckExpiredItemTask creates task to collect expired items
 func NewCheckExpiredItemTask(region *core.RegionInfo) FlowItemTask {
 	return &checkExpiredTask{
 		region: region,
@@ -82,7 +82,7 @@ type collectUnReportedPeerTask struct {
 	interval  uint64
 }
 
-// NewCollectUnReportedPeerTask ...
+// NewCollectUnReportedPeerTask creates task to collect unreported peers
 func NewCollectUnReportedPeerTask(storeID uint64, regionIDs map[uint64]struct{}, interval uint64) FlowItemTask {
 	return &collectUnReportedPeerTask{
 		storeID:   storeID,
