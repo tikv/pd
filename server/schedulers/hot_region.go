@@ -315,7 +315,7 @@ func summaryStoresLoad(
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.KeyDim])
 			}
 			{
-				ty := "qps-" + rwTy.String() + "-" + kind.String()
+				ty := "query-rate-" + rwTy.String() + "-" + kind.String()
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.QueryDim])
 			}
 		}
@@ -356,7 +356,7 @@ func summaryStoresLoad(
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.KeyDim])
 		}
 		{
-			ty := "exp-qps-" + rwTy.String() + "-" + kind.String()
+			ty := "exp-query-rate-" + rwTy.String() + "-" + kind.String()
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.QueryDim])
 		}
 		{
@@ -494,7 +494,7 @@ func (bs *balanceSolver) init() {
 		maxCur = maxLoad(maxCur, &detail.LoadPred.Current)
 	}
 
-	rankStepRatios := []float64{bs.sche.conf.GetByteRankStepRatio(), bs.sche.conf.GetKeyRankStepRatio(), bs.sche.conf.GetQPSRankStepRatio()}
+	rankStepRatios := []float64{bs.sche.conf.GetByteRankStepRatio(), bs.sche.conf.GetKeyRankStepRatio(), bs.sche.conf.GetQueryRateRankStepRatio()}
 	stepLoads := make([]float64, statistics.DimLen)
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]

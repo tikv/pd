@@ -32,8 +32,8 @@ type HotStoreStats struct {
 	BytesReadStats  map[uint64]float64 `json:"bytes-read-rate,omitempty"`
 	KeysWriteStats  map[uint64]float64 `json:"keys-write-rate,omitempty"`
 	KeysReadStats   map[uint64]float64 `json:"keys-read-rate,omitempty"`
-	QueryWriteStats map[uint64]float64 `json:"write-qps,omitempty"`
-	QueryReadStats  map[uint64]float64 `json:"read-qps,omitempty"`
+	QueryWriteStats map[uint64]float64 `json:"query-write-rate,omitempty"`
+	QueryReadStats  map[uint64]float64 `json:"query-read-rate,omitempty"`
 }
 
 func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusHandler {

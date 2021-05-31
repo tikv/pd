@@ -538,7 +538,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		if infl := pendings[storeID]; infl != nil {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_qps").Set(infl.Loads[statistics.QueryDim])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_query_rate").Set(infl.Loads[statistics.QueryDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_count").Set(infl.Count)
 		}
 	}
@@ -578,7 +578,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		if infl := pendings[storeID]; infl != nil {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_qps").Set(infl.Loads[statistics.QueryDim])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_query_rate").Set(infl.Loads[statistics.QueryDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_count").Set(infl.Count)
 		}
 	}

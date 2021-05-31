@@ -124,7 +124,7 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
-			Name:      "read_qps_hist",
+			Name:      "read_query_hist",
 			Help:      "The distribution of region read query",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
 		})
@@ -132,7 +132,7 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
-			Name:      "write_qps_hist",
+			Name:      "write_query_hist",
 			Help:      "The distribution of region write query",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
 		})

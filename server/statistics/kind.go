@@ -73,9 +73,9 @@ func (k StoreStatKind) String() string {
 	case StoreWriteBytes:
 		return "store_write_bytes"
 	case StoreReadQuery:
-		return "store_read_qps"
+		return "store_read_query"
 	case StoreWriteQuery:
-		return "store_write_qps"
+		return "store_write_query"
 	case StoreWriteKeys:
 		return "store_write_keys"
 	case StoreCPUUsage:
