@@ -409,6 +409,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
 		// no panic
 	}
 }
+
 func (s *testHotWriteRegionSchedulerSuite) TestCheckHot(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
