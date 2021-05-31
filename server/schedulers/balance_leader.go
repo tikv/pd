@@ -162,10 +162,10 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		if i < len(sources) {
 			plan.source, plan.target = sources[i], nil
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("source-store", plan.SourceStoreID()))
-			l.counter.WithLabelValues("high-score", plan.SourceStoreLabel()).Inc()
+			l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
 			for j := 0; j < balanceLeaderRetryLimit; j++ {
 				if ops := l.transferLeaderOut(plan); len(ops) > 0 {
-					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", plan.SourceStoreLabel()))
+					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", plan.SourceMetricLabel()))
 					return ops
 				}
 			}
@@ -174,11 +174,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		if i < len(targets) {
 			plan.source, plan.target = nil, targets[i]
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("target-store", plan.TargetStoreID()))
-			l.counter.WithLabelValues("low-score", plan.TargetStoreLabel()).Inc()
+			l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
 
 			for j := 0; j < balanceLeaderRetryLimit; j++ {
 				if ops := l.transferLeaderIn(plan); len(ops) > 0 {
-					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-in", plan.TargetStoreLabel()))
+					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-in", plan.TargetMetricLabel()))
 					return ops
 				}
 			}
@@ -279,11 +279,11 @@ func (l *balanceLeaderScheduler) createOperator(plan *balancePlan) []*operator.O
 	}
 	op.Counters = append(op.Counters,
 		schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
-		balanceDirectionCounter.WithLabelValues(l.GetName(), plan.SourceStoreLabel(), plan.TargetStoreLabel()),
+		balanceDirectionCounter.WithLabelValues(l.GetName(), plan.SourceMetricLabel(), plan.TargetMetricLabel()),
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
-		l.counter.WithLabelValues("move-leader", plan.SourceStoreLabel()+"-out"),
-		l.counter.WithLabelValues("move-leader", plan.TargetStoreLabel()+"-in"),
+		l.counter.WithLabelValues("move-leader", plan.SourceMetricLabel()+"-out"),
+		l.counter.WithLabelValues("move-leader", plan.TargetMetricLabel()+"-in"),
 	)
 	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(plan.sourceScore, 'f', 2, 64)
 	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(plan.targetScore, 'f', 2, 64)

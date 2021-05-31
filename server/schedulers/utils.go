@@ -65,7 +65,7 @@ func (p *balancePlan) SourceStoreID() uint64 {
 	return p.source.GetID()
 }
 
-func (p *balancePlan) SourceStoreLabel() string {
+func (p *balancePlan) SourceMetricLabel() string {
 	return strconv.FormatUint(p.SourceStoreID(), 10)
 }
 
@@ -73,7 +73,7 @@ func (p *balancePlan) TargetStoreID() uint64 {
 	return p.target.GetID()
 }
 
-func (p *balancePlan) TargetStoreLabel() string {
+func (p *balancePlan) TargetMetricLabel() string {
 	return strconv.FormatUint(p.TargetStoreID(), 10)
 }
 
