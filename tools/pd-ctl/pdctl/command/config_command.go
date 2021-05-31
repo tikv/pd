@@ -16,9 +16,9 @@ package command
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"reflect"
 	"strconv"
@@ -565,7 +565,7 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	if !respIsList {
 		res = "[\n" + res + "]\n"
 	}
-	err = ioutil.WriteFile(file, []byte(res), 0644)
+	err = os.WriteFile(file, []byte(res), 0644)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -578,7 +578,7 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
 	}
-	content, err := ioutil.ReadFile(file)
+	content, err := os.ReadFile(file)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -692,7 +692,7 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	err = ioutil.WriteFile(file, []byte(res), 0644)
+	err = os.WriteFile(file, []byte(res), 0644)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -705,7 +705,7 @@ func setRuleBundle(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
 	}
-	content, err := ioutil.ReadFile(file)
+	content, err := os.ReadFile(file)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -767,7 +767,7 @@ func loadRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	err = ioutil.WriteFile(file, []byte(res), 0644)
+	err = os.WriteFile(file, []byte(res), 0644)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -780,7 +780,7 @@ func saveRuleBundle(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
 	}
-	content, err := ioutil.ReadFile(file)
+	content, err := os.ReadFile(file)
 	if err != nil {
 		cmd.Println(err)
 		return
