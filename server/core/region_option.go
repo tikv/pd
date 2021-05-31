@@ -35,6 +35,19 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	}
 }
 
+// WithFlowLossPrecision
+func WithFlowLossPrecision(lossPrecision uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		if lossPrecision == 0 {
+			return
+		}
+		region.writtenBytes = (region.writtenBytes / lossPrecision) * lossPrecision
+		region.readBytes = (region.readBytes / lossPrecision) * lossPrecision
+		region.writtenKeys = (region.writtenKeys / lossPrecision) * lossPrecision
+		region.readKeys = (region.readKeys / lossPrecision) * lossPrecision
+	}
+}
+
 // WithPendingPeers sets the pending peers for the region.
 func WithPendingPeers(pendingPeers []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {

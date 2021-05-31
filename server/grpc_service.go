@@ -502,6 +502,7 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 	server := &heartbeatServer{stream: stream}
+	flowLossPrecision := s.persistOptions.GetPDServerConfig().FlowLossPrecision
 	var (
 		forwardStream     pdpb.PD_RegionHeartbeatClient
 		cancel            context.CancelFunc
@@ -583,10 +584,12 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		if time.Since(lastBind) > s.cfg.HeartbeatStreamBindInterval.Duration {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
 			s.hbStreams.BindStream(storeID, server)
+			// refresh flowLossPrecision
+			flowLossPrecision = s.persistOptions.GetPDServerConfig().FlowLossPrecision
 			lastBind = time.Now()
 		}
 
-		region := core.RegionFromHeartbeat(request)
+		region := core.RegionFromHeartbeat(request, core.WithFlowLossPrecision(flowLossPrecision))
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()

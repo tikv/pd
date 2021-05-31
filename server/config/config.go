@@ -225,10 +225,11 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage = true
-	defaultTraceRegionFlow  = true
-	defaultMaxResetTSGap    = 24 * time.Hour
-	defaultKeyType          = "table"
+	defaultUseRegionStorage  = true
+	defaultTraceRegionFlow   = true
+	defaultFlowLossPrecision = 512 // 512 B
+	defaultMaxResetTSGap     = 24 * time.Hour
+	defaultKeyType           = "table"
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
@@ -1071,6 +1072,8 @@ type PDServerConfig struct {
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
 	// TraceRegionFlow the option to update flow information of regions
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
+	//FlowLossPrecisionUnit is the unit of region flow
+	FlowLossPrecision uint64 `toml:"flow-loss-precision" json:"flow-loss-precision"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1089,6 +1092,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("trace-region-flow") {
 		c.TraceRegionFlow = defaultTraceRegionFlow
+	}
+	if !meta.IsDefined("flow-loss-precision") {
+		adjustUint64(&c.FlowLossPrecision, defaultFlowLossPrecision)
 	}
 	return c.Validate()
 }
