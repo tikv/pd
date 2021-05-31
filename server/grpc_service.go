@@ -1274,42 +1274,25 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	})
 }
 
-// SyncMaxTS is a RPC method used to synchronize the timestamp of TSO between the
-// Global TSO Allocator and multi Local TSO Allocator leaders. It contains two
-// phases:
-// 1. Collect timestamps among all Local TSO Allocator leaders, and choose the
-//    greatest one as MaxTS.
-// 2. Send the MaxTS to all Local TSO Allocator leaders. They will compare MaxTS
-//    with its current TSO in memory to make sure their local TSOs are not less
-//    than MaxTS by writing MaxTS into memory to finish the global TSO synchronization.
+// SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
+// and write it into all Local TSO Allocators then if it's indeed the biggest one.
 func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
-		return pdpb.NewPDClient(client).SyncMaxTS(ctx, request)
-	}
-
 	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
 		return nil, err
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
 	// There is no dc-location found in this server, return err.
-	if len(tsoAllocatorManager.GetClusterDCLocations()) == 0 {
-		return nil, status.Errorf(codes.Unknown, "empty cluster dc-Location found, checker may not work properly")
+	if tsoAllocatorManager.GetClusterDCLocationsNumber() == 0 {
+		return nil, status.Errorf(codes.Unknown, "empty cluster dc-location found, checker may not work properly")
 	}
 	// Get all Local TSO Allocator leaders
 	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
-	var processedDCs []string
-	if request.GetMaxTs() == nil || request.GetMaxTs().GetPhysical() == 0 {
-		// The first phase of synchronization: collect the max local ts
-		var maxLocalTS pdpb.Timestamp
+	if !request.GetSkipCheck() {
+		var maxLocalTS *pdpb.Timestamp
+		syncedDCs := make([]string, 0, len(allocatorLeaders))
 		for _, allocator := range allocatorLeaders {
 			// No longer leader, just skip here because
 			// the global allocator will check if all DCs are handled.
@@ -1320,18 +1303,21 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			if err != nil {
 				return nil, status.Errorf(codes.Unknown, err.Error())
 			}
-			if tsoutil.CompareTimestamp(&currentLocalTSO, &maxLocalTS) > 0 {
+			if tsoutil.CompareTimestamp(currentLocalTSO, maxLocalTS) > 0 {
 				maxLocalTS = currentLocalTSO
 			}
-			processedDCs = append(processedDCs, allocator.GetDCLocation())
+			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 		}
-		return &pdpb.SyncMaxTSResponse{
-			Header:     s.header(),
-			MaxLocalTs: &maxLocalTS,
-			Dcs:        processedDCs,
-		}, nil
+		// Found a bigger maxLocalTS, return it directly.
+		if tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs()) > 0 {
+			return &pdpb.SyncMaxTSResponse{
+				Header:     s.header(),
+				MaxLocalTs: maxLocalTS,
+				SyncedDcs:  syncedDCs,
+			}, nil
+		}
 	}
-	// The second phase of synchronization: do the writing
+	syncedDCs := make([]string, 0, len(allocatorLeaders))
 	for _, allocator := range allocatorLeaders {
 		if !allocator.IsAllocatorLeader() {
 			continue
@@ -1339,11 +1325,11 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
 			return nil, status.Errorf(codes.Unknown, err.Error())
 		}
-		processedDCs = append(processedDCs, allocator.GetDCLocation())
+		syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 	}
 	return &pdpb.SyncMaxTSResponse{
-		Header: s.header(),
-		Dcs:    processedDCs,
+		Header:    s.header(),
+		SyncedDcs: syncedDCs,
 	}, nil
 }
 
@@ -1370,19 +1356,8 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 	}, nil
 }
 
-// GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager, and will collect current max
-// Local TSO if the NeedSyncMaxTSO flag in dc-location info is true.
+// GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
 func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
-		return pdpb.NewPDClient(client).GetDCLocationInfo(ctx, request)
-	}
-
 	var err error
 	if err = s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err

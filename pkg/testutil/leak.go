@@ -28,6 +28,7 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*Server).handleRawConn"),
 	goleak.IgnoreTopFunction("go.etcd.io/etcd/pkg/logutil.(*MergeLogger).outputLoop"),
+	goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),
 	// TODO: remove the below options once we fixed the http connection leak problems
 	goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 	goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),

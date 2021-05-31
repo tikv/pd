@@ -971,8 +971,9 @@ func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
 
 // GetAllocators get all allocators with some filters.
 func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []Allocator {
-	var allocators []Allocator
-	for _, ag := range am.getAllocatorGroups(filters...) {
+	allocatorGroups := am.getAllocatorGroups(filters...)
+	allocators := make([]Allocator, 0, len(allocatorGroups))
+	for _, ag := range allocatorGroups {
 		allocators = append(allocators, ag.allocator)
 	}
 	return allocators
@@ -1083,7 +1084,7 @@ func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp
 	if err != nil {
 		return nil, err
 	}
-	if err := globalAllocator.(*GlobalTSOAllocator).SyncMaxTS(ctx, clusterDCLocations, maxTSO); err != nil {
+	if err := globalAllocator.(*GlobalTSOAllocator).SyncMaxTS(ctx, clusterDCLocations, maxTSO, false); err != nil {
 		return nil, err
 	}
 	return maxTSO, nil

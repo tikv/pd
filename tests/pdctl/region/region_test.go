@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -50,13 +51,14 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	url := cluster.GetConfig().GetClientURL()
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 
 	echo := pdctl.GetEcho([]string{"-u", url, "region", "key", "--format=raw", " "})
 	c.Assert(strings.Contains(echo, "unknown flag"), IsFalse)
@@ -73,13 +75,14 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 
 	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
 	r1 := pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"),

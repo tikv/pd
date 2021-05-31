@@ -135,7 +135,12 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 		return nil, errors.New("no store to add peer")
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
-	return operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
+	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
+	if err != nil {
+		return nil, err
+	}
+	op.SetPriorityLevel(core.HighPriority)
+	return op, nil
 }
 
 func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, rf *placement.RuleFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
@@ -147,7 +152,12 @@ func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, rf *placement.Rul
 		return nil, errors.New("no store to replace peer")
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
-	return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+	op, err := operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+	if err != nil {
+		return nil, err
+	}
+	op.SetPriorityLevel(core.HighPriority)
+	return op, nil
 }
 
 func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer) (*operator.Operator, error) {

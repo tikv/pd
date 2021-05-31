@@ -204,10 +204,11 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	var (
-		endpoints    []string
+		testServers  = cluster.GetServers()
+		endpoints    = make([]string, 0, len(testServers))
 		endpointsMap = make(map[string]string)
 	)
-	for _, s := range cluster.GetServers() {
+	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 		endpointsMap[s.GetServer().GetMemberInfo().GetName()] = s.GetConfig().AdvertiseClientUrls
 	}
@@ -443,8 +444,9 @@ func (s *clientTestSuite) runServer(c *C, cluster *tests.TestCluster) []string {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
+	testServers := cluster.GetServers()
+	endpoints := make([]string, 0, len(testServers))
+	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
 	return endpoints
