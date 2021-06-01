@@ -152,20 +152,6 @@ func SetWrittenKeys(v uint64) RegionCreateOption {
 	}
 }
 
-<<<<<<< HEAD
-=======
-// SetWrittenQueryNum sets the written query num for the region.
-func SetWrittenQueryNum(v uint64) RegionCreateOption {
-	return func(region *RegionInfo) {
-		if region.QueryStats == nil {
-			region.QueryStats = &pdpb.QueryStats{}
-		}
-		region.QueryStats.Put = v
-
-	}
-}
-
->>>>>>> 4445b25f... replace loads with []float64 in peer info
 // WithRemoveStorePeer removes the specified peer for the region.
 func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -193,19 +179,6 @@ func SetReadKeys(v uint64) RegionCreateOption {
 	}
 }
 
-<<<<<<< HEAD
-=======
-// SetCoprocessorQueryNum sets the coprocessor query num for the region.
-func SetCoprocessorQueryNum(v uint64) RegionCreateOption {
-	return func(region *RegionInfo) {
-		if region.QueryStats == nil {
-			region.QueryStats = &pdpb.QueryStats{}
-		}
-		region.QueryStats.Coprocessor = v
-	}
-}
-
->>>>>>> 4445b25f... replace loads with []float64 in peer info
 // SetApproximateSize sets the approximate size for the region.
 func SetApproximateSize(v int64) RegionCreateOption {
 	return func(region *RegionInfo) {
