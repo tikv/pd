@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -292,7 +293,7 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 	}
 }
 
-func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
+func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
 	// Add 5 stores.
@@ -318,6 +319,7 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 		},
 	}
 
+	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
 	for _, testcase := range testcases {
 		c.Logf(testcase.name)
 		ctx, cancel := context.WithCancel(context.Background())
@@ -325,36 +327,35 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 		regionID := 1
 		for i := 0; i < 100; i++ {
 			for j := 0; j < testcase.groupCount; j++ {
-				_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
+				scatterer.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
 					fmt.Sprintf("group-%v", j))
-				c.Assert(err, IsNil)
 				regionID++
 			}
-			// insert region with no group
-			_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3), "")
-			c.Assert(err, IsNil)
-			regionID++
 		}
 
-		for i := 0; i < testcase.groupCount; i++ {
-			// comparing the leader distribution
-			group := fmt.Sprintf("group-%v", i)
-			max := uint64(0)
-			min := uint64(math.MaxUint64)
-			groupDistribution, _ := scatterer.ordinaryEngine.selectedLeader.groupDistribution.Get(group)
-			for _, count := range groupDistribution.(map[uint64]uint64) {
-				if count > max {
-					max = count
+		checker := func(ss *selectedStores, expected uint64, delta float64) {
+			for i := 0; i < testcase.groupCount; i++ {
+				// comparing the leader distribution
+				group := fmt.Sprintf("group-%v", i)
+				max := uint64(0)
+				min := uint64(math.MaxUint64)
+				groupDistribution, _ := ss.groupDistribution.Get(group)
+				for _, count := range groupDistribution.(map[uint64]uint64) {
+					if count > max {
+						max = count
+					}
+					if count < min {
+						min = count
+					}
 				}
-				if count < min {
-					min = count
-				}
+				c.Assert(math.Abs(float64(max)-float64(expected)), LessEqual, delta)
+				c.Assert(math.Abs(float64(min)-float64(expected)), LessEqual, delta)
 			}
-			// 100 regions divided 5 stores, each store expected to have about 20 regions.
-			c.Assert(min, LessEqual, uint64(20))
-			c.Assert(max, GreaterEqual, uint64(20))
-			c.Assert(max-min, LessEqual, uint64(5))
 		}
+		// For leader, we expect each store have about 20 leader for each group
+		checker(scatterer.ordinaryEngine.selectedLeader, 20, 5)
+		// For peer, we expect each store have about 50 peers for each group
+		checker(scatterer.ordinaryEngine.selectedPeer, 50, 15)
 		cancel()
 	}
 }
@@ -439,4 +440,39 @@ func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
 	c.Assert(ok, Equals, false)
 	_, ok = stores.GetGroupDistribution("testgroup")
 	c.Assert(ok, Equals, false)
+}
+
+// TestRegionFromDifferentGroups test the multi regions. each region have its own group.
+// After scatter, the distribution for the whole cluster should be well.
+func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	// Add 6 stores.
+	storeCount := 6
+	for i := uint64(1); i <= uint64(storeCount); i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scatterer := NewRegionScatterer(ctx, tc)
+	regionCount := 50
+	for i := 1; i <= regionCount; i++ {
+		p := rand.Perm(storeCount)
+		scatterer.scatterRegion(tc.AddLeaderRegion(uint64(i), uint64(p[0])+1, uint64(p[1])+1, uint64(p[2])+1), fmt.Sprintf("t%d", i))
+	}
+	check := func(ss *selectedStores) {
+		max := uint64(0)
+		min := uint64(math.MaxUint64)
+		for i := uint64(1); i <= uint64(storeCount); i++ {
+			count := ss.totalCountByStore(i)
+			if count > max {
+				max = count
+			}
+			if count < min {
+				min = count
+			}
+		}
+		c.Assert(max-min, LessEqual, uint64(2))
+	}
+	check(scatterer.ordinaryEngine.selectedPeer)
 }
