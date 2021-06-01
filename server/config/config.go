@@ -227,7 +227,7 @@ const (
 
 	defaultUseRegionStorage = true
 	defaultTraceRegionFlow  = true
-	defaultFlowRoundingBits = 9 // 1<<9 = 512
+	defaultFlowBucketsWidth = 512
 	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultKeyType          = "table"
 
@@ -1073,8 +1073,8 @@ type PDServerConfig struct {
 	// TraceRegionFlow the option to update flow information of regions
 	// TODO: deprecate
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
-	// FlowRoundingBits is the bits used to round with shift.
-	FlowRoundingBits uint64 `toml:"flow-round-bits" json:"flow-round-bits"`
+	// FlowBucketsWidth is the width used to discretization processing flow information
+	FlowBucketsWidth uint64 `toml:"flow-rounding-bits" json:"flow-rounding-bits"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1094,8 +1094,8 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("trace-region-flow") {
 		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
-	if !meta.IsDefined("flow-round-bits") {
-		adjustUint64(&c.FlowRoundingBits, defaultFlowRoundingBits)
+	if !meta.IsDefined("flow-rounding-bits") {
+		adjustUint64(&c.FlowBucketsWidth, defaultFlowBucketsWidth)
 	}
 	return c.Validate()
 }

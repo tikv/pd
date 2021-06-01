@@ -171,7 +171,7 @@ func (s *testRegionInfoSuite) TestRegionRoundingFlow(c *C) {
 	}
 	for _, t := range testcases {
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-		r.FlowRoundingBits = t.bits
+		r.flowBucketsWidth = t.bits
 		r.readBytes = t.flow
 		r.writtenBytes = t.flow
 		c.Assert(r.GetRoundBytesRead(), Equals, t.expect)

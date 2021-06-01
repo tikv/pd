@@ -35,14 +35,14 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	}
 }
 
-// WithFlowRoundingBits set the round step, which use to round to the Nearest number
+// WithFlowBucketsWidth set the round step, which use to round to the Nearest number
 // with the step.
-func WithFlowRoundingBits(bits uint64) RegionCreateOption {
+func WithFlowBucketsWidth(bits uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		if bits == 0 {
 			return
 		}
-		region.FlowRoundingBits = bits
+		region.flowBucketsWidth = bits
 	}
 }
 
