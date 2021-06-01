@@ -15,7 +15,6 @@ package join
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"strings"
@@ -92,7 +91,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	filePath := path.Join(cfg.DataDir, "join")
 	// Read the persist join config
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
-		s, err := ioutil.ReadFile(filePath)
+		s, err := os.ReadFile(filePath)
 		if err != nil {
 			log.Fatal("read the join config meet error", errs.ZapError(errs.ErrIORead, err))
 		}
@@ -207,7 +206,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return errors.WithStack(err)
 	}
 
-	err = ioutil.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
+	err = os.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
 	return errors.WithStack(err)
 }
 

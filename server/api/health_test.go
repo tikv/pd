@@ -15,7 +15,7 @@ package api
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"strings"
 
 	. "github.com/pingcap/check"
@@ -65,7 +65,7 @@ func (s *testHealthAPISuite) TestHealthSlice(c *C) {
 	resp, err := testDialClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
-	buf, err := ioutil.ReadAll(resp.Body)
+	buf, err := io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	checkSliceResponse(c, buf, cfgs, follow.GetConfig().Name)
 }

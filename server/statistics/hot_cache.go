@@ -216,10 +216,12 @@ func (w *HotCache) updateItems(ctx context.Context) {
 			if ok && item != nil {
 				w.updateItem(item, w.writeFlow)
 			}
+			hotCacheFlowQueueStatusGauge.WithLabelValues(WriteFlow.String()).Set(float64(len(w.writeFlowQueue)))
 		case item, ok := <-w.readFlowQueue:
 			if ok && item != nil {
 				w.updateItem(item, w.readFlow)
 			}
+			hotCacheFlowQueueStatusGauge.WithLabelValues(ReadFlow.String()).Set(float64(len(w.readFlowQueue)))
 		}
 	}
 }
