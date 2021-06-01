@@ -15,6 +15,7 @@ package core
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -152,6 +153,28 @@ func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 		regionB := region.Clone(WithDownPeers(downPeersB), WithPendingPeers(pendingPeersB))
 		c.Assert(SortedPeersStatsEqual(regionA.GetDownPeers(), regionB.GetDownPeers()), Equals, t.isEqual)
 		c.Assert(SortedPeersEqual(regionA.GetPendingPeers(), regionB.GetPendingPeers()), Equals, t.isEqual)
+	}
+}
+
+func (s *testRegionInfoSuite) TestRegionRoundingFlow(c *C) {
+	testcases := []struct {
+		flow   uint64
+		bits   uint64
+		expect uint64
+	}{
+		{10, 0, 10},
+		{13, 1, 12},
+		{11807, 9, 11776},
+		{252623, 9, 252416},
+		{252623, 64, 0},
+		{252623, math.MaxUint64, 0},
+	}
+	for _, t := range testcases {
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.FlowRoundingBits = t.bits
+		r.readBytes = t.flow
+		r.writtenBytes = t.flow
+		c.Assert(r.GetRoundBytesRead(), Equals, t.expect)
 	}
 }
 
