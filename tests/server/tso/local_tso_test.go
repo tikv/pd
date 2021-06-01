@@ -161,8 +161,8 @@ func (s *testLocalTSOSuite) testTSO(c *C, cluster *tests.TestCluster, dcLocation
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
+	wg.Add(tsoRequestConcurrencyNumber)
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
 			lastList := make(map[string]*pdpb.Timestamp)
@@ -172,7 +172,7 @@ func (s *testLocalTSOSuite) testTSO(c *C, cluster *tests.TestCluster, dcLocation
 					Logical:  0,
 				}
 			}
-			for j := 0; j < 30; j++ {
+			for j := 0; j < tsoRequestRound; j++ {
 				for _, dcLocation := range dcLocationConfig {
 					req := &pdpb.TsoRequest{
 						Header:     testutil.NewRequestHeader(leaderServer.GetClusterID()),

@@ -15,7 +15,7 @@ package api
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"github.com/pingcap/log"
@@ -48,7 +48,7 @@ func newLogHandler(svr *server.Server, rd *render.Render) *logHandler {
 // @Router /admin/log [post]
 func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	var level string
-	data, err := ioutil.ReadAll(r.Body)
+	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())

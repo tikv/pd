@@ -15,7 +15,7 @@ package api
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/versioninfo"
@@ -41,7 +41,7 @@ func (s *testStatusAPISuite) TestStatus(c *C) {
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/status"
 		resp, err := testDialClient.Get(addr)
 		c.Assert(err, IsNil)
-		buf, err := ioutil.ReadAll(resp.Body)
+		buf, err := io.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
 		checkStatusResponse(c, buf)
 		resp.Body.Close()

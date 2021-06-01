@@ -17,9 +17,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
+	"os"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -646,6 +646,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
+	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
 }
 
@@ -1211,9 +1212,13 @@ func (s *Server) campaignLeader() {
 	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-	defer s.member.ResetLeader()
-	// maintain the PD leader
+	var resetLeaderOnce sync.Once
+	defer resetLeaderOnce.Do(func() {
+		cancel()
+		s.member.ResetLeader()
+	})
+
+	// maintain the PD leadership, after this, TSO can be service.
 	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
@@ -1228,8 +1233,6 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-	// Check the cluster dc-location after the PD leader is elected
-	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
@@ -1255,7 +1258,16 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
 	}
+	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
+	// Check the cluster dc-location after the PD leader is elected.
+	go s.tsoAllocatorManager.ClusterDCLocationChecker()
+	defer resetLeaderOnce.Do(func() {
+		// as soon as cancel the leadership keepalive, then other member have chance
+		// to be new leader.
+		cancel()
+		s.member.ResetLeader()
+	})
 
 	CheckPDVersion(s.persistOptions)
 	log.Info("PD cluster leader is ready to serve", zap.String("pd-leader-name", s.Name()))
@@ -1348,7 +1360,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
-	return ioutil.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
+	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
 }
 
 // SaveTTLConfig save ttl config
