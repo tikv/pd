@@ -35,16 +35,14 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	}
 }
 
-// WithFlowLossPrecision applys the lossPrecision for the region flows.
-func WithFlowLossPrecision(lossPrecision uint64) RegionCreateOption {
+//  WithFlowRoundNearest round to the Nearest number with the unit.
+func WithFlowRoundNearest(unit uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		if lossPrecision == 0 {
+		if unit == 0 {
 			return
 		}
-		region.writtenBytes = (region.writtenBytes / lossPrecision) * lossPrecision
-		region.readBytes = (region.readBytes / lossPrecision) * lossPrecision
-		region.writtenKeys = (region.writtenKeys / lossPrecision) * lossPrecision
-		region.readKeys = (region.readKeys / lossPrecision) * lossPrecision
+		region.writtenBytes = (region.writtenBytes / unit) * unit
+		region.readBytes = (region.readBytes / unit) * unit
 	}
 }
 

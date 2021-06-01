@@ -655,11 +655,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetApproximateKeys() != origin.GetApproximateKeys() {
 			saveCache = true
 		}
-
+		// Once flow has changed, will update the cache.
+		// Because keys and bytes are strongly related, only bytes are judged.
 		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
-			region.GetBytesRead() != origin.GetBytesRead() ||
-			region.GetKeysWritten() != origin.GetKeysWritten() ||
-			region.GetKeysRead() != origin.GetKeysRead()) {
+			region.GetBytesRead() != origin.GetBytesRead()) {
 			saveCache, needSync = true, true
 		}
 
