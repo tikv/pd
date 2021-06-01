@@ -35,7 +35,7 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	}
 }
 
-// WithFlowLossPrecision
+// WithFlowLossPrecision applys the lossPrecision for the region flows.
 func WithFlowLossPrecision(lossPrecision uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		if lossPrecision == 0 {
