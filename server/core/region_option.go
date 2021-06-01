@@ -155,10 +155,10 @@ func SetWrittenKeys(v uint64) RegionCreateOption {
 // SetWrittenQueryNum sets the written query num for the region.
 func SetWrittenQueryNum(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		if region.queryStats == nil {
-			region.queryStats = &pdpb.QueryStats{}
+		if region.QueryStats == nil {
+			region.QueryStats = &pdpb.QueryStats{}
 		}
-		region.queryStats.Put = v
+		region.QueryStats.Put = v
 
 	}
 }
@@ -193,10 +193,10 @@ func SetReadKeys(v uint64) RegionCreateOption {
 // SetCoprocessorQueryNum sets the coprocessor query num for the region.
 func SetCoprocessorQueryNum(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		if region.queryStats == nil {
-			region.queryStats = &pdpb.QueryStats{}
+		if region.QueryStats == nil {
+			region.QueryStats = &pdpb.QueryStats{}
 		}
-		region.queryStats.Coprocessor = v
+		region.QueryStats.Coprocessor = v
 	}
 }
 
