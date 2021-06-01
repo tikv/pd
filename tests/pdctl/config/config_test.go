@@ -112,7 +112,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args = []string{"-u", pdAddr, "config", "set", "flow-loss-precision", "502"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
-	c.Assert(svr.GetPDServerConfig().FlowLossPrecision, Equals, uint64(502))
+	c.Assert(svr.GetPDServerConfig().FlowRoundStep, Equals, uint64(502))
 
 	// config show schedule
 	args = []string{"-u", pdAddr, "config", "show", "schedule"}

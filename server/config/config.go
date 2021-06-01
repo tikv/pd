@@ -227,7 +227,7 @@ const (
 
 	defaultUseRegionStorage = true
 	defaultTraceRegionFlow  = true
-	defaultFlowRoundUnit    = 512 // 512 B
+	defaultflowRoundStep    = 512 // 512 B
 	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultKeyType          = "table"
 
@@ -1071,9 +1071,10 @@ type PDServerConfig struct {
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
 	// TraceRegionFlow the option to update flow information of regions
+	// TODO: deprecate
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
-	//FlowRoundUint is the unit used to round to nearest.
-	FlowRoundUint uint64 `toml:"flow-round-unit" json:"flow-round-unit"`
+	//FlowRoundStep is the step used to round to nearest.
+	FlowRoundStep uint64 `toml:"flow-round-step" json:"flow-round-step"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1094,7 +1095,7 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
 	if !meta.IsDefined("flow-loss-precision") {
-		adjustUint64(&c.FlowRoundUint, defaultFlowRoundUnit)
+		adjustUint64(&c.FlowRoundStep, defaultflowRoundStep)
 	}
 	return c.Validate()
 }
