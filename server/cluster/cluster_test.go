@@ -104,7 +104,10 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 			{
 				RegionId:  1,
 				ReadKeys:  9999999,
-				ReadBytes: 9999999,
+				ReadBytes: 9999998,
+				QueryStats: &pdpb.QueryStats{
+					Get: 9999997,
+				},
 			},
 		},
 	}
@@ -124,6 +127,11 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	storeStats := cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
 	c.Assert(storeStats[1], HasLen, 1)
 	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	interval := float64(hotHeartBeat.Interval.EndTimestamp - hotHeartBeat.Interval.StartTimestamp)
+	c.Assert(storeStats[1][0].Loads, HasLen, int(statistics.RegionStatCount))
+	c.Assert(storeStats[1][0].Loads[statistics.RegionReadBytes], Equals, float64(hotHeartBeat.PeerStats[0].ReadBytes)/interval)
+	c.Assert(storeStats[1][0].Loads[statistics.RegionReadKeys], Equals, float64(hotHeartBeat.PeerStats[0].ReadKeys)/interval)
+	c.Assert(storeStats[1][0].Loads[statistics.RegionReadQuery], Equals, float64(hotHeartBeat.PeerStats[0].QueryStats.Get)/interval)
 	// After cold heartbeat, we won't find region 1 peer in regionStats
 	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
 	time.Sleep(20 * time.Millisecond)

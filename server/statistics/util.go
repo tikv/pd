@@ -15,8 +15,6 @@ package statistics
 
 import (
 	"fmt"
-
-	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 const (
@@ -28,18 +26,4 @@ const (
 
 func storeTag(id uint64) string {
 	return fmt.Sprintf("store-%d", id)
-}
-
-func getReadQueryNum(stats *pdpb.QueryStats) uint64 {
-	if stats == nil {
-		return 0
-	}
-	return stats.Coprocessor + stats.Get + stats.Scan
-}
-
-func getWriteQueryNum(stats *pdpb.QueryStats) uint64 {
-	if stats == nil {
-		return 0
-	}
-	return stats.Put + stats.Delete + stats.DeleteRange
 }

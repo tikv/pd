@@ -847,16 +847,24 @@ func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInf
 
 // GetReadQueryNum returns read query num from this region
 func (r *RegionInfo) GetReadQueryNum() uint64 {
-	stats := r.QueryStats
+	return GetReadQueryNum(r.QueryStats)
+}
+
+// GetWriteQueryNum returns write query num from this region
+func (r *RegionInfo) GetWriteQueryNum() uint64 {
+	return GetWriteQueryNum(r.QueryStats)
+}
+
+// GetReadQueryNum returns read query num from this QueryStats
+func GetReadQueryNum(stats *pdpb.QueryStats) uint64 {
 	if stats == nil {
 		return 0
 	}
 	return stats.Coprocessor + stats.Get + stats.Scan
 }
 
-// GetWriteQueryNum returns write query num from this region
-func (r *RegionInfo) GetWriteQueryNum() uint64 {
-	stats := r.QueryStats
+// GetWriteQueryNum returns write query num from this QueryStats
+func GetWriteQueryNum(stats *pdpb.QueryStats) uint64 {
 	if stats == nil {
 		return 0
 	}
