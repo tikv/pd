@@ -17,7 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -47,7 +47,7 @@ func requestStatusBody(c *C, client *http.Client, method string, url string) int
 	c.Assert(err, IsNil)
 	resp, err := client.Do(req)
 	c.Assert(err, IsNil)
-	_, err = ioutil.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	err = resp.Body.Close()
 	c.Assert(err, IsNil)

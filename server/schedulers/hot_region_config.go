@@ -16,7 +16,7 @@ package schedulers
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -178,7 +178,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	defer conf.Unlock()
 	rd := render.New(render.Options{IndentJSON: true})
 	oldc, _ := json.Marshal(conf)
-	data, err := ioutil.ReadAll(r.Body)
+	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())

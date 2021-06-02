@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -27,6 +28,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -50,16 +52,19 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	url := cluster.GetConfig().GetClientURL()
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 
-	echo := pdctl.GetEcho([]string{"-u", url, "region", "key", "--format=raw", " "})
-	c.Assert(strings.Contains(echo, "unknown flag"), IsFalse)
+	cmd := pdctlCmd.GetRootCmd()
+	output, e := pdctl.ExecuteCommand(cmd, "-u", url, "region", "key", "--format=raw", " ")
+	c.Assert(e, IsNil)
+	c.Assert(strings.Contains(string(output), "unknown flag"), IsFalse)
 }
 
 func (s *regionTestSuite) TestRegion(c *C) {
@@ -71,15 +76,16 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 
 	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
 	r1 := pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"),

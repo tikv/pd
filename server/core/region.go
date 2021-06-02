@@ -61,7 +61,6 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 		meta:   region,
 		leader: leader,
 	}
-
 	for _, opt := range opts {
 		opt(regionInfo)
 	}
@@ -80,6 +79,8 @@ func classifyVoterAndLearner(region *RegionInfo) {
 			voters = append(voters, p)
 		}
 	}
+	sort.Sort(peerSlice(learners))
+	sort.Sort(peerSlice(voters))
 	region.learners = learners
 	region.voters = voters
 }
@@ -96,7 +97,7 @@ const (
 )
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
-func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
+func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
 	// Convert unit to MB.
 	// If region is empty or less than 1MB, use 1MB instead.
 	regionSize := heartbeat.GetApproximateSize() / (1 << 20)
@@ -119,6 +120,10 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
 		QueryStats:        heartbeat.GetQueryStats(),
+	}
+
+	for _, opt := range opts {
+		opt(region)
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -755,8 +760,9 @@ func SortedPeersEqual(peersA, peersB []*metapb.Peer) bool {
 	if len(peersA) != len(peersB) {
 		return false
 	}
-	for i, peer := range peersA {
-		if peer.GetId() != peersB[i].GetId() {
+	for i, peerA := range peersA {
+		peerB := peersB[i]
+		if peerA.GetStoreId() != peerB.GetStoreId() || peerA.GetId() != peerB.GetId() {
 			return false
 		}
 	}
@@ -780,8 +786,10 @@ func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
 	if len(peersA) != len(peersB) {
 		return false
 	}
-	for i, peerStats := range peersA {
-		if peerStats.GetPeer().GetId() != peersB[i].GetPeer().GetId() {
+	for i, peerStatsA := range peersA {
+		peerA := peerStatsA.GetPeer()
+		peerB := peersB[i].GetPeer()
+		if peerA.GetStoreId() != peerB.GetStoreId() || peerA.GetId() != peerB.GetId() {
 			return false
 		}
 	}
@@ -791,25 +799,10 @@ func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
 // shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
 // new peer was created, learners changed, pendingPeers changed, and so on.
 func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
-	checkPeersChange := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
-		if len(origin) != len(other) {
-			return true
-		}
-		sort.Sort(peerSlice(origin))
-		sort.Sort(peerSlice(other))
-		for index, peer := range origin {
-			if peer.GetStoreId() == other[index].GetStoreId() && peer.GetId() == other[index].GetId() {
-				continue
-			}
-			return true
-		}
-		return false
-	}
-
 	return origin.leader.GetId() != region.leader.GetId() ||
-		checkPeersChange(origin.GetVoters(), region.GetVoters()) ||
-		checkPeersChange(origin.GetLearners(), region.GetLearners()) ||
-		checkPeersChange(origin.GetPendingPeers(), region.GetPendingPeers())
+		!SortedPeersEqual(origin.GetVoters(), region.GetVoters()) ||
+		!SortedPeersEqual(origin.GetLearners(), region.GetLearners()) ||
+		!SortedPeersEqual(origin.GetPendingPeers(), region.GetPendingPeers())
 }
 
 // SearchRegion searches RegionInfo from regionTree
@@ -967,6 +960,26 @@ func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInf
 		return followers.find(region).region
 	}
 	return nil
+}
+
+// GetLoads returns loads from region
+func (r *RegionInfo) GetLoads() []float64 {
+	return []float64{
+		float64(r.GetBytesRead()),
+		float64(r.GetKeysRead()),
+		float64(r.GetBytesWritten()),
+		float64(r.GetKeysWritten()),
+	}
+}
+
+// GetWriteLoads returns write loads from region
+func (r *RegionInfo) GetWriteLoads() []float64 {
+	return []float64{
+		0,
+		0,
+		float64(r.GetBytesWritten()),
+		float64(r.GetKeysWritten()),
+	}
 }
 
 // ScanRange scans regions intersecting [start key, end key), returns at most

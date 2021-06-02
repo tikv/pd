@@ -43,5 +43,5 @@ func showTSOCommandFunc(cmd *cobra.Command, args []string) {
 
 	physicalTime, logical := tsoutil.ParseTS(ts)
 	cmd.Println("system: ", physicalTime)
-	cmd.Println("logic: ", logical)
+	cmd.Println("logic:  ", logical)
 }

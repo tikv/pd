@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -49,34 +50,39 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
 	stores := []*metapb.Store{
 		{
-			Id:    1,
-			State: metapb.StoreState_Up,
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:    2,
-			State: metapb.StoreState_Up,
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:    3,
-			State: metapb.StoreState_Up,
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:    4,
-			State: metapb.StoreState_Up,
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
 
-	mustExec := func(args []string, v interface{}) {
+	mustExec := func(args []string, v interface{}) string {
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		c.Assert(err, IsNil)
 		if v == nil {
-			return
+			return string(output)
 		}
 		c.Assert(json.Unmarshal(output, v), IsNil)
+		return ""
 	}
 
 	checkSchedulerCommand := func(args []string, expected map[string]bool) {
@@ -102,7 +108,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 	}
 
 	pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"))
@@ -235,22 +241,22 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler"}, &roles)
 	c.Assert(roles, DeepEquals, []string{"learner"})
 
-	// test echo
-	echo := pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"})
+	// test balance region config
+	echo := mustExec([]string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"})
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"})
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "Success!"), IsFalse)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"})
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}, nil)
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"})
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"})
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
 	c.Assert(strings.Contains(echo, "404"), IsTrue)
 
 	// test hot region config
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"})
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "[404] scheduler not found"), IsTrue)
 	var conf map[string]interface{}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)

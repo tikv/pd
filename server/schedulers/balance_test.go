@@ -122,27 +122,25 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 	for _, t := range tests {
 		tc.AddLeaderStore(1, int(t.sourceCount))
 		tc.AddLeaderStore(2, int(t.targetCount))
-		source := tc.GetStore(1)
-		target := tc.GetStore(2)
 		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 		tc.PutRegion(region)
 		tc.SetLeaderSchedulePolicy(t.kind.String())
 		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
-		shouldBalance, _, _ := shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), "")
-		c.Assert(shouldBalance, Equals, t.expectedResult)
+		plan := newBalancePlan(kind, tc, oc.GetOpInfluence(tc))
+		plan.source, plan.target, plan.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+		c.Assert(plan.shouldBalance(""), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
 		if t.kind.String() == core.BySize.String() {
 			tc.AddRegionStore(1, int(t.sourceCount))
 			tc.AddRegionStore(2, int(t.targetCount))
-			source := tc.GetStore(1)
-			target := tc.GetStore(2)
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 			tc.PutRegion(region)
 			kind := core.NewScheduleKind(core.RegionKind, t.kind)
-			shouldBalance, _, _ := shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), "")
-			c.Assert(shouldBalance, Equals, t.expectedResult)
+			plan := newBalancePlan(kind, tc, oc.GetOpInfluence(tc))
+			plan.source, plan.target, plan.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+			c.Assert(plan.shouldBalance(""), Equals, t.expectedResult)
 		}
 	}
 }
@@ -170,17 +168,26 @@ func (s *testBalanceSuite) TestTolerantRatio(c *C) {
 	regionSize := int64(96 * KB)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
 
-	tc.SetTolerantSizeRatio(0)
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.ByCount}), Equals, int64(leaderTolerantSizeRatio))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.ByCount}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
-
-	tc.SetTolerantSizeRatio(10)
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.ByCount}), Equals, int64(tc.GetScheduleConfig().TolerantSizeRatio))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.ByCount}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	tbl := []struct {
+		ratio                  float64
+		kind                   core.ScheduleKind
+		expectTolerantResource func() int64
+	}{
+		{0, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.ByCount}, func() int64 { return int64(leaderTolerantSizeRatio) }},
+		{0, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.BySize}, func() int64 { return int64(adjustTolerantRatio(tc) * float64(regionSize)) }},
+		{0, core.ScheduleKind{Resource: core.RegionKind, Policy: core.ByCount}, func() int64 { return int64(adjustTolerantRatio(tc) * float64(regionSize)) }},
+		{0, core.ScheduleKind{Resource: core.RegionKind, Policy: core.BySize}, func() int64 { return int64(adjustTolerantRatio(tc) * float64(regionSize)) }},
+		{10, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.ByCount}, func() int64 { return int64(tc.GetScheduleConfig().TolerantSizeRatio) }},
+		{10, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.BySize}, func() int64 { return int64(adjustTolerantRatio(tc) * float64(regionSize)) }},
+		{10, core.ScheduleKind{Resource: core.RegionKind, Policy: core.ByCount}, func() int64 { return int64(adjustTolerantRatio(tc) * float64(regionSize)) }},
+		{10, core.ScheduleKind{Resource: core.RegionKind, Policy: core.BySize}, func() int64 { return int64(adjustTolerantRatio(tc) * float64(regionSize)) }},
+	}
+	for i, t := range tbl {
+		tc.SetTolerantSizeRatio(t.ratio)
+		plan := newBalancePlan(t.kind, tc, operator.OpInfluence{})
+		plan.region = region
+		c.Assert(plan.getTolerantResource(), Equals, t.expectTolerantResource(), Commentf("case #%d", i+1))
+	}
 }
 
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})

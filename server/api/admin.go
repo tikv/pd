@@ -14,7 +14,7 @@
 package api
 
 import (
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -97,7 +97,7 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 // Intentionally no swagger mark as it is supposed to be only used in
 // server-to-server.
 func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
-	data, err := ioutil.ReadAll(r.Body)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, "")
 		return
