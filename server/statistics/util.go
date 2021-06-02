@@ -15,8 +15,6 @@ package statistics
 
 import (
 	"fmt"
-
-	"github.com/tikv/pd/server/core"
 )
 
 const (
@@ -28,14 +26,4 @@ const (
 
 func storeTag(id uint64) string {
 	return fmt.Sprintf("store-%d", id)
-}
-
-// GetLoads return loads from region
-func GetLoads(r *core.RegionInfo) []float64 {
-	return []float64{
-		RegionWriteBytes: float64(r.GetBytesWritten()),
-		RegionWriteKeys:  float64(r.GetKeysWritten()),
-		RegionReadBytes:  float64(r.GetBytesRead()),
-		RegionReadKeys:   float64(r.GetKeysRead()),
-	}
 }
