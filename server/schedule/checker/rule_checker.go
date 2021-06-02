@@ -154,7 +154,6 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		c.regionWaitingList.Put(region.GetID(), nil)
 		return nil, errors.New("no store to replace peer")
 	}
-
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	// randomly pick leader to avoid the Offline store be snapshot generotor bottleneck.
 	var newLeader *metapb.Peer
@@ -164,7 +163,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	}
 	createOp := func() (*operator.Operator, error) {
 		if newLeader != nil && newLeader.GetId() != peer.GetId() {
-			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
+			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
 		}
 		return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
 	}
