@@ -162,7 +162,6 @@ func (s *testRuleCheckerSuite) TestFixPeer(c *C) {
 		}
 	}
 	c.Assert(hasTransferLeader, IsTrue)
-
 }
 
 func (s *testRuleCheckerSuite) TestFixOrphanPeers(c *C) {
