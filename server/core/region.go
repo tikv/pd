@@ -946,7 +946,7 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 	return r.learners[storeID].RandomRegions(n, ranges)
 }
 
-// GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
+// GetLeader returns leader RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	if leaders, ok := r.leaders[storeID]; ok {
 		return leaders.find(region).region
@@ -954,7 +954,7 @@ func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo 
 	return nil
 }
 
-// GetFollower return follower RegionInfo by storeID and regionID(now only used in test)
+// GetFollower returns follower RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
 	if followers, ok := r.followers[storeID]; ok {
 		return followers.find(region).region
@@ -962,13 +962,33 @@ func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInf
 	return nil
 }
 
+// GetReadQueryNum returns read query num from this region
+func (r *RegionInfo) GetReadQueryNum() uint64 {
+	stats := r.QueryStats
+	if stats == nil {
+		return 0
+	}
+	return stats.Coprocessor + stats.Get + stats.Scan
+}
+
+// GetWriteQueryNum returns write query num from this region
+func (r *RegionInfo) GetWriteQueryNum() uint64 {
+	stats := r.QueryStats
+	if stats == nil {
+		return 0
+	}
+	return stats.Put + stats.Delete + stats.DeleteRange
+}
+
 // GetLoads returns loads from region
 func (r *RegionInfo) GetLoads() []float64 {
 	return []float64{
 		float64(r.GetBytesRead()),
 		float64(r.GetKeysRead()),
+		float64(r.GetReadQueryNum()),
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
+		float64(r.GetWriteQueryNum()),
 	}
 }
 
@@ -977,8 +997,10 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 	return []float64{
 		0,
 		0,
+		0,
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
+		float64(r.GetWriteQueryNum()),
 	}
 }
 
