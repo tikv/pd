@@ -109,7 +109,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(svr.GetPDServerConfig().TraceRegionFlow, Equals, false)
 
-	args = []string{"-u", pdAddr, "config", "set", "flow-rounding-bits", "10"}
+	args = []string{"-u", pdAddr, "config", "set", "flow-buckets-width", "10"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(svr.GetPDServerConfig().FlowBucketsWidth, Equals, uint64(10))

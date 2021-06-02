@@ -1074,7 +1074,7 @@ type PDServerConfig struct {
 	// TODO: deprecate
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
 	// FlowBucketsWidth is the width used to discretization processing flow information
-	FlowBucketsWidth uint64 `toml:"flow-rounding-bits" json:"flow-rounding-bits"`
+	FlowBucketsWidth uint64 `toml:"flow-buckets-width" json:"flow-buckets-width"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1094,7 +1094,7 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("trace-region-flow") {
 		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
-	if !meta.IsDefined("flow-rounding-bits") {
+	if !meta.IsDefined("flow-buckets-width") {
 		adjustUint64(&c.FlowBucketsWidth, defaultFlowBucketsWidth)
 	}
 	return c.Validate()
