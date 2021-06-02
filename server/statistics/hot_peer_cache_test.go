@@ -111,7 +111,7 @@ func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect i
 	res = append(res, cache.CollectExpiredItems(region)...)
 	for _, peer := range region.GetPeers() {
 		peerInfo := core.NewPeerInfo(peer,
-			statistics.GetLoads(region),
+			GetLoads(region),
 			interval)
 		item := cache.CheckPeerFlow(peerInfo, region)
 		if item != nil {
