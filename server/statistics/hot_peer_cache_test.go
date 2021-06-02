@@ -111,7 +111,7 @@ func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect i
 	res = append(res, cache.CollectExpiredItems(region)...)
 	for _, peer := range region.GetPeers() {
 		peerInfo := core.NewPeerInfo(peer,
-			GetLoads(region),
+			region.GetLoads(),
 			interval)
 		item := cache.CheckPeerFlow(peerInfo, region)
 		if item != nil {
@@ -343,7 +343,7 @@ func BenchmarkCheckRegionFlow(b *testing.B) {
 	peerInfos := make([]*core.PeerInfo, 0)
 	for _, peer := range newRegion.GetPeers() {
 		peerInfo := core.NewPeerInfo(peer,
-			GetLoads(region),
+			region.GetLoads(),
 			10)
 		peerInfos = append(peerInfos, peerInfo)
 	}

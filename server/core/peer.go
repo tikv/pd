@@ -95,11 +95,6 @@ func (p *PeerInfo) GetStoreID() uint64 {
 	return p.GetStoreId()
 }
 
-// GetLoads provides loads
-func (p *PeerInfo) GetLoads() []float64 {
-	return p.loads
-}
-
 // GetPeerID provides peer id
 func (p *PeerInfo) GetPeerID() uint64 {
 	return p.GetId()
