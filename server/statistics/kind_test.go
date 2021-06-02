@@ -35,4 +35,12 @@ func (s *testRegionInfoSuite) TestGetLoads(c *C) {
 	c.Assert(float64(regionA.GetKeysRead()), Equals, loads[RegionReadKeys])
 	c.Assert(float64(regionA.GetBytesWritten()), Equals, loads[RegionWriteBytes])
 	c.Assert(float64(regionA.GetKeysWritten()), Equals, loads[RegionWriteKeys])
+
+	loads = regionA.GetWriteLoads()
+	c.Assert(loads, HasLen, int(RegionStatCount))
+	c.Assert(0.0, Equals, loads[RegionReadBytes])
+	c.Assert(0.0, Equals, loads[RegionReadKeys])
+	c.Assert(float64(regionA.GetBytesWritten()), Equals, loads[RegionWriteBytes])
+	c.Assert(float64(regionA.GetKeysWritten()), Equals, loads[RegionWriteKeys])
+
 }

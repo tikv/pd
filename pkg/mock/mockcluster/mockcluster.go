@@ -755,9 +755,7 @@ func (mc *Cluster) CheckRegionRead(region *core.RegionInfo) []*statistics.HotPee
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer,
-			region.GetLoads(),
-			interval)
+		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
 		item := mc.HotCache.CheckReadPeerSync(peerInfo, region)
 		if item != nil {
 			items = append(items, item)
@@ -774,9 +772,7 @@ func (mc *Cluster) CheckRegionWrite(region *core.RegionInfo) []*statistics.HotPe
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer,
-			region.GetLoads(),
-			interval)
+		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
 		item := mc.HotCache.CheckWritePeerSync(peerInfo, region)
 		if item != nil {
 			items = append(items, item)
@@ -793,9 +789,7 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	peer := region.GetLeader()
-	peerInfo := core.NewPeerInfo(peer,
-		region.GetLoads(),
-		interval)
+	peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
 	item := mc.HotCache.CheckReadPeerSync(peerInfo, region)
 	if item != nil {
 		items = append(items, item)

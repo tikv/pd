@@ -595,9 +595,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer,
-			region.GetLoads(),
-			interval)
+		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
 		item := statistics.NewPeerInfoItem(peerInfo, region)
 		c.hotStat.CheckWriteAsync(item)
 	}
