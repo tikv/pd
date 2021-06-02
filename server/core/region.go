@@ -843,6 +843,26 @@ func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInf
 	return nil
 }
 
+// GetLoads returns loads from region
+func (r *RegionInfo) GetLoads() []float64 {
+	return []float64{
+		float64(r.GetBytesRead()),
+		float64(r.GetKeysRead()),
+		float64(r.GetBytesWritten()),
+		float64(r.GetKeysWritten()),
+	}
+}
+
+// GetWriteLoads returns write loads from region
+func (r *RegionInfo) GetWriteLoads() []float64 {
+	return []float64{
+		0,
+		0,
+		float64(r.GetBytesWritten()),
+		float64(r.GetKeysWritten()),
+	}
+}
+
 // ScanRange scans regions intersecting [start key, end key), returns at most
 // `limit` regions. limit <= 0 means no limit.
 func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
