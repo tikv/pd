@@ -14,6 +14,8 @@
 package checker
 
 import (
+	"math/rand"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -105,11 +107,11 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	for _, peer := range rf.Peers {
 		if c.isDownPeer(region, peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
-			return c.replaceRulePeer(region, rf, peer, downStatus)
+			return c.replaceUnexpectRulePeer(region, rf, peer, downStatus)
 		}
 		if c.isOfflinePeer(peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
-			return c.replaceRulePeer(region, rf, peer, offlineStatus)
+			return c.replaceUnexpectRulePeer(region, rf, peer, offlineStatus)
 		}
 	}
 	// fix loose matched peers.
@@ -143,7 +145,8 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 	return op, nil
 }
 
-func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, rf *placement.RuleFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
+// The peer's store may in Offline or Down, need to be replace.
+func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *placement.RuleFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
 	ruleStores := c.getRuleFitStores(rf)
 	store := c.strategy(region, rf.Rule).SelectStoreToReplace(ruleStores, peer.GetStoreId())
 	if store == 0 {
@@ -151,8 +154,21 @@ func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, rf *placement.Rul
 		c.regionWaitingList.Put(region.GetID(), nil)
 		return nil, errors.New("no store to replace peer")
 	}
+
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
-	op, err := operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+	// randomly pick leader to avoid the Offline store be snapshot generotor bottleneck.
+	var newLeader *metapb.Peer
+	if region.GetLeader().GetId() == peer.GetId() {
+		i := rand.Intn(len(region.GetPeers()))
+		newLeader = region.GetPeers()[i]
+	}
+	createOp := func() (*operator.Operator, error) {
+		if newLeader != nil && newLeader.GetId() != peer.GetId() {
+			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
+		}
+		return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+	}
+	op, err := createOp()
 	if err != nil {
 		return nil, err
 	}
