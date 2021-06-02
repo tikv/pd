@@ -163,10 +163,10 @@ func (s *testRegionInfoSuite) TestRegionRoundingFlow(c *C) {
 		expect uint64
 	}{
 		{10, 0, 10},
-		{13, 1, 12},
-		{11807, 9, 11776},
-		{252623, 9, 252416},
-		{252623, 64, 0},
+		{13, 1, 13},
+		{11807, 512, 11776},
+		{252623, 512, 252416},
+		{252623, 10240, 245760},
 		{252623, math.MaxUint64, 0},
 	}
 	for _, t := range testcases {
