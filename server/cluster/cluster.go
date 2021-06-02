@@ -561,9 +561,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			statistics.RegionWriteBytes: 0,
 			statistics.RegionWriteKeys:  0,
 		}
-		peerInfo := core.NewPeerInfo(peer,
-			loads,
-			interval)
+		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		item := statistics.NewPeerInfoItem(peerInfo, region)
 		c.hotStat.CheckReadAsync(item)
 	}

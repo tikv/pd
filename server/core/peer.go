@@ -81,8 +81,7 @@ type PeerInfo struct {
 }
 
 // NewPeerInfo creates PeerInfo
-func NewPeerInfo(meta *metapb.Peer, loads []float64,
-	interval uint64) *PeerInfo {
+func NewPeerInfo(meta *metapb.Peer, loads []float64, interval uint64) *PeerInfo {
 	return &PeerInfo{
 		Peer:     meta,
 		loads:    loads,
