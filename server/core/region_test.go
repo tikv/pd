@@ -37,47 +37,46 @@ type testRegionInfoSuite struct{}
 
 func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 	testcases := []struct {
-		idsA    []uint64
-		idsB    []uint64
+		idsA    []int
+		idsB    []int
 		isEqual bool
 	}{
 		{
-			[]uint64{},
-			[]uint64{},
+			[]int{},
+			[]int{},
 			true,
 		},
 		{
-			[]uint64{},
-			[]uint64{1, 2},
+			[]int{},
+			[]int{1, 2},
 			false,
 		},
 		{
-			[]uint64{1, 2},
-			[]uint64{1, 2},
+			[]int{1, 2},
+			[]int{1, 2},
 			true,
 		},
 		{
-			[]uint64{1, 2},
-			[]uint64{2, 1},
+			[]int{1, 2},
+			[]int{2, 1},
 			true,
 		},
 		{
-			[]uint64{1, 2},
-			[]uint64{1, 2, 3},
+			[]int{1, 2},
+			[]int{1, 2, 3},
 			false,
 		},
 		{
-			[]uint64{1, 2, 3},
-			[]uint64{2, 3, 1},
+			[]int{1, 2, 3},
+			[]int{2, 3, 1},
 			true,
 		},
 		{
-			[]uint64{1, 3},
-			[]uint64{1, 2},
+			[]int{1, 3},
+			[]int{1, 2},
 			false,
 		},
 	}
-
 	meta := &metapb.Region{
 		Id: 100,
 		Peers: []*metapb.Peer{
@@ -92,29 +91,62 @@ func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 			{
 				Id:      2,
 				StoreId: 20,
+				Role:    metapb.PeerRole_Learner,
 			},
 			{
 				Id:      4,
 				StoreId: 40,
+				Role:    metapb.PeerRole_IncomingVoter,
 			},
 		},
 	}
-
-	region := NewRegionInfo(meta, meta.Peers[0])
-
+	pickPeers := func(ids []int) []*metapb.Peer {
+		peers := make([]*metapb.Peer, 0, len(ids))
+		for _, i := range ids {
+			peers = append(peers, meta.Peers[i])
+		}
+		return peers
+	}
+	pickPeerStats := func(ids []int) []*pdpb.PeerStats {
+		peers := make([]*pdpb.PeerStats, 0, len(ids))
+		for _, i := range ids {
+			peers = append(peers, &pdpb.PeerStats{Peer: meta.Peers[i]})
+		}
+		return peers
+	}
+	// test NewRegionInfo
 	for _, t := range testcases {
-		downPeersA := make([]*pdpb.PeerStats, 0)
-		downPeersB := make([]*pdpb.PeerStats, 0)
-		pendingPeersA := make([]*metapb.Peer, 0)
-		pendingPeersB := make([]*metapb.Peer, 0)
-		for _, i := range t.idsA {
-			downPeersA = append(downPeersA, &pdpb.PeerStats{Peer: meta.Peers[i]})
-			pendingPeersA = append(pendingPeersA, meta.Peers[i])
-		}
-		for _, i := range t.idsB {
-			downPeersB = append(downPeersB, &pdpb.PeerStats{Peer: meta.Peers[i]})
-			pendingPeersB = append(pendingPeersB, meta.Peers[i])
-		}
+		regionA := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(t.idsA)}, nil)
+		regionB := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(t.idsB)}, nil)
+		c.Assert(SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()), Equals, t.isEqual)
+		c.Assert(SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()), Equals, t.isEqual)
+	}
+
+	// test RegionFromHeartbeat
+	for _, t := range testcases {
+		regionA := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+			Region:       &metapb.Region{Id: 100, Peers: pickPeers(t.idsA)},
+			DownPeers:    pickPeerStats(t.idsA),
+			PendingPeers: pickPeers(t.idsA),
+		})
+		regionB := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+			Region:       &metapb.Region{Id: 100, Peers: pickPeers(t.idsB)},
+			DownPeers:    pickPeerStats(t.idsB),
+			PendingPeers: pickPeers(t.idsB),
+		})
+		c.Assert(SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()), Equals, t.isEqual)
+		c.Assert(SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()), Equals, t.isEqual)
+		c.Assert(SortedPeersEqual(regionA.GetPendingPeers(), regionB.GetPendingPeers()), Equals, t.isEqual)
+		c.Assert(SortedPeersStatsEqual(regionA.GetDownPeers(), regionB.GetDownPeers()), Equals, t.isEqual)
+	}
+
+	// test Clone
+	region := NewRegionInfo(meta, meta.Peers[0])
+	for _, t := range testcases {
+		downPeersA := pickPeerStats(t.idsA)
+		downPeersB := pickPeerStats(t.idsB)
+		pendingPeersA := pickPeers(t.idsA)
+		pendingPeersB := pickPeers(t.idsB)
 
 		regionA := region.Clone(WithDownPeers(downPeersA), WithPendingPeers(pendingPeersA))
 		regionB := region.Clone(WithDownPeers(downPeersB), WithPendingPeers(pendingPeersB))
@@ -128,10 +160,6 @@ var _ = Suite(&testRegionMapSuite{})
 type testRegionMapSuite struct{}
 
 func (s *testRegionMapSuite) TestRegionMap(c *C) {
-	var empty *regionMap
-	c.Assert(empty.Len(), Equals, 0)
-	c.Assert(empty.Get(1), IsNil)
-
 	rm := newRegionMap()
 	s.check(c, rm)
 	rm.Put(s.regionInfo(1))
@@ -163,7 +191,7 @@ func (s *testRegionMapSuite) regionInfo(id uint64) *RegionInfo {
 	}
 }
 
-func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
+func (s *testRegionMapSuite) check(c *C, rm regionMap, ids ...uint64) {
 	// Check Get.
 	for _, id := range ids {
 		c.Assert(rm.Get(id).GetID(), Equals, id)
@@ -176,16 +204,10 @@ func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
 		expect[id] = struct{}{}
 	}
 	set1 := make(map[uint64]struct{})
-	for _, r := range rm.m {
+	for _, r := range rm {
 		set1[r.GetID()] = struct{}{}
 	}
 	c.Assert(set1, DeepEquals, expect)
-	// Check region size.
-	var total int64
-	for _, id := range ids {
-		total += int64(id)
-	}
-	c.Assert(rm.TotalSize(), Equals, total)
 }
 
 var _ = Suite(&testRegionKey{})
@@ -293,8 +315,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	c.Assert(regions.tree.length(), Equals, 96)
 	c.Assert(len(regions.GetRegions()), Equals, 96)
 	c.Assert(regions.GetRegion(201), NotNil)
-	c.Assert(regions.regions.totalKeys, Equals, int64(20))
-	c.Assert(regions.regions.totalSize, Equals, int64(30))
+	c.Assert(regions.tree.TotalSize(), Equals, int64(30))
 }
 
 func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
@@ -311,10 +332,10 @@ func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
 	}, peer1)
 
 	origin := NewRegionInfo(&metapb.Region{
-		Id:       uint64(2),
+		Id:       uint64(1),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
-		StartKey: []byte(fmt.Sprintf("%20d", 20)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 30)),
+		StartKey: []byte(fmt.Sprintf("%20d", 10)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
 	}, peer1)
 	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
 
@@ -329,7 +350,7 @@ func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
 	region.learners = append(region.learners, peer2)
 	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
 
-	origin.learners = append(origin.learners, peer3, peer2)
+	origin.learners = append(origin.learners, peer2, peer3)
 	region.learners = append(region.learners, peer4)
 	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
 

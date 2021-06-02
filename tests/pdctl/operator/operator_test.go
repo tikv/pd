@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -59,7 +60,7 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
 	stores := []*metapb.Store{
 		{
@@ -219,8 +220,9 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "leader", "3", "follower")
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
-	echo := pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
-	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "1")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 
 	_, err = pdctl.ExecuteCommand(cmd, "config", "set", "enable-placement-rules", "false")
 	c.Assert(err, IsNil)
@@ -237,7 +239,7 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	c.Assert(strings.Contains(string(output), "scatter-region"), IsTrue)
 
 	// test echo, as the scatter region result is random, both region 1 and region 3 can be the region to be scattered
-	echo1 := pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
-	echo2 := pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "3"})
-	c.Assert(strings.Contains(echo1, "Success!") || strings.Contains(echo2, "Success!"), IsTrue)
+	output1, _ := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "1")
+	output2, _ := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "3")
+	c.Assert(strings.Contains(string(output1), "Success!") || strings.Contains(string(output2), "Success!"), IsTrue)
 }

@@ -152,7 +152,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		return nil
 	}
 	storeID := peer.GetStoreID()
-	deltaLoads := getFlowDeltaLoads(peer)
+	deltaLoads := peer.GetLoads()
 	f.collectPeerMetrics(deltaLoads, interval)
 	loads := make([]float64, len(deltaLoads))
 	for i := range deltaLoads {
@@ -446,23 +446,6 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 		newItem.rollingLoads[i] = ds
 	}
 	return newItem
-}
-
-func getFlowDeltaLoads(stat core.FlowStat) []float64 {
-	ret := make([]float64, RegionStatCount)
-	for k := RegionStatKind(0); k < RegionStatCount; k++ {
-		switch k {
-		case RegionReadBytes:
-			ret[k] = float64(stat.GetBytesRead())
-		case RegionReadKeys:
-			ret[k] = float64(stat.GetKeysRead())
-		case RegionWriteBytes:
-			ret[k] = float64(stat.GetBytesWritten())
-		case RegionWriteKeys:
-			ret[k] = float64(stat.GetKeysWritten())
-		}
-	}
-	return ret
 }
 
 func (f *hotPeerCache) putInheritItem(item *HotPeerStat) {
