@@ -555,8 +555,14 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 				zap.Uint64("store-id", storeID))
 			continue
 		}
+		loads := []float64{
+			statistics.RegionReadBytes:  float64(peerStat.GetReadBytes()),
+			statistics.RegionReadKeys:   float64(peerStat.GetReadKeys()),
+			statistics.RegionWriteBytes: 0,
+			statistics.RegionWriteKeys:  0,
+		}
 		peerInfo := core.NewPeerInfo(peer,
-			statistics.GetLoads(region),
+			loads,
 			interval)
 		item := statistics.NewPeerInfoItem(peerInfo, region)
 		c.hotStat.CheckReadAsync(item)
@@ -590,7 +596,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
 		peerInfo := core.NewPeerInfo(peer,
-			statistics.GetLoads(region),
+			region.GetLoads(),
 			interval)
 		item := statistics.NewPeerInfoItem(peerInfo, region)
 		c.hotStat.CheckWriteAsync(item)
