@@ -120,36 +120,28 @@ func (s *testRegionSuite) newRegionWithStat(start, end string, size, keys int64)
 	return region
 }
 
-func (s *testRegionSuite) TestRegionSubTree(c *C) {
-	tree := newRegionSubTree()
+func (s *testRegionSuite) TestRegionTreeStat(c *C) {
+	tree := newRegionTree()
 	c.Assert(tree.totalSize, Equals, int64(0))
-	c.Assert(tree.totalKeys, Equals, int64(0))
 	tree.update(s.newRegionWithStat("a", "b", 1, 2))
 	c.Assert(tree.totalSize, Equals, int64(1))
-	c.Assert(tree.totalKeys, Equals, int64(2))
 	tree.update(s.newRegionWithStat("b", "c", 3, 4))
 	c.Assert(tree.totalSize, Equals, int64(4))
-	c.Assert(tree.totalKeys, Equals, int64(6))
 	tree.update(s.newRegionWithStat("b", "e", 5, 6))
 	c.Assert(tree.totalSize, Equals, int64(6))
-	c.Assert(tree.totalKeys, Equals, int64(8))
 	tree.remove(s.newRegionWithStat("a", "b", 1, 2))
 	c.Assert(tree.totalSize, Equals, int64(5))
-	c.Assert(tree.totalKeys, Equals, int64(6))
 	tree.remove(s.newRegionWithStat("f", "g", 1, 2))
 	c.Assert(tree.totalSize, Equals, int64(5))
-	c.Assert(tree.totalKeys, Equals, int64(6))
 }
 
-func (s *testRegionSuite) TestRegionSubTreeMerge(c *C) {
-	tree := newRegionSubTree()
+func (s *testRegionSuite) TestRegionTreeMerge(c *C) {
+	tree := newRegionTree()
 	tree.update(s.newRegionWithStat("a", "b", 1, 2))
 	tree.update(s.newRegionWithStat("b", "c", 3, 4))
 	c.Assert(tree.totalSize, Equals, int64(4))
-	c.Assert(tree.totalKeys, Equals, int64(6))
 	tree.update(s.newRegionWithStat("a", "c", 5, 5))
 	c.Assert(tree.totalSize, Equals, int64(5))
-	c.Assert(tree.totalKeys, Equals, int64(5))
 }
 
 func (s *testRegionSuite) TestRegionTree(c *C) {
