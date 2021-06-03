@@ -652,7 +652,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	copy(keySort, ret)
 	sort.Slice(keySort, func(i, j int) bool {
 		k := getRegionStatKind(bs.rwTy, statistics.KeyDim)
-		return byteSort[i].GetLoad(k) > byteSort[j].GetLoad(k)
+		return keySort[i].GetLoad(k) > keySort[j].GetLoad(k)
 	})
 
 	union := make(map[*statistics.HotPeerStat]struct{}, maxPeerNum)
