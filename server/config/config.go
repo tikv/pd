@@ -225,11 +225,11 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage = true
-	defaultTraceRegionFlow  = true
-	defaultFlowBucketsWidth = 512
-	defaultMaxResetTSGap    = 24 * time.Hour
-	defaultKeyType          = "table"
+	defaultUseRegionStorage  = true
+	defaultTraceRegionFlow   = true
+	defaultFlowRroundByDigit = 3
+	defaultMaxResetTSGap     = 24 * time.Hour
+	defaultKeyType           = "table"
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
@@ -323,6 +323,12 @@ func adjustUint64(v *uint64, defValue uint64) {
 }
 
 func adjustInt64(v *int64, defValue int64) {
+	if *v == 0 {
+		*v = defValue
+	}
+}
+
+func adjustInt(v *int, defValue int) {
 	if *v == 0 {
 		*v = defValue
 	}
@@ -1073,8 +1079,8 @@ type PDServerConfig struct {
 	// TraceRegionFlow the option to update flow information of regions
 	// TODO: deprecate
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
-	// FlowBucketsWidth is the width used to discretization processing flow information
-	FlowBucketsWidth uint64 `toml:"flow-buckets-width" json:"flow-buckets-width"`
+	// FlowRroundByDigit is the width used to discretization processing flow information
+	FlowRroundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1094,8 +1100,8 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("trace-region-flow") {
 		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
-	if !meta.IsDefined("flow-buckets-width") {
-		adjustUint64(&c.FlowBucketsWidth, defaultFlowBucketsWidth)
+	if !meta.IsDefined("flow-round-by-digit") {
+		adjustInt(&c.FlowRroundByDigit, defaultFlowRroundByDigit)
 	}
 	return c.Validate()
 }
@@ -1117,6 +1123,9 @@ func (c *PDServerConfig) Validate() error {
 		if err := ValidateURLWithScheme(c.DashboardAddress); err != nil {
 			return err
 		}
+	}
+	if c.FlowRroundByDigit < 0 {
+		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
 	}
 
 	return nil

@@ -271,6 +271,11 @@ var (
 	ErrSemverNewVersion = errors.Normalize("new version error", errors.RFCCodeText("PD:semver:ErrSemverNewVersion"))
 )
 
+// config
+var (
+	ErrConfigItem = errors.Normalize("cannot set invalid configuration", errors.RFCCodeText("PD:filepath:ErrFilePathAbs"))
+)
+
 // log
 var (
 	ErrInitLogger = errors.Normalize("init logger error", errors.RFCCodeText("PD:log:ErrInitLogger"))

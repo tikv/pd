@@ -35,14 +35,13 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	}
 }
 
-// WithFlowBucketsWidth set the bucket width, which use to round to the nearest bucket
-// with the with.
-func WithFlowBucketsWidth(width uint64) RegionCreateOption {
+// WithFlowRroundByDigit set the digit, which use to round to the nearest number
+func WithFlowRroundByDigit(digit int) RegionCreateOption {
 	return func(region *RegionInfo) {
-		if width == 0 {
+		if digit == 0 {
 			return
 		}
-		region.flowBucketsWidth = width
+		region.flowRroundByDigit = int(digit)
 	}
 }
 

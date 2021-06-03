@@ -159,19 +159,21 @@ func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 func (s *testRegionInfoSuite) TestRegionRoundingFlow(c *C) {
 	testcases := []struct {
 		flow   uint64
-		bits   uint64
+		digit  int
 		expect uint64
 	}{
 		{10, 0, 10},
-		{13, 1, 13},
-		{11807, 512, 11776},
-		{252623, 512, 252416},
-		{252623, 10240, 245760},
-		{252623, math.MaxUint64, 0},
+		{13, 1, 10},
+		{11807, 3, 12000},
+		{252623, 4, 250000},
+		{258623, 4, 260000},
+		{258623, 64, 0},
+		{252623, math.MaxInt64, 0},
+		{252623, math.MinInt64, 252623},
 	}
 	for _, t := range testcases {
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-		r.flowBucketsWidth = t.bits
+		r.flowRroundByDigit = t.digit
 		r.readBytes = t.flow
 		r.writtenBytes = t.flow
 		c.Assert(r.GetRoundBytesRead(), Equals, t.expect)
