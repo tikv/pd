@@ -140,21 +140,21 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 			LastHeartbeatTS: info.Status.LastHeartbeatTS,
 			Uptime:          info.Status.Uptime,
 		}
-		s.HotReadFlow, s.HotReadRegionFlows = h.getStoreFlow(readStats, statistics.RegionReadBytes, store.GetID())
-		s.HotWriteFlow, s.HotWriteRegionFlows = h.getStoreFlow(writeStats, statistics.RegionWriteBytes, store.GetID())
+		s.HotReadFlow, s.HotReadRegionFlows = h.getStoreFlow(readStats, store.GetID())
+		s.HotWriteFlow, s.HotWriteRegionFlows = h.getStoreFlow(writeStats, store.GetID())
 		trendStores = append(trendStores, s)
 	}
 	return trendStores, nil
 }
 
-func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, regionStatKind statistics.RegionStatKind, storeID uint64) (storeFlow float64, regionFlows []float64) {
+func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, storeID uint64) (storeByteFlow float64, regionByteFlows []float64) {
 	if stats == nil {
 		return
 	}
 	if stat, ok := stats[storeID]; ok {
-		storeFlow = stat.TotalBytesRate
+		storeByteFlow = stat.TotalBytesRate
 		for _, flow := range stat.Stats {
-			regionFlows = append(regionFlows, flow.ByteRate)
+			regionByteFlows = append(regionByteFlows, flow.ByteRate)
 		}
 	}
 	return
