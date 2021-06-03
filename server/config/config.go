@@ -225,11 +225,11 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage  = true
-	defaultTraceRegionFlow   = true
-	defaultFlowRroundByDigit = 3
-	defaultMaxResetTSGap     = 24 * time.Hour
-	defaultKeyType           = "table"
+	defaultUseRegionStorage = true
+	defaultTraceRegionFlow  = true
+	defaultFlowRoundByDigit = 3
+	defaultMaxResetTSGap    = 24 * time.Hour
+	defaultKeyType          = "table"
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
@@ -1079,8 +1079,8 @@ type PDServerConfig struct {
 	// TraceRegionFlow the option to update flow information of regions
 	// TODO: deprecate
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
-	// FlowRroundByDigit is the width used to discretization processing flow information
-	FlowRroundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
+	// FlowRoundByDigit used to discretization processing flow information.
+	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1101,7 +1101,7 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
 	if !meta.IsDefined("flow-round-by-digit") {
-		adjustInt(&c.FlowRroundByDigit, defaultFlowRroundByDigit)
+		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
 	return c.Validate()
 }
@@ -1124,7 +1124,7 @@ func (c *PDServerConfig) Validate() error {
 			return err
 		}
 	}
-	if c.FlowRroundByDigit < 0 {
+	if c.FlowRoundByDigit < 0 {
 		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
 	}
 

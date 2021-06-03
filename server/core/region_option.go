@@ -35,13 +35,13 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	}
 }
 
-// WithFlowRroundByDigit set the digit, which use to round to the nearest number
-func WithFlowRroundByDigit(digit int) RegionCreateOption {
+// WithFlowRoundByDigit set the digit, which use to round to the nearest number
+func WithFlowRoundByDigit(digit int) RegionCreateOption {
 	return func(region *RegionInfo) {
 		if digit == 0 {
 			return
 		}
-		region.flowRroundByDigit = int(digit)
+		region.flowRoundByDigit = int(digit)
 	}
 }
 

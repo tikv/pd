@@ -53,7 +53,7 @@ type RegionInfo struct {
 	approximateKeys   int64
 	interval          *pdpb.TimeInterval
 	replicationStatus *replication_modepb.RegionReplicationStatus
-	flowRroundByDigit int
+	flowRoundByDigit  int
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -400,7 +400,7 @@ func (r *RegionInfo) GetBytesRead() uint64 {
 
 // GetRoundBytesRead returns the read bytes of the region.
 func (r *RegionInfo) GetRoundBytesRead() uint64 {
-	divisor := uint64(math.Pow10(r.flowRroundByDigit))
+	divisor := uint64(math.Pow10(r.flowRoundByDigit))
 	if divisor == 0 {
 		return r.readBytes
 	}
@@ -414,7 +414,7 @@ func (r *RegionInfo) GetBytesWritten() uint64 {
 
 // GetRoundBytesWritten returns the written bytes of the region.
 func (r *RegionInfo) GetRoundBytesWritten() uint64 {
-	divisor := uint64(math.Pow10(r.flowRroundByDigit))
+	divisor := uint64(math.Pow10(r.flowRoundByDigit))
 	if divisor == 0 {
 		return r.writtenBytes
 	}
