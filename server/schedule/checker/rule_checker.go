@@ -88,9 +88,12 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	return nil
 }
 
+// Offlie is triggered manually and only appears when the node makes some adjustments. Here a long TTL is used.
+var offlineCounterTTL = 24 * time.Hour
+
 func (c *RuleChecker) refreshOfflineCounter() {
-	// gc the offlineLeaderCounter if there no event more than 24 hours.
-	if len(c.offlineLeaderCounter) > 0 && time.Since(c.lastReplaceOpTime) > 24*time.Hour {
+	// gc the offlineLeaderCounter if there no event for a long time.
+	if len(c.offlineLeaderCounter) > 0 && time.Since(c.lastReplaceOpTime) > offlineCounterTTL {
 		c.offlineLeaderCounter = make(map[uint64]uint64)
 	}
 }
