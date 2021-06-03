@@ -42,14 +42,3 @@ func (k FlowKind) RegionStats() []RegionStatKind {
 	}
 	return nil
 }
-
-// FilterRegionStats returns hot items according to kind
-func (k FlowKind) FilterRegionStats() []RegionStatKind {
-	switch k {
-	case WriteFlow:
-		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys}
-	case ReadFlow:
-		return []RegionStatKind{RegionReadBytes, RegionReadKeys}
-	}
-	return nil
-}
