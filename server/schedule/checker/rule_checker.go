@@ -14,7 +14,8 @@
 package checker
 
 import (
-	"math/rand"
+	"math"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -32,19 +33,23 @@ import (
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
-	cluster           opt.Cluster
-	ruleManager       *placement.RuleManager
-	name              string
-	regionWaitingList cache.Cache
+	cluster              opt.Cluster
+	ruleManager          *placement.RuleManager
+	name                 string
+	regionWaitingList    cache.Cache
+	offlineLeaderCounter map[uint64]uint64
+	lastReplaceOpTime    time.Time
 }
 
 // NewRuleChecker creates a checker instance.
 func NewRuleChecker(cluster opt.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
 	return &RuleChecker{
-		cluster:           cluster,
-		ruleManager:       ruleManager,
-		name:              "rule-checker",
-		regionWaitingList: regionWaitingList,
+		cluster:              cluster,
+		ruleManager:          ruleManager,
+		name:                 "rule-checker",
+		regionWaitingList:    regionWaitingList,
+		offlineLeaderCounter: make(map[uint64]uint64),
+		lastReplaceOpTime:    time.Now(),
 	}
 }
 
@@ -57,7 +62,7 @@ func (c *RuleChecker) GetType() string {
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
-
+	c.refreshOfflineCounter()
 	fit := c.cluster.FitRegion(region)
 	if len(fit.RuleFits) == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "fix-range").Inc()
@@ -81,6 +86,13 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 		}
 	}
 	return nil
+}
+
+func (c *RuleChecker) refreshOfflineCounter() {
+	// gc the offlineLeaderCounter if there no event more than 24 hours.
+	if len(c.offlineLeaderCounter) > 0 && time.Since(c.lastReplaceOpTime) > 24*time.Hour {
+		c.offlineLeaderCounter = make(map[uint64]uint64)
+	}
 }
 
 func (c *RuleChecker) fixRange(region *core.RegionInfo) *operator.Operator {
@@ -155,12 +167,19 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		return nil, errors.New("no store to replace peer")
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
-	// randomly pick leader to avoid the Offline store be snapshot generotor bottleneck.
+	//  pick the smallest leader store to avoid the Offline store be snapshot generotor bottleneck.
 	var newLeader *metapb.Peer
 	if region.GetLeader().GetId() == peer.GetId() {
-		i := rand.Intn(len(region.GetPeers()))
-		newLeader = region.GetPeers()[i]
+		minCount := uint64(math.MaxUint64)
+		for _, peer := range region.GetPeers() {
+			count := c.offlineLeaderCounter[peer.GetStoreId()]
+			if minCount > count {
+				minCount = count
+				newLeader = peer
+			}
+		}
 	}
+
 	createOp := func() (*operator.Operator, error) {
 		if newLeader != nil && newLeader.GetId() != peer.GetId() {
 			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
@@ -170,6 +189,10 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	op, err := createOp()
 	if err != nil {
 		return nil, err
+	}
+	if newLeader != nil {
+		c.offlineLeaderCounter[newLeader.GetStoreId()] += 1
+		c.lastReplaceOpTime = time.Now()
 	}
 	op.SetPriorityLevel(core.HighPriority)
 	return op, nil
