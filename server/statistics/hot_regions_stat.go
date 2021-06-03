@@ -26,6 +26,7 @@ type HotPeersStat struct {
 	Stats          []HotPeerStatShow `json:"statistics"`
 }
 
+// HotPeerStatShow records the hot region statistics for output
 type HotPeerStatShow struct {
 	StoreID        uint64    `json:"store_id"`
 	RegionID       uint64    `json:"region_id"`
