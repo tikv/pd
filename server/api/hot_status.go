@@ -14,7 +14,9 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/statistics"
@@ -47,7 +49,34 @@ func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusH
 // @Success 200 {object} statistics.StoreHotPeersInfos
 // @Router /hotspot/regions/write [get]
 func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.Handler.GetHotWriteRegions())
+	storeIDs := r.URL.Query()["store_id"]
+	if len(storeIDs) < 1 {
+		h.rd.JSON(w, http.StatusOK, h.Handler.GetHotWriteRegions())
+		return
+	}
+
+	rc, err := h.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var ids []uint64
+	for _, storeID := range storeIDs {
+		id, err := strconv.ParseUint(storeID, 10, 64)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid store id: %s", storeID))
+			return
+		}
+		store := rc.GetStore(id)
+		if store == nil {
+			h.rd.JSON(w, http.StatusNotFound, server.ErrStoreNotFound(id).Error())
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	h.rd.JSON(w, http.StatusOK, rc.GetHotWriteRegions(ids...))
 }
 
 // @Tags hotspot
@@ -56,7 +85,34 @@ func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Req
 // @Success 200 {object} statistics.StoreHotPeersInfos
 // @Router /hotspot/regions/read [get]
 func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.Handler.GetHotReadRegions())
+	storeIDs := r.URL.Query()["store_id"]
+	if len(storeIDs) < 1 {
+		h.rd.JSON(w, http.StatusOK, h.Handler.GetHotReadRegions())
+		return
+	}
+
+	rc, err := h.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var ids []uint64
+	for _, storeID := range storeIDs {
+		id, err := strconv.ParseUint(storeID, 10, 64)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid store id: %s", storeID))
+			return
+		}
+		store := rc.GetStore(id)
+		if store == nil {
+			h.rd.JSON(w, http.StatusNotFound, server.ErrStoreNotFound(id).Error())
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	h.rd.JSON(w, http.StatusOK, rc.GetHotReadRegions(ids...))
 }
 
 // @Tags hotspot
