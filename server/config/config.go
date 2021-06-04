@@ -227,6 +227,7 @@ const (
 
 	defaultUseRegionStorage = true
 	defaultTraceRegionFlow  = true
+	defaultFlowRoundByDigit = 3
 	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultKeyType          = "table"
 
@@ -322,6 +323,12 @@ func adjustUint64(v *uint64, defValue uint64) {
 }
 
 func adjustInt64(v *int64, defValue int64) {
+	if *v == 0 {
+		*v = defValue
+	}
+}
+
+func adjustInt(v *int, defValue int) {
 	if *v == 0 {
 		*v = defValue
 	}
@@ -1070,7 +1077,10 @@ type PDServerConfig struct {
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
 	// TraceRegionFlow the option to update flow information of regions
+	// TODO: deprecate
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
+	// FlowRoundByDigit used to discretization processing flow information.
+	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1089,6 +1099,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("trace-region-flow") {
 		c.TraceRegionFlow = defaultTraceRegionFlow
+	}
+	if !meta.IsDefined("flow-round-by-digit") {
+		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
 	return c.Validate()
 }
@@ -1110,6 +1123,9 @@ func (c *PDServerConfig) Validate() error {
 		if err := ValidateURLWithScheme(c.DashboardAddress); err != nil {
 			return err
 		}
+	}
+	if c.FlowRoundByDigit < 0 {
+		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
 	}
 
 	return nil
