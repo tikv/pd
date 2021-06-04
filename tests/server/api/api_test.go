@@ -15,7 +15,7 @@ package api_test
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -166,7 +166,7 @@ func (s *testRedirectorSuite) TestAllowFollowerHandle(c *C) {
 	c.Assert(resp.Header.Get(serverapi.FollowerHandle), Equals, "true")
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	_, err = ioutil.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 }
 
@@ -189,7 +189,7 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	_, err = ioutil.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 
 	// Request to follower with redirectorHeader will fail.
@@ -199,7 +199,7 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 	c.Assert(err, IsNil)
 	defer resp1.Body.Close()
 	c.Assert(resp1.StatusCode, Not(Equals), http.StatusOK)
-	_, err = ioutil.ReadAll(resp1.Body)
+	_, err = io.ReadAll(resp1.Body)
 	c.Assert(err, IsNil)
 }
 
@@ -207,7 +207,7 @@ func mustRequestSuccess(c *C, s *server.Server) http.Header {
 	resp, err := dialClient.Get(s.GetAddr() + "/pd/api/v1/version")
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
-	_, err = ioutil.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	return resp.Header

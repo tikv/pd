@@ -13,9 +13,26 @@
 
 package statistics
 
+import (
+	"time"
+)
+
 // HotPeersStat records all hot regions statistics
 type HotPeersStat struct {
-	TotalLoads []float64     `json:"total_loads"`
-	Count      int           `json:"regions_count"`
-	Stats      []HotPeerStat `json:"statistics"`
+	TotalLoads     []float64         `json:"-"`
+	TotalBytesRate float64           `json:"total_flow_bytes"`
+	TotalKeysRate  float64           `json:"total_flow_keys"`
+	Count          int               `json:"regions_count"`
+	Stats          []HotPeerStatShow `json:"statistics"`
+}
+
+// HotPeerStatShow records the hot region statistics for output
+type HotPeerStatShow struct {
+	StoreID        uint64    `json:"store_id"`
+	RegionID       uint64    `json:"region_id"`
+	HotDegree      int       `json:"hot_degree"`
+	ByteRate       float64   `json:"flow_bytes"`
+	KeyRate        float64   `json:"flow_keys"`
+	AntiCount      int       `json:"anti_count"`
+	LastUpdateTime time.Time `json:"last_update_time"`
 }
