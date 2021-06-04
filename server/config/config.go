@@ -1077,8 +1077,8 @@ type PDServerConfig struct {
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
-	// TraceRegionFlow the option to update flow information of regions
-	// WARN: TraceRegionFlow is deprecate
+	// TraceRegionFlow the option to update flow information of regions.
+	// WARN: TraceRegionFlow is deprecated.
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
 	// FlowRoundByDigit used to discretization processing flow information.
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
@@ -1118,7 +1118,7 @@ func (c *PDServerConfig) migrateConfigurationFromFile(meta *configMetaData) erro
 		}
 	case defineOld && !defineNew:
 		if !c.TraceRegionFlow {
-			c.FlowRoundByDigit = math.MaxInt64
+			c.FlowRoundByDigit = math.MaxInt8
 		}
 	}
 	return nil
@@ -1127,7 +1127,7 @@ func (c *PDServerConfig) migrateConfigurationFromFile(meta *configMetaData) erro
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *PDServerConfig) MigrateDeprecatedFlags() {
 	if !c.TraceRegionFlow {
-		c.FlowRoundByDigit = math.MaxInt64
+		c.FlowRoundByDigit = math.MaxInt8
 	}
 	// json omity the false. next time will not persist to the kv.
 	c.TraceRegionFlow = false
