@@ -499,98 +499,59 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 	return nil
 }
 
-// SetRegion sets the RegionInfo with regionID
-func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
-	var item *regionItem
-	rangeChanged := true
-	peersChanged := true
+// SetRegion sets the RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
+// overlaps: Other regions that overlap with the specified region, excluding itself.
+func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
+	var item *regionItem   // Pointer to the *RegionInfo of this ID.
+	var origin *RegionInfo // This is the original region information of this ID.
+	var rangeChanged bool  // This Region is new, or its range has changed.
+	var peersChanged bool  // This Region is new, or its peers have changed, including leader-change/pending/down.
+
 	if item = r.regions.Get(region.GetID()); item != nil {
-		origin := item.region
+		// If this ID already exists, use the existing regionItem and pick out the origin.
+		origin = item.region
 		rangeChanged = !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) ||
 			!bytes.Equal(origin.GetEndKey(), region.GetEndKey())
-		peersChanged = r.shouldRemoveFromSubTree(region, origin)
 		if rangeChanged {
+			// Delete itself in regionTree so that overlaps will not contain itself.
+			// Because the regionItem is reused, there is no need to delete it in the regionMap.
 			r.tree.remove(origin)
+			// A change in the range is equivalent to a change in all peers.
+			peersChanged = true
+		} else {
+			peersChanged = r.shouldRemoveFromSubTree(region, origin)
 		}
+		// If the peers have changed, the sub regionTree needs to be cleaned up.
 		if peersChanged {
+			// TODO: Improve performance by deleting only the different peers.
 			r.removeRegionFromSubTree(origin)
 		}
-		if !rangeChanged && !peersChanged {
-			// Here is a simplified version of addRegion.
-			r.tree.updateStat(item.region, region)
-			r.updateSubTreeStat(item.region, region)
-			item.region = region
-			return nil
-		}
-	}
-	return r.addRegion(item, region, rangeChanged, peersChanged)
-}
-
-// Len returns the RegionsInfo length
-func (r *RegionsInfo) Len() int {
-	return r.regions.Len()
-}
-
-// TreeLen returns the RegionsInfo tree length(now only used in test)
-func (r *RegionsInfo) TreeLen() int {
-	return r.tree.length()
-}
-
-func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) {
-	for _, peer := range region.GetVoters() {
-		storeID := peer.GetStoreId()
-		if peer.GetId() == region.leader.GetId() {
-			if tree, ok := r.leaders[storeID]; ok {
-				tree.updateStat(origin, region)
-			}
-		} else {
-			if tree, ok := r.followers[storeID]; ok {
-				tree.updateStat(origin, region)
-			}
-		}
-	}
-	for _, peer := range region.GetLearners() {
-		if tree, ok := r.learners[peer.GetStoreId()]; ok {
-			tree.updateStat(origin, region)
-		}
-	}
-	for _, peer := range region.GetPendingPeers() {
-		if tree, ok := r.pendingPeers[peer.GetStoreId()]; ok {
-			tree.updateStat(origin, region)
-		}
-	}
-}
-
-// GetOverlaps returns the regions which are overlapped with the specified region range.
-func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
-	return r.tree.getOverlaps(region)
-}
-
-// addRegion adds RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
-func (r *RegionsInfo) addRegion(item *regionItem, region *RegionInfo, rangeChanged, peersChanged bool) []*RegionInfo {
-	// the regions which are overlapped with the specified region range.
-	var overlaps []*RegionInfo
-	var origin *RegionInfo
-	if item == nil {
-		item = r.regions.AddNew(region)
-	} else {
-		origin = item.region
+		// Update the RegionInfo in the regionItem.
 		item.region = region
+	} else {
+		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
+		rangeChanged = true
+		peersChanged = true
+		item = r.regions.AddNew(region)
 	}
 
-	if rangeChanged {
-		// Add to tree.
+	if !rangeChanged {
+		// If the range is not changed, only the statistical on the regionTree needs to be updated.
+		r.tree.updateStat(origin, region)
+	} else {
+		// It has been removed and all information needs to be updated again.
 		overlaps = r.tree.update(item)
 		for _, old := range overlaps {
 			r.RemoveRegion(r.GetRegion(old.GetID()))
 		}
-	} else {
-		r.tree.updateStat(origin, region)
 	}
 
 	if !peersChanged {
+		// If the peers are not changed, only the statistical on the sub regionTree needs to be updated.
 		r.updateSubTreeStat(origin, region)
 	} else {
+		// It has been removed and all information needs to be updated again.
+
 		// Add to leaders and followers.
 		for _, peer := range region.GetVoters() {
 			storeID := peer.GetStoreId()
@@ -634,7 +595,47 @@ func (r *RegionsInfo) addRegion(item *regionItem, region *RegionInfo, rangeChang
 		}
 	}
 
-	return overlaps
+	return
+}
+
+// Len returns the RegionsInfo length
+func (r *RegionsInfo) Len() int {
+	return r.regions.Len()
+}
+
+// TreeLen returns the RegionsInfo tree length(now only used in test)
+func (r *RegionsInfo) TreeLen() int {
+	return r.tree.length()
+}
+
+func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) {
+	for _, peer := range region.GetVoters() {
+		storeID := peer.GetStoreId()
+		if peer.GetId() == region.leader.GetId() {
+			if tree, ok := r.leaders[storeID]; ok {
+				tree.updateStat(origin, region)
+			}
+		} else {
+			if tree, ok := r.followers[storeID]; ok {
+				tree.updateStat(origin, region)
+			}
+		}
+	}
+	for _, peer := range region.GetLearners() {
+		if tree, ok := r.learners[peer.GetStoreId()]; ok {
+			tree.updateStat(origin, region)
+		}
+	}
+	for _, peer := range region.GetPendingPeers() {
+		if tree, ok := r.pendingPeers[peer.GetStoreId()]; ok {
+			tree.updateStat(origin, region)
+		}
+	}
+}
+
+// GetOverlaps returns the regions which are overlapped with the specified region range.
+func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
+	return r.tree.getOverlaps(region)
 }
 
 // RemoveRegion removes RegionInfo from regionTree and regionMap
