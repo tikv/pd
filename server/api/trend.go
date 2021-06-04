@@ -125,7 +125,6 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	trendStores := make([]trendStore, 0, len(stores))
 	for _, store := range stores {
 		info := newStoreInfo(h.svr.GetScheduleConfig(), store)
@@ -148,14 +147,14 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	return trendStores, nil
 }
 
-func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, storeID uint64) (storeFlow float64, regionFlows []float64) {
+func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, storeID uint64) (storeByteFlow float64, regionByteFlows []float64) {
 	if stats == nil {
 		return
 	}
 	if stat, ok := stats[storeID]; ok {
-		storeFlow = stat.TotalBytesRate
+		storeByteFlow = stat.TotalBytesRate
 		for _, flow := range stat.Stats {
-			regionFlows = append(regionFlows, flow.GetByteRate())
+			regionByteFlows = append(regionByteFlows, flow.ByteRate)
 		}
 	}
 	return

@@ -60,7 +60,6 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 		meta:   region,
 		leader: leader,
 	}
-
 	for _, opt := range opts {
 		opt(regionInfo)
 	}
@@ -79,6 +78,8 @@ func classifyVoterAndLearner(region *RegionInfo) {
 			voters = append(voters, p)
 		}
 	}
+	sort.Sort(peerSlice(learners))
+	sort.Sort(peerSlice(voters))
 	region.learners = learners
 	region.voters = voters
 }
@@ -95,7 +96,7 @@ const (
 )
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
-func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
+func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
 	// Convert unit to MB.
 	// If region is empty or less than 1MB, use 1MB instead.
 	regionSize := heartbeat.GetApproximateSize() / (1 << 20)
@@ -117,6 +118,10 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
+	}
+
+	for _, opt := range opts {
+		opt(region)
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -437,154 +442,36 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 }
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
-type regionMap struct {
-	m         map[uint64]*RegionInfo
-	totalSize int64
-	totalKeys int64
+type regionMap map[uint64]*RegionInfo
+
+func newRegionMap() regionMap {
+	return make(map[uint64]*RegionInfo)
 }
 
-func newRegionMap() *regionMap {
-	return &regionMap{
-		m: make(map[uint64]*RegionInfo),
-	}
+func (rm regionMap) Len() int {
+	return len(rm)
 }
 
-func (rm *regionMap) Len() int {
-	if rm == nil {
-		return 0
-	}
-	return len(rm.m)
+func (rm regionMap) Get(id uint64) *RegionInfo {
+	return rm[id]
 }
 
-func (rm *regionMap) Get(id uint64) *RegionInfo {
-	if rm == nil {
-		return nil
-	}
-	if r, ok := rm.m[id]; ok {
-		return r
-	}
-	return nil
+func (rm regionMap) Put(region *RegionInfo) {
+	rm[region.GetID()] = region
 }
 
-func (rm *regionMap) Put(region *RegionInfo) {
-	if old, ok := rm.m[region.GetID()]; ok {
-		rm.totalSize -= old.approximateSize
-		rm.totalKeys -= old.approximateKeys
-	}
-	rm.m[region.GetID()] = region
-	rm.totalSize += region.approximateSize
-	rm.totalKeys += region.approximateKeys
-}
-
-func (rm *regionMap) Delete(id uint64) {
-	if rm == nil {
-		return
-	}
-	if old, ok := rm.m[id]; ok {
-		delete(rm.m, id)
-		rm.totalSize -= old.approximateSize
-		rm.totalKeys -= old.approximateKeys
-	}
-}
-
-func (rm *regionMap) TotalSize() int64 {
-	if rm.Len() == 0 {
-		return 0
-	}
-	return rm.totalSize
-}
-
-// regionSubTree is used to manager different types of regions.
-type regionSubTree struct {
-	*regionTree
-	totalSize int64
-	totalKeys int64
-}
-
-func newRegionSubTree() *regionSubTree {
-	return &regionSubTree{
-		regionTree: newRegionTree(),
-		totalSize:  0,
-	}
-}
-
-func (rst *regionSubTree) TotalSize() int64 {
-	if rst.length() == 0 {
-		return 0
-	}
-	return rst.totalSize
-}
-
-func (rst *regionSubTree) scanRanges() []*RegionInfo {
-	if rst.length() == 0 {
-		return nil
-	}
-	var res []*RegionInfo
-	rst.scanRange([]byte(""), func(region *RegionInfo) bool {
-		res = append(res, region)
-		return true
-	})
-	return res
-}
-
-func (rst *regionSubTree) update(region *RegionInfo) {
-	overlaps := rst.regionTree.update(region)
-	rst.totalSize += region.approximateSize
-	rst.totalKeys += region.approximateKeys
-	for _, r := range overlaps {
-		rst.totalSize -= r.approximateSize
-		rst.totalKeys -= r.approximateKeys
-	}
-}
-
-func (rst *regionSubTree) remove(region *RegionInfo) {
-	if rst.length() == 0 {
-		return
-	}
-	if rst.regionTree.remove(region) != nil {
-		rst.totalSize -= region.approximateSize
-		rst.totalKeys -= region.approximateKeys
-	}
-}
-
-func (rst *regionSubTree) length() int {
-	if rst == nil {
-		return 0
-	}
-	return rst.regionTree.length()
-}
-
-func (rst *regionSubTree) RandomRegion(ranges []KeyRange) *RegionInfo {
-	if rst.length() == 0 {
-		return nil
-	}
-
-	return rst.regionTree.RandomRegion(ranges)
-}
-
-func (rst *regionSubTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
-	if rst.length() == 0 {
-		return nil
-	}
-
-	regions := make([]*RegionInfo, 0, n)
-
-	for i := 0; i < n; i++ {
-		if region := rst.regionTree.RandomRegion(ranges); region != nil {
-			regions = append(regions, region)
-		}
-	}
-	return regions
+func (rm regionMap) Delete(id uint64) {
+	delete(rm, id)
 }
 
 // RegionsInfo for export
 type RegionsInfo struct {
 	tree         *regionTree
-	regions      *regionMap                // regionID -> regionInfo
-	leaders      map[uint64]*regionSubTree // storeID -> regionSubTree
-	followers    map[uint64]*regionSubTree // storeID -> regionSubTree
-	learners     map[uint64]*regionSubTree // storeID -> regionSubTree
-	pendingPeers map[uint64]*regionSubTree // storeID -> regionSubTree
+	regions      regionMap              // regionID -> regionInfo
+	leaders      map[uint64]*regionTree // storeID -> sub regionTree
+	followers    map[uint64]*regionTree // storeID -> sub regionTree
+	learners     map[uint64]*regionTree // storeID -> sub regionTree
+	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -592,10 +479,10 @@ func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
 		tree:         newRegionTree(),
 		regions:      newRegionMap(),
-		leaders:      make(map[uint64]*regionSubTree),
-		followers:    make(map[uint64]*regionSubTree),
-		learners:     make(map[uint64]*regionSubTree),
-		pendingPeers: make(map[uint64]*regionSubTree),
+		leaders:      make(map[uint64]*regionTree),
+		followers:    make(map[uint64]*regionTree),
+		learners:     make(map[uint64]*regionTree),
+		pendingPeers: make(map[uint64]*regionTree),
 	}
 }
 
@@ -621,13 +508,13 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
 	return r.AddRegion(region)
 }
 
-// Length returns the RegionsInfo length
-func (r *RegionsInfo) Length() int {
+// Len returns the RegionsInfo length
+func (r *RegionsInfo) Len() int {
 	return r.regions.Len()
 }
 
-// TreeLength returns the RegionsInfo tree length(now only used in test)
-func (r *RegionsInfo) TreeLength() int {
+// TreeLen returns the RegionsInfo tree length(now only used in test)
+func (r *RegionsInfo) TreeLen() int {
 	return r.tree.length()
 }
 
@@ -648,6 +535,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 			if bytes.Equal(regionOld.region.GetStartKey(), region.GetStartKey()) &&
 				bytes.Equal(regionOld.region.GetEndKey(), region.GetEndKey()) &&
 				regionOld.region.GetID() == region.GetID() {
+				r.tree.updateStat(regionOld.region, region)
 				regionOld.region = region
 				treeNeedAdd = false
 			}
@@ -670,7 +558,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 			// Add leader peer to leaders.
 			store, ok := r.leaders[storeID]
 			if !ok {
-				store = newRegionSubTree()
+				store = newRegionTree()
 				r.leaders[storeID] = store
 			}
 			store.update(region)
@@ -678,7 +566,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 			// Add follower peer to followers.
 			store, ok := r.followers[storeID]
 			if !ok {
-				store = newRegionSubTree()
+				store = newRegionTree()
 				r.followers[storeID] = store
 			}
 			store.update(region)
@@ -690,7 +578,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 		storeID := peer.GetStoreId()
 		store, ok := r.learners[storeID]
 		if !ok {
-			store = newRegionSubTree()
+			store = newRegionTree()
 			r.learners[storeID] = store
 		}
 		store.update(region)
@@ -700,7 +588,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 		storeID := peer.GetStoreId()
 		store, ok := r.pendingPeers[storeID]
 		if !ok {
-			store = newRegionSubTree()
+			store = newRegionTree()
 			r.pendingPeers[storeID] = store
 		}
 		store.update(region)
@@ -753,8 +641,9 @@ func SortedPeersEqual(peersA, peersB []*metapb.Peer) bool {
 	if len(peersA) != len(peersB) {
 		return false
 	}
-	for i, peer := range peersA {
-		if peer.GetId() != peersB[i].GetId() {
+	for i, peerA := range peersA {
+		peerB := peersB[i]
+		if peerA.GetStoreId() != peerB.GetStoreId() || peerA.GetId() != peerB.GetId() {
 			return false
 		}
 	}
@@ -778,8 +667,10 @@ func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
 	if len(peersA) != len(peersB) {
 		return false
 	}
-	for i, peerStats := range peersA {
-		if peerStats.GetPeer().GetId() != peersB[i].GetPeer().GetId() {
+	for i, peerStatsA := range peersA {
+		peerA := peerStatsA.GetPeer()
+		peerB := peersB[i].GetPeer()
+		if peerA.GetStoreId() != peerB.GetStoreId() || peerA.GetId() != peerB.GetId() {
 			return false
 		}
 	}
@@ -789,25 +680,10 @@ func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
 // shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
 // new peer was created, learners changed, pendingPeers changed, and so on.
 func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
-	checkPeersChange := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
-		if len(origin) != len(other) {
-			return true
-		}
-		sort.Sort(peerSlice(origin))
-		sort.Sort(peerSlice(other))
-		for index, peer := range origin {
-			if peer.GetStoreId() == other[index].GetStoreId() && peer.GetId() == other[index].GetId() {
-				continue
-			}
-			return true
-		}
-		return false
-	}
-
 	return origin.leader.GetId() != region.leader.GetId() ||
-		checkPeersChange(origin.GetVoters(), region.GetVoters()) ||
-		checkPeersChange(origin.GetLearners(), region.GetLearners()) ||
-		checkPeersChange(origin.GetPendingPeers(), region.GetPendingPeers())
+		!SortedPeersEqual(origin.GetVoters(), region.GetVoters()) ||
+		!SortedPeersEqual(origin.GetLearners(), region.GetLearners()) ||
+		!SortedPeersEqual(origin.GetPendingPeers(), region.GetPendingPeers())
 }
 
 // SearchRegion searches RegionInfo from regionTree
@@ -831,7 +707,7 @@ func (r *RegionsInfo) SearchPrevRegion(regionKey []byte) *RegionInfo {
 // GetRegions gets all RegionInfo from regionMap
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.regions.Len())
-	for _, region := range r.regions.m {
+	for _, region := range r.regions {
 		regions = append(regions, region)
 	}
 	return regions
@@ -875,7 +751,7 @@ func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) int64 {
 // GetMetaRegions gets a set of metapb.Region from regionMap
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
-	for _, region := range r.regions.m {
+	for _, region := range r.regions {
 		regions = append(regions, proto.Clone(region.meta).(*metapb.Region))
 	}
 	return regions
@@ -967,6 +843,26 @@ func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInf
 	return nil
 }
 
+// GetLoads returns loads from region
+func (r *RegionInfo) GetLoads() []float64 {
+	return []float64{
+		float64(r.GetBytesRead()),
+		float64(r.GetKeysRead()),
+		float64(r.GetBytesWritten()),
+		float64(r.GetKeysWritten()),
+	}
+}
+
+// GetWriteLoads returns write loads from region
+func (r *RegionInfo) GetWriteLoads() []float64 {
+	return []float64{
+		0,
+		0,
+		float64(r.GetBytesWritten()),
+		float64(r.GetKeysWritten()),
+	}
+}
+
 // ScanRange scans regions intersecting [start key, end key), returns at most
 // `limit` regions. limit <= 0 means no limit.
 func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
@@ -1006,10 +902,10 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Regi
 
 // GetAverageRegionSize returns the average region approximate size.
 func (r *RegionsInfo) GetAverageRegionSize() int64 {
-	if r.regions.Len() == 0 {
+	if r.tree.length() == 0 {
 		return 0
 	}
-	return r.regions.TotalSize() / int64(r.regions.Len())
+	return r.tree.TotalSize() / int64(r.tree.length())
 }
 
 // DiffRegionPeersInfo return the difference of peers info  between two RegionInfo

@@ -50,9 +50,17 @@ type testMergeCheckerSuite struct {
 	regions []*core.RegionInfo
 }
 
+func (s *testMergeCheckerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testMergeCheckerSuite) TearDownTest(c *C) {
+	s.cancel()
+}
+
 func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
@@ -130,12 +138,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	for _, region := range s.regions {
 		s.cluster.PutRegion(region)
 	}
-	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.mc = NewMergeChecker(s.ctx, s.cluster)
-}
-
-func (s *testMergeCheckerSuite) TearDownTest(c *C) {
-	s.cancel()
 }
 
 func (s *testMergeCheckerSuite) TestBasic(c *C) {
@@ -434,7 +437,7 @@ type testSplitMergeSuite struct{}
 
 func (s *testMergeCheckerSuite) TestCache(c *C) {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetSplitMergeInterval(time.Hour)

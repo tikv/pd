@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -26,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -49,26 +51,23 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := cmd.GetRootCmd()
 
 	stores := []*metapb.Store{
 		{
-			Id:      1,
-			Address: "tikv1",
-			State:   metapb.StoreState_Up,
-			Version: "2.0.0",
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:      3,
-			Address: "tikv3",
-			State:   metapb.StoreState_Up,
-			Version: "2.0.0",
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:      2,
-			Address: "tikv2",
-			State:   metapb.StoreState_Tombstone,
-			Version: "2.0.0",
+			Id:            2,
+			State:         metapb.StoreState_Tombstone,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
 
@@ -76,7 +75,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
 
@@ -225,17 +224,23 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(strings.Contains(string(output), "rate should be a number that > 0"), IsTrue)
 
 	// store limit <type>
-	echo := pdctl.GetEcho([]string{"-u", pdAddr, "store", "limit"})
+	args = []string{"-u", pdAddr, "store", "limit"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+
 	allAddPeerLimit := make(map[string]map[string]interface{})
-	json.Unmarshal([]byte(echo), &allAddPeerLimit)
+	json.Unmarshal([]byte(output), &allAddPeerLimit)
 	c.Assert(allAddPeerLimit["1"]["add-peer"].(float64), Equals, float64(20))
 	c.Assert(allAddPeerLimit["3"]["add-peer"].(float64), Equals, float64(20))
 	_, ok := allAddPeerLimit["2"]["add-peer"]
 	c.Assert(ok, Equals, false)
 
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "store", "limit", "remove-peer"})
+	args = []string{"-u", pdAddr, "store", "limit", "remove-peer"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+
 	allRemovePeerLimit := make(map[string]map[string]interface{})
-	json.Unmarshal([]byte(echo), &allRemovePeerLimit)
+	json.Unmarshal([]byte(output), &allRemovePeerLimit)
 	c.Assert(allRemovePeerLimit["1"]["remove-peer"].(float64), Equals, float64(20))
 	c.Assert(allRemovePeerLimit["3"]["remove-peer"].(float64), Equals, float64(25))
 	_, ok = allRemovePeerLimit["2"]["add-peer"]
@@ -275,12 +280,20 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(len([]*api.StoreInfo{storeInfo}), Equals, 1)
 
 	// It should be called after stores remove-tombstone.
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit"})
-	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit", "remove-peer"})
-	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit", "add-peer"})
-	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
+	args = []string{"-u", pdAddr, "stores", "show", "limit"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "PANIC"), IsFalse)
+
+	args = []string{"-u", pdAddr, "stores", "show", "limit", "remove-peer"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "PANIC"), IsFalse)
+
+	args = []string{"-u", pdAddr, "stores", "show", "limit", "add-peer"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "PANIC"), IsFalse)
 	// store limit-scene
 	args = []string{"-u", pdAddr, "store", "limit-scene"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)

@@ -14,6 +14,7 @@
 package checker
 
 import (
+	"context"
 	"encoding/hex"
 
 	. "github.com/pingcap/check"
@@ -34,11 +35,21 @@ type testRuleCheckerSuite struct {
 	cluster     *mockcluster.Cluster
 	ruleManager *placement.RuleManager
 	rc          *RuleChecker
+	ctx         context.Context
+	cancel      context.CancelFunc
+}
+
+func (s *testRuleCheckerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testRuleCheckerSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testRuleCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(cfg)
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.cluster.SetEnablePlacementRules(true)
 	s.ruleManager = s.cluster.RuleManager
@@ -74,6 +85,7 @@ func (s *testRuleCheckerSuite) TestAddRulePeer(c *C) {
 	op := s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "add-rule-peer")
+	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(3))
 }
 
@@ -126,6 +138,7 @@ func (s *testRuleCheckerSuite) TestFixPeer(c *C) {
 	op = s.rc.Check(r)
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "replace-rule-down-peer")
+	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	var add operator.AddLearner
 	c.Assert(op.Step(0), FitsTypeOf, add)
 	s.cluster.SetStoreUp(2)
@@ -133,6 +146,7 @@ func (s *testRuleCheckerSuite) TestFixPeer(c *C) {
 	op = s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
+	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	c.Assert(op.Step(0), FitsTypeOf, add)
 }
 

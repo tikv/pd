@@ -15,7 +15,7 @@ package api
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server"
@@ -53,7 +53,7 @@ func (s *testDiagnoseAPISuite) TestDiagnoseSlice(c *C) {
 	resp, err := testDialClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
-	buf, err := ioutil.ReadAll(resp.Body)
+	buf, err := io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	checkDiagnoseResponse(c, buf)
 }

@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"sync/atomic"
@@ -60,7 +59,7 @@ func getTestDataKey() []byte {
 func newTestEtcd(c *C) (client *clientv3.Client, cleanup func()) {
 	cfg := embed.NewConfig()
 	cfg.Name = "test_etcd"
-	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_etcd")
+	cfg.Dir, _ = os.MkdirTemp("/tmp", "test_etcd")
 	cfg.Logger = "zap"
 	pu, err := url.Parse(tempurl.Alloc())
 	c.Assert(err, IsNil)
@@ -95,10 +94,10 @@ func newTestKeyFile(c *C, key ...string) (keyFilePath string, cleanup func()) {
 	for _, k := range key {
 		testKey = k
 	}
-	tempDir, err := ioutil.TempDir("/tmp", "test_key_file")
+	tempDir, err := os.MkdirTemp("/tmp", "test_key_file")
 	c.Assert(err, IsNil)
 	keyFilePath = tempDir + "/key"
-	err = ioutil.WriteFile(keyFilePath, []byte(testKey), 0644)
+	err = os.WriteFile(keyFilePath, []byte(testKey), 0644)
 	c.Assert(err, IsNil)
 
 	cleanup = func() {
@@ -197,13 +196,7 @@ func (s *testKeyManagerSuite) TestNewKeyManagerLoadKeys(c *C) {
 	err := config.Adjust()
 	c.Assert(err, IsNil)
 	// Store initial keys in etcd.
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -284,13 +277,7 @@ func (s *testKeyManagerSuite) TestGetKey(c *C) {
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
 	// Store initial keys in etcd.
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -345,13 +332,7 @@ func (s *testKeyManagerSuite) TestLoadKeyEmpty(c *C) {
 	defer cleanupKeyFile()
 	leadership := newTestLeader(c, client)
 	// Store initial keys in etcd.
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -409,13 +390,7 @@ func (s *testKeyManagerSuite) TestWatcher(c *C) {
 	_, err = m.GetKey(456)
 	c.Assert(err, NotNil)
 	// Update keys in etcd
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -638,13 +613,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExposed(c *C) {
 		reloadEvent <- e
 	}
 	// Update keys in etcd
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -716,13 +685,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithCurrentKeyExpired(c *C) {
 		reloadEvent <- e
 	}
 	// Update keys in etcd
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -800,13 +763,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithMasterKeyChanged(c *C) {
 		reloadEvent <- e
 	}
 	// Update keys in etcd
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -883,13 +840,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipMasterKeyWithCiphertextKey(c *C) 
 		return encryption.NewCustomMasterKeyForTest(outputMasterKey, outputCiphertextKey), nil
 	}
 	// Update keys in etcd
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -954,13 +905,7 @@ func (s *testKeyManagerSuite) TestSetLeadershipWithEncryptionDisabling(c *C) {
 		reloadEvent <- e
 	}
 	// Update keys in etcd
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -1028,13 +973,7 @@ func (s *testKeyManagerSuite) TestKeyRotation(c *C) {
 		tickerEvent <- e
 	}
 	// Update keys in etcd
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -1141,13 +1080,7 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 		}
 	}
 	// Update keys in etcd
-	masterKeyMeta := &encryptionpb.MasterKey{
-		Backend: &encryptionpb.MasterKey_File{
-			File: &encryptionpb.MasterKeyFile{
-				Path: keyFile,
-			},
-		},
-	}
+	masterKeyMeta := newMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -1205,4 +1138,14 @@ func (s *testKeyManagerSuite) TestKeyRotationConflict(c *C) {
 	storedKeys, err = extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
 	c.Assert(err, IsNil)
 	c.Assert(proto.Equal(storedKeys, keys), IsTrue)
+}
+
+func newMasterKey(keyFile string) *encryptionpb.MasterKey {
+	return &encryptionpb.MasterKey{
+		Backend: &encryptionpb.MasterKey_File{
+			File: &encryptionpb.MasterKeyFile{
+				Path: keyFile,
+			},
+		},
+	}
 }

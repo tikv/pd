@@ -16,7 +16,6 @@ package client_test
 import (
 	"context"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,16 +71,16 @@ func (s *clientTLSTestSuite) TearDownSuite(c *C) {
 // when all certs are atomically replaced by directory renaming.
 // And expects server to reject client requests, and vice versa.
 func (s *clientTLSTestSuite) TestTLSReloadAtomicReplace(c *C) {
-	tmpDir, err := ioutil.TempDir(os.TempDir(), "cert-tmp")
+	tmpDir, err := os.MkdirTemp(os.TempDir(), "cert-tmp")
 	c.Assert(err, IsNil)
 	os.RemoveAll(tmpDir)
 	defer os.RemoveAll(tmpDir)
 
-	certsDir, err := ioutil.TempDir(os.TempDir(), "cert-to-load")
+	certsDir, err := os.MkdirTemp(os.TempDir(), "cert-to-load")
 	c.Assert(err, IsNil)
 	defer os.RemoveAll(certsDir)
 
-	certsDirExp, err := ioutil.TempDir(os.TempDir(), "cert-expired")
+	certsDirExp, err := os.MkdirTemp(os.TempDir(), "cert-expired")
 	c.Assert(err, IsNil)
 	defer os.RemoveAll(certsDirExp)
 
@@ -115,7 +114,7 @@ func (s *clientTLSTestSuite) TestTLSReloadAtomicReplace(c *C) {
 		c.Assert(err, IsNil)
 
 	}
-	s.testTLSReload(c, cloneFunc, replaceFunc, revertFunc, false)
+	s.testTLSReload(c, cloneFunc, replaceFunc, revertFunc)
 
 }
 
@@ -123,8 +122,7 @@ func (s *clientTLSTestSuite) testTLSReload(
 	c *C,
 	cloneFunc func() transport.TLSInfo,
 	replaceFunc func(),
-	revertFunc func(),
-	useIP bool) {
+	revertFunc func()) {
 	tlsInfo := cloneFunc()
 	// 1. start cluster with valid certs
 	clus, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) {
@@ -145,8 +143,9 @@ func (s *clientTLSTestSuite) testTLSReload(
 	c.Assert(err, IsNil)
 	clus.WaitLeader()
 
-	var endpoints []string
-	for _, s := range clus.GetServers() {
+	testServers := clus.GetServers()
+	endpoints := make([]string, 0, len(testServers))
+	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
 	// 2. concurrent client dialing while certs become expired

@@ -20,7 +20,7 @@ import (
 	. "github.com/pingcap/check"
 )
 
-func TestParser(t *testing.T) {
+func Test(t *testing.T) {
 	TestingT(t)
 }
 

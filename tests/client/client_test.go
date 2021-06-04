@@ -42,7 +42,10 @@ import (
 	"go.uber.org/goleak"
 )
 
-const tsoRequestConcurrentNumber = 10
+const (
+	tsoRequestConcurrencyNumber = 5
+	tsoRequestRound             = 30
+)
 
 func Test(t *testing.T) {
 	TestingT(t)
@@ -201,10 +204,11 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	cluster.WaitAllLeaders(c, dcLocationConfig)
 
 	var (
-		endpoints    []string
+		testServers  = cluster.GetServers()
+		endpoints    = make([]string, 0, len(testServers))
 		endpointsMap = make(map[string]string)
 	)
-	for _, s := range cluster.GetServers() {
+	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 		endpointsMap[s.GetServer().GetMemberInfo().GetName()] = s.GetConfig().AdvertiseClientUrls
 	}
@@ -275,12 +279,12 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 
 	wg := sync.WaitGroup{}
 	for _, dcLocation := range dcLocationConfig {
-		wg.Add(tsoRequestConcurrentNumber)
-		for i := 0; i < tsoRequestConcurrentNumber; i++ {
+		wg.Add(tsoRequestConcurrencyNumber)
+		for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 			go func(dc string) {
 				defer wg.Done()
 				var lastTS uint64
-				for i := 0; i < 100; i++ {
+				for i := 0; i < tsoRequestRound; i++ {
 					globalPhysical1, globalLogical1, err := cli.GetTS(context.TODO())
 					c.Assert(err, IsNil)
 					globalTS1 := tsoutil.ComposeTS(globalPhysical1, globalLogical1)
@@ -421,7 +425,7 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient2(c *C) {
 }
 
 func checkTS(c *C, cli pd.Client, lastTS uint64) uint64 {
-	for i := 0; i < 100; i++ {
+	for i := 0; i < tsoRequestRound; i++ {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
 			ts := tsoutil.ComposeTS(physical, logical)
@@ -440,8 +444,9 @@ func (s *clientTestSuite) runServer(c *C, cluster *tests.TestCluster) []string {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
-	var endpoints []string
-	for _, s := range cluster.GetServers() {
+	testServers := cluster.GetServers()
+	endpoints := make([]string, 0, len(testServers))
+	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
 	return endpoints
@@ -589,11 +594,11 @@ func bootstrapServer(c *C, header *pdpb.RequestHeader, client pdpb.PDClient) {
 
 func (s *testClientSuite) TestNormalTSO(c *C) {
 	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrentNumber)
-	for i := 0; i < tsoRequestConcurrentNumber; i++ {
+	wg.Add(tsoRequestConcurrencyNumber)
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			var lastTS uint64
-			for i := 0; i < 100; i++ {
+			for i := 0; i < tsoRequestRound; i++ {
 				physical, logical, err := s.client.GetTS(context.Background())
 				c.Assert(err, IsNil)
 				ts := tsoutil.ComposeTS(physical, logical)

@@ -17,9 +17,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
-	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/gogo/protobuf/proto"
@@ -32,46 +29,13 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tools/pd-ctl/pdctl"
-	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
-
-// InitCommand is used to initialize command.
-func InitCommand() *cobra.Command {
-	commandFlags := pdctl.CommandFlags{}
-	rootCmd := &cobra.Command{}
-	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "", "")
-	rootCmd.Flags().StringVar(&commandFlags.CAPath, "cacert", "", "")
-	rootCmd.Flags().StringVar(&commandFlags.CertPath, "cert", "", "")
-	rootCmd.Flags().StringVar(&commandFlags.KeyPath, "key", "", "")
-	rootCmd.AddCommand(
-		command.NewConfigCommand(),
-		command.NewRegionCommand(),
-		command.NewStoreCommand(),
-		command.NewStoresCommand(),
-		command.NewMemberCommand(),
-		command.NewExitCommand(),
-		command.NewLabelCommand(),
-		command.NewPingCommand(),
-		command.NewOperatorCommand(),
-		command.NewSchedulerCommand(),
-		command.NewTSOCommand(),
-		command.NewHotSpotCommand(),
-		command.NewClusterCommand(),
-		command.NewHealthCommand(),
-		command.NewLogCommand(),
-		command.NewPluginCommand(),
-		command.NewCompletionCommand(),
-	)
-	return rootCmd
-}
 
 // ExecuteCommand is used for test purpose.
 func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err error) {
 	buf := new(bytes.Buffer)
 	root.SetOutput(buf)
 	root.SetArgs(args)
-
 	err = root.Execute()
 	return buf.Bytes(), err
 }
@@ -117,21 +81,13 @@ func CheckRegionsInfo(c *check.C, output *api.RegionsInfo, expected []*core.Regi
 }
 
 // MustPutStore is used for test purpose.
-func MustPutStore(c *check.C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {
+func MustPutStore(c *check.C, svr *server.Server, store *metapb.Store) {
+	store.Address = fmt.Sprintf("tikv%d", store.GetId())
+	store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
+
 	_, err := svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
-		Store: &metapb.Store{
-			Id:      id,
-			Address: fmt.Sprintf("tikv%d", id),
-			State:   state,
-			Labels:  labels,
-			Version: versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
-		},
-	})
-	c.Assert(err, check.IsNil)
-	_, err = svr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
-		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
-		Stats:  &pdpb.StoreStats{StoreId: id},
+		Store:  store,
 	})
 	c.Assert(err, check.IsNil)
 }
@@ -153,18 +109,4 @@ func MustPutRegion(c *check.C, cluster *tests.TestCluster, regionID, storeID uin
 	err := cluster.HandleRegionHeartbeat(r)
 	c.Assert(err, check.IsNil)
 	return r
-}
-
-// GetEcho is used to get echo from stdout.
-func GetEcho(args []string) string {
-	filename := filepath.Join(os.TempDir(), "stdout")
-	old := os.Stdout
-	temp, _ := os.Create(filename)
-	os.Stdout = temp
-	pdctl.Start(args)
-	temp.Close()
-	os.Stdout = old
-	out, _ := ioutil.ReadFile(filename)
-	_ = os.Remove(filename)
-	return string(out)
 }

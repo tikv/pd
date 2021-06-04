@@ -14,7 +14,7 @@ OVERALLS := overalls
 BUILD_BIN_PATH := $(shell pwd)/bin
 GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
-SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' /bin/bash
+SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
 FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable)
@@ -165,7 +165,7 @@ test-with-cover: install-go-tools dashboard-ui
 	done
 	@$(FAILPOINT_DISABLE)
 
-check: install-go-tools check-all check-plugin errdoc check-missing-tests docker-build-test
+check: install-go-tools check-all check-plugin errdoc check-testing-t docker-build-test
 
 check-all: static lint tidy
 	@echo "checking"
@@ -200,8 +200,8 @@ docker-build-test:
 	fi
 	docker build --no-cache -t tikv/pd .
 
-check-missing-tests:
-	./scripts/check-missing-tests.sh
+check-testing-t:
+	./scripts/check-testing-t.sh
 
 simulator: export GO111MODULE=on
 simulator:

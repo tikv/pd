@@ -13,6 +13,7 @@
 package filter
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -31,7 +32,18 @@ func Test(t *testing.T) {
 
 var _ = Suite(&testFiltersSuite{})
 
-type testFiltersSuite struct{}
+type testFiltersSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testFiltersSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testFiltersSuite) TearDownTest(c *C) {
+	s.cancel()
+}
 
 func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 	labels := []string{"zone", "rack", "host"}
@@ -69,7 +81,7 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 
 func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
 	opt := config.NewTestOptions()
-	testCluster := mockcluster.NewCluster(opt)
+	testCluster := mockcluster.NewCluster(s.ctx, opt)
 	store := core.NewStoreInfoWithLabel(1, 1, map[string]string{"id": "1"})
 
 	testCases := []struct {
@@ -97,7 +109,7 @@ func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
 func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
-	testCluster := mockcluster.NewCluster(opt)
+	testCluster := mockcluster.NewCluster(s.ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone"})
 	testCluster.SetEnablePlacementRules(true)
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
@@ -184,7 +196,7 @@ func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
 
 func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 	opt := config.NewTestOptions()
-	testCluster := mockcluster.NewCluster(opt)
+	testCluster := mockcluster.NewCluster(s.ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone", "rack", "host"})
 	allStores := []struct {
 		storeID     uint64
@@ -252,7 +264,7 @@ func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
-	testCluster := mockcluster.NewCluster(opt)
+	testCluster := mockcluster.NewCluster(s.ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone"})
 	testCluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	testCluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})

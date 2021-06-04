@@ -93,6 +93,69 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(tmp, DeepEquals, storeMetasAfterHeartbeat[i])
 	}
+	hotHeartBeat := &pdpb.StoreStats{
+		StoreId:     1,
+		RegionCount: 1,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: 0,
+			EndTimestamp:   10,
+		},
+		PeerStats: []*pdpb.PeerStat{
+			{
+				RegionId:  1,
+				ReadKeys:  9999999,
+				ReadBytes: 9999999,
+			},
+		},
+	}
+	coldHeartBeat := &pdpb.StoreStats{
+		StoreId:     1,
+		RegionCount: 1,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: 0,
+			EndTimestamp:   10,
+		},
+		PeerStats: []*pdpb.PeerStat{},
+	}
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats := cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	// After cold heartbeat, we won't find region 1 peer in regionStats
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	c.Assert(storeStats[1], HasLen, 0)
+	// After hot heartbeat, we can find region 1 peer again
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	//  after several cold heartbeats, and one hot heartbeat, we also can't find region 1 peer
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 0)
+	c.Assert(storeStats[1], HasLen, 0)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 0)
+	// after 2 hot heartbeats, wo can find region 1 peer again
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
 }
 
 func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
@@ -198,7 +261,7 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 			Address:    storeInfo.GetAddress(),
 			State:      metapb.StoreState_Up,
 			Version:    storeInfo.GetVersion(),
-			DeployPath: fmt.Sprintf("test/store%d", storeID),
+			DeployPath: getTestDeployPath(storeID),
 		}
 
 		if storeInfo.IsPhysicallyDestroyed() || storeInfo.IsTombstone() {
@@ -208,7 +271,10 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 			c.Assert(cluster.PutStore(newStore), NotNil)
 		}
 	}
+}
 
+func getTestDeployPath(storeID uint64) string {
+	return fmt.Sprintf("test/store%d", storeID)
 }
 
 func (s *testClusterInfoSuite) TestUpStore(c *C) {
@@ -242,6 +308,7 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	// store 4 not exist
 	err = cluster.UpStore(4)
 	c.Assert(errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(4)), IsTrue)
+
 }
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
@@ -265,6 +332,63 @@ func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	c.Assert(cluster.RemoveStore(3, true), IsNil)
 	cluster.checkStores()
 	c.Assert(cluster.GetClusterVersion(), Equals, "5.0.0")
+}
+
+func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	newTestStores(4, "2.0.0")
+	peers := []*metapb.Peer{
+		{
+			Id:      1,
+			StoreId: 1,
+		},
+		{
+			Id:      2,
+			StoreId: 2,
+		},
+		{
+			Id:      3,
+			StoreId: 3,
+		},
+	}
+	leader := &metapb.Peer{
+		Id:      1,
+		StoreId: 1,
+	}
+	regionMeta := &metapb.Region{
+		Id:          1,
+		Peers:       peers,
+		StartKey:    []byte{byte(1)},
+		EndKey:      []byte{byte(1 + 1)},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+	}
+	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}),
+		core.SetWrittenBytes(30000*10),
+		core.SetWrittenKeys(300000*10))
+	err = cluster.processRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+	// wait HotStat to update items
+	time.Sleep(1 * time.Second)
+	stats := cluster.hotStat.RegionStats(statistics.WriteFlow, 0)
+	c.Assert(stats[1], HasLen, 1)
+	c.Assert(stats[2], HasLen, 1)
+	c.Assert(stats[3], HasLen, 1)
+	newPeer := &metapb.Peer{
+		Id:      4,
+		StoreId: 4,
+	}
+	region = region.Clone(core.WithRemoveStorePeer(2), core.WithAddPeer(newPeer))
+	err = cluster.processRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+	// wait HotStat to update items
+	time.Sleep(1 * time.Second)
+	stats = cluster.hotStat.RegionStats(statistics.WriteFlow, 0)
+	c.Assert(stats[1], HasLen, 1)
+	c.Assert(stats[2], HasLen, 0)
+	c.Assert(stats[3], HasLen, 1)
+	c.Assert(stats[4], HasLen, 1)
 }
 
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
@@ -962,7 +1086,7 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 			Address:    fmt.Sprintf("127.0.0.1:%d", i),
 			State:      metapb.StoreState_Up,
 			Version:    version,
-			DeployPath: fmt.Sprintf("test/store%d", i),
+			DeployPath: getTestDeployPath(i),
 		}
 		stores = append(stores, core.NewStoreInfo(store))
 	}
