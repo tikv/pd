@@ -622,13 +622,6 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	processRegions(regions)
 	newRegion := cluster.GetRegion(region.GetID())
 	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
-
-	// do not trace the flow changes
-	cluster.traceRegionFlow = false
-	processRegions([]*core.RegionInfo{region})
-	newRegion = cluster.GetRegion(region.GetID())
-	c.Assert(region.GetBytesRead(), Equals, uint64(0))
-	c.Assert(newRegion.GetBytesRead(), Not(Equals), uint64(0))
 }
 
 func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
