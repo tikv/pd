@@ -65,7 +65,11 @@ func (w *HotCache) CheckReadPeerSync(peer *core.PeerInfo, region *core.RegionInf
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckWriteAsync(task FlowItemTask) {
+	// discard task directly if closed
 	if w.isClosed() {
+		if !isChanClose(w.writeFlowQueue) {
+			close(w.writeFlowQueue)
+		}
 		return
 	}
 	w.writeFlowQueue <- task
@@ -73,7 +77,11 @@ func (w *HotCache) CheckWriteAsync(task FlowItemTask) {
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckReadAsync(task FlowItemTask) {
+	// discard task directly if closed
 	if w.isClosed() {
+		if !isChanClose(w.readFlowQueue) {
+			close(w.readFlowQueue)
+		}
 		return
 	}
 	w.readFlowQueue <- task
@@ -183,9 +191,6 @@ func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task Flow
 	for task := range queue {
 		runTask(task)
 	}
-	if w.isClosed() {
-		return
-	}
 }
 
 func (w *HotCache) runReadTask(task FlowItemTask) {
@@ -223,6 +228,13 @@ func (w *HotCache) isClosed() bool {
 func (w *HotCache) watchClose() {
 	<-w.ctx.Done()
 	atomic.StoreUint32(&w.closed, 1)
-	close(w.readFlowQueue)
-	close(w.writeFlowQueue)
+}
+
+func isChanClose(ch chan FlowItemTask) bool {
+	select {
+	case _, received := <-ch:
+		return !received
+	default:
+	}
+	return false
 }
