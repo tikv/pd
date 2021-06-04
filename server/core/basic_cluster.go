@@ -282,30 +282,34 @@ func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 	bc.Stores.DeleteStore(store)
 }
 
+func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
+	bc.RLock()
+	defer bc.RUnlock()
+	origin = bc.Regions.GetRegion(region.GetID())
+	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
+		overlaps = bc.Regions.GetOverlaps(region)
+	}
+	return
+}
+
 // PreCheckPutRegion checks if the region is valid to put.
 func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
-	bc.RLock()
-	origin := bc.Regions.GetRegion(region.GetID())
-	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		for _, item := range bc.Regions.GetOverlaps(region) {
-			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
-				bc.RUnlock()
-				return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
-			}
+	origin, overlaps := bc.getRelevantRegions(region)
+	for _, item := range overlaps {
+		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
+			return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
 		}
 	}
-	bc.RUnlock()
 	if origin == nil {
 		return nil, nil
 	}
+
 	r := region.GetRegionEpoch()
 	o := origin.GetRegionEpoch()
-
 	// TiKV reports term after v3.0
 	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
-
 	// Region meta is stale, return an error.
-	if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() || isTermBehind {
+	if isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
 		return origin, errRegionIsStale(region.GetMeta(), origin.GetMeta())
 	}
 
