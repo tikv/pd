@@ -13,7 +13,11 @@
 
 package statistics
 
-import "github.com/tikv/pd/server/core"
+import (
+	"context"
+
+	"github.com/tikv/pd/server/core"
+)
 
 type flowItemTaskKind uint32
 
@@ -146,6 +150,15 @@ func (t *isRegionHotTask) runTask(flow *hotPeerCache) {
 	t.ret <- flow.isRegionHotWithAnyPeers(t.region, t.minHotDegree)
 }
 
+func (t *isRegionHotTask) waitRet(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case r := <-t.ret:
+		return r
+	}
+}
+
 type collectMetricsTask struct {
 	typ  string
 	done chan struct{}
@@ -165,4 +178,13 @@ func (t *collectMetricsTask) taskType() flowItemTaskKind {
 func (t *collectMetricsTask) runTask(flow *hotPeerCache) {
 	flow.CollectMetrics(t.typ)
 	t.done <- struct{}{}
+}
+
+func (t *collectMetricsTask) waitDone(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-t.done:
+		return
+	}
 }
