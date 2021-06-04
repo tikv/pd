@@ -273,7 +273,7 @@ var (
 
 // config
 var (
-	ErrConfigItem = errors.Normalize("cannot set invalid configuration", errors.RFCCodeText("PD:filepath:ErrFilePathAbs"))
+	ErrConfigItem = errors.Normalize("cannot set invalid configuration", errors.RFCCodeText("PD:server:ErrConfiguration"))
 )
 
 // log
