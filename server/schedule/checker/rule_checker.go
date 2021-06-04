@@ -33,23 +33,21 @@ import (
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
-	cluster              opt.Cluster
-	ruleManager          *placement.RuleManager
-	name                 string
-	regionWaitingList    cache.Cache
-	offlineLeaderCounter map[uint64]uint64
-	lastReplaceOpTime    time.Time
+	cluster           opt.Cluster
+	ruleManager       *placement.RuleManager
+	name              string
+	regionWaitingList cache.Cache
+	record            *recorder
 }
 
 // NewRuleChecker creates a checker instance.
 func NewRuleChecker(cluster opt.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
 	return &RuleChecker{
-		cluster:              cluster,
-		ruleManager:          ruleManager,
-		name:                 "rule-checker",
-		regionWaitingList:    regionWaitingList,
-		offlineLeaderCounter: make(map[uint64]uint64),
-		lastReplaceOpTime:    time.Now(),
+		cluster:           cluster,
+		ruleManager:       ruleManager,
+		name:              "rule-checker",
+		regionWaitingList: regionWaitingList,
+		record:            newRecord(),
 	}
 }
 
@@ -62,7 +60,7 @@ func (c *RuleChecker) GetType() string {
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
-	c.refreshOfflineCounter()
+	c.record.refresh(c.cluster)
 	fit := c.cluster.FitRegion(region)
 	if len(fit.RuleFits) == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "fix-range").Inc()
@@ -86,26 +84,6 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 		}
 	}
 	return nil
-}
-
-// Offlie is triggered manually and only appears when the node makes some adjustments. here is a operator timeout / 2.
-var offlineCounterTTL = 5 * time.Minute
-
-func (c *RuleChecker) refreshOfflineCounter() {
-	// re-count the offlineLeaderCounter if the store is already tombstone or store is gone.
-	if len(c.offlineLeaderCounter) > 0 && time.Since(c.lastReplaceOpTime) > offlineCounterTTL {
-		needClean := false
-		for _, storeID := range c.offlineLeaderCounter {
-			store := c.cluster.GetStore(storeID)
-			if store == nil || store.IsTombstone() {
-				needClean = true
-				break
-			}
-		}
-		if needClean {
-			c.offlineLeaderCounter = make(map[uint64]uint64)
-		}
-	}
 }
 
 func (c *RuleChecker) fixRange(region *core.RegionInfo) *operator.Operator {
@@ -180,12 +158,12 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		return nil, errors.New("no store to replace peer")
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
-	//  pick the smallest leader store to avoid the Offline store be snapshot generotor bottleneck.
+	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
 	if region.GetLeader().GetId() == peer.GetId() {
 		minCount := uint64(math.MaxUint64)
 		for _, peer := range region.GetPeers() {
-			count := c.offlineLeaderCounter[peer.GetStoreId()]
+			count := c.record.getOfflineLeaderCount(peer.GetStoreId())
 			if minCount > count {
 				minCount = count
 				newLeader = peer
@@ -204,8 +182,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		return nil, err
 	}
 	if newLeader != nil {
-		c.offlineLeaderCounter[newLeader.GetStoreId()] += 1
-		c.lastReplaceOpTime = time.Now()
+		c.record.incOfflineLeaderCount(newLeader.GetStoreId())
 	}
 	op.SetPriorityLevel(core.HighPriority)
 	return op, nil
@@ -345,4 +322,45 @@ func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo 
 		}
 	}
 	return stores
+}
+
+type recorder struct {
+	offlineLeaderCounter map[uint64]uint64
+	lastUpdateTime       time.Time
+}
+
+func newRecord() *recorder {
+	return &recorder{
+		offlineLeaderCounter: make(map[uint64]uint64),
+		lastUpdateTime:       time.Now(),
+	}
+}
+
+func (o *recorder) getOfflineLeaderCount(storeID uint64) uint64 {
+	return o.offlineLeaderCounter[storeID]
+}
+
+func (o *recorder) incOfflineLeaderCount(storeID uint64) {
+	o.offlineLeaderCounter[storeID] += 1
+	o.lastUpdateTime = time.Now()
+}
+
+// Offline is triggered manually and only appears when the node makes some adjustments. here is an operator timeout / 2.
+var offlineCounterTTL = 5 * time.Minute
+
+func (o *recorder) refresh(cluster opt.Cluster) {
+	// re-count the offlineLeaderCounter if the store is already tombstone or store is gone.
+	if len(o.offlineLeaderCounter) > 0 && time.Since(o.lastUpdateTime) > offlineCounterTTL {
+		needClean := false
+		for _, storeID := range o.offlineLeaderCounter {
+			store := cluster.GetStore(storeID)
+			if store == nil || store.IsTombstone() {
+				needClean = true
+				break
+			}
+		}
+		if needClean {
+			o.offlineLeaderCounter = make(map[uint64]uint64)
+		}
+	}
 }
