@@ -576,7 +576,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	hotStat := c.hotStat
 	storage := c.storage
 	coreCluster := c.core
-	traceRegionFlow := c.traceRegionFlow
 	c.RUnlock()
 
 	origin, err := coreCluster.PreCheckPutRegion(region)
@@ -663,7 +662,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache = true
 		}
 
-		if traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
+		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
 			region.GetKeysRead() != origin.GetKeysRead()) {
