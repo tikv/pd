@@ -516,7 +516,7 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 // See issue: https://github.com/tikv/pd/issues/3705
 func (s *testReplicaCheckerSuite) TestFixDownPeer(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetLocationLabels([]string{"zone"})
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
@@ -547,7 +547,7 @@ func (s *testReplicaCheckerSuite) TestFixDownPeer(c *C) {
 // See issue: https://github.com/tikv/pd/issues/3705
 func (s *testReplicaCheckerSuite) TestFixOfflinePeer(c *C) {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.SetLocationLabels([]string{"zone"})
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
