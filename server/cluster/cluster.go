@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -119,7 +120,7 @@ type RaftCluster struct {
 	httpClient  *http.Client
 
 	replicationMode *replication.ModeManager
-	traceRegionFlow bool
+	traceRegionFlow uint32 // atomic.Bool
 
 	// It's used to manage components.
 	componentManager *component.Manager
@@ -210,7 +211,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
 	c.suspectKeyRanges = cache.NewStringTTL(c.ctx, time.Minute, 3*time.Minute)
-	c.traceRegionFlow = opt.GetPDServerConfig().TraceRegionFlow
+	atomic.StoreUint32(&c.traceRegionFlow, typeutil.BoolToUint32(opt.GetPDServerConfig().TraceRegionFlow))
 }
 
 // Start starts a cluster.
@@ -322,6 +323,7 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 		case <-ticker.C:
 			c.checkStores()
 			c.collectMetrics()
+			c.reloadPersistOptions()
 			c.coordinator.opController.PruneHistory()
 		}
 	}
@@ -658,7 +660,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache = true
 		}
 
-		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
+		if atomic.LoadUint32(&c.traceRegionFlow) != 0 && (region.GetBytesWritten() != origin.GetBytesWritten() ||
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
 			region.GetKeysRead() != origin.GetKeysRead()) {
@@ -754,6 +756,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	return nil
+}
+
+func (c *RaftCluster) reloadPersistOptions() {
+	traceRegionFlow := typeutil.BoolToUint32(c.GetOpts().GetPDServerConfig().TraceRegionFlow)
+	atomic.StoreUint32(&c.traceRegionFlow, traceRegionFlow)
 }
 
 func (c *RaftCluster) updateStoreStatusLocked(id uint64) {

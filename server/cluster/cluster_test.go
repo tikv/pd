@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -636,7 +637,7 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
 
 	// do not trace the flow changes
-	cluster.traceRegionFlow = false
+	atomic.StoreUint32(&cluster.traceRegionFlow, 0)
 	processRegions([]*core.RegionInfo{region})
 	newRegion = cluster.GetRegion(region.GetID())
 	c.Assert(region.GetBytesRead(), Equals, uint64(0))

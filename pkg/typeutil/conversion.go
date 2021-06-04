@@ -43,6 +43,14 @@ func BoolToUint64(b bool) uint64 {
 	return 0
 }
 
+// BoolToUint32 converts bool to uint32.
+func BoolToUint32(b bool) uint32 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // BoolToInt converts bool to int.
 func BoolToInt(b bool) int {
 	if b {
