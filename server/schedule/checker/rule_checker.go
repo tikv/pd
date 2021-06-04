@@ -88,13 +88,23 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	return nil
 }
 
-// Offlie is triggered manually and only appears when the node makes some adjustments. Here a long TTL is used.
-var offlineCounterTTL = 24 * time.Hour
+// Offlie is triggered manually and only appears when the node makes some adjustments. here is a operator timeout / 2.
+var offlineCounterTTL = 5 * time.Minute
 
 func (c *RuleChecker) refreshOfflineCounter() {
-	// gc the offlineLeaderCounter if there no event for a long time.
+	// re-count the offlineLeaderCounter if the store is already tombstone or store is gone.
 	if len(c.offlineLeaderCounter) > 0 && time.Since(c.lastReplaceOpTime) > offlineCounterTTL {
-		c.offlineLeaderCounter = make(map[uint64]uint64)
+		needClean := false
+		for _, storeID := range c.offlineLeaderCounter {
+			store := c.cluster.GetStore(storeID)
+			if store == nil || store.IsTombstone() {
+				needClean = true
+				break
+			}
+		}
+		if needClean {
+			c.offlineLeaderCounter = make(map[uint64]uint64)
+		}
 	}
 }
 
