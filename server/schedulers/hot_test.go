@@ -410,6 +410,39 @@ func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
 	}
 }
 
+func (s *testHotWriteRegionSchedulerSuite) TestCheckHot(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.AddRegionStore(4, 20)
+	tc.AddRegionStore(5, 20)
+
+	tc.UpdateStorageWrittenStats(1, 10.5*MB*statistics.StoreHeartBeatReportInterval, 10.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 10.5*MB*statistics.StoreHeartBeatReportInterval, 10.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 10.5*MB*statistics.StoreHeartBeatReportInterval, 10.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 9.5*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+
+	addRegionInfo(tc, write, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 90, 0.5 * MB},       // no hot
+		{1, []uint64{2, 1, 3}, 90, 0.5 * MB},       // no hot
+		{2, []uint64{3, 2, 1}, 0.5 * MB, 0.5 * MB}, // byteDecRatio is greater than greatDecRatio
+	})
+
+	c.Check(hb.Schedule(tc), HasLen, 0)
+}
+
 func (s *testHotWriteRegionSchedulerSuite) TestLeader(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1231,6 +1264,59 @@ func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
 		} else {
 			c.Check(item.IsNeedDelete(), IsFalse)
 		}
+	}
+}
+
+func (s *testHotCacheSuite) TestSortHotPeer(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetMaxReplicas(3)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
+	c.Assert(err, IsNil)
+	hb := sche.(*hotScheduler)
+	leaderSolver := newBalanceSolver(hb, tc, read, transferLeader)
+
+	hotPeers := []*statistics.HotPeerStat{{
+		RegionID: 1,
+		Loads: []float64{
+			statistics.RegionReadBytes: 10,
+			statistics.RegionReadKeys:  1,
+		},
+	}, {
+		RegionID: 2,
+		Loads: []float64{
+			statistics.RegionReadBytes: 1,
+			statistics.RegionReadKeys:  10,
+		},
+	}, {
+		RegionID: 3,
+		Loads: []float64{
+			statistics.RegionReadBytes: 5,
+			statistics.RegionReadKeys:  6,
+		},
+	}}
+
+	u := leaderSolver.sortHotPeers(hotPeers, 1)
+	checkSortResult(c, []uint64{1}, u)
+
+	u = leaderSolver.sortHotPeers(hotPeers, 2)
+	checkSortResult(c, []uint64{1, 2}, u)
+}
+
+func checkSortResult(c *C, regions []uint64, hotPeers map[*statistics.HotPeerStat]struct{}) {
+	c.Assert(len(regions), Equals, len(hotPeers))
+	for _, region := range regions {
+		in := false
+		for hotPeer := range hotPeers {
+			if hotPeer.RegionID == region {
+				in = true
+				break
+			}
+		}
+		c.Assert(in, IsTrue)
 	}
 }
 

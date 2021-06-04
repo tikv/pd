@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -227,6 +228,7 @@ const (
 
 	defaultUseRegionStorage = true
 	defaultTraceRegionFlow  = true
+	defaultFlowRoundByDigit = 3
 	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultKeyType          = "table"
 
@@ -322,6 +324,12 @@ func adjustUint64(v *uint64, defValue uint64) {
 }
 
 func adjustInt64(v *int64, defValue int64) {
+	if *v == 0 {
+		*v = defValue
+	}
+}
+
+func adjustInt(v *int, defValue int) {
 	if *v == 0 {
 		*v = defValue
 	}
@@ -1069,8 +1077,11 @@ type PDServerConfig struct {
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
-	// TraceRegionFlow the option to update flow information of regions
-	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
+	// TraceRegionFlow the option to update flow information of regions.
+	// WARN: TraceRegionFlow is deprecated.
+	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
+	// FlowRoundByDigit used to discretization processing flow information.
+	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1090,7 +1101,36 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("trace-region-flow") {
 		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
+	if !meta.IsDefined("flow-round-by-digit") {
+		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
+	}
+	c.migrateConfigurationFromFile(meta)
 	return c.Validate()
+}
+
+func (c *PDServerConfig) migrateConfigurationFromFile(meta *configMetaData) error {
+	oldName, newName := "trace-region-flow", "flow-round-by-digit"
+	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
+	switch {
+	case defineOld && defineNew:
+		if c.TraceRegionFlow && (c.FlowRoundByDigit == defaultFlowRoundByDigit) {
+			return errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
+		}
+	case defineOld && !defineNew:
+		if !c.TraceRegionFlow {
+			c.FlowRoundByDigit = math.MaxInt8
+		}
+	}
+	return nil
+}
+
+// MigrateDeprecatedFlags updates new flags according to deprecated flags.
+func (c *PDServerConfig) MigrateDeprecatedFlags() {
+	if !c.TraceRegionFlow {
+		c.FlowRoundByDigit = math.MaxInt8
+	}
+	// json omity the false. next time will not persist to the kv.
+	c.TraceRegionFlow = false
 }
 
 // Clone returns a cloned PD server config.
@@ -1110,6 +1150,9 @@ func (c *PDServerConfig) Validate() error {
 		if err := ValidateURLWithScheme(c.DashboardAddress); err != nil {
 			return err
 		}
+	}
+	if c.FlowRoundByDigit < 0 {
+		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
 	}
 
 	return nil

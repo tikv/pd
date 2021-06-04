@@ -629,6 +629,15 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		return nret
 	}
 
+	union := bs.sortHotPeers(ret, maxPeerNum)
+	ret = make([]*statistics.HotPeerStat, 0, len(union))
+	for peer := range union {
+		ret = appendItem(ret, peer)
+	}
+	return ret
+}
+
+func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum int) map[*statistics.HotPeerStat]struct{} {
 	byteSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(byteSort, ret)
 	sort.Slice(byteSort, func(i, j int) bool {
@@ -639,7 +648,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	copy(keySort, ret)
 	sort.Slice(keySort, func(i, j int) bool {
 		k := getRegionStatKind(bs.rwTy, statistics.KeyDim)
-		return byteSort[i].GetLoad(k) > byteSort[j].GetLoad(k)
+		return keySort[i].GetLoad(k) > keySort[j].GetLoad(k)
 	})
 
 	union := make(map[*statistics.HotPeerStat]struct{}, maxPeerNum)
@@ -652,7 +661,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 				break
 			}
 		}
-		for len(keySort) > 0 {
+		for len(union) < maxPeerNum && len(keySort) > 0 {
 			peer := keySort[0]
 			keySort = keySort[1:]
 			if _, ok := union[peer]; !ok {
@@ -661,11 +670,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 			}
 		}
 	}
-	ret = make([]*statistics.HotPeerStat, 0, len(union))
-	for peer := range union {
-		ret = appendItem(ret, peer)
-	}
-	return ret
+	return union
 }
 
 // isRegionAvailable checks whether the given region is not available to schedule.
@@ -817,7 +822,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			dstRate := dstLd.Loads[dim]
 			peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, dim))
 			decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
-			isHot := peerRate >= bs.sche.conf.GetMinHotKeyRate()
+			isHot := peerRate >= bs.getMinRate(dim)
 			return isHot, decRatio
 		}
 		keyHot, keyDecRatio := checkHot(statistics.KeyDim)
@@ -842,6 +847,16 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		zap.Uint64("to-store-id", bs.cur.dstStoreID),
 		zap.Int64("rank", rank))
 	bs.cur.progressiveRank = rank
+}
+
+func (bs *balanceSolver) getMinRate(dim int) float64 {
+	switch dim {
+	case statistics.KeyDim:
+		return bs.sche.conf.GetMinHotKeyRate()
+	case statistics.ByteDim:
+		return bs.sche.conf.GetMinHotByteRate()
+	}
+	return -1
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.

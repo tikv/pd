@@ -512,20 +512,8 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 
-		// Change keys written.
-		region = region.Clone(core.SetWrittenKeys(240))
-		regions[i] = region
-		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
-
 		// Change bytes read.
 		region = region.Clone(core.SetReadBytes(1080000))
-		regions[i] = region
-		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
-
-		// Change keys read.
-		region = region.Clone(core.SetReadKeys(1080))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
@@ -634,13 +622,6 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	processRegions(regions)
 	newRegion := cluster.GetRegion(region.GetID())
 	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
-
-	// do not trace the flow changes
-	cluster.traceRegionFlow = false
-	processRegions([]*core.RegionInfo{region})
-	newRegion = cluster.GetRegion(region.GetID())
-	c.Assert(region.GetBytesRead(), Equals, uint64(0))
-	c.Assert(newRegion.GetBytesRead(), Not(Equals), uint64(0))
 }
 
 func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {

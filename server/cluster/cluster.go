@@ -555,8 +555,13 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 				zap.Uint64("store-id", storeID))
 			continue
 		}
-		peerInfo := core.NewPeerInfo(peer, 0, 0,
-			peerStat.GetReadBytes(), peerStat.GetReadKeys(), interval)
+		loads := []float64{
+			statistics.RegionReadBytes:  float64(peerStat.GetReadBytes()),
+			statistics.RegionReadKeys:   float64(peerStat.GetReadKeys()),
+			statistics.RegionWriteBytes: 0,
+			statistics.RegionWriteKeys:  0,
+		}
+		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		item := statistics.NewPeerInfoItem(peerInfo, region)
 		c.hotStat.CheckReadAsync(item)
 	}
@@ -588,10 +593,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer,
-			region.GetBytesWritten(), region.GetKeysWritten(),
-			0, 0,
-			interval)
+		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
 		item := statistics.NewPeerInfoItem(peerInfo, region)
 		c.hotStat.CheckWriteAsync(item)
 	}
@@ -655,11 +657,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetApproximateKeys() != origin.GetApproximateKeys() {
 			saveCache = true
 		}
-
-		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
-			region.GetBytesRead() != origin.GetBytesRead() ||
-			region.GetKeysWritten() != origin.GetKeysWritten() ||
-			region.GetKeysRead() != origin.GetKeysRead()) {
+		// Once flow has changed, will update the cache.
+		// Because keys and bytes are strongly related, only bytes are judged.
+		if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
+			region.GetRoundBytesRead() != origin.GetRoundBytesRead() {
 			saveCache, needSync = true, true
 		}
 
