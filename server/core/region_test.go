@@ -415,7 +415,7 @@ func BenchmarkRandomRegion(b *testing.B) {
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
 		}, peer)
-		regions.AddRegion(region)
+		regions.SetRegion(region)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -468,6 +468,6 @@ func BenchmarkAddRegion(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		regions.AddRegion(items[i])
+		regions.SetRegion(items[i])
 	}
 }
