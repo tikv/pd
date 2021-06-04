@@ -456,10 +456,10 @@ func (rm regionMap) Get(id uint64) *regionItem {
 	return rm[id]
 }
 
-// Add uses RegionInfo to generate a new regionItem.
+// AddNew uses RegionInfo to generate a new regionItem.
 // If the regionItem already exists, it will be overwritten.
 // Note: Do not use this function when you only need to update the RegionInfo and do not need a new regionItem.
-func (rm regionMap) Add(region *RegionInfo) *regionItem {
+func (rm regionMap) AddNew(region *RegionInfo) *regionItem {
 	item := &regionItem{region: region}
 	rm[region.GetID()] = item
 	return item
@@ -572,7 +572,7 @@ func (r *RegionsInfo) addRegion(item *regionItem, region *RegionInfo, rangeChang
 	var overlaps []*RegionInfo
 	var origin *RegionInfo
 	if item == nil {
-		item = r.regions.Add(region)
+		item = r.regions.AddNew(region)
 	} else {
 		origin = item.region
 		item.region = region

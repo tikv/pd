@@ -162,14 +162,14 @@ type testRegionMapSuite struct{}
 func (s *testRegionMapSuite) TestRegionMap(c *C) {
 	rm := newRegionMap()
 	s.check(c, rm)
-	rm.Add(s.regionInfo(1))
+	rm.AddNew(s.regionInfo(1))
 	s.check(c, rm, 1)
 
-	rm.Add(s.regionInfo(2))
-	rm.Add(s.regionInfo(3))
+	rm.AddNew(s.regionInfo(2))
+	rm.AddNew(s.regionInfo(3))
 	s.check(c, rm, 1, 2, 3)
 
-	rm.Add(s.regionInfo(3))
+	rm.AddNew(s.regionInfo(3))
 	rm.Delete(4)
 	s.check(c, rm, 1, 2, 3)
 
@@ -177,7 +177,7 @@ func (s *testRegionMapSuite) TestRegionMap(c *C) {
 	rm.Delete(1)
 	s.check(c, rm, 2)
 
-	rm.Add(s.regionInfo(3))
+	rm.AddNew(s.regionInfo(3))
 	s.check(c, rm, 2, 3)
 }
 
