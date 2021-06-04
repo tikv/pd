@@ -178,7 +178,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	)
 	for i := 0; i < maxRetryCount; i++ {
 		// TODO: add a switch to control whether to enable the MaxTSO estimation.
-		// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT if enableGlobalTSOEstimation.
+		// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT.
 		estimatedMaxTSO, shouldRetry, err = gta.estimateMaxTS(count, suffixBits)
 		if err != nil {
 			return pdpb.Timestamp{}, err

@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -53,7 +54,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	pdAddr := cluster.GetConfig().GetClientURL()
 	c.Assert(err, IsNil)
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 	svr := cluster.GetServer("pd2")
 	id := svr.GetServerID()
 	name := svr.GetServer().Name()

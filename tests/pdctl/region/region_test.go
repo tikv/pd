@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -60,8 +61,10 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 
-	echo := pdctl.GetEcho([]string{"-u", url, "region", "key", "--format=raw", " "})
-	c.Assert(strings.Contains(echo, "unknown flag"), IsFalse)
+	cmd := pdctlCmd.GetRootCmd()
+	output, e := pdctl.ExecuteCommand(cmd, "-u", url, "region", "key", "--format=raw", " ")
+	c.Assert(e, IsNil)
+	c.Assert(strings.Contains(string(output), "unknown flag"), IsFalse)
 }
 
 func (s *regionTestSuite) TestRegion(c *C) {
@@ -73,7 +76,7 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
 		Id:            1,
@@ -150,31 +153,31 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
 		output, e := pdctl.ExecuteCommand(cmd, args...)
 		c.Assert(e, IsNil)
-		regionsInfo := api.RegionsInfo{}
-		c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
-		pdctl.CheckRegionsInfo(c, regionsInfo, testCase.expect)
+		regions := &api.RegionsInfo{}
+		c.Assert(json.Unmarshal(output, regions), IsNil)
+		pdctl.CheckRegionsInfo(c, regions, testCase.expect)
 	}
 
 	var testRegionCases = []struct {
 		args   []string
-		expect *api.RegionInfo
+		expect *core.RegionInfo
 	}{
 		// region <region_id> command
-		{[]string{"region", "1"}, api.NewRegionInfo(leaderServer.GetRegionInfoByID(1))},
+		{[]string{"region", "1"}, leaderServer.GetRegionInfoByID(1)},
 		// region key --format=raw <key> command
-		{[]string{"region", "key", "--format=raw", "b"}, api.NewRegionInfo(r2)},
+		{[]string{"region", "key", "--format=raw", "b"}, r2},
 		// region key --format=hex <key> command
-		{[]string{"region", "key", "--format=hex", "62"}, api.NewRegionInfo(r2)},
+		{[]string{"region", "key", "--format=hex", "62"}, r2},
 		// issue #2351
-		{[]string{"region", "key", "--format=hex", "622f62"}, api.NewRegionInfo(r2)},
+		{[]string{"region", "key", "--format=hex", "622f62"}, r2},
 	}
 
 	for _, testCase := range testRegionCases {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
 		output, e := pdctl.ExecuteCommand(cmd, args...)
 		c.Assert(e, IsNil)
-		regionInfo := api.RegionInfo{}
-		c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
-		c.Assert(&regionInfo, DeepEquals, testCase.expect)
+		region := &api.RegionInfo{}
+		c.Assert(json.Unmarshal(output, region), IsNil)
+		pdctl.CheckRegionInfo(c, region, testCase.expect)
 	}
 }

@@ -128,6 +128,11 @@ func (mc *Cluster) SetLocationLabels(v []string) {
 	mc.updateReplicationConfig(func(r *config.ReplicationConfig) { r.LocationLabels = v })
 }
 
+// SetIsolationLevel updates the IsolationLevel configuration.
+func (mc *Cluster) SetIsolationLevel(v string) {
+	mc.updateReplicationConfig(func(r *config.ReplicationConfig) { r.IsolationLevel = v })
+}
+
 func (mc *Cluster) updateScheduleConfig(f func(*config.ScheduleConfig)) {
 	s := mc.GetScheduleConfig().Clone()
 	f(s)

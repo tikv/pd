@@ -18,6 +18,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -29,7 +30,7 @@ var _ = Suite(&completionTestSuite{})
 type completionTestSuite struct{}
 
 func (s *completionTestSuite) TestCompletion(c *C) {
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
 	// completion command
 	args := []string{"completion", "bash"}

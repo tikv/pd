@@ -22,6 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -37,7 +38,7 @@ func (s *tsoTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *tsoTestSuite) TestTSO(c *C) {
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
 	const (
 		physicalShiftBits = 18
