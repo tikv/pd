@@ -660,10 +660,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache = true
 		}
 
-		if atomic.LoadUint32(&c.traceRegionFlow) != 0 && (region.GetBytesWritten() != origin.GetBytesWritten() ||
+		if (region.GetBytesWritten() != origin.GetBytesWritten() ||
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
-			region.GetKeysRead() != origin.GetKeysRead()) {
+			region.GetKeysRead() != origin.GetKeysRead()) &&
+			atomic.LoadUint32(&c.traceRegionFlow) != 0 {
 			saveCache, needSync = true, true
 		}
 
