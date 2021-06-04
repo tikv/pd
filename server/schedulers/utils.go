@@ -398,19 +398,55 @@ type storeLoadDetail struct {
 }
 
 func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
-	peers := make([]statistics.HotPeerStat, 0, len(li.HotPeers))
 	totalLoads := make([]float64, statistics.RegionStatCount)
+	if len(li.HotPeers) == 0 {
+		return &statistics.HotPeersStat{
+			TotalLoads:     totalLoads,
+			TotalBytesRate: 0.0,
+			TotalKeysRate:  0.0,
+			Count:          0,
+			Stats:          make([]statistics.HotPeerStatShow, 0),
+		}
+	}
+	kind := write
+	if li.HotPeers[0].Kind == statistics.ReadFlow {
+		kind = read
+	}
+
+	peers := make([]statistics.HotPeerStatShow, 0, len(li.HotPeers))
 	for _, peer := range li.HotPeers {
 		if peer.HotDegree > 0 {
-			peers = append(peers, *peer.Clone())
+			peers = append(peers, toHotPeerStatShow(peer, kind))
 			for i := range totalLoads {
 				totalLoads[i] += peer.GetLoad(statistics.RegionStatKind(i))
 			}
 		}
 	}
+
+	b, k := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim)
+	byteRate := totalLoads[b]
+	keyRate := totalLoads[k]
+
 	return &statistics.HotPeersStat{
-		TotalLoads: totalLoads,
-		Count:      len(peers),
-		Stats:      peers,
+		TotalLoads:     totalLoads,
+		TotalBytesRate: byteRate,
+		TotalKeysRate:  keyRate,
+		Count:          len(peers),
+		Stats:          peers,
+	}
+}
+
+func toHotPeerStatShow(p *statistics.HotPeerStat, kind rwType) statistics.HotPeerStatShow {
+	b, k := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim)
+	byteRate := p.Loads[b]
+	keyRate := p.Loads[k]
+	return statistics.HotPeerStatShow{
+		StoreID:        p.StoreID,
+		RegionID:       p.RegionID,
+		HotDegree:      p.HotDegree,
+		ByteRate:       byteRate,
+		KeyRate:        keyRate,
+		AntiCount:      p.AntiCount,
+		LastUpdateTime: p.LastUpdateTime,
 	}
 }

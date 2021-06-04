@@ -151,7 +151,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 // The peer's store may in Offline or Down, need to be replace.
 func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *placement.RuleFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
 	ruleStores := c.getRuleFitStores(rf)
-	store := c.strategy(region, rf.Rule).SelectStoreToReplace(ruleStores, peer.GetStoreId())
+	store := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
 		c.regionWaitingList.Put(region.GetID(), nil)

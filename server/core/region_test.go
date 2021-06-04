@@ -15,6 +15,7 @@ package core
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -155,15 +156,34 @@ func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 	}
 }
 
+func (s *testRegionInfoSuite) TestRegionRoundingFlow(c *C) {
+	testcases := []struct {
+		flow   uint64
+		digit  int
+		expect uint64
+	}{
+		{10, 0, 10},
+		{13, 1, 10},
+		{11807, 3, 12000},
+		{252623, 4, 250000},
+		{258623, 4, 260000},
+		{258623, 64, 0},
+		{252623, math.MaxInt64, 0},
+		{252623, math.MinInt64, 252623},
+	}
+	for _, t := range testcases {
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, WithFlowRoundByDigit(t.digit))
+		r.readBytes = t.flow
+		r.writtenBytes = t.flow
+		c.Assert(r.GetRoundBytesRead(), Equals, t.expect)
+	}
+}
+
 var _ = Suite(&testRegionMapSuite{})
 
 type testRegionMapSuite struct{}
 
 func (s *testRegionMapSuite) TestRegionMap(c *C) {
-	var empty *regionMap
-	c.Assert(empty.Len(), Equals, 0)
-	c.Assert(empty.Get(1), IsNil)
-
 	rm := newRegionMap()
 	s.check(c, rm)
 	rm.Put(s.regionInfo(1))
@@ -195,7 +215,7 @@ func (s *testRegionMapSuite) regionInfo(id uint64) *RegionInfo {
 	}
 }
 
-func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
+func (s *testRegionMapSuite) check(c *C, rm regionMap, ids ...uint64) {
 	// Check Get.
 	for _, id := range ids {
 		c.Assert(rm.Get(id).GetID(), Equals, id)
@@ -208,16 +228,10 @@ func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
 		expect[id] = struct{}{}
 	}
 	set1 := make(map[uint64]struct{})
-	for _, r := range rm.m {
+	for _, r := range rm {
 		set1[r.GetID()] = struct{}{}
 	}
 	c.Assert(set1, DeepEquals, expect)
-	// Check region size.
-	var total int64
-	for _, id := range ids {
-		total += int64(id)
-	}
-	c.Assert(rm.TotalSize(), Equals, total)
 }
 
 var _ = Suite(&testRegionKey{})
@@ -325,8 +339,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	c.Assert(regions.tree.length(), Equals, 96)
 	c.Assert(len(regions.GetRegions()), Equals, 96)
 	c.Assert(regions.GetRegion(201), NotNil)
-	c.Assert(regions.regions.totalKeys, Equals, int64(20))
-	c.Assert(regions.regions.totalSize, Equals, int64(30))
+	c.Assert(regions.tree.TotalSize(), Equals, int64(30))
 }
 
 func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {

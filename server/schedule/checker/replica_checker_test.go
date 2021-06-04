@@ -523,3 +523,62 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	tc.SetEnableReplaceOfflineReplica(false)
 	c.Assert(rc.Check(region), IsNil)
 }
+
+// See issue: https://github.com/tikv/pd/issues/3705
+func (s *testReplicaCheckerSuite) TestFixDownPeer(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetLocationLabels([]string{"zone"})
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
+	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	region := tc.GetRegion(1)
+	c.Assert(rc.Check(region), IsNil)
+
+	tc.SetStoreDown(4)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{Peer: region.GetStorePeer(4), DownSeconds: 6000},
+	}))
+	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 5)
+
+	tc.SetStoreDown(5)
+	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 2)
+
+	tc.SetIsolationLevel("zone")
+	c.Assert(rc.Check(region), IsNil)
+}
+
+// See issue: https://github.com/tikv/pd/issues/3705
+func (s *testReplicaCheckerSuite) TestFixOfflinePeer(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetLocationLabels([]string{"zone"})
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
+	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	region := tc.GetRegion(1)
+	c.Assert(rc.Check(region), IsNil)
+
+	tc.SetStoreOffline(4)
+	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 5)
+
+	tc.SetStoreOffline(5)
+	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 2)
+
+	tc.SetIsolationLevel("zone")
+	c.Assert(rc.Check(region), IsNil)
+}

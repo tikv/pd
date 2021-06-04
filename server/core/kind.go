@@ -129,11 +129,3 @@ func StringToKeyType(input string) KeyType {
 		panic("invalid key type: " + input)
 	}
 }
-
-// FlowStat indicates the stats of the flow
-type FlowStat interface {
-	GetKeysWritten() uint64
-	GetBytesWritten() uint64
-	GetBytesRead() uint64
-	GetKeysRead() uint64
-}
