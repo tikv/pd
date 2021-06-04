@@ -629,6 +629,15 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		return nret
 	}
 
+	union := bs.sortHotPeers(ret, maxPeerNum)
+	ret = make([]*statistics.HotPeerStat, 0, len(union))
+	for peer := range union {
+		ret = appendItem(ret, peer)
+	}
+	return ret
+}
+
+func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum int) map[*statistics.HotPeerStat]struct{} {
 	byteSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(byteSort, ret)
 	sort.Slice(byteSort, func(i, j int) bool {
@@ -652,7 +661,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 				break
 			}
 		}
-		for len(keySort) > 0 {
+		for len(union) < maxPeerNum && len(keySort) > 0 {
 			peer := keySort[0]
 			keySort = keySort[1:]
 			if _, ok := union[peer]; !ok {
@@ -661,11 +670,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 			}
 		}
 	}
-	ret = make([]*statistics.HotPeerStat, 0, len(union))
-	for peer := range union {
-		ret = appendItem(ret, peer)
-	}
-	return ret
+	return union
 }
 
 // isRegionAvailable checks whether the given region is not available to schedule.
