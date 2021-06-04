@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 
 	// Register schedulers.
 	_ "github.com/tikv/pd/server/schedulers"
@@ -135,7 +136,7 @@ func (s *dashboardTestSuite) testDashboard(c *C, internalProxy bool) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
 	cluster.WaitLeader()
 	servers := cluster.GetServers()
