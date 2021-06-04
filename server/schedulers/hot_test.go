@@ -1268,47 +1268,42 @@ func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
 }
 
 func (s *testHotCacheSuite) TestSortHotPeer(c *C) {
-	ctx, _ := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
-	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
 	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 	leaderSolver := newBalanceSolver(hb, tc, read, transferLeader)
 
-	hotPeers := []*statistics.HotPeerStat{
-		&statistics.HotPeerStat{
-			RegionID: 1,
-			Loads: []float64{
-				statistics.RegionReadBytes: 10,
-				statistics.RegionReadKeys:  1,
-			},
+	hotPeers := []*statistics.HotPeerStat{{
+		RegionID: 1,
+		Loads: []float64{
+			statistics.RegionReadBytes: 10,
+			statistics.RegionReadKeys:  1,
 		},
-		&statistics.HotPeerStat{
-			RegionID: 2,
-			Loads: []float64{
-				statistics.RegionReadBytes: 1,
-				statistics.RegionReadKeys:  10,
-			},
+	}, {
+		RegionID: 2,
+		Loads: []float64{
+			statistics.RegionReadBytes: 1,
+			statistics.RegionReadKeys:  10,
 		},
-		&statistics.HotPeerStat{
-			RegionID: 3,
-			Loads: []float64{
-				statistics.RegionReadBytes: 5,
-				statistics.RegionReadKeys:  6,
-			},
+	}, {
+		RegionID: 3,
+		Loads: []float64{
+			statistics.RegionReadBytes: 5,
+			statistics.RegionReadKeys:  6,
 		},
-	}
+	}}
 
 	u := leaderSolver.sortHotPeers(hotPeers, 1)
 	checkSortResult(c, []uint64{1}, u)
 
 	u = leaderSolver.sortHotPeers(hotPeers, 2)
 	checkSortResult(c, []uint64{1, 2}, u)
-
 }
 
 func checkSortResult(c *C, regions []uint64, hotPeers map[*statistics.HotPeerStat]struct{}) {
