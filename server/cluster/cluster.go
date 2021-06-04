@@ -1581,8 +1581,9 @@ func (checker *prepareChecker) collect(region *core.RegionInfo) {
 // GetHotWriteRegions gets hot write regions' info.
 func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
 	c.RLock()
-	hotWriteRegions := c.coordinator.getHotWriteRegions()
+	co := c.coordinator
 	c.RUnlock()
+	hotWriteRegions := co.getHotWriteRegions()
 	if len(storeIDs) > 0 {
 		hotWriteRegions = getHotRegionsByStoreIDs(hotWriteRegions, storeIDs...)
 	}
@@ -1592,8 +1593,9 @@ func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHo
 // GetHotReadRegions gets hot read regions' info.
 func (c *RaftCluster) GetHotReadRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
 	c.RLock()
-	hotReadRegions := c.coordinator.getHotReadRegions()
+	co := c.coordinator
 	c.RUnlock()
+	hotReadRegions := co.getHotReadRegions()
 	if len(storeIDs) > 0 {
 		hotReadRegions = getHotRegionsByStoreIDs(hotReadRegions, storeIDs...)
 	}
