@@ -575,8 +575,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
 	hotStat := c.hotStat
 	storage := c.storage
-	origin, err := c.core.PreCheckPutRegion(region)
+	coreCluster := c.core
+	traceRegionFlow := c.traceRegionFlow
 	c.RUnlock()
+
+	origin, err := coreCluster.PreCheckPutRegion(region)
 	if err != nil {
 		return err
 	}
@@ -660,7 +663,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache = true
 		}
 
-		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
+		if traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
 			region.GetKeysRead() != origin.GetKeysRead()) {
@@ -724,6 +727,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
+
+	changedRegions := c.changedRegions
+
 	c.Unlock()
 
 	if storage != nil {
@@ -752,7 +758,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 	if saveKV || needSync {
 		select {
-		case c.changedRegions <- region:
+		case changedRegions <- region:
 		default:
 		}
 	}
