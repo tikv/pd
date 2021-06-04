@@ -551,6 +551,11 @@ error = '''
 client url empty
 '''
 
+["PD:server:ErrConfiguration"]
+error = '''
+cannot set invalid configuration
+'''
+
 ["PD:server:ErrLeaderNil"]
 error = '''
 leader is nil
