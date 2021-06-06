@@ -58,8 +58,15 @@ func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) 
 	}
 }
 
+// CheckRegionInfo is used to check the test results.
+func CheckRegionInfo(c *check.C, output *api.RegionInfo, expected *core.RegionInfo) {
+	region := api.NewRegionInfo(expected)
+	output.Adjust()
+	c.Assert(output, check.DeepEquals, region)
+}
+
 // CheckRegionsInfo is used to check the test results.
-func CheckRegionsInfo(c *check.C, output api.RegionsInfo, expected []*core.RegionInfo) {
+func CheckRegionsInfo(c *check.C, output *api.RegionsInfo, expected []*core.RegionInfo) {
 	c.Assert(output.Count, check.Equals, len(expected))
 	got := output.Regions
 	sort.Slice(got, func(i, j int) bool {
@@ -69,7 +76,7 @@ func CheckRegionsInfo(c *check.C, output api.RegionsInfo, expected []*core.Regio
 		return expected[i].GetID() < expected[j].GetID()
 	})
 	for i, region := range expected {
-		c.Assert(api.NewRegionInfo(region), check.DeepEquals, got[i])
+		CheckRegionInfo(c, &got[i], region)
 	}
 }
 

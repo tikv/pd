@@ -512,20 +512,8 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 
-		// Change keys written.
-		region = region.Clone(core.SetWrittenKeys(240))
-		regions[i] = region
-		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
-
 		// Change bytes read.
 		region = region.Clone(core.SetReadBytes(1080000))
-		regions[i] = region
-		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
-
-		// Change keys read.
-		region = region.Clone(core.SetReadKeys(1080))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
@@ -634,13 +622,6 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	processRegions(regions)
 	newRegion := cluster.GetRegion(region.GetID())
 	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
-
-	// do not trace the flow changes
-	cluster.traceRegionFlow = false
-	processRegions([]*core.RegionInfo{region})
-	newRegion = cluster.GetRegion(region.GetID())
-	c.Assert(region.GetBytesRead(), Equals, uint64(0))
-	c.Assert(newRegion.GetBytesRead(), Not(Equals), uint64(0))
 }
 
 func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
@@ -926,7 +907,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		c.Assert(cache.SearchRegion(regionKey), IsNil)
 		checkRegions(c, cache, regions[0:i])
 
-		cache.AddRegion(region)
+		cache.SetRegion(region)
 		checkRegion(c, cache.GetRegion(i), region)
 		checkRegion(c, cache.SearchRegion(regionKey), region)
 		checkRegions(c, cache, regions[0:(i+1)])
@@ -952,7 +933,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		// Reset leader to peer 0.
 		newRegion = region.Clone(core.WithLeader(region.GetPeers()[0]))
 		regions[i] = newRegion
-		cache.AddRegion(newRegion)
+		cache.SetRegion(newRegion)
 		checkRegion(c, cache.GetRegion(i), newRegion)
 		checkRegions(c, cache, regions[0:(i+1)])
 		checkRegion(c, cache.SearchRegion(regionKey), newRegion)
@@ -971,7 +952,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// check overlaps
 	// clone it otherwise there are two items with the same key in the tree
 	overlapRegion := regions[n-1].Clone(core.WithStartKey(regions[n-2].GetStartKey()))
-	cache.AddRegion(overlapRegion)
+	cache.SetRegion(overlapRegion)
 	c.Assert(cache.GetRegion(n-2), IsNil)
 	c.Assert(cache.GetRegion(n-1), NotNil)
 
