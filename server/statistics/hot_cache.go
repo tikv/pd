@@ -22,7 +22,7 @@ import (
 // only turned off by the simulator and the test.
 var Denoising = true
 
-const queueCap = 5000
+const queueCap = 20000
 
 // HotCache is a cache hold hot regions.
 type HotCache struct {
@@ -60,14 +60,23 @@ func (w *HotCache) CheckReadPeerSync(peer *core.PeerInfo, region *core.RegionInf
 }
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
-func (w *HotCache) CheckWriteAsync(task FlowItemTask) {
-	w.writeFlowQueue <- task
-
+func (w *HotCache) CheckWriteAsync(task FlowItemTask) bool {
+	select {
+	case w.writeFlowQueue <- task:
+		return true
+	default:
+		return false
+	}
 }
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
-func (w *HotCache) CheckReadAsync(task FlowItemTask) {
-	w.readFlowQueue <- task
+func (w *HotCache) CheckReadAsync(task FlowItemTask) bool {
+	select {
+	case w.readFlowQueue <- task:
+		return true
+	default:
+		return false
+	}
 }
 
 // Update updates the cache.
@@ -86,11 +95,17 @@ func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*Ho
 	switch kind {
 	case WriteFlow:
 		task := newCollectRegionStatsTask(minHotDegree)
-		w.CheckWriteAsync(task)
+		succ := w.CheckWriteAsync(task)
+		if !succ {
+			return nil
+		}
 		return <-task.ret
 	case ReadFlow:
 		task := newCollectRegionStatsTask(minHotDegree)
-		w.CheckReadAsync(task)
+		succ := w.CheckReadAsync(task)
+		if !succ {
+			return nil
+		}
 		return <-task.ret
 	}
 	return nil
@@ -108,19 +123,26 @@ func (w *HotCache) HotRegionsFromStore(storeID uint64, kind FlowKind, minHotDegr
 func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 	writeIsRegionHotTask := newIsRegionHotTask(region, minHotDegree)
 	readIsRegionHotTask := newIsRegionHotTask(region, minHotDegree)
-	w.CheckWriteAsync(writeIsRegionHotTask)
-	w.CheckReadAsync(readIsRegionHotTask)
-	return writeIsRegionHotTask.waitRet(w.ctx) || readIsRegionHotTask.waitRet(w.ctx)
+	succ1 := w.CheckWriteAsync(writeIsRegionHotTask)
+	succ2 := w.CheckReadAsync(readIsRegionHotTask)
+	if succ1 && succ2 {
+		return writeIsRegionHotTask.waitRet(w.ctx) || readIsRegionHotTask.waitRet(w.ctx)
+	}
+	return false
 }
 
 // CollectMetrics collects the hot cache metrics.
 func (w *HotCache) CollectMetrics() {
 	writeMetricsTask := newCollectMetricsTask("write")
 	readMetricsTask := newCollectMetricsTask("read")
-	w.CheckWriteAsync(writeMetricsTask)
-	w.CheckReadAsync(readMetricsTask)
-	writeMetricsTask.waitDone(w.ctx)
-	readMetricsTask.waitDone(w.ctx)
+	succ1 := w.CheckWriteAsync(writeMetricsTask)
+	succ2 := w.CheckReadAsync(readMetricsTask)
+	if succ1 {
+		writeMetricsTask.waitDone(w.ctx)
+	}
+	if succ2 {
+		readMetricsTask.waitDone(w.ctx)
+	}
 }
 
 // ResetMetrics resets the hot cache metrics.
@@ -187,9 +209,6 @@ func (w *HotCache) runWriteTask(task FlowItemTask) {
 }
 
 func update(item *HotPeerStat, flow *hotPeerCache) {
-	if item == nil {
-		return
-	}
 	flow.Update(item)
 	if item.IsNeedDelete() {
 		incMetrics("remove_item", item.StoreID, item.Kind)
