@@ -27,6 +27,7 @@ const queueCap = 20000
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx            context.Context
+	cancel         context.CancelFunc
 	readFlowQueue  chan FlowItemTask
 	writeFlowQueue chan FlowItemTask
 	writeFlow      *hotPeerCache
@@ -34,13 +35,18 @@ type HotCache struct {
 }
 
 // NewHotCache creates a new hot spot cache.
-func NewHotCache(ctx context.Context) *HotCache {
+func NewHotCache(parCtx context.Context, quit <-chan struct{}) *HotCache {
+	ctx, cancel := context.WithCancel(parCtx)
 	w := &HotCache{
 		ctx:            ctx,
+		cancel:         cancel,
 		readFlowQueue:  make(chan FlowItemTask, queueCap),
 		writeFlowQueue: make(chan FlowItemTask, queueCap),
 		writeFlow:      NewHotStoresStats(WriteFlow),
 		readFlow:       NewHotStoresStats(ReadFlow),
+	}
+	if quit != nil {
+		go w.watchClose(quit)
 	}
 	go w.updateItems(w.readFlowQueue, w.runReadTask)
 	go w.updateItems(w.writeFlowQueue, w.runWriteTask)
@@ -191,6 +197,16 @@ func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task Flow
 		case task := <-queue:
 			runTask(task)
 		}
+	}
+}
+
+func (w *HotCache) watchClose(quit <-chan struct{}) {
+	select {
+	case <-quit:
+		w.cancel()
+		return
+	case <-w.ctx.Done():
+		return
 	}
 }
 

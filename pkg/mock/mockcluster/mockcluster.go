@@ -57,7 +57,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
 		BasicCluster:     core.NewBasicCluster(),
 		IDAllocator:      mockid.NewIDAllocator(),
-		HotStat:          statistics.NewHotStat(ctx),
+		HotStat:          statistics.NewHotStat(ctx, nil),
 		PersistOptions:   opts,
 		suspectRegions:   map[uint64]struct{}{},
 		disabledFeatures: make(map[versioninfo.Feature]struct{}),
