@@ -26,7 +26,7 @@ import (
 )
 
 // DefaultCacheSize is the default length of waiting list.
-const DefaultCacheSize = 1000
+const DefaultCacheSize = 128
 
 // CheckerController is used to manage all checkers.
 type CheckerController struct {
