@@ -123,11 +123,11 @@ func (s *testRegionSuite) newRegionWithStat(start, end string, size, keys int64)
 func (s *testRegionSuite) TestRegionTreeStat(c *C) {
 	tree := newRegionTree()
 	c.Assert(tree.totalSize, Equals, int64(0))
-	tree.update(s.newRegionWithStat("a", "b", 1, 2))
+	updateNewItem(tree, s.newRegionWithStat("a", "b", 1, 2))
 	c.Assert(tree.totalSize, Equals, int64(1))
-	tree.update(s.newRegionWithStat("b", "c", 3, 4))
+	updateNewItem(tree, s.newRegionWithStat("b", "c", 3, 4))
 	c.Assert(tree.totalSize, Equals, int64(4))
-	tree.update(s.newRegionWithStat("b", "e", 5, 6))
+	updateNewItem(tree, s.newRegionWithStat("b", "e", 5, 6))
 	c.Assert(tree.totalSize, Equals, int64(6))
 	tree.remove(s.newRegionWithStat("a", "b", 1, 2))
 	c.Assert(tree.totalSize, Equals, int64(5))
@@ -137,10 +137,10 @@ func (s *testRegionSuite) TestRegionTreeStat(c *C) {
 
 func (s *testRegionSuite) TestRegionTreeMerge(c *C) {
 	tree := newRegionTree()
-	tree.update(s.newRegionWithStat("a", "b", 1, 2))
-	tree.update(s.newRegionWithStat("b", "c", 3, 4))
+	updateNewItem(tree, s.newRegionWithStat("a", "b", 1, 2))
+	updateNewItem(tree, s.newRegionWithStat("b", "c", 3, 4))
 	c.Assert(tree.totalSize, Equals, int64(4))
-	tree.update(s.newRegionWithStat("a", "c", 5, 5))
+	updateNewItem(tree, s.newRegionWithStat("a", "c", 5, 5))
 	c.Assert(tree.totalSize, Equals, int64(5))
 }
 
@@ -154,8 +154,8 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 	regionC := NewTestRegionInfo([]byte("c"), []byte("d"))
 	regionD := NewTestRegionInfo([]byte("d"), []byte{})
 
-	tree.update(regionA)
-	tree.update(regionC)
+	updateNewItem(tree, regionA)
+	updateNewItem(tree, regionC)
 	c.Assert(tree.search([]byte{}), IsNil)
 	c.Assert(tree.search([]byte("a")), Equals, regionA)
 	c.Assert(tree.search([]byte("b")), IsNil)
@@ -167,13 +167,13 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 	c.Assert(tree.searchPrev([]byte("b")), IsNil)
 	c.Assert(tree.searchPrev([]byte("c")), IsNil)
 
-	tree.update(regionB)
+	updateNewItem(tree, regionB)
 	// search previous region
 	c.Assert(tree.searchPrev([]byte("c")), Equals, regionB)
 	c.Assert(tree.searchPrev([]byte("b")), Equals, regionA)
 
 	tree.remove(regionC)
-	tree.update(regionD)
+	updateNewItem(tree, regionD)
 	c.Assert(tree.search([]byte{}), IsNil)
 	c.Assert(tree.search([]byte("a")), Equals, regionA)
 	c.Assert(tree.search([]byte("b")), Equals, regionB)
@@ -196,7 +196,7 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 
 	// region with the same range and different region id will not be delete.
 	region0 := newRegionItem([]byte{}, []byte("a")).region
-	tree.update(region0)
+	updateNewItem(tree, region0)
 	c.Assert(tree.search([]byte{}), Equals, region0)
 	anotherRegion0 := newRegionItem([]byte{}, []byte("a")).region
 	anotherRegion0.meta.Id = 123
@@ -205,7 +205,7 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 
 	// overlaps with 0, A, B, C.
 	region0D := newRegionItem([]byte(""), []byte("d")).region
-	tree.update(region0D)
+	updateNewItem(tree, region0D)
 	c.Assert(tree.search([]byte{}), Equals, region0D)
 	c.Assert(tree.search([]byte("a")), Equals, region0D)
 	c.Assert(tree.search([]byte("b")), Equals, region0D)
@@ -214,7 +214,7 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 
 	// overlaps with D.
 	regionE := newRegionItem([]byte("e"), []byte{}).region
-	tree.update(regionE)
+	updateNewItem(tree, regionE)
 	c.Assert(tree.search([]byte{}), Equals, region0D)
 	c.Assert(tree.search([]byte("a")), Equals, region0D)
 	c.Assert(tree.search([]byte("b")), Equals, region0D)
@@ -225,7 +225,7 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 
 func updateRegions(c *C, tree *regionTree, regions []*RegionInfo) {
 	for _, region := range regions {
-		tree.update(region)
+		updateNewItem(tree, region)
 		c.Assert(tree.search(region.GetStartKey()), Equals, region)
 		if len(region.GetEndKey()) > 0 {
 			end := region.GetEndKey()[0]
@@ -271,16 +271,16 @@ func (s *testRegionSuite) TestRandomRegion(c *C) {
 	c.Assert(r, IsNil)
 
 	regionA := NewTestRegionInfo([]byte(""), []byte("g"))
-	tree.update(regionA)
+	updateNewItem(tree, regionA)
 	ra := tree.RandomRegion([]KeyRange{NewKeyRange("", "")})
 	c.Assert(ra, DeepEquals, regionA)
 
 	regionB := NewTestRegionInfo([]byte("g"), []byte("n"))
 	regionC := NewTestRegionInfo([]byte("n"), []byte("t"))
 	regionD := NewTestRegionInfo([]byte("t"), []byte(""))
-	tree.update(regionB)
-	tree.update(regionC)
-	tree.update(regionD)
+	updateNewItem(tree, regionB)
+	updateNewItem(tree, regionC)
+	updateNewItem(tree, regionD)
 
 	rb := tree.RandomRegion([]KeyRange{NewKeyRange("g", "n")})
 	c.Assert(rb, DeepEquals, regionB)
@@ -312,7 +312,7 @@ func (s *testRegionSuite) TestRandomRegionDiscontinuous(c *C) {
 
 	// test for single region
 	regionA := NewTestRegionInfo([]byte("c"), []byte("f"))
-	tree.update(regionA)
+	updateNewItem(tree, regionA)
 	ra := tree.RandomRegion([]KeyRange{NewKeyRange("c", "e")})
 	c.Assert(ra, IsNil)
 	ra = tree.RandomRegion([]KeyRange{NewKeyRange("c", "f")})
@@ -327,7 +327,7 @@ func (s *testRegionSuite) TestRandomRegionDiscontinuous(c *C) {
 	c.Assert(ra, DeepEquals, regionA)
 
 	regionB := NewTestRegionInfo([]byte("n"), []byte("x"))
-	tree.update(regionB)
+	updateNewItem(tree, regionB)
 	rb := tree.RandomRegion([]KeyRange{NewKeyRange("g", "x")})
 	c.Assert(rb, DeepEquals, regionB)
 	rb = tree.RandomRegion([]KeyRange{NewKeyRange("g", "y")})
@@ -338,15 +338,20 @@ func (s *testRegionSuite) TestRandomRegionDiscontinuous(c *C) {
 	c.Assert(rb, IsNil)
 
 	regionC := NewTestRegionInfo([]byte("z"), []byte(""))
-	tree.update(regionC)
+	updateNewItem(tree, regionC)
 	rc := tree.RandomRegion([]KeyRange{NewKeyRange("y", "")})
 	c.Assert(rc, DeepEquals, regionC)
 	regionD := NewTestRegionInfo([]byte(""), []byte("a"))
-	tree.update(regionD)
+	updateNewItem(tree, regionD)
 	rd := tree.RandomRegion([]KeyRange{NewKeyRange("", "b")})
 	c.Assert(rd, DeepEquals, regionD)
 
 	checkRandomRegion(c, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []KeyRange{NewKeyRange("", "")})
+}
+
+func updateNewItem(tree *regionTree, region *RegionInfo) {
+	item := &regionItem{region: region}
+	tree.update(item)
 }
 
 func checkRandomRegion(c *C, tree *regionTree, regions []*RegionInfo, ranges []KeyRange) {
@@ -376,7 +381,7 @@ func BenchmarkRegionTreeUpdate(b *testing.B) {
 	tree := newRegionTree()
 	for i := 0; i < b.N; i++ {
 		item := &RegionInfo{meta: &metapb.Region{StartKey: []byte(fmt.Sprintf("%20d", i)), EndKey: []byte(fmt.Sprintf("%20d", i+1))}}
-		tree.update(item)
+		updateNewItem(tree, item)
 	}
 }
 
@@ -401,6 +406,6 @@ func BenchmarkRegionTreeUpdateUnordered(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tree.update(items[i])
+		updateNewItem(tree, items[i])
 	}
 }

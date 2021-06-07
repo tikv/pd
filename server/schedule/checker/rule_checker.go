@@ -14,6 +14,9 @@
 package checker
 
 import (
+	"math"
+	"time"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -34,6 +37,7 @@ type RuleChecker struct {
 	ruleManager       *placement.RuleManager
 	name              string
 	regionWaitingList cache.Cache
+	record            *recorder
 }
 
 // NewRuleChecker creates a checker instance.
@@ -43,6 +47,7 @@ func NewRuleChecker(cluster opt.Cluster, ruleManager *placement.RuleManager, reg
 		ruleManager:       ruleManager,
 		name:              "rule-checker",
 		regionWaitingList: regionWaitingList,
+		record:            newRecord(),
 	}
 }
 
@@ -55,7 +60,7 @@ func (c *RuleChecker) GetType() string {
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
-
+	c.record.refresh(c.cluster)
 	fit := c.cluster.FitRegion(region)
 	if len(fit.RuleFits) == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "fix-range").Inc()
@@ -105,11 +110,11 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	for _, peer := range rf.Peers {
 		if c.isDownPeer(region, peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
-			return c.replaceRulePeer(region, rf, peer, downStatus)
+			return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
 		}
 		if c.isOfflinePeer(peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
-			return c.replaceRulePeer(region, rf, peer, offlineStatus)
+			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
 		}
 	}
 	// fix loose matched peers.
@@ -143,7 +148,8 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 	return op, nil
 }
 
-func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, rf *placement.RuleFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
+// The peer's store may in Offline or Down, need to be replace.
+func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *placement.RuleFit, fit *placement.RegionFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
 	ruleStores := c.getRuleFitStores(rf)
 	store := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
@@ -152,9 +158,40 @@ func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, rf *placement.Rul
 		return nil, errors.New("no store to replace peer")
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
-	op, err := operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
+	var newLeader *metapb.Peer
+	if region.GetLeader().GetId() == peer.GetId() {
+		minCount := uint64(math.MaxUint64)
+		for _, p := range region.GetPeers() {
+			count := c.record.getOfflineLeaderCount(p.GetStoreId())
+			checkPeerhealth := func() bool {
+				if p.GetId() == peer.GetId() {
+					return true
+				}
+				if region.GetDownPeer(p.GetId()) != nil || region.GetPendingPeer(p.GetId()) != nil {
+					return false
+				}
+				return c.allowLeader(fit, p)
+			}
+			if minCount > count && checkPeerhealth() {
+				minCount = count
+				newLeader = p
+			}
+		}
+	}
+
+	createOp := func() (*operator.Operator, error) {
+		if newLeader != nil && newLeader.GetId() != peer.GetId() {
+			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
+		}
+		return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+	}
+	op, err := createOp()
 	if err != nil {
 		return nil, err
+	}
+	if newLeader != nil {
+		c.record.incOfflineLeaderCount(newLeader.GetStoreId())
 	}
 	op.SetPriorityLevel(core.HighPriority)
 	return op, nil
@@ -294,4 +331,45 @@ func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo 
 		}
 	}
 	return stores
+}
+
+type recorder struct {
+	offlineLeaderCounter map[uint64]uint64
+	lastUpdateTime       time.Time
+}
+
+func newRecord() *recorder {
+	return &recorder{
+		offlineLeaderCounter: make(map[uint64]uint64),
+		lastUpdateTime:       time.Now(),
+	}
+}
+
+func (o *recorder) getOfflineLeaderCount(storeID uint64) uint64 {
+	return o.offlineLeaderCounter[storeID]
+}
+
+func (o *recorder) incOfflineLeaderCount(storeID uint64) {
+	o.offlineLeaderCounter[storeID] += 1
+	o.lastUpdateTime = time.Now()
+}
+
+// Offline is triggered manually and only appears when the node makes some adjustments. here is an operator timeout / 2.
+var offlineCounterTTL = 5 * time.Minute
+
+func (o *recorder) refresh(cluster opt.Cluster) {
+	// re-count the offlineLeaderCounter if the store is already tombstone or store is gone.
+	if len(o.offlineLeaderCounter) > 0 && time.Since(o.lastUpdateTime) > offlineCounterTTL {
+		needClean := false
+		for _, storeID := range o.offlineLeaderCounter {
+			store := cluster.GetStore(storeID)
+			if store == nil || store.IsTombstone() {
+				needClean = true
+				break
+			}
+		}
+		if needClean {
+			o.offlineLeaderCounter = make(map[uint64]uint64)
+		}
+	}
 }

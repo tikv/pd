@@ -149,6 +149,24 @@ func (s *testRuleCheckerSuite) TestFixPeer(c *C) {
 	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
 	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	c.Assert(op.Step(0), FitsTypeOf, add)
+
+	s.cluster.SetStoreUp(2)
+	// leader store offline
+	s.cluster.SetStoreOffline(1)
+	r1 := s.cluster.GetRegion(1)
+	nr1 := r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetStorePeer(3)}))
+	s.cluster.PutRegion(nr1)
+	hasTransferLeader := false
+	for i := 0; i < 100; i++ {
+		op = s.rc.Check(s.cluster.GetRegion(1))
+		c.Assert(op, NotNil)
+		if step, ok := op.Step(0).(operator.TransferLeader); ok {
+			c.Assert(step.FromStore, Equals, uint64(1))
+			c.Assert(step.ToStore, Not(Equals), uint64(3))
+			hasTransferLeader = true
+		}
+	}
+	c.Assert(hasTransferLeader, IsTrue)
 }
 
 func (s *testRuleCheckerSuite) TestFixOrphanPeers(c *C) {
