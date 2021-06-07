@@ -27,7 +27,7 @@ const queueCap = 20000
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx            context.Context
-	cancel         context.CancelFunc
+	quit           <-chan struct{}
 	readFlowQueue  chan FlowItemTask
 	writeFlowQueue chan FlowItemTask
 	writeFlow      *hotPeerCache
@@ -35,18 +35,14 @@ type HotCache struct {
 }
 
 // NewHotCache creates a new hot spot cache.
-func NewHotCache(parCtx context.Context, quit <-chan struct{}) *HotCache {
-	ctx, cancel := context.WithCancel(parCtx)
+func NewHotCache(ctx context.Context, quit <-chan struct{}) *HotCache {
 	w := &HotCache{
 		ctx:            ctx,
-		cancel:         cancel,
+		quit:           quit,
 		readFlowQueue:  make(chan FlowItemTask, queueCap),
 		writeFlowQueue: make(chan FlowItemTask, queueCap),
 		writeFlow:      NewHotStoresStats(WriteFlow),
 		readFlow:       NewHotStoresStats(ReadFlow),
-	}
-	if quit != nil {
-		go w.watchClose(quit)
 	}
 	go w.updateItems(w.readFlowQueue, w.runReadTask)
 	go w.updateItems(w.writeFlowQueue, w.runWriteTask)
@@ -105,14 +101,14 @@ func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*Ho
 		if !succ {
 			return nil
 		}
-		return <-task.ret
+		return task.waitRet(w.ctx, w.quit)
 	case ReadFlow:
 		task := newCollectRegionStatsTask(minHotDegree)
 		succ := w.CheckReadAsync(task)
 		if !succ {
 			return nil
 		}
-		return <-task.ret
+		return task.waitRet(w.ctx, w.quit)
 	}
 	return nil
 }
@@ -132,7 +128,7 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 	succ1 := w.CheckWriteAsync(writeIsRegionHotTask)
 	succ2 := w.CheckReadAsync(readIsRegionHotTask)
 	if succ1 && succ2 {
-		return writeIsRegionHotTask.waitRet(w.ctx) || readIsRegionHotTask.waitRet(w.ctx)
+		return writeIsRegionHotTask.waitRet(w.ctx, w.quit) || readIsRegionHotTask.waitRet(w.ctx, w.quit)
 	}
 	return false
 }
@@ -144,10 +140,10 @@ func (w *HotCache) CollectMetrics() {
 	succ1 := w.CheckWriteAsync(writeMetricsTask)
 	succ2 := w.CheckReadAsync(readMetricsTask)
 	if succ1 {
-		writeMetricsTask.waitDone(w.ctx)
+		writeMetricsTask.waitDone(w.ctx, w.quit)
 	}
 	if succ2 {
-		readMetricsTask.waitDone(w.ctx)
+		readMetricsTask.waitDone(w.ctx, w.quit)
 	}
 }
 
@@ -194,19 +190,11 @@ func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task Flow
 		select {
 		case <-w.ctx.Done():
 			return
+		case <-w.quit:
+			return
 		case task := <-queue:
 			runTask(task)
 		}
-	}
-}
-
-func (w *HotCache) watchClose(quit <-chan struct{}) {
-	select {
-	case <-quit:
-		w.cancel()
-		return
-	case <-w.ctx.Done():
-		return
 	}
 }
 

@@ -54,10 +54,11 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
+	mockQuit := make(chan struct{})
 	clus := &Cluster{
 		BasicCluster:     core.NewBasicCluster(),
 		IDAllocator:      mockid.NewIDAllocator(),
-		HotStat:          statistics.NewHotStat(ctx, nil),
+		HotStat:          statistics.NewHotStat(ctx, mockQuit),
 		PersistOptions:   opts,
 		suspectRegions:   map[uint64]struct{}{},
 		disabledFeatures: make(map[versioninfo.Feature]struct{}),

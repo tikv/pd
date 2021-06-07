@@ -128,6 +128,17 @@ func (t *collectRegionStatsTask) runTask(flow *hotPeerCache) {
 	t.ret <- flow.RegionStats(t.minDegree)
 }
 
+func (t *collectRegionStatsTask) waitRet(ctx context.Context, quit <-chan struct{}) map[uint64][]*HotPeerStat {
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-quit:
+		return nil
+	case ret := <-t.ret:
+		return ret
+	}
+}
+
 type isRegionHotTask struct {
 	region       *core.RegionInfo
 	minHotDegree int
@@ -150,9 +161,11 @@ func (t *isRegionHotTask) runTask(flow *hotPeerCache) {
 	t.ret <- flow.isRegionHotWithAnyPeers(t.region, t.minHotDegree)
 }
 
-func (t *isRegionHotTask) waitRet(ctx context.Context) bool {
+func (t *isRegionHotTask) waitRet(ctx context.Context, quit <-chan struct{}) bool {
 	select {
 	case <-ctx.Done():
+		return false
+	case <-quit:
 		return false
 	case r := <-t.ret:
 		return r
@@ -180,9 +193,11 @@ func (t *collectMetricsTask) runTask(flow *hotPeerCache) {
 	t.done <- struct{}{}
 }
 
-func (t *collectMetricsTask) waitDone(ctx context.Context) {
+func (t *collectMetricsTask) waitDone(ctx context.Context, quit <-chan struct{}) {
 	select {
 	case <-ctx.Done():
+		return
+	case <-quit:
 		return
 	case <-t.done:
 		return
