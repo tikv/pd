@@ -572,19 +572,20 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
 	storage := c.storage
 	coreCluster := c.core
+	hotStat := c.hotStat
 	c.RUnlock()
 
 	origin, err := coreCluster.PreCheckPutRegion(region)
 	if err != nil {
 		return err
 	}
-	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
-	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
+	hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
+	hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
 		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
-		c.hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
+		hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
 
 	// Save to storage if meta is updated.
