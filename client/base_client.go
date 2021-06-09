@@ -26,8 +26,8 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
