@@ -2,14 +2,18 @@ on:
   push:
     branches:
       - master
-      - release-4.0
-      - release-5.*
+      - release-*
+    branches-ignore:
+      - release-[123].*
   pull_request:
     branches:
       - master
-      - release-4.0
-      - release-5.*
+      - release-*
+    branches-ignore:
+      - release-[123].*
+
 name: PD Tests
+
 jobs:
   chunks:
     runs-on: ubuntu-latest
