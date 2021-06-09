@@ -4,11 +4,13 @@ on:
       - master
       - release-4.0
       - release-5.0
+      - release-5.1
   pull_request:
     branches:
       - master
       - release-4.0
       - release-5.0
+      - release-5.1
 name: PD Tests
 jobs:
   chunks:
