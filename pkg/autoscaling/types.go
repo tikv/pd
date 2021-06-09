@@ -20,7 +20,13 @@ import (
 	"strings"
 
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/server/schedule/filter"
 	"go.etcd.io/etcd/clientv3"
+)
+
+const (
+	homogeneousTiKVResourceType = "default_homogeneous_tikv_resource_type"
+	homogeneousTiDBResourceType = "default_homogeneous_tidb_resource_type"
 )
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
@@ -38,13 +44,18 @@ type Rule struct {
 
 // CPURule is the constraints about CPU.
 type CPURule struct {
-	MaxThreshold  float64  `json:"max_threshold"`
+	// cpu usage max threshold
+	MaxThreshold float64 `json:"max_threshold"`
+	// cpu usage min threshold
 	MinThreshold  float64  `json:"min_threshold"`
 	ResourceTypes []string `json:"resource_types"`
 }
 
 // StorageRule is the constraints about storage.
 type StorageRule struct {
+	// storage usage max threshold
+	MaxThreshold float64 `json:"max_threshold"`
+	// storage usage min threshold
 	MinThreshold  float64  `json:"min_threshold"`
 	ResourceTypes []string `json:"resource_types"`
 }
@@ -69,6 +80,30 @@ type Plan struct {
 	Labels       map[string]string `json:"labels"`
 }
 
+func NewPlan(component ComponentType, count uint64, resourceType string) *Plan {
+	labels := getLabelsByResourceType(resourceType, component)
+
+	return &Plan{
+		Component:    component.String(),
+		Count:        count,
+		ResourceType: resourceType,
+		Labels:       labels,
+	}
+}
+
+func (p *Plan) Clone() *Plan {
+	var component ComponentType
+
+	switch p.Component {
+	case TiKV.String():
+		component = TiKV
+	case TiDB.String():
+		component = TiDB
+	}
+
+	return NewPlan(component, p.Count, p.ResourceType)
+}
+
 // ComponentType distinguishes different kinds of components.
 type ComponentType int
 
@@ -90,6 +125,24 @@ func (c ComponentType) String() string {
 	}
 }
 
+type RuleType int
+
+const (
+	CPU RuleType = iota
+	Storage
+)
+
+func (r RuleType) String() string {
+	switch r {
+	case CPU:
+		return "cpu"
+	case Storage:
+		return "storage"
+	default:
+		return "unknown"
+	}
+}
+
 // MetricType distinguishes different kinds of metrics
 type MetricType int
 
@@ -98,6 +151,10 @@ const (
 	CPUUsage MetricType = iota
 	// CPUQuota is cpu cores quota for each instance
 	CPUQuota
+	// StorageUsage is used storage usage in the duration
+	StorageUsage
+	// StorageQuota is cpu storage quota for each instance
+	StorageQuota
 )
 
 func (c MetricType) String() string {
@@ -106,6 +163,10 @@ func (c MetricType) String() string {
 		return "cpu_usage"
 	case CPUQuota:
 		return "cpu_quota"
+	case StorageUsage:
+		return "storage_usage"
+	case StorageQuota:
+		return "storage_quota"
 	default:
 		return "unknown"
 	}
@@ -189,4 +250,17 @@ func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
 		}
 	}
 	return tidbs, nil
+}
+
+func getLabelsByResourceType(resourceType string, component ComponentType) map[string]string {
+	labels := map[string]string{
+		groupLabelKey:        fmt.Sprintf("%s-%s", autoScalingGroupLabelKeyPrefix, component.String()),
+		resourceTypeLabelKey: resourceType,
+	}
+
+	if component == TiKV {
+		labels[filter.SpecialUseKey] = filter.SpecialUseHotRegion
+	}
+
+	return labels
 }

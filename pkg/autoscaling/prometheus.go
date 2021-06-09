@@ -78,7 +78,7 @@ func (prom *PrometheusQuerier) Query(options *QueryOptions) (QueryResult, error)
 		return nil, err
 	}
 
-	result, err := extractInstancesFromResponse(resp, options.addresses)
+	result, err := extractInstancesFromResponse(resp, options.component)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 	return resp, nil
 }
 
-func extractInstancesFromResponse(resp promModel.Value, addresses []string) (QueryResult, error) {
+func extractInstancesFromResponse(resp promModel.Value, component ComponentType) (QueryResult, error) {
 	if resp == nil {
 		return nil, errs.ErrEmptyMetricsResponse.FastGenByArgs()
 	}
@@ -122,32 +122,24 @@ func extractInstancesFromResponse(resp promModel.Value, addresses []string) (Que
 		return nil, errs.ErrEmptyMetricsResult.FastGenByArgs("query metrics duration must be at least twice the Prometheus scrape interval")
 	}
 
-	instancesSet := map[string]string{}
-	for _, addr := range addresses {
-		instanceName, err := getInstanceNameFromAddress(addr)
-		if err == nil {
-			instancesSet[instanceName] = addr
-		}
+	var resourceType string
+
+	switch component {
+	case TiKV:
+		resourceType = homogeneousTiKVResourceType
+	case TiDB:
+		resourceType = homogeneousTiDBResourceType
 	}
 
 	result := make(QueryResult)
 
 	for _, sample := range vector {
-		podName, ok := sample.Metric[instanceLabelName]
-		if !ok {
-			continue
+		resourceTypeLabel, ok := sample.Metric[resourceTypeLabelKey]
+		if ok {
+			resourceType = string(resourceTypeLabel)
 		}
 
-		namespace, ok := sample.Metric[namespaceLabelName]
-		if !ok {
-			continue
-		}
-
-		instanceName := buildInstanceIdentifier(string(podName), string(namespace))
-
-		if addr, ok := instancesSet[instanceName]; ok {
-			result[addr] = float64(sample.Value)
-		}
+		result[resourceType] = float64(sample.Value)
 	}
 
 	return result, nil

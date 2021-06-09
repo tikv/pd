@@ -15,29 +15,27 @@ package uiserver
 
 import (
 	"net/http"
-	"os"
 	"sync"
-	"time"
 
 	"github.com/pingcap/tidb-dashboard/pkg/config"
-	"github.com/pingcap/tidb-dashboard/pkg/uiserver"
 )
 
 var once sync.Once
 
 // Assets returns the Assets FileSystem of the dashboard UI
 func Assets(cfg *config.Config) http.FileSystem {
-	once.Do(func() {
-		uiserver.RewriteAssets(assets, cfg, func(fs http.FileSystem, f http.File, path, newContent string, bs []byte) {
-			m := fs.(vfsgen۰FS)
-			fi := f.(os.FileInfo)
-			m[path] = &vfsgen۰CompressedFileInfo{
-				name:              fi.Name(),
-				modTime:           time.Now(),
-				uncompressedSize:  int64(len(newContent)),
-				compressedContent: bs,
-			}
-		})
-	})
-	return assets
+	// once.Do(func() {
+	// 	uiserver.RewriteAssets(assets, cfg, func(fs http.FileSystem, f http.File, path, newContent string, bs []byte) {
+	// 		m := fs.(vfsgen۰FS)
+	// 		fi := f.(os.FileInfo)
+	// 		m[path] = &vfsgen۰CompressedFileInfo{
+	// 			name:              fi.Name(),
+	// 			modTime:           time.Now(),
+	// 			uncompressedSize:  int64(len(newContent)),
+	// 			compressedContent: bs,
+	// 		}
+	// 	})
+	// })
+	// return assets
+	return nil
 }

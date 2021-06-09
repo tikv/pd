@@ -19,3 +19,4 @@ docs/swagger/*
 *.before
 covprofile
 coverage.tmp
+okteto.yml
