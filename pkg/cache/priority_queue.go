@@ -28,7 +28,7 @@ func (pq *PriorityQueue) Push(priority int, value interface{}) bool {
 	if !ok {
 		if pq.Size() >= pq.capacity {
 			tail := pq.queue.tail()
-			if tail.Priority <= priority {
+			if tail.Priority < priority {
 				return false
 			}
 			pq.RemoveValue(tail)

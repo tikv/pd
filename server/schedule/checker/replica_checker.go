@@ -92,7 +92,6 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) (op *operator.Operator) 
 	if abnormalCount > tolerate {
 		log.Warn("region lose majority follow peers, should manual recovery", zap.Uint64("region id", region.GetID()),
 			zap.Int("miss peer", abnormalCount))
-		return
 	} else if abnormalCount <= tolerate && abnormalCount > 0 {
 		r.regionPriorityQueue.Push(tolerate-abnormalCount, region.GetID())
 	} else {
@@ -101,6 +100,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) (op *operator.Operator) 
 
 	if op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
+		op.SetPriorityLevel(core.HighPriority)
 		return
 	}
 	if op = r.checkRemoveExtraReplica(region); op != nil {
