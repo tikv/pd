@@ -59,26 +59,9 @@ func (c *RuleChecker) GetType() string {
 	return "rule-checker"
 }
 
-// GetMissPeer get miss peers of region
-func (c *RuleChecker) GetMissPeer(region *core.RegionInfo) (missPeers, expect int) {
-	fit := c.cluster.FitRegion(region)
-	if len(fit.RuleFits) == 0 {
-		return
-	}
-	missPeers = 0
-	expect = 0
-	for _, rf := range fit.RuleFits {
-		if len(rf.Peers) < rf.Rule.Count {
-			missPeers = missPeers + rf.Rule.Count - len(rf.Peers)
-		}
-		expect = expect + rf.Rule.Count
-	}
-	return
-}
-
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
-func (c *RuleChecker) Check(region *core.RegionInfo) (op *operator.Operator) {
+func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
 	c.record.refresh(c.cluster)
 	fit := c.cluster.FitRegion(region)
@@ -94,7 +77,8 @@ func (c *RuleChecker) Check(region *core.RegionInfo) (op *operator.Operator) {
 	}
 	log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	for _, rf := range fit.RuleFits {
-		if op, err = c.fixRulePeer(region, fit, rf); err != nil {
+		op, err := c.fixRulePeer(region, fit, rf)
+		if err != nil {
 			log.Debug("fail to fix rule peer", zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID), errs.ZapError(err))
 			continue
 		}
