@@ -478,8 +478,8 @@ func (s *testCoordinatorSuite) TestCheckMissRegions(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"), IsNil)
 }
 
-func CheckMissRegionsTest(tc *testCluster, co *coordinator, c *C) {
-	// case 1: region-1 and region-3 will entry miss peer queue
+func checkMissRegionsTest(tc *testCluster, co *coordinator, c *C) {
+	// case 1: region-1 and region-3 will enter miss peer queue
 	co.wg.Add(1)
 	oc := co.opController
 	co.patrolRegions()
