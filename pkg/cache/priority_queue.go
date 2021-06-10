@@ -28,11 +28,10 @@ func (pq *PriorityQueue) Push(priority int, value interface{}) bool {
 	if !ok {
 		if pq.Size() >= pq.capacity {
 			tail := pq.queue.tail()
-			if tail.Priority >= priority {
+			if tail.Priority <= priority {
 				return false
-			} else {
-				pq.RemoveValue(tail)
 			}
+			pq.RemoveValue(tail)
 		}
 		v = &Entry{Value: value, Priority: priority}
 		heap.Push(pq.queue, v)
@@ -61,7 +60,7 @@ func (pq *PriorityQueue) Peek() *Entry {
 	return pq.queue.peek()
 }
 
-// Update update the priority of the given element
+// UpdatePriority update the priority of the given element
 func (pq *PriorityQueue) UpdatePriority(old *Entry, priority int) {
 	old.Priority = priority
 	pq.queue.fix(old)
