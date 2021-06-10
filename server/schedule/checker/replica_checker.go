@@ -85,13 +85,22 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) (op *operator.Operator) 
 	}
 	if op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
-		op.SetPriorityLevel(core.HighPriority)
-		if abnormalCount > r.opts.GetMaxReplicas()/2 {
-			r.regionPriorityQueue.Push(abnormalCount, region.GetID())
+		// It only add region follow only the normal region follow more than majority,
+		// the priority is how many follows can it tolerate
+		// region-1's replicate set 3 ,it lose one follow, so it's priority is 0(1-1),it can not loss any follows
+		// region-2's replicate set 5 ,it lose one follow, so it's priority is 1(2-1),it can loss one follow at most
+		// region-3's replicate set 3, it lose two follow, so it should not  put into the priority because it lost majority follows
+		tolerate := r.opts.GetMaxReplicas() / 2
+		if abnormalCount >= tolerate {
+			log.Error("region lose majority follow peers,should manual recovery", zap.Uint64("region id", region.GetID()),
+				zap.Int("miss peer", abnormalCount))
+			return
+		} else if abnormalCount < tolerate {
+			r.regionPriorityQueue.Push(tolerate-abnormalCount, region.GetID())
 		} else {
 			r.regionPriorityQueue.RemoveValue(region.GetID())
 		}
-		return op
+		return
 	}
 	if op = r.checkRemoveExtraReplica(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()

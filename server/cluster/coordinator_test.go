@@ -492,7 +492,7 @@ func CheckMissRegionsTest(tc *testCluster, co *coordinator, c *C) {
 	co.patrolRegions()
 	c.Assert(len(co.checkers.GetMissRegions()), Equals, 0)
 
-	//case 3: store 1 is tombstone, so region 3 has only one replicas,it will be added to miss regions
+	//case 3: store-1 is tombstone, so region-3 has only one replicas,it will be added to miss regions
 	c.Assert(co.cluster.RemoveStore(1, false), IsNil)
 	c.Assert(co.cluster.buryStore(1), IsNil)
 	c.Assert(co.cluster.GetStore(1).IsUp(), Equals, false)
@@ -500,8 +500,7 @@ func CheckMissRegionsTest(tc *testCluster, co *coordinator, c *C) {
 	co.patrolRegions()
 	c.Assert(len(co.checkers.GetMissRegions()), Equals, 1)
 
-	// recovery
-	// add store-1, region-1 has one peer, remove miss region
+	// recovery add store-1, region-1 has one peer, remove miss region
 	c.Assert(tc.addRegionStore(1, 0), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2), IsNil)
 	co.checkers.RemoveMissRegions([]uint64{3})

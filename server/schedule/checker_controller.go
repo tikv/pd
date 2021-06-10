@@ -118,6 +118,11 @@ func (c *CheckerController) GetMissRegions() []*cache.Entry {
 	return c.regionPriorityQueue.GetAll()
 }
 
+// GetMissRegionSize return miss region queue size
+func (c *CheckerController) GetMissRegionSize() int {
+	return c.regionPriorityQueue.Size()
+}
+
 // RemoveMissRegions remove the regions from priority queue
 func (c *CheckerController) RemoveMissRegions(ids []uint64) {
 	s := make([]interface{}, len(ids))
@@ -125,11 +130,6 @@ func (c *CheckerController) RemoveMissRegions(ids []uint64) {
 		s[i] = v
 	}
 	c.regionPriorityQueue.RemoveValues(s)
-}
-
-// UpdateMissPeer update region priority
-func (c *CheckerController) UpdateMissPeer(entry *cache.Entry) {
-	c.regionPriorityQueue.Update(entry, entry.Priority)
 }
 
 // GetWaitingRegions returns the regions in the waiting list.

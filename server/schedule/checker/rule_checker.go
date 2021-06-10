@@ -122,18 +122,17 @@ func (c *RuleChecker) fixRange(region *core.RegionInfo) *operator.Operator {
 
 // fixRulePeer fix region to satisfy rule requirement and statics miss region count include down and offline peer
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (op *operator.Operator, err error) {
-	miss := 0
+	abnormal := 0
 	// make up peers.
 	if len(rf.Peers) < rf.Rule.Count {
 		op, err = c.addRulePeer(region, rf)
-		miss = miss + rf.Rule.Count - len(rf.Peers)
+		abnormal = abnormal + rf.Rule.Count - len(rf.Peers)
 	}
-	log.Info("fixRulePeer", zap.Uint64("region id", region.GetID()), zap.Int("miss", miss))
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
-		abnormal := false
+		flag := false
 		if c.isDownPeer(region, peer) {
-			abnormal = true
+			flag = true
 			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
 			// to avoid replacing
 			if op == nil {
@@ -141,22 +140,30 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			}
 		}
 		if c.isOfflinePeer(peer) {
-			abnormal = true
+			flag = true
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
 			// to avoid replacing
 			if op == nil {
 				op, err = c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
 			}
 		}
-		if abnormal {
-			miss = miss + 1
-			log.Info("fixRulePeer", zap.Uint64("region id", region.GetID()), zap.Bool("abnormal", abnormal))
+		if flag {
+			abnormal = abnormal + 1
 		}
 	}
 	if op != nil {
-		log.Info("fixRulePeer", zap.Uint64("region id", op.RegionID()), zap.Int("miss", miss))
-		if miss > rf.Rule.Count/2 {
-			c.regionPriorityQueue.Push(miss, region.GetID())
+		// It only add region follow only the normal region follow more than majority
+		// region-1's replicate set 3 ,it lose one follow, so it's priority is 1(2-1)
+		// region-2's replicate set 5 ,it lose one follow, so it's priority is 2(3-1)
+		// region-3's replicate set 3, it lose two follow, so it should not  put into the priority
+		// because it lost majority follows
+		majority := (rf.Rule.Count + 1) / 2
+		if abnormal >= majority {
+			log.Error("region lose majority follow peers,should manual recovery", zap.Uint64("region id", region.GetID()),
+				zap.Int("abnormal peer", abnormal))
+			return
+		} else if abnormal < majority {
+			c.regionPriorityQueue.Push(majority-abnormal, region.GetID())
 		} else {
 			c.regionPriorityQueue.RemoveValue(region.GetID())
 		}

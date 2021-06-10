@@ -5,6 +5,7 @@ import (
 )
 
 // PriorityQueue queue has priority, the first element has the highest priority
+// the priority is lowest that has highest priority
 type PriorityQueue struct {
 	queue    *priorityHeap
 	items    map[interface{}]*Entry
@@ -114,7 +115,7 @@ func (pq priorityHeap) Len() int { return len(pq) }
 
 // Less
 func (pq priorityHeap) Less(i, j int) bool {
-	return pq[i].Priority > pq[j].Priority
+	return pq[i].Priority < pq[j].Priority
 }
 
 // Swap

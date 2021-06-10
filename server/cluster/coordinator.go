@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/config"
@@ -163,7 +162,6 @@ func (c *coordinator) patrolRegions() {
 // checkMissRegions check miss peer, if miss region is more than maxMissPeerQueueSize,
 // it will return ture to avoid run other replica check
 func (c *coordinator) checkMissRegions() bool {
-	updates := make([]*cache.Entry, 0)
 	removes := make([]uint64, 0)
 	missPeers := c.checkers.GetMissRegions()
 	regionListGauge.WithLabelValues("priority").Set(float64(len(missPeers)))
@@ -186,17 +184,10 @@ func (c *coordinator) checkMissRegions() bool {
 		}
 		if !c.opController.ExceedStoreLimit(ops...) {
 			c.opController.AddWaitingOperator(ops...)
-			if entry.Priority = entry.Priority - 1; entry.Priority > 1 {
-				updates = append(updates, entry)
-			}
 		}
 	}
 	c.checkers.RemoveMissRegions(removes)
-	for _, v := range updates {
-		c.checkers.UpdateMissPeer(v)
-	}
-	remained := len(missPeers) - len(removes)
-	return remained > maxMissPeerQueueSize
+	return c.checkers.GetMissRegionSize() > maxMissPeerQueueSize
 }
 
 func (c *coordinator) checkSuspectRegions() {
