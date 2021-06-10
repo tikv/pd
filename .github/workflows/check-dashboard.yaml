@@ -2,17 +2,15 @@ on:
   push:
     branches:
       - master
-      - release-*
-    branches-ignore:
-      - release-[123].*
+      - release-4.0
+      - release-5.*
     paths:
       - "go.mod"
   pull_request:
     branches:
       - master
-      - release-*
-    branches-ignore:
-      - release-[123].*
+      - release-4.0
+      - release-5.*
     paths:
       - "go.mod"
 
