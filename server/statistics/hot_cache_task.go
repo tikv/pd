@@ -20,36 +20,9 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-type flowItemTaskKind uint32
-
-const (
-	checkPeerTaskType flowItemTaskKind = iota
-	checkExpiredTaskType
-	collectUnReportedPeerTaskType
-	collectRegionStatsTaskType
-	isRegionHotTaskType
-	collectMetricsTaskType
-)
-
-func taskType(t flowItemTaskKind) string {
-	switch t {
-	case checkPeerTaskType:
-		return "checkPeerTaskType"
-	case checkExpiredTaskType:
-		return "checkExpiredTaskType"
-	case collectUnReportedPeerTaskType:
-		return "checkExpiredTaskType"
-	case isRegionHotTaskType:
-		return "isRegionHotTaskType"
-	case collectMetricsTaskType:
-		return "collectMetricsTaskType"
-	}
-	return "unknown"
-}
-
 // FlowItemTask indicates the task in flowItem queue
 type FlowItemTask interface {
-	taskType() flowItemTaskKind
+	taskType() string
 	runTask(flow *hotPeerCache)
 }
 
@@ -66,8 +39,8 @@ func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) Flow
 	}
 }
 
-func (t *checkPeerTask) taskType() flowItemTaskKind {
-	return checkPeerTaskType
+func (t *checkPeerTask) taskType() string {
+	return "checkPeerTask"
 }
 
 func (t *checkPeerTask) runTask(flow *hotPeerCache) {
@@ -88,8 +61,8 @@ func NewCheckExpiredItemTask(region *core.RegionInfo) FlowItemTask {
 	}
 }
 
-func (t *checkExpiredTask) taskType() flowItemTaskKind {
-	return checkExpiredTaskType
+func (t *checkExpiredTask) taskType() string {
+	return "checkExpiredTask"
 }
 
 func (t *checkExpiredTask) runTask(flow *hotPeerCache) {
@@ -114,8 +87,8 @@ func NewCollectUnReportedPeerTask(storeID uint64, regionIDs map[uint64]struct{},
 	}
 }
 
-func (t *collectUnReportedPeerTask) taskType() flowItemTaskKind {
-	return collectUnReportedPeerTaskType
+func (t *collectUnReportedPeerTask) taskType() string {
+	return "collectUnReportedPeerTask"
 }
 
 func (t *collectUnReportedPeerTask) runTask(flow *hotPeerCache) {
@@ -126,19 +99,21 @@ func (t *collectUnReportedPeerTask) runTask(flow *hotPeerCache) {
 }
 
 type collectRegionStatsTask struct {
+	rw        string
 	minDegree int
 	ret       chan map[uint64][]*HotPeerStat
 }
 
-func newCollectRegionStatsTask(minDegree int) *collectRegionStatsTask {
+func newCollectRegionStatsTask(minDegree int, rw string) *collectRegionStatsTask {
 	return &collectRegionStatsTask{
+		rw:        rw,
 		minDegree: minDegree,
 		ret:       make(chan map[uint64][]*HotPeerStat, 1),
 	}
 }
 
-func (t *collectRegionStatsTask) taskType() flowItemTaskKind {
-	return collectRegionStatsTaskType
+func (t *collectRegionStatsTask) taskType() string {
+	return "collectRegionStatsTask"
 }
 
 func (t *collectRegionStatsTask) runTask(flow *hotPeerCache) {
@@ -148,7 +123,9 @@ func (t *collectRegionStatsTask) runTask(flow *hotPeerCache) {
 // TODO: do we need a wait-return timeout?
 func (t *collectRegionStatsTask) waitRet(ctx context.Context, quit <-chan struct{}) map[uint64][]*HotPeerStat {
 	start := time.Now()
-	defer hotCacheFlowTaskWaitDurationHist.WithLabelValues(taskType(t.taskType()), t.rw).Observe(time.Since(start).Seconds())
+	defer func() {
+		hotCacheFlowTaskWaitDurationHist.WithLabelValues(t.taskType(), t.rw).Observe(time.Since(start).Seconds())
+	}()
 	select {
 	case <-ctx.Done():
 		return nil
@@ -175,8 +152,8 @@ func newIsRegionHotTask(region *core.RegionInfo, minDegree int, rw string) *isRe
 	}
 }
 
-func (t *isRegionHotTask) taskType() flowItemTaskKind {
-	return isRegionHotTaskType
+func (t *isRegionHotTask) taskType() string {
+	return "isRegionHotTask"
 }
 
 func (t *isRegionHotTask) runTask(flow *hotPeerCache) {
@@ -186,7 +163,9 @@ func (t *isRegionHotTask) runTask(flow *hotPeerCache) {
 // TODO: do we need a wait-return timeout?
 func (t *isRegionHotTask) waitRet(ctx context.Context, quit <-chan struct{}) bool {
 	start := time.Now()
-	defer hotCacheFlowTaskWaitDurationHist.WithLabelValues(taskType(t.taskType()), t.rw).Observe(time.Since(start).Seconds())
+	defer func() {
+		hotCacheFlowTaskWaitDurationHist.WithLabelValues(t.taskType(), t.rw).Observe(time.Since(start).Seconds())
+	}()
 	select {
 	case <-ctx.Done():
 		return false
@@ -207,8 +186,8 @@ func newCollectMetricsTask(rw string) *collectMetricsTask {
 	}
 }
 
-func (t *collectMetricsTask) taskType() flowItemTaskKind {
-	return collectMetricsTaskType
+func (t *collectMetricsTask) taskType() string {
+	return "collectMetricsTask"
 }
 
 func (t *collectMetricsTask) runTask(flow *hotPeerCache) {
