@@ -161,7 +161,7 @@ func (w *fitWorker) run() {
 }
 
 // Pick the most suitable peer combination for the rule.
-// index specifies the position of the rule.
+// Index specifies the position of the rule.
 // returns true if it replaces `bestFit` with a better alternative.
 func (w *fitWorker) fitRule(index int) bool {
 	if index >= len(w.rules) {
