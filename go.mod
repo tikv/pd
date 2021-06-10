@@ -21,7 +21,6 @@ require (
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.5.0
-	github.com/opentracing/opentracing-go v1.1.0
 	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
 	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
@@ -43,6 +42,7 @@ require (
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
 	github.com/swaggo/swag v1.6.6-0.20200529100950-7c765ddd0476
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
+	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
@@ -55,3 +55,5 @@ require (
 
 // Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
 replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
+
+replace github.com/tikv/pd/client => ./client
