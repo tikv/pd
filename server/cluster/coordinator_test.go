@@ -479,7 +479,7 @@ func (s *testCoordinatorSuite) TestCheckMissRegions(c *C) {
 }
 
 func checkMissRegionsTest(tc *testCluster, co *coordinator, c *C) {
-	// case 1: region-1 and region-3 will entry miss peer queue
+	// case 1: region-1 and region-3 will enter miss peer queue
 	co.wg.Add(1)
 	oc := co.opController
 	co.patrolRegions()
