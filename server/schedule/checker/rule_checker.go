@@ -133,17 +133,17 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 		flag := false
 		if c.isDownPeer(region, peer) {
 			flag = true
-			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
 			// to avoid replacing
 			if op == nil {
+				checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
 				op, err = c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
 			}
 		}
 		if c.isOfflinePeer(peer) {
 			flag = true
-			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
 			// to avoid replacing
 			if op == nil {
+				checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
 				op, err = c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
 			}
 		}

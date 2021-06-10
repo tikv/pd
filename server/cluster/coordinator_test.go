@@ -465,14 +465,14 @@ func (s *testCoordinatorSuite) TestCheckMissRegions(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`), IsNil)
 
 	// check miss region placement-rule enable
-	CheckMissRegionsTest(tc, co, c)
+	checkMissRegionsTest(tc, co, c)
 
 	// check miss region placement-rule disable,it will have same behavior with placement-rule
 	opt := co.cluster.GetOpts()
 	opt.SetPlacementRuleEnabled(false)
 	c.Assert(opt.IsPlacementRulesEnabled(), Equals, false)
 	c.Assert(opt.IsMakeUpReplicaEnabled(), Equals, true)
-	CheckMissRegionsTest(tc, co, c)
+	checkMissRegionsTest(tc, co, c)
 
 	co.wg.Wait()
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"), IsNil)

@@ -173,7 +173,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) (offlineCount
 	}
 	return
 }
-func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) (miss int) {
+func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) int {
 	if !r.opts.IsMakeUpReplicaEnabled() {
 		return 0
 	}
