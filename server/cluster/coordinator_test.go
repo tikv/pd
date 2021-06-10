@@ -460,7 +460,7 @@ func (s *testCoordinatorSuite) TestCheckMissRegions(c *C) {
 
 	// Add a peer with three replicas.
 	c.Assert(tc.addLeaderRegion(1, 2), IsNil)
-	c.Assert(tc.addLeaderRegion(2, 2, 3), IsNil)
+	c.Assert(tc.addLeaderRegion(2, 2, 3, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(3, 2, 1), IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`), IsNil)
 
@@ -479,18 +479,18 @@ func (s *testCoordinatorSuite) TestCheckMissRegions(c *C) {
 }
 
 func checkMissRegionsTest(tc *testCluster, co *coordinator, c *C) {
-	// case 1: region-1 and region-3 will enter miss peer queue
+	// case 1:  region-3 will enter miss peer queue
 	co.wg.Add(1)
 	oc := co.opController
 	co.patrolRegions()
 	c.Assert(len(oc.GetOperators()), Equals, 0)
-	c.Assert(len(co.checkers.GetMissRegions()), Equals, 1)
+	c.Assert(co.checkers.GetMissRegionSize(), Equals, 1)
 
-	//case 2: region-1 add one replicate
-	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
+	//case 2: region-3 add one replicate
+	c.Assert(tc.addLeaderRegion(3, 2, 3, 1), IsNil)
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(len(co.checkers.GetMissRegions()), Equals, 0)
+	c.Assert(co.checkers.GetMissRegionSize(), Equals, 0)
 
 	//case 3: store-1 is tombstone, so region-3 has only one replicas,it will be added to miss regions
 	c.Assert(co.cluster.RemoveStore(1, false), IsNil)
@@ -498,12 +498,13 @@ func checkMissRegionsTest(tc *testCluster, co *coordinator, c *C) {
 	c.Assert(co.cluster.GetStore(1).IsUp(), Equals, false)
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(len(co.checkers.GetMissRegions()), Equals, 1)
+	c.Assert(len(co.checkers.GetMissRegions()), Equals, 2)
 
 	// recovery add store-1, region-1 has one peer, remove miss region
 	c.Assert(tc.addRegionStore(1, 0), IsNil)
-	c.Assert(tc.addLeaderRegion(1, 2), IsNil)
-	co.checkers.RemoveMissRegions([]uint64{3})
+	c.Assert(tc.addLeaderRegion(3, 2, 1), IsNil)
+	c.Assert(tc.addLeaderRegion(2, 2, 3, 1), IsNil)
+	co.checkers.RemoveMissRegions([]uint64{3, 2})
 	c.Assert(len(co.checkers.GetMissRegions()), Equals, 0)
 }
 
