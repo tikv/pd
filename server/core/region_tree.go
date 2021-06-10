@@ -97,10 +97,11 @@ func (t *regionTree) getOverlaps(region *RegionInfo) []*RegionInfo {
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
-func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
+func (t *regionTree) update(item *regionItem) []*RegionInfo {
+	region := item.region
 	t.totalSize += region.approximateSize
-
 	overlaps := t.getOverlaps(region)
+
 	for _, old := range overlaps {
 		log.Debug("overlapping region",
 			zap.Uint64("region-id", old.GetID()),
@@ -110,8 +111,7 @@ func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
 		t.totalSize -= old.approximateSize
 	}
 
-	t.tree.ReplaceOrInsert(&regionItem{region: region})
-
+	t.tree.ReplaceOrInsert(item)
 	return overlaps
 }
 

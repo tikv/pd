@@ -580,6 +580,7 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 		return err
 	}
 	o.adjustScheduleCfg(&cfg.Schedule)
+	cfg.PDServerCfg.MigrateDeprecatedFlags()
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)

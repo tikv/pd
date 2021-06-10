@@ -35,16 +35,22 @@ func Test(t *testing.T) {
 
 var _ = Suite(&schedulerTestSuite{})
 
-type schedulerTestSuite struct{}
+type schedulerTestSuite struct {
+	context context.Context
+	cancel  context.CancelFunc
+}
 
 func (s *schedulerTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
+	s.context, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *schedulerTestSuite) TearDownSuite(c *C) {
+	s.cancel()
 }
 
 func (s *schedulerTestSuite) TestScheduler(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestCluster(s.context, 1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

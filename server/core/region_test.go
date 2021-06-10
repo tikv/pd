@@ -186,14 +186,14 @@ type testRegionMapSuite struct{}
 func (s *testRegionMapSuite) TestRegionMap(c *C) {
 	rm := newRegionMap()
 	s.check(c, rm)
-	rm.Put(s.regionInfo(1))
+	rm.AddNew(s.regionInfo(1))
 	s.check(c, rm, 1)
 
-	rm.Put(s.regionInfo(2))
-	rm.Put(s.regionInfo(3))
+	rm.AddNew(s.regionInfo(2))
+	rm.AddNew(s.regionInfo(3))
 	s.check(c, rm, 1, 2, 3)
 
-	rm.Put(s.regionInfo(3))
+	rm.AddNew(s.regionInfo(3))
 	rm.Delete(4)
 	s.check(c, rm, 1, 2, 3)
 
@@ -201,7 +201,7 @@ func (s *testRegionMapSuite) TestRegionMap(c *C) {
 	rm.Delete(1)
 	s.check(c, rm, 2)
 
-	rm.Put(s.regionInfo(3))
+	rm.AddNew(s.regionInfo(3))
 	s.check(c, rm, 2, 3)
 }
 
@@ -218,7 +218,7 @@ func (s *testRegionMapSuite) regionInfo(id uint64) *RegionInfo {
 func (s *testRegionMapSuite) check(c *C, rm regionMap, ids ...uint64) {
 	// Check Get.
 	for _, id := range ids {
-		c.Assert(rm.Get(id).GetID(), Equals, id)
+		c.Assert(rm.Get(id).region.GetID(), Equals, id)
 	}
 	// Check Len.
 	c.Assert(rm.Len(), Equals, len(ids))
@@ -229,7 +229,7 @@ func (s *testRegionMapSuite) check(c *C, rm regionMap, ids ...uint64) {
 	}
 	set1 := make(map[uint64]struct{})
 	for _, r := range rm {
-		set1[r.GetID()] = struct{}{}
+		set1[r.region.GetID()] = struct{}{}
 	}
 	c.Assert(set1, DeepEquals, expect)
 }
@@ -439,7 +439,7 @@ func BenchmarkRandomRegion(b *testing.B) {
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
 		}, peer)
-		regions.AddRegion(region)
+		regions.SetRegion(region)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -492,6 +492,6 @@ func BenchmarkAddRegion(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		regions.AddRegion(items[i])
+		regions.SetRegion(items[i])
 	}
 }
