@@ -15,6 +15,7 @@ package statistics
 
 import (
 	"context"
+	"time"
 
 	"github.com/tikv/pd/server/core"
 )
@@ -29,6 +30,22 @@ const (
 	isRegionHotTaskType
 	collectMetricsTaskType
 )
+
+func taskType(t flowItemTaskKind) string {
+	switch t {
+	case checkPeerTaskType:
+		return "checkPeerTaskType"
+	case checkExpiredTaskType:
+		return "checkExpiredTaskType"
+	case collectUnReportedPeerTaskType:
+		return "checkExpiredTaskType"
+	case isRegionHotTaskType:
+		return "isRegionHotTaskType"
+	case collectMetricsTaskType:
+		return "collectMetricsTaskType"
+	}
+	return "unknown"
+}
 
 // FlowItemTask indicates the task in flowItem queue
 type FlowItemTask interface {
@@ -140,13 +157,15 @@ func (t *collectRegionStatsTask) waitRet(ctx context.Context, quit <-chan struct
 }
 
 type isRegionHotTask struct {
+	rw           string
 	region       *core.RegionInfo
 	minHotDegree int
 	ret          chan bool
 }
 
-func newIsRegionHotTask(region *core.RegionInfo, minDegree int) *isRegionHotTask {
+func newIsRegionHotTask(region *core.RegionInfo, minDegree int, rw string) *isRegionHotTask {
 	return &isRegionHotTask{
+		rw:           rw,
 		region:       region,
 		minHotDegree: minDegree,
 		ret:          make(chan bool),
@@ -173,13 +192,13 @@ func (t *isRegionHotTask) waitRet(ctx context.Context, quit <-chan struct{}) boo
 }
 
 type collectMetricsTask struct {
-	typ  string
+	rw   string
 	done chan struct{}
 }
 
-func newCollectMetricsTask(typ string) *collectMetricsTask {
+func newCollectMetricsTask(rw string) *collectMetricsTask {
 	return &collectMetricsTask{
-		typ:  typ,
+		rw:   rw,
 		done: make(chan struct{}),
 	}
 }
@@ -189,11 +208,13 @@ func (t *collectMetricsTask) taskType() flowItemTaskKind {
 }
 
 func (t *collectMetricsTask) runTask(flow *hotPeerCache) {
-	flow.CollectMetrics(t.typ)
+	flow.CollectMetrics(t.rw)
 	t.done <- struct{}{}
 }
 
 func (t *collectMetricsTask) waitDone(ctx context.Context, quit <-chan struct{}) {
+	start := time.Now()
+	defer hotCacheFlowTaskWaitDurationHist.WithLabelValues(taskType(t.taskType()), t.rw).Observe(time.Since(start).Seconds())
 	select {
 	case <-ctx.Done():
 		return
