@@ -930,8 +930,9 @@ func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
 // IsRegionHot checks if a region is in hot state.
 func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
 	c.RLock()
-	defer c.RUnlock()
-	return c.hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
+	hotStat := c.hotStat
+	c.RUnlock()
+	return hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
 }
 
 // GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
@@ -1311,26 +1312,30 @@ func (c *RaftCluster) resetMetrics() {
 
 func (c *RaftCluster) collectClusterMetrics() {
 	c.RLock()
-	defer c.RUnlock()
 	if c.regionStats == nil {
 		return
 	}
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
+	hotStat := c.hotStat
+	c.RUnlock()
 	// collect hot cache metrics
-	c.hotStat.CollectMetrics()
+	hotStat.CollectMetrics()
 }
 
 func (c *RaftCluster) resetClusterMetrics() {
 	c.RLock()
-	defer c.RUnlock()
+
 	if c.regionStats == nil {
+		c.RUnlock()
 		return
 	}
 	c.regionStats.Reset()
 	c.labelLevelStats.Reset()
+	hotStat := c.hotStat
+	c.RUnlock()
 	// reset hot cache metrics
-	c.hotStat.ResetMetrics()
+	hotStat.ResetMetrics()
 }
 
 func (c *RaftCluster) collectHealthStatus() {

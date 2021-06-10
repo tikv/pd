@@ -177,8 +177,15 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 
 // CollectMetrics collects the hot cache metrics.
 func (w *HotCache) CollectMetrics() {
+<<<<<<< HEAD
 	w.writeFlow.CollectMetrics("write")
 	w.readFlow.CollectMetrics("read")
+=======
+	writeMetricsTask := newCollectMetricsTask("write")
+	readMetricsTask := newCollectMetricsTask("read")
+	w.CheckWriteAsync(writeMetricsTask)
+	w.CheckReadAsync(readMetricsTask)
+>>>>>>> f4d6f28d9 (statistics: fix task might get stuck and hold raftcluster mutex (#3758))
 }
 
 // ResetMetrics resets the hot cache metrics.
@@ -226,6 +233,7 @@ func (w *HotCache) updateItems(ctx context.Context) {
 	}
 }
 
+<<<<<<< HEAD
 func (w *HotCache) updateItem(item *FlowItem, flow *hotPeerCache) {
 	if item.peerInfo != nil && item.regionInfo != nil {
 		stat := flow.CheckPeerFlow(item.peerInfo, item.regionInfo)
@@ -240,5 +248,31 @@ func (w *HotCache) updateItem(item *FlowItem, flow *hotPeerCache) {
 		for _, stat := range stats {
 			w.Update(stat)
 		}
+=======
+func (w *HotCache) runReadTask(task FlowItemTask) {
+	if task != nil {
+		// TODO: do we need a run-task timeout to protect the queue won't be stucked by a task?
+		task.runTask(w.readFlow)
+		hotCacheFlowQueueStatusGauge.WithLabelValues(ReadFlow.String()).Set(float64(len(w.readFlowQueue)))
+	}
+}
+
+func (w *HotCache) runWriteTask(task FlowItemTask) {
+	if task != nil {
+		// TODO: do we need a run-task timeout to protect the queue won't be stucked by a task?
+		task.runTask(w.writeFlow)
+		hotCacheFlowQueueStatusGauge.WithLabelValues(WriteFlow.String()).Set(float64(len(w.writeFlowQueue)))
+	}
+}
+
+func update(item *HotPeerStat, flow *hotPeerCache) {
+	flow.Update(item)
+	if item.IsNeedDelete() {
+		incMetrics("remove_item", item.StoreID, item.Kind)
+	} else if item.IsNew() {
+		incMetrics("add_item", item.StoreID, item.Kind)
+	} else {
+		incMetrics("update_item", item.StoreID, item.Kind)
+>>>>>>> f4d6f28d9 (statistics: fix task might get stuck and hold raftcluster mutex (#3758))
 	}
 }
