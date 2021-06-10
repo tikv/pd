@@ -447,6 +447,67 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	waitNoResponse(c, stream)
 }
 
+func (s *testCoordinatorSuite) TestCheckMissRegions(c *C) {
+	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
+		// Turn off replica scheduling.
+		cfg.ReplicaScheduleLimit = 0
+	}, nil, nil, c)
+	defer cleanup()
+
+	c.Assert(tc.addRegionStore(1, 0), IsNil)
+	c.Assert(tc.addRegionStore(2, 0), IsNil)
+	c.Assert(tc.addRegionStore(3, 0), IsNil)
+
+	// Add a peer with three replicas.
+	c.Assert(tc.addLeaderRegion(1, 2), IsNil)
+	c.Assert(tc.addLeaderRegion(2, 2, 3), IsNil)
+	c.Assert(tc.addLeaderRegion(3, 2, 1), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`), IsNil)
+
+	// check miss region placement-rule enable
+	CheckMissRegionsTest(tc, co, c)
+
+	// check miss region placement-rule disable,it will have same behavior with placement-rule
+	opt := co.cluster.GetOpts()
+	opt.SetPlacementRuleEnabled(false)
+	c.Assert(opt.IsPlacementRulesEnabled(), Equals, false)
+	c.Assert(opt.IsMakeUpReplicaEnabled(), Equals, true)
+	CheckMissRegionsTest(tc, co, c)
+
+	co.wg.Wait()
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"), IsNil)
+}
+
+func CheckMissRegionsTest(tc *testCluster, co *coordinator, c *C) {
+	// case 1: region-1 and region-3 will entry miss peer queue
+	co.wg.Add(1)
+	oc := co.opController
+	co.patrolRegions()
+	c.Assert(len(oc.GetOperators()), Equals, 0)
+	c.Assert(len(co.checkers.GetMissRegions()), Equals, 1)
+
+	//case 2: region-1 add one replicate
+	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
+	co.wg.Add(1)
+	co.patrolRegions()
+	c.Assert(len(co.checkers.GetMissRegions()), Equals, 0)
+
+	//case 3: store 1 is tombstone, so region 3 has only one replicas,it will be added to miss regions
+	c.Assert(co.cluster.RemoveStore(1, false), IsNil)
+	c.Assert(co.cluster.buryStore(1), IsNil)
+	c.Assert(co.cluster.GetStore(1).IsUp(), Equals, false)
+	co.wg.Add(1)
+	co.patrolRegions()
+	c.Assert(len(co.checkers.GetMissRegions()), Equals, 1)
+
+	// recovery
+	// add store-1, region-1 has one peer, remove miss region
+	c.Assert(tc.addRegionStore(1, 0), IsNil)
+	c.Assert(tc.addLeaderRegion(1, 2), IsNil)
+	co.checkers.RemoveMissRegions([]uint64{3})
+	c.Assert(len(co.checkers.GetMissRegions()), Equals, 0)
+}
+
 func (s *testCoordinatorSuite) TestCheckCache(c *C) {
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		// Turn off replica scheduling.

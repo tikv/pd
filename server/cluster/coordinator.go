@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/config"
@@ -44,6 +45,7 @@ const (
 	collectTimeout            = 5 * time.Minute
 	maxScheduleRetries        = 10
 	maxLoadConfigRetries      = 10
+	maxMissPeerQueueSize      = 4096
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 	// PluginLoad means action for load plugin
@@ -108,6 +110,10 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
+		// Check miss region first
+		if c.checkMissRegions() {
+			continue
+		}
 		// Check suspect regions first.
 		c.checkSuspectRegions()
 		// Check suspect key ranges
@@ -127,7 +133,6 @@ func (c *coordinator) patrolRegions() {
 			if c.opController.GetOperator(region.GetID()) != nil {
 				continue
 			}
-
 			ops := c.checkers.CheckRegion(region)
 
 			key = region.GetEndKey()
@@ -153,6 +158,45 @@ func (c *coordinator) patrolRegions() {
 			failpoint.Break()
 		})
 	}
+}
+
+// checkMissRegions check miss peer, if miss region is more than maxMissPeerQueueSize,
+// it will return ture to avoid run other replica check
+func (c *coordinator) checkMissRegions() bool {
+	updates := make([]*cache.Entry, 0)
+	removes := make([]uint64, 0)
+	missPeers := c.checkers.GetMissRegions()
+	regionListGauge.WithLabelValues("priority").Set(float64(len(missPeers)))
+	log.Debug("check miss regions", zap.Int("miss region count", len(missPeers)))
+	for _, entry := range missPeers {
+		id, ok := entry.Value.(uint64)
+		if !ok {
+			continue
+		}
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			// the region could be recent split, continue to wait.
+			removes = append(removes, id)
+			continue
+		}
+		ops := c.checkers.CheckRegion(region)
+		// skip merge operator
+		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
+			continue
+		}
+		if !c.opController.ExceedStoreLimit(ops...) {
+			c.opController.AddWaitingOperator(ops...)
+			if entry.Priority = entry.Priority - 1; entry.Priority > 1 {
+				updates = append(updates, entry)
+			}
+		}
+	}
+	c.checkers.RemoveMissRegions(removes)
+	for _, v := range updates {
+		c.checkers.UpdateMissPeer(v)
+	}
+	remained := len(missPeers) - len(removes)
+	return remained > maxMissPeerQueueSize
 }
 
 func (c *coordinator) checkSuspectRegions() {
@@ -207,7 +251,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 
 func (c *coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
-	regionWaitingListGauge.Set(float64(len(items)))
+	regionListGauge.WithLabelValues("waiting").Set(float64(len(items)))
 	for _, item := range items {
 		id := item.Key
 		region := c.cluster.GetRegion(id)

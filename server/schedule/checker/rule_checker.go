@@ -33,21 +33,24 @@ import (
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
-	cluster           opt.Cluster
-	ruleManager       *placement.RuleManager
-	name              string
-	regionWaitingList cache.Cache
-	record            *recorder
+	cluster             opt.Cluster
+	ruleManager         *placement.RuleManager
+	name                string
+	regionWaitingList   cache.Cache
+	record              *recorder
+	regionPriorityQueue *cache.PriorityQueue
 }
 
 // NewRuleChecker creates a checker instance.
-func NewRuleChecker(cluster opt.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
+func NewRuleChecker(cluster opt.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache,
+	regionPriorityQueue *cache.PriorityQueue) *RuleChecker {
 	return &RuleChecker{
-		cluster:           cluster,
-		ruleManager:       ruleManager,
-		name:              "rule-checker",
-		regionWaitingList: regionWaitingList,
-		record:            newRecord(),
+		cluster:             cluster,
+		ruleManager:         ruleManager,
+		name:                "rule-checker",
+		regionWaitingList:   regionWaitingList,
+		record:              newRecord(),
+		regionPriorityQueue: regionPriorityQueue,
 	}
 }
 
@@ -56,9 +59,26 @@ func (c *RuleChecker) GetType() string {
 	return "rule-checker"
 }
 
+// GetMissPeer get miss peers of region
+func (c *RuleChecker) GetMissPeer(region *core.RegionInfo) (missPeers, expect int) {
+	fit := c.cluster.FitRegion(region)
+	if len(fit.RuleFits) == 0 {
+		return
+	}
+	missPeers = 0
+	expect = 0
+	for _, rf := range fit.RuleFits {
+		if len(rf.Peers) < rf.Rule.Count {
+			missPeers = missPeers + rf.Rule.Count - len(rf.Peers)
+		}
+		expect = expect + rf.Rule.Count
+	}
+	return
+}
+
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
-func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
+func (c *RuleChecker) Check(region *core.RegionInfo) (op *operator.Operator) {
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
 	c.record.refresh(c.cluster)
 	fit := c.cluster.FitRegion(region)
@@ -74,8 +94,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 	log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	for _, rf := range fit.RuleFits {
-		op, err := c.fixRulePeer(region, fit, rf)
-		if err != nil {
+		if op, err = c.fixRulePeer(region, fit, rf); err != nil {
 			log.Debug("fail to fix rule peer", zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID), errs.ZapError(err))
 			continue
 		}
@@ -101,25 +120,51 @@ func (c *RuleChecker) fixRange(region *core.RegionInfo) *operator.Operator {
 	return op
 }
 
-func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
+// fixRulePeer fix region to satisfy rule requirement and statics miss region count include down and offline peer
+func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (op *operator.Operator, err error) {
+	miss := 0
 	// make up peers.
 	if len(rf.Peers) < rf.Rule.Count {
-		return c.addRulePeer(region, rf)
+		op, err = c.addRulePeer(region, rf)
+		miss = miss + rf.Rule.Count - len(rf.Peers)
 	}
+	log.Info("fixRulePeer", zap.Uint64("region id", region.GetID()), zap.Int("miss", miss))
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
+		abnormal := false
 		if c.isDownPeer(region, peer) {
+			abnormal = true
 			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
-			return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
+			// to avoid replacing
+			if op == nil {
+				op, err = c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
+			}
 		}
 		if c.isOfflinePeer(peer) {
+			abnormal = true
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
-			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
+			// to avoid replacing
+			if op == nil {
+				op, err = c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
+			}
 		}
+		if abnormal {
+			miss = miss + 1
+			log.Info("fixRulePeer", zap.Uint64("region id", region.GetID()), zap.Bool("abnormal", abnormal))
+		}
+	}
+	if op != nil {
+		log.Info("fixRulePeer", zap.Uint64("region id", op.RegionID()), zap.Int("miss", miss))
+		if miss > rf.Rule.Count/2 {
+			c.regionPriorityQueue.Push(miss, region.GetID())
+		} else {
+			c.regionPriorityQueue.RemoveValue(region.GetID())
+		}
+		return
 	}
 	// fix loose matched peers.
 	for _, peer := range rf.PeersWithDifferentRole {
-		op, err := c.fixLooseMatchPeer(region, fit, rf, peer)
+		op, err = c.fixLooseMatchPeer(region, fit, rf, peer)
 		if err != nil {
 			return nil, err
 		}

@@ -28,38 +28,44 @@ import (
 // DefaultCacheSize is the default length of waiting list.
 const DefaultCacheSize = 1000
 
+// DefaultMissPeerSize is the default length of priority queue list.
+const DefaultMissPeerSize = 4096
+
 // CheckerController is used to manage all checkers.
 type CheckerController struct {
-	cluster           opt.Cluster
-	opts              *config.PersistOptions
-	opController      *OperatorController
-	learnerChecker    *checker.LearnerChecker
-	replicaChecker    *checker.ReplicaChecker
-	ruleChecker       *checker.RuleChecker
-	mergeChecker      *checker.MergeChecker
-	jointStateChecker *checker.JointStateChecker
-	regionWaitingList cache.Cache
+	cluster             opt.Cluster
+	opts                *config.PersistOptions
+	opController        *OperatorController
+	learnerChecker      *checker.LearnerChecker
+	replicaChecker      *checker.ReplicaChecker
+	ruleChecker         *checker.RuleChecker
+	mergeChecker        *checker.MergeChecker
+	jointStateChecker   *checker.JointStateChecker
+	regionWaitingList   cache.Cache
+	regionPriorityQueue *cache.PriorityQueue
 }
 
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
 func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, opController *OperatorController) *CheckerController {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
+	regionPriorityQueue := cache.NewPriorityQueue(DefaultMissPeerSize)
 	return &CheckerController{
-		cluster:           cluster,
-		opts:              cluster.GetOpts(),
-		opController:      opController,
-		learnerChecker:    checker.NewLearnerChecker(cluster),
-		replicaChecker:    checker.NewReplicaChecker(cluster, regionWaitingList),
-		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager, regionWaitingList),
-		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
-		jointStateChecker: checker.NewJointStateChecker(cluster),
-		regionWaitingList: regionWaitingList,
+		cluster:             cluster,
+		opts:                cluster.GetOpts(),
+		opController:        opController,
+		learnerChecker:      checker.NewLearnerChecker(cluster),
+		replicaChecker:      checker.NewReplicaChecker(cluster, regionWaitingList, regionPriorityQueue),
+		ruleChecker:         checker.NewRuleChecker(cluster, ruleManager, regionWaitingList, regionPriorityQueue),
+		mergeChecker:        checker.NewMergeChecker(ctx, cluster),
+		jointStateChecker:   checker.NewJointStateChecker(cluster),
+		regionWaitingList:   regionWaitingList,
+		regionPriorityQueue: regionPriorityQueue,
 	}
 }
 
 // CheckRegion will check the region and add a new operator if needed.
-func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Operator {
+func (c *CheckerController) CheckRegion(region *core.RegionInfo) (ops []*operator.Operator) {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
@@ -70,23 +76,22 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 
 	if c.opts.IsPlacementRulesEnabled() {
 		if op := c.ruleChecker.Check(region); op != nil {
-			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-				return []*operator.Operator{op}
-			}
-			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
-			c.regionWaitingList.Put(region.GetID(), nil)
+			ops = []*operator.Operator{op}
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
 			return []*operator.Operator{op}
 		}
 		if op := c.replicaChecker.Check(region); op != nil {
-			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-				return []*operator.Operator{op}
-			}
-			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
-			c.regionWaitingList.Put(region.GetID(), nil)
+			ops = []*operator.Operator{op}
 		}
+	}
+	if len(ops) > 0 {
+		if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+			return ops
+		}
+		operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
+		c.regionWaitingList.Put(region.GetID(), nil)
 	}
 
 	if c.mergeChecker != nil {
@@ -106,6 +111,25 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 // GetMergeChecker returns the merge checker.
 func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 	return c.mergeChecker
+}
+
+// GetMissRegions return miss regions that it's peers less than majority
+func (c *CheckerController) GetMissRegions() []*cache.Entry {
+	return c.regionPriorityQueue.GetAll()
+}
+
+// RemoveMissRegions remove the regions from priority queue
+func (c *CheckerController) RemoveMissRegions(ids []uint64) {
+	s := make([]interface{}, len(ids))
+	for i, v := range ids {
+		s[i] = v
+	}
+	c.regionPriorityQueue.RemoveValues(s)
+}
+
+// UpdateMissPeer update region priority
+func (c *CheckerController) UpdateMissPeer(entry *cache.Entry) {
+	c.regionPriorityQueue.Update(entry, entry.Priority)
 }
 
 // GetWaitingRegions returns the regions in the waiting list.
