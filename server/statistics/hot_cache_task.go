@@ -133,7 +133,7 @@ type collectRegionStatsTask struct {
 func newCollectRegionStatsTask(minDegree int) *collectRegionStatsTask {
 	return &collectRegionStatsTask{
 		minDegree: minDegree,
-		ret:       make(chan map[uint64][]*HotPeerStat),
+		ret:       make(chan map[uint64][]*HotPeerStat, 1),
 	}
 }
 
@@ -145,7 +145,10 @@ func (t *collectRegionStatsTask) runTask(flow *hotPeerCache) {
 	t.ret <- flow.RegionStats(t.minDegree)
 }
 
+// TODO: do we need a wait-return timeout?
 func (t *collectRegionStatsTask) waitRet(ctx context.Context, quit <-chan struct{}) map[uint64][]*HotPeerStat {
+	start := time.Now()
+	defer hotCacheFlowTaskWaitDurationHist.WithLabelValues(taskType(t.taskType()), t.rw).Observe(time.Since(start).Seconds())
 	select {
 	case <-ctx.Done():
 		return nil
@@ -168,7 +171,7 @@ func newIsRegionHotTask(region *core.RegionInfo, minDegree int, rw string) *isRe
 		rw:           rw,
 		region:       region,
 		minHotDegree: minDegree,
-		ret:          make(chan bool),
+		ret:          make(chan bool, 1),
 	}
 }
 
@@ -180,7 +183,10 @@ func (t *isRegionHotTask) runTask(flow *hotPeerCache) {
 	t.ret <- flow.isRegionHotWithAnyPeers(t.region, t.minHotDegree)
 }
 
+// TODO: do we need a wait-return timeout?
 func (t *isRegionHotTask) waitRet(ctx context.Context, quit <-chan struct{}) bool {
+	start := time.Now()
+	defer hotCacheFlowTaskWaitDurationHist.WithLabelValues(taskType(t.taskType()), t.rw).Observe(time.Since(start).Seconds())
 	select {
 	case <-ctx.Done():
 		return false
@@ -192,14 +198,12 @@ func (t *isRegionHotTask) waitRet(ctx context.Context, quit <-chan struct{}) boo
 }
 
 type collectMetricsTask struct {
-	rw   string
-	done chan struct{}
+	rw string
 }
 
 func newCollectMetricsTask(rw string) *collectMetricsTask {
 	return &collectMetricsTask{
-		rw:   rw,
-		done: make(chan struct{}),
+		rw: rw,
 	}
 }
 
@@ -209,18 +213,4 @@ func (t *collectMetricsTask) taskType() flowItemTaskKind {
 
 func (t *collectMetricsTask) runTask(flow *hotPeerCache) {
 	flow.CollectMetrics(t.rw)
-	t.done <- struct{}{}
-}
-
-func (t *collectMetricsTask) waitDone(ctx context.Context, quit <-chan struct{}) {
-	start := time.Now()
-	defer hotCacheFlowTaskWaitDurationHist.WithLabelValues(taskType(t.taskType()), t.rw).Observe(time.Since(start).Seconds())
-	select {
-	case <-ctx.Done():
-		return
-	case <-quit:
-		return
-	case <-t.done:
-		return
-	}
 }
