@@ -1,4 +1,4 @@
-// Copyright 2019 TiKV Project Authors.
+// Copyright 2021 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,6 @@ import "go.uber.org/goleak"
 
 // LeakOptions is used to filter the goroutines.
 var LeakOptions = []goleak.Option{
-	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).mpoolDrain"),
-	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).tCompaction"),
-	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb/util.(*BufferPool).drain"),
-	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).mCompaction"),
-	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).compactionError"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*ccBalancerWrapper).watcher"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*ccResolverWrapper).watcher"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).createTransport"),
