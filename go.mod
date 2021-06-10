@@ -2,6 +2,12 @@ module github.com/tikv/pd
 
 go 1.16
 
+replace (
+	github.com/tikv/pd/client => ./client
+	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
+	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
+)
+
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
@@ -42,7 +48,7 @@ require (
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
 	github.com/swaggo/swag v1.6.6-0.20200529100950-7c765ddd0476
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/client v0.0.0
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
@@ -52,8 +58,3 @@ require (
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
-
-// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
-replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
-
-replace github.com/tikv/pd/client => ./client
