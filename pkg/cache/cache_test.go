@@ -311,8 +311,11 @@ func (s *testRegionCacheSuite) TestPriorityQueue(c *C) {
 	c.Assert(pq.Push(2, 2), IsTrue)
 	c.Assert(pq.Push(3, 4), IsTrue)
 	c.Assert(pq.Push(5, 4), IsTrue)
+	c.Assert(pq.Get(4).Retry, Equals, 0)
 	c.Assert(pq.Push(6, 5), IsFalse)
 	c.Assert(pq.Push(3, 3), IsTrue)
+	c.Assert(pq.Push(3, 3), IsTrue)
+	c.Assert(pq.Get(3).Retry, Equals, 1)
 	c.Assert(pq.Has(4), IsFalse)
 
 	// case1 test getAll ,the highest element should be the first

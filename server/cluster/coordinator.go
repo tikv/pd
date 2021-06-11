@@ -45,6 +45,7 @@ const (
 	maxScheduleRetries        = 10
 	maxLoadConfigRetries      = 10
 	maxMissPeerQueueSize      = 4096
+	maxRegionRetry            = 10
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 	// PluginLoad means action for load plugin
@@ -172,11 +173,17 @@ func (c *coordinator) checkMissRegions() bool {
 			continue
 		}
 		region := c.cluster.GetRegion(id)
-		if region == nil {
-			// the region could be recent split, continue to wait.
+		// it will remove if region retry reach max regionRetry
+		if region == nil || entry.Retry > maxRegionRetry {
 			removes = append(removes, id)
 			continue
 		}
+		// avoid to some region run first leading to other region do not execute
+		// skip if time not after now-10*retry*patrol_interval
+		if t := entry.Last.Add(time.Duration(entry.Retry*10) * c.cluster.opt.GetPatrolRegionInterval()); t.After(time.Now()) {
+			continue
+		}
+
 		ops := c.checkers.CheckRegion(region)
 		// skip merge operator
 		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {

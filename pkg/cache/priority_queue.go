@@ -2,6 +2,7 @@ package cache
 
 import (
 	"container/heap"
+	"time"
 )
 
 // PriorityQueue queue has priority, the first element has the highest priority
@@ -33,9 +34,16 @@ func (pq *PriorityQueue) Push(priority int, value interface{}) bool {
 			}
 			pq.RemoveValue(tail.Value)
 		}
-		v = &Entry{Value: value, Priority: priority}
+		v = &Entry{Value: value, Priority: priority, Last: time.Now()}
 		heap.Push(pq.queue, v)
 	} else {
+		// priority has no change
+		if priority == v.Priority {
+			v.Retry = v.Retry + 1
+		} else {
+			v.Retry = 0
+		}
+		v.Last = time.Now()
 		pq.UpdatePriority(v, priority)
 	}
 	pq.items[value] = v
@@ -86,6 +94,14 @@ func (pq *PriorityQueue) RemoveValues(values []interface{}) {
 	}
 }
 
+// Get entry if queue has the value
+func (pq PriorityQueue) Get(value interface{}) *Entry {
+	if v, ok := pq.items[value]; ok && v.index != -1 {
+		return v
+	}
+	return nil
+}
+
 // Has it will return true if queue has the value
 func (pq PriorityQueue) Has(value interface{}) bool {
 	if v, ok := pq.items[value]; ok && v.index != -1 {
@@ -103,6 +119,8 @@ func (pq PriorityQueue) Size() int {
 type Entry struct {
 	Value    interface{}
 	Priority int
+	Last     time.Time
+	Retry    int
 	index    int
 }
 
