@@ -56,7 +56,7 @@ func (pq *PriorityQueue) Pop() *Entry {
 }
 
 // Peek return the highest priority element
-func (pq *PriorityQueue) Peek() *Entry {
+func (pq PriorityQueue) Peek() *Entry {
 	return pq.queue.peek()
 }
 
@@ -66,12 +66,12 @@ func (pq *PriorityQueue) UpdatePriority(old *Entry, priority int) {
 	pq.queue.fix(old)
 }
 
-// GetAll return limited Entries
-func (pq *PriorityQueue) GetAll() []*Entry {
+// GetAll return all entries
+func (pq PriorityQueue) GetAll() []*Entry {
 	return pq.queue.GetAll()
 }
 
-// RemoveValue remove element
+// RemoveValue remove element by value
 func (pq *PriorityQueue) RemoveValue(value interface{}) {
 	if entry, ok := pq.items[value]; ok {
 		pq.queue.remove(entry.index)
@@ -87,7 +87,7 @@ func (pq *PriorityQueue) RemoveValues(values []interface{}) {
 }
 
 // Has it will return true if queue has the value
-func (pq *PriorityQueue) Has(value interface{}) bool {
+func (pq PriorityQueue) Has(value interface{}) bool {
 	if v, ok := pq.items[value]; ok && v.index != -1 {
 		return true
 	}
@@ -95,7 +95,7 @@ func (pq *PriorityQueue) Has(value interface{}) bool {
 }
 
 // Size return the size of queue
-func (pq *PriorityQueue) Size() int {
+func (pq PriorityQueue) Size() int {
 	return pq.queue.Len()
 }
 
@@ -142,27 +142,24 @@ func (pq *priorityHeap) Pop() interface{} {
 }
 
 // peek peek the highest priority element from heap
-func (pq *priorityHeap) peek() *Entry {
+func (pq priorityHeap) peek() *Entry {
 	if pq.Len() <= 0 {
 		return nil
 	}
-	old := *pq
-	return old[0]
+	return pq[0]
 }
 
 // tail peek the lowest priority element from heap
-func (pq *priorityHeap) tail() *Entry {
+func (pq priorityHeap) tail() *Entry {
 	if pq.Len() <= 0 {
 		return nil
 	}
-	old := *pq
-	return old[len(old)-1]
+	return pq[len(pq)-1]
 }
 
 // GetAll return the limited size of elements
-func (pq *priorityHeap) GetAll() []*Entry {
-	tmp := *pq
-	return tmp[:]
+func (pq priorityHeap) GetAll() []*Entry {
+	return pq[:]
 }
 
 // remove return the index element from heap
