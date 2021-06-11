@@ -66,7 +66,7 @@ func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *St
 		case TiKV.String():
 			tikvPlans, err := getTiKVPlans(rc, querier, strategy)
 			if err != nil {
-				log.Error("error getting tikv plans.\n%s", errs.ZapError(err))
+				log.Error("error getting tikv plans", errs.ZapError(err))
 				return nil
 			}
 
@@ -74,7 +74,7 @@ func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *St
 		case TiDB.String():
 			tidbPlans, err := getTiDBPlans(rc, querier, strategy)
 			if err != nil {
-				log.Error("error getting tidb plans.\n%s", errs.ZapError(err))
+				log.Error("error getting tidb plans", errs.ZapError(err))
 				return nil
 			}
 
