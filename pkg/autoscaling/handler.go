@@ -56,6 +56,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plans := calculate(rc, h.svr.GetPDServerConfig(), &strategy)
+	plans := calculate(rc, &strategy)
+
 	h.rd.JSON(w, http.StatusOK, plans)
 }

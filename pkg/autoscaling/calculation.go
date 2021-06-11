@@ -14,6 +14,8 @@
 package autoscaling
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -25,12 +27,14 @@ import (
 	promClient "github.com/prometheus/client_golang/api"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
 const (
+	DefaultTimeout                 = 5 * time.Second
+	prometheusAddressKey           = "/topology/prometheus"
+	prometheusPort                 = 9090
 	groupLabelKey                  = "group"
 	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling"
 	resourceTypeLabelKey           = "resource-type"
@@ -49,14 +53,17 @@ var (
 	MaxScaleInStep uint64 = 1
 )
 
-func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Strategy) []*Plan {
+func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 	var plans []*Plan
 
-	client, err := promClient.NewClient(promClient.Config{
-		Address: cfg.MetricStorage,
-	})
+	prometheusAddress, err := getPrometheusAddress(rc)
 	if err != nil {
-		log.Error("error initializing Prometheus client", zap.String("metric-storage", cfg.MetricStorage), errs.ZapError(errs.ErrPrometheusCreateClient, err))
+		log.Error("error getting prometheus address", errs.ZapError(err))
+	}
+
+	client, err := promClient.NewClient(promClient.Config{Address: prometheusAddress})
+	if err != nil {
+		log.Error("error initializing Prometheus client", zap.String("prometheusAddress", prometheusAddress), errs.ZapError(errs.ErrPrometheusCreateClient, err))
 		return nil
 	}
 	querier := NewPrometheusQuerier(client)
@@ -142,6 +149,27 @@ func getTiKVStoragePlan(rc *cluster.RaftCluster, instances []instance, strategy 
 	}
 
 	return nil, nil
+}
+
+func getPrometheusAddress(rc *cluster.RaftCluster) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	resp, err := rc.GetEtcdClient().Get(ctx, prometheusAddressKey)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Kvs) == 0 {
+		return "", errors.New(fmt.Sprintf("length of the response values of the key %s is 0", prometheusAddressKey))
+	}
+
+	prometheusAddress := &PrometheusAddress{}
+	err = json.Unmarshal(resp.Kvs[0].Value, prometheusAddress)
+	if err != nil {
+		return "", err
+	}
+
+	return prometheusAddress.String(), nil
 }
 
 func getTiDBPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy) ([]*Plan, error) {

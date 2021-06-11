@@ -29,6 +29,15 @@ const (
 	homogeneousTiDBResourceType = "default_homogeneous_tidb_resource_type"
 )
 
+type PrometheusAddress struct {
+	IP   string `json:"ip"`
+	Port int    `json:"port"`
+}
+
+func (pa *PrometheusAddress) String() string {
+	return fmt.Sprintf("%s:%d", pa.IP, pa.Port)
+}
+
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
 type Strategy struct {
 	Rules     []*Rule     `json:"rules"`
