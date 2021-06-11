@@ -107,6 +107,7 @@ func (c *RuleChecker) fixRange(region *core.RegionInfo) *operator.Operator {
 // fixRulePeer fix region to satisfy rule requirement and statics miss region count include down and offline peer
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (op *operator.Operator, err error) {
 	abnormal := 0
+	offline := 0
 	// make up peers.
 	if len(rf.Peers) < rf.Rule.Count {
 		op, err = c.addRulePeer(region, rf)
@@ -114,9 +115,8 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	}
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
-		flag := false
 		if c.isDownPeer(region, peer) {
-			flag = true
+			abnormal = abnormal + 1
 			// to avoid replacing
 			if op == nil {
 				checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
@@ -124,32 +124,27 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			}
 		}
 		if c.isOfflinePeer(peer) {
-			flag = true
 			// to avoid replacing
+			offline = offline + 1
 			if op == nil {
 				checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
 				op, err = c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
 			}
 		}
-		if flag {
-			abnormal = abnormal + 1
-		}
 	}
-	// It only add region follow only the normal region follow more than tolerate
-	// region-1's replicate set 3, tolerate should be 1, it lose one follow, so it's priority is 1(2-1)
-	// region-2's replicate set 5, tolerate should be 2, it lose one follow, so it's priority is 2(3-1)
-	// region-3's replicate set 3, tolerate should be 1, it lose two follow, so it should not put into the priority queue
-	// because it lost  follows more than tolerate
+
 	tolerate := rf.Rule.Count / 2
+	// It only adds region to priority queue only the region can make up replicas
 	if abnormal > tolerate {
 		log.Warn("region lose tolerate follow peers,should manual recovery", zap.Uint64("region id", region.GetID()),
 			zap.Int("abnormal peer", abnormal))
-	} else if abnormal <= tolerate && abnormal > 0 {
-		c.regionPriorityQueue.Push(tolerate-abnormal, region.GetID())
 	} else {
-		c.regionPriorityQueue.RemoveValue(region.GetID())
+		if abnormal > 0 || offline > 0 {
+			c.regionPriorityQueue.Push(tolerate-abnormal-offline, region.GetID())
+		} else {
+			c.regionPriorityQueue.RemoveValue(region.GetID())
+		}
 	}
-
 	if op != nil {
 		return
 	}

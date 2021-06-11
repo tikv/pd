@@ -67,15 +67,17 @@ func (r *ReplicaChecker) GetType() string {
 func (r *ReplicaChecker) Check(region *core.RegionInfo) (op *operator.Operator) {
 	checkerCounter.WithLabelValues("replica_checker", "check").Inc()
 	abnormalCount := 0
+	offlineCount := 0
 	if downCount, storeID := r.checkDownPeer(region); downCount > 0 {
 		op = r.fixPeer(region, storeID, downStatus)
 		abnormalCount = abnormalCount + downCount
 	}
-	if offlineCount, storeID := r.checkOfflinePeer(region); offlineCount > 0 {
+	// offline region can work well,so it should add to abnormal
+	if count, storeID := r.checkOfflinePeer(region); count > 0 {
 		if op == nil {
 			op = r.fixPeer(region, storeID, offlineStatus)
 		}
-		abnormalCount = abnormalCount + offlineCount
+		offlineCount = count
 	}
 	if miss := r.checkMakeUpReplica(region); miss > 0 {
 		if op == nil {
@@ -83,19 +85,19 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) (op *operator.Operator) 
 		}
 		abnormalCount = abnormalCount + miss
 	}
-	// It only add region follow only the normal region follow more than majority,
-	// the priority is how many follows can it tolerate
-	// region-1's replicate set 3, it lose one follow, so it's priority is 0(1-1),it can not loss any follows
-	// region-2's replicate set 5, it lose one follow, so it's priority is 1(2-1),it can loss one follow at most
-	// region-3's replicate set 3, it lose two follow, so it should not  put into the priority because it lost majority follows
+
 	tolerate := r.opts.GetMaxReplicas() / 2
+	// It only adds region to priority queue only the region can make up replicas
 	if abnormalCount > tolerate {
 		log.Warn("region lose majority follow peers, should manual recovery", zap.Uint64("region id", region.GetID()),
 			zap.Int("miss peer", abnormalCount))
-	} else if abnormalCount <= tolerate && abnormalCount > 0 {
-		r.regionPriorityQueue.Push(tolerate-abnormalCount, region.GetID())
 	} else {
-		r.regionPriorityQueue.RemoveValue(region.GetID())
+		// region can fix replica or offline is not zero
+		if abnormalCount > 0 || offlineCount > 0 {
+			r.regionPriorityQueue.Push(tolerate-abnormalCount-offlineCount, region.GetID())
+		} else {
+			r.regionPriorityQueue.RemoveValue(region.GetID())
+		}
 	}
 
 	if op != nil {
