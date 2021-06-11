@@ -20,6 +20,10 @@ WORKDIR /go/src/github.com/tikv/pd
 COPY go.mod .
 COPY go.sum .
 
+RUN mkdir -p client
+COPY client/go.mod client 
+COPY client/go.sum client 
+
 RUN GO111MODULE=on go mod download
 
 COPY . .
