@@ -100,14 +100,14 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 
 // RunServer runs the server of the region syncer.
 // regionNotifier is used to get the changed regions.
-func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit chan struct{}) {
+func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *core.RegionInfo) {
 	var requests []*metapb.Region
 	var stats []*pdpb.RegionStat
 	var leaders []*metapb.Peer
 	ticker := time.NewTicker(syncerKeepAliveInterval)
 	for {
 		select {
-		case <-quit:
+		case <-ctx.Done():
 			log.Info("region syncer has been stopped")
 			return
 		case first := <-regionNotifier:

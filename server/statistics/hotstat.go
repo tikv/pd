@@ -24,9 +24,9 @@ type HotStat struct {
 }
 
 // NewHotStat creates the container to hold cluster's hotspot statistics.
-func NewHotStat(ctx context.Context, quit <-chan struct{}) *HotStat {
+func NewHotStat(ctx context.Context) *HotStat {
 	return &HotStat{
-		HotCache:    NewHotCache(ctx, quit),
+		HotCache:    NewHotCache(ctx),
 		StoresStats: NewStoresStats(),
 	}
 }
