@@ -31,7 +31,7 @@ func (pq *PriorityQueue) Push(priority int, value interface{}) bool {
 			if tail.Priority < priority {
 				return false
 			}
-			pq.RemoveValue(tail)
+			pq.RemoveValue(tail.Value)
 		}
 		v = &Entry{Value: value, Priority: priority}
 		heap.Push(pq.queue, v)

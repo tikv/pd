@@ -135,17 +135,17 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			abnormal = abnormal + 1
 		}
 	}
-	// It only add region follow only the normal region follow more than majority
-	// region-1's replicate set 3 ,it lose one follow, so it's priority is 1(2-1)
-	// region-2's replicate set 5 ,it lose one follow, so it's priority is 2(3-1)
-	// region-3's replicate set 3, it lose two follow, so it should not  put into the priority
-	// because it lost majority follows
-	majority := rf.Rule.Count / 2
-	if abnormal > majority {
-		log.Warn("region lose majority follow peers,should manual recovery", zap.Uint64("region id", region.GetID()),
+	// It only add region follow only the normal region follow more than tolerate
+	// region-1's replicate set 3, tolerate should be 1, it lose one follow, so it's priority is 1(2-1)
+	// region-2's replicate set 5, tolerate should be 2, it lose one follow, so it's priority is 2(3-1)
+	// region-3's replicate set 3, tolerate should be 1, it lose two follow, so it should not put into the priority queue
+	// because it lost  follows more than tolerate
+	tolerate := rf.Rule.Count / 2
+	if abnormal > tolerate {
+		log.Warn("region lose tolerate follow peers,should manual recovery", zap.Uint64("region id", region.GetID()),
 			zap.Int("abnormal peer", abnormal))
-	} else if abnormal <= majority && abnormal > 0 {
-		c.regionPriorityQueue.Push(majority-abnormal, region.GetID())
+	} else if abnormal <= tolerate && abnormal > 0 {
+		c.regionPriorityQueue.Push(tolerate-abnormal, region.GetID())
 	} else {
 		c.regionPriorityQueue.RemoveValue(region.GetID())
 	}

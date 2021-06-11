@@ -304,12 +304,16 @@ func (s *testRegionCacheSuite) TestPriorityQueue(c *C) {
 	c.Assert(pq.Pop(), IsNil)
 	c.Assert(pq.Peek(), IsNil)
 	pq.UpdatePriority(entry, 2)
+
+	// it will have priority-value pair as 1-1 2-2 3-3
 	pq = NewPriorityQueue(3)
 	c.Assert(pq.Push(1, 1), IsTrue)
-	c.Assert(pq.Push(3, 3), IsTrue)
-	c.Assert(pq.Push(5, 3), IsTrue)
 	c.Assert(pq.Push(2, 2), IsTrue)
-	c.Assert(pq.Push(6, 4), IsFalse)
+	c.Assert(pq.Push(3, 4), IsTrue)
+	c.Assert(pq.Push(5, 4), IsTrue)
+	c.Assert(pq.Push(6, 5), IsFalse)
+	c.Assert(pq.Push(3, 3), IsTrue)
+	c.Assert(pq.Has(4), IsFalse)
 
 	// case1 test getAll ,the highest element should be the first
 	entries := pq.queue.GetAll()
@@ -327,22 +331,21 @@ func (s *testRegionCacheSuite) TestPriorityQueue(c *C) {
 	c.Assert(entry.Value, Equals, 2)
 
 	// case3 remove last element
-	pq.UpdatePriority(entry, 3)
+	pq.UpdatePriority(entry, 4)
 	pq.RemoveValues([]interface{}{2})
 	c.Assert(pq.Size(), Equals, 1)
 
 	// case4 update entry should be fix
-	pq.Push(3, 2)
 	entry = pq.Pop()
 	c.Assert(entry.Priority, Equals, 3)
 	c.Assert(entry.index, Equals, -1)
-	c.Assert(entry.Value, Equals, 2)
+	c.Assert(entry.Value, Equals, 3)
 	c.Assert(pq.Has(2), Equals, false)
-	c.Assert(pq.Has(3), Equals, true)
+	c.Assert(pq.Has(3), Equals, false)
 
 	// case5 remove all element
-	pq.RemoveValues([]interface{}{3})
 	c.Assert(pq.Size(), Equals, 0)
 	c.Assert(len(pq.items), Equals, 0)
 	c.Assert(pq.queue.Len(), Equals, 0)
+	c.Assert(pq.queue.tail(), IsNil)
 }
