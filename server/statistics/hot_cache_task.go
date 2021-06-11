@@ -116,7 +116,7 @@ type collectRegionStatsTask struct {
 func newCollectRegionStatsTask(minDegree int) *collectRegionStatsTask {
 	return &collectRegionStatsTask{
 		minDegree: minDegree,
-		ret:       make(chan map[uint64][]*HotPeerStat),
+		ret:       make(chan map[uint64][]*HotPeerStat, 1),
 	}
 }
 
@@ -128,6 +128,7 @@ func (t *collectRegionStatsTask) runTask(flow *hotPeerCache) {
 	t.ret <- flow.RegionStats(t.minDegree)
 }
 
+// TODO: do we need a wait-return timeout?
 func (t *collectRegionStatsTask) waitRet(ctx context.Context, quit <-chan struct{}) map[uint64][]*HotPeerStat {
 	select {
 	case <-ctx.Done():
@@ -149,7 +150,7 @@ func newIsRegionHotTask(region *core.RegionInfo, minDegree int) *isRegionHotTask
 	return &isRegionHotTask{
 		region:       region,
 		minHotDegree: minDegree,
-		ret:          make(chan bool),
+		ret:          make(chan bool, 1),
 	}
 }
 
@@ -161,6 +162,7 @@ func (t *isRegionHotTask) runTask(flow *hotPeerCache) {
 	t.ret <- flow.isRegionHotWithAnyPeers(t.region, t.minHotDegree)
 }
 
+// TODO: do we need a wait-return timeout?
 func (t *isRegionHotTask) waitRet(ctx context.Context, quit <-chan struct{}) bool {
 	select {
 	case <-ctx.Done():
@@ -173,14 +175,12 @@ func (t *isRegionHotTask) waitRet(ctx context.Context, quit <-chan struct{}) boo
 }
 
 type collectMetricsTask struct {
-	typ  string
-	done chan struct{}
+	typ string
 }
 
 func newCollectMetricsTask(typ string) *collectMetricsTask {
 	return &collectMetricsTask{
-		typ:  typ,
-		done: make(chan struct{}),
+		typ: typ,
 	}
 }
 
@@ -190,16 +190,4 @@ func (t *collectMetricsTask) taskType() flowItemTaskKind {
 
 func (t *collectMetricsTask) runTask(flow *hotPeerCache) {
 	flow.CollectMetrics(t.typ)
-	t.done <- struct{}{}
-}
-
-func (t *collectMetricsTask) waitDone(ctx context.Context, quit <-chan struct{}) {
-	select {
-	case <-ctx.Done():
-		return
-	case <-quit:
-		return
-	case <-t.done:
-		return
-	}
 }
