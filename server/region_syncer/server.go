@@ -69,10 +69,9 @@ type Server interface {
 type RegionSyncer struct {
 	mu struct {
 		sync.RWMutex
-		streams            map[string]ServerStream
-		regionSyncerCtx    context.Context
-		regionSyncerCancel context.CancelFunc
-		closed             chan struct{}
+		streams      map[string]ServerStream
+		clientCtx    context.Context
+		clientCancel context.CancelFunc
 	}
 	server    Server
 	wg        sync.WaitGroup
@@ -94,7 +93,6 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		tlsConfig: s.GetTLSConfig(),
 	}
 	syncer.mu.streams = make(map[string]ServerStream)
-	syncer.mu.closed = make(chan struct{})
 	return syncer
 }
 
