@@ -205,7 +205,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.storage = storage
 	c.id = id
 	c.labelLevelStats = statistics.NewLabelStatistics()
-	c.hotStat = statistics.NewHotStat(c.ctx)
+	c.hotStat = statistics.NewHotStat(c.ctx, c.quit)
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
@@ -222,7 +222,7 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-
+	c.quit = make(chan struct{})
 	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
@@ -254,7 +254,6 @@ func (c *RaftCluster) Start(s Server) error {
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
-	c.quit = make(chan struct{})
 
 	c.wg.Add(4)
 	go c.runCoordinator()
@@ -562,45 +561,31 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			statistics.RegionWriteKeys:  0,
 		}
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
-		item := statistics.NewPeerInfoItem(peerInfo, region)
-		c.hotStat.CheckReadAsync(item)
+		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
-	collect := statistics.NewUnReportStatsCollect(storeID, regionIDs, interval)
-	c.hotStat.CheckReadAsync(collect)
+	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regionIDs, interval))
 	return nil
 }
 
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
-	hotStat := c.hotStat
 	storage := c.storage
 	coreCluster := c.core
+	hotStat := c.hotStat
 	c.RUnlock()
 
 	origin, err := coreCluster.PreCheckPutRegion(region)
 	if err != nil {
 		return err
 	}
-
-	expiredStats := hotStat.ExpiredItems(region)
-	// Put expiredStats into read/write queue to update stats
-	if len(expiredStats) > 0 {
-		for _, stat := range expiredStats {
-			item := statistics.NewExpiredStatItem(stat)
-			if stat.Kind == statistics.WriteFlow {
-				hotStat.CheckWriteAsync(item)
-			} else {
-				hotStat.CheckReadAsync(item)
-			}
-		}
-	}
+	hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
+	hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
 		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
-		item := statistics.NewPeerInfoItem(peerInfo, region)
-		hotStat.CheckWriteAsync(item)
+		hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
 
 	// Save to storage if meta is updated.
