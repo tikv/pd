@@ -8164,7 +8164,7 @@
                 "query": {
                   "datasourceId": 1,
                   "model": {
-                    "expr": "delta(etcd_disk_wal_fsync_duration_seconds_count{tidb_cluster=\"$tidb_cluster\"}[1m])",
+                    "expr": "delta(etcd_disk_wal_fsync_duration_seconds_count{tidb_cluster=\"$tidb_cluster\", job=\"pd\"}[1m])",
                     "intervalFactor": 2,
                     "legendFormat": "{{instance}} etch disk wal fsync rate",
                     "refId": "A",
@@ -8233,7 +8233,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "delta(etcd_disk_wal_fsync_duration_seconds_count{tidb_cluster=\"$tidb_cluster\"}[1m])",
+              "expr": "delta(etcd_disk_wal_fsync_duration_seconds_count{tidb_cluster=\"$tidb_cluster\", job=\"pd\"}[1m])",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}",
