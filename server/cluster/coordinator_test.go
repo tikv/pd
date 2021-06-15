@@ -283,7 +283,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	if setCfg != nil {
 		setCfg(cfg)
 	}
-	tc := newTestCluster(opt)
+	tc := newTestCluster(ctx, opt)
 	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.getClusterID(), tc, true /* need to run */)
 	if setTc != nil {
 		setTc(tc)
@@ -335,7 +335,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	co.stop()
 	co.wg.Wait()
 
-	tc = newTestCluster(opt)
+	tc = newTestCluster(s.ctx, opt)
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 
