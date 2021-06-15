@@ -150,6 +150,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	})
 	for _, plan.source = range stores {
 		for i := 0; i < balanceRegionRetryLimit; i++ {
+			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
 			plan.region = cluster.RandPendingRegion(plan.SourceStoreID(), s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
