@@ -14,6 +14,7 @@
 package core
 
 import (
+	"math"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -32,6 +33,13 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.downPeers = append(downPeers[:0:0], downPeers...)
 		sort.Sort(peerStatsSlice(region.downPeers))
+	}
+}
+
+// WithFlowRoundByDigit set the digit, which use to round to the nearest number
+func WithFlowRoundByDigit(digit int) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.flowRoundDivisor = uint64(math.Pow10(digit))
 	}
 }
 

@@ -129,7 +129,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 			break
 		}
 	}
-	tc.Regions.AddRegion(region)
+	tc.Regions.SetRegion(region)
 	op = sl.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
 }

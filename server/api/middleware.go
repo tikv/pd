@@ -14,10 +14,12 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 
@@ -40,6 +42,13 @@ func (m clusterMiddleware) Middleware(h http.Handler) http.Handler {
 			m.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 			return
 		}
-		h.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), clusterCtxKey{}, rc)
+		h.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+type clusterCtxKey struct{}
+
+func getCluster(r *http.Request) *cluster.RaftCluster {
+	return r.Context().Value(clusterCtxKey{}).(*cluster.RaftCluster)
 }

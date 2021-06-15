@@ -642,6 +642,15 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		return nret
 	}
 
+	union := bs.sortHotPeers(ret, maxPeerNum)
+	ret = make([]*statistics.HotPeerStat, 0, len(union))
+	for peer := range union {
+		ret = appendItem(ret, peer)
+	}
+	return ret
+}
+
+func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum int) map[*statistics.HotPeerStat]struct{} {
 	byteSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(byteSort, ret)
 	sort.Slice(byteSort, func(i, j int) bool {
@@ -665,7 +674,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 				break
 			}
 		}
-		for len(keySort) > 0 {
+		for len(union) < maxPeerNum && len(keySort) > 0 {
 			peer := keySort[0]
 			keySort = keySort[1:]
 			if _, ok := union[peer]; !ok {
@@ -674,11 +683,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 			}
 		}
 	}
-	ret = make([]*statistics.HotPeerStat, 0, len(union))
-	for peer := range union {
-		ret = appendItem(ret, peer)
-	}
-	return ret
+	return union
 }
 
 // isRegionAvailable checks whether the given region is not available to schedule.
@@ -1099,32 +1104,22 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	return []*operator.Operator{op}, []Influence{infl}
 }
 
-func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
+func (h *hotScheduler) GetHotStatus(typ string) *statistics.StoreHotPeersInfos {
 	h.RLock()
 	defer h.RUnlock()
-	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[readLeader]))
-	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[readPeer]))
-	for id, detail := range h.stLoadInfos[readLeader] {
+	var leaderTyp, peerTyp resourceType
+	switch typ {
+	case HotReadRegionType:
+		leaderTyp, peerTyp = readLeader, readPeer
+	case HotWriteRegionType:
+		leaderTyp, peerTyp = writeLeader, writePeer
+	}
+	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[leaderTyp]))
+	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[peerTyp]))
+	for id, detail := range h.stLoadInfos[leaderTyp] {
 		asLeader[id] = detail.toHotPeersStat()
 	}
-	for id, detail := range h.stLoadInfos[readPeer] {
-		asPeer[id] = detail.toHotPeersStat()
-	}
-	return &statistics.StoreHotPeersInfos{
-		AsLeader: asLeader,
-		AsPeer:   asPeer,
-	}
-}
-
-func (h *hotScheduler) GetHotWriteStatus() *statistics.StoreHotPeersInfos {
-	h.RLock()
-	defer h.RUnlock()
-	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[writeLeader]))
-	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[writePeer]))
-	for id, detail := range h.stLoadInfos[writeLeader] {
-		asLeader[id] = detail.toHotPeersStat()
-	}
-	for id, detail := range h.stLoadInfos[writePeer] {
+	for id, detail := range h.stLoadInfos[peerTyp] {
 		asPeer[id] = detail.toHotPeersStat()
 	}
 	return &statistics.StoreHotPeersInfos{

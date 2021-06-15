@@ -85,15 +85,10 @@ func (s *selectedStores) GetGroupDistribution(group string) (map[uint64]uint64, 
 	return s.getDistributionByGroupLocked(group)
 }
 
-// getDistributionByGroupLocked should be called with lock
-func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]uint64, bool) {
-	if result, ok := s.groupDistribution.Get(group); ok {
-		return result.(map[uint64]uint64), true
-	}
-	return nil, false
-}
-
-func (s *selectedStores) totalCountByStore(storeID uint64) uint64 {
+// TotalCountByStore counts the total count by store
+func (s *selectedStores) TotalCountByStore(storeID uint64) uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	groups := s.groupDistribution.GetAllID()
 	totalCount := uint64(0)
 	for _, group := range groups {
@@ -108,6 +103,14 @@ func (s *selectedStores) totalCountByStore(storeID uint64) uint64 {
 		totalCount += count
 	}
 	return totalCount
+}
+
+// getDistributionByGroupLocked should be called with lock
+func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]uint64, bool) {
+	if result, ok := s.groupDistribution.Get(group); ok {
+		return result.(map[uint64]uint64), true
+	}
+	return nil, false
 }
 
 // RegionScatterer scatters regions.
@@ -347,7 +350,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 	maxStoreTotalCount := uint64(0)
 	minStoreTotalCount := uint64(math.MaxUint64)
 	for _, store := range r.cluster.GetStores() {
-		count := context.selectedPeer.totalCountByStore(store.GetID())
+		count := context.selectedPeer.TotalCountByStore(store.GetID())
 		if count > maxStoreTotalCount {
 			maxStoreTotalCount = count
 		}
@@ -356,7 +359,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 		}
 	}
 	for _, store := range stores {
-		storeCount := context.selectedPeer.totalCountByStore(store.GetID())
+		storeCount := context.selectedPeer.TotalCountByStore(store.GetID())
 		// If storeCount is equal to the maxStoreTotalCount, we should skip this store as candidate.
 		// If the storeCount are all the same for the whole cluster(maxStoreTotalCount == minStoreTotalCount), any store
 		// could be selected as candidate.
