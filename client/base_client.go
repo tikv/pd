@@ -314,8 +314,8 @@ func (c *baseClient) updateMember() error {
 	return errs.ErrClientGetLeader.FastGenByArgs(c.urls)
 }
 
-func (c *baseClient) getMembers(basicCtx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
-	ctx, cancel := context.WithTimeout(c.ctx, timeout)
+func (c *baseClient) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cc, err := c.getOrCreateGRPCConn(url)
 	if err != nil {
