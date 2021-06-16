@@ -44,6 +44,7 @@ func NewStoreCommand() *cobra.Command {
 	s.AddCommand(NewStoreLimitCommand())
 	s.AddCommand(NewRemoveTombStoneCommand())
 	s.AddCommand(NewStoreLimitSceneCommand())
+	s.AddCommand(NewStoreCheckCommand())
 	s.Flags().String("jq", "", "jq query")
 	s.Flags().StringSlice("state", nil, "state filter")
 	return s
@@ -99,6 +100,16 @@ func NewStoreLimitCommand() *cobra.Command {
 		Run:   storeLimitCommandFunc,
 	}
 	return c
+}
+
+// NewStoreCheckCommand return a check subcommand of storeCmd
+func NewStoreCheckCommand() *cobra.Command {
+	d := &cobra.Command{
+		Use:   "check <store_status>",
+		Short: "Check all the stores with specified status",
+		Run:   storeCheckCommandFunc,
+	}
+	return d
 }
 
 // NewStoresCommand returns a store subcommand of rootCmd
@@ -445,6 +456,21 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			postJSON(cmd, prefix, postInput)
 		}
 	}
+}
+
+func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
+		return
+	}
+
+	prefix := storesPrefix + "?state=" + args[0]
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get store: %s\n", err)
+		return
+	}
+	cmd.Println(r)
 }
 
 func showStoresCommandFunc(cmd *cobra.Command, args []string) {
