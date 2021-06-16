@@ -146,9 +146,6 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 		rootCmd.LocalFlags().MarkHidden("cacert")
 		rootCmd.LocalFlags().MarkHidden("cert")
 		rootCmd.LocalFlags().MarkHidden("key")
-		rootCmd.LocalFlags().MarkHidden("detach")
-		rootCmd.LocalFlags().MarkHidden("interact")
-		rootCmd.LocalFlags().MarkHidden("version")
 		rootCmd.SetOutput(os.Stdout)
 		return rootCmd
 	}
