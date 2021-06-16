@@ -513,15 +513,15 @@ func (c *coordinator) collectHotSpotMetrics() {
 func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ string) {
 	status := s.Scheduler.(hasHotStatus).GetHotStatus(typ)
 	var (
-		kind            string
-		byteTyp, keyTyp statistics.RegionStatKind
+		kind                      string
+		byteTyp, keyTyp, queryTyp statistics.RegionStatKind
 	)
 
 	switch typ {
 	case schedulers.HotReadRegionType:
-		kind, byteTyp, keyTyp = "read", statistics.RegionReadBytes, statistics.RegionReadKeys
+		kind, byteTyp, keyTyp, queryTyp = "read", statistics.RegionReadBytes, statistics.RegionReadKeys, statistics.RegionReadQuery
 	case schedulers.HotWriteRegionType:
-		kind, byteTyp, keyTyp = "write", statistics.RegionWriteBytes, statistics.RegionWriteKeys
+		kind, byteTyp, keyTyp, queryTyp = "write", statistics.RegionWriteBytes, statistics.RegionWriteKeys, statistics.RegionWriteQuery
 	}
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
@@ -531,22 +531,28 @@ func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ stri
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalLoads[byteTyp])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalLoads[keyTyp])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalLoads[queryTyp])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(0)
+
 		}
 
 		stat, ok = status.AsPeer[storeID]
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalLoads[byteTyp])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalLoads[keyTyp])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalLoads[queryTyp])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(0)
+
 		}
 	}
 }
@@ -560,6 +566,7 @@ func collectPendingInfluence(s *scheduleController, stores []*core.StoreInfo) {
 		if infl := pendings[storeID]; infl != nil {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_query_rate").Set(infl.Loads[statistics.QueryDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_count").Set(infl.Count)
 		}
 	}

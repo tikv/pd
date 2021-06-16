@@ -45,8 +45,10 @@ const (
 var minHotThresholds = [RegionStatCount]float64{
 	RegionWriteBytes: 1 * 1024,
 	RegionWriteKeys:  32,
+	RegionWriteQuery: 32,
 	RegionReadBytes:  8 * 1024,
 	RegionReadKeys:   128,
+	RegionReadQuery:  128,
 }
 
 // hotPeerCache saves the hot peer's statistics.
@@ -123,6 +125,10 @@ func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 			writeByteHist.Observe(loads[int(k)])
 		case RegionWriteKeys:
 			writeKeyHist.Observe(loads[int(k)])
+		case RegionWriteQuery:
+			writeQueryHist.Observe(loads[int(k)])
+		case RegionReadQuery:
+			readQueryHist.Observe(loads[int(k)])
 		}
 	}
 }
@@ -427,7 +433,10 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 		return nil
 	}
 	isHot := slice.AnyOf(regionStats, func(i int) bool {
-		return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
+		if IsSelectedDim(i) {
+			return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
+		}
+		return false
 	})
 	if !isHot {
 		return nil
