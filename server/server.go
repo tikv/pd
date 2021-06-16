@@ -432,8 +432,6 @@ func (s *Server) Close() {
 
 	log.Info("closing server")
 
-	s.stopServerLoop()
-
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
@@ -447,6 +445,8 @@ func (s *Server) Close() {
 	if s.member.Etcd() != nil {
 		s.member.Close()
 	}
+
+	s.stopServerLoop()
 
 	if s.hbStreams != nil {
 		s.hbStreams.Close()
