@@ -22,12 +22,9 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
-)
-
-var (
-	readlineCompleter *readline.PrefixCompleter
 )
 
 func init() {
@@ -103,13 +100,14 @@ func MainStart(args []string) {
 	// TODO: deprecated
 	rootCmd.Flags().BoolP("detach", "d", true, "Run pdctl without readline.")
 
-	rootCmd.Run = func(cmd *cobra.Command, args []string) {
+	rootCmd.Run = func(cmd *cobra.Command, localArgs []string) {
 		if v, err := cmd.Flags().GetBool("version"); err == nil && v {
 			server.PrintPDInfo()
 			return
 		}
 		if v, err := cmd.Flags().GetBool("interact"); err == nil && v {
-			loop()
+			readlineCompleter := readline.NewPrefixCompleter(genCompleter(cmd)...)
+			loop(cmd.PersistentFlags(), readlineCompleter)
 		}
 	}
 
@@ -117,15 +115,13 @@ func MainStart(args []string) {
 	rootCmd.ParseFlags(args)
 	rootCmd.SetOutput(os.Stdout)
 
-	readlineCompleter = readline.NewPrefixCompleter(genCompleter(rootCmd)...)
-
 	if err := rootCmd.Execute(); err != nil {
 		rootCmd.Println(err)
 		os.Exit(1)
 	}
 }
 
-func loop() {
+func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoCompleter) {
 	l, err := readline.NewEx(&readline.Config{
 		Prompt:            "\033[31m»\033[0m ",
 		HistoryFile:       "/tmp/readline.tmp",
@@ -138,9 +134,6 @@ func loop() {
 		panic(err)
 	}
 	defer l.Close()
-
-	rootCmd := GetRootCmd()
-	rootCmd.SetOutput(os.Stdout)
 
 	for {
 		line, err := l.Readline()
@@ -161,9 +154,15 @@ func loop() {
 			continue
 		}
 
+		rootCmd := GetRootCmd()
+		persistentFlags.VisitAll(func(flag *pflag.Flag) {
+			if flag.Changed {
+				rootCmd.PersistentFlags().Set(flag.Name, flag.Value.String())
+			}
+		})
 		rootCmd.SetArgs(args)
 		rootCmd.ParseFlags(args)
-
+		rootCmd.SetOutput(os.Stdout)
 		if err := rootCmd.Execute(); err != nil {
 			rootCmd.Println(err)
 			os.Exit(1)
