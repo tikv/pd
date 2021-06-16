@@ -118,9 +118,9 @@ func (c *CheckerController) GetMissRegions() []*cache.Entry {
 	return c.regionPriorityQueue.GetAll()
 }
 
-// GetMissRegionSize return miss region queue size
-func (c *CheckerController) GetMissRegionSize() int {
-	return c.regionPriorityQueue.Size()
+// TooManyMissRegions miss priority queue has too many region
+func (c *CheckerController) TooManyMissRegions() bool {
+	return c.regionPriorityQueue.Size() > DefaultCacheSize*0.75
 }
 
 // RemoveMissRegions remove the regions from priority queue

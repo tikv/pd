@@ -44,7 +44,6 @@ const (
 	collectTimeout            = 5 * time.Minute
 	maxScheduleRetries        = 10
 	maxLoadConfigRetries      = 10
-	maxMissPeerQueueSize      = 4096
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 	// PluginLoad means action for load plugin
@@ -178,16 +177,19 @@ func (c *coordinator) checkMissRegions() bool {
 			continue
 		}
 		ops := c.checkers.CheckRegion(region)
-		// skip merge operator
-		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
+		if len(ops) == 0 {
 			continue
 		}
 		if !c.opController.ExceedStoreLimit(ops...) {
 			c.opController.AddWaitingOperator(ops...)
+			// it will remove region if region needs to merge
+			if ops[0].Kind()&operator.OpMerge != 0 {
+				removes = append(removes, id)
+			}
 		}
 	}
 	c.checkers.RemoveMissRegions(removes)
-	return c.checkers.GetMissRegionSize() > maxMissPeerQueueSize
+	return c.checkers.TooManyMissRegions()
 }
 
 func (c *coordinator) checkSuspectRegions() {

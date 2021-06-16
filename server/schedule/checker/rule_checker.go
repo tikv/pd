@@ -136,7 +136,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	tolerate := rf.Rule.Count / 2
 	// It only adds region to priority queue only the region can make up replicas
 	if abnormal > tolerate {
-		log.Warn("region lose tolerate follow peers,should manual recovery", zap.Uint64("region id", region.GetID()),
+		log.Warn("region loses tolerate follow peers,should manually recovery", zap.Uint64("region id", region.GetID()),
 			zap.Int("abnormal peer", abnormal))
 	} else {
 		if abnormal > 0 || offline > 0 {

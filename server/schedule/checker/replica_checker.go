@@ -89,7 +89,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) (op *operator.Operator) 
 	tolerate := r.opts.GetMaxReplicas() / 2
 	// It only adds region to priority queue only the region can make up replicas
 	if abnormalCount > tolerate {
-		log.Warn("region lose majority follow peers, should manual recovery", zap.Uint64("region id", region.GetID()),
+		log.Warn("region loses majority follow peers, should manually recovery", zap.Uint64("region id", region.GetID()),
 			zap.Int("miss peer", abnormalCount))
 	} else {
 		// region can fix replica or offline is not zero
