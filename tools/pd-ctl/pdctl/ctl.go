@@ -135,6 +135,24 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 	}
 	defer l.Close()
 
+	getREPLCmd := func() *cobra.Command {
+		rootCmd := GetRootCmd()
+		persistentFlags.VisitAll(func(flag *pflag.Flag) {
+			if flag.Changed {
+				rootCmd.PersistentFlags().Set(flag.Name, flag.Value.String())
+			}
+		})
+		rootCmd.LocalFlags().MarkHidden("pd")
+		rootCmd.LocalFlags().MarkHidden("cacert")
+		rootCmd.LocalFlags().MarkHidden("cert")
+		rootCmd.LocalFlags().MarkHidden("key")
+		rootCmd.LocalFlags().MarkHidden("detach")
+		rootCmd.LocalFlags().MarkHidden("interact")
+		rootCmd.LocalFlags().MarkHidden("version")
+		rootCmd.SetOutput(os.Stdout)
+		return rootCmd
+	}
+
 	for {
 		line, err := l.Readline()
 		if err != nil {
@@ -154,15 +172,9 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 			continue
 		}
 
-		rootCmd := GetRootCmd()
-		persistentFlags.VisitAll(func(flag *pflag.Flag) {
-			if flag.Changed {
-				rootCmd.PersistentFlags().Set(flag.Name, flag.Value.String())
-			}
-		})
+		rootCmd := getREPLCmd()
 		rootCmd.SetArgs(args)
 		rootCmd.ParseFlags(args)
-		rootCmd.SetOutput(os.Stdout)
 		if err := rootCmd.Execute(); err != nil {
 			rootCmd.Println(err)
 			os.Exit(1)
