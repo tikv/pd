@@ -554,11 +554,14 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 				zap.Uint64("store-id", storeID))
 			continue
 		}
+		readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
 		loads := []float64{
 			statistics.RegionReadBytes:  float64(peerStat.GetReadBytes()),
 			statistics.RegionReadKeys:   float64(peerStat.GetReadKeys()),
+			statistics.RegionReadQuery:  float64(readQueryNum),
 			statistics.RegionWriteBytes: 0,
 			statistics.RegionWriteKeys:  0,
+			statistics.RegionWriteQuery: 0,
 		}
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))

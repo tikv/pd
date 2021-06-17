@@ -107,15 +107,16 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 				expectMap := map[string]float64{
-					"min-hot-byte-rate":         100,
-					"min-hot-key-rate":          10,
-					"max-zombie-rounds":         3,
-					"max-peer-number":           1000,
-					"byte-rate-rank-step-ratio": 0.05,
-					"key-rate-rank-step-ratio":  0.05,
-					"count-rank-step-ratio":     0.01,
-					"great-dec-ratio":           0.95,
-					"minor-dec-ratio":           0.99,
+					"min-hot-byte-rate":          100,
+					"min-hot-key-rate":           10,
+					"max-zombie-rounds":          3,
+					"max-peer-number":            1000,
+					"byte-rate-rank-step-ratio":  0.05,
+					"key-rate-rank-step-ratio":   0.05,
+					"query-rate-rank-step-ratio": 0.05,
+					"count-rank-step-ratio":      0.01,
+					"great-dec-ratio":            0.95,
+					"minor-dec-ratio":            0.99,
 				}
 				for key := range expectMap {
 					c.Assert(resp[key], DeepEquals, expectMap[key])
