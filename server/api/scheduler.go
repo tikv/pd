@@ -21,11 +21,13 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const schedulerConfigPrefix = "pd/api/v1/scheduler-config"
@@ -162,39 +164,9 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case schedulers.GrantLeaderName:
-		storeID, ok := input["store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing store id")
-			return
-		}
-		err := h.AddGrantLeaderScheduler(uint64(storeID))
-		if errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			if err := h.redirectSchedulerUpdate(schedulers.GrantLeaderName, storeID); err != nil {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-		}
-		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		h.addEvictOrGrant(w, input, schedulers.GrantLeaderName)
 	case schedulers.EvictLeaderName:
-		storeID, ok := input["store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing store id")
-			return
-		}
-		err := h.AddEvictLeaderScheduler(uint64(storeID))
-		if errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			if err := h.redirectSchedulerUpdate(schedulers.EvictLeaderName, storeID); err != nil {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-		}
-		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		h.addEvictOrGrant(w, input, schedulers.EvictLeaderName)
 	case schedulers.ShuffleLeaderName:
 		if err := h.AddShuffleLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -238,6 +210,36 @@ func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64)
 		return err
 	}
 	return postJSON(h.svr.GetHTTPClient(), updateURL, body)
+}
+
+func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[string]interface{}, name string) {
+	storeID, ok := input["store_id"].(float64)
+	if !ok {
+		h.r.JSON(w, http.StatusBadRequest, "missing store id")
+		return
+	}
+	if exist, err := h.Handler.IsSchedulerExisted(name); !exist {
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		switch name {
+		case schedulers.EvictLeaderName:
+			err = h.AddEvictLeaderScheduler(uint64(storeID))
+		case schedulers.GrantLeaderName:
+			err = h.AddGrantLeaderScheduler(uint64(storeID))
+		}
+		if err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		if err := h.redirectSchedulerUpdate(name, storeID); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+	}
 }
 
 // @Tags scheduler

@@ -1437,7 +1437,7 @@ func (s *Server) getDelegateClient(ctx context.Context, forwardedHost string) (*
 func getForwardedHost(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		log.Error("failed to get forwarding metadata")
+		log.Debug("failed to get forwarding metadata")
 	}
 	if t, ok := md[grpcutil.ForwardMetadataKey]; ok {
 		return t[0]
