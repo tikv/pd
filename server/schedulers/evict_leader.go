@@ -20,6 +20,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
@@ -116,6 +117,9 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedule.EncodeConfig(conf)
+	failpoint.Inject("persistFail", func() {
+		err = errors.New("fail to persist")
+	})
 	if err != nil {
 		return err
 	}
@@ -149,6 +153,22 @@ func (conf *evictLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 		last = len(conf.StoreIDWithRanges) == 0
 	}
 	return succ, last
+}
+
+func (conf *evictLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
+	conf.mu.Lock()
+	defer conf.mu.Unlock()
+	conf.cluster.PauseLeaderTransfer(id)
+	conf.StoreIDWithRanges[id] = keyRange
+}
+
+func (conf *evictLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	if ranges, exist := conf.StoreIDWithRanges[id]; exist {
+		return ranges
+	}
+	return nil
 }
 
 type evictLeaderScheduler struct {
@@ -296,12 +316,15 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	idFloat, ok := input["store_id"].(float64)
 	if ok {
 		id = (uint64)(idFloat)
+		handler.config.mu.RLock()
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
 			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
+				handler.config.mu.RUnlock()
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
+		handler.config.mu.RUnlock()
 		args = append(args, strconv.FormatUint(id, 10))
 	}
 
@@ -315,6 +338,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.config.BuildWithArgs(args)
 	err := handler.config.Persist()
 	if err != nil {
+		handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -335,10 +359,12 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	}
 
 	var resp interface{}
+	keyRanges := handler.config.getKeyRangesByID(id)
 	succ, last := handler.config.removeStore(id)
 	if succ {
 		err = handler.config.Persist()
 		if err != nil {
+			handler.config.resetStore(id, keyRanges)
 			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -347,6 +373,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {
+					handler.config.resetStore(id, keyRanges)
 					handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				}
 				return
