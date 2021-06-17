@@ -606,7 +606,6 @@ func (c *coordinator) removeScheduler(name string) error {
 
 	s.Stop()
 	schedulerStatusGauge.WithLabelValues(name, "allow").Set(0)
-	delete(c.schedulers, name)
 
 	var err error
 	opt := c.cluster.opt
@@ -625,6 +624,7 @@ func (c *coordinator) removeScheduler(name string) error {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
 	}
+	delete(c.schedulers, name)
 
 	return nil
 }
