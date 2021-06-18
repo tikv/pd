@@ -35,8 +35,8 @@ const (
 	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{component="tidb"}[%s])) by (instance, kubernetes_namespace)`
 	tikvCPUQuotaMetricsPattern    = `tikv_server_cpu_cores_quota`
 	tidbCPUQuotaMetricsPattern    = `tidb_server_maxprocs`
-	instanceLabelName             = "instance"
-	namespaceLabelName            = "kubernetes_namespace"
+	instanceLabelKey              = "instance"
+	namespaceLabelKey             = "kubernetes_namespace"
 	addressFormat                 = "pod-name.peer-svc.namespace.svc:port"
 
 	httpRequestTimeout = 5 * time.Second
@@ -78,7 +78,7 @@ func (prom *PrometheusQuerier) Query(options *QueryOptions) (QueryResult, error)
 		return nil, err
 	}
 
-	result, err := extractInstancesFromResponse(resp, options.component)
+	result, err := extractInstancesFromResponse(resp)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 	return resp, nil
 }
 
-func extractInstancesFromResponse(resp promModel.Value, component ComponentType) (QueryResult, error) {
+func extractInstancesFromResponse(resp promModel.Value) (QueryResult, error) {
 	if resp == nil {
 		return nil, errs.ErrEmptyMetricsResponse.FastGenByArgs()
 	}
@@ -122,24 +122,25 @@ func extractInstancesFromResponse(resp promModel.Value, component ComponentType)
 		return nil, errs.ErrEmptyMetricsResult.FastGenByArgs("query metrics duration must be at least twice the Prometheus scrape interval")
 	}
 
-	var resourceType string
-
-	switch component {
-	case TiKV:
-		resourceType = homogeneousTiKVResourceType
-	case TiDB:
-		resourceType = homogeneousTiDBResourceType
-	}
+	var (
+		instanceName string
+		namespace    string
+	)
 
 	result := make(QueryResult)
 
 	for _, sample := range vector {
-		resourceTypeLabel, ok := sample.Metric[resourceTypeLabelKey]
+		instanceLabel, ok := sample.Metric[instanceLabelKey]
 		if ok {
-			resourceType = string(resourceTypeLabel)
+			instanceName = string(instanceLabel)
+		}
+		namespaceLabel, ok := sample.Metric[namespaceLabelKey]
+		if ok {
+			namespace = string(namespaceLabel)
 		}
 
-		result[resourceType] += float64(sample.Value)
+		instanceFullName := buildInstanceIdentifier(instanceName, namespace)
+		result[instanceFullName] = float64(sample.Value)
 	}
 
 	return result, nil

@@ -17,7 +17,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -34,7 +33,6 @@ import (
 const (
 	DefaultTimeout                 = 5 * time.Second
 	prometheusAddressKey           = "/topology/prometheus"
-	prometheusPort                 = 9090
 	groupLabelKey                  = "group"
 	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling"
 	resourceTypeLabelKey           = "resource-type"
@@ -77,15 +75,18 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 				return nil
 			}
 
-			plans = append(plans, tikvPlans...)
+			if tikvPlans != nil {
+				plans = append(plans, tikvPlans...)
+			}
 		case TiDB.String():
 			tidbPlans, err := getTiDBPlans(rc, querier, strategy)
 			if err != nil {
 				log.Error("error getting tidb plans", errs.ZapError(err))
 				return nil
 			}
-
-			plans = append(plans, tidbPlans...)
+			if tidbPlans != nil {
+				plans = append(plans, tidbPlans...)
+			}
 		}
 	}
 
@@ -193,31 +194,38 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 
 	now := time.Now()
 	// get cpu used times
-	cpuUsedTimes, err := querier.Query(NewQueryOptions(component, CPUUsage, getAddresses(instances), now, MetricsTimeDuration))
+	cpuUsedTimes, err := querier.Query(NewQueryOptions(component, CPUUsage, now, MetricsTimeDuration))
 	if err != nil {
 		return nil, err
 	}
-	// get total cpu quota
-	currentQuota, err := getTotalCPUQuota(querier, component, instances, now)
+	// get cpu quotas
+	cpuQuotas, err := querier.Query(NewQueryOptions(component, CPUQuota, now, MetricsTimeDuration))
 	if err != nil {
 		return nil, err
 	}
 
 	var (
 		totalCPUUsedTime float64
+		totalCPUQuota    float64
 		cpuUsageLowNum   int
 		count            uint64
 	)
 
 	// get cpu threshold
 	cpuMaxThreshold, cpuMinThreshold := getCPUThresholdByComponent(strategy, component)
-	cpuUsageHighMap := make(map[string][]float64)
-	for resourceType, cpuUsedTime := range cpuUsedTimes {
+	cpuUsageHighMap := make(map[float64]float64)
+	for instanceName, cpuUsedTime := range cpuUsedTimes {
+		cpuQuota, ok := cpuQuotas[instanceName]
+		if !ok {
+			continue
+		}
+		cpuUsedTime /= MetricsTimeDuration.Seconds()
 		totalCPUUsedTime += cpuUsedTime
-		cpuUsage := cpuUsedTime / MetricsTimeDuration.Seconds()
+		totalCPUQuota += cpuQuota
+		cpuUsage := cpuUsedTime / cpuQuota
 
 		if cpuUsage > cpuMaxThreshold {
-			cpuUsageHighMap[resourceType] = append(cpuUsageHighMap[resourceType], cpuUsage)
+			cpuUsageHighMap[cpuUsage] = cpuQuota
 			continue
 		}
 		if cpuUsage < cpuMinThreshold {
@@ -225,7 +233,6 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 		}
 	}
 	resources := getCPUResourcesByComponent(strategy, component)
-	totalCPUQuota := float64(currentQuota) / float64(milliCores) * MetricsTimeDuration.Seconds()
 	homogeneousResourceType := getHomogeneousResourceType(component)
 	homogeneousCPUSize := getCPUByResourceType(resources, homogeneousResourceType)
 
@@ -239,7 +246,7 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 	cpuUsageTarget := (cpuMaxThreshold + cpuMinThreshold) / 2
 	if totalCPUUsage > cpuMaxThreshold {
 		// generate homogeneous scale out plan
-		cpuScaleOutSize := (totalCPUUsedTime/cpuUsageTarget - totalCPUQuota) * milliCores
+		cpuScaleOutSize := totalCPUUsedTime/cpuUsageTarget - totalCPUQuota
 		count += uint64(cpuScaleOutSize/float64(homogeneousCPUSize)) + 1 + uint64(len(instances))
 		homogeneousCount := getCountByResourceType(resources, homogeneousResourceType)
 
@@ -260,11 +267,8 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 	if len(cpuUsageHighMap) > 0 {
 		// generate heterogeneous scale out plans
 		cpuScaleOutSize := 0.0
-		for resourceType, cpuUsageList := range cpuUsageHighMap {
-			resourceCPUSize := getCPUByResourceType(resources, resourceType)
-			for _, cpuUsage := range cpuUsageList {
-				cpuScaleOutSize += (cpuUsage - cpuUsageTarget) * float64(resourceCPUSize) * milliCores
-			}
+		for cpuUsage, cpuQuota := range cpuUsageHighMap {
+			cpuScaleOutSize += (cpuUsage - cpuUsageTarget) * cpuQuota
 		}
 
 		return getHeterogeneousScaleOutPlans(cpuScaleOutSize, cpuUsageTarget, groups, resources), nil
@@ -395,31 +399,6 @@ func getTiDBInstances(rc *cluster.RaftCluster) ([]instance, error) {
 	}
 
 	return instances, nil
-}
-
-func getAddresses(instances []instance) []string {
-	names := make([]string, 0, len(instances))
-	for _, inst := range instances {
-		names = append(names, inst.address)
-	}
-	return names
-}
-
-// get total CPU quota (in milliCores) through Prometheus.
-func getTotalCPUQuota(querier Querier, component ComponentType, instances []instance, timestamp time.Time) (uint64, error) {
-	result, err := querier.Query(NewQueryOptions(component, CPUQuota, getAddresses(instances), timestamp, 0))
-	if err != nil {
-		return 0, err
-	}
-
-	sum := 0.0
-	for _, value := range result {
-		sum += value
-	}
-
-	quota := uint64(math.Floor(sum * float64(milliCores)))
-
-	return quota, nil
 }
 
 func getTotalStorageInfo(informer core.StoreSetInformer, healthyInstances []instance) (float64, float64, error) {
