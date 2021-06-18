@@ -30,19 +30,10 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
 	github.com/pingcap/kvproto v0.0.0-20210219064844-c1844a4775d6
 	github.com/pingcap/log v0.0.0-20210317133921-96f4fcab92a4
-<<<<<<< HEAD
 	github.com/pingcap/sysutil v0.0.0-20210221112134-a07bda3bde99
-	github.com/pingcap/tidb-dashboard v0.0.0-20210512074702-4ee3e3909d5e
+	github.com/pingcap/tidb-dashboard v0.0.0-20210615143005-6bbc7e6ce0fb
 	github.com/prometheus/client_golang v1.2.1
 	github.com/prometheus/common v0.9.1
-=======
-	github.com/pingcap/sysutil v0.0.0-20210315073920-cc0985d983a3
-	github.com/pingcap/tidb-dashboard v0.0.0-20210615143005-6bbc7e6ce0fb
-	github.com/prometheus/client_golang v1.1.0
-	github.com/prometheus/client_model v0.2.0 // indirect
-	github.com/prometheus/common v0.6.0
-	github.com/prometheus/procfs v0.0.5 // indirect
->>>>>>> ae91b18ab (dashboard: Update TiDB Dashboard to v2021.06.15.1 (#3785))
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/cobra v1.0.0
