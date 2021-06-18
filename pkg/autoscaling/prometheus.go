@@ -139,7 +139,7 @@ func extractInstancesFromResponse(resp promModel.Value, component ComponentType)
 			resourceType = string(resourceTypeLabel)
 		}
 
-		result[resourceType] = float64(sample.Value)
+		result[resourceType] += float64(sample.Value)
 	}
 
 	return result, nil

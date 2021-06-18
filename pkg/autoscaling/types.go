@@ -25,17 +25,18 @@ import (
 )
 
 const (
-	homogeneousTiKVResourceType = "default_homogeneous_tikv_resource_type"
-	homogeneousTiDBResourceType = "default_homogeneous_tidb_resource_type"
+	httpPrefix                  = "http://"
+	homogeneousTiKVResourceType = "default_homogeneous_tikv"
+	homogeneousTiDBResourceType = "default_homogeneous_tidb"
 )
 
-type PrometheusAddress struct {
+type Address struct {
 	IP   string `json:"ip"`
 	Port int    `json:"port"`
 }
 
-func (pa *PrometheusAddress) String() string {
-	return fmt.Sprintf("%s:%d", pa.IP, pa.Port)
+func (address *Address) String() string {
+	return fmt.Sprintf("%s%s:%d", httpPrefix, address.IP, address.Port)
 }
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.

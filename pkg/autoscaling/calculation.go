@@ -56,14 +56,14 @@ var (
 func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 	var plans []*Plan
 
-	prometheusAddress, err := getPrometheusAddress(rc)
+	address, err := getPrometheusAddress(rc)
 	if err != nil {
 		log.Error("error getting prometheus address", errs.ZapError(err))
 	}
 
-	client, err := promClient.NewClient(promClient.Config{Address: prometheusAddress})
+	client, err := promClient.NewClient(promClient.Config{Address: address})
 	if err != nil {
-		log.Error("error initializing Prometheus client", zap.String("prometheusAddress", prometheusAddress), errs.ZapError(errs.ErrPrometheusCreateClient, err))
+		log.Error("error initializing Prometheus client", zap.String("prometheusAddress", address), errs.ZapError(errs.ErrPrometheusCreateClient, err))
 		return nil
 	}
 	querier := NewPrometheusQuerier(client)
@@ -144,8 +144,15 @@ func getTiKVStoragePlan(rc *cluster.RaftCluster, instances []instance, strategy 
 		storageScaleSize := totalStorageUsedSize/storageUsageTarget - totalStorageCapacity
 		storeStorageSize := getStorageByResourceType(resources, homogeneousTiKVResourceType)
 		count := uint64(storageScaleSize)/storeStorageSize + 1 + uint64(len(instances))
+		homogeneousTiKVCount := getCountByResourceType(resources, homogeneousTiKVResourceType)
 
-		return NewPlan(TiKV, count, homogeneousTiKVResourceType), nil
+		if homogeneousTiKVCount != nil && count > *homogeneousTiKVCount {
+			count = *homogeneousTiKVCount
+		}
+
+		if count > 0 {
+			return NewPlan(TiKV, count, homogeneousTiKVResourceType), nil
+		}
 	}
 
 	return nil, nil
@@ -163,13 +170,13 @@ func getPrometheusAddress(rc *cluster.RaftCluster) (string, error) {
 		return "", errors.New(fmt.Sprintf("length of the response values of the key %s is 0", prometheusAddressKey))
 	}
 
-	prometheusAddress := &PrometheusAddress{}
-	err = json.Unmarshal(resp.Kvs[0].Value, prometheusAddress)
+	address := &Address{}
+	err = json.Unmarshal(resp.Kvs[0].Value, address)
 	if err != nil {
 		return "", err
 	}
 
-	return prometheusAddress.String(), nil
+	return address.String(), nil
 }
 
 func getTiDBPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy) ([]*Plan, error) {
@@ -234,8 +241,14 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 		// generate homogeneous scale out plan
 		cpuScaleOutSize := (totalCPUUsedTime/cpuUsageTarget - totalCPUQuota) * milliCores
 		count += uint64(cpuScaleOutSize/float64(homogeneousCPUSize)) + 1 + uint64(len(instances))
+		homogeneousCount := getCountByResourceType(resources, homogeneousResourceType)
 
-		return append(plans, NewPlan(component, count, homogeneousResourceType)), nil
+		if homogeneousCount != nil && count > *homogeneousCount {
+			count = *homogeneousCount
+		}
+		if count > 0 {
+			return append(plans, NewPlan(component, count, homogeneousResourceType)), nil
+		}
 	}
 
 	// get scaled groups
@@ -426,7 +439,6 @@ func getTotalStorageInfo(informer core.StoreSetInformer, healthyInstances []inst
 		groupName := store.GetLabelValue(groupLabelKey)
 		totalStorageUsedSize += store.GetUsedSize()
 		if !isAutoScaledGroup(groupName) {
-			// TODO: find out the unit of the size
 			totalStorageCapacity += store.GetCapacity()
 		}
 	}
@@ -481,6 +493,16 @@ func getStorageByResourceType(resources []*Resource, resourceType string) uint64
 	}
 
 	return 0
+}
+
+func getCountByResourceType(resources []*Resource, resourceType string) *uint64 {
+	for _, resource := range resources {
+		if resource.ResourceType == resourceType {
+			return resource.Count
+		}
+	}
+
+	return nil
 }
 
 func getCPUThresholdByComponent(strategy *Strategy, component ComponentType) (maxThreshold float64, minThreshold float64) {
