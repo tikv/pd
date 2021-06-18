@@ -8,6 +8,7 @@ mkdir -p $CACHE_DIR -Force | Out-Null
 
 echo '+ Fetch TiDB Dashboard Go module'
 go mod download
+go mod tidy
 
 echo '+ Discover TiDB Dashboard release version'
 
