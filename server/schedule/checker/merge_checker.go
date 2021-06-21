@@ -129,6 +129,11 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	if region.GetReadQueryNum()+target.GetReadQueryNum() > m.cluster.GetOpts().GetSplitQPSThreshold() {
+		checkerCounter.WithLabelValues("merge_checker", "read-load-high").Inc()
+		return nil
+	}
+
 	if target.GetApproximateSize() > maxTargetRegionSize {
 		checkerCounter.WithLabelValues("merge_checker", "target-too-large").Inc()
 		return nil
