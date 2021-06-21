@@ -67,6 +67,7 @@ func (m *MergeChecker) RecordRegionSplit(regionIDs []uint64) {
 
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
+	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
 	expireTime := m.startTime.Add(m.opts.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
 		checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
@@ -77,8 +78,6 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		checkerCounter.WithLabelValues("merge_checker", "recently-split").Inc()
 		return nil
 	}
-
-	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
 
 	// when pd just started, it will load region meta from etcd
 	// but the size for these loaded region info is 0

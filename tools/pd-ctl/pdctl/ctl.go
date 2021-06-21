@@ -22,12 +22,9 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
-)
-
-var (
-	readlineCompleter *readline.PrefixCompleter
 )
 
 func init() {
@@ -109,7 +106,8 @@ func MainStart(args []string) {
 			return
 		}
 		if v, err := cmd.Flags().GetBool("interact"); err == nil && v {
-			loop()
+			readlineCompleter := readline.NewPrefixCompleter(genCompleter(cmd)...)
+			loop(cmd.PersistentFlags(), readlineCompleter)
 		}
 	}
 
@@ -117,15 +115,13 @@ func MainStart(args []string) {
 	rootCmd.ParseFlags(args)
 	rootCmd.SetOutput(os.Stdout)
 
-	readlineCompleter = readline.NewPrefixCompleter(genCompleter(rootCmd)...)
-
 	if err := rootCmd.Execute(); err != nil {
 		rootCmd.Println(err)
 		os.Exit(1)
 	}
 }
 
-func loop() {
+func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoCompleter) {
 	l, err := readline.NewEx(&readline.Config{
 		Prompt:            "\033[31m»\033[0m ",
 		HistoryFile:       "/tmp/readline.tmp",
@@ -139,8 +135,20 @@ func loop() {
 	}
 	defer l.Close()
 
-	rootCmd := GetRootCmd()
-	rootCmd.SetOutput(os.Stdout)
+	getREPLCmd := func() *cobra.Command {
+		rootCmd := GetRootCmd()
+		persistentFlags.VisitAll(func(flag *pflag.Flag) {
+			if flag.Changed {
+				rootCmd.PersistentFlags().Set(flag.Name, flag.Value.String())
+			}
+		})
+		rootCmd.LocalFlags().MarkHidden("pd")
+		rootCmd.LocalFlags().MarkHidden("cacert")
+		rootCmd.LocalFlags().MarkHidden("cert")
+		rootCmd.LocalFlags().MarkHidden("key")
+		rootCmd.SetOutput(os.Stdout)
+		return rootCmd
+	}
 
 	for {
 		line, err := l.Readline()
@@ -161,12 +169,11 @@ func loop() {
 			continue
 		}
 
+		rootCmd := getREPLCmd()
 		rootCmd.SetArgs(args)
 		rootCmd.ParseFlags(args)
-
 		if err := rootCmd.Execute(); err != nil {
 			rootCmd.Println(err)
-			os.Exit(1)
 		}
 	}
 }
