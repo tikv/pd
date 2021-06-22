@@ -216,6 +216,7 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 				}
 				metas = metas[:0]
 				stats = stats[:0]
+				leaders = leaders[:0]
 			}
 			log.Info("requested server has completed full synchronization with server",
 				zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))
