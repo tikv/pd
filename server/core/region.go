@@ -462,8 +462,12 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
+// RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
+// and new region information.
 type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
 
+// GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
+// nil means do not print the log.
 func GenerateRegionGuideFunc(debug, info func(msg string, fields ...zap.Field)) RegionGuideFunc {
 	noLog := func(msg string, fields ...zap.Field) {}
 	if debug == nil {
