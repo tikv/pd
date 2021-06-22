@@ -273,7 +273,9 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.mu.streams[name] = stream
+	if s.mu.clientCtx != nil {
+		s.mu.streams[name] = stream
+	}
 }
 
 func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
