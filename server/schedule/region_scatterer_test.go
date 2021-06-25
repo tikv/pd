@@ -464,7 +464,7 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
 		for i := uint64(1); i <= uint64(storeCount); i++ {
-			count := ss.totalCountByStore(i)
+			count := ss.TotalCountByStore(i)
 			if count > max {
 				max = count
 			}
