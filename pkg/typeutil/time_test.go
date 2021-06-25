@@ -39,11 +39,38 @@ func (s *testTimeSuite) TestParseTimestamp(c *C) {
 }
 
 func (s *testTimeSuite) TestSubTimeByWallClock(c *C) {
-	for i := 0; i < 3; i++ {
-		r := rand.Int31n(1000)
+	for i := 0; i < 100; i++ {
+		r := rand.Int63n(1000)
 		t1 := time.Now()
+		// Add r seconds.
 		t2 := t1.Add(time.Second * time.Duration(r))
-		duration := SubTimeByWallClock(t2, t1)
+		duration := SubRealTimeByWallClock(t2, t1)
 		c.Assert(duration, Equals, time.Second*time.Duration(r))
+		milliseconds := SubTSOPhysicalByWallClock(t2, t1)
+		c.Assert(milliseconds, Equals, r*time.Second.Milliseconds())
+		// Add r millionseconds.
+		t3 := t1.Add(time.Millisecond * time.Duration(r))
+		milliseconds = SubTSOPhysicalByWallClock(t3, t1)
+		c.Assert(milliseconds, Equals, r)
+		// Add r nanoseconds.
+		t4 := t1.Add(time.Duration(-r))
+		duration = SubRealTimeByWallClock(t4, t1)
+		c.Assert(duration, Equals, time.Duration(-r))
+		// For the millisecond comparison, please see TestSmallTimeDifference.
 	}
+}
+
+func (s *testTimeSuite) TestSmallTimeDifference(c *C) {
+	t1, err := time.Parse("2006-01-02 15:04:05.999", "2021-04-26 00:44:25.682")
+	c.Assert(err, IsNil)
+	t2, err := time.Parse("2006-01-02 15:04:05.999", "2021-04-26 00:44:25.681918")
+	c.Assert(err, IsNil)
+	duration := SubRealTimeByWallClock(t1, t2)
+	c.Assert(duration, Equals, time.Duration(82)*time.Microsecond)
+	duration = SubRealTimeByWallClock(t2, t1)
+	c.Assert(duration, Equals, time.Duration(-82)*time.Microsecond)
+	milliseconds := SubTSOPhysicalByWallClock(t1, t2)
+	c.Assert(milliseconds, Equals, int64(1))
+	milliseconds = SubTSOPhysicalByWallClock(t2, t1)
+	c.Assert(milliseconds, Equals, int64(-1))
 }

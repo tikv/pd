@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -648,6 +649,68 @@ func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
 			regions = core.SplitRegions(regions)
 		}
 		heartbeatRegions(c, cluster, regions)
+	}
+}
+
+func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	storage := core.NewStorage(kv.NewMemoryKV())
+	cluster.ruleManager = placement.NewRuleManager(storage, cluster)
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		if err != nil {
+			panic(err)
+		}
+	}
+	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
+
+	// Put 3 stores.
+	for _, store := range newTestStores(4, "5.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+
+	peers := []*metapb.Peer{
+		{
+			Id:      4,
+			StoreId: 1,
+		}, {
+			Id:      5,
+			StoreId: 2,
+		}, {
+			Id:      6,
+			StoreId: 3,
+		},
+	}
+	origin := core.NewRegionInfo(
+		&metapb.Region{
+			StartKey:    []byte{},
+			EndKey:      []byte{},
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+			Id:          1,
+			Peers:       peers}, peers[0])
+	regions := []*core.RegionInfo{origin}
+
+	// store 1: up -> offline
+	c.Assert(cluster.RemoveStore(1, false), IsNil)
+	store := cluster.GetStore(1)
+	c.Assert(store.IsOffline(), IsTrue)
+
+	// Split.
+	n := 7
+	for i := 0; i < n; i++ {
+		regions = core.SplitRegions(regions)
+	}
+	heartbeatRegions(c, cluster, regions)
+	c.Assert(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), HasLen, len(regions))
+
+	// Merge.
+	for i := 0; i < n; i++ {
+		regions = core.MergeRegions(regions)
+		heartbeatRegions(c, cluster, regions)
+		c.Assert(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), HasLen, len(regions))
 	}
 }
 

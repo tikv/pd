@@ -17,8 +17,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/pprof"
+	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -51,7 +53,8 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
 
-	apiRouter := rootRouter.PathPrefix("/api/v1").Subrouter()
+	apiPrefix := "/api/v1"
+	apiRouter := rootRouter.PathPrefix(apiPrefix).Subrouter()
 
 	clusterRouter := apiRouter.NewRoute().Subrouter()
 	clusterRouter.Use(newClusterMiddleware(svr).Middleware)
@@ -239,6 +242,15 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
 	apiRouter.HandleFunc("/gc/safepoint", serviceGCSafepointHandler.List).Methods("GET")
 	apiRouter.HandleFunc("/gc/safepoint/{service_id}", serviceGCSafepointHandler.Delete).Methods("DELETE")
+
+	// API to set or unset failpoints
+	failpoint.Inject("enableFailpointAPI", func() {
+		apiRouter.PathPrefix("/fail").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The HTTP handler of failpoint requires the full path to be the failpoint path.
+			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
+			new(failpoint.HttpHandler).ServeHTTP(w, r)
+		})
+	})
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
