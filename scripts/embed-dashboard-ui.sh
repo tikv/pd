@@ -25,6 +25,7 @@ rm -f ASSET_DEST_PATH
 
 echo '+ Fetch TiDB Dashboard Go module'
 go mod download
+go mod tidy
 DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
 echo "  - TiDB Dashboard directory: ${DASHBOARD_DIR}"
 
