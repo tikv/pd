@@ -52,12 +52,8 @@ require (
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
-<<<<<<< HEAD
 
 replace (
 	github.com/oleiade/reflections => github.com/oleiade/reflections v1.0.1
 	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
-	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 )
-=======
->>>>>>> 04ff28f43 (*: Fix the wrong usage of go.mod replace (#3802))
