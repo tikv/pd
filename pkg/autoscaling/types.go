@@ -43,6 +43,7 @@ func (address *Address) String() string {
 type Strategy struct {
 	Rules     []*Rule     `json:"rules"`
 	Resources []*Resource `json:"resources"`
+	NodeCount uint64      `json:"node_count"`
 }
 
 // Rule is a set of constraints for a kind of component.
@@ -73,7 +74,7 @@ type StorageRule struct {
 // Resource represents a kind of resource set including CPU, memory, storage.
 type Resource struct {
 	ResourceType string `json:"resource_type"`
-	// The basic unit of CPU is core.
+	// The basic unit of CPU is milli-core.
 	CPU uint64 `json:"cpu"`
 	// The basic unit of memory is byte.
 	Memory uint64 `json:"memory"`

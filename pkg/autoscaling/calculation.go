@@ -94,37 +94,30 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 }
 
 func getTiKVPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy) ([]*Plan, error) {
-	var (
-		plans        []*Plan
-		storageCount uint64
-	)
-
 	instances := getTiKVInstances(rc)
 	if len(instances) == 0 {
 		return nil, nil
 	}
 
-	storagePlan, err := getTiKVStoragePlan(rc, instances, strategy)
+	plans, err := getTiKVStoragePlans(rc, instances, strategy)
 	if err != nil {
 		return nil, err
 	}
-	if storagePlan != nil {
-		storageCount = storagePlan.Count - uint64(len(instances))
-		plans = append(plans, storagePlan)
+	if plans != nil {
+		return plans, nil
 	}
 
-	cpuPlans, err := getCPUPlans(rc, querier, instances, strategy, TiKV, storageCount)
+	plans, err = getCPUPlans(rc, querier, instances, strategy, TiKV)
 	if err != nil {
 		return nil, err
-	}
-	if cpuPlans != nil {
-		plans = append(plans, cpuPlans...)
 	}
 
 	return plans, nil
 }
 
-func getTiKVStoragePlan(rc *cluster.RaftCluster, instances []instance, strategy *Strategy) (*Plan, error) {
+func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy *Strategy) ([]*Plan, error) {
+	var plans []*Plan
+
 	if len(instances) == 0 {
 		return nil, nil
 	}
@@ -141,19 +134,61 @@ func getTiKVStoragePlan(rc *cluster.RaftCluster, instances []instance, strategy 
 	storageUsageTarget := (storageMaxThreshold + storageMinThreshold) / 2
 	if storageUsage > storageMaxThreshold {
 		// generate homogeneous tikv plan
-		resources := getCPUResourcesByComponent(strategy, TiKV)
+		resourceMap, err := getResourceMapByComponent(rc, instances, TiKV)
+		if err != nil {
+			return nil, err
+		}
+
+		totalInstanceCount := uint64(len(instances))
+		resources := getStorageResourcesByComponent(strategy, TiKV)
+		// sort resources by cpu to minimize the impact when need to scale in heterogeneous instances
+		sortResourcesByCPUAsc(resources)
+
 		storageScaleSize := totalStorageUsedSize/storageUsageTarget - totalStorageCapacity
 		storeStorageSize := getStorageByResourceType(resources, homogeneousTiKVResourceType)
-		count := uint64(storageScaleSize)/storeStorageSize + 1 + uint64(len(instances))
 		homogeneousTiKVCount := getCountByResourceType(resources, homogeneousTiKVResourceType)
+		scaleOutCount := uint64(storageScaleSize)/storeStorageSize + 1
+		count := scaleOutCount + resourceMap[homogeneousTiKVResourceType]
+
+		if count > strategy.NodeCount {
+			// not enough k8s nodes to scale out, set count to node count
+			scaleOutCount = strategy.NodeCount - resourceMap[homogeneousTiKVResourceType]
+			count = strategy.NodeCount
+		}
 
 		if homogeneousTiKVCount != nil && count > *homogeneousTiKVCount {
+			// limited by homogeneous resource count, scale out as much as possible
+			scaleOutCount = *homogeneousTiKVCount - resourceMap[homogeneousTiKVResourceType]
 			count = *homogeneousTiKVCount
 		}
 
-		if count > 0 {
-			return NewPlan(TiKV, count, homogeneousTiKVResourceType), nil
+		scaleInCount := scaleOutCount + totalInstanceCount - strategy.NodeCount
+		if scaleInCount > 0 {
+			// there are not enough k8s nodes to scale out, need to scale in some heterogeneous instances
+			for _, resource := range resources {
+				if resource.ResourceType != homogeneousTiKVResourceType {
+					resourceInstanceCount, ok := resourceMap[resource.ResourceType]
+					if ok {
+						// this resource type exists, try to scale in
+						if scaleInCount <= resourceInstanceCount {
+							// scaling in this resource type is enough
+							scaleInPlan := NewPlan(TiKV, resourceInstanceCount-scaleInCount, resource.ResourceType)
+							scaleOutPlan := NewPlan(TiKV, count, homogeneousTiKVResourceType)
+
+							return append(plans, scaleInPlan, scaleOutPlan), nil
+						}
+
+						// scaling in this resource type is not enough, need to scale in all instances of this resource type
+						scaleInPlan := NewPlan(TiKV, 0, resource.ResourceType)
+						plans = append(plans, scaleInPlan)
+						scaleInCount -= resourceInstanceCount
+					}
+				}
+			}
 		}
+
+		// there are enough k8s nodes to scale out
+		return append(plans, NewPlan(TiKV, count, homogeneousTiKVResourceType)), nil
 	}
 
 	return nil, nil
@@ -186,10 +221,10 @@ func getTiDBPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy) 
 		return nil, err
 	}
 
-	return getCPUPlans(rc, querier, instances, strategy, TiDB, 0)
+	return getCPUPlans(rc, querier, instances, strategy, TiDB)
 }
 
-func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance, strategy *Strategy, component ComponentType, storageCount uint64) ([]*Plan, error) {
+func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance, strategy *Strategy, component ComponentType) ([]*Plan, error) {
 	var plans []*Plan
 
 	now := time.Now()
@@ -203,12 +238,16 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 	if err != nil {
 		return nil, err
 	}
+	// get resource map
+	resourceMap, err := getResourceMapByComponent(rc, instances, component)
+	if err != nil {
+		return nil, err
+	}
 
 	var (
 		totalCPUUsedTime float64
 		totalCPUQuota    float64
-		cpuUsageLowNum   int
-		count            uint64
+		cpuUsageLowNum   uint64
 	)
 
 	// get cpu threshold
@@ -232,147 +271,140 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 			cpuUsageLowNum++
 		}
 	}
-	resources := getCPUResourcesByComponent(strategy, component)
-	homogeneousResourceType := getHomogeneousResourceType(component)
-	homogeneousCPUSize := getCPUByResourceType(resources, homogeneousResourceType)
 
-	if component == TiKV && storageCount > 0 {
-		// add quota from storage plan
-		totalCPUQuota += float64(storageCount * homogeneousCPUSize)
-		count = storageCount
-	}
-
+	totalInstanceCount := uint64(len(instances))
 	totalCPUUsage := totalCPUUsedTime / totalCPUQuota
 	cpuUsageTarget := (cpuMaxThreshold + cpuMinThreshold) / 2
+	resources := getCPUResourcesByComponent(strategy, component)
+
 	if totalCPUUsage > cpuMaxThreshold {
-		// generate homogeneous scale out plan
-		cpuScaleOutSize := totalCPUUsedTime/cpuUsageTarget - totalCPUQuota
-		count += uint64(cpuScaleOutSize/float64(homogeneousCPUSize)) + 1 + uint64(len(instances))
+		// get homogeneous plans
+		homogeneousResourceType := getHomogeneousResourceType(component)
+		homogeneousCPUSize := getCPUByResourceType(resources, homogeneousResourceType)
 		homogeneousCount := getCountByResourceType(resources, homogeneousResourceType)
+		cpuScaleOutSize := totalCPUUsedTime/cpuUsageTarget - totalCPUQuota
+		scaleOutCount := uint64(cpuScaleOutSize/float64(homogeneousCPUSize)) + 1
+		count := scaleOutCount + resourceMap[homogeneousResourceType]
+
+		if homogeneousCount != nil && resourceMap[homogeneousResourceType] > *homogeneousCount {
+			// existing homogeneous instance count is larger than the count specified in spec,
+			// this may be caused by specifying wrong count in the yaml file,
+			// or someone scaled the cluster manually but forgot to modify the spec,
+			// for now, do nothing here
+			// TODO: maybe we should return an error here to notify user about this
+			return nil, nil
+		}
+
+		if count > strategy.NodeCount {
+			// not enough k8s nodes to scale out, set count to node count
+			scaleOutCount = strategy.NodeCount - resourceMap[homogeneousResourceType]
+			count = strategy.NodeCount
+		}
 
 		if homogeneousCount != nil && count > *homogeneousCount {
+			// limited by homogeneous resource count, scale out as much as possible
+			scaleOutCount = *homogeneousCount - resourceMap[homogeneousResourceType]
 			count = *homogeneousCount
 		}
-		if count > 0 {
+
+		overflowCount := scaleOutCount + totalInstanceCount - strategy.NodeCount
+		if overflowCount > 0 {
+			// after scaling out, the total instance count will be larger than node count, so need to reduce the scale out count
+			count -= overflowCount
+		}
+
+		if count > resourceMap[homogeneousResourceType] {
 			return append(plans, NewPlan(component, count, homogeneousResourceType)), nil
 		}
+
+		return nil, nil
 	}
 
-	// get scaled groups
-	groups, err := getScaledGroupsByComponent(rc, instances, component)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(cpuUsageHighMap) > 0 {
+	if len(cpuUsageHighMap) > 0 && totalInstanceCount < strategy.NodeCount {
 		// generate heterogeneous scale out plans
 		cpuScaleOutSize := 0.0
 		for cpuUsage, cpuQuota := range cpuUsageHighMap {
 			cpuScaleOutSize += (cpuUsage - cpuUsageTarget) * cpuQuota
 		}
 
-		return getHeterogeneousScaleOutPlans(cpuScaleOutSize, cpuUsageTarget, groups, resources), nil
+		availableCount := strategy.NodeCount - totalInstanceCount
+		return getHeterogeneousScaleOutPlans(cpuScaleOutSize, cpuUsageTarget, availableCount, resourceMap, resources, component), nil
 	}
 
-	if cpuUsageLowNum == len(instances) {
+	if cpuUsageLowNum == totalInstanceCount {
 		// generate heterogeneous scale in plans
-		return getHeterogeneousScaleInPlans(groups), nil
+		return getHeterogeneousScaleInPlans(resourceMap, component), nil
 	}
 
 	return nil, nil
 }
 
-func getHeterogeneousScaleOutPlans(cpuScaleOutSize float64, cpuUsageTarget float64, groups []*Plan, resources []*Resource) []*Plan {
-	plans := deepCopyPlans(groups)
+func getHeterogeneousScaleOutPlans(cpuScaleOutSize float64, cpuUsageTarget float64, availableCount uint64, resourceMap map[string]uint64, resources []*Resource, component ComponentType) []*Plan {
+	var plans []*Plan
 	// sort resources by cpu desc
 	sortResourcesByCPUDesc(resources)
 
 	for _, resource := range resources {
-		if resource.ResourceType == homogeneousTiKVResourceType || resource.ResourceType == homogeneousTiDBResourceType {
-			// jump over homogeneous resource type
-			continue
+		if cpuScaleOutSize <= 0 || availableCount <= 0 {
+			break
 		}
 
-		group := getScaledGroupByResourceType(groups, resource.ResourceType)
-		scaleOutCount := uint64(cpuScaleOutSize/float64(resource.CPU)/cpuUsageTarget) + 1
-
-		if group == nil {
-			// scaled group does not exist
-			if resource.Count == nil || *resource.Count >= scaleOutCount {
-				// unlimited resource count or enough resource count left
-				return append(plans, NewPlan(TiKV, scaleOutCount, resource.ResourceType))
+		if resource.ResourceType != homogeneousTiKVResourceType && resource.ResourceType != homogeneousTiDBResourceType {
+			scaleOutCount := uint64(cpuScaleOutSize/float64(resource.CPU)/cpuUsageTarget) + 1
+			if scaleOutCount > availableCount {
+				// not enough k8s nodes to scale out, reduce the scale out count
+				scaleOutCount = availableCount
+				availableCount = 0
 			}
-			if *resource.Count > 0 {
-				// not enough count left, use as much as it left
-				plans = append(plans, NewPlan(TiKV, *resource.Count, resource.ResourceType))
-				cpuScaleOutSize -= float64(resource.CPU) * cpuUsageTarget * float64(*resource.Count)
+
+			existsCount, ok := resourceMap[resource.ResourceType]
+			if ok {
+				// this resource type exists
+				count := scaleOutCount + existsCount
+				if resource.Count == nil || count <= *resource.Count {
+					// unlimited resource count or enough resource count left
+					return append(plans, NewPlan(component, count, resource.ResourceType))
+				}
+
+				// not enough count left, use as much as possible
+				scaleOutCount = *resource.Count - existsCount
+				availableCount -= scaleOutCount
+				count = *resource.Count
+				cpuScaleOutSize -= float64(resource.CPU * scaleOutCount)
+
+				plans = append(plans, NewPlan(component, count, resource.ResourceType))
 				continue
 			}
-		}
 
-		// scaled group exists
-		plan := getScaledTiKVGroupByResourceType(plans, resource.ResourceType)
+			// this resource type does not exist
+			if resource.Count == nil || scaleOutCount <= *resource.Count {
+				// unlimited resource count or enough resource count left
+				return append(plans, NewPlan(component, scaleOutCount, resource.ResourceType))
+			}
 
-		if resource.Count == nil || *resource.Count >= scaleOutCount+plan.Count {
-			// unlimited resource count or enough count left
-			plan.Count += scaleOutCount
+			if *resource.Count > 0 {
+				// not enough count left, use as much as possible
+				availableCount -= *resource.Count
+				cpuScaleOutSize -= float64(resource.CPU * *resource.Count)
 
-			return plans
-		}
-		if *resource.Count > plan.Count {
-			// not enough count left, use as much as it left
-			cpuScaleOutSize -= float64(resource.CPU) * cpuUsageTarget * float64(*resource.Count-plan.Count)
-			plan.Count = *resource.Count
+				plans = append(plans, NewPlan(TiKV, *resource.Count, resource.ResourceType))
+			}
 		}
 	}
 
 	return plans
 }
 
-func getHeterogeneousScaleInPlans(groups []*Plan) []*Plan {
-	plans := deepCopyPlans(groups)
+func getHeterogeneousScaleInPlans(resourceMap map[string]uint64, component ComponentType) []*Plan {
+	var plans []*Plan
 
-	for i, plan := range plans {
-		plan.Count -= MaxScaleInStep
-
-		if plan.Count <= 0 {
-			plans = append(plans[:i], plans[i+1:]...)
+	for resourceType, resourceCount := range resourceMap {
+		if resourceType != homogeneousTiKVResourceType && resourceType != homogeneousTiDBResourceType {
+			return append(plans, NewPlan(component, resourceCount-1, resourceType))
 		}
-
-		return plans
 	}
 
 	return plans
-}
-
-func deepCopyPlans(plans []*Plan) []*Plan {
-	var newPlans []*Plan
-
-	for _, plan := range plans {
-		newPlans = append(newPlans, plan.Clone())
-	}
-
-	return newPlans
-}
-
-func getScaledGroupByResourceType(groups []*Plan, resourceType string) *Plan {
-	for _, group := range groups {
-		if group.ResourceType == resourceType {
-			return group
-		}
-	}
-
-	return nil
-}
-
-func getScaledTiKVGroupByResourceType(groups []*Plan, resourceType string) *Plan {
-	for _, group := range groups {
-		if group.ResourceType == resourceType {
-			return group
-		}
-	}
-
-	return nil
 }
 
 func getTiKVInstances(rc *cluster.RaftCluster) []instance {
@@ -431,6 +463,25 @@ func getCPUResourcesByComponent(strategy *Strategy, component ComponentType) []*
 	for _, rule := range strategy.Rules {
 		if rule.Component == component.String() {
 			for _, resourceType := range rule.CPURule.ResourceTypes {
+				resource := getResourceByResourceType(strategy, resourceType)
+				if resource != nil {
+					resources = append(resources, resource)
+				}
+			}
+
+			return resources
+		}
+	}
+
+	return resources
+}
+
+func getStorageResourcesByComponent(strategy *Strategy, component ComponentType) []*Resource {
+	var resources []*Resource
+
+	for _, rule := range strategy.Rules {
+		if rule.Component == component.String() {
+			for _, resourceType := range rule.StorageRule.ResourceTypes {
 				resource := getResourceByResourceType(strategy, resourceType)
 				if resource != nil {
 					resources = append(resources, resource)
@@ -513,11 +564,46 @@ func getHomogeneousResourceType(component ComponentType) string {
 	}
 }
 
-func getScaledGroupsByComponent(rc *cluster.RaftCluster, healthyInstances []instance, component ComponentType) ([]*Plan, error) {
+func sortResourcesByCPUAsc(resources []*Resource) {
+	for i := len(resources) - 1; i > 0; i-- {
+		sorted := true
+		for j := 0; j < i; j++ {
+			if resources[j].CPU > resources[j+1].CPU {
+				sorted = false
+				tmp := resources[j]
+				resources[j] = resources[j+1]
+				resources[j+1] = tmp
+			}
+		}
+
+		if sorted {
+			break
+		}
+	}
+}
+
+func sortResourcesByCPUDesc(resources []*Resource) {
+	for i := len(resources) - 1; i > 0; i-- {
+		sorted := true
+		for j := 0; j < i; j++ {
+			if resources[j].CPU < resources[j+1].CPU {
+				sorted = false
+				tmp := resources[j]
+				resources[j] = resources[j+1]
+				resources[j+1] = tmp
+			}
+		}
+
+		if sorted {
+			break
+		}
+	}
+}
+
+func getResourceMapByComponent(rc *cluster.RaftCluster, healthyInstances []instance, component ComponentType) (map[string]uint64, error) {
 	var (
 		err         error
 		resourceMap map[string]uint64
-		groups      []*Plan
 	)
 
 	switch component {
@@ -535,30 +621,7 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, healthyInstances []inst
 		return nil, errors.Errorf("unknown component type %s", component.String())
 	}
 
-	for resourceType, count := range resourceMap {
-		groups = append(groups, NewPlan(TiKV, count, resourceType))
-	}
-
-	return groups, nil
-}
-
-func sortResourcesByCPUDesc(resources []*Resource) {
-	for i := len(resources) - 1; i > 0; i-- {
-		sorted := true
-		j := 0
-		for ; j < i; j++ {
-			if resources[j].CPU < resources[j+1].CPU {
-				sorted = false
-				tmp := resources[j]
-				resources[j] = resources[j+1]
-				resources[j+1] = tmp
-			}
-		}
-
-		if sorted {
-			break
-		}
-	}
+	return resourceMap, nil
 }
 
 func getTiKVResourceMap(rc *cluster.RaftCluster, healthyInstances []instance) (map[string]uint64, error) {
@@ -573,12 +636,13 @@ func getTiKVResourceMap(rc *cluster.RaftCluster, healthyInstances []instance) (m
 		}
 
 		groupName := store.GetLabelValue(groupLabelKey)
-		if !isAutoScaledGroup(groupName) {
+		if isAutoScaledGroup(groupName) {
+			resourceType := store.GetLabelValue(resourceTypeLabelKey)
+			resourceMap[resourceType]++
 			continue
 		}
 
-		resourceType := store.GetLabelValue(resourceTypeLabelKey)
-		resourceMap[resourceType]++
+		resourceMap[homogeneousTiKVResourceType]++
 	}
 
 	return resourceMap, nil
@@ -594,12 +658,13 @@ func getTiDBResourceMap(rc *cluster.RaftCluster, healthyInstances []instance) (m
 		}
 
 		groupName := tidbInfo.getLabelValue(groupLabelKey)
-		if !isAutoScaledGroup(groupName) {
+		if isAutoScaledGroup(groupName) {
+			resourceType := tidbInfo.getLabelValue(resourceTypeLabelKey)
+			resourceMap[resourceType]++
 			continue
 		}
 
-		resourceType := tidbInfo.getLabelValue(resourceTypeLabelKey)
-		resourceMap[resourceType]++
+		resourceMap[homogeneousTiDBResourceType]++
 	}
 
 	return resourceMap, nil

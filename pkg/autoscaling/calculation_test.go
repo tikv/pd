@@ -200,7 +200,7 @@ func (s *calculationTestSuite) TearDownTest(c *C) {
 //
 // 	for _, testcase := range testcases {
 // 		c.Log(testcase.name)
-// 		plans, err := getScaledGroupsByComponent(testcase.informer, testcase.healthyInstances, TiKV)
+// 		plans, err := getHeterogeneousGroupsByComponent(testcase.informer, testcase.healthyInstances, TiKV)
 // 		if testcase.expectedPlan == nil {
 // 			c.Assert(plans, HasLen, 0)
 // 			c.Assert(err, testcase.errChecker)
