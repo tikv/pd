@@ -1247,6 +1247,11 @@ func (s *Server) campaignLeader() {
 		return
 	}
 
+	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
+		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
+		return
+	}
+
 	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
 		log.Error("failed to initialize encryption", errs.ZapError(err))
 		return
@@ -1258,10 +1263,6 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.stopRaftCluster()
-	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
-		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
-		return
-	}
 	if err := s.idAllocator.Rebase(); err != nil {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
