@@ -43,6 +43,8 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
+	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
+	go.etcd.io/bbolt v1.3.5 // indirect
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.uber.org/goleak v1.1.10
 	go.uber.org/zap v1.16.0
@@ -54,5 +56,4 @@ require (
 replace (
 	github.com/oleiade/reflections => github.com/oleiade/reflections v1.0.1
 	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
-	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 )
