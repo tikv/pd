@@ -90,7 +90,6 @@ type testCase struct {
 
 func (t *testMovingAvg) TestMovingAvg(c *C) {
 	var empty float64 = 0
-
 	data := []float64{1, 1, 1, 1, 5, 1, 1, 1}
 	testCases := []testCase{{
 		ma:       NewEMA(0.9),
