@@ -768,19 +768,8 @@ func (oc *OperatorController) updateCounts(operators map[uint64]*operator.Operat
 	for k := range oc.counts {
 		delete(oc.counts, k)
 	}
-	// it will occupy the highest OpKind if the operator has many OpKind to avoid that the scheduler influence each
-	// checker will have higher priority than scheduler
-	// fix #3778
-	priority := []operator.OpKind{operator.OpMerge, operator.OpRange, operator.OpReplica, operator.OpHotRegion,
-		operator.OpRegion, operator.OpLeader}
 	for _, op := range operators {
-		kind := op.Kind()
-		for _, v := range priority {
-			if kind&v != 0 {
-				oc.counts[v]++
-				break
-			}
-		}
+		oc.counts[op.SchedulerKind()]++
 	}
 }
 

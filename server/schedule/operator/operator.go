@@ -125,6 +125,18 @@ func (o *Operator) Kind() OpKind {
 	return o.kind
 }
 
+// SchedulerKind return the highest OpKind even if the operator has many OpKind
+// fix #3778
+func (o *Operator) SchedulerKind() OpKind {
+	priority := []OpKind{OpMerge, OpRange, OpReplica, OpHotRegion, OpRegion, OpLeader}
+	for _, v := range priority {
+		if o.kind&v != 0 {
+			return v
+		}
+	}
+	return o.kind
+}
+
 // Status returns operator status.
 func (o *Operator) Status() OpStatus {
 	return o.status.Status()
