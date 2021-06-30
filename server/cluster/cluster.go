@@ -1183,6 +1183,24 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 	return c.putStoreLocked(newStore)
 }
 
+// SetStoreHotWeight sets store hot weight for read and write
+func (c *RaftCluster) SetStoreHotWeight(storeID uint64, hotReadWeight, hotWriteWeight float64) error {
+	c.Lock()
+	defer c.Unlock()
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if err := c.storage.SaveStoreHotWeight(storeID, hotReadWeight, hotWriteWeight); err != nil {
+		return err
+	}
+	newStore := store.Clone(
+		core.SetStoreHotReadWeight(hotReadWeight),
+		core.SetStoreHotWriteWeight(hotWriteWeight),
+	)
+	return c.putStoreLocked(newStore)
+}
+
 func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 	if c.storage != nil {
 		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
