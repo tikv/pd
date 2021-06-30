@@ -382,3 +382,36 @@ func (s *testOperatorSuite) TestCheck(c *C) {
 		c.Assert(op.Status(), Equals, SUCCESS)
 	}
 }
+
+func (s *testOperatorSuite) TestSchedulerKind(c *C) {
+	testdata := []struct {
+		op     *Operator
+		expect OpKind
+	}{
+		{
+			op:     s.newTestOperator(1, OpMerge|OpLeader|OpRegion),
+			expect: OpMerge,
+		}, {
+			op:     s.newTestOperator(1, OpReplica|OpRegion),
+			expect: OpReplica,
+		}, {
+			op:     s.newTestOperator(1, OpSplit|OpRegion),
+			expect: OpSplit,
+		}, {
+			op:     s.newTestOperator(1, OpRange|OpRegion),
+			expect: OpRange,
+		}, {
+			op:     s.newTestOperator(1, OpHotRegion|OpLeader|OpRegion),
+			expect: OpHotRegion,
+		}, {
+			op:     s.newTestOperator(1, OpRegion|OpLeader),
+			expect: OpRegion,
+		}, {
+			op:     s.newTestOperator(1, OpLeader),
+			expect: OpLeader,
+		},
+	}
+	for _, v := range testdata {
+		c.Assert(v.op.SchedulerKind(), Equals, v.expect)
+	}
+}

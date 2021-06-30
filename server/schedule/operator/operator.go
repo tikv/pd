@@ -128,13 +128,11 @@ func (o *Operator) Kind() OpKind {
 // SchedulerKind return the highest OpKind even if the operator has many OpKind
 // fix #3778
 func (o *Operator) SchedulerKind() OpKind {
-	priority := []OpKind{OpMerge, OpRange, OpReplica, OpHotRegion, OpRegion, OpLeader}
-	for _, v := range priority {
-		if o.kind&v != 0 {
-			return v
-		}
-	}
-	return o.kind
+	// LowBit ref: https://zh.wikipedia.org/wiki/%E6%A0%91%E7%8A%B6%E6%95%B0%E7%BB%84
+	// 6(110)==> 2(10)
+	// 5(101)==> 1(01)
+	// 4(100)==> 4(100)
+	return o.kind & (-o.kind)
 }
 
 // Status returns operator status.
