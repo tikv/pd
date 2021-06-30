@@ -233,7 +233,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 }
 
 func (s *testOperatorSuite) TestOperatorKind(c *C) {
-	c.Assert((OpLeader | OpReplica).String(), Equals, "leader,replica")
+	c.Assert((OpLeader | OpReplica).String(), Equals, "replica,leader")
 	c.Assert(OpKind(0).String(), Equals, "unknown")
 	k, err := ParseOperatorKind("region,leader")
 	c.Assert(err, IsNil)
