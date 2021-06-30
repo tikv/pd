@@ -76,6 +76,8 @@ const (
 
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
+
+	minWeight = 1e-3
 )
 
 // schedulePeerPr the probability of schedule the hot peer.
@@ -207,15 +209,19 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	h.summaryPendingInfluence()
 
 	storesLoads := cluster.GetStoresLoads()
+	hotReadWeights := cluster.GetStoresHotReadWeight()
+	hotWriteWeights := cluster.GetStoresHotWriteWeight()
 
 	{ // update read statistics
 		regionRead := cluster.RegionReadStats()
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
+			hotReadWeights,
 			storesLoads,
 			h.pendingSums,
 			regionRead,
 			read, core.LeaderKind)
 		h.stLoadInfos[readPeer] = summaryStoresLoad(
+			hotReadWeights,
 			storesLoads,
 			h.pendingSums,
 			regionRead,
@@ -225,12 +231,14 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	{ // update write statistics
 		regionWrite := cluster.RegionWriteStats()
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
+			hotWriteWeights,
 			storesLoads,
 			h.pendingSums,
 			regionWrite,
 			write, core.LeaderKind)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
+			hotWriteWeights,
 			storesLoads,
 			h.pendingSums,
 			regionWrite,
@@ -262,6 +270,7 @@ func (h *hotScheduler) gcRegionPendings() {
 // summaryStoresLoad Load information of all available stores.
 // it will filtered the hot peer and calculate the current and future stat(byte/key rate,count) for each store
 func summaryStoresLoad(
+	storesHotWeight map[uint64]float64,
 	storesLoads map[uint64][]float64,
 	storePendings map[uint64]*Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
@@ -272,9 +281,12 @@ func summaryStoresLoad(
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storesLoads))
 	allLoadSum := make([]float64, statistics.DimLen)
 	allCount := 0.0
+	totalWeight := 0.0
 
 	// Stores without byte rate statistics is not available to schedule.
 	for id, storeLoads := range storesLoads {
+		hotWeight := storesHotWeight[id]
+		totalWeight += hotWeight
 		loads := make([]float64, statistics.DimLen)
 		switch rwTy {
 		case read:
@@ -336,14 +348,14 @@ func summaryStoresLoad(
 			HotPeers: hotPeers,
 		}
 	}
-	storeLen := float64(len(storesLoads))
 	// store expectation byte/key rate and count for each store-load detail.
 	for id, detail := range loadDetail {
+		storeWeight := storesHotWeight[id]
 		expectLoads := make([]float64, len(allLoadSum))
 		for i := range expectLoads {
-			expectLoads[i] = allLoadSum[i] / storeLen
+			expectLoads[i] = allLoadSum[i] * storeWeight / totalWeight
 		}
-		expectCount := allCount / storeLen
+		expectCount := allCount * storeWeight / totalWeight
 		detail.LoadPred.Expect.Loads = expectLoads
 		detail.LoadPred.Expect.Count = expectCount
 		// Debug
@@ -802,6 +814,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}
+		} else {
 			hotSchedulerResultCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
 		}
 	}
@@ -833,11 +846,17 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			}
 			return a - b
 		}
+		srcWeight := bs.cluster.GetStore(bs.cur.srcStoreID).GetHotReadWight()
+		dstWeight := bs.cluster.GetStore(bs.cur.dstStoreID).GetHotReadWight()
+		if bs.rwTy == write {
+			srcWeight = bs.cluster.GetStore(bs.cur.srcStoreID).GetHotWriteWeight()
+			dstWeight = bs.cluster.GetStore(bs.cur.dstStoreID).GetHotWriteWeight()
+		}
 		checkHot := func(dim int) (bool, float64) {
 			srcRate := srcLd.Loads[dim]
 			dstRate := dstLd.Loads[dim]
 			peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, dim))
-			decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
+			decRatio := ((dstRate + peerRate) / math.Max(dstWeight, minWeight)) / getSrcDecRate(srcRate/math.Max(srcWeight, minWeight), peerRate)
 			isHot := peerRate >= bs.getMinRate(dim)
 			return isHot, decRatio
 		}

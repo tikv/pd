@@ -136,6 +136,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []
 	switch typ {
 	case read:
 		s.stLoadInfos[readLeader] = summaryStoresLoad(
+			cluster.GetStoresHotReadWeight(),
 			storesLoads,
 			map[uint64]*Influence{},
 			cluster.RegionReadStats(),
@@ -143,6 +144,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []
 		return s.randomSchedule(cluster, s.stLoadInfos[readLeader])
 	case write:
 		s.stLoadInfos[writeLeader] = summaryStoresLoad(
+			cluster.GetStoresHotWriteWeight(),
 			storesLoads,
 			map[uint64]*Influence{},
 			cluster.RegionWriteStats(),

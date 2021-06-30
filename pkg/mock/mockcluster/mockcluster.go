@@ -797,3 +797,28 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 	}
 	return items
 }
+
+// UpdateStoreHotWeight updates store's hot read/write weight
+func (mc *Cluster) UpdateStoreHotWeight(storeID uint64, readWeight, writeWeight float64) {
+	store := mc.GetStore(storeID)
+	newStore := store.Clone(core.SetStoreHotReadWeight(readWeight), core.SetStoreHotWriteWeight(writeWeight))
+	mc.PutStore(newStore)
+}
+
+func (mc *Cluster) GetStoresHotReadWeight() map[uint64]float64 {
+	stores := mc.GetStores()
+	weights := make(map[uint64]float64, 0)
+	for _, store := range stores {
+		weights[store.GetID()] = store.GetHotReadWight()
+	}
+	return weights
+}
+
+func (mc *Cluster) GetStoresHotWriteWeight() map[uint64]float64 {
+	stores := mc.GetStores()
+	weights := make(map[uint64]float64, 0)
+	for _, store := range stores {
+		weights[store.GetID()] = store.GetHotWriteWeight()
+	}
+	return weights
+}

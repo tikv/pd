@@ -393,6 +393,8 @@ type StoreSetInformer interface {
 	GetRegionStores(region *RegionInfo) []*StoreInfo
 	GetFollowerStores(region *RegionInfo) []*StoreInfo
 	GetLeaderStore(region *RegionInfo) *StoreInfo
+	GetStoresHotReadWeight() map[uint64]float64
+	GetStoresHotWriteWeight() map[uint64]float64
 }
 
 // StoreSetController is used to control stores' status.

@@ -760,6 +760,41 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	}
 	hb.Schedule(tc)
 	hb.(*hotScheduler).clearPendingInfluence()
+
+	// Set store hot read weight
+	tc.UpdateStoreHotWeight(1, 3.0, 1.0)
+	//25MB 3+4
+	// 10.7MB
+	//| store_id | read_bytes_rate |
+	//|----------|-----------------|
+	//|    1     |       6MB       |
+	//|    2     |       5MB     |
+	//|    3     |       5MB     |
+	//|    4     |       5MB     |
+	//|    5     |       6MB       |
+	tc.UpdateStorageReadBytes(1, 9*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(4, 5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(5, 6*MB*statistics.StoreHeartBeatReportInterval)
+
+	//| region_id | leader_store | follower_store | follower_store |   read_bytes_rate  |
+	//|-----------|--------------|----------------|----------------|--------------------|
+	//|     1     |       1      |        2       |       3        |        512KB       |
+	//|     2     |       2      |        1       |       3        |        512KB       |
+	//|     3     |       3      |        2       |       1        |        512KB       |
+	//|     4     |       1      |        2       |       3        |        512KB       |
+	//|     5     |       4      |        2       |       5        |        512KB       |
+	//|     11    |       1      |        2       |       3        |         24KB       |
+	//|     12    |       5      |        1       |       4        |        512KB       |
+
+	addRegionInfo(tc, read, []testRegionInfo{
+		{12, []uint64{5, 1, 4}, 512 * KB, 0},
+	})
+
+	// We will transfer leader of region 12 from 5 to 1
+	testutil.CheckTransferLeader(c, hb.Schedule(tc)[0], operator.OpLeader, 5, 1)
+	hb.(*hotScheduler).clearPendingInfluence()
 }
 
 func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
