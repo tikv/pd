@@ -773,17 +773,12 @@ func (oc *OperatorController) updateCounts(operators map[uint64]*operator.Operat
 	}
 }
 
-// OperatorCount gets the count of operators filtered by mask.
-func (oc *OperatorController) OperatorCount(mask operator.OpKind) uint64 {
+// OperatorCount gets the count of operators filtered by kind.
+// kind only has one OpKind.
+func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
 	oc.RLock()
 	defer oc.RUnlock()
-	var total uint64
-	for k, count := range oc.counts {
-		if k&mask != 0 {
-			total += count
-		}
-	}
-	return total
+	return oc.counts[kind]
 }
 
 // GetOpInfluence gets OpInfluence.
