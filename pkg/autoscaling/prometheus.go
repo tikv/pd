@@ -140,7 +140,7 @@ func extractInstancesFromResponse(resp promModel.Value) (QueryResult, error) {
 		}
 
 		instanceFullName := buildInstanceIdentifier(instanceName, namespace)
-		result[instanceFullName] = float64(sample.Value * milliCores)
+		result[instanceFullName] = float64(sample.Value)
 	}
 
 	return result, nil

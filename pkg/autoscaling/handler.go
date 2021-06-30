@@ -15,9 +15,11 @@ package autoscaling
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -50,6 +52,8 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Info(fmt.Sprintf("autoscale: strategy data: %s", string(data)))
+
 	strategy := Strategy{}
 	if err := json.Unmarshal(data, &strategy); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
@@ -57,6 +61,15 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	plans := calculate(rc, &strategy)
+
+	if plans != nil {
+		data, err = json.Marshal(plans)
+		if err != nil {
+			log.Error("marshal plans failed.", errs.ZapError(err))
+		} else {
+			log.Info(fmt.Sprintf("autoscaling plans: %s", string(data)))
+		}
+	}
 
 	h.rd.JSON(w, http.StatusOK, plans)
 }

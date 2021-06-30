@@ -95,6 +95,7 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 
 func getTiKVPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy) ([]*Plan, error) {
 	instances := getTiKVInstances(rc)
+
 	if len(instances) == 0 {
 		return nil, nil
 	}
@@ -118,7 +119,7 @@ func getTiKVPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy) 
 func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy *Strategy) ([]*Plan, error) {
 	var plans []*Plan
 
-	if len(instances) == 0 {
+	if strategy.Rules[0].StorageRule == nil || len(instances) == 0 {
 		return nil, nil
 	}
 
@@ -132,6 +133,11 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 	storageUsage := totalStorageUsedSize / totalStorageCapacity
 	storageMaxThreshold, storageMinThreshold := getStorageThresholdByComponent(strategy, TiKV)
 	storageUsageTarget := (storageMaxThreshold + storageMinThreshold) / 2
+
+	log.Info(fmt.Sprintf(
+		"autoscale: get storage usage information compeleted. totalStorageUsedSize: %f, totalStorageCapacity: %f, storageMaxThreshold: %f , storageMinThreshold: %f",
+		totalStorageUsedSize, totalStorageCapacity, storageMaxThreshold, storageMinThreshold))
+
 	if storageUsage > storageMaxThreshold {
 		// generate homogeneous tikv plan
 		resourceMap, err := getResourceMapByComponent(rc, instances, TiKV)
@@ -164,6 +170,9 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 
 		scaleInCount := scaleOutCount + totalInstanceCount - strategy.NodeCount
 		if scaleInCount > 0 {
+			log.Info(fmt.Sprintf(
+				"autoscale: there are not enough k8s nodes to scale out, need to scale in some heterogeneous instances. scaleOutCount: %d, totalInstanceCount: %d, nodeCount: %d, scaleInCount: %d",
+				scaleOutCount, totalInstanceCount, strategy.NodeCount, scaleInCount))
 			// there are not enough k8s nodes to scale out, need to scale in some heterogeneous instances
 			for _, resource := range resources {
 				if resource.ResourceType != homogeneousTiKVResourceType {
@@ -227,6 +236,10 @@ func getTiDBPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy) 
 func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance, strategy *Strategy, component ComponentType) ([]*Plan, error) {
 	var plans []*Plan
 
+	if strategy.Rules[0].CPURule == nil || len(instances) == 0 {
+		return nil, nil
+	}
+
 	now := time.Now()
 	// get cpu used times
 	cpuUsedTimes, err := querier.Query(NewQueryOptions(component, CPUUsage, now, MetricsTimeDuration))
@@ -238,6 +251,11 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 	if err != nil {
 		return nil, err
 	}
+
+	log.Info(fmt.Sprintf(
+		"autoscale: get cpu usage information completed. component: %s, cpuUsedTimes: %v, cpuQuotas: %v",
+		component.String(), cpuUsedTimes, cpuQuotas))
+
 	// get resource map
 	resourceMap, err := getResourceMapByComponent(rc, instances, component)
 	if err != nil {
@@ -277,6 +295,10 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 	cpuUsageTarget := (cpuMaxThreshold + cpuMinThreshold) / 2
 	resources := getCPUResourcesByComponent(strategy, component)
 
+	log.Info(fmt.Sprintf(
+		"autoscale: calculate total cpu usage infomation completed. component: %s, totalInstanceCount: %d, totalCPUUsage: %f, cpuUsageHighMap: %v, cpuUsageLowNum: %d",
+		component.String(), totalInstanceCount, totalCPUUsage, cpuUsageHighMap, cpuUsageLowNum))
+
 	if totalCPUUsage > cpuMaxThreshold {
 		// get homogeneous plans
 		homogeneousResourceType := getHomogeneousResourceType(component)
@@ -286,12 +308,19 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 		scaleOutCount := uint64(cpuScaleOutSize/float64(homogeneousCPUSize)) + 1
 		count := scaleOutCount + resourceMap[homogeneousResourceType]
 
+		log.Info(fmt.Sprintf(
+			"autoscale: get homogeneous plans. component: %s, homogeneousCPUSize: %f, homogeneousCount %d, cpuScaleOutSize: %d, scaleOutCount: %d, count: %d",
+			component.String(), homogeneousCPUSize, homogeneousCount, cpuScaleOutSize, scaleOutCount, count))
+
 		if homogeneousCount != nil && resourceMap[homogeneousResourceType] > *homogeneousCount {
-			// existing homogeneous instance count is larger than the count specified in spec,
+			// existing homogeneous instance count is larger than the count specified in strategy,
 			// this may be caused by specifying wrong count in the yaml file,
 			// or someone scaled the cluster manually but forgot to modify the spec,
-			// for now, do nothing here
+			// for now, just log a warning message here.
 			// TODO: maybe we should return an error here to notify user about this
+			log.Warn(fmt.Sprintf(
+				"existing homogeneous instance count is larger than the count specified in spec. component: %s, existingCount: %d, specCount: %d",
+				component.String(), resourceMap[homogeneousResourceType], *homogeneousCount))
 			return nil, nil
 		}
 
@@ -309,6 +338,9 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 
 		overflowCount := scaleOutCount + totalInstanceCount - strategy.NodeCount
 		if overflowCount > 0 {
+			log.Info(fmt.Sprintf(
+				"autoscale: not enough k8s nodes to scale out. scaleOutCount: %d, totalInstanceCount: %d, nodeCount: %d",
+				scaleOutCount, totalInstanceCount, strategy.NodeCount))
 			// after scaling out, the total instance count will be larger than node count, so need to reduce the scale out count
 			count -= overflowCount
 		}
@@ -363,6 +395,7 @@ func getHeterogeneousScaleOutPlans(cpuScaleOutSize float64, cpuUsageTarget float
 				count := scaleOutCount + existsCount
 				if resource.Count == nil || count <= *resource.Count {
 					// unlimited resource count or enough resource count left
+					log.Info(fmt.Sprintf("autoscale: get heterogeneous scale out plans completed. component: %s, plans: %v", component, plans))
 					return append(plans, NewPlan(component, count, resource.ResourceType))
 				}
 
@@ -379,6 +412,7 @@ func getHeterogeneousScaleOutPlans(cpuScaleOutSize float64, cpuUsageTarget float
 			// this resource type does not exist
 			if resource.Count == nil || scaleOutCount <= *resource.Count {
 				// unlimited resource count or enough resource count left
+				log.Info(fmt.Sprintf("autoscale: get heterogeneous scale out plans completed. component: %s, plans: %v", component, plans))
 				return append(plans, NewPlan(component, scaleOutCount, resource.ResourceType))
 			}
 
@@ -392,6 +426,7 @@ func getHeterogeneousScaleOutPlans(cpuScaleOutSize float64, cpuUsageTarget float
 		}
 	}
 
+	log.Info(fmt.Sprintf("autoscale: get heterogeneous scale out plans completed. component: %s, plans: %v", component, plans))
 	return plans
 }
 
@@ -400,9 +435,12 @@ func getHeterogeneousScaleInPlans(resourceMap map[string]uint64, component Compo
 
 	for resourceType, resourceCount := range resourceMap {
 		if resourceType != homogeneousTiKVResourceType && resourceType != homogeneousTiDBResourceType {
+			log.Info(fmt.Sprintf("autoscale: get heterogeneous scale in plans completed. component: %s, plans: %v", component, plans))
 			return append(plans, NewPlan(component, resourceCount-1, resourceType))
 		}
 	}
+
+	log.Info(fmt.Sprintf("autoscale: get heterogeneous scale in plans completed. component: %s, plans: %v", component, plans))
 
 	return plans
 }
