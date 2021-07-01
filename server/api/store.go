@@ -53,6 +53,8 @@ type StoreStatus struct {
 	RegionCount        int                `json:"region_count"`
 	RegionWeight       float64            `json:"region_weight"`
 	RegionScore        float64            `json:"region_score"`
+	HotReadWeight      float64            `json:"hot_read_weight"`
+	HotWriteWeight     float64            `json:"hot_write_weight"`
 	RegionSize         int64              `json:"region_size"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
@@ -91,6 +93,8 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			RegionWeight:       store.GetRegionWeight(),
 			RegionScore:        store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0, 0),
 			RegionSize:         store.GetRegionSize(),
+			HotReadWeight:      store.GetHotReadWight(),
+			HotWriteWeight:     store.GetHotWriteWeight(),
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
 			IsBusy:             store.IsBusy(),
@@ -356,7 +360,7 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {string} string "The store's hot read/write weight is updated."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /store/{id}/weight [post]
+// @Router /store/{id}/hot-weight [post]
 func (h *storeHandler) SetHotWeight(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -371,12 +375,12 @@ func (h *storeHandler) SetHotWeight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hotWriteVal, ok := input["hot-write"]
+	hotWriteVal, ok := input["hot-write-weight"]
 	if !ok {
 		h.rd.JSON(w, http.StatusBadRequest, "hot-write weight unset")
 		return
 	}
-	hotReadVal, ok := input["hot-read"]
+	hotReadVal, ok := input["hot-read-weight"]
 	if !ok {
 		h.rd.JSON(w, http.StatusBadRequest, "hot-read weight unset")
 		return
