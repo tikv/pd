@@ -19,6 +19,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -57,16 +58,27 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	body, err := json.Marshal(input)
 	c.Assert(err, IsNil)
 	c.Assert(postJSON(testDialClient, addURL, body), IsNil)
+	rc := s.svr.GetRaftCluster()
+	c.Assert(rc.GetSchedulers(), HasLen, 1)
+	resp := make(map[string]interface{})
+	listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
+	c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
+	c.Assert(resp["store-id-ranges"], HasLen, 1)
 	input1 := make(map[string]interface{})
 	input1["name"] = "evict-leader-scheduler"
 	input1["store_id"] = 2
 	body, err = json.Marshal(input1)
 	c.Assert(err, IsNil)
-	c.Assert(postJSON(testDialClient, addURL, body), IsNil)
-	rc := s.svr.GetRaftCluster()
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedulers/persistFail", "return(true)"), IsNil)
+	c.Assert(postJSON(testDialClient, addURL, body), NotNil)
 	c.Assert(rc.GetSchedulers(), HasLen, 1)
-	resp := make(map[string]interface{})
-	listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
+	resp = make(map[string]interface{})
+	c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
+	c.Assert(resp["store-id-ranges"], HasLen, 1)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedulers/persistFail"), IsNil)
+	c.Assert(postJSON(testDialClient, addURL, body), IsNil)
+	c.Assert(rc.GetSchedulers(), HasLen, 1)
+	resp = make(map[string]interface{})
 	c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 	c.Assert(resp["store-id-ranges"], HasLen, 2)
 	deleteURL := fmt.Sprintf("%s/%s", s.urlPrefix, "evict-leader-scheduler-1")
@@ -77,7 +89,13 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	c.Assert(readJSON(testDialClient, listURL, &resp1), IsNil)
 	c.Assert(resp1["store-id-ranges"], HasLen, 1)
 	deleteURL = fmt.Sprintf("%s/%s", s.urlPrefix, "evict-leader-scheduler-2")
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/config/persistFail", "return(true)"), IsNil)
 	res, err := doDelete(testDialClient, deleteURL)
+	c.Assert(err, IsNil)
+	c.Assert(res.StatusCode, Equals, 500)
+	c.Assert(rc.GetSchedulers(), HasLen, 1)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/config/persistFail"), IsNil)
+	res, err = doDelete(testDialClient, deleteURL)
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, 200)
 	c.Assert(rc.GetSchedulers(), HasLen, 0)
