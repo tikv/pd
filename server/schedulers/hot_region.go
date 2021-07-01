@@ -76,8 +76,6 @@ const (
 
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
-
-	minWeight = 1e-3
 )
 
 // schedulePeerPr the probability of schedule the hot peer.
@@ -835,17 +833,11 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			}
 			return a - b
 		}
-		srcWeight := bs.cluster.GetStore(bs.cur.srcStoreID).GetHotReadWight()
-		dstWeight := bs.cluster.GetStore(bs.cur.dstStoreID).GetHotReadWight()
-		if bs.rwTy == write {
-			srcWeight = bs.cluster.GetStore(bs.cur.srcStoreID).GetHotWriteWeight()
-			dstWeight = bs.cluster.GetStore(bs.cur.dstStoreID).GetHotWriteWeight()
-		}
 		checkHot := func(dim int) (bool, float64) {
 			srcRate := srcLd.Loads[dim]
 			dstRate := dstLd.Loads[dim]
 			peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, dim))
-			decRatio := ((dstRate + peerRate) / math.Max(dstWeight, minWeight)) / getSrcDecRate(srcRate/math.Max(srcWeight, minWeight), peerRate)
+			decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
 			isHot := peerRate >= bs.getMinRate(dim)
 			return isHot, decRatio
 		}
