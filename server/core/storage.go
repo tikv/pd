@@ -429,6 +429,7 @@ func (s *Storage) SaveStoreWeight(storeID uint64, leader, region float64) error 
 	return s.Save(s.storeRegionWeightPath(storeID), regionValue)
 }
 
+// SaveStoreHotWeight saves store hot read/write weight
 func (s *Storage) SaveStoreHotWeight(storeID uint64, hotWrite, hotRead float64) error {
 	hotWriteValue := strconv.FormatFloat(hotWrite, 'f', -1, 64)
 	if err := s.Save(s.storeHotWriteWeightPath(storeID), hotWriteValue); err != nil {
