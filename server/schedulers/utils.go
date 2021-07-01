@@ -406,6 +406,7 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 			TotalLoads:     totalLoads,
 			TotalBytesRate: 0.0,
 			TotalKeysRate:  0.0,
+			TotalQueryRate: 0.0,
 			Count:          0,
 			Stats:          make([]statistics.HotPeerStatShow, 0),
 		}
@@ -425,29 +426,33 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 		}
 	}
 
-	b, k := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim)
+	b, k, q := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim), getRegionStatKind(kind, statistics.QueryDim)
 	byteRate := totalLoads[b]
 	keyRate := totalLoads[k]
+	queryRate := totalLoads[q]
 
 	return &statistics.HotPeersStat{
 		TotalLoads:     totalLoads,
 		TotalBytesRate: byteRate,
 		TotalKeysRate:  keyRate,
+		TotalQueryRate: queryRate,
 		Count:          len(peers),
 		Stats:          peers,
 	}
 }
 
 func toHotPeerStatShow(p *statistics.HotPeerStat, kind rwType) statistics.HotPeerStatShow {
-	b, k := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim)
+	b, k, q := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim), getRegionStatKind(kind, statistics.QueryDim)
 	byteRate := p.Loads[b]
 	keyRate := p.Loads[k]
+	queryRate := p.Loads[q]
 	return statistics.HotPeerStatShow{
 		StoreID:        p.StoreID,
 		RegionID:       p.RegionID,
 		HotDegree:      p.HotDegree,
 		ByteRate:       byteRate,
 		KeyRate:        keyRate,
+		QueryRate:      queryRate,
 		AntiCount:      p.AntiCount,
 		LastUpdateTime: p.LastUpdateTime,
 	}

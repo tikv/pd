@@ -263,9 +263,7 @@ func (c *baseClient) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	for _, u := range c.urls {
-		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, c.timeout)
-		members, err := c.getMembers(timeoutCtx, u)
-		timeoutCancel()
+		members, err := c.getMembers(ctx, u, c.timeout)
 		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", u), errs.ZapError(err))
 			continue
@@ -278,9 +276,7 @@ func (c *baseClient) initClusterID() error {
 
 func (c *baseClient) updateMember() error {
 	for _, u := range c.urls {
-		ctx, cancel := context.WithTimeout(c.ctx, updateMemberTimeout)
-		members, err := c.getMembers(ctx, u)
-		cancel()
+		members, err := c.getMembers(c.ctx, u, updateMemberTimeout)
 
 		var errTSO error
 		if err == nil {
@@ -318,7 +314,9 @@ func (c *baseClient) updateMember() error {
 	return errs.ErrClientGetLeader.FastGenByArgs(c.urls)
 }
 
-func (c *baseClient) getMembers(ctx context.Context, url string) (*pdpb.GetMembersResponse, error) {
+func (c *baseClient) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	cc, err := c.getOrCreateGRPCConn(url)
 	if err != nil {
 		return nil, err

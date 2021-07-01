@@ -530,11 +530,11 @@ func (mc *Cluster) UpdateStorageWrittenStats(storeID, bytesWritten, keysWritten 
 }
 
 // UpdateStorageReadStats updates store written bytes.
-func (mc *Cluster) UpdateStorageReadStats(storeID, bytesWritten, keysWritten uint64) {
+func (mc *Cluster) UpdateStorageReadStats(storeID, bytesRead, keysRead uint64) {
 	store := mc.GetStore(storeID)
 	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.BytesRead = bytesWritten
-	newStats.KeysRead = keysWritten
+	newStats.BytesRead = bytesRead
+	newStats.KeysRead = keysRead
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
