@@ -41,6 +41,7 @@ func NewStoreCommand() *cobra.Command {
 	s.AddCommand(NewDeleteStoreCommand())
 	s.AddCommand(NewLabelStoreCommand())
 	s.AddCommand(NewSetStoreWeightCommand())
+	s.AddCommand(NewSetStoreHotWeightCommand())
 	s.AddCommand(NewStoreLimitCommand())
 	s.AddCommand(NewRemoveTombStoneCommand())
 	s.AddCommand(NewStoreLimitSceneCommand())
@@ -87,6 +88,15 @@ func NewSetStoreWeightCommand() *cobra.Command {
 		Use:   "weight <store_id> <leader_weight> <region_weight>",
 		Short: "set a store's leader and region balance weight",
 		Run:   setStoreWeightCommandFunc,
+	}
+}
+
+// NewSetStoreHotWeightCommand returns a hot weight sub command of storeCMD
+func NewSetStoreHotWeightCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "hot-weight <store_id> <hot_read_weight> <hot_write_weight>",
+		Short: "set a store's hot read and write scheduling weight",
+		Run:   setStoreHotWeightCommandFunc,
 	}
 }
 
@@ -384,6 +394,28 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, prefix, map[string]interface{}{
 		"leader": leader,
 		"region": region,
+	})
+}
+
+func setStoreHotWeightCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 3 {
+		cmd.Usage()
+		return
+	}
+	hotReadWeight, err := strconv.ParseFloat(args[1], 64)
+	if err != nil || hotReadWeight <= 0 {
+		cmd.Println("hot_read_weight should be a number that > 0.")
+		return
+	}
+	hotWriteWeight, err := strconv.ParseFloat(args[2], 64)
+	if err != nil || hotWriteWeight <= 0 {
+		cmd.Println("region_weight should be a number that > 0")
+		return
+	}
+	prefix := fmt.Sprintf(path.Join(storePrefix, "hot-weight"), args[0])
+	postJSON(cmd, prefix, map[string]interface{}{
+		"hot-read-weight":  hotReadWeight,
+		"hot-write-weight": hotWriteWeight,
 	})
 }
 
