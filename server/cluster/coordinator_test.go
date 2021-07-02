@@ -169,19 +169,19 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 
 	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 	oc.AddWaitingOperator(op1)
-	c.Assert(oc.OperatorCount(op1.Kind()), Equals, uint64(1))
+	c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(1))
 	c.Assert(oc.GetOperator(1).RegionID(), Equals, op1.RegionID())
 
 	// Region 1 already has an operator, cannot add another one.
 	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 	oc.AddWaitingOperator(op2)
-	c.Assert(oc.OperatorCount(op2.Kind()), Equals, uint64(0))
+	c.Assert(oc.OperatorCount(operator.OpRegion), Equals, uint64(0))
 
 	// Remove the operator manually, then we can add a new operator.
 	c.Assert(oc.RemoveOperator(op1), IsTrue)
 	op3 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 	oc.AddWaitingOperator(op3)
-	c.Assert(oc.OperatorCount(op3.Kind()), Equals, uint64(1))
+	c.Assert(oc.OperatorCount(operator.OpRegion), Equals, uint64(1))
 	c.Assert(oc.GetOperator(1).RegionID(), Equals, op3.RegionID())
 }
 

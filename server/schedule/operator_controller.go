@@ -775,21 +775,16 @@ func (oc *OperatorController) updateCounts(operators map[uint64]*operator.Operat
 		delete(oc.counts, k)
 	}
 	for _, op := range operators {
-		oc.counts[op.Kind()]++
+		oc.counts[op.SchedulerKind()]++
 	}
 }
 
-// OperatorCount gets the count of operators filtered by mask.
-func (oc *OperatorController) OperatorCount(mask operator.OpKind) uint64 {
+// OperatorCount gets the count of operators filtered by kind.
+// kind only has one OpKind.
+func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
 	oc.RLock()
 	defer oc.RUnlock()
-	var total uint64
-	for k, count := range oc.counts {
-		if k&mask != 0 {
-			total += count
-		}
-	}
-	return total
+	return oc.counts[kind]
 }
 
 // GetOpInfluence gets OpInfluence.
