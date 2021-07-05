@@ -512,9 +512,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	}
 	bs.cur = &solution{}
 	var (
-		best  *solution
-		ops   []*operator.Operator
-		infls []Influence
+		best *solution
+		op   *operator.Operator
+		infl Influence
 	)
 
 	for srcStoreID := range bs.filterSrcStores() {
@@ -530,9 +530,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				bs.cur.dstStoreID = dstStoreID
 				bs.calcProgressiveRank()
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
-					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
-						ops = newOps
-						infls = newInfls
+					if newOp, newInfl := bs.buildOperator(); newOp != nil {
+						op = newOp
+						infl = *newInfl
 						clone := *bs.cur
 						best = &clone
 					}
@@ -541,13 +541,11 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		}
 	}
 
-	for i := 0; i < len(ops); i++ {
-		// TODO: multiple operators need to be atomic.
-		if !bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i]) {
-			return nil
-		}
+	if best == nil || !bs.sche.addPendingInfluence(op, best.srcStoreID, best.dstStoreID, infl) {
+		return nil
 	}
-	return ops
+
+	return []*operator.Operator{op}
 }
 
 // allowBalance check whether the operator count have exceed the hot region limit by type
@@ -999,12 +997,11 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 	return true
 }
 
-func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
+func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence) {
 	if !bs.isReadyToBuild() {
 		return nil, nil
 	}
 	var (
-		op       *operator.Operator
 		counters []prometheus.Counter
 		err      error
 	)
@@ -1068,11 +1065,11 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
 
-	infl := Influence{
+	infl = &Influence{
 		Loads: append(bs.cur.srcPeerStat.Loads[:0:0], bs.cur.srcPeerStat.Loads...),
 		Count: 1,
 	}
-	return []*operator.Operator{op}, []Influence{infl}
+	return op, infl
 }
 
 func (h *hotScheduler) GetHotStatus(typ string) *statistics.StoreHotPeersInfos {
