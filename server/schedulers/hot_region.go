@@ -840,7 +840,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		srcKeyRate := srcLd.Loads[statistics.KeyDim]
 		dstKeyRate := dstLd.Loads[statistics.KeyDim]
 		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
-		if (srcKeyRate-peerKeyRate)/srcWeight >= (dstKeyRate+peerKeyRate)/dstWeight {
+		if (srcKeyRate-peerKeyRate)/math.Max(srcWeight, minWeight) >= (dstKeyRate+peerKeyRate)/math.Max(dstWeight, minWeight) {
 			rank = -1
 		}
 	} else {
