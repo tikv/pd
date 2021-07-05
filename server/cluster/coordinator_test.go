@@ -373,13 +373,14 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 				c.Assert(co.opController.AddWaitingOperator(op), Equals, 1)
 			case operator.OpRegion | operator.OpMerge:
 				if regionID%2 == 1 {
-					ops, err := operator.CreateMergeRegionOperator("merge-region", co.cluster, tc.GetRegion(regionID), tc.GetRegion(regionID-1), operator.OpMerge)
+					ops, err := operator.CreateMergeRegionOperator("merge-region", co.cluster, tc.GetRegion(regionID), tc.GetRegion(regionID-1), 0)
 					c.Assert(err, IsNil)
 					c.Assert(co.opController.AddWaitingOperator(ops...), Equals, len(ops))
 				}
 			}
 		}
 	}
+	c.Assert(co.opController.OperatorCount(operator.OpMerge), Equals, uint64(5))
 	s.checkRegion(c, tc, co, num, 0)
 }
 

@@ -814,7 +814,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	tc.AddLeaderRegion(2, 1, 2, 3)
 
 	// add two merge operator to let the count of opRegion to 2.
-	ops, err := operator.CreateMergeRegionOperator("merge-region", tc, source, target, operator.OpMerge)
+	ops, err := operator.CreateMergeRegionOperator("merge-region", tc, source, target, 0)
 	c.Assert(err, IsNil)
 	oc.SetOperator(ops[0])
 	oc.SetOperator(ops[1])

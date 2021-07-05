@@ -162,7 +162,8 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 	type testCase struct {
 		sourcePeers   []*metapb.Peer // first is leader
 		targetPeers   []*metapb.Peer // first is leader
-		kind          OpKind
+		sourceKind    OpKind
+		targetkind    OpKind
 		expectedError bool
 		prepareSteps  []OpStep
 	}
@@ -177,6 +178,7 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
 			OpMerge,
+			OpPlaceholder,
 			false,
 			[]OpStep{},
 		},
@@ -190,6 +192,7 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
 			},
 			OpMerge | OpLeader | OpRegion,
+			OpPlaceholder,
 			false,
 			[]OpStep{
 				AddLearner{ToStore: 3},
@@ -215,6 +218,7 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
 			0,
+			0,
 			true,
 			nil,
 		},
@@ -227,6 +231,7 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_IncomingVoter},
 			},
+			0,
 			0,
 			true,
 			nil,
@@ -243,9 +248,9 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 		}
 		c.Assert(err, IsNil)
 		c.Assert(ops, HasLen, 2)
-		c.Assert(ops[0].kind, Equals, tc.kind)
+		c.Assert(ops[0].kind, Equals, tc.sourceKind)
 		c.Assert(ops[0].Len(), Equals, len(tc.prepareSteps)+1)
-		c.Assert(ops[1].kind, Equals, tc.kind)
+		c.Assert(ops[1].kind, Equals, tc.targetkind)
 		c.Assert(ops[1].Len(), Equals, 1)
 		c.Assert(ops[1].Step(0).(MergeRegion), DeepEquals, MergeRegion{source.GetMeta(), target.GetMeta(), true})
 

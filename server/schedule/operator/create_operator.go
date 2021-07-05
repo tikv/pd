@@ -170,12 +170,13 @@ func CreateMergeRegionOperator(desc string, cluster opt.Cluster, source *core.Re
 
 	brief := fmt.Sprintf("merge: region %v to %v", source.GetID(), target.GetID())
 	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind|OpMerge, steps...)
-	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, MergeRegion{
+	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind&OpAdmin|OpPlaceholder, MergeRegion{
 		FromRegion: source.GetMeta(),
 		ToRegion:   target.GetMeta(),
 		IsPassive:  true,
 	})
 
+	// The sequence of operator is important, should be [src, target].
 	return []*Operator{op1, op2}, nil
 }
 

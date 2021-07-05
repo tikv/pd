@@ -717,7 +717,7 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	target := newRegionInfo(0, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	// now there is one operator being allowed to add, if it is a merge operator
 	// both of the pair are allowed
-	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
+	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, 0)
 	c.Assert(err, IsNil)
 	c.Assert(ops, HasLen, 2)
 	c.Assert(controller.AddWaitingOperator(ops...), Equals, 2)

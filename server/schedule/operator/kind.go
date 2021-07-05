@@ -27,6 +27,9 @@ type OpKind uint32
 const (
 	// Initiated by admin.
 	OpAdmin OpKind = 1 << iota
+	// Only one of merge operators takes effect, the other one is used as a placeholder.
+	// This operator is no meaning for limit.
+	OpPlaceholder
 	// Initiated by merge checker or merge scheduler. Note that it may not include region merge.
 	// the order describe the operator's producer and is very helpful to decouple scheduler or checker limit
 	OpMerge
@@ -46,25 +49,27 @@ const (
 )
 
 var flagToName = map[OpKind]string{
-	OpLeader:    "leader",
-	OpRegion:    "region",
-	OpSplit:     "split",
-	OpAdmin:     "admin",
-	OpHotRegion: "hot-region",
-	OpReplica:   "replica",
-	OpMerge:     "merge",
-	OpRange:     "range",
+	OpLeader:      "leader",
+	OpRegion:      "region",
+	OpSplit:       "split",
+	OpAdmin:       "admin",
+	OpHotRegion:   "hot-region",
+	OpReplica:     "replica",
+	OpMerge:       "merge",
+	OpRange:       "range",
+	OpPlaceholder: "placeholder",
 }
 
 var nameToFlag = map[string]OpKind{
-	"leader":     OpLeader,
-	"region":     OpRegion,
-	"split":      OpSplit,
-	"admin":      OpAdmin,
-	"hot-region": OpHotRegion,
-	"replica":    OpReplica,
-	"merge":      OpMerge,
-	"range":      OpRange,
+	"leader":      OpLeader,
+	"region":      OpRegion,
+	"split":       OpSplit,
+	"admin":       OpAdmin,
+	"hot-region":  OpHotRegion,
+	"replica":     OpReplica,
+	"merge":       OpMerge,
+	"range":       OpRange,
+	"placeholder": OpPlaceholder,
 }
 
 func (k OpKind) String() string {

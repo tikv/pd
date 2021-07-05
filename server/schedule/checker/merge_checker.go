@@ -153,7 +153,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	log.Debug("try to merge region",
 		logutil.ZapRedactStringer("from", core.RegionToHexMeta(region.GetMeta())),
 		logutil.ZapRedactStringer("to", core.RegionToHexMeta(target.GetMeta())))
-	ops, err := operator.CreateMergeRegionOperator("merge-region", m.cluster, region, target, operator.OpMerge)
+	ops, err := operator.CreateMergeRegionOperator("merge-region", m.cluster, region, target, 0)
 	if err != nil {
 		log.Warn("create merge region operator failed", errs.ZapError(err))
 		return nil

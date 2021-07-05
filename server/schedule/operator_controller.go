@@ -261,26 +261,23 @@ func (oc *OperatorController) PushOperators() {
 }
 
 // AddWaitingOperator adds operators to waiting operators.
-func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int {
+func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) (added int) {
 	oc.Lock()
-	added := 0
+	defer oc.Unlock()
+	opLen := len(ops)
 
-	for i := 0; i < len(ops); i++ {
-		op := ops[i]
-		desc := op.Desc()
-		isMerge := false
+	for i := 0; i < opLen; i++ {
+		op, desc, isMerge := ops[i], ops[i].Desc(), false
 		if op.Kind()&operator.OpMerge != 0 {
-			if i+1 >= len(ops) {
+			if i+1 >= opLen {
 				// should not be here forever
-				log.Error("orphan merge operators found", zap.String("desc", desc), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("orphan operator found")))
-				oc.Unlock()
-				return added
+				log.Error("orphan merge operator found", zap.String("operator", op.String()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("orphan operator found")))
+				return
 			}
-			if ops[i+1].Kind()&operator.OpMerge == 0 {
-				log.Error("merge operator should be paired", zap.String("desc",
-					ops[i+1].Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
-				oc.Unlock()
-				return added
+			if ops[i+1].Kind()&operator.OpPlaceholder == 0 {
+				log.Error("merge operator should be paired", zap.String("operator",
+					ops[i+1].String()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
+				return
 			}
 			isMerge = true
 		}
@@ -289,12 +286,11 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 			oc.buryOperator(op)
 			if isMerge {
 				// Merge operation have two operators, cancel them all
-				next := ops[i+1]
-				_ = next.Cancel()
-				oc.buryOperator(next)
+				targetOp := ops[i+1]
+				_ = targetOp.Cancel()
+				oc.buryOperator(targetOp)
 			}
-			oc.Unlock()
-			return added
+			return
 		}
 		oc.wop.PutOperator(op)
 		if isMerge {
@@ -308,11 +304,9 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 		oc.wopStatus.ops[desc]++
 		added++
 	}
-
-	oc.Unlock()
 	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
-	oc.PromoteWaitingOperator()
-	return added
+	oc.promoteWaitingOperatorLocked()
+	return
 }
 
 // AddOperator adds operators to the running operators.
@@ -339,6 +333,10 @@ func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 func (oc *OperatorController) PromoteWaitingOperator() {
 	oc.Lock()
 	defer oc.Unlock()
+	oc.promoteWaitingOperatorLocked()
+}
+
+func (oc *OperatorController) promoteWaitingOperatorLocked() {
 	var ops []*operator.Operator
 	for {
 		// GetOperator returns one operator or two merge operators
