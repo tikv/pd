@@ -89,6 +89,7 @@ func NewGlobalTSOAllocator(
 
 func (gta *GlobalTSOAllocator) setSyncRTT(rtt int64) {
 	gta.syncRTT.Store(rtt)
+	tsoGauge.WithLabelValues("global_tso_sync_rtt", gta.timestampOracle.dcLocation).Set(float64(rtt))
 }
 
 func (gta *GlobalTSOAllocator) getSyncRTT() int64 {
@@ -155,6 +156,7 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 //      During the process, if the estimated MaxTS is not accurate, it will fallback to the collecting way.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
 	if !gta.leadership.Check() {
+		tsoCounter.WithLabelValues("not_leader", gta.timestampOracle.dcLocation).Inc()
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
 	// To check if we have any dc-location configured in the cluster
@@ -209,20 +211,27 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 			skipCheck = true
 			goto SETTING_PHASE
 		}
+		// Is skipCheck is false and globalTSOResp remains the same, it means the estimatedTSO is valide.
+		if !skipCheck && tsoutil.CompareTimestamp(&globalTSOResp, estimatedMaxTSO) == 0 {
+			tsoCounter.WithLabelValues("global_tso_estimate", gta.timestampOracle.dcLocation).Inc()
+		}
 		// 4. Persist MaxTS into memory, and etcd if needed
 		var currentGlobalTSO *pdpb.Timestamp
 		if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
 			return pdpb.Timestamp{}, err
 		}
 		if tsoutil.CompareTimestamp(currentGlobalTSO, &globalTSOResp) < 0 {
+			tsoCounter.WithLabelValues("global_tso_persist", gta.timestampOracle.dcLocation).Inc()
 			// Update the Global TSO in memory
 			if err = gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(&globalTSOResp), true); err != nil {
+				tsoCounter.WithLabelValues("global_tso_persist_err", gta.timestampOracle.dcLocation).Inc()
 				log.Error("update the global tso in memory failed", errs.ZapError(err))
 				return pdpb.Timestamp{}, err
 			}
 		}
 		// 5. Check leadership again before we returning the response.
 		if !gta.leadership.Check() {
+			tsoCounter.WithLabelValues("not_leader_anymore", gta.timestampOracle.dcLocation).Inc()
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd leader anymore")
 		}
 		// 6. Differentiate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
@@ -230,6 +239,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		globalTSOResp.SuffixBits = uint32(suffixBits)
 		return globalTSOResp, nil
 	}
+	tsoCounter.WithLabelValues("exceeded_max_retry", gta.timestampOracle.dcLocation).Inc()
 	return globalTSOResp, errs.ErrGenerateTimestamp.FastGenByArgs("maximum number of retries exceeded")
 }
 
@@ -247,7 +257,7 @@ func (gta *GlobalTSOAllocator) precheckLogical(maxTSO *pdpb.Timestamp, suffixBit
 	if differentiatedLogical := gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits); differentiatedLogical >= maxLogical {
 		log.Error("estimated logical part outside of max logical interval, please check ntp time",
 			zap.Reflect("max-tso", maxTSO), errs.ZapError(errs.ErrLogicOverflow))
-		tsoCounter.WithLabelValues("logical_overflow", gta.timestampOracle.dcLocation).Inc()
+		tsoCounter.WithLabelValues("precheck_logical_overflow", gta.timestampOracle.dcLocation).Inc()
 		return false
 	}
 	return true
