@@ -843,6 +843,11 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		if (srcKeyRate-peerKeyRate)/math.Max(srcWeight, minWeight) >= (dstKeyRate+peerKeyRate)/math.Max(dstWeight, minWeight) {
 			rank = -1
 		}
+		log.Debug("calcProgressiveRank",
+			zap.Uint64("region-id", bs.cur.region.GetID()),
+			zap.Uint64("from-store-id", bs.cur.srcStoreID),
+			zap.Uint64("to-store-id", bs.cur.dstStoreID),
+			zap.Int64("rank", rank))
 	} else {
 		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
 		// than the src store's (key/byte) rate after scheduling one peer.
@@ -875,12 +880,18 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			// If belong to the case, byte rate will be more balanced, ignore the key rate.
 			rank = -1
 		}
+		log.Debug("calcProgressiveRank",
+			zap.Uint64("region-id", bs.cur.region.GetID()),
+			zap.Uint64("from-store-id", bs.cur.srcStoreID),
+			zap.Uint64("to-store-id", bs.cur.dstStoreID),
+			zap.Int64("rank", rank),
+			zap.Float64("key-dec-ratio", keyDecRatio),
+			zap.Float64("byte-dec-ratio", byteDecRatio),
+			zap.Float64("greatDecRatio", greatDecRatio),
+			zap.Float64("minorDecRatio", minorDecRatio),
+			zap.Bool("keyHot", keyHot),
+			zap.Bool("byteHot", byteHot))
 	}
-	log.Debug("calcProgressiveRank",
-		zap.Uint64("region-id", bs.cur.region.GetID()),
-		zap.Uint64("from-store-id", bs.cur.srcStoreID),
-		zap.Uint64("to-store-id", bs.cur.dstStoreID),
-		zap.Int64("rank", rank))
 	bs.cur.progressiveRank = rank
 }
 
