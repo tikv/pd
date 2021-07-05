@@ -859,17 +859,17 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
-	srcWeight := bs.cluster.GetStore(bs.cur.srcStoreID).GetHotReadWight()
-	dstWeight := bs.cluster.GetStore(bs.cur.dstStoreID).GetHotReadWight()
-	if bs.rwTy == write {
-		srcWeight = bs.cluster.GetStore(bs.cur.srcStoreID).GetHotWriteWeight()
-		dstWeight = bs.cluster.GetStore(bs.cur.dstStoreID).GetHotWriteWeight()
-	}
+	//srcWeight := bs.cluster.GetStore(bs.cur.srcStoreID).GetHotReadWight()
+	//dstWeight := bs.cluster.GetStore(bs.cur.dstStoreID).GetHotReadWight()
+	//if bs.rwTy == write {
+	//	srcWeight = bs.cluster.GetStore(bs.cur.srcStoreID).GetHotWriteWeight()
+	//	dstWeight = bs.cluster.GetStore(bs.cur.dstStoreID).GetHotWriteWeight()
+	//}
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
 		// Only consider about key rate.
-		srcKeyRate := (srcLd.Loads[statistics.KeyDim] * srcWeight) / bs.totalWeight
-		dstKeyRate := (dstLd.Loads[statistics.KeyDim] * dstWeight) / bs.totalWeight
+		srcKeyRate := srcLd.Loads[statistics.KeyDim]
+		dstKeyRate := dstLd.Loads[statistics.KeyDim]
 		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
 		if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
 			rank = -1
