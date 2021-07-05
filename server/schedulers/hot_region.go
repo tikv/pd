@@ -358,6 +358,8 @@ func summaryStoresLoad(
 		expectCount := allCount * storeWeight / totalWeight
 		detail.LoadPred.Expect.Loads = expectLoads
 		detail.LoadPred.Expect.Count = expectCount
+		minLoads := detail.LoadPred.min().Loads
+		maxLoads := detail.LoadPred.max().Loads
 		// Debug
 		{
 			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
@@ -374,6 +376,22 @@ func summaryStoresLoad(
 		{
 			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectCount)
+		}
+		{
+			ty := "min-byte-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(minLoads[statistics.ByteDim])
+		}
+		{
+			ty := "min-key-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(minLoads[statistics.KeyDim])
+		}
+		{
+			ty := "max-byte-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(maxLoads[statistics.ByteDim])
+		}
+		{
+			ty := "max-key-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(maxLoads[statistics.KeyDim])
 		}
 	}
 	return loadDetail
@@ -570,6 +588,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
 				bs.calcProgressiveRank()
+
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
 					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
 						ops = newOps
@@ -624,8 +643,9 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		}) {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+		} else {
+			hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 		}
-		hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 	}
 	return ret
 }
@@ -844,6 +864,8 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			rank = -1
 		}
 		log.Debug("calcProgressiveRank",
+			zap.String("rwType", bs.rwTy.String()),
+			zap.String("opType", bs.opTy.String()),
 			zap.Uint64("region-id", bs.cur.region.GetID()),
 			zap.Uint64("from-store-id", bs.cur.srcStoreID),
 			zap.Uint64("to-store-id", bs.cur.dstStoreID),
@@ -881,6 +903,8 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			rank = -1
 		}
 		log.Debug("calcProgressiveRank",
+			zap.String("rwType", bs.rwTy.String()),
+			zap.String("opType", bs.opTy.String()),
 			zap.Uint64("region-id", bs.cur.region.GetID()),
 			zap.Uint64("from-store-id", bs.cur.srcStoreID),
 			zap.Uint64("to-store-id", bs.cur.dstStoreID),
