@@ -34,6 +34,26 @@ import (
 
 func init() {
 	schedulePeerPr = 1.0
+	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		return newHotWriteScheduler(opController, initHotRegionScheduleConfig()), nil
+	})
+	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
+	})
+}
+
+func newHotReadScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
+	ret := newHotScheduler(opController, conf)
+	ret.name = ""
+	ret.types = []rwType{read}
+	return ret
+}
+
+func newHotWriteScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
+	ret := newHotScheduler(opController, conf)
+	ret.name = ""
+	ret.types = []rwType{write}
+	return ret
 }
 
 type testHotSchedulerSuite struct{}

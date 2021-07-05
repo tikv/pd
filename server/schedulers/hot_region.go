@@ -51,17 +51,6 @@ func init() {
 		conf.storage = storage
 		return newHotScheduler(opController, conf), nil
 	})
-
-	// FIXME: remove this two schedule after the balance test move in schedulers package
-	{
-		schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-			return newHotWriteScheduler(opController, initHotRegionScheduleConfig()), nil
-		})
-		schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-			return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
-		})
-
-	}
 }
 
 const (
@@ -121,20 +110,6 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.stLoadInfos[ty] = map[uint64]*storeLoadDetail{}
 	}
-	return ret
-}
-
-func newHotReadScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
-	ret := newHotScheduler(opController, conf)
-	ret.name = ""
-	ret.types = []rwType{read}
-	return ret
-}
-
-func newHotWriteScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
-	ret := newHotScheduler(opController, conf)
-	ret.name = ""
-	ret.types = []rwType{write}
 	return ret
 }
 
