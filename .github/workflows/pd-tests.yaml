@@ -3,13 +3,15 @@ on:
     branches:
       - master
       - release-4.0
-      - release-5.0
+      - release-5.*
   pull_request:
     branches:
       - master
       - release-4.0
-      - release-5.0
+      - release-5.*
+
 name: PD Tests
+
 jobs:
   chunks:
     runs-on: ubuntu-latest

@@ -15,7 +15,6 @@ package statistics
 
 import (
 	"math"
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -46,13 +45,14 @@ const (
 var minHotThresholds = [RegionStatCount]float64{
 	RegionWriteBytes: 1 * 1024,
 	RegionWriteKeys:  32,
+	RegionWriteQuery: 32,
 	RegionReadBytes:  8 * 1024,
 	RegionReadKeys:   128,
+	RegionReadQuery:  128,
 }
 
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
-	sync.RWMutex
 	kind               FlowKind
 	peersOfStore       map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion     map[uint64]map[uint64]struct{} // regionID -> storeIDs
@@ -83,8 +83,6 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 // TODO: rename RegionStats as PeerStats
 // RegionStats returns hot items
 func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
-	f.RLock()
-	defer f.RUnlock()
 	res := make(map[uint64][]*HotPeerStat)
 	for storeID, peers := range f.peersOfStore {
 		values := peers.GetAll()
@@ -101,8 +99,6 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 
 // Update updates the items in statistics.
 func (f *hotPeerCache) Update(item *HotPeerStat) {
-	f.Lock()
-	defer f.Unlock()
 	if item.IsNeedDelete() {
 		f.putInheritItem(item)
 		f.removeItem(item)
@@ -129,14 +125,16 @@ func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 			writeByteHist.Observe(loads[int(k)])
 		case RegionWriteKeys:
 			writeKeyHist.Observe(loads[int(k)])
+		case RegionWriteQuery:
+			writeQueryHist.Observe(loads[int(k)])
+		case RegionReadQuery:
+			readQueryHist.Observe(loads[int(k)])
 		}
 	}
 }
 
 // CollectExpiredItems collects expired items, mark them as needDelete and puts them into inherit items
 func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerStat {
-	f.RLock()
-	defer f.RUnlock()
 	regionID := region.GetID()
 	items := make([]*HotPeerStat, 0)
 	for _, storeID := range f.getAllStoreIDs(region) {
@@ -155,8 +153,6 @@ func (f *hotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 // Notice: CheckPeerFlow couldn't be used concurrently.
 // CheckPeerFlow will update oldItem's rollingLoads into newItem, thus we should use write lock here.
 func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
-	f.Lock()
-	defer f.Unlock()
 	interval := peer.GetInterval()
 	if Denoising && interval < HotRegionReportMinInterval {
 		return nil
@@ -207,8 +203,6 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 
 // CheckColdPeer checks the collect the un-heartbeat peer and maintain it.
 func (f *hotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]struct{}, interval uint64) (ret []*HotPeerStat) {
-	f.Lock()
-	defer f.Unlock()
 	if Denoising && interval < HotRegionReportMinInterval {
 		return
 	}
@@ -251,8 +245,6 @@ func (f *hotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]st
 }
 
 func (f *hotPeerCache) CollectMetrics(typ string) {
-	f.RLock()
-	defer f.RUnlock()
 	for storeID, peers := range f.peersOfStore {
 		store := storeTag(storeID)
 		thresholds := f.calcHotThresholds(storeID)
@@ -441,7 +433,10 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 		return nil
 	}
 	isHot := slice.AnyOf(regionStats, func(i int) bool {
-		return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
+		if IsSelectedDim(i) {
+			return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
+		}
+		return false
 	})
 	if !isHot {
 		return nil

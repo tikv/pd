@@ -24,6 +24,8 @@ import (
 	"unsafe"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
@@ -566,7 +568,11 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 		LabelProperty:   o.GetLabelPropertyConfig(),
 		ClusterVersion:  *o.GetClusterVersion(),
 	}
-	return storage.SaveConfig(cfg)
+	err := storage.SaveConfig(cfg)
+	failpoint.Inject("persistFail", func() {
+		err = errors.New("fail to persist")
+	})
+	return err
 }
 
 // Reload reloads the configuration from the storage.
@@ -580,6 +586,7 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 		return err
 	}
 	o.adjustScheduleCfg(&cfg.Schedule)
+	cfg.PDServerCfg.MigrateDeprecatedFlags()
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)

@@ -205,7 +205,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.storage = storage
 	c.id = id
 	c.labelLevelStats = statistics.NewLabelStatistics()
-	c.hotStat = statistics.NewHotStat(c.ctx)
+	c.hotStat = statistics.NewHotStat(c.ctx, c.quit)
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
@@ -222,7 +222,7 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-
+	c.quit = make(chan struct{})
 	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
@@ -254,7 +254,6 @@ func (c *RaftCluster) Start(s Server) error {
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
-	c.quit = make(chan struct{})
 
 	c.wg.Add(4)
 	go c.runCoordinator()
@@ -555,49 +554,42 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 				zap.Uint64("store-id", storeID))
 			continue
 		}
+		readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
 		loads := []float64{
 			statistics.RegionReadBytes:  float64(peerStat.GetReadBytes()),
 			statistics.RegionReadKeys:   float64(peerStat.GetReadKeys()),
+			statistics.RegionReadQuery:  float64(readQueryNum),
 			statistics.RegionWriteBytes: 0,
 			statistics.RegionWriteKeys:  0,
+			statistics.RegionWriteQuery: 0,
 		}
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
-		item := statistics.NewPeerInfoItem(peerInfo, region)
-		c.hotStat.CheckReadAsync(item)
+		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
-	collect := statistics.NewUnReportStatsCollect(storeID, regionIDs, interval)
-	c.hotStat.CheckReadAsync(collect)
+	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regionIDs, interval))
 	return nil
 }
 
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
-	origin, err := c.core.PreCheckPutRegion(region)
+	storage := c.storage
+	coreCluster := c.core
+	hotStat := c.hotStat
+	c.RUnlock()
+
+	origin, err := coreCluster.PreCheckPutRegion(region)
 	if err != nil {
-		c.RUnlock()
 		return err
 	}
-	expiredStats := c.hotStat.ExpiredItems(region)
-	// Put expiredStats into read/write queue to update stats
-	if len(expiredStats) > 0 {
-		for _, stat := range expiredStats {
-			item := statistics.NewExpiredStatItem(stat)
-			if stat.Kind == statistics.WriteFlow {
-				c.hotStat.CheckWriteAsync(item)
-			} else {
-				c.hotStat.CheckReadAsync(item)
-			}
-		}
-	}
+	hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
+	hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
 		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
-		item := statistics.NewPeerInfoItem(peerInfo, region)
-		c.hotStat.CheckWriteAsync(item)
+		hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
-	c.RUnlock()
 
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
@@ -657,11 +649,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetApproximateKeys() != origin.GetApproximateKeys() {
 			saveCache = true
 		}
-
-		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
-			region.GetBytesRead() != origin.GetBytesRead() ||
-			region.GetKeysWritten() != origin.GetKeysWritten() ||
-			region.GetKeysRead() != origin.GetKeysRead()) {
+		// Once flow has changed, will update the cache.
+		// Because keys and bytes are strongly related, only bytes are judged.
+		if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
+			region.GetRoundBytesRead() != origin.GetRoundBytesRead() {
 			saveCache, needSync = true, true
 		}
 
@@ -680,6 +671,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		time.Sleep(500 * time.Millisecond)
 	})
 
+	var overlaps []*core.RegionInfo
 	c.Lock()
 	if saveCache {
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
@@ -690,17 +682,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			c.Unlock()
 			return err
 		}
-		overlaps := c.core.PutRegion(region)
-		if c.storage != nil {
-			for _, item := range overlaps {
-				if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
-					log.Error("failed to delete region from storage",
-						zap.Uint64("region-id", item.GetID()),
-						logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
-						errs.ZapError(err))
-				}
-			}
-		}
+		overlaps = c.core.PutRegion(region)
 		for _, item := range overlaps {
 			if c.regionStats != nil {
 				c.regionStats.ClearDefunctRegion(item.GetID())
@@ -731,24 +713,38 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
+
+	changedRegions := c.changedRegions
+
 	c.Unlock()
 
-	// If there are concurrent heartbeats from the same region, the last write will win even if
-	// writes to storage in the critical area. So don't use mutex to protect it.
-	if saveKV && c.storage != nil {
-		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
-			// Not successfully saved to storage is not fatal, it only leads to longer warm-up
-			// after restart. Here we only log the error then go on updating cache.
-			log.Error("failed to save region to storage",
-				zap.Uint64("region-id", region.GetID()),
-				logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
-				errs.ZapError(err))
+	if storage != nil {
+		// If there are concurrent heartbeats from the same region, the last write will win even if
+		// writes to storage in the critical area. So don't use mutex to protect it.
+		// Not successfully saved to storage is not fatal, it only leads to longer warm-up
+		// after restart. Here we only log the error then go on updating cache.
+		for _, item := range overlaps {
+			if err := storage.DeleteRegion(item.GetMeta()); err != nil {
+				log.Error("failed to delete region from storage",
+					zap.Uint64("region-id", item.GetID()),
+					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
+					errs.ZapError(err))
+			}
 		}
-		regionEventCounter.WithLabelValues("update_kv").Inc()
+		if saveKV {
+			if err := storage.SaveRegion(region.GetMeta()); err != nil {
+				log.Error("failed to save region to storage",
+					zap.Uint64("region-id", region.GetID()),
+					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
+					errs.ZapError(err))
+			}
+			regionEventCounter.WithLabelValues("update_kv").Inc()
+		}
 	}
+
 	if saveKV || needSync {
 		select {
-		case c.changedRegions <- region:
+		case changedRegions <- region:
 		default:
 		}
 	}
@@ -922,8 +918,9 @@ func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
 // IsRegionHot checks if a region is in hot state.
 func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
 	c.RLock()
-	defer c.RUnlock()
-	return c.hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
+	hotStat := c.hotStat
+	c.RUnlock()
+	return hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
 }
 
 // GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
@@ -1303,26 +1300,30 @@ func (c *RaftCluster) resetMetrics() {
 
 func (c *RaftCluster) collectClusterMetrics() {
 	c.RLock()
-	defer c.RUnlock()
 	if c.regionStats == nil {
 		return
 	}
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
+	hotStat := c.hotStat
+	c.RUnlock()
 	// collect hot cache metrics
-	c.hotStat.CollectMetrics()
+	hotStat.CollectMetrics()
 }
 
 func (c *RaftCluster) resetClusterMetrics() {
 	c.RLock()
-	defer c.RUnlock()
+
 	if c.regionStats == nil {
+		c.RUnlock()
 		return
 	}
 	c.regionStats.Reset()
 	c.labelLevelStats.Reset()
+	hotStat := c.hotStat
+	c.RUnlock()
 	// reset hot cache metrics
-	c.hotStat.ResetMetrics()
+	hotStat.ResetMetrics()
 }
 
 func (c *RaftCluster) collectHealthStatus() {

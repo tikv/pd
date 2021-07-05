@@ -280,9 +280,11 @@ func summaryStoresLoad(
 		case read:
 			loads[statistics.ByteDim] = storeLoads[statistics.StoreReadBytes]
 			loads[statistics.KeyDim] = storeLoads[statistics.StoreReadKeys]
+			loads[statistics.QueryDim] = storeLoads[statistics.StoreReadQuery]
 		case write:
 			loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
 			loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
+			loads[statistics.QueryDim] = storeLoads[statistics.StoreWriteQuery]
 		}
 		// Find all hot peers first
 		var hotPeers []*statistics.HotPeerStat
@@ -311,6 +313,10 @@ func summaryStoresLoad(
 			{
 				ty := "key-rate-" + rwTy.String() + "-" + kind.String()
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.KeyDim])
+			}
+			{
+				ty := "query-rate-" + rwTy.String() + "-" + kind.String()
+				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.QueryDim])
 			}
 		}
 		for i := range allLoadSum {
@@ -348,6 +354,10 @@ func summaryStoresLoad(
 		{
 			ty := "exp-key-rate-" + rwTy.String() + "-" + kind.String()
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.KeyDim])
+		}
+		{
+			ty := "exp-query-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.QueryDim])
 		}
 		{
 			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
@@ -484,7 +494,7 @@ func (bs *balanceSolver) init() {
 		maxCur = maxLoad(maxCur, &detail.LoadPred.Current)
 	}
 
-	rankStepRatios := []float64{bs.sche.conf.GetByteRankStepRatio(), bs.sche.conf.GetKeyRankStepRatio()}
+	rankStepRatios := []float64{bs.sche.conf.GetByteRankStepRatio(), bs.sche.conf.GetKeyRankStepRatio(), bs.sche.conf.GetQueryRateRankStepRatio()}
 	stepLoads := make([]float64, statistics.DimLen)
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
@@ -595,7 +605,10 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		}
 		minLoad := detail.LoadPred.min()
 		if slice.AllOf(minLoad.Loads, func(i int) bool {
-			return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.Loads[i]
+			if statistics.IsSelectedDim(i) {
+				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.Loads[i]
+			}
+			return true
 		}) {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
@@ -629,6 +642,15 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		return nret
 	}
 
+	union := bs.sortHotPeers(ret, maxPeerNum)
+	ret = make([]*statistics.HotPeerStat, 0, len(union))
+	for peer := range union {
+		ret = appendItem(ret, peer)
+	}
+	return ret
+}
+
+func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum int) map[*statistics.HotPeerStat]struct{} {
 	byteSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(byteSort, ret)
 	sort.Slice(byteSort, func(i, j int) bool {
@@ -639,7 +661,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	copy(keySort, ret)
 	sort.Slice(keySort, func(i, j int) bool {
 		k := getRegionStatKind(bs.rwTy, statistics.KeyDim)
-		return byteSort[i].GetLoad(k) > byteSort[j].GetLoad(k)
+		return keySort[i].GetLoad(k) > keySort[j].GetLoad(k)
 	})
 
 	union := make(map[*statistics.HotPeerStat]struct{}, maxPeerNum)
@@ -652,7 +674,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 				break
 			}
 		}
-		for len(keySort) > 0 {
+		for len(union) < maxPeerNum && len(keySort) > 0 {
 			peer := keySort[0]
 			keySort = keySort[1:]
 			if _, ok := union[peer]; !ok {
@@ -661,11 +683,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 			}
 		}
 	}
-	ret = make([]*statistics.HotPeerStat, 0, len(union))
-	for peer := range union {
-		ret = appendItem(ret, peer)
-	}
-	return ret
+	return union
 }
 
 // isRegionAvailable checks whether the given region is not available to schedule.
@@ -776,7 +794,10 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 			detail := bs.stLoadDetail[store.GetID()]
 			maxLoads := detail.LoadPred.max().Loads
 			if slice.AllOf(maxLoads, func(i int) bool {
-				return maxLoads[i]*dstToleranceRatio < detail.LoadPred.Expect.Loads[i]
+				if statistics.IsSelectedDim(i) {
+					return maxLoads[i]*dstToleranceRatio < detail.LoadPred.Expect.Loads[i]
+				}
+				return true
 			}) {
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
@@ -1083,32 +1104,22 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	return []*operator.Operator{op}, []Influence{infl}
 }
 
-func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
+func (h *hotScheduler) GetHotStatus(typ string) *statistics.StoreHotPeersInfos {
 	h.RLock()
 	defer h.RUnlock()
-	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[readLeader]))
-	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[readPeer]))
-	for id, detail := range h.stLoadInfos[readLeader] {
+	var leaderTyp, peerTyp resourceType
+	switch typ {
+	case HotReadRegionType:
+		leaderTyp, peerTyp = readLeader, readPeer
+	case HotWriteRegionType:
+		leaderTyp, peerTyp = writeLeader, writePeer
+	}
+	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[leaderTyp]))
+	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[peerTyp]))
+	for id, detail := range h.stLoadInfos[leaderTyp] {
 		asLeader[id] = detail.toHotPeersStat()
 	}
-	for id, detail := range h.stLoadInfos[readPeer] {
-		asPeer[id] = detail.toHotPeersStat()
-	}
-	return &statistics.StoreHotPeersInfos{
-		AsLeader: asLeader,
-		AsPeer:   asPeer,
-	}
-}
-
-func (h *hotScheduler) GetHotWriteStatus() *statistics.StoreHotPeersInfos {
-	h.RLock()
-	defer h.RUnlock()
-	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[writeLeader]))
-	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[writePeer]))
-	for id, detail := range h.stLoadInfos[writeLeader] {
-		asLeader[id] = detail.toHotPeersStat()
-	}
-	for id, detail := range h.stLoadInfos[writePeer] {
+	for id, detail := range h.stLoadInfos[peerTyp] {
 		asPeer[id] = detail.toHotPeersStat()
 	}
 	return &statistics.StoreHotPeersInfos{
@@ -1233,6 +1244,10 @@ func getRegionStatKind(rwTy rwType, dim int) statistics.RegionStatKind {
 		return statistics.RegionWriteBytes
 	case rwTy == write && dim == statistics.KeyDim:
 		return statistics.RegionWriteKeys
+	case rwTy == write && dim == statistics.QueryDim:
+		return statistics.RegionWriteQuery
+	case rwTy == read && dim == statistics.QueryDim:
+		return statistics.RegionReadQuery
 	}
 	return 0
 }

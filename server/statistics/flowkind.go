@@ -36,9 +36,9 @@ func (k FlowKind) String() string {
 func (k FlowKind) RegionStats() []RegionStatKind {
 	switch k {
 	case WriteFlow:
-		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys}
+		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
 	case ReadFlow:
-		return []RegionStatKind{RegionReadBytes, RegionReadKeys}
+		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
 	}
 	return nil
 }
