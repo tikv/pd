@@ -1128,8 +1128,11 @@ func (s *Server) campaignLeader() {
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-<<<<<<< HEAD
-	defer cancel()
+
+	var resetLeaderOnce sync.Once
+	defer resetLeaderOnce.Do(func() {
+		cancel()
+	})
 	go lease.KeepAlive(ctx)
 	s.SetLease(lease)
 	defer s.SetLease(nil)
@@ -1141,29 +1144,6 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.tso.ResetTimestamp()
-=======
-	var resetLeaderOnce sync.Once
-	defer resetLeaderOnce.Do(func() {
-		cancel()
-		s.member.ResetLeader()
-	})
-
-	// maintain the PD leadership, after this, TSO can be service.
-	go s.member.KeepLeader(ctx)
-	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
-
-	alllocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
-		return
-	}
-	log.Info("initializing the global TSO allocator")
-	if err := alllocator.Initialize(0); err != nil {
-		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
-		return
-	}
-	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
->>>>>>> 71b12e40a (server: make leader can lost lease as soon as possible (#3712))
 
 	err := s.reloadConfigFromKV()
 	if err != nil {
@@ -1187,18 +1167,12 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-<<<<<<< HEAD
-	defer s.member.DisableLeader()
-=======
-	// Check the cluster dc-location after the PD leader is elected.
-	go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
 		cancel()
-		s.member.ResetLeader()
+		s.member.DisableLeader()
 	})
->>>>>>> 71b12e40a (server: make leader can lost lease as soon as possible (#3712))
 
 	CheckPDVersion(s.persistOptions)
 	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
