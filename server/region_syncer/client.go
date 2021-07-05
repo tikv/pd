@@ -123,7 +123,7 @@ func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 	return syncStream, nil
 }
 
-var regionGuide = core.GenerateRegionGuideFunc(nil, nil)
+var regionGuide = core.GenerateRegionGuideFunc(false)
 
 // StartSyncWithLeader starts to sync with leader.
 func (s *RegionSyncer) StartSyncWithLeader(addr string) {
