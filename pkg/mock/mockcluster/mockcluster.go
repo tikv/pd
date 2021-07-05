@@ -807,7 +807,7 @@ func (mc *Cluster) UpdateStoreHotWeight(storeID uint64, readWeight, writeWeight 
 
 func (mc *Cluster) GetStoresHotReadWeight() map[uint64]float64 {
 	stores := mc.GetStores()
-	weights := make(map[uint64]float64, 0)
+	weights := make(map[uint64]float64)
 	for _, store := range stores {
 		weights[store.GetID()] = store.GetHotReadWight()
 	}
@@ -816,7 +816,7 @@ func (mc *Cluster) GetStoresHotReadWeight() map[uint64]float64 {
 
 func (mc *Cluster) GetStoresHotWriteWeight() map[uint64]float64 {
 	stores := mc.GetStores()
-	weights := make(map[uint64]float64, 0)
+	weights := make(map[uint64]float64)
 	for _, store := range stores {
 		weights[store.GetID()] = store.GetHotWriteWeight()
 	}

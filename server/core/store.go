@@ -432,7 +432,7 @@ var (
 	// If a store's last heartbeat is storeDisconnectDuration ago, the store will
 	// be marked as disconnected state. The value should be greater than tikv's
 	// store heartbeat interval (default 10s).
-	storeDisconnectDuration = 20000 * time.Second
+	storeDisconnectDuration = 20 * time.Second
 	storeUnhealthyDuration  = 10 * time.Minute
 )
 

@@ -1780,7 +1780,7 @@ func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 
 func (c *RaftCluster) GetStoresHotReadWeight() map[uint64]float64 {
 	stores := c.GetStores()
-	weights := make(map[uint64]float64, 0)
+	weights := make(map[uint64]float64)
 	for _, store := range stores {
 		weights[store.GetID()] = store.GetHotReadWight()
 	}
@@ -1789,7 +1789,7 @@ func (c *RaftCluster) GetStoresHotReadWeight() map[uint64]float64 {
 
 func (c *RaftCluster) GetStoresHotWriteWeight() map[uint64]float64 {
 	stores := c.GetStores()
-	weights := make(map[uint64]float64, 0)
+	weights := make(map[uint64]float64)
 	for _, store := range stores {
 		weights[store.GetID()] = store.GetHotWriteWeight()
 	}
