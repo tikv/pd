@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
 	"go.uber.org/zap"
 )
@@ -468,13 +469,12 @@ type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache,
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
-func GenerateRegionGuideFunc(debug, info func(msg string, fields ...zap.Field)) RegionGuideFunc {
+func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	noLog := func(msg string, fields ...zap.Field) {}
-	if debug == nil {
-		debug = noLog
-	}
-	if info == nil {
-		info = noLog
+	debug, info := noLog, noLog
+	if enableLog {
+		debug = log.Debug
+		info = log.Info
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
