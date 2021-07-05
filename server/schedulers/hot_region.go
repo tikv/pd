@@ -478,9 +478,10 @@ type balanceSolver struct {
 
 	cur *solution
 
-	maxSrc   *storeLoad
-	minDst   *storeLoad
-	rankStep *storeLoad
+	maxSrc      *storeLoad
+	minDst      *storeLoad
+	rankStep    *storeLoad
+	totalWeight float64
 }
 
 type solution struct {
@@ -532,6 +533,16 @@ func (bs *balanceSolver) init() {
 	bs.rankStep = &storeLoad{
 		Loads: stepLoads,
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
+	}
+	bs.totalWeight = 0
+	if bs.rwTy == read {
+		for _, store := range bs.cluster.GetStores() {
+			bs.totalWeight += store.GetHotReadWight()
+		}
+	} else {
+		for _, store := range bs.cluster.GetStores() {
+			bs.totalWeight += store.GetHotWriteWeight()
+		}
 	}
 }
 
@@ -857,10 +868,10 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
 		// Only consider about key rate.
-		srcKeyRate := srcLd.Loads[statistics.KeyDim]
-		dstKeyRate := dstLd.Loads[statistics.KeyDim]
+		srcKeyRate := (srcLd.Loads[statistics.KeyDim] * srcWeight) / bs.totalWeight
+		dstKeyRate := (dstLd.Loads[statistics.KeyDim] * dstWeight) / bs.totalWeight
 		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
-		if (srcKeyRate-peerKeyRate)/math.Max(srcWeight, minWeight) >= (dstKeyRate+peerKeyRate)/math.Max(dstWeight, minWeight) {
+		if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
 			rank = -1
 		}
 		log.Debug("calcProgressiveRank",
@@ -883,7 +894,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			srcRate := srcLd.Loads[dim]
 			dstRate := dstLd.Loads[dim]
 			peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, dim))
-			decRatio := ((dstRate + peerRate) / math.Max(dstWeight, minWeight)) / getSrcDecRate(srcRate/math.Max(srcWeight, minWeight), peerRate)
+			decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
 			isHot := peerRate >= bs.getMinRate(dim)
 			return isHot, decRatio
 		}
