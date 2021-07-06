@@ -59,6 +59,8 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 		log.Error("error getting prometheus address", errs.ZapError(err))
 	}
 
+	log.Info(fmt.Sprintf("prometheus address: %s", address))
+
 	client, err := promClient.NewClient(promClient.Config{Address: address})
 	if err != nil {
 		log.Error("error initializing Prometheus client", zap.String("prometheusAddress", address), errs.ZapError(errs.ErrPrometheusCreateClient, err))
@@ -135,8 +137,8 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 	storageUsageTarget := (storageMaxThreshold + storageMinThreshold) / 2
 
 	log.Info(fmt.Sprintf(
-		"autoscale: get storage usage information compeleted. totalStorageUsedSize: %f, totalStorageCapacity: %f, storageMaxThreshold: %f , storageMinThreshold: %f",
-		totalStorageUsedSize, totalStorageCapacity, storageMaxThreshold, storageMinThreshold))
+		"autoscale: get storage usage information compeleted. totalStorageUsedSize: %f, totalStorageCapacity: %f, storageUsage: %f, storageMaxThreshold: %f , storageMinThreshold: %f",
+		totalStorageUsedSize, totalStorageCapacity, storageUsage, storageMaxThreshold, storageMinThreshold))
 
 	if storageUsage > storageMaxThreshold {
 		// generate homogeneous tikv plan
@@ -145,14 +147,22 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 			return nil, err
 		}
 
-		totalInstanceCount := uint64(len(instances))
 		resources := getStorageResourcesByComponent(strategy, TiKV)
+		homogeneousTiKVCount := getCountByResourceType(resources, homogeneousTiKVResourceType)
+
+		if resourceMap[homogeneousTiKVResourceType] == strategy.NodeCount || (homogeneousTiKVCount != nil && resourceMap[homogeneousTiKVResourceType] > *homogeneousTiKVCount) {
+			// homogeneous instance number reaches k8s node number or the resource limit,
+			// can not scale out homogeneous instance any more
+			log.Warn(fmt.Sprintf("autoscale: can not scale out homogeneous instance, homogeneous instance number: %d, k8s node number: %d, resource limit: %v", resourceMap[homogeneousTiKVResourceType], strategy.NodeCount, homogeneousTiKVCount))
+			return nil, nil
+		}
+
+		totalInstanceCount := uint64(len(instances))
 		// sort resources by cpu to minimize the impact when need to scale in heterogeneous instances
 		sortResourcesByCPUAsc(resources)
 
 		storageScaleSize := totalStorageUsedSize/storageUsageTarget - totalStorageCapacity
 		storeStorageSize := getStorageByResourceType(resources, homogeneousTiKVResourceType)
-		homogeneousTiKVCount := getCountByResourceType(resources, homogeneousTiKVResourceType)
 		scaleOutCount := uint64(storageScaleSize)/storeStorageSize + 1
 		count := scaleOutCount + resourceMap[homogeneousTiKVResourceType]
 
@@ -196,7 +206,7 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 			}
 		}
 
-		// there are enough k8s nodes to scale out
+		// there are enough k8s nodes to scale out or all heterogeneous instances are scaled in, scale out as much as possible
 		return append(plans, NewPlan(TiKV, count, homogeneousTiKVResourceType)), nil
 	}
 
@@ -308,8 +318,15 @@ func getCPUPlans(rc *cluster.RaftCluster, querier Querier, instances []instance,
 		scaleOutCount := uint64(cpuScaleOutSize/float64(homogeneousCPUSize)) + 1
 		count := scaleOutCount + resourceMap[homogeneousResourceType]
 
+		if resourceMap[homogeneousResourceType] >= strategy.NodeCount || (homogeneousCount != nil && resourceMap[homogeneousResourceType] >= *homogeneousCount) {
+			// homogeneous instance number reaches k8s node number or the resource limit,
+			// can not scale out homogeneous instance any more
+			log.Warn(fmt.Sprintf("autoscale: can not scale out homogeneous instance, component: %s, homogeneous instance number: %d, k8s node number: %d, resource limit: %v", component.String(), resourceMap[homogeneousTiKVResourceType], strategy.NodeCount, homogeneousCount))
+			return nil, nil
+		}
+
 		log.Info(fmt.Sprintf(
-			"autoscale: get homogeneous plans. component: %s, homogeneousCPUSize: %f, homogeneousCount %d, cpuScaleOutSize: %d, scaleOutCount: %d, count: %d",
+			"autoscale: get homogeneous plans. component: %s, homogeneousCPUSize: %d, homogeneousCount %d, cpuScaleOutSize: %f, scaleOutCount: %d, count: %d",
 			component.String(), homogeneousCPUSize, homogeneousCount, cpuScaleOutSize, scaleOutCount, count))
 
 		if homogeneousCount != nil && resourceMap[homogeneousResourceType] > *homogeneousCount {

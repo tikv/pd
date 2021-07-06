@@ -264,13 +264,14 @@ func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
 }
 
 func getLabelsByResourceType(resourceType string, component ComponentType) map[string]string {
-	labels := map[string]string{
-		groupLabelKey:        fmt.Sprintf("%s-%s", autoScalingGroupLabelKeyPrefix, component.String()),
-		resourceTypeLabelKey: resourceType,
-	}
+	labels := map[string]string{}
 
-	if component == TiKV {
-		labels[filter.SpecialUseKey] = filter.SpecialUseHotRegion
+	if resourceType != homogeneousTiKVResourceType && resourceType != homogeneousTiDBResourceType {
+		labels[groupLabelKey] = fmt.Sprintf("%s-%s", autoScalingGroupLabelKeyPrefix, component.String())
+		labels[resourceTypeLabelKey] = resourceType
+		if component == TiKV {
+			labels[filter.SpecialUseKey] = filter.SpecialUseHotRegion
+		}
 	}
 
 	return labels
