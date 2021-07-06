@@ -1115,8 +1115,11 @@ func (s *Server) leaderLoop() {
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
 
+	var resetLeaderOnce sync.Once
 	lease := member.NewLeaderLease(s.client)
-	defer lease.Close()
+	defer resetLeaderOnce.Do(func() {
+		lease.Close()
+	})
 	if err := s.member.CampaignLeader(lease, s.cfg.LeaderLease); err != nil {
 		log.Error("campaign leader meet error", errs.ZapError(err))
 		return
@@ -1129,9 +1132,9 @@ func (s *Server) campaignLeader() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 
-	var resetLeaderOnce sync.Once
 	defer resetLeaderOnce.Do(func() {
 		cancel()
+		lease.Close()
 	})
 	go lease.KeepAlive(ctx)
 	s.SetLease(lease)
@@ -1171,6 +1174,7 @@ func (s *Server) campaignLeader() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
 		cancel()
+		lease.Close()
 		s.member.DisableLeader()
 	})
 
