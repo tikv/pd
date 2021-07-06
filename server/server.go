@@ -1145,20 +1145,10 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
 	}
-<<<<<<< HEAD
-=======
-
 	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
 		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
 		return
 	}
-
-	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
-		log.Error("failed to initialize encryption", errs.ZapError(err))
-		return
-	}
-
->>>>>>> 585e056dc (server: fix the data race problem (#3772))
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
@@ -1166,15 +1156,7 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.stopRaftCluster()
-<<<<<<< HEAD
-	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
-		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
-		return
-	}
 	if err := s.idAllocator.Generate(); err != nil {
-=======
-	if err := s.idAllocator.Rebase(); err != nil {
->>>>>>> 585e056dc (server: fix the data race problem (#3772))
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
 	}
