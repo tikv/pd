@@ -409,7 +409,7 @@ func setStoreHotWeightCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	hotWriteWeight, err := strconv.ParseFloat(args[2], 64)
 	if err != nil || hotWriteWeight <= 0 {
-		cmd.Println("region_weight should be a number that > 0")
+		cmd.Println("hot_write_weight should be a number that > 0")
 		return
 	}
 	prefix := fmt.Sprintf(path.Join(storePrefix, "hot-weight"), args[0])

@@ -395,6 +395,14 @@ func (h *storeHandler) SetHotWeight(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "bad format hot-read weight")
 		return
 	}
+	if hotRead <= 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "hot_read_weight should be a number > 0")
+		return
+	}
+	if hotWrite <= 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "hot_write_weight should be a number > 0")
+		return
+	}
 
 	if err := rc.SetStoreHotWeight(storeID, hotRead, hotWrite); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
