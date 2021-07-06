@@ -1,0 +1,2 @@
+git config user.name 'dashboard-release-bot'
+git config user.email 'dashboard-release-bot@pingcap.com'

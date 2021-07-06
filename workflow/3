@@ -1,0 +1,9 @@
+go get -d "github.com/pingcap/tidb-dashboard@$GITHUB_REF1"
+go mod tidy
+git add .
+if git status | grep -q "Changes to be committed"
+then
+  git commit --message "Update from https://github.com/$GITHUB_REPOSITORY/commit/$GITHUB_SHA, release version: $GITHUB_REF1"
+else
+  echo "No changes detected"
+fi
