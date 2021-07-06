@@ -1174,7 +1174,10 @@ func (s *Server) campaignLeader() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
 		cancel()
+<<<<<<< HEAD
 		lease.Close()
+=======
+>>>>>>> sre/cherry-pick-3712-to-release-4.0
 		s.member.DisableLeader()
 	})
 
