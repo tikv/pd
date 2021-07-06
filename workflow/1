@@ -1,0 +1,3 @@
+ACTOR=nektos/act
+git config user.name "$ACTOR"
+git config user.email "$ACTOR@pingcap.com"
