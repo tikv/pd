@@ -133,7 +133,7 @@ func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
 	return res
 }
 
-func (conf *grantLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (succ bool, last bool) {
+func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last bool) {
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
 	_, exists := conf.StoreIDWithRanges[id]
@@ -290,7 +290,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	}
 
 	var resp interface{}
-	succ, last := handler.config.mayBeRemoveStoreFromConfig(id)
+	succ, last := handler.config.removeStore(id)
 	if succ {
 		err = handler.config.Persist()
 		if err != nil {
