@@ -33,6 +33,7 @@ jobs:
       - name: Fetch Go module
         run: |
           go mod download
+          go mod tidy
           DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
           DASHBOARD_RELEASE_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/release-version")
           echo DASHBOARD_DIR="$DASHBOARD_DIR" >> $GITHUB_ENV
