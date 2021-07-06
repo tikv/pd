@@ -1153,6 +1153,10 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
 	}
+	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
+		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
+		return
+	}
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
@@ -1160,10 +1164,6 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.stopRaftCluster()
-	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
-		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
-		return
-	}
 	if err := s.idAllocator.Generate(); err != nil {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
