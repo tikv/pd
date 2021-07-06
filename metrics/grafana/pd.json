@@ -1413,7 +1413,7 @@
           "tableColumn": "",
           "targets": [
             {
-              "expr": "pd_cluster_tso{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", dc=\"global\"}",
+              "expr": "pd_cluster_tso{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"tso\", dc=\"global\"}",
               "format": "time_series",
               "instant": true,
               "intervalFactor": 2,
