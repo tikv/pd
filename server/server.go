@@ -603,6 +603,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
+	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
 }
 
@@ -1114,8 +1115,11 @@ func (s *Server) leaderLoop() {
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
 
+	var resetLeaderOnce sync.Once
 	lease := member.NewLeaderLease(s.client)
-	defer lease.Close()
+	defer resetLeaderOnce.Do(func() {
+		lease.Close()
+	})
 	if err := s.member.CampaignLeader(lease, s.cfg.LeaderLease); err != nil {
 		log.Error("campaign leader meet error", errs.ZapError(err))
 		return
@@ -1127,7 +1131,11 @@ func (s *Server) campaignLeader() {
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
+
+	defer resetLeaderOnce.Do(func() {
+		cancel()
+		lease.Close()
+	})
 	go lease.KeepAlive(ctx)
 	s.SetLease(lease)
 	defer s.SetLease(nil)
@@ -1160,8 +1168,15 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
 	}
+	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	defer s.member.DisableLeader()
+	defer resetLeaderOnce.Do(func() {
+		// as soon as cancel the leadership keepalive, then other member have chance
+		// to be new leader.
+		cancel()
+		lease.Close()
+		s.member.DisableLeader()
+	})
 
 	CheckPDVersion(s.persistOptions)
 	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
