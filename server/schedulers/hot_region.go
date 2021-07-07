@@ -648,7 +648,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		minLoad := detail.LoadPred.min()
 		if slice.AllOf(minLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
-				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.Loads[i]
+				return minLoad.Loads[i] > detail.LoadPred.Expect.Loads[i]
 			}
 			return true
 		}) {
@@ -831,14 +831,14 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*core.StoreInfo) map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
-	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
+	//dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	for _, store := range candidates {
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
 			maxLoads := detail.LoadPred.max().Loads
 			if slice.AllOf(maxLoads, func(i int) bool {
 				if statistics.IsSelectedDim(i) {
-					return maxLoads[i]*dstToleranceRatio < detail.LoadPred.Expect.Loads[i]
+					return maxLoads[i] < detail.LoadPred.Expect.Loads[i]
 				}
 				return true
 			}) {
