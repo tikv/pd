@@ -8,5 +8,5 @@ jobs:
     steps:
       - name: Add Labels
         uses: srvaroa/labeler@master
-        with:
+        env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
