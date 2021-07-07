@@ -1,0 +1,12 @@
+name: Add Labels
+on:
+  - pull_request
+
+jobs:
+  labeler:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add Labels
+        uses: srvaroa/labeler@master
+        with:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
