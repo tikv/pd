@@ -646,7 +646,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			continue
 		}
 		minLoad := detail.LoadPred.min()
-		if slice.AllOf(minLoad.Loads, func(i int) bool {
+		if slice.AnyOf(minLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
 				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.Loads[i]
 			}
@@ -859,12 +859,13 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
-	//srcWeight := bs.cluster.GetStore(bs.cur.srcStoreID).GetHotReadWight()
-	//dstWeight := bs.cluster.GetStore(bs.cur.dstStoreID).GetHotReadWight()
-	//if bs.rwTy == write {
-	//	srcWeight = bs.cluster.GetStore(bs.cur.srcStoreID).GetHotWriteWeight()
-	//	dstWeight = bs.cluster.GetStore(bs.cur.dstStoreID).GetHotWriteWeight()
-	//}
+	srcWeight := bs.cluster.GetStore(bs.cur.srcStoreID).GetHotReadWight()
+	dstWeight := bs.cluster.GetStore(bs.cur.dstStoreID).GetHotReadWight()
+	if bs.rwTy == write {
+		srcWeight = bs.cluster.GetStore(bs.cur.srcStoreID).GetHotWriteWeight()
+		dstWeight = bs.cluster.GetStore(bs.cur.dstStoreID).GetHotWriteWeight()
+	}
+	weightRatio := dstWeight / srcWeight
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
 		// Only consider about key rate.
@@ -903,13 +904,13 @@ func (bs *balanceSolver) calcProgressiveRank() {
 
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
 		switch {
-		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
+		case byteHot && byteDecRatio <= greatDecRatio*weightRatio && keyHot && keyDecRatio <= greatDecRatio*weightRatio:
 			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
 			rank = -3
-		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
+		case byteDecRatio <= minorDecRatio*weightRatio && keyHot && keyDecRatio <= greatDecRatio*weightRatio:
 			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
 			rank = -2
-		case byteHot && byteDecRatio <= greatDecRatio:
+		case byteHot && byteDecRatio <= greatDecRatio*weightRatio:
 			// If belong to the case, byte rate will be more balanced, ignore the key rate.
 			rank = -1
 		}
