@@ -636,6 +636,7 @@ func (bs *balanceSolver) allowBalance() bool {
 // filterSrcStores compare the min rate and the ratio * expectation rate, if both key and byte rate is greater than
 // its expectation * ratio, the store would be selected as hot source store
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
+	srcToleranceRatio := bs.sche.conf.GetSrcToleranceRatio()
 	ret := make(map[uint64]*storeLoadDetail)
 	for id, detail := range bs.stLoadDetail {
 		if bs.cluster.GetStore(id) == nil {
@@ -646,9 +647,9 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			continue
 		}
 		minLoad := detail.LoadPred.min()
-		if slice.AnyOf(minLoad.Loads, func(i int) bool {
+		if slice.AllOf(minLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
-				return minLoad.Loads[i] > detail.LoadPred.Expect.Loads[i]
+				return minLoad.Loads[i] < detail.LoadPred.Expect.Loads[i]*srcToleranceRatio
 			}
 			return true
 		}) {
@@ -831,14 +832,14 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*core.StoreInfo) map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
-	//dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
+	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	for _, store := range candidates {
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
 			maxLoads := detail.LoadPred.max().Loads
-			if slice.AnyOf(maxLoads, func(i int) bool {
+			if slice.AllOf(maxLoads, func(i int) bool {
 				if statistics.IsSelectedDim(i) {
-					return maxLoads[i] < detail.LoadPred.Expect.Loads[i]
+					return maxLoads[i]*dstToleranceRatio > detail.LoadPred.Expect.Loads[i]
 				}
 				return true
 			}) {
