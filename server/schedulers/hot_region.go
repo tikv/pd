@@ -649,7 +649,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		minLoad := detail.LoadPred.min()
 		if slice.AllOf(minLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
-				return minLoad.Loads[i] < detail.LoadPred.Expect.Loads[i]*srcToleranceRatio
+				return minLoad.Loads[i] > detail.LoadPred.Expect.Loads[i]*srcToleranceRatio
 			}
 			return true
 		}) {
@@ -839,7 +839,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 			maxLoads := detail.LoadPred.max().Loads
 			if slice.AllOf(maxLoads, func(i int) bool {
 				if statistics.IsSelectedDim(i) {
-					return maxLoads[i]*dstToleranceRatio > detail.LoadPred.Expect.Loads[i]
+					return maxLoads[i]*dstToleranceRatio < detail.LoadPred.Expect.Loads[i]
 				}
 				return true
 			}) {
