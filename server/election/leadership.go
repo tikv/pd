@@ -144,8 +144,7 @@ func (ls *Leadership) leaderCmp() clientv3.Cmp {
 
 // DeleteLeader deletes the corresponding leader from etcd by given leaderPath (as the key).
 func (ls *Leadership) DeleteLeader() error {
-	// delete leader itself and let others start a new election again.
-	resp, err := ls.LeaderTxn().Then(clientv3.OpDelete(ls.leaderKey)).Commit()
+	resp, err := kv.NewSlowLogTxn(ls.client).Then(clientv3.OpDelete(ls.leaderKey)).Commit()
 	if err != nil {
 		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}
