@@ -1,0 +1,12 @@
+version: 1
+labels:
+  - label: "component/visualization"
+    title: "^Update TiDB Dashboard to"
+  - label: "needs-cherry-pick-release-4.0"
+    title: "^Update TiDB Dashboard to"
+  - label: "needs-cherry-pick-release-5.0"
+    title: "^Update TiDB Dashboard to"
+  - label: "needs-cherry-pick-release-5.1"
+    title: "^Update TiDB Dashboard to"
+  - label: "require-LGT1"
+    title: "^Update TiDB Dashboard to"
