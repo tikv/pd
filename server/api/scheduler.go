@@ -254,15 +254,11 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	switch {
 	case strings.HasPrefix(name, schedulers.EvictLeaderName) && name != schedulers.EvictLeaderName:
-		if err := h.redirectSchedulerDelete(name, schedulers.EvictLeaderName); err != nil {
-			h.handleErr(w, err)
-			return
-		}
+		h.redirectSchedulerDelete(w, name, schedulers.EvictLeaderName)
+		return
 	case strings.HasPrefix(name, schedulers.GrantLeaderName) && name != schedulers.GrantLeaderName:
-		if err := h.redirectSchedulerDelete(name, schedulers.GrantLeaderName); err != nil {
-			h.handleErr(w, err)
-			return
-		}
+		h.redirectSchedulerDelete(w, name, schedulers.GrantLeaderName)
+		return
 	default:
 		if err := h.RemoveScheduler(name); err != nil {
 			h.handleErr(w, err)
@@ -280,18 +276,16 @@ func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
 	}
 }
 
-func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) error {
+func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, schedulerName string) {
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
 	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
 	resp, err := doDelete(h.svr.GetHTTPClient(), url)
 	if err != nil {
-		return err
+		h.r.JSON(w, resp.StatusCode, err.Error())
+		return
 	}
-	if resp.StatusCode != http.StatusOK {
-		return errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-	return nil
+	h.r.JSON(w, resp.StatusCode, nil)
 }
 
 // FIXME: details of input json body params
