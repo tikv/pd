@@ -30,6 +30,12 @@ import (
 	"github.com/unrolled/render"
 )
 
+const (
+	EqualPriority = "equal"
+	BytePriority  = "byte"
+	KeyPriority   = "key"
+)
+
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	return &hotRegionSchedulerConfig{
@@ -45,6 +51,8 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MaxPeerNum:             1000,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
+		ReadDimPriority:        EqualPriority,
+		WriteDimPriority:       EqualPriority,
 	}
 }
 
@@ -67,6 +75,8 @@ type hotRegionSchedulerConfig struct {
 	MinorDecRatio          float64 `json:"minor-dec-ratio"`
 	SrcToleranceRatio      float64 `json:"src-tolerance-ratio"`
 	DstToleranceRatio      float64 `json:"dst-tolerance-ratio"`
+	ReadDimPriority        string  `json:"read-dim-priority"`
+	WriteDimPriority       string  `json:"write-dim-priority"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
@@ -157,6 +167,36 @@ func (conf *hotRegionSchedulerConfig) GetMinHotByteRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotByteRate
+}
+
+type dimPriority int
+
+const (
+	equalPriority dimPriority = iota
+	bytePriority
+	keyPriority
+)
+
+func FromStringPriority(priority string) dimPriority {
+	switch priority {
+	case BytePriority:
+		return bytePriority
+	case KeyPriority:
+		return keyPriority
+	}
+	return equalPriority
+}
+
+func (conf *hotRegionSchedulerConfig) GetReadDimPriority() dimPriority {
+	conf.Lock()
+	defer conf.Unlock()
+	return FromStringPriority(conf.ReadDimPriority)
+}
+
+func (conf *hotRegionSchedulerConfig) GetWriteDimPriority() dimPriority {
+	conf.Lock()
+	defer conf.Unlock()
+	return FromStringPriority(conf.WriteDimPriority)
 }
 
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {

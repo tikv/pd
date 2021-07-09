@@ -647,16 +647,37 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			continue
 		}
 		minLoad := detail.LoadPred.min()
-		if slice.AllOf(minLoad.Loads, func(i int) bool {
-			if statistics.IsSelectedDim(i) {
-				return minLoad.Loads[i] > detail.LoadPred.Expect.Loads[i]*srcToleranceRatio
+		priority := bs.sche.conf.GetReadDimPriority()
+		if bs.rwTy == write {
+			priority = bs.sche.conf.GetWriteDimPriority()
+		}
+		switch priority {
+		case equalPriority:
+			if slice.AllOf(minLoad.Loads, func(i int) bool {
+				if statistics.IsSelectedDim(i) {
+					return minLoad.Loads[i] > srcToleranceRatio*detail.LoadPred.Expect.Loads[i]
+				}
+				return true
+			}) {
+				ret[id] = detail
+				hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+			} else {
+				hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 			}
-			return true
-		}) {
-			ret[id] = detail
-			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
-		} else {
-			hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+		case keyPriority:
+			if minLoad.Loads[statistics.KeyDim] > srcToleranceRatio*detail.LoadPred.Expect.Loads[statistics.KeyDim] {
+				ret[id] = detail
+				hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+			} else {
+				hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+			}
+		case bytePriority:
+			if minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.Loads[statistics.ByteDim] {
+				ret[id] = detail
+				hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+			} else {
+				hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+			}
 		}
 	}
 	return ret
@@ -834,20 +855,42 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	for _, store := range candidates {
+		id := store.GetID()
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
 			maxLoads := detail.LoadPred.max().Loads
-			if slice.AllOf(maxLoads, func(i int) bool {
-				if statistics.IsSelectedDim(i) {
-					return maxLoads[i]*dstToleranceRatio < detail.LoadPred.Expect.Loads[i]
-				}
-				return true
-			}) {
-				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
-				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
+			priority := bs.sche.conf.GetReadDimPriority()
+			if bs.rwTy == write {
+				priority = bs.sche.conf.GetWriteDimPriority()
 			}
-		} else {
-			hotSchedulerResultCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
+			switch priority {
+			case equalPriority:
+				if slice.AllOf(maxLoads, func(i int) bool {
+					if statistics.IsSelectedDim(i) {
+						return maxLoads[i]*dstToleranceRatio < detail.LoadPred.Expect.Loads[i]
+					}
+					return true
+				}) {
+					ret[id] = detail
+					hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+				} else {
+					hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+				}
+			case keyPriority:
+				if maxLoads[statistics.KeyDim]*dstToleranceRatio < detail.LoadPred.Expect.Loads[statistics.KeyDim] {
+					ret[id] = detail
+					hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+				} else {
+					hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+				}
+			case bytePriority:
+				if maxLoads[statistics.ByteDim]*dstToleranceRatio < detail.LoadPred.Expect.Loads[statistics.ByteDim] {
+					ret[id] = detail
+					hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+				} else {
+					hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+				}
+			}
 		}
 	}
 	return ret
@@ -862,20 +905,32 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	rank := int64(0)
 	srcWeight := bs.cluster.GetStore(bs.cur.srcStoreID).GetHotReadWight()
 	dstWeight := bs.cluster.GetStore(bs.cur.dstStoreID).GetHotReadWight()
+	priority := FromStringPriority(bs.sche.conf.ReadDimPriority)
 	if bs.rwTy == write {
 		srcWeight = bs.cluster.GetStore(bs.cur.srcStoreID).GetHotWriteWeight()
 		dstWeight = bs.cluster.GetStore(bs.cur.dstStoreID).GetHotWriteWeight()
+		priority = FromStringPriority(bs.sche.conf.ReadDimPriority)
 	}
 	weightRatio := dstWeight / srcWeight
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
 		// Only consider about key rate.
-		srcKeyRate := srcLd.Loads[statistics.KeyDim]
-		dstKeyRate := dstLd.Loads[statistics.KeyDim]
-		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
-		if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
-			rank = -1
+		if priority == equalPriority || priority == keyPriority {
+			srcKeyRate := srcLd.Loads[statistics.KeyDim]
+			dstKeyRate := dstLd.Loads[statistics.KeyDim]
+			peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
+			if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
+				rank = -1
+			}
+		} else {
+			srcKeyRate := srcLd.Loads[statistics.ByteDim]
+			dstKeyRate := dstLd.Loads[statistics.ByteDim]
+			peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.ByteDim))
+			if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
+				rank = -1
+			}
 		}
+
 		log.Debug("calcProgressiveRank",
 			zap.String("rwType", bs.rwTy.String()),
 			zap.String("opType", bs.opTy.String()),
@@ -902,18 +957,33 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		}
 		keyHot, keyDecRatio := checkHot(statistics.KeyDim)
 		byteHot, byteDecRatio := checkHot(statistics.ByteDim)
-
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
-		switch {
-		case byteHot && byteDecRatio <= greatDecRatio*weightRatio && keyHot && keyDecRatio <= greatDecRatio*weightRatio:
-			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
-			rank = -3
-		case byteDecRatio <= minorDecRatio*weightRatio && keyHot && keyDecRatio <= greatDecRatio*weightRatio:
-			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
-			rank = -2
-		case byteHot && byteDecRatio <= greatDecRatio*weightRatio:
-			// If belong to the case, byte rate will be more balanced, ignore the key rate.
-			rank = -1
+		if priority == equalPriority {
+			switch {
+			case byteHot && byteDecRatio <= greatDecRatio*weightRatio && keyHot && keyDecRatio <= greatDecRatio*weightRatio:
+				// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
+				rank = -3
+			case byteDecRatio <= minorDecRatio*weightRatio && keyHot && keyDecRatio <= greatDecRatio*weightRatio:
+				// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
+				rank = -2
+			case byteHot && byteDecRatio <= greatDecRatio*weightRatio:
+				// If belong to the case, byte rate will be more balanced, ignore the key rate.
+				rank = -1
+			}
+		} else if priority == keyPriority {
+			switch {
+			case keyHot && keyDecRatio <= greatDecRatio*weightRatio:
+				rank = -3
+			case keyHot && keyDecRatio <= minorDecRatio*weightRatio:
+				rank = -2
+			}
+		} else if priority == bytePriority {
+			switch {
+			case byteHot && keyDecRatio <= greatDecRatio*weightRatio:
+				rank = -3
+			case byteHot && keyDecRatio <= minorDecRatio*weightRatio:
+				rank = -2
+			}
 		}
 		log.Debug("calcProgressiveRank",
 			zap.String("rwType", bs.rwTy.String()),
@@ -929,7 +999,6 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			zap.Bool("keyHot", keyHot),
 			zap.Bool("byteHot", byteHot))
 	}
-	bs.cur.progressiveRank = rank
 }
 
 func (bs *balanceSolver) getMinRate(dim int) float64 {

@@ -527,6 +527,14 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	if err != nil {
 		val = value
 	}
+	if schedulerName == "balance-hot-region-scheduler" {
+		if args[0] == "read-dim-priority" || args[0] == "write-dim-priority" {
+			if args[1] != "equal" && args[1] != "byte" && args[1] != "key" {
+				cmd.Println(cmd.UsageString())
+				return
+			}
+		}
+	}
 	input[key] = val
 	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
