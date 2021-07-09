@@ -31,7 +31,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20210527074428-73468940541b
 	github.com/pingcap/log v0.0.0-20210317133921-96f4fcab92a4
 	github.com/pingcap/sysutil v0.0.0-20210315073920-cc0985d983a3
-	github.com/pingcap/tidb-dashboard v0.0.0-20210615143005-6bbc7e6ce0fb
+	github.com/pingcap/tidb-dashboard v0.0.0-20210709093715-07fe6d3dedc9
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.6.0
