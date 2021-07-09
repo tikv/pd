@@ -28,8 +28,8 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
 	github.com/pingcap/kvproto v0.0.0-20200907074027-32a3a0accf7d
 	github.com/pingcap/log v0.0.0-20210317133921-96f4fcab92a4
-	github.com/pingcap/sysutil v0.0.0-20201130064824-f0c8aa6a6966
-	github.com/pingcap/tidb-dashboard v0.0.0-20210615143005-6bbc7e6ce0fb
+	github.com/pingcap/sysutil v0.0.0-20210315073920-cc0985d983a3
+	github.com/pingcap/tidb-dashboard v0.0.0-20210709093715-07fe6d3dedc9
 	github.com/prometheus/client_golang v1.2.1
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/sirupsen/logrus v1.4.2
