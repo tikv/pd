@@ -1980,7 +1980,7 @@
           "thresholds": "",
           "timeFrom": null,
           "timeShift": null,
-          "title": "Current Global TSO Physcial",
+          "title": "Current TSO Physcial",
           "type": "singlestat",
           "valueFontSize": "80%",
           "valueMaps": [
@@ -2182,7 +2182,7 @@
           "thresholds": "",
           "timeFrom": null,
           "timeShift": null,
-          "title": "Current Global TSO Datetime",
+          "title": "Current TSO Datetime",
           "type": "singlestat",
           "valueFontSize": "80%",
           "valueMaps": [
