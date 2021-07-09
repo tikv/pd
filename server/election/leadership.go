@@ -142,7 +142,7 @@ func (ls *Leadership) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.leaderValue)
 }
 
-// DeleteLeaderKey deletes the corresponding leader from etcd by given leaderPath as the key.
+// DeleteLeaderKey deletes the corresponding leader from etcd by the leaderPath as the key.
 func (ls *Leadership) DeleteLeaderKey() error {
 	resp, err := kv.NewSlowLogTxn(ls.client).Then(clientv3.OpDelete(ls.leaderKey)).Commit()
 	if err != nil {
