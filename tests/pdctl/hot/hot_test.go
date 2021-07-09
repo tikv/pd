@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/tests"
@@ -104,7 +105,6 @@ func (s *hotTestSuite) TestHot(c *C) {
 
 	hotStoreID := uint64(1)
 	count := 0
-
 	testHot := func(hotRegionID, hotStoreID uint64, hotType string) {
 		args = []string{"-u", pdAddr, "hot", hotType}
 		output, e := pdctl.ExecuteCommand(cmd, args...)
@@ -160,4 +160,62 @@ func (s *hotTestSuite) TestHot(c *C) {
 		statistics.ReadReportInterval*2 + 1,
 	}
 	testCommand(reportIntervals, "read")
+}
+
+func (s *hotTestSuite) TestHotWithStoreID(c *C) {
+	statistics.Denoising = false
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, serverName string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctlCmd.GetRootCmd()
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	for _, store := range stores {
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+	}
+	defer cluster.Destroy()
+
+	pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(c, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(c, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	// wait hot scheduler starts
+	time.Sleep(5000 * time.Millisecond)
+	args := []string{"-u", pdAddr, "hot", "write", "1"}
+	output, e := pdctl.ExecuteCommand(cmd, args...)
+	hotRegion := statistics.StoreHotPeersInfos{}
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegion), IsNil)
+	c.Assert(hotRegion.AsLeader, HasLen, 1)
+	c.Assert(hotRegion.AsLeader[1].Count, Equals, 2)
+	c.Assert(hotRegion.AsLeader[1].TotalBytesRate, Equals, float64(200000000))
+
+	args = []string{"-u", pdAddr, "hot", "write", "1", "2"}
+	output, e = pdctl.ExecuteCommand(cmd, args...)
+	hotRegion = statistics.StoreHotPeersInfos{}
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegion), IsNil)
+	c.Assert(hotRegion.AsLeader, HasLen, 2)
+	c.Assert(hotRegion.AsLeader[1].Count, Equals, 2)
+	c.Assert(hotRegion.AsLeader[2].Count, Equals, 1)
+	c.Assert(hotRegion.AsLeader[1].TotalBytesRate, Equals, float64(200000000))
+	c.Assert(hotRegion.AsLeader[2].TotalBytesRate, Equals, float64(100000000))
 }
