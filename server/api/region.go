@@ -109,6 +109,7 @@ type RegionInfo struct {
 	ReadKeys        uint64        `json:"read_keys"`
 	ApproximateSize int64         `json:"approximate_size"`
 	ApproximateKeys int64         `json:"approximate_keys"`
+	Interval        uint64        `json:"interval"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
@@ -154,6 +155,8 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ReadKeys = r.GetKeysRead()
 	s.ApproximateSize = r.GetApproximateSize()
 	s.ApproximateKeys = r.GetApproximateKeys()
+	interval := r.GetInterval()
+	s.Interval = interval.GetEndTimestamp() - interval.GetStartTimestamp()
 	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())
 
 	return s
