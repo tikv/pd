@@ -396,19 +396,19 @@ func (s *Storage) LoadStores(f func(store *StoreInfo)) error {
 			if err != nil {
 				return err
 			}
-			hotReadWeight, err := s.loadFloatWithDefaultValue(s.storeHotReadWeightPath(store.GetId()), 1.0)
+			readDimWeights, err := s.loadDimFloatWithDefaultValue(s.storeHotReadWeightPath(store.GetId()), [DimLen]float64{1.0, 1.0, 1.0})
 			if err != nil {
 				return err
 			}
-			hotWriteWeight, err := s.loadFloatWithDefaultValue(s.storeHotWriteWeightPath(store.GetId()), 1.0)
+			writeDimWeights, err := s.loadDimFloatWithDefaultValue(s.storeHotWriteWeightPath(store.GetId()), [DimLen]float64{1.0, 1.0, 1.0})
 			if err != nil {
 				return err
 			}
 			newStoreInfo := NewStoreInfo(store,
 				SetLeaderWeight(leaderWeight),
 				SetRegionWeight(regionWeight),
-				SetStoreHotReadWeight(hotReadWeight),
-				SetStoreHotWriteWeight(hotWriteWeight))
+				SetStoreReadDimWeights(readDimWeights),
+				SetStoreWriteDimWeights(writeDimWeights))
 
 			nextID = store.GetId() + 1
 			f(newStoreInfo)
@@ -430,13 +430,11 @@ func (s *Storage) SaveStoreWeight(storeID uint64, leader, region float64) error 
 }
 
 // SaveStoreHotWeight saves store hot read/write weight
-func (s *Storage) SaveStoreHotWeight(storeID uint64, hotWrite, hotRead float64) error {
-	hotWriteValue := strconv.FormatFloat(hotWrite, 'f', -1, 64)
-	if err := s.Save(s.storeHotWriteWeightPath(storeID), hotWriteValue); err != nil {
+func (s *Storage) SaveStoreHotWeight(storeID uint64, hotWrite, hotRead [DimLen]float64) error {
+	if err := s.Save(s.storeHotWriteWeightPath(storeID), formatDimWeights(hotWrite)); err != nil {
 		return err
 	}
-	hotReadValue := strconv.FormatFloat(hotRead, 'f', -1, 64)
-	return s.Save(s.storeHotReadWeightPath(storeID), hotReadValue)
+	return s.Save(s.storeHotReadWeightPath(storeID), formatDimWeights(hotRead))
 }
 
 func (s *Storage) loadFloatWithDefaultValue(path string, def float64) (float64, error) {
@@ -450,6 +448,21 @@ func (s *Storage) loadFloatWithDefaultValue(path string, def float64) (float64, 
 	val, err := strconv.ParseFloat(res, 64)
 	if err != nil {
 		return 0, errs.ErrStrconvParseFloat.Wrap(err).GenWithStackByArgs()
+	}
+	return val, nil
+}
+
+func (s *Storage) loadDimFloatWithDefaultValue(path string, def [DimLen]float64) ([DimLen]float64, error) {
+	res, err := s.Load(path)
+	if err != nil {
+		return [DimLen]float64{}, err
+	}
+	if res == "" {
+		return def, nil
+	}
+	val, err := parseDimWeights(res)
+	if err != nil {
+		return [DimLen]float64{}, errs.ErrStrconvParseFloat.Wrap(err).GenWithStackByArgs()
 	}
 	return val, nil
 }
@@ -694,4 +707,30 @@ func saveRegion(
 		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByArgs()
 	}
 	return kv.Save(regionPath(region.GetId()), string(value))
+}
+
+func formatDimWeights(fs [DimLen]float64) string {
+	fss := make([]string, len(fs))
+	for i, f := range fs {
+		fss[i] = strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	return strings.Join(fss, ",")
+}
+
+func parseDimWeights(fss string) ([DimLen]float64, error) {
+	fs := [DimLen]float64{}
+	for i := range fs {
+		fs[i] = 1.0
+	}
+	for i, s := range strings.Split(fss, ",") {
+		if i >= DimLen {
+			break
+		}
+		f, err := strconv.ParseFloat(s, 10)
+		if err != nil {
+			return fs, err
+		}
+		fs[i] = f
+	}
+	return fs, nil
 }

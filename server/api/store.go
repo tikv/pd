@@ -53,8 +53,8 @@ type StoreStatus struct {
 	RegionCount        int                `json:"region_count"`
 	RegionWeight       float64            `json:"region_weight"`
 	RegionScore        float64            `json:"region_score"`
-	HotReadWeight      float64            `json:"hot_read_weight"`
-	HotWriteWeight     float64            `json:"hot_write_weight"`
+	ReadDimWeight      DimWeight          `json:"hot_read"`
+	WriteDimWeight     DimWeight          `json:"hot_write"`
 	RegionSize         int64              `json:"region_size"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
@@ -62,6 +62,11 @@ type StoreStatus struct {
 	StartTS            *time.Time         `json:"start_ts,omitempty"`
 	LastHeartbeatTS    *time.Time         `json:"last_heartbeat_ts,omitempty"`
 	Uptime             *typeutil.Duration `json:"uptime,omitempty"`
+}
+
+type DimWeight struct {
+	ByteWeight float64 `json:"byte_weight"`
+	KeyWeight  float64 `json:"key_weight"`
 }
 
 // StoreInfo contains information about a store.
@@ -76,25 +81,33 @@ const (
 )
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
+	readDimWeight := store.GetReadDimWeights()
+	writeDimWeights := store.GetWriteDimWeights()
 	s := &StoreInfo{
 		Store: &MetaStore{
 			Store:     store.GetMeta(),
 			StateName: store.GetState().String(),
 		},
 		Status: &StoreStatus{
-			Capacity:           typeutil.ByteSize(store.GetCapacity()),
-			Available:          typeutil.ByteSize(store.GetAvailable()),
-			UsedSize:           typeutil.ByteSize(store.GetUsedSize()),
-			LeaderCount:        store.GetLeaderCount(),
-			LeaderWeight:       store.GetLeaderWeight(),
-			LeaderScore:        store.LeaderScore(core.StringToSchedulePolicy(opt.LeaderSchedulePolicy), 0),
-			LeaderSize:         store.GetLeaderSize(),
-			RegionCount:        store.GetRegionCount(),
-			RegionWeight:       store.GetRegionWeight(),
-			RegionScore:        store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0, 0),
-			RegionSize:         store.GetRegionSize(),
-			HotReadWeight:      store.GetHotReadWight(),
-			HotWriteWeight:     store.GetHotWriteWeight(),
+			Capacity:     typeutil.ByteSize(store.GetCapacity()),
+			Available:    typeutil.ByteSize(store.GetAvailable()),
+			UsedSize:     typeutil.ByteSize(store.GetUsedSize()),
+			LeaderCount:  store.GetLeaderCount(),
+			LeaderWeight: store.GetLeaderWeight(),
+			LeaderScore:  store.LeaderScore(core.StringToSchedulePolicy(opt.LeaderSchedulePolicy), 0),
+			LeaderSize:   store.GetLeaderSize(),
+			RegionCount:  store.GetRegionCount(),
+			RegionWeight: store.GetRegionWeight(),
+			RegionScore:  store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0, 0),
+			RegionSize:   store.GetRegionSize(),
+			ReadDimWeight: DimWeight{
+				ByteWeight: readDimWeight[core.ByteDim],
+				KeyWeight:  readDimWeight[core.KeyDim],
+			},
+			WriteDimWeight: DimWeight{
+				ByteWeight: writeDimWeights[core.ByteDim],
+				KeyWeight:  readDimWeight[core.KeyDim],
+			},
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
 			IsBusy:             store.IsBusy(),
@@ -375,36 +388,46 @@ func (h *storeHandler) SetHotWeight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hotWriteVal, ok := input["hot-write-weight"]
+	rwTypeVal, ok := input["type"]
 	if !ok {
-		h.rd.JSON(w, http.StatusBadRequest, "hot-write weight unset")
+		h.rd.JSON(w, http.StatusBadRequest, "type unset")
 		return
 	}
-	hotReadVal, ok := input["hot-read-weight"]
+	dimType, ok := input["dim"]
 	if !ok {
-		h.rd.JSON(w, http.StatusBadRequest, "hot-read weight unset")
+		h.rd.JSON(w, http.StatusBadRequest, "dim type unset")
 		return
 	}
-	hotWrite, ok := hotWriteVal.(float64)
-	if !ok || hotWrite < 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "bad format hot-write weight")
+	weightVal, ok := input["weight"]
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "weight unset")
 		return
 	}
-	hotRead, ok := hotReadVal.(float64)
-	if !ok || hotRead < 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "bad format hot-read weight")
+	rwType, ok := rwTypeVal.(string)
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "bad format dim type")
 		return
 	}
-	if hotRead <= 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "hot_read_weight should be a number > 0")
+	if rwType != "read" && rwType != "write" {
+		h.rd.JSON(w, http.StatusBadRequest, "type should be read or write")
 		return
 	}
-	if hotWrite <= 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "hot_write_weight should be a number > 0")
+	weight, ok := weightVal.(float64)
+	if !ok || weight < 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "bad format for weight")
 		return
 	}
-
-	if err := rc.SetStoreHotWeight(storeID, hotRead, hotWrite); err != nil {
+	dim := core.ByteDim
+	switch dimType {
+	case "key":
+		dim = core.KeyDim
+	case "byte":
+		dim = core.ByteDim
+	default:
+		h.rd.JSON(w, http.StatusBadRequest, "dim should be keys or bytes")
+		return
+	}
+	if err := rc.SetStoreDimWeight(storeID, rwType, dim, weight); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

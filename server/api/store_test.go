@@ -498,13 +498,16 @@ func (s *testStoreSuite) TestStoreHotWeight(c *C) {
 	err := readJSON(testDialClient, url, storesInfo)
 	c.Assert(err, IsNil)
 	for _, storeInfo := range storesInfo.Stores {
-		// assert
-		c.Assert(storeInfo.Status.HotWriteWeight, Equals, 1.0)
-		c.Assert(storeInfo.Status.HotReadWeight, Equals, 1.0)
+		// assert dim weight default value
+		c.Assert(storeInfo.Status.ReadDimWeight.ByteWeight, Equals, 1.0)
+		c.Assert(storeInfo.Status.ReadDimWeight.KeyWeight, Equals, 1.0)
+		c.Assert(storeInfo.Status.WriteDimWeight.ByteWeight, Equals, 1.0)
+		c.Assert(storeInfo.Status.WriteDimWeight.KeyWeight, Equals, 1.0)
 	}
-	weight := map[string]float64{
-		"hot-read-weight":  3.0,
-		"hot-write-weight": 2.0,
+	weight := map[string]interface{}{
+		"type":   "read",
+		"dim":    "byte",
+		"weight": 2.0,
 	}
 	w, _ := json.Marshal(weight)
 	err = postJSON(testDialClient, s.urlPrefix+"/store/1/hot-weight", w)
@@ -513,6 +516,5 @@ func (s *testStoreSuite) TestStoreHotWeight(c *C) {
 	storeInfo := new(StoreInfo)
 	err = readJSON(testDialClient, url, storeInfo)
 	c.Assert(err, IsNil)
-	c.Assert(storeInfo.Status.HotReadWeight, Equals, 3.0)
-	c.Assert(storeInfo.Status.HotWriteWeight, Equals, 2.0)
+	c.Assert(storeInfo.Status.ReadDimWeight.ByteWeight, Equals, 2.0)
 }

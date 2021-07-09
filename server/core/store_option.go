@@ -166,17 +166,17 @@ func SetRegionWeight(regionWeight float64) StoreCreateOption {
 	}
 }
 
-// SetStoreHotReadWeight sets the Store hot read weight
-func SetStoreHotReadWeight(hotReaderWight float64) StoreCreateOption {
+// SetStoreReadDimWeights sets the Store hot read weight
+func SetStoreReadDimWeights(readDimWeights [DimLen]float64) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.hotReadWeight = hotReaderWight
+		store.readDimWeights = readDimWeights
 	}
 }
 
-// SetStoreHotWriteWeight sets the Store hot write weight
-func SetStoreHotWriteWeight(hotWriteWeight float64) StoreCreateOption {
+// SetStoreWriteDimWeights sets the Store hot write weight
+func SetStoreWriteDimWeights(writeDimWeights [DimLen]float64) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.hotWriteWeight = hotWriteWeight
+		store.writeDimWeights = writeDimWeights
 	}
 }
 
