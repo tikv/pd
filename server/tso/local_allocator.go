@@ -211,7 +211,7 @@ func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool)
 			log.Warn("the local tso allocator leader has not changed, delete and campaign again",
 				zap.String("dc-location", lta.timestampOracle.dcLocation), zap.Stringer("old-pd-leader", allocatorLeader))
 			// Delete the leader itself and let others start a new election again.
-			if err = lta.leadership.DeleteLeader(); err != nil {
+			if err = lta.leadership.DeleteLeaderKey(); err != nil {
 				log.Error("deleting local tso allocator leader key meets error", errs.ZapError(err))
 				time.Sleep(200 * time.Millisecond)
 				return nil, 0, true

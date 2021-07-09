@@ -173,7 +173,7 @@ func (m *Member) CheckLeader() (*pdpb.Member, int64, bool) {
 			// in previous CampaignLeader. We should delete the leadership and campaign again.
 			log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
 			// Delete the leader itself and let others start a new election again.
-			if err = m.leadership.DeleteLeader(); err != nil {
+			if err = m.leadership.DeleteLeaderKey(); err != nil {
 				log.Error("deleting pd leader key meets error", errs.ZapError(err))
 				time.Sleep(200 * time.Millisecond)
 				return nil, 0, true

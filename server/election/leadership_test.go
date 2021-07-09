@@ -72,7 +72,7 @@ func (s *testLeadershipSuite) TestLeadership(c *C) {
 	c.Assert(leadership1.Check(), IsFalse)
 	c.Assert(leadership2.Check(), IsFalse)
 
-	err = leadership1.DeleteLeader()
+	err = leadership1.DeleteLeaderKey()
 	c.Assert(err, IsNil)
 	err = leadership1.Campaign(defaultTestLeaderLease, "test_leader_1")
 	c.Assert(err, IsNil)
