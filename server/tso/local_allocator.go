@@ -216,6 +216,8 @@ func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool)
 				time.Sleep(200 * time.Millisecond)
 				return nil, 0, true
 			}
+			// Return nil and false to make sure the campaign will start immediately.
+			return nil, 0, false
 		}
 	}
 	return allocatorLeader, rev, false
