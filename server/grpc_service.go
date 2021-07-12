@@ -1311,6 +1311,9 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			}
 			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 		}
+		if maxLocalTS == nil {
+			return nil, status.Errorf(codes.Unknown, "local tso allocator leaders have changed during the sync, should retry")
+		}
 		// Found a bigger or equal maxLocalTS, return it directly.
 		cmpResult := tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs())
 		if cmpResult >= 0 {
