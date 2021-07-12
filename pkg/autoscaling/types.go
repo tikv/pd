@@ -267,7 +267,7 @@ func getLabelsByResourceType(resourceType string, component ComponentType) map[s
 	labels := map[string]string{}
 
 	if resourceType != homogeneousTiKVResourceType && resourceType != homogeneousTiDBResourceType {
-		labels[groupLabelKey] = fmt.Sprintf("%s-%s", autoScalingGroupLabelKeyPrefix, component.String())
+		labels[groupLabelKey] = fmt.Sprintf("%s-%s-%s", autoScalingGroupLabelKeyPrefix, component.String(), resourceType)
 		labels[resourceTypeLabelKey] = resourceType
 		if component == TiKV {
 			labels[filter.SpecialUseKey] = filter.SpecialUseHotRegion
