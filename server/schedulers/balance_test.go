@@ -809,7 +809,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 			Peers: []*metapb.Peer{
 				{Id: 103, StoreId: 1},
 				{Id: 104, StoreId: 4},
-				{Id: 105, StoreId: 5},
+				{Id: 105, StoreId: 3},
 			},
 		},
 		&metapb.Peer{Id: 104, StoreId: 4},
@@ -833,7 +833,6 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	c.Assert(err, IsNil)
 	oc.SetOperator(ops[0])
 	oc.SetOperator(ops[1])
-
 	c.Assert(sb.IsScheduleAllowed(tc), IsTrue)
 	c.Assert(sb.Schedule(tc)[0], NotNil)
 	// if the space of store 5 is normal, we can balance region to store 5
@@ -843,11 +842,13 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	origin := tc.GetStore(5)
 	stats := origin.GetStoreStats()
 	stats.Capacity = 50
-	stats.Available = 28
-	stats.UsedSize = 20
+	stats.Available = 20
+	stats.UsedSize = 28
 	store5 := origin.Clone(core.SetStoreStats(stats))
 	tc.PutStore(store5)
-
+	// remove op influence
+	oc.RemoveOperator(ops[1])
+	oc.RemoveOperator(ops[0])
 	// the scheduler first picks store 1 as source store,
 	// and store 5 as target store, but cannot pass `shouldBalance`.
 	// Then it will try store 4.

@@ -1665,6 +1665,13 @@ func (c *RaftCluster) IsSchedulerDisabled(name string) (bool, error) {
 	return c.coordinator.isSchedulerDisabled(name)
 }
 
+// IsSchedulerExisted checks if a scheduler is existed.
+func (c *RaftCluster) IsSchedulerExisted(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.isSchedulerExisted(name)
+}
+
 // GetStoreLimiter returns the dynamic adjusting limiter
 func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 	return c.limiter

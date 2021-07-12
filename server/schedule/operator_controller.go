@@ -52,6 +52,8 @@ var (
 	PushOperatorTickInterval = 500 * time.Millisecond
 	// StoreBalanceBaseTime represents the base time of balance rate.
 	StoreBalanceBaseTime float64 = 60
+	// FastOperatorFinishTime min finish time, if finish duration less than it,op will be pushed to fast operator queue
+	FastOperatorFinishTime = 10 * time.Second
 )
 
 // OperatorController is used to limit the speed of scheduling.
@@ -61,6 +63,7 @@ type OperatorController struct {
 	cluster         opt.Cluster
 	operators       map[uint64]*operator.Operator
 	hbStreams       *hbstream.HeartbeatStreams
+	fastOperators   *cache.TTLUint64
 	histories       *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
@@ -78,6 +81,7 @@ func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams *
 		operators:       make(map[uint64]*operator.Operator),
 		hbStreams:       hbStreams,
 		histories:       list.New(),
+		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
 		storesLimit:     make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit),
@@ -125,6 +129,10 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
+			}
+			if time.Since(op.GetStartTime()) < FastOperatorFinishTime {
+				log.Debug("op finish duration less than 10s", zap.Uint64("region-id", op.RegionID()))
+				oc.pushFastOperator(op)
 			}
 		case operator.TIMEOUT:
 			if oc.RemoveOperator(op) {
@@ -736,6 +744,10 @@ func (oc *OperatorController) pushHistory(op *operator.Operator) {
 	}
 }
 
+func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
+	oc.fastOperators.Put(op.RegionID(), op)
+}
+
 // PruneHistory prunes a part of operators' history.
 func (oc *OperatorController) PruneHistory() {
 	oc.Lock()
@@ -797,6 +809,25 @@ func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInf
 		}
 	}
 	return influence
+}
+
+// GetFastOpInfluence get fast finish operator influence
+func (oc *OperatorController) GetFastOpInfluence(cluster opt.Cluster, influence operator.OpInfluence) {
+	for _, id := range oc.fastOperators.GetAllID() {
+		value, ok := oc.fastOperators.Get(id)
+		if !ok {
+			continue
+		}
+		op, ok := value.(*operator.Operator)
+		if !ok {
+			continue
+		}
+		region := cluster.GetRegion(op.RegionID())
+		if region != nil {
+			log.Debug("op influence less than 10s", zap.Uint64("region-id", op.RegionID()))
+			op.TotalInfluence(influence, region)
+		}
+	}
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
