@@ -173,11 +173,11 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	defer cancel()
 	for i := 0; i < maxRetryCount; i++ {
 		var (
-			globalTSOResp          pdpb.Timestamp  = pdpb.Timestamp{}
-			estimatedMaxTSO        *pdpb.Timestamp = &pdpb.Timestamp{}
-			suffixBits             int             = gta.allocatorManager.GetSuffixBits()
-			shouldRetry, skipCheck bool
 			err                    error
+			shouldRetry, skipCheck bool
+			globalTSOResp          pdpb.Timestamp
+			estimatedMaxTSO        *pdpb.Timestamp
+			suffixBits             = gta.allocatorManager.GetSuffixBits()
 		)
 		// TODO: add a switch to control whether to enable the MaxTSO estimation.
 		// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT.
