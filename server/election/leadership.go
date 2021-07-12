@@ -151,7 +151,9 @@ func (ls *Leadership) DeleteLeaderKey() error {
 	if !resp.Succeeded {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
-
+	// Reset the lease as soon as possible.
+	ls.Reset()
+	log.Info("delete the leader key ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
 }
 
