@@ -559,3 +559,35 @@ func (s *testSynchronizedGlobalTSO) TestSynchronizedGlobalTSOOverflow(c *C) {
 	s.testGetTimestamp(ctx, c, cluster, tsoCount, tso.GlobalDCLocation)
 	failpoint.Disable("github.com/tikv/pd/server/tso/globalTSOOverflow")
 }
+
+func (s *testSynchronizedGlobalTSO) TestLocalAllocatorLeaderChange(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/mockLocalAllocatorLeaderChange", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/server/mockLocalAllocatorLeaderChange")
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	cluster.WaitAllLeaders(c, dcLocationConfig)
+
+	s.leaderServer = cluster.GetServer(cluster.GetLeader())
+	c.Assert(s.leaderServer, NotNil)
+	s.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClient(c, s.leaderServer.GetAddr())
+	for _, dcLocation := range dcLocationConfig {
+		pdName := s.leaderServer.GetAllocatorLeader(dcLocation).GetName()
+		s.dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.testGetTimestamp(ctx, c, cluster, tsoCount, tso.GlobalDCLocation)
+}

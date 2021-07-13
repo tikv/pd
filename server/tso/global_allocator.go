@@ -256,6 +256,10 @@ func (gta *GlobalTSOAllocator) precheckLogical(maxTSO *pdpb.Timestamp, suffixBit
 			globalTSOOverflowFlag = false
 		}
 	})
+	// Make sure the physical time is not empty again.
+	if maxTSO.GetPhysical() == 0 {
+		return false
+	}
 	// Check if the logical part will reach the overflow condition after being differenitated.
 	if differentiatedLogical := gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits); differentiatedLogical >= maxLogical {
 		log.Error("estimated logical part outside of max logical interval, please check ntp time",
