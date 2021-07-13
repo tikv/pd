@@ -25,7 +25,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/tempurl"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/server/v3/embed"
 )
 
 func TestKV(t *testing.T) {

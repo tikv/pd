@@ -22,7 +22,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"go.etcd.io/etcd/pkg/report"
+	"go.etcd.io/etcd/pkg/v3/report"
 	"google.golang.org/grpc"
 )
 

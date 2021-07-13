@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/server/v3/embed"
 )
 
 func TestKeyManager(t *testing.T) {

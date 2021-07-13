@@ -27,7 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/server/v3/embed"
 
 	// Register schedulers
 	_ "github.com/tikv/pd/server/schedulers"

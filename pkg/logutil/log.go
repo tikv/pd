@@ -27,7 +27,7 @@ import (
 	zaplog "github.com/pingcap/log"
 	log "github.com/sirupsen/logrus"
 	"github.com/tikv/pd/pkg/errs"
-	"go.etcd.io/etcd/raft"
+	raft "go.etcd.io/etcd/raft/v3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/grpclog"
