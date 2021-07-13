@@ -39,7 +39,7 @@ import (
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/tso"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // TestServer states.
