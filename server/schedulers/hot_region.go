@@ -981,7 +981,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 	switch bs.opTy {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
-		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
+		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role, Witness: srcPeer.Witness}
 		typ := "move-peer"
 		if bs.rwTy == read && bs.cur.region.GetLeader().StoreId == bs.cur.srcStoreID { // move read leader
 			op, err = operator.CreateMoveLeaderOperator(

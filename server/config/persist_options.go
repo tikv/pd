@@ -167,6 +167,18 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 	o.SetReplicationConfig(v)
 }
 
+// GetWitnessCount returns the number of witness peers for each region.
+func (o *PersistOptions) GetWitnessCount() int {
+	return o.GetReplicationConfig().WitnessCount
+}
+
+// SetWitnessCount sets the number of witness peers for each region.
+func (o *PersistOptions) SetWitnessCount(witnessCount int) {
+	v := o.GetReplicationConfig().Clone()
+	v.WitnessCount = witnessCount
+	o.SetReplicationConfig(v)
+}
+
 const (
 	maxSnapshotCountKey            = "schedule.max-snapshot-count"
 	maxMergeRegionSizeKey          = "schedule.max-merge-region-size"

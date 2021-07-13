@@ -140,12 +140,29 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 		return nil, errors.New("no store to add peer")
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
+	if rf.Rule.WitnessCount > 0 {
+		c.tryAddWitnessPeer(peer, region, rf)
+	}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
 	if err != nil {
 		return nil, err
 	}
 	op.SetPriorityLevel(core.HighPriority)
 	return op, nil
+}
+
+func (c *RuleChecker) tryAddWitnessPeer(peer *metapb.Peer, region *core.RegionInfo, rf *placement.RuleFit) {
+	var dataPeerCnt int
+	for _, p := range rf.Peers {
+		if !p.Witness {
+			dataPeerCnt++
+		}
+	}
+	dataPeerCnt -= len(region.GetDownPeers())
+	dataPeerCnt -= len(region.GetPendingPeers())
+	if dataPeerCnt+rf.Rule.WitnessCount >= rf.Rule.Count {
+		peer.Witness = true
+	}
 }
 
 // The peer's store may in Offline or Down, need to be replace.
@@ -157,7 +174,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		c.regionWaitingList.Put(region.GetID(), nil)
 		return nil, errors.New("no store to replace peer")
 	}
-	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
+	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), Witness: peer.Witness}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
 	if region.GetLeader().GetId() == peer.GetId() {
@@ -255,13 +272,19 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	if oldStore == 0 {
 		return nil, nil
 	}
+	var oldWitness bool
+	for _, peer := range region.GetPeers() {
+		if peer.StoreId == oldStore {
+			oldWitness = peer.Witness
+		}
+	}
 	newStore := strategy.SelectStoreToImprove(ruleStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		return nil, nil
 	}
 	checkerCounter.WithLabelValues("rule_checker", "move-to-better-location").Inc()
-	newPeer := &metapb.Peer{StoreId: newStore, Role: rf.Rule.Role.MetaPeerRole()}
+	newPeer := &metapb.Peer{StoreId: newStore, Role: rf.Rule.Role.MetaPeerRole(), Witness: oldWitness}
 	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStore, newPeer)
 }
 

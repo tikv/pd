@@ -784,7 +784,7 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 	storage := core.NewStorage(kv.NewMemoryKV())
 	cluster.ruleManager = placement.NewRuleManager(storage, cluster)
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), 0, opt.GetLocationLabels())
 		if err != nil {
 			panic(err)
 		}
@@ -1080,7 +1080,7 @@ func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluste
 	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage, core.NewBasicCluster())
 	rc.ruleManager = placement.NewRuleManager(storage, rc)
 	if opt.IsPlacementRulesEnabled() {
-		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), 0, opt.GetLocationLabels())
 		if err != nil {
 			panic(err)
 		}

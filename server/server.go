@@ -829,7 +829,8 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.
-			if err := raftCluster.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
+			if err := raftCluster.GetRuleManager().
+				Initialize(int(cfg.MaxReplicas), cfg.WitnessCount, cfg.LocationLabels); err != nil {
 				return err
 			}
 		} else {

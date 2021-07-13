@@ -769,6 +769,7 @@ func createRegionForRuleFit(startKey, endKey []byte,
 			Id:      p.Id,
 			StoreId: p.StoreId,
 			Role:    p.Role,
+			Witness: p.Witness,
 		}
 		copyPeers = append(copyPeers, peer)
 	}

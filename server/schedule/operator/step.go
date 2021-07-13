@@ -83,6 +83,7 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 // AddPeer is an OpStep that adds a region peer.
 type AddPeer struct {
 	ToStore, PeerID uint64
+	Witness         bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -129,6 +130,7 @@ func (ap AddPeer) CheckSafety(region *core.RegionInfo) error {
 // AddLearner is an OpStep that adds a region learner peer.
 type AddLearner struct {
 	ToStore, PeerID uint64
+	Witness         bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -181,6 +183,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
 type PromoteLearner struct {
 	ToStore, PeerID uint64
+	Witness         bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -350,6 +353,7 @@ func (sr SplitRegion) CheckSafety(region *core.RegionInfo) error {
 // AddLightPeer is an OpStep that adds a region peer without considering the influence.
 type AddLightPeer struct {
 	ToStore, PeerID uint64
+	Witness         bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -394,6 +398,7 @@ func (ap AddLightPeer) Influence(opInfluence OpInfluence, region *core.RegionInf
 // AddLightLearner is an OpStep that adds a region learner peer without considering the influence.
 type AddLightLearner struct {
 	ToStore, PeerID uint64
+	Witness         bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -444,6 +449,7 @@ func (al AddLightLearner) Influence(opInfluence OpInfluence, region *core.Region
 // DemoteFollower is an OpStep that demotes a region follower peer to learner.
 type DemoteFollower struct {
 	ToStore, PeerID uint64
+	Witness         bool
 }
 
 func (df DemoteFollower) String() string {
@@ -486,6 +492,7 @@ func (df DemoteFollower) Influence(opInfluence OpInfluence, region *core.RegionI
 // Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
 type DemoteVoter struct {
 	ToStore, PeerID uint64
+	Witness         bool
 }
 
 func (dv DemoteVoter) String() string {
@@ -632,6 +639,7 @@ func (cpe ChangePeerV2Enter) GetRequest() *pdpb.ChangePeerV2 {
 				Id:      pl.PeerID,
 				StoreId: pl.ToStore,
 				Role:    metapb.PeerRole_Voter,
+				Witness: pl.Witness,
 			},
 		})
 	}
@@ -642,6 +650,7 @@ func (cpe ChangePeerV2Enter) GetRequest() *pdpb.ChangePeerV2 {
 				Id:      dv.PeerID,
 				StoreId: dv.ToStore,
 				Role:    metapb.PeerRole_Learner,
+				Witness: dv.Witness,
 			},
 		})
 	}

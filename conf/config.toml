@@ -175,6 +175,9 @@
 ## Whether or not to enable placement rules.
 # enable-placement-rules = true
 
+## The number of witness peers for each Region.
+# witness-count = 0
+
 [dashboard]
 ## Configurations below are for the TiDB Dashboard embedded in the PD.
 

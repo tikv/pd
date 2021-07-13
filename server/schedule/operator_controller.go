@@ -649,29 +649,29 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			// The newly added peer is pending.
 			return
 		}
-		cmd = addNode(st.PeerID, st.ToStore)
+		cmd = addNode(st.PeerID, st.ToStore, st.Witness)
 	case operator.AddLightPeer:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd = addNode(st.PeerID, st.ToStore)
+		cmd = addNode(st.PeerID, st.ToStore, st.Witness)
 	case operator.AddLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
+		cmd = addLearnerNode(st.PeerID, st.ToStore, st.Witness)
 	case operator.AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
+		cmd = addLearnerNode(st.PeerID, st.ToStore, st.Witness)
 	case operator.PromoteLearner:
-		cmd = addNode(st.PeerID, st.ToStore)
+		cmd = addNode(st.PeerID, st.ToStore, st.Witness)
 	case operator.DemoteFollower:
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
+		cmd = addLearnerNode(st.PeerID, st.ToStore, st.Witness)
 	case operator.RemovePeer:
 		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
@@ -710,7 +710,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 	oc.hbStreams.SendMsg(region, cmd)
 }
 
-func addNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
+func addNode(id, storeID uint64, witness bool) *pdpb.RegionHeartbeatResponse {
 	return &pdpb.RegionHeartbeatResponse{
 		ChangePeer: &pdpb.ChangePeer{
 			ChangeType: eraftpb.ConfChangeType_AddNode,
@@ -718,12 +718,13 @@ func addNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
 				Id:      id,
 				StoreId: storeID,
 				Role:    metapb.PeerRole_Voter,
+				Witness: witness,
 			},
 		},
 	}
 }
 
-func addLearnerNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
+func addLearnerNode(id, storeID uint64, witness bool) *pdpb.RegionHeartbeatResponse {
 	return &pdpb.RegionHeartbeatResponse{
 		ChangePeer: &pdpb.ChangePeer{
 			ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
@@ -731,6 +732,7 @@ func addLearnerNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
 				Id:      id,
 				StoreId: storeID,
 				Role:    metapb.PeerRole_Learner,
+				Witness: witness,
 			},
 		},
 	}

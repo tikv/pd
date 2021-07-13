@@ -221,7 +221,7 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 		}
 
 		oldPeer := plan.region.GetStorePeer(sourceID)
-		newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
+		newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role, Witness: oldPeer.Witness}
 		op, err := operator.CreateMovePeerOperator(BalanceRegionType, plan.cluster, plan.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()

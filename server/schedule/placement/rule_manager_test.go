@@ -34,7 +34,7 @@ func (s *testManagerSuite) SetUpTest(c *C) {
 	s.store = core.NewStorage(kv.NewMemoryKV())
 	var err error
 	s.manager = NewRuleManager(s.store, nil)
-	err = s.manager.Initialize(3, []string{"zone", "rack", "host"})
+	err = s.manager.Initialize(3, 0, []string{"zone", "rack", "host"})
 	c.Assert(err, IsNil)
 }
 
@@ -111,7 +111,7 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 	}
 
 	m2 := NewRuleManager(s.store, nil)
-	err := m2.Initialize(3, []string{"no", "labels"})
+	err := m2.Initialize(3, 0, []string{"no", "labels"})
 	c.Assert(err, IsNil)
 	c.Assert(m2.GetAllRules(), HasLen, 3)
 	c.Assert(m2.GetRule("pd", "default"), DeepEquals, rules[0])

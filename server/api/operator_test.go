@@ -349,6 +349,7 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 		if tc.placementRuleEnable {
 			err := s.svr.GetRaftCluster().GetRuleManager().Initialize(
 				s.svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
+				s.svr.GetRaftCluster().GetOpts().GetWitnessCount(),
 				s.svr.GetRaftCluster().GetOpts().GetLocationLabels())
 			c.Assert(err, IsNil)
 		}

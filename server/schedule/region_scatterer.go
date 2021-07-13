@@ -385,6 +385,7 @@ func (r *RegionScatterer) selectStore(group string, peer *metapb.Peer, sourceSto
 			newPeer = &metapb.Peer{
 				StoreId: storeID,
 				Role:    peer.GetRole(),
+				Witness: peer.Witness,
 			}
 		}
 	}

@@ -195,7 +195,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 		if srcPeer == nil {
 			return nil
 		}
-		destPeer := &metapb.Peer{StoreId: destStoreID}
+		destPeer := &metapb.Peer{StoreId: destStoreID, Witness: srcPeer.Witness}
 		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
 		if err != nil {
 			log.Debug("fail to create move leader operator", errs.ZapError(err))

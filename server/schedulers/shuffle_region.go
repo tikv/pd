@@ -163,5 +163,5 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, region *co
 	if target == nil {
 		return nil
 	}
-	return &metapb.Peer{StoreId: target.GetID(), Role: oldPeer.GetRole()}
+	return &metapb.Peer{StoreId: target.GetID(), Role: oldPeer.GetRole(), Witness: oldPeer.Witness}
 }

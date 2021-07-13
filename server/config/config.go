@@ -1017,6 +1017,9 @@ type ReplicationConfig struct {
 	// Even if a zone is down, PD will not try to make up replicas in other zone
 	// because other zones already have replicas on it.
 	IsolationLevel string `toml:"isolation-level" json:"isolation-level"`
+
+	// WitnessCount is the number of witness peers for each region.
+	WitnessCount int `toml:"witness-count" json:"witness_count"`
 }
 
 // Clone makes a deep copy of the config.
