@@ -165,7 +165,7 @@ func (c *coordinator) checkPriorityRegions() {
 	for _, id := range regionIDs {
 		region := c.cluster.GetRegion(id)
 		if region == nil {
-			regionIDs = append(removeIDs, id)
+			removeIDs = append(removeIDs, id)
 			continue
 		}
 		ops := c.checkers.CheckRegion(region)

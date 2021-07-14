@@ -12,10 +12,8 @@ import (
 var _ = Suite(&testPriorityCheckerSuite{})
 
 type testPriorityCheckerSuite struct {
-	cluster *mockcluster.Cluster
-	rc      *ReplicaChecker
-	ctx     context.Context
-	cancel  context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func (s *testPriorityCheckerSuite) SetUpSuite(c *C) {

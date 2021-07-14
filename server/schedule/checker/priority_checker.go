@@ -42,7 +42,7 @@ func NewPriorityChecker(cluster opt.Cluster) *PriorityChecker {
 }
 
 // GetType returns PriorityChecker's type
-func (m *PriorityChecker) GetType() string {
+func (p *PriorityChecker) GetType() string {
 	return "priority-checker"
 }
 
@@ -63,21 +63,21 @@ func NewRegionEntry(regionID uint64) *RegionPriorityEntry {
 	return &RegionPriorityEntry{regionID: regionID, Last: time.Now(), Retry: 1}
 }
 
-// Check check region's replicas, it will put into priority queue if the region lack of replicas
-func (c *PriorityChecker) Check(region *core.RegionInfo) {
+// Check check region's replicas, it will put into priority queue if the region lack of replicas.
+func (p *PriorityChecker) Check(region *core.RegionInfo) {
 	makeupCount := 0
-	if c.opts.IsPlacementRulesEnabled() {
-		makeupCount = c.checkRegionInPlacementRule(region)
+	if p.opts.IsPlacementRulesEnabled() {
+		makeupCount = p.checkRegionInPlacementRule(region)
 	} else {
-		makeupCount = c.checkRegionInReplica(region)
+		makeupCount = p.checkRegionInReplica(region)
 	}
 	priority := 0 - makeupCount
-	c.addPriorityQueue(priority, region.GetID())
+	p.addPriorityQueue(priority, region.GetID())
 }
 
 // checkRegionInPlacementRule check region in placement rule mode
-func (c *PriorityChecker) checkRegionInPlacementRule(region *core.RegionInfo) (makeupCount int) {
-	fit := c.cluster.FitRegion(region)
+func (p *PriorityChecker) checkRegionInPlacementRule(region *core.RegionInfo) (makeupCount int) {
+	fit := p.cluster.FitRegion(region)
 	if len(fit.RuleFits) == 0 {
 		return
 	}
@@ -88,33 +88,33 @@ func (c *PriorityChecker) checkRegionInPlacementRule(region *core.RegionInfo) (m
 }
 
 // checkReplicas check region in replica mode
-func (c *PriorityChecker) checkRegionInReplica(region *core.RegionInfo) (makeupCount int) {
-	return c.opts.GetMaxReplicas() - len(region.GetPeers())
+func (p *PriorityChecker) checkRegionInReplica(region *core.RegionInfo) (makeupCount int) {
+	return p.opts.GetMaxReplicas() - len(region.GetPeers())
 }
 
 // addPriorityQueue add region into queue
 // it will remove if region's priority equal 0
 // it's retry will increase if region's priority equal last
-func (c *PriorityChecker) addPriorityQueue(priority int, regionID uint64) {
+func (p *PriorityChecker) addPriorityQueue(priority int, regionID uint64) {
 	if priority < 0 {
-		if entry := c.queue.Get(regionID); entry != nil && entry.Priority == priority {
+		if entry := p.queue.Get(regionID); entry != nil && entry.Priority == priority {
 			e := entry.Value.(*RegionPriorityEntry)
 			e.Retry = e.Retry + 1
 			e.Last = time.Now()
 		}
 		entry := NewRegionEntry(regionID)
-		c.queue.Put(priority, entry)
+		p.queue.Put(priority, entry)
 	} else {
-		c.queue.Remove(regionID)
+		p.queue.Remove(regionID)
 	}
 }
 
 // GetPriorityRegions returns all regions in priority queue that needs rerun
-func (c *PriorityChecker) GetPriorityRegions() (ids []uint64) {
-	entries := c.queue.Elems()
+func (p *PriorityChecker) GetPriorityRegions() (ids []uint64) {
+	entries := p.queue.Elems()
 	for _, e := range entries {
 		re := e.Value.(*RegionPriorityEntry)
-		if t := re.Last.Add(time.Duration(re.Retry*10) * c.opts.GetPatrolRegionInterval()); t.Before(time.Now()) {
+		if t := re.Last.Add(time.Duration(re.Retry*10) * p.opts.GetPatrolRegionInterval()); t.Before(time.Now()) {
 			ids = append(ids, re.regionID)
 		}
 	}
@@ -122,6 +122,6 @@ func (c *PriorityChecker) GetPriorityRegions() (ids []uint64) {
 }
 
 // RemovePriorityRegion removes priority region from priority queue
-func (c *PriorityChecker) RemovePriorityRegion(regionID uint64) {
-	c.queue.Remove(regionID)
+func (p *PriorityChecker) RemovePriorityRegion(regionID uint64) {
+	p.queue.Remove(regionID)
 }
