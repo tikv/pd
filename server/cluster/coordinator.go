@@ -159,13 +159,13 @@ func (c *coordinator) patrolRegions() {
 
 // checkPriorityRegions checks priority regions
 func (c *coordinator) checkPriorityRegions() {
-	regionIDs := c.checkers.GetPriorityRegions()
-	removeIDs := make([]uint64, 0)
-	regionListGauge.WithLabelValues("priority_list").Set(float64(len(regionIDs)))
-	for _, id := range regionIDs {
+	items := c.checkers.GetPriorityRegions()
+	removes := make([]uint64, 0)
+	regionListGauge.WithLabelValues("priority_list").Set(float64(len(items)))
+	for _, id := range items {
 		region := c.cluster.GetRegion(id)
 		if region == nil {
-			removeIDs = append(removeIDs, id)
+			removes = append(removes, id)
 			continue
 		}
 		ops := c.checkers.CheckRegion(region)
@@ -177,7 +177,7 @@ func (c *coordinator) checkPriorityRegions() {
 			c.opController.AddWaitingOperator(ops...)
 		}
 	}
-	for _, v := range removeIDs {
+	for _, v := range removes {
 		c.checkers.RemovePriorityRegions(v)
 	}
 }
