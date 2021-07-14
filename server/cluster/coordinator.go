@@ -108,6 +108,8 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
+		//  Check priority regions first.
+		c.checkPriorityRegions()
 		// Check suspect regions first.
 		c.checkSuspectRegions()
 		// Check suspect key ranges
@@ -152,6 +154,31 @@ func (c *coordinator) patrolRegions() {
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()
 		})
+	}
+}
+
+// checkPriorityRegions checks priority regions
+func (c *coordinator) checkPriorityRegions() {
+	regionIDs := c.checkers.GetPriorityRegions()
+	removeIDs := make([]uint64, 0)
+	regionListGauge.WithLabelValues("priority_list").Set(float64(len(regionIDs)))
+	for _, id := range regionIDs {
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			regionIDs = append(removeIDs, id)
+			continue
+		}
+		ops := c.checkers.CheckRegion(region)
+		// it should skip if region needs to merge
+		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
+			continue
+		}
+		if !c.opController.ExceedStoreLimit(ops...) {
+			c.opController.AddWaitingOperator(ops...)
+		}
+	}
+	for _, v := range removeIDs {
+		c.checkers.RemovePriorityRegions(v)
 	}
 }
 
@@ -207,7 +234,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 
 func (c *coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
-	regionWaitingListGauge.Set(float64(len(items)))
+	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
 	for _, item := range items {
 		id := item.Key
 		region := c.cluster.GetRegion(id)
