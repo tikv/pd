@@ -26,8 +26,8 @@ type StoreComparer func(a, b *core.StoreInfo) int
 // score.
 func RegionScoreComparer(opt *config.PersistOptions) StoreComparer {
 	return func(a, b *core.StoreInfo) int {
-		sa := a.RegionScore(opt.GetRegionScoreFormulaVersion(), opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, 0)
-		sb := b.RegionScore(opt.GetRegionScoreFormulaVersion(), opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, 0)
+		sa := a.RegionScore(opt.GetRegionScoreFormulaVersion(), opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0)
+		sb := b.RegionScore(opt.GetRegionScoreFormulaVersion(), opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0)
 		switch {
 		case sa > sb:
 			return 1

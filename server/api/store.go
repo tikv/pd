@@ -89,7 +89,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			LeaderSize:         store.GetLeaderSize(),
 			RegionCount:        store.GetRegionCount(),
 			RegionWeight:       store.GetRegionWeight(),
-			RegionScore:        store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0, 0),
+			RegionScore:        store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
 			RegionSize:         store.GetRegionSize(),
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
