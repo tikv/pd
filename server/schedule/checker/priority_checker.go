@@ -22,7 +22,8 @@ import (
 	"github.com/tikv/pd/server/schedule/opt"
 )
 
-const DefaultPriorityQueueSize = 1280 //// the default value of priority queue size
+// the default value of priority queue size
+const defaultPriorityQueueSize = 1280
 
 // PriorityChecker ensures high priority region should run first
 type PriorityChecker struct {
@@ -37,7 +38,7 @@ func NewPriorityChecker(cluster opt.Cluster) *PriorityChecker {
 	return &PriorityChecker{
 		cluster: cluster,
 		opts:    opts,
-		queue:   cache.NewPriorityQueue(DefaultPriorityQueueSize),
+		queue:   cache.NewPriorityQueue(defaultPriorityQueueSize),
 	}
 }
 
