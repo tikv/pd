@@ -846,14 +846,24 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
+	priority := bs.sche.conf.HotDimPriority
 	if bs.rwTy == write && bs.opTy == transferLeader {
-		// In this condition, CPU usage is the matter.
-		// Only consider about key rate.
-		srcKeyRate := srcLd.Loads[statistics.KeyDim]
-		dstKeyRate := dstLd.Loads[statistics.KeyDim]
-		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
-		if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
-			rank = -1
+		if priority == NoneDimPriority || priority == WriteKeyDimPriority {
+			// In this condition, CPU usage is the matter.
+			// Only consider about key rate.
+			srcKeyRate := srcLd.Loads[statistics.KeyDim]
+			dstKeyRate := dstLd.Loads[statistics.KeyDim]
+			peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
+			if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
+				rank = -1
+			}
+		} else {
+			srcKeyRate := srcLd.Loads[statistics.ByteDim]
+			dstKeyRate := dstLd.Loads[statistics.ByteDim]
+			peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.ByteDim))
+			if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
+				rank = -1
+			}
 		}
 	} else {
 		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
@@ -876,16 +886,32 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		byteHot, byteDecRatio := checkHot(statistics.ByteDim)
 
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
-		switch {
-		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
-			rank = -3
-		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
-			rank = -2
-		case byteHot && byteDecRatio <= greatDecRatio:
-			// If belong to the case, byte rate will be more balanced, ignore the key rate.
-			rank = -1
+		if priority == NoneDimPriority {
+			switch {
+			case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
+				// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
+				rank = -3
+			case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
+				// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
+				rank = -2
+			case byteHot && byteDecRatio <= greatDecRatio:
+				// If belong to the case, byte rate will be more balanced, ignore the key rate.
+				rank = -1
+			}
+		} else if priority == ReadKeyDimPriority || priority == WriteKeyDimPriority {
+			switch {
+			case keyHot && keyDecRatio <= greatDecRatio:
+				rank = -3
+			case keyHot && keyDecRatio <= minorDecRatio:
+				rank = -2
+			}
+		} else if priority == ReadByteDimPriority || priority == WriteByteDimPriority {
+			switch {
+			case byteHot && byteDecRatio <= greatDecRatio:
+				rank = -3
+			case byteHot && byteDecRatio <= minorDecRatio:
+				rank = -2
+			}
 		}
 	}
 	log.Debug("calcProgressiveRank",

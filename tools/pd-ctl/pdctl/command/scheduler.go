@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/server/schedulers"
 	"net/http"
 	"net/url"
 	"path"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server/schedulers"
 )
 
 var (

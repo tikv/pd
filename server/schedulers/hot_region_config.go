@@ -31,10 +31,15 @@ import (
 )
 
 const (
-	NoneDimPriority      = "none"
-	ReadKeyDimPriority   = "read_key"
-	ReadByteDimPriority  = "read_byte"
-	WriteKeyDimPriority  = "write_key"
+	// NoneDimPriority indicates hot-region-scheduler doesn't have dim priority
+	NoneDimPriority = "none"
+	// ReadKeyDimPriority indicates hot-region-scheduler prefer read key dim
+	ReadKeyDimPriority = "read_key"
+	// ReadByteDimPriority indicates hot-region-scheduler prefer read byte dim
+	ReadByteDimPriority = "read_byte"
+	// WriteKeyDimPriority indicates hot-region-scheduler prefer write key dim
+	WriteKeyDimPriority = "write_key"
+	// WriteByteDimPriority indicates hot-region-scheduler prefer write byte dim
 	WriteByteDimPriority = "write_byte"
 )
 
