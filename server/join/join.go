@@ -18,7 +18,6 @@ import (
 	"os"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -154,47 +153,31 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	})
 	// - A new PD joins an existing cluster.
 	// - A deleted PD joins to previous cluster.
-	{
-		// First adds member through the API
-		addResp, err = etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
-		if err != nil {
-			return err
-		}
+	// First adds member through the API
+	addResp, err = etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
+	if err != nil {
+		return err
 	}
 	failpoint.Label("LabelSkipAddMember")
 
 	var (
-		pds      []string
-		listSucc bool
+		pds     []string
+		addSucc bool
 	)
-
-	for i := 0; i < listMemberRetryTimes; i++ {
-		listResp, err = etcdutil.ListEtcdMembers(client)
-		if err != nil {
-			return err
+	for _, memb := range addResp.Members {
+		n := memb.Name
+		if memb.ID == addResp.Member.ID {
+			n = cfg.Name
+			addSucc = true
 		}
-
-		pds = []string{}
-		for _, memb := range listResp.Members {
-			n := memb.Name
-			if addResp != nil && memb.ID == addResp.Member.ID {
-				n = cfg.Name
-				listSucc = true
-			}
-			if len(n) == 0 {
-				return errors.New("there is a member that has not joined successfully")
-			}
-			for _, m := range memb.PeerURLs {
-				pds = append(pds, fmt.Sprintf("%s=%s", n, m))
-			}
+		if len(n) == 0 {
+			return errors.New("there is a member that has not joined successfully")
 		}
-
-		if listSucc {
-			break
+		for _, m := range memb.PeerURLs {
+			pds = append(pds, fmt.Sprintf("%s=%s", n, m))
 		}
-		time.Sleep(500 * time.Millisecond)
 	}
-	if !listSucc {
+	if !addSucc {
 		return errors.Errorf("join failed, adds the new member %s may failed", cfg.Name)
 	}
 
