@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/tikv/pd/server/schedulers"
 	"net/http"
 	"net/url"
 	"path"
@@ -528,6 +529,21 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 		val = value
 	}
 	input[key] = val
+	if schedulerName == "balance-hot-region-scheduler" && key == "hot-dim-priority" {
+		if value != schedulers.NoneDimPriority &&
+			value != schedulers.ReadByteDimPriority &&
+			value != schedulers.ReadKeyDimPriority &&
+			value != schedulers.WriteByteDimPriority &&
+			value != schedulers.WriteKeyDimPriority {
+			cmd.Println(fmt.Sprintf("hot-dim-priority should be one of <%s>, <%s>, <%s>, <%s>, <%s>",
+				schedulers.NoneDimPriority,
+				schedulers.ReadByteDimPriority,
+				schedulers.ReadKeyDimPriority,
+				schedulers.WriteByteDimPriority,
+				schedulers.WriteKeyDimPriority))
+			return
+		}
+	}
 	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 
