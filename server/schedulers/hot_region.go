@@ -825,7 +825,7 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	switch {
 	case priority == NoneDimPriority:
-		return slice.AllOf(maxLoad, func(i int) bool {
+		return slice.AllOf(maxLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
 				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
 			}
