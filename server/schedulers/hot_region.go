@@ -745,7 +745,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 				}
 				return true
 			}) {
-				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
+				ret[store.GetID()] = detail
 				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}
 			hotSchedulerResultCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
