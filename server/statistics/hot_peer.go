@@ -97,12 +97,9 @@ type HotPeerStat struct {
 	needDelete bool
 	isLeader   bool
 	isNew      bool
-	//TODO: remove it when we send peer stat by store info
-	justTransferLeader     bool
-	interval               uint64
-	thresholds             []float64
-	peers                  []uint64
-	lastTransferLeaderTime time.Time
+	interval   uint64
+	thresholds []float64
+	peers      []uint64
 	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
 	// we will handle it as cold peer and mark the inCold flag
 	inCold bool
@@ -129,16 +126,9 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Float64s("thresholds", stat.thresholds),
 		zap.Int("hot-degree", stat.HotDegree),
 		zap.Int("hot-anti-count", stat.AntiCount),
-		zap.Bool("just-transfer-leader", stat.justTransferLeader),
 		zap.Bool("is-leader", stat.isLeader),
 		zap.Bool("need-delete", stat.IsNeedDelete()),
-		zap.String("type", stat.Kind.String()),
-		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
-}
-
-// IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
-func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
-	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*stat.hotStatReportInterval())
+		zap.String("type", stat.Kind.String()))
 }
 
 // IsNeedDelete to delete the item in cache.

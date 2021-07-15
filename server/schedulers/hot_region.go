@@ -568,8 +568,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 
 	// filter pending region
 	appendItem := func(items []*statistics.HotPeerStat, item *statistics.HotPeerStat) []*statistics.HotPeerStat {
-		minHotDegree := bs.cluster.GetOpts().GetHotRegionCacheHitsThreshold()
-		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(minHotDegree) {
+		if _, ok := bs.sche.regionPendings[item.ID()]; !ok {
 			// no in pending operator and no need cool down after transfer leader
 			items = append(items, item)
 		}

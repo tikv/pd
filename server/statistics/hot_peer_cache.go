@@ -164,7 +164,6 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	for i := range deltaLoads {
 		loads[i] = deltaLoads[i] / float64(interval)
 	}
-	justTransferLeader := f.justTransferLeader(region)
 	oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
 	thresholds := f.calcHotThresholds(storeID)
 	regionPeers := region.GetPeers()
@@ -173,17 +172,16 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		peers = append(peers, peer.StoreId)
 	}
 	newItem := &HotPeerStat{
-		StoreID:            storeID,
-		RegionID:           region.GetID(),
-		Kind:               f.kind,
-		Loads:              loads,
-		LastUpdateTime:     time.Now(),
-		needDelete:         false,
-		isLeader:           region.GetLeader().GetStoreId() == storeID,
-		justTransferLeader: justTransferLeader,
-		interval:           interval,
-		peers:              peers,
-		thresholds:         thresholds,
+		StoreID:        storeID,
+		RegionID:       region.GetID(),
+		Kind:           f.kind,
+		Loads:          loads,
+		LastUpdateTime: time.Now(),
+		needDelete:     false,
+		isLeader:       region.GetLeader().GetStoreId() == storeID,
+		interval:       interval,
+		peers:          peers,
+		thresholds:     thresholds,
 	}
 	if oldItem == nil {
 		inheritItem := f.takeInheritItem(region.GetID())
@@ -221,15 +219,14 @@ func (f *hotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]st
 				RegionID: regionID,
 				Kind:     f.kind,
 				// use oldItem.thresholds to make the newItem won't affect the threshold
-				Loads:              oldItem.thresholds,
-				LastUpdateTime:     time.Now(),
-				needDelete:         false,
-				isLeader:           oldItem.isLeader,
-				justTransferLeader: oldItem.justTransferLeader,
-				interval:           interval,
-				peers:              oldItem.peers,
-				thresholds:         oldItem.thresholds,
-				inCold:             true,
+				Loads:          oldItem.thresholds,
+				LastUpdateTime: time.Now(),
+				needDelete:     false,
+				isLeader:       oldItem.isLeader,
+				interval:       interval,
+				peers:          oldItem.peers,
+				thresholds:     oldItem.thresholds,
+				inCold:         true,
 			}
 			deltaLoads := make([]float64, RegionStatCount)
 			for i, loads := range oldItem.thresholds {
@@ -330,22 +327,6 @@ func (f *hotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool 
 	return isOldPeer() && noInCache()
 }
 
-func (f *hotPeerCache) justTransferLeader(region *core.RegionInfo) bool {
-	ids, ok := f.storesOfRegion[region.GetID()]
-	if ok {
-		for storeID := range ids {
-			oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
-			if oldItem == nil {
-				continue
-			}
-			if oldItem.isLeader {
-				return oldItem.StoreID != region.GetLeader().GetStoreId()
-			}
-		}
-	}
-	return false
-}
-
 func (f *hotPeerCache) isRegionHotWithAnyPeers(region *core.RegionInfo, hotDegree int) bool {
 	for _, peer := range region.GetPeers() {
 		if f.isRegionHotWithPeer(region, peer, hotDegree) {
@@ -379,21 +360,6 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 	}
 
 	newItem.rollingLoads = oldItem.rollingLoads
-
-	if newItem.justTransferLeader {
-		newItem.lastTransferLeaderTime = time.Now()
-		// skip the first heartbeat flow statistic after transfer leader, because its statistics are calculated by the last leader in this store and are inaccurate
-		// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.
-		// For write stat, as the stat is send by region heartbeat, the first heartbeat will be skipped.
-		// For read stat, as the stat is send by store heartbeat, the first heartbeat won't be skipped.
-		if newItem.Kind == WriteFlow {
-			inheritItemDegree(newItem, oldItem)
-			return newItem
-		}
-	} else {
-		newItem.lastTransferLeaderTime = oldItem.lastTransferLeaderTime
-	}
-
 	for i, k := range regionStats {
 		newItem.rollingLoads[i].Add(deltaLoads[k], interval)
 	}
