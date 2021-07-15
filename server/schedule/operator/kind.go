@@ -24,9 +24,11 @@ type OpKind uint32
 
 // Flags for operators.
 const (
+	// Initiated by admin.
+	OpAdmin OpKind = 1 << iota
 	// Initiated by merge checker or merge scheduler. Note that it may not include region merge.
 	// the order describe the operator's producer and is very helpful to decouple scheduler or checker limit
-	OpMerge OpKind = 1 << iota
+	OpMerge
 	// Initiated by range scheduler.
 	OpRange
 	// Initiated by replica checker.
@@ -41,8 +43,6 @@ const (
 	OpLeader
 	OpBalance
 	OpAdjacent
-	// Initiated by admin.
-	OpAdmin
 	opMax
 )
 

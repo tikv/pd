@@ -87,7 +87,7 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 }
 
 func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
-	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, OpAdmin|kind, steps...)
+	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, kind, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OpStep) {
@@ -105,7 +105,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 		TransferLeader{FromStore: 3, ToStore: 1},
 		RemovePeer{FromStore: 3},
 	}
-	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+	op := s.newTestOperator(1, OpAdmin|OpLeader|OpRegion, steps...)
 	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	s.checkSteps(c, op, steps)
 	op.Start()
@@ -380,6 +380,10 @@ func (s *testOperatorSuite) TestSchedulerKind(c *C) {
 		op     *Operator
 		expect OpKind
 	}{
+		{
+			op:     s.newTestOperator(1, OpAdmin|OpMerge|OpRegion),
+			expect: OpAdmin,
+		},
 		{
 			op:     s.newTestOperator(1, OpMerge|OpLeader|OpRegion),
 			expect: OpMerge,
