@@ -452,8 +452,10 @@ func getHeterogeneousScaleInPlans(resourceMap map[string]uint64, component Compo
 
 	for resourceType, resourceCount := range resourceMap {
 		if resourceType != homogeneousTiKVResourceType && resourceType != homogeneousTiDBResourceType {
+			plans = append(plans, NewPlan(component, resourceCount-1, resourceType))
 			log.Info(fmt.Sprintf("autoscale: get heterogeneous scale in plans completed. component: %s, plans: %v", component, plans))
-			return append(plans, NewPlan(component, resourceCount-1, resourceType))
+
+			return plans
 		}
 	}
 
