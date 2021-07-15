@@ -36,6 +36,7 @@ type storeStatistics struct {
 	Offline         int
 	Tombstone       int
 	LowSpace        int
+	Slow            int
 	StorageSize     uint64
 	StorageCapacity uint64
 	RegionCount     int
@@ -73,6 +74,8 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 			s.Unhealthy++
 		} else if store.IsDisconnected() {
 			s.Disconnect++
+		} else if store.IsSlow() {
+			s.Slow++
 		} else {
 			s.Up++
 		}

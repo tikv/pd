@@ -33,6 +33,7 @@ const (
 	gb                     = 1 << 30 // 1GB size
 	initialMaxRegionCounts = 30      // exclude storage Threshold Filter when region less than 30
 	initialMinSpace        = 1 << 33 // 2^33=8GB
+	slowStoreThreshold     = 80
 )
 
 // StoreInfo contains information about a store.
@@ -139,6 +140,18 @@ func (s *StoreInfo) IsOffline() bool {
 // IsTombstone checks if the store's state is Tombstone.
 func (s *StoreInfo) IsTombstone() bool {
 	return s.GetState() == metapb.StoreState_Tombstone
+}
+
+func (s *StoreInfo) SlowScore() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rawStats.GetSlowScore()
+}
+
+func (s *StoreInfo) IsSlow() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rawStats.GetSlowScore() >= slowStoreThreshold
 }
 
 // IsPhysicallyDestroyed checks if the store's physically destroyed.

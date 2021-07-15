@@ -54,3 +54,5 @@ require (
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+replace github.com/pingcap/kvproto v0.0.0-20210604082642-dda0a102bc6a => github.com/5kbpers/kvproto v0.0.0-20210714075718-bae4198f5778

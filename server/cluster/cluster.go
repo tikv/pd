@@ -123,6 +123,8 @@ type RaftCluster struct {
 
 	// It's used to manage components.
 	componentManager *component.Manager
+
+	slowNodeDetector *slowStoreDetector
 }
 
 // Status saves some state information.
@@ -254,6 +256,7 @@ func (c *RaftCluster) Start(s Server) error {
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
+	c.slowNodeDetector = newSlowStoreDetector(cluster)
 
 	c.wg.Add(4)
 	go c.runCoordinator()
@@ -1198,7 +1201,9 @@ func (c *RaftCluster) checkStores() {
 	var offlineStores []*metapb.Store
 	var upStoreCount int
 	stores := c.GetStores()
+	storesMap := make(map[uint64]*core.StoreInfo)
 	for _, store := range stores {
+		storesMap[store.GetID()] = store
 		// the store has already been tombstone
 		if store.IsTombstone() {
 			continue
@@ -1224,6 +1229,8 @@ func (c *RaftCluster) checkStores() {
 			offlineStores = append(offlineStores, offlineStore)
 		}
 	}
+
+	c.slowNodeDetector.detectSlowStore(storesMap)
 
 	if len(offlineStores) == 0 {
 		return
