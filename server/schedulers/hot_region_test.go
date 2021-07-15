@@ -1167,7 +1167,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		{
 			kind:                      write,
 			onlyLeader:                false,
-			DegreeAfterTransferLeader: 3,
+			DegreeAfterTransferLeader: 4,
 		},
 		{
 			kind:                      read,
@@ -1220,13 +1220,13 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 				c.Check(item.HotDegree, Equals, testcase.DegreeAfterTransferLeader)
 			}
 		}
-
+		//
 		if testcase.DegreeAfterTransferLeader >= 3 {
 			// try schedule
 			hb.prepareForBalance(tc)
 			leaderSolver := newBalanceSolver(hb, tc, testcase.kind, transferLeader)
 			leaderSolver.cur = &solution{srcStoreID: 2}
-			c.Check(leaderSolver.filterHotPeers(), HasLen, 0) // skip schedule
+			c.Check(leaderSolver.filterHotPeers(), HasLen, 1) // not skip schedule anymore
 			threshold := tc.GetHotRegionCacheHitsThreshold()
 			tc.SetHotRegionCacheHitsThreshold(0)
 			c.Check(leaderSolver.filterHotPeers(), HasLen, 1)
