@@ -31,7 +31,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20210604082642-dda0a102bc6a
 	github.com/pingcap/log v0.0.0-20210317133921-96f4fcab92a4
 	github.com/pingcap/sysutil v0.0.0-20210315073920-cc0985d983a3
-	github.com/pingcap/tidb-dashboard v0.0.0-20210709093715-07fe6d3dedc9
+	github.com/pingcap/tidb-dashboard v0.0.0-20210714101133-01cc765fe667
 	github.com/prometheus/client_golang v1.11.0
 	github.com/prometheus/common v0.26.0
 	github.com/sasha-s/go-deadlock v0.2.0
@@ -55,5 +55,3 @@ require (
 	google.golang.org/grpc v1.39.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
-
-replace github.com/pingcap/tidb-dashboard => ../tidb-dashboard
