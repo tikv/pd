@@ -389,6 +389,10 @@ func (s *testOperatorSuite) TestSchedulerKind(c *C) {
 		expect OpKind
 	}{
 		{
+			op:     s.newTestOperator(1, OpAdmin|OpMerge|OpRegion),
+			expect: OpAdmin,
+		},
+		{
 			op:     s.newTestOperator(1, OpMerge|OpLeader|OpRegion),
 			expect: OpMerge,
 		}, {
