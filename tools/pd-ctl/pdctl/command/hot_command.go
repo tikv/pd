@@ -15,7 +15,9 @@ package command
 
 import (
 	"net/http"
+	"strconv"
 
+	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +42,7 @@ func NewHotSpotCommand() *cobra.Command {
 // NewHotWriteRegionCommand return a hot regions subcommand of hotSpotCmd
 func NewHotWriteRegionCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "write",
+		Use:   "write [<store id> ...]",
 		Short: "show the hot write regions",
 		Run:   showHotWriteRegionsCommandFunc,
 	}
@@ -48,9 +50,14 @@ func NewHotWriteRegionCommand() *cobra.Command {
 }
 
 func showHotWriteRegionsCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, hotWriteRegionsPrefix, http.MethodGet)
+	prefix, err := parseOptionalArgs(cmd, hotWriteRegionsPrefix, args)
 	if err != nil {
-		cmd.Printf("Failed to get hotspot: %s\n", err)
+		cmd.Println(err)
+		return
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get write hotspot: %s\n", err)
 		return
 	}
 	cmd.Println(r)
@@ -59,7 +66,7 @@ func showHotWriteRegionsCommandFunc(cmd *cobra.Command, args []string) {
 // NewHotReadRegionCommand return a hot read regions subcommand of hotSpotCmd
 func NewHotReadRegionCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "read",
+		Use:   "read [<store id> ...]",
 		Short: "show the hot read regions",
 		Run:   showHotReadRegionsCommandFunc,
 	}
@@ -67,9 +74,14 @@ func NewHotReadRegionCommand() *cobra.Command {
 }
 
 func showHotReadRegionsCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, hotReadRegionsPrefix, http.MethodGet)
+	prefix, err := parseOptionalArgs(cmd, hotReadRegionsPrefix, args)
 	if err != nil {
-		cmd.Printf("Failed to get hotspot: %s\n", err)
+		cmd.Println(err)
+		return
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get read hotspot: %s\n", err)
 		return
 	}
 	cmd.Println(r)
@@ -88,8 +100,26 @@ func NewHotStoreCommand() *cobra.Command {
 func showHotStoresCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, hotStoresPrefix, http.MethodGet)
 	if err != nil {
-		cmd.Printf("Failed to get hotspot: %s\n", err)
+		cmd.Printf("Failed to get store hotspot: %s\n", err)
 		return
 	}
 	cmd.Println(r)
+}
+
+func parseOptionalArgs(cmd *cobra.Command, prefix string, args []string) (string, error) {
+	argsLen := len(args)
+	if argsLen > 0 {
+		prefix += "?"
+	}
+	for i, arg := range args {
+		if _, err := strconv.Atoi(arg); err != nil {
+			return "", errors.Errorf("store id should be a number, but got %s", arg)
+		}
+		if i != argsLen {
+			prefix = prefix + "store_id=" + arg + "&"
+		} else {
+			prefix = prefix + "store_id=" + arg
+		}
+	}
+	return prefix, nil
 }

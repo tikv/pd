@@ -38,7 +38,7 @@ type storeStats struct {
 func newStoreStats() *storeStats {
 	return &storeStats{
 		rawStats:                 &pdpb.StoreStats{},
-		avgAvailable:             movingaverage.NewHMA(240),       // take 40 minutes sample under 10s heartbeat rate
+		avgAvailable:             movingaverage.NewHMA(60),        // take 10 minutes sample under 10s heartbeat rate
 		maxAvailableDeviation:    movingaverage.NewMaxFilter(120), // take 20 minutes sample under 10s heartbeat rate
 		avgMaxAvailableDeviation: movingaverage.NewHMA(60),        // take 10 minutes sample under 10s heartbeat rate
 	}
