@@ -31,8 +31,6 @@ import (
 )
 
 const (
-	// NoneDimPriority indicates hot-region-scheduler doesn't have dim priority
-	NoneDimPriority = "none"
 	// ReadKeyDimPriority indicates hot-region-scheduler prefer read key dim
 	ReadKeyDimPriority = "read_key"
 	// ReadByteDimPriority indicates hot-region-scheduler prefer read byte dim
@@ -58,7 +56,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MaxPeerNum:             1000,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		HotDimPriority:         NoneDimPriority,
+		HotDimPriority:         []string{},
 	}
 }
 
@@ -73,15 +71,15 @@ type hotRegionSchedulerConfig struct {
 
 	// rank step ratio decide the step when calculate rank
 	// step = max current * rank step ratio
-	ByteRateRankStepRatio  float64 `json:"byte-rate-rank-step-ratio"`
-	KeyRateRankStepRatio   float64 `json:"key-rate-rank-step-ratio"`
-	QueryRateRankStepRatio float64 `json:"query-rate-rank-step-ratio"`
-	CountRankStepRatio     float64 `json:"count-rank-step-ratio"`
-	GreatDecRatio          float64 `json:"great-dec-ratio"`
-	MinorDecRatio          float64 `json:"minor-dec-ratio"`
-	SrcToleranceRatio      float64 `json:"src-tolerance-ratio"`
-	DstToleranceRatio      float64 `json:"dst-tolerance-ratio"`
-	HotDimPriority         string  `json:"hot-dim-priority"`
+	ByteRateRankStepRatio  float64  `json:"byte-rate-rank-step-ratio"`
+	KeyRateRankStepRatio   float64  `json:"key-rate-rank-step-ratio"`
+	QueryRateRankStepRatio float64  `json:"query-rate-rank-step-ratio"`
+	CountRankStepRatio     float64  `json:"count-rank-step-ratio"`
+	GreatDecRatio          float64  `json:"great-dec-ratio"`
+	MinorDecRatio          float64  `json:"minor-dec-ratio"`
+	SrcToleranceRatio      float64  `json:"src-tolerance-ratio"`
+	DstToleranceRatio      float64  `json:"dst-tolerance-ratio"`
+	HotDimPriority         []string `json:"hot-dim-priority"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {

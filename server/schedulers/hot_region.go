@@ -536,8 +536,8 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 }
 
 func (bs *balanceSolver) checkInfluenceConflict() bool {
-	priority := bs.sche.conf.HotDimPriority
-	if priority == NoneDimPriority {
+	priorities := bs.sche.conf.HotDimPriority
+	if len(priorities) == 0 {
 		return true
 	}
 	srcStore := bs.cur.srcStoreID
@@ -553,43 +553,27 @@ func (bs *balanceSolver) checkInfluenceConflict() bool {
 		}
 		return pass
 	}
+	ensuredPriorities := ensureDimPriority(bs.rwTy, priorities)
+	ensuredDimIndexes := prioritiesToDimIndexes(ensuredPriorities)
 	switch {
-	case bs.rwTy == write && priority == ReadByteDimPriority:
+	case bs.rwTy == write:
 		return checkLoads(
 			bs.sche.stLoadInfos[readPeer][srcStore].LoadPred.min(),
 			bs.sche.stLoadInfos[readPeer][dstStore].LoadPred.max(),
-			statistics.RegionReadBytes) &&
+			ensuredDimIndexes...) &&
 			checkLoads(
 				bs.sche.stLoadInfos[readLeader][srcStore].LoadPred.min(),
 				bs.sche.stLoadInfos[readLeader][dstStore].LoadPred.max(),
-				statistics.RegionReadBytes)
-	case bs.rwTy == write && priority == ReadKeyDimPriority:
-		return checkLoads(
-			bs.sche.stLoadInfos[readPeer][srcStore].LoadPred.min(),
-			bs.sche.stLoadInfos[readPeer][dstStore].LoadPred.max(),
-			statistics.RegionReadKeys) &&
-			checkLoads(
-				bs.sche.stLoadInfos[readLeader][srcStore].LoadPred.min(),
-				bs.sche.stLoadInfos[readLeader][dstStore].LoadPred.max(),
-				statistics.RegionReadKeys)
-	case bs.rwTy == read && priority == WriteByteDimPriority:
+				ensuredDimIndexes...)
+	case bs.rwTy == read:
 		return checkLoads(
 			bs.sche.stLoadInfos[writePeer][srcStore].LoadPred.min(),
 			bs.sche.stLoadInfos[writePeer][dstStore].LoadPred.max(),
-			statistics.RegionWriteBytes) &&
+			ensuredDimIndexes...) &&
 			checkLoads(
 				bs.sche.stLoadInfos[writeLeader][srcStore].LoadPred.min(),
 				bs.sche.stLoadInfos[writeLeader][dstStore].LoadPred.max(),
-				statistics.RegionWriteBytes)
-	case bs.rwTy == read && priority == WriteKeyDimPriority:
-		return checkLoads(
-			bs.sche.stLoadInfos[writePeer][srcStore].LoadPred.min(),
-			bs.sche.stLoadInfos[writePeer][dstStore].LoadPred.max(),
-			statistics.RegionWriteKeys) &&
-			checkLoads(
-				bs.sche.stLoadInfos[writeLeader][srcStore].LoadPred.min(),
-				bs.sche.stLoadInfos[writeLeader][dstStore].LoadPred.max(),
-				statistics.RegionWriteKeys)
+				ensuredDimIndexes...)
 	}
 	return true
 }
@@ -618,18 +602,19 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 }
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad) bool {
-	priority := bs.sche.conf.HotDimPriority
+	priorities := bs.sche.conf.HotDimPriority
+	preferPriority := preferPriority(bs.rwTy, priorities)
 	switch {
-	case priority == NoneDimPriority:
+	case len(priorities) == 0:
 		return slice.AllOf(minLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
 				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
 			}
 			return true
 		})
-	case (bs.rwTy == read && priority == ReadKeyDimPriority) || (bs.rwTy == write && priority == WriteKeyDimPriority):
+	case preferPriority == ReadKeyDimPriority || preferPriority == WriteKeyDimPriority:
 		return minLoad.Loads[statistics.KeyDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.KeyDim]
-	case (bs.rwTy == read && priority == ReadByteDimPriority) || (bs.rwTy == write && priority == WriteByteDimPriority):
+	case preferPriority == ReadByteDimPriority || preferPriority == WriteByteDimPriority:
 		return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
 	}
 	return false
@@ -821,19 +806,20 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 }
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad) bool {
-	priority := bs.sche.conf.HotDimPriority
+	priorities := bs.sche.conf.HotDimPriority
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
+	preferPriority := preferPriority(bs.rwTy, priorities)
 	switch {
-	case priority == NoneDimPriority:
+	case len(priorities) == 0:
 		return slice.AllOf(maxLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
 				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
 			}
 			return true
 		})
-	case (bs.rwTy == read && priority == ReadKeyDimPriority) || (bs.rwTy == write && priority == WriteKeyDimPriority):
+	case preferPriority == ReadKeyDimPriority || preferPriority == WriteKeyDimPriority:
 		return maxLoad.Loads[statistics.KeyDim]*dstToleranceRatio < expect.Loads[statistics.KeyDim]
-	case (bs.rwTy == read && priority == ReadByteDimPriority) || (bs.rwTy == write && priority == WriteByteDimPriority):
+	case preferPriority == ReadByteDimPriority || preferPriority == WriteByteDimPriority:
 		return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
 	}
 	return false
@@ -846,9 +832,10 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
-	priority := bs.sche.conf.HotDimPriority
+	priorities := bs.sche.conf.HotDimPriority
+	prefer := preferPriority(bs.rwTy, priorities)
 	if bs.rwTy == write && bs.opTy == transferLeader {
-		if priority == NoneDimPriority || priority == WriteKeyDimPriority {
+		if len(priorities) == 0 || prefer == WriteKeyDimPriority {
 			// In this condition, CPU usage is the matter.
 			// Only consider about key rate.
 			srcKeyRate := srcLd.Loads[statistics.KeyDim]
@@ -886,7 +873,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		byteHot, byteDecRatio := checkHot(statistics.ByteDim)
 
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
-		if priority == NoneDimPriority {
+		if len(priorities) == 0 {
 			switch {
 			case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
 				// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
@@ -898,14 +885,14 @@ func (bs *balanceSolver) calcProgressiveRank() {
 				// If belong to the case, byte rate will be more balanced, ignore the key rate.
 				rank = -1
 			}
-		} else if priority == ReadKeyDimPriority || priority == WriteKeyDimPriority {
+		} else if prefer == ReadKeyDimPriority || prefer == WriteKeyDimPriority {
 			switch {
 			case keyHot && keyDecRatio <= greatDecRatio:
 				rank = -3
 			case keyHot && keyDecRatio <= minorDecRatio:
 				rank = -2
 			}
-		} else if priority == ReadByteDimPriority || priority == WriteByteDimPriority {
+		} else if prefer == ReadByteDimPriority || prefer == WriteByteDimPriority {
 			switch {
 			case byteHot && byteDecRatio <= greatDecRatio:
 				rank = -3
@@ -1301,6 +1288,71 @@ func getRegionStatKind(rwTy rwType, dim int) statistics.RegionStatKind {
 		return statistics.RegionWriteQuery
 	case rwTy == read && dim == statistics.QueryDim:
 		return statistics.RegionReadQuery
+	}
+	return 0
+}
+
+func preferPriority(rwType rwType, priorities []string) string {
+	for _, priority := range priorities {
+		if rwType == read {
+			if priority == ReadKeyDimPriority || priority == ReadByteDimPriority {
+				return priority
+			}
+		} else if rwType == write {
+			if priority == WriteKeyDimPriority || priority == WriteByteDimPriority {
+				return priority
+			}
+		}
+	}
+	return ""
+}
+
+func ensureDimPriority(t rwType, priorities []string) []string {
+	passPriority := func(t rwType, priority string) bool {
+		if t == write {
+			if priority == ReadByteDimPriority || priority == ReadKeyDimPriority {
+				return true
+			} else {
+				return false
+			}
+		} else if t == read {
+			if priority == WriteByteDimPriority || priority == WriteKeyDimPriority {
+				return true
+			} else {
+				return false
+			}
+		}
+		return false
+	}
+
+	ensureDim := make([]string, 0)
+	for _, priority := range priorities {
+		ensureDim = append(ensureDim, priority)
+		if !passPriority(t, priority) {
+			break
+		}
+	}
+	return ensureDim
+}
+
+func prioritiesToDimIndexes(priorieties []string) []statistics.RegionStatKind {
+	indexes := make([]statistics.RegionStatKind, 0)
+	for _, priority := range priorieties {
+		indexes = append(indexes, priorityToDimIndex(priority))
+	}
+	return indexes
+}
+
+func priorityToDimIndex(priority string) statistics.RegionStatKind {
+	switch priority {
+	case ReadByteDimPriority:
+		return statistics.RegionReadBytes
+	case ReadKeyDimPriority:
+		return statistics.RegionReadKeys
+	case WriteByteDimPriority:
+		return statistics.RegionWriteBytes
+	case WriteKeyDimPriority:
+		return statistics.RegionWriteKeys
 	}
 	return 0
 }
