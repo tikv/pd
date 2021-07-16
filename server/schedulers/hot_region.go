@@ -159,22 +159,6 @@ func (h *hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
 }
 
 func (h *hotScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return h.allowBalanceLeader(cluster) || h.allowBalanceRegion(cluster)
-}
-
-func (h *hotScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
-	hotRegionAllowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetHotRegionScheduleLimit()
-	leaderAllowed := h.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
-	if !hotRegionAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
-	}
-	if !leaderAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpLeader.String()).Inc()
-	}
-	return hotRegionAllowed && leaderAllowed
-}
-
-func (h *hotScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
 	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetHotRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
@@ -581,7 +565,7 @@ func (bs *balanceSolver) isValid() bool {
 }
 
 func (bs *balanceSolver) solve() []*operator.Operator {
-	if !bs.isValid() || !bs.allowBalance() {
+	if !bs.isValid() {
 		return nil
 	}
 	bs.cur = &solution{}
@@ -622,17 +606,6 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		}
 	}
 	return ops
-}
-
-func (bs *balanceSolver) allowBalance() bool {
-	switch bs.opTy {
-	case movePeer:
-		return bs.sche.allowBalanceRegion(bs.cluster)
-	case transferLeader:
-		return bs.sche.allowBalanceLeader(bs.cluster)
-	default:
-		return false
-	}
 }
 
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {

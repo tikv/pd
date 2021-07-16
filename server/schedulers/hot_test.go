@@ -196,12 +196,10 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 
 	// hot region scheduler is restricted by `hot-region-schedule-limit`.
 	opt.HotRegionScheduleLimit = 0
-	c.Assert(hb.Schedule(tc), HasLen, 0)
+	c.Assert(hb.IsScheduleAllowed(tc), IsFalse)
 	hb.(*hotScheduler).clearPendingInfluence()
 	opt.HotRegionScheduleLimit = mockoption.NewScheduleOptions().HotRegionScheduleLimit
 
-	// hot region scheduler is restricted by schedule limit.
-	opt.LeaderScheduleLimit = 0
 	for i := 0; i < 20; i++ {
 		op := hb.Schedule(tc)[0]
 		hb.(*hotScheduler).clearPendingInfluence()
@@ -214,7 +212,6 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 			testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 6)
 		}
 	}
-	opt.LeaderScheduleLimit = mockoption.NewScheduleOptions().LeaderScheduleLimit
 
 	// hot region scheduler is not affect by `balance-region-schedule-limit`.
 	opt.RegionScheduleLimit = 0
@@ -265,7 +262,7 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 	//   Region 1 and 2 are the same, cannot move peer to store 5 due to the label.
 	//   Region 3 can only move peer to store 5.
 	//   Region 5 can only move peer to store 6.
-	opt.LeaderScheduleLimit = 0
+	opt.HotRegionScheduleLimit = 0
 	for i := 0; i < 30; i++ {
 		op := hb.Schedule(tc)[0]
 		hb.(*hotScheduler).clearPendingInfluence()
@@ -443,7 +440,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	opt.HotRegionCacheHitsThreshold = 0
-	opt.LeaderScheduleLimit = 0
+	opt.HotRegionScheduleLimit = 0
 	for i := 0; i < 2; i++ {
 		// 0: byte rate
 		// 1: key rate
