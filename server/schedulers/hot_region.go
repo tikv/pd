@@ -1322,10 +1322,10 @@ func ensureDimPriority(t rwType, priorities []string) []string {
 
 	ensureDim := make([]string, 0)
 	for _, priority := range priorities {
+		ensureDim = append(ensureDim, priority)
 		if !passPriority(t, priority) {
 			break
 		}
-		ensureDim = append(ensureDim, priority)
 	}
 	return ensureDim
 }
