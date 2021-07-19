@@ -550,7 +550,7 @@ func (bs *balanceSolver) checkInfluenceConflict() bool {
 		pass := true
 		for _, i := range indexes {
 			dim := toDim(i)
-			y := srcLoads.Loads[dim]-infl.Loads[i] >= dstLoads.Loads[dim]+infl.Loads[i]
+			y := srcLoads.Loads[dim]-infl.Loads[i] > dstLoads.Loads[dim]+infl.Loads[i]
 			pass = pass && y
 		}
 		return pass
@@ -1322,10 +1322,10 @@ func ensureDimPriority(t rwType, priorities []string) []string {
 
 	ensureDim := make([]string, 0)
 	for _, priority := range priorities {
-		ensureDim = append(ensureDim, priority)
 		if !passPriority(t, priority) {
 			break
 		}
+		ensureDim = append(ensureDim, priority)
 	}
 	return ensureDim
 }
