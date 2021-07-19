@@ -548,32 +548,27 @@ func (bs *balanceSolver) checkInfluenceConflict() bool {
 	}
 	checkLoads := func(srcLoads, dstLoads *storeLoad, indexes ...statistics.RegionStatKind) bool {
 		pass := true
-		for _, index := range indexes {
-			pass = pass && srcLoads.Loads[index]-infl.Loads[index] > dstLoads.Loads[index]+infl.Loads[index]
+		for _, i := range indexes {
+			dim := toDim(i)
+			y := srcLoads.Loads[dim]-infl.Loads[i] >= dstLoads.Loads[dim]+infl.Loads[i]
+			pass = pass && y
 		}
 		return pass
 	}
 	ensuredPriorities := ensureDimPriority(bs.rwTy, priorities)
-	ensuredDimIndexes := prioritiesToDimIndexes(ensuredPriorities)
-	switch {
-	case bs.rwTy == write:
-		return checkLoads(
-			bs.sche.stLoadInfos[readPeer][srcStore].LoadPred.min(),
-			bs.sche.stLoadInfos[readPeer][dstStore].LoadPred.max(),
-			ensuredDimIndexes...) &&
-			checkLoads(
-				bs.sche.stLoadInfos[readLeader][srcStore].LoadPred.min(),
-				bs.sche.stLoadInfos[readLeader][dstStore].LoadPred.max(),
-				ensuredDimIndexes...)
-	case bs.rwTy == read:
-		return checkLoads(
-			bs.sche.stLoadInfos[writePeer][srcStore].LoadPred.min(),
-			bs.sche.stLoadInfos[writePeer][dstStore].LoadPred.max(),
-			ensuredDimIndexes...) &&
-			checkLoads(
-				bs.sche.stLoadInfos[writeLeader][srcStore].LoadPred.min(),
-				bs.sche.stLoadInfos[writeLeader][dstStore].LoadPred.max(),
-				ensuredDimIndexes...)
+	for _, ensuredPriority := range ensuredPriorities {
+		priorityRW := priorityToRW(ensuredPriority)
+		checkPeer, checkLeader := checkTypeByRW(priorityRW)
+		t := priorityToDimIndex(ensuredPriority)
+		peerFlag := checkLoads(
+			bs.sche.stLoadInfos[checkPeer][srcStore].LoadPred.min(),
+			bs.sche.stLoadInfos[checkPeer][dstStore].LoadPred.max(),
+			t)
+		leaderFlag := checkLoads(
+			bs.sche.stLoadInfos[checkLeader][srcStore].LoadPred.min(),
+			bs.sche.stLoadInfos[checkLeader][dstStore].LoadPred.max(),
+			t)
+		return peerFlag && leaderFlag
 	}
 	return true
 }
@@ -1335,14 +1330,6 @@ func ensureDimPriority(t rwType, priorities []string) []string {
 	return ensureDim
 }
 
-func prioritiesToDimIndexes(priorieties []string) []statistics.RegionStatKind {
-	indexes := make([]statistics.RegionStatKind, 0)
-	for _, priority := range priorieties {
-		indexes = append(indexes, priorityToDimIndex(priority))
-	}
-	return indexes
-}
-
 func priorityToDimIndex(priority string) statistics.RegionStatKind {
 	switch priority {
 	case ReadByteDimPriority:
@@ -1355,4 +1342,28 @@ func priorityToDimIndex(priority string) statistics.RegionStatKind {
 		return statistics.RegionWriteKeys
 	}
 	return 0
+}
+
+func toDim(kind statistics.RegionStatKind) int {
+	switch {
+	case kind == statistics.RegionReadBytes || kind == statistics.RegionWriteBytes:
+		return statistics.ByteDim
+	case kind == statistics.RegionReadKeys || kind == statistics.RegionWriteKeys:
+		return statistics.KeyDim
+	}
+	return 0
+}
+
+func priorityToRW(priority string) rwType {
+	if priority == ReadByteDimPriority || priority == ReadKeyDimPriority {
+		return read
+	}
+	return write
+}
+
+func checkTypeByRW(rwType rwType) (resourceType, resourceType) {
+	if rwType == read {
+		return readPeer, readLeader
+	}
+	return writePeer, writeLeader
 }
