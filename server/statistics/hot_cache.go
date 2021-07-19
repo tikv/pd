@@ -130,7 +130,7 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 	if succ1 && succ2 {
 		return writeIsRegionHotTask.waitRet(w.ctx, w.quit) || readIsRegionHotTask.waitRet(w.ctx, w.quit)
 	}
-	return false
+	return true
 }
 
 // CollectMetrics collects the hot cache metrics.
