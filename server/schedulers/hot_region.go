@@ -512,9 +512,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			}
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
-				if !bs.checkInfluenceConflict() {
-					continue
-				}
+				//if !bs.checkInfluenceConflict() {
+				//	continue
+				//}
 				bs.calcProgressiveRank()
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
 					if newOp, newInfl := bs.buildOperator(); newOp != nil {
