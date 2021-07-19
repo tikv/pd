@@ -512,9 +512,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			}
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
-				//if !bs.checkInfluenceConflict() {
-				//	continue
-				//}
+				if !bs.checkInfluenceConflict() {
+					continue
+				}
 				bs.calcProgressiveRank()
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
 					if newOp, newInfl := bs.buildOperator(); newOp != nil {
@@ -600,7 +600,7 @@ func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *
 	priorities := bs.sche.conf.HotDimPriority
 	preferPriority := preferPriority(bs.rwTy, priorities)
 	switch {
-	case len(priorities) == 0:
+	case len(priorities) == 0 || len(preferPriority) == 0:
 		return slice.AllOf(minLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
 				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
@@ -805,7 +805,7 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	preferPriority := preferPriority(bs.rwTy, priorities)
 	switch {
-	case len(priorities) == 0:
+	case len(priorities) == 0 || len(preferPriority) == 0:
 		return slice.AllOf(maxLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
 				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
@@ -830,7 +830,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	priorities := bs.sche.conf.HotDimPriority
 	prefer := preferPriority(bs.rwTy, priorities)
 	if bs.rwTy == write && bs.opTy == transferLeader {
-		if len(priorities) == 0 || prefer == WriteKeyDimPriority {
+		if len(priorities) == 0 || prefer == WriteKeyDimPriority || len(prefer) == 0 {
 			// In this condition, CPU usage is the matter.
 			// Only consider about key rate.
 			srcKeyRate := srcLd.Loads[statistics.KeyDim]
@@ -868,7 +868,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		byteHot, byteDecRatio := checkHot(statistics.ByteDim)
 
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
-		if len(priorities) == 0 {
+		if len(priorities) == 0 || len(prefer) == 0 {
 			switch {
 			case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
 				// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
