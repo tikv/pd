@@ -530,16 +530,19 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	}
 	if schedulerName == "balance-hot-region-scheduler" && key == "hot-dim-priority" {
 		priorities := make([]string, 0)
-		for _, priority := range strings.Split(value, ",") {
-			if priority != schedulers.ReadByteDimPriority && priority != schedulers.ReadKeyDimPriority &&
-				priority != schedulers.WriteKeyDimPriority && priority != schedulers.WriteByteDimPriority {
-				cmd.Println(fmt.Sprintf("hot-dim-priority should be one of %s,%s,%s,%s",
-					schedulers.ReadByteDimPriority,
-					schedulers.ReadKeyDimPriority,
-					schedulers.WriteKeyDimPriority,
-					schedulers.WriteByteDimPriority))
+		if value == "none" {
+		} else {
+			for _, priority := range strings.Split(value, ",") {
+				if priority != schedulers.ReadByteDimPriority && priority != schedulers.ReadKeyDimPriority &&
+					priority != schedulers.WriteKeyDimPriority && priority != schedulers.WriteByteDimPriority {
+					cmd.Println(fmt.Sprintf("hot-dim-priority should be one of %s,%s,%s,%s",
+						schedulers.ReadByteDimPriority,
+						schedulers.ReadKeyDimPriority,
+						schedulers.WriteKeyDimPriority,
+						schedulers.WriteByteDimPriority))
+				}
+				priorities = append(priorities, priority)
 			}
-			priorities = append(priorities, priority)
 		}
 		input[key] = priorities
 	} else {
