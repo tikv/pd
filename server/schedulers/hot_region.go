@@ -847,6 +847,11 @@ func (bs *balanceSolver) calcProgressiveRank() {
 				rank = -1
 			}
 		}
+		log.Debug("calcProgressiveRank",
+			zap.Uint64("region-id", bs.cur.region.GetID()),
+			zap.Uint64("from-store-id", bs.cur.srcStoreID),
+			zap.Uint64("to-store-id", bs.cur.dstStoreID),
+			zap.Int64("rank", rank))
 	} else {
 		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
 		// than the src store's (key/byte) rate after scheduling one peer.
@@ -895,12 +900,14 @@ func (bs *balanceSolver) calcProgressiveRank() {
 				rank = -2
 			}
 		}
+		log.Debug("calcProgressiveRank",
+			zap.String("rwType", bs.rwTy.String()),
+			zap.String("opType", bs.opTy.String()),
+			zap.Uint64("region-id", bs.cur.region.GetID()),
+			zap.Uint64("from-store-id", bs.cur.srcStoreID),
+			zap.Uint64("to-store-id", bs.cur.dstStoreID),
+			zap.Int64("rank", rank))
 	}
-	log.Debug("calcProgressiveRank",
-		zap.Uint64("region-id", bs.cur.region.GetID()),
-		zap.Uint64("from-store-id", bs.cur.srcStoreID),
-		zap.Uint64("to-store-id", bs.cur.dstStoreID),
-		zap.Int64("rank", rank))
 	bs.cur.progressiveRank = rank
 }
 
