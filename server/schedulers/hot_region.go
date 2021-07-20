@@ -906,6 +906,12 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			zap.Uint64("region-id", bs.cur.region.GetID()),
 			zap.Uint64("from-store-id", bs.cur.srcStoreID),
 			zap.Uint64("to-store-id", bs.cur.dstStoreID),
+			zap.Bool("byteHot", byteHot),
+			zap.Bool("keyHot", keyHot),
+			zap.Float64("keyDecRatio", keyDecRatio),
+			zap.Float64("byteDecRatio", byteDecRatio),
+			zap.Float64("greatDecRatio", greatDecRatio),
+			zap.Float64("minorDecRatio", minorDecRatio),
 			zap.Int64("rank", rank))
 	}
 	bs.cur.progressiveRank = rank
