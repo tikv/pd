@@ -512,9 +512,6 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			}
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
-				if !bs.checkInfluenceConflict() {
-					continue
-				}
 				bs.calcProgressiveRank()
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
 					if newOp, newInfl := bs.buildOperator(); newOp != nil {
@@ -533,44 +530,6 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	}
 
 	return []*operator.Operator{op}
-}
-
-func (bs *balanceSolver) checkInfluenceConflict() bool {
-	priorities := bs.sche.conf.HotDimPriority
-	if len(priorities) == 0 {
-		return true
-	}
-	srcStore := bs.cur.srcStoreID
-	dstStore := bs.cur.dstStoreID
-	infl := &Influence{
-		Loads: append(bs.cur.srcPeerStat.Loads[:0:0], bs.cur.srcPeerStat.Loads...),
-		Count: 1,
-	}
-	checkLoads := func(srcLoads, dstLoads *storeLoad, indexes ...statistics.RegionStatKind) bool {
-		pass := true
-		for _, i := range indexes {
-			dim := toDim(i)
-			y := srcLoads.Loads[dim]-infl.Loads[i] > dstLoads.Loads[dim]+infl.Loads[i]
-			pass = pass && y
-		}
-		return pass
-	}
-	ensuredPriorities := ensureDimPriority(bs.rwTy, priorities)
-	for _, ensuredPriority := range ensuredPriorities {
-		priorityRW := priorityToRW(ensuredPriority)
-		checkPeer, checkLeader := checkTypeByRW(priorityRW)
-		t := priorityToDimIndex(ensuredPriority)
-		peerFlag := checkLoads(
-			bs.sche.stLoadInfos[checkPeer][srcStore].LoadPred.min(),
-			bs.sche.stLoadInfos[checkPeer][dstStore].LoadPred.max(),
-			t)
-		leaderFlag := checkLoads(
-			bs.sche.stLoadInfos[checkLeader][srcStore].LoadPred.min(),
-			bs.sche.stLoadInfos[checkLeader][dstStore].LoadPred.max(),
-			t)
-		return peerFlag && leaderFlag
-	}
-	return true
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if both key and byte rate is greater than
@@ -597,19 +556,18 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 }
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad) bool {
-	priorities := bs.sche.conf.HotDimPriority
-	preferPriority := preferPriority(bs.rwTy, priorities)
-	switch {
-	case len(priorities) == 0 || len(preferPriority) == 0:
+	preferPriority := bs.preferPriority()
+	switch preferPriority {
+	case NoneDimPriority:
 		return slice.AllOf(minLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
 				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
 			}
 			return true
 		})
-	case preferPriority == ReadKeyDimPriority || preferPriority == WriteKeyDimPriority:
+	case KeyDimPriority:
 		return minLoad.Loads[statistics.KeyDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.KeyDim]
-	case preferPriority == ReadByteDimPriority || preferPriority == WriteByteDimPriority:
+	case ByteDimPriority:
 		return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
 	}
 	return false
@@ -801,20 +759,19 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 }
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad) bool {
-	priorities := bs.sche.conf.HotDimPriority
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
-	preferPriority := preferPriority(bs.rwTy, priorities)
-	switch {
-	case len(priorities) == 0 || len(preferPriority) == 0:
+	preferPriority := bs.preferPriority()
+	switch preferPriority {
+	case NoneDimPriority:
 		return slice.AllOf(maxLoad.Loads, func(i int) bool {
 			if statistics.IsSelectedDim(i) {
 				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
 			}
 			return true
 		})
-	case preferPriority == ReadKeyDimPriority || preferPriority == WriteKeyDimPriority:
+	case KeyDimPriority:
 		return maxLoad.Loads[statistics.KeyDim]*dstToleranceRatio < expect.Loads[statistics.KeyDim]
-	case preferPriority == ReadByteDimPriority || preferPriority == WriteByteDimPriority:
+	case ByteDimPriority:
 		return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
 	}
 	return false
@@ -823,97 +780,55 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
+	preferPriority := bs.preferPriority()
+	if preferPriority == NoneDimPriority {
+		bs.defaultCalcProgressiveRank()
+		return
+	}
+	dimHotList, dimDecRatioList := bs.getDimList()
+	bs.cur.progressiveRank = bs.calRank(dimHotList, dimDecRatioList)
+}
+
+// calcProgressiveRank calculates `bs.cur.progressiveRank`.
+// See the comments of `solution.progressiveRank` for more about progressive rank.
+func (bs *balanceSolver) defaultCalcProgressiveRank() {
 	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
-	priorities := bs.sche.conf.HotDimPriority
-	prefer := preferPriority(bs.rwTy, priorities)
 	if bs.rwTy == write && bs.opTy == transferLeader {
-		if len(priorities) == 0 || prefer == WriteKeyDimPriority || len(prefer) == 0 {
-			// In this condition, CPU usage is the matter.
-			// Only consider about key rate.
-			srcKeyRate := srcLd.Loads[statistics.KeyDim]
-			dstKeyRate := dstLd.Loads[statistics.KeyDim]
-			peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
-			if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
-				rank = -1
-			}
-		} else {
-			srcKeyRate := srcLd.Loads[statistics.ByteDim]
-			dstKeyRate := dstLd.Loads[statistics.ByteDim]
-			peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.ByteDim))
-			if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
-				rank = -1
-			}
+		// In this condition, CPU usage is the matter.
+		// Only consider about key rate.
+		srcKeyRate := srcLd.Loads[statistics.KeyDim]
+		dstKeyRate := dstLd.Loads[statistics.KeyDim]
+		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
+		if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
+			rank = -1
 		}
-		log.Debug("calcProgressiveRank",
-			zap.Uint64("region-id", bs.cur.region.GetID()),
-			zap.Uint64("from-store-id", bs.cur.srcStoreID),
-			zap.Uint64("to-store-id", bs.cur.dstStoreID),
-			zap.Int64("rank", rank))
 	} else {
 		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
 		// than the src store's (key/byte) rate after scheduling one peer.
-		getSrcDecRate := func(a, b float64) float64 {
-			if a-b <= 0 {
-				return 1
-			}
-			return a - b
-		}
-		checkHot := func(dim int) (bool, float64) {
-			srcRate := srcLd.Loads[dim]
-			dstRate := dstLd.Loads[dim]
-			peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, dim))
-			decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
-			isHot := peerRate >= bs.getMinRate(dim)
-			return isHot, decRatio
-		}
-		keyHot, keyDecRatio := checkHot(statistics.KeyDim)
-		byteHot, byteDecRatio := checkHot(statistics.ByteDim)
+		keyHot, keyDecRatio := bs.checkHot(statistics.KeyDim, srcLd, dstLd, peer)
+		byteHot, byteDecRatio := bs.checkHot(statistics.ByteDim, srcLd, dstLd, peer)
 
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
-		if len(priorities) == 0 || len(prefer) == 0 {
-			switch {
-			case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-				// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
-				rank = -3
-			case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-				// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
-				rank = -2
-			case byteHot && byteDecRatio <= greatDecRatio:
-				// If belong to the case, byte rate will be more balanced, ignore the key rate.
-				rank = -1
-			}
-		} else if prefer == ReadKeyDimPriority || prefer == WriteKeyDimPriority {
-			switch {
-			case keyHot && keyDecRatio <= greatDecRatio:
-				rank = -3
-			case keyHot && keyDecRatio <= minorDecRatio:
-				rank = -2
-			}
-		} else if prefer == ReadByteDimPriority || prefer == WriteByteDimPriority {
-			switch {
-			case byteHot && byteDecRatio <= greatDecRatio:
-				rank = -3
-			case byteHot && byteDecRatio <= minorDecRatio:
-				rank = -2
-			}
+		switch {
+		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
+			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
+			rank = -3
+		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
+			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
+			rank = -2
+		case byteHot && byteDecRatio <= greatDecRatio:
+			// If belong to the case, byte rate will be more balanced, ignore the key rate.
+			rank = -1
 		}
-		log.Debug("calcProgressiveRank",
-			zap.String("rwType", bs.rwTy.String()),
-			zap.String("opType", bs.opTy.String()),
-			zap.Uint64("region-id", bs.cur.region.GetID()),
-			zap.Uint64("from-store-id", bs.cur.srcStoreID),
-			zap.Uint64("to-store-id", bs.cur.dstStoreID),
-			zap.Bool("byteHot", byteHot),
-			zap.Bool("keyHot", keyHot),
-			zap.Float64("keyDecRatio", keyDecRatio),
-			zap.Float64("byteDecRatio", byteDecRatio),
-			zap.Float64("greatDecRatio", greatDecRatio),
-			zap.Float64("minorDecRatio", minorDecRatio),
-			zap.Int64("rank", rank))
 	}
+	log.Debug("calcProgressiveRank",
+		zap.Uint64("region-id", bs.cur.region.GetID()),
+		zap.Uint64("from-store-id", bs.cur.srcStoreID),
+		zap.Uint64("to-store-id", bs.cur.dstStoreID),
+		zap.Int64("rank", rank))
 	bs.cur.progressiveRank = rank
 }
 
@@ -954,42 +869,28 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 
 	if bs.cur.srcPeerStat != old.srcPeerStat {
 		// compare region
-
-		if bs.rwTy == write && bs.opTy == transferLeader {
-			switch {
-			case bs.cur.srcPeerStat.GetLoad(statistics.RegionWriteKeys) > old.srcPeerStat.GetLoad(statistics.RegionWriteKeys):
-				return true
-			case bs.cur.srcPeerStat.GetLoad(statistics.RegionWriteKeys) < old.srcPeerStat.GetLoad(statistics.RegionWriteKeys):
-				return false
+		bk, kk := getRegionStatKind(bs.rwTy, statistics.ByteDim), getRegionStatKind(bs.rwTy, statistics.KeyDim)
+		byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(bk), old.srcPeerStat.GetLoad(bk), stepRank(0, 100))
+		keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(kk), old.srcPeerStat.GetLoad(kk), stepRank(0, 10))
+		switch bs.preferPriority() {
+		case NoneDimPriority:
+			return bs.defaultBetterThan(old)
+		case ByteDimPriority:
+			if byteRkCmp != 0 {
+				return byteRkCmp > 0
 			}
-		} else {
-			bk, kk := getRegionStatKind(bs.rwTy, statistics.ByteDim), getRegionStatKind(bs.rwTy, statistics.KeyDim)
-			byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(bk), old.srcPeerStat.GetLoad(bk), stepRank(0, 100))
-			keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(kk), old.srcPeerStat.GetLoad(kk), stepRank(0, 10))
-
-			switch bs.cur.progressiveRank {
-			case -2: // greatDecRatio < byteDecRatio <= minorDecRatio && keyDecRatio <= greatDecRatio
-				if keyRkCmp != 0 {
-					return keyRkCmp > 0
-				}
-				if byteRkCmp != 0 {
-					// prefer smaller byte rate, to reduce oscillation
-					return byteRkCmp < 0
-				}
-			case -3: // byteDecRatio <= greatDecRatio && keyDecRatio <= greatDecRatio
-				if keyRkCmp != 0 {
-					return keyRkCmp > 0
-				}
-				fallthrough
-			case -1: // byteDecRatio <= greatDecRatio
-				if byteRkCmp != 0 {
-					// prefer region with larger byte rate, to converge faster
-					return byteRkCmp > 0
-				}
+			if keyRkCmp != 0 {
+				return keyRkCmp < 0
+			}
+		case KeyDimPriority:
+			if keyRkCmp != 0 {
+				return keyRkCmp > 0
+			}
+			if byteRkCmp != 0 {
+				return byteRkCmp < 0
 			}
 		}
 	}
-
 	return false
 }
 
@@ -1300,83 +1201,132 @@ func getRegionStatKind(rwTy rwType, dim int) statistics.RegionStatKind {
 	return 0
 }
 
-func preferPriority(rwType rwType, priorities []string) string {
-	for _, priority := range priorities {
-		if rwType == read {
-			if priority == ReadKeyDimPriority || priority == ReadByteDimPriority {
-				return priority
-			}
-		} else if rwType == write {
-			if priority == WriteKeyDimPriority || priority == WriteByteDimPriority {
-				return priority
-			}
-		}
+func (bs *balanceSolver) preferPriority() string {
+	priorities := bs.sche.conf.WritePriority
+	if bs.rwTy == read {
+		priorities = bs.sche.conf.ReadPriority
 	}
-	return ""
+	if len(priorities) == 0 {
+		return ""
+	}
+	return priorities[0]
 }
 
-func ensureDimPriority(t rwType, priorities []string) []string {
-	passPriority := func(t rwType, priority string) bool {
-		if t == write {
-			if priority == ReadByteDimPriority || priority == ReadKeyDimPriority {
-				return true
-			} else {
-				return false
-			}
-		} else if t == read {
-			if priority == WriteByteDimPriority || priority == WriteKeyDimPriority {
-				return true
-			} else {
-				return false
-			}
-		}
-		return false
+func (bs *balanceSolver) calRank(dimHotList [statistics.DimLen]bool, dimDecRatioList [statistics.DimLen]float64) int64 {
+	priorities := bs.sche.conf.WritePriority
+	if bs.rwTy == read {
+		priorities = bs.sche.conf.ReadPriority
 	}
-
-	ensureDim := make([]string, 0)
-	for _, priority := range priorities {
-		ensureDim = append(ensureDim, priority)
-		if !passPriority(t, priority) {
-			break
-		}
-	}
-	return ensureDim
+	greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
+	return calRank(greatDecRatio, minorDecRatio, priorities, dimHotList, dimDecRatioList)
 }
 
-func priorityToDimIndex(priority string) statistics.RegionStatKind {
+func calRank(greatDecRatio, minorDecRatio float64, priorities []string,
+	dimHotList [statistics.DimLen]bool, dimDecRatioList [statistics.DimLen]float64) int64 {
+	better := 1
+	noWorse := 0
+	worse := -1
+	priorityLen := len(priorities)
+	originValue := 0
+	for i, priority := range priorities {
+		dimIndex := priorityToDim(priority)
+		dimHot := dimHotList[dimIndex]
+		dimDecRatio := dimDecRatioList[dimIndex]
+		x := 0
+		switch {
+		case dimHot && dimDecRatio < greatDecRatio:
+			x = better
+		case dimDecRatio < minorDecRatio:
+			x = noWorse
+		case dimDecRatio >= minorDecRatio:
+			x = worse
+		}
+		originValue = originValue + x*getValue(priorityLen-i-1)
+	}
+	return int64(-originValue)
+}
+func getValue(n int) int {
+	x := 1
+	for i := 0; i < n; i++ {
+		x = x * 10
+	}
+	return x
+}
+
+func priorityToDim(priority string) int {
 	switch priority {
-	case ReadByteDimPriority:
-		return statistics.RegionReadBytes
-	case ReadKeyDimPriority:
-		return statistics.RegionReadKeys
-	case WriteByteDimPriority:
-		return statistics.RegionWriteBytes
-	case WriteKeyDimPriority:
-		return statistics.RegionWriteKeys
-	}
-	return 0
-}
-
-func toDim(kind statistics.RegionStatKind) int {
-	switch {
-	case kind == statistics.RegionReadBytes || kind == statistics.RegionWriteBytes:
+	case ByteDimPriority:
 		return statistics.ByteDim
-	case kind == statistics.RegionReadKeys || kind == statistics.RegionWriteKeys:
+	case KeyDimPriority:
 		return statistics.KeyDim
 	}
 	return 0
 }
 
-func priorityToRW(priority string) rwType {
-	if priority == ReadByteDimPriority || priority == ReadKeyDimPriority {
-		return read
+func getSrcDecRate(a, b float64) float64 {
+	if a-b <= 0 {
+		return 1
 	}
-	return write
+	return a - b
 }
 
-func checkTypeByRW(rwType rwType) (resourceType, resourceType) {
-	if rwType == read {
-		return readPeer, readLeader
+func (bs *balanceSolver) checkHot(dim int, srcLd, dstLd *storeLoad, peer *statistics.HotPeerStat) (bool, float64) {
+	srcRate := srcLd.Loads[dim]
+	dstRate := dstLd.Loads[dim]
+	peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, dim))
+	decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
+	isHot := peerRate >= bs.getMinRate(dim)
+	return isHot, decRatio
+}
+
+func (bs *balanceSolver) getDimList() ([statistics.DimLen]bool, [statistics.DimLen]float64) {
+	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
+	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
+	peer := bs.cur.srcPeerStat
+	keyHot, keyDecRatio := bs.checkHot(statistics.KeyDim, srcLd, dstLd, peer)
+	byteHot, byteDecRatio := bs.checkHot(statistics.ByteDim, srcLd, dstLd, peer)
+	var dimHot [statistics.DimLen]bool
+	dimHot[statistics.KeyDim] = keyHot
+	dimHot[statistics.ByteDim] = byteHot
+	var dimDecRatio [statistics.DimLen]float64
+	dimDecRatio[statistics.KeyDim] = keyDecRatio
+	dimDecRatio[statistics.ByteDim] = byteDecRatio
+	return dimHot, dimDecRatio
+}
+
+func (bs *balanceSolver) defaultBetterThan(old *solution) bool {
+	if bs.rwTy == write && bs.opTy == transferLeader {
+		switch {
+		case bs.cur.srcPeerStat.GetLoad(statistics.RegionWriteKeys) > old.srcPeerStat.GetLoad(statistics.RegionWriteKeys):
+			return true
+		case bs.cur.srcPeerStat.GetLoad(statistics.RegionWriteKeys) < old.srcPeerStat.GetLoad(statistics.RegionWriteKeys):
+			return false
+		}
+	} else {
+		bk, kk := getRegionStatKind(bs.rwTy, statistics.ByteDim), getRegionStatKind(bs.rwTy, statistics.KeyDim)
+		byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(bk), old.srcPeerStat.GetLoad(bk), stepRank(0, 100))
+		keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(kk), old.srcPeerStat.GetLoad(kk), stepRank(0, 10))
+
+		switch bs.cur.progressiveRank {
+		case -2: // greatDecRatio < byteDecRatio <= minorDecRatio && keyDecRatio <= greatDecRatio
+			if keyRkCmp != 0 {
+				return keyRkCmp > 0
+			}
+			if byteRkCmp != 0 {
+				// prefer smaller byte rate, to reduce oscillation
+				return byteRkCmp < 0
+			}
+		case -3: // byteDecRatio <= greatDecRatio && keyDecRatio <= greatDecRatio
+			if keyRkCmp != 0 {
+				return keyRkCmp > 0
+			}
+			fallthrough
+		case -1: // byteDecRatio <= greatDecRatio
+			if byteRkCmp != 0 {
+				// prefer region with larger byte rate, to converge faster
+				return byteRkCmp > 0
+			}
+		}
 	}
-	return writePeer, writeLeader
+	return false
 }
