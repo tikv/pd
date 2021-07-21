@@ -1207,7 +1207,7 @@ func (bs *balanceSolver) preferPriority() string {
 		priorities = bs.sche.conf.ReadPriority
 	}
 	if len(priorities) == 0 {
-		return ""
+		return NoneDimPriority
 	}
 	return priorities[0]
 }
