@@ -21,7 +21,7 @@ import (
 var balanceEmptyRegionThreshold = 50
 
 // IsRegionHealthy checks if a region is healthy for scheduling. It requires the
-// region does not have any down or pending peers. 
+// region does not have any down or pending peers.
 func IsRegionHealthy(cluster Cluster, region *core.RegionInfo) bool {
 	return IsHealthyAllowPending(cluster, region) && len(region.GetPendingPeers()) == 0
 }
