@@ -86,12 +86,12 @@ groups:
       summary: PD_tidb_handle_requests_duration
 
   - alert: PD_down_peer_region_nums
-    expr:  (sum(pd_regions_status{type="down_peer_region_count"}) by (instance)  > 0) and (sum(etcd_server_is_leader) by (instance) > 0)
+    expr:  (sum(pd_regions_status{type="down-peer-region-count"}) by (instance)  > 0) and (sum(etcd_server_is_leader) by (instance) > 0)
     for: 1m
     labels:
       env: ENV_LABELS_ENV
       level: warning
-      expr:  (sum(pd_regions_status{type="down_peer_region_count"}) by (instance)  > 0) and (sum(etcd_server_is_leader) by (instance) > 0)
+      expr:  (sum(pd_regions_status{type="down-peer-region-count"}) by (instance)  > 0) and (sum(etcd_server_is_leader) by (instance) > 0)
     annotations:
       description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values:{{ $value }}'
       value: '{{ $value }}'

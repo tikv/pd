@@ -142,17 +142,18 @@ func (ls *Leadership) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.leaderValue)
 }
 
-// DeleteLeader deletes the corresponding leader from etcd by given leaderPath (as the key).
-func (ls *Leadership) DeleteLeader() error {
-	// delete leader itself and let others start a new election again.
-	resp, err := ls.LeaderTxn().Then(clientv3.OpDelete(ls.leaderKey)).Commit()
+// DeleteLeaderKey deletes the corresponding leader from etcd by the leaderPath as the key.
+func (ls *Leadership) DeleteLeaderKey() error {
+	resp, err := kv.NewSlowLogTxn(ls.client).Then(clientv3.OpDelete(ls.leaderKey)).Commit()
 	if err != nil {
 		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
-
+	// Reset the lease as soon as possible.
+	ls.Reset()
+	log.Info("delete the leader key ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
 }
 

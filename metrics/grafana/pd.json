@@ -1352,174 +1352,101 @@
           "type": "table"
         },
         {
-          "cacheTimeout": null,
-          "colorBackground": false,
-          "colorValue": false,
-          "colors": [
+          "cacheTimeout":null,
+          "colorBackground":false,
+          "colorValue":false,
+          "colors":[
             "#299c46",
             "rgba(237, 129, 40, 0.89)",
             "#d44a3a"
           ],
-          "datasource": "${DS_TEST-CLUSTER}",
-          "format": "none",
-          "gauge": {
-            "maxValue": 100,
-            "minValue": 0,
-            "show": false,
-            "thresholdLabels": false,
-            "thresholdMarkers": true
+          "datasource":"tidb-cluster",
+          "fieldConfig":{
+            "defaults":{
+              "custom":{
+                
+              }
+            },
+            "overrides":[
+              
+            ]
           },
-          "gridPos": {
-            "h": 2,
-            "w": 5,
-            "x": 9,
-            "y": 17
+          "format":"none",
+          "gauge":{
+            "maxValue":100,
+            "minValue":0,
+            "show":false,
+            "thresholdLabels":false,
+            "thresholdMarkers":true
           },
-          "hideTimeOverride": true,
-          "id": 137,
-          "interval": null,
-          "links": [],
-          "mappingType": 1,
-          "mappingTypes": [
+          "gridPos":{
+            "h":4,
+            "w":5,
+            "x":9,
+            "y":17
+          },
+          "hideTimeOverride":true,
+          "id":115,
+          "interval":null,
+          "links":[
+            
+          ],
+          "mappingType":1,
+          "mappingTypes":[
             {
-              "name": "value to text",
-              "value": 1
+              "name":"value to text",
+              "value":1
             },
             {
-              "name": "range to text",
-              "value": 2
+              "name":"range to text",
+              "value":2
             }
           ],
-          "maxDataPoints": 100,
-          "nullPointMode": "connected",
-          "nullText": null,
-          "postfix": "",
-          "postfixFontSize": "50%",
-          "prefix": "",
-          "prefixFontSize": "50%",
-          "rangeMaps": [
+          "maxDataPoints":100,
+          "nullPointMode":"connected",
+          "nullText":null,
+          "postfix":"",
+          "postfixFontSize":"50%",
+          "prefix":"",
+          "prefixFontSize":"50%",
+          "rangeMaps":[
             {
-              "from": "null",
-              "text": "N/A",
-              "to": "null"
+              "from":"null",
+              "text":"N/A",
+              "to":"null"
             }
           ],
-          "sparkline": {
-            "fillColor": "rgba(31, 118, 189, 0.18)",
-            "full": false,
-            "lineColor": "rgb(31, 120, 193)",
-            "show": false
+          "sparkline":{
+            "fillColor":"rgba(31, 118, 189, 0.18)",
+            "full":false,
+            "lineColor":"rgb(31, 120, 193)",
+            "show":false
           },
-          "tableColumn": "",
-          "targets": [
+          "tableColumn":"idalloc",
+          "targets":[
             {
-              "expr": "pd_cluster_tso{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", dc=\"global\"}",
-              "format": "time_series",
-              "instant": true,
-              "intervalFactor": 2,
-              "legendFormat": "{{type}}",
-              "refId": "A"
+              "expr":"pd_cluster_id{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
+              "format":"time_series",
+              "hide":false,
+              "instant":true,
+              "intervalFactor":2,
+              "legendFormat":"{{type}}",
+              "refId":"A"
             }
           ],
-          "thresholds": "",
-          "timeFrom": null,
-          "timeShift": null,
-          "title": "Current Global TSO",
-          "type": "singlestat",
-          "valueFontSize": "80%",
-          "valueMaps": [
+          "thresholds":"",
+          "timeFrom":"1s",
+          "title":"Current ID allocation",
+          "type":"singlestat",
+          "valueFontSize":"80%",
+          "valueMaps":[
             {
-              "op": "=",
-              "text": "N/A",
-              "value": "null"
+              "op":"=",
+              "text":"N/A",
+              "value":"null"
             }
           ],
-          "valueName": "avg"
-        },
-        {
-          "cacheTimeout": null,
-          "colorBackground": false,
-          "colorValue": false,
-          "colors": [
-            "#299c46",
-            "rgba(237, 129, 40, 0.89)",
-            "#d44a3a"
-          ],
-          "datasource": "${DS_TEST-CLUSTER}",
-          "format": "none",
-          "gauge": {
-            "maxValue": 100,
-            "minValue": 0,
-            "show": false,
-            "thresholdLabels": false,
-            "thresholdMarkers": true
-          },
-          "gridPos": {
-            "h": 2,
-            "w": 5,
-            "x": 9,
-            "y": 19
-          },
-          "hideTimeOverride": true,
-          "id": 115,
-          "interval": null,
-          "links": [],
-          "mappingType": 1,
-          "mappingTypes": [
-            {
-              "name": "value to text",
-              "value": 1
-            },
-            {
-              "name": "range to text",
-              "value": 2
-            }
-          ],
-          "maxDataPoints": 100,
-          "nullPointMode": "connected",
-          "nullText": null,
-          "postfix": "",
-          "postfixFontSize": "50%",
-          "prefix": "",
-          "prefixFontSize": "50%",
-          "rangeMaps": [
-            {
-              "from": "null",
-              "text": "N/A",
-              "to": "null"
-            }
-          ],
-          "sparkline": {
-            "fillColor": "rgba(31, 118, 189, 0.18)",
-            "full": false,
-            "lineColor": "rgb(31, 120, 193)",
-            "show": false
-          },
-          "tableColumn": "",
-          "targets": [
-            {
-              "expr": "pd_cluster_id{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
-              "format": "time_series",
-              "hide": false,
-              "instant": true,
-              "intervalFactor": 2,
-              "legendFormat": "{{type}}",
-              "refId": "A"
-            }
-          ],
-          "thresholds": "",
-          "timeFrom": "1s",
-          "title": "Current ID allocation",
-          "type": "singlestat",
-          "valueFontSize": "80%",
-          "valueMaps": [
-            {
-              "op": "=",
-              "text": "N/A",
-              "value": "null"
-            }
-          ],
-          "valueName": "avg"
+          "valueName":"avg"
         },
         {
           "aliasColors": {},
@@ -1972,6 +1899,300 @@
             "align": false,
             "alignLevel": null
           }
+        },
+        {
+          "cacheTimeout": null,
+          "colorBackground": false,
+          "colorValue": false,
+          "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+          ],
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "format": "none",
+          "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 5,
+            "x": 0,
+            "y": 35
+          },
+          "hideTimeOverride": true,
+          "id": 137,
+          "interval": null,
+          "links": [],
+          "mappingType": 1,
+          "mappingTypes": [
+            {
+              "name": "value to text",
+              "value": 1
+            },
+            {
+              "name": "range to text",
+              "value": 2
+            }
+          ],
+          "maxDataPoints": 100,
+          "nullPointMode": "connected",
+          "nullText": null,
+          "postfix": "",
+          "postfixFontSize": "50%",
+          "prefix": "",
+          "prefixFontSize": "50%",
+          "rangeMaps": [
+            {
+              "from": "null",
+              "text": "N/A",
+              "to": "null"
+            }
+          ],
+          "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+          },
+          "tableColumn": "tso",
+          "targets": [
+            {
+              "expr": "pd_cluster_tso{instance=\"$instance\", type=\"tso\", dc=\"global\"}",
+              "format": "time_series",
+              "instant": true,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "{{type}}",
+              "refId": "A"
+            }
+          ],
+          "thresholds": "",
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "Current TSO Physcial",
+          "type": "singlestat",
+          "valueFontSize": "80%",
+          "valueMaps": [
+            {
+              "op": "=",
+              "text": "N/A",
+              "value": "null"
+            }
+          ],
+          "valueName": "avg"
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "The gap between TSO and current time",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "fill": 1,
+          "fillGradient": 0,
+          "grid": {},
+          "gridPos": {
+            "h": 8,
+            "w": 7,
+            "x": 5,
+            "y": 35
+          },
+          "hiddenSeries": false,
+          "id": 1443,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null as zero",
+          "options": {
+            "alertThreshold": true
+          },
+          "percentage": false,
+          "pluginVersion": "7.3.4",
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "sum(pd_cluster_tso_gap_millionseconds{tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}) by (dc)",
+              "format": "time_series",
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "{{dc}}",
+              "refId": "A",
+              "step": 60
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Max TSO gap",
+          "tooltip": {
+            "msResolution": false,
+            "shared": true,
+            "sort": 0,
+            "value_type": "cumulative"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "ms",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "cacheTimeout": null,
+          "colorBackground": false,
+          "colorValue": false,
+          "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+          ],
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "format": "dateTimeAsIso",
+          "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 5,
+            "x": 0,
+            "y": 39
+          },
+          "hideTimeOverride": true,
+          "id": 1444,
+          "interval": null,
+          "links": [],
+          "mappingType": 1,
+          "mappingTypes": [
+            {
+              "name": "value to text",
+              "value": 1
+            },
+            {
+              "name": "range to text",
+              "value": 2
+            }
+          ],
+          "maxDataPoints": 100,
+          "nullPointMode": "connected",
+          "nullText": null,
+          "postfix": "",
+          "postfixFontSize": "50%",
+          "prefix": "",
+          "prefixFontSize": "50%",
+          "rangeMaps": [
+            {
+              "from": "null",
+              "text": "N/A",
+              "to": "null"
+            }
+          ],
+          "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+          },
+          "tableColumn": "tso",
+          "targets": [
+            {
+              "expr": "pd_cluster_tso{instance=\"$instance\", type=\"tso\", dc=\"global\"}",
+              "format": "time_series",
+              "instant": true,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "{{type}}",
+              "refId": "A"
+            }
+          ],
+          "thresholds": "",
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "Current TSO Datetime",
+          "type": "singlestat",
+          "valueFontSize": "80%",
+          "valueMaps": [
+            {
+              "op": "=",
+              "text": "N/A",
+              "value": "null"
+            }
+          ],
+          "valueName": "avg"
         }
       ],
       "repeat": null,
@@ -7258,7 +7479,7 @@
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "tidb-cluster",
+          "datasource": "${DS_TEST-CLUSTER}",
           "description": "",
           "fill": 0,
           "gridPos": {
@@ -7362,7 +7583,7 @@
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "tidb-cluster",
+          "datasource": "${DS_TEST-CLUSTER}",
           "fill": 0,
           "gridPos": {
             "h": 8,

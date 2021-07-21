@@ -1580,19 +1580,40 @@ func (checker *prepareChecker) collect(region *core.RegionInfo) {
 }
 
 // GetHotWriteRegions gets hot write regions' info.
-func (c *RaftCluster) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
+func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
 	c.RLock()
 	co := c.coordinator
 	c.RUnlock()
-	return co.getHotWriteRegions()
+	hotWriteRegions := co.getHotWriteRegions()
+	if len(storeIDs) > 0 {
+		hotWriteRegions = getHotRegionsByStoreIDs(hotWriteRegions, storeIDs...)
+	}
+	return hotWriteRegions
 }
 
 // GetHotReadRegions gets hot read regions' info.
-func (c *RaftCluster) GetHotReadRegions() *statistics.StoreHotPeersInfos {
+func (c *RaftCluster) GetHotReadRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
 	c.RLock()
 	co := c.coordinator
 	c.RUnlock()
-	return co.getHotReadRegions()
+	hotReadRegions := co.getHotReadRegions()
+	if len(storeIDs) > 0 {
+		hotReadRegions = getHotRegionsByStoreIDs(hotReadRegions, storeIDs...)
+	}
+	return hotReadRegions
+}
+
+func getHotRegionsByStoreIDs(hotPeerInfos *statistics.StoreHotPeersInfos, storeIDs ...uint64) *statistics.StoreHotPeersInfos {
+	asLeader := statistics.StoreHotPeersStat{}
+	asPeer := statistics.StoreHotPeersStat{}
+	for _, storeID := range storeIDs {
+		asLeader[storeID] = hotPeerInfos.AsLeader[storeID]
+		asPeer[storeID] = hotPeerInfos.AsPeer[storeID]
+	}
+	return &statistics.StoreHotPeersInfos{
+		AsLeader: asLeader,
+		AsPeer:   asPeer,
+	}
 }
 
 // GetSchedulers gets all schedulers.
@@ -1642,6 +1663,13 @@ func (c *RaftCluster) IsSchedulerDisabled(name string) (bool, error) {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.isSchedulerDisabled(name)
+}
+
+// IsSchedulerExisted checks if a scheduler is existed.
+func (c *RaftCluster) IsSchedulerExisted(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.isSchedulerExisted(name)
 }
 
 // GetStoreLimiter returns the dynamic adjusting limiter
