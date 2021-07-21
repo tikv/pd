@@ -307,6 +307,9 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 	peers := r.GetVoters()
 	followers := make(map[uint64]*metapb.Peer, len(peers))
 	for _, peer := range peers {
+		if peer.Witness {
+			continue
+		}
 		if r.leader == nil || r.leader.GetId() != peer.GetId() {
 			followers[peer.GetStoreId()] = peer
 		}
@@ -317,6 +320,9 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 // GetFollower randomly returns a follow peer.
 func (r *RegionInfo) GetFollower() *metapb.Peer {
 	for _, peer := range r.GetVoters() {
+		if peer.Witness {
+			continue
+		}
 		if r.leader == nil || r.leader.GetId() != peer.GetId() {
 			return peer
 		}
@@ -494,6 +500,7 @@ type RegionsInfo struct {
 	regions      regionMap              // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
 	followers    map[uint64]*regionTree // storeID -> sub regionTree
+	witnesses    map[uint64]*regionTree // storeID -> sub regionTree
 	learners     map[uint64]*regionTree // storeID -> sub regionTree
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 }
@@ -505,6 +512,7 @@ func NewRegionsInfo() *RegionsInfo {
 		regions:      newRegionMap(),
 		leaders:      make(map[uint64]*regionTree),
 		followers:    make(map[uint64]*regionTree),
+		witnesses:    make(map[uint64]*regionTree),
 		learners:     make(map[uint64]*regionTree),
 		pendingPeers: make(map[uint64]*regionTree),
 	}
@@ -574,7 +582,15 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 		// Add to leaders and followers.
 		for _, peer := range region.GetVoters() {
 			storeID := peer.GetStoreId()
-			if peer.GetId() == region.leader.GetId() {
+			if peer.Witness {
+				// Add witness peer to witnesses.
+				store, ok := r.witnesses[storeID]
+				if !ok {
+					store = newRegionTree()
+					r.witnesses[storeID] = store
+				}
+				store.update(item)
+			} else if peer.GetId() == region.leader.GetId() {
 				// Add leader peer to leaders.
 				store, ok := r.leaders[storeID]
 				if !ok {
