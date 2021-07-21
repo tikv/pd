@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/tidb-dashboard/pkg/uiserver"
 
 	"github.com/tikv/pd/pkg/dashboard/adapter"
+	_ "github.com/tikv/pd/pkg/dashboard/distro"
 	"github.com/tikv/pd/pkg/dashboard/keyvisual"
 	ui "github.com/tikv/pd/pkg/dashboard/uiserver"
 	"github.com/tikv/pd/server"

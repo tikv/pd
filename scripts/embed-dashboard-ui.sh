@@ -2,6 +2,12 @@
 set -euo pipefail
 
 
+DISTRIBUTION_DIR=${DASHBOARD_DISTRIBUTION_DIR-}
+
+if [ -n "${DISTRIBUTION_DIR}" ]; then
+  DASHBOARD=COMPILE
+fi
+
 if [ "${DASHBOARD-}" == "0" ] || [ "${DASHBOARD-}" = "SKIP" ]; then
   # DASHBOARD=0 will completely exclude TiDB Dashboard in building when calling from Makefile
   # while DASHBOARD=SKIP will keep current asset file unchanged and include it in building
@@ -102,6 +108,16 @@ function compile_asset {
 
   echo '+ Build UI'
   cd "${BUILD_DIR}"
+
+  if [ -n "${DISTRIBUTION_DIR}" ]; then
+    echo '+ Generating distribution resource'
+    echo '  - Generating...'
+    DISTRIBUTION_DIR=${DISTRIBUTION_DIR} scripts/replace_distro_resource.sh
+    DISTRO_BUILD_TAG=1 scripts/generate_distro_info.sh
+
+    echo '+ Generating distribution resource complete'
+  fi
+
   make ui
 
   echo '+ Generating UI assets'
