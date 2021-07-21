@@ -110,15 +110,11 @@ function compile_asset {
   cd "${BUILD_DIR}"
 
   if [ -n "${DISTRIBUTION_DIR}" ]; then
-    echo '+ Generating distribution resource'
-    echo '  - Generating...'
     DISTRIBUTION_DIR=${DISTRIBUTION_DIR} scripts/replace_distro_resource.sh
-    DISTRO_BUILD_TAG=1 scripts/generate_distro_info.sh
-
-    echo '+ Generating distribution resource complete'
+    DISTRO_BUILD_TAG=1 make ui
+  else
+    make ui
   fi
-
-  make ui
 
   echo '+ Generating UI assets'
   echo '  - Generating...'

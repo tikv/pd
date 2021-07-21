@@ -55,7 +55,7 @@ else
 endif
 
 ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
-	BUILD_TAGS += distro
+	BUILD_TAGS += dashboard_distro
 endif
 
 ifeq ("$(WITH_RACE)", "1")
@@ -102,7 +102,7 @@ ifneq ($(SWAGGER), 0)
 	PD_SERVER_DEP += swagger-spec
 endif
 ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
-	PD_SERVER_DEP += replace-distro-info
+	PD_SERVER_DEP += dashboard-replace-distro-info
 endif
 PD_SERVER_DEP += dashboard-ui
 
@@ -132,7 +132,7 @@ dashboard-ui: export GO111MODULE=on
 dashboard-ui:
 	./scripts/embed-dashboard-ui.sh
 
-replace-distro-info:
+dashboard-replace-distro-info:
 	rm -f pkg/dashboard/distro/distro_info.go
 	cp $(DASHBOARD_DISTRIBUTION_DIR)/distro_info.go pkg/dashboard/distro/distro_info.go
 
