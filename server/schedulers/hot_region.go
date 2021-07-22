@@ -384,12 +384,9 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 	default:
 	}
 	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
-	preferPriorities := leaderSolver.preferPriority()
-	if preferPriorities == NoneDimPriority {
-		ops := leaderSolver.solve()
-		if len(ops) > 0 {
-			return ops
-		}
+	ops := leaderSolver.solve()
+	if len(ops) > 0 {
+		return ops
 	}
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
