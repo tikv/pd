@@ -556,21 +556,13 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 }
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad) bool {
-	preferPriority := bs.preferPriority()
-	switch preferPriority {
-	case NoneDimPriority:
-		return slice.AllOf(minLoad.Loads, func(i int) bool {
-			if statistics.IsSelectedDim(i) {
-				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
-			}
-			return true
-		})
-	//case KeyDimPriority:
-	//	return minLoad.Loads[statistics.KeyDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.KeyDim]
-	//case ByteDimPriority:
-	//	return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
-	}
-	return false
+	//preferPriority := bs.preferPriority()
+	return slice.AllOf(minLoad.Loads, func(i int) bool {
+		if statistics.IsSelectedDim(i) {
+			return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
+		}
+		return true
+	})
 }
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
@@ -760,21 +752,12 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad) bool {
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
-	preferPriority := bs.preferPriority()
-	switch preferPriority {
-	case NoneDimPriority:
-		return slice.AllOf(maxLoad.Loads, func(i int) bool {
-			if statistics.IsSelectedDim(i) {
-				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
-			}
-			return true
-		})
-	//case KeyDimPriority:
-	//	return maxLoad.Loads[statistics.KeyDim]*dstToleranceRatio < expect.Loads[statistics.KeyDim]
-	//case ByteDimPriority:
-	//	return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
-	}
-	return false
+	return slice.AllOf(maxLoad.Loads, func(i int) bool {
+		if statistics.IsSelectedDim(i) {
+			return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
+		}
+		return true
+	})
 }
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
