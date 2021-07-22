@@ -31,8 +31,11 @@ import (
 )
 
 const (
+	// NonePriority indicates there is no dim priority for hot-region-scheduler
 	NonePriority = ""
+	// BytePriority indicates hot-region-scheduler prefer byte dim
 	BytePriority = "byte"
+	// KeyPriority indicates hot-region-scheduler prefer key dim
 	KeyPriority  = "key"
 )
 
