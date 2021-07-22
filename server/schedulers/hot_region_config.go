@@ -36,7 +36,7 @@ const (
 	// BytePriority indicates hot-region-scheduler prefer byte dim
 	BytePriority = "byte"
 	// KeyPriority indicates hot-region-scheduler prefer key dim
-	KeyPriority  = "key"
+	KeyPriority = "key"
 )
 
 // params about hot region.

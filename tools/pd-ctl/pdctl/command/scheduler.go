@@ -538,6 +538,7 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 						schedulers.BytePriority,
 						schedulers.KeyPriority,
 						"none"))
+					return
 				}
 				priorities = append(priorities, priority)
 			}
