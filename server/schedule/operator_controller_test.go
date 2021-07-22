@@ -604,6 +604,10 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 		}),
 		core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}),
 	)
+
+	// set to a small rate to reduce unstable possibility.
+	tc.SetAllStoresLimit(storelimit.AddPeer, 0.0000001)
+	tc.SetAllStoresLimit(storelimit.RemovePeer, 0.0000001)
 	tc.PutRegion(regions[2])
 	// The size of Region is less or equal than 1MB.
 	for i := 0; i < 50; i++ {
