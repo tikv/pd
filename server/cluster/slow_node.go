@@ -43,7 +43,7 @@ func (d *slowStoreDetector) detectSlowStore(stores map[uint64]*core.StoreInfo) {
 			// slow node next time.
 			log.Info("slow store has been removed",
 				zap.Stringer("store", store.GetMeta()))
-		} else if store.SlowScore() == slowStoreRecoveredThreshold {
+		} else if store.GetSlowScore() == slowStoreRecoveredThreshold {
 			log.Info("slow store has been recovered",
 				zap.Stringer("store", store.GetMeta()))
 			// Recover leader weight and region weight.
@@ -64,7 +64,7 @@ func (d *slowStoreDetector) detectSlowStore(stores map[uint64]*core.StoreInfo) {
 		if len(slowStores) == 1 {
 			// TODO: add evict leader scheduler.
 			store := slowStores[0]
-			if store.SlowScore() == slowStoreEvictedThreshold {
+			if store.GetSlowScore() == slowStoreEvictedThreshold {
 				d.evictedStore = store.ShallowClone()
 				d.cluster.SetStoreWeight(store.GetID(), 0, store.GetRegionWeight())
 				log.Info("detected slow store, set leader weight to 0",

@@ -33,6 +33,9 @@ import (
 // SelectSourceStores selects stores that be selected as source store from the list.
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		if s.GetLeaderCount() == 0 {
+			return false
+		}
 		return slice.AllOf(filters, func(i int) bool {
 			if !filters[i].Source(opt, s) {
 				sourceID := fmt.Sprintf("%d", s.GetID())
