@@ -860,14 +860,14 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 			return bs.defaultBetterThan(old)
 		case ByteDimPriority:
 			if byteRkCmp != 0 {
-				return byteRkCmp > 0
+				return byteRkCmp < 0
 			}
 			if keyRkCmp != 0 {
 				return keyRkCmp < 0
 			}
 		case KeyDimPriority:
 			if keyRkCmp != 0 {
-				return keyRkCmp > 0
+				return keyRkCmp < 0
 			}
 			if byteRkCmp != 0 {
 				return byteRkCmp < 0
