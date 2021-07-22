@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/tikv/pd/server/schedulers"
 	"net/http"
 	"net/url"
 	"path"
@@ -527,7 +528,24 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	if err != nil {
 		val = value
 	}
-	input[key] = val
+	if schedulerName == "balance-hot-region-scheduler" && (key == "read-priorities" || key == "write-priorities") {
+		priorities := make([]string, 0)
+		if value == "none" {
+		} else {
+			for _, priority := range strings.Split(value, ",") {
+				if priority != schedulers.BytePriority && priority != schedulers.KeyPriority {
+					cmd.Println(fmt.Sprintf("priority should be one of %s,%s,%s",
+						schedulers.BytePriority,
+						schedulers.KeyPriority,
+						"none"))
+				}
+				priorities = append(priorities, priority)
+			}
+		}
+		input[key] = priorities
+	} else {
+		input[key] = val
+	}
 	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 
