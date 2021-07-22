@@ -530,8 +530,7 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	}
 	if schedulerName == "balance-hot-region-scheduler" && (key == "read-priorities" || key == "write-priorities") {
 		priorities := make([]string, 0)
-		if value == "none" {
-		} else {
+		if value != "none" {
 			for _, priority := range strings.Split(value, ",") {
 				if priority != schedulers.BytePriority && priority != schedulers.KeyPriority {
 					cmd.Println(fmt.Sprintf("priority should be one of %s,%s,%s",
