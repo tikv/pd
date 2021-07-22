@@ -70,6 +70,13 @@ func checkSet(c *C, ma MovingAvg, data []float64, expected []float64) {
 	checkAdd(c, ma, data[1:], expected[1:])
 }
 
+// checkInstantaneous checks GetInstantaneous
+func checkInstantaneous(c *C, ma MovingAvg) {
+	value := 100.000000
+	ma.Add(value)
+	c.Assert(ma.GetInstantaneous(), Equals, value)
+}
+
 func (t *testMovingAvg) TestMedianFilter(c *C) {
 	var empty float64 = 0
 	data := []float64{2, 4, 2, 800, 600, 6, 3}
@@ -103,6 +110,9 @@ func (t *testMovingAvg) TestMovingAvg(c *C) {
 	}, {
 		ma:       NewMedianFilter(5),
 		expected: []float64{1.000000, 1.000000, 1.000000, 1.000000, 1.000000, 1.000000, 1.000000, 1.000000},
+	}, {
+		ma:       NewMaxFilter(5),
+		expected: []float64{1.000000, 1.000000, 1.000000, 1.000000, 5.000000, 5.000000, 5.000000, 5.000000},
 	},
 	}
 	for _, test := range testCases {
@@ -110,5 +120,6 @@ func (t *testMovingAvg) TestMovingAvg(c *C) {
 		checkReset(c, test.ma, empty)
 		checkAdd(c, test.ma, data, test.expected)
 		checkSet(c, test.ma, data, test.expected)
+		checkInstantaneous(c, test.ma)
 	}
 }
