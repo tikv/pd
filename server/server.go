@@ -852,14 +852,14 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
 				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			if !(defaultRule.Count == int(old.MaxReplicas) && stringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
+			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.StringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
-		if !(cfg.MaxReplicas == old.MaxReplicas && stringsEqual(cfg.LocationLabels, old.LocationLabels)) {
+		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.StringsEqual(cfg.LocationLabels, old.LocationLabels)) {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
@@ -1375,16 +1375,4 @@ func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) e
 		}
 	}
 	return nil
-}
-
-func stringsEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
