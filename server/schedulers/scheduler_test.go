@@ -219,7 +219,7 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	tc.SetLeaderScheduleLimit(0)
+	tc.SetHotRegionScheduleLimit(0)
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
@@ -237,7 +237,7 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	tc.AddRegionWithReadInfo(3, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2, 3})
 	tc.SetHotRegionCacheHitsThreshold(0)
 	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
-	c.Assert(hb.Schedule(tc), IsNil)
+	c.Assert(hb.IsScheduleAllowed(tc), IsFalse)
 }
 
 var _ = Suite(&testEvictLeaderSuite{})
