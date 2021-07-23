@@ -20,6 +20,8 @@ type MovingAvg interface {
 	Add(data float64)
 	// Get returns the moving average.
 	Get() float64
+	// GetInstantaneous returns the value just added.
+	GetInstantaneous() float64
 	// Reset cleans the data set.
 	Reset()
 	// Set = Reset + Add
