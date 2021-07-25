@@ -169,7 +169,7 @@ test-with-cover: install-go-tools dashboard-ui
 	@$(FAILPOINT_DISABLE)
 
 test-tso-function: install-go-tools dashboard-ui
-	# testing TSO consistency...
+	# testing TSO function...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
 	CGO_ENABLED=1 GO111MODULE=on go test -race -tags tso_function_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
