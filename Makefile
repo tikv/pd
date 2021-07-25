@@ -168,7 +168,7 @@ test-with-cover: install-go-tools dashboard-ui
 	done
 	@$(FAILPOINT_DISABLE)
 
-test-tso-function: install-go-tools
+test-tso-function: install-go-tools dashboard-ui
 	# testing TSO consistency...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
@@ -176,7 +176,7 @@ test-tso-function: install-go-tools
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
-test-tso-consistency: install-go-tools
+test-tso-consistency: install-go-tools dashboard-ui
 	# testing TSO consistency...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
@@ -239,6 +239,7 @@ clean-test:
 	rm -rf /tmp/test_pd*
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
+	go clean -testcache
 
 clean-build:
 	# Cleaning building files...
