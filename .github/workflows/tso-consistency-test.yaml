@@ -1,0 +1,16 @@
+name: TSO Consistency Test
+on:
+  push:
+    branches:
+      - master
+jobs:
+  chunks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Make TSO Consistency Test
+        run: make test-tso-consistency

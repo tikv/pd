@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// +build tso_full_test tso_function_test
+
 package tso_test
 
 import (
@@ -151,23 +153,7 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 	}
 }
 
-var _ = SerialSuites(&testLocalTSOSerialSuite{})
-
-type testLocalTSOSerialSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testLocalTSOSerialSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
-}
-
-func (s *testLocalTSOSerialSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
-func (s *testLocalTSOSerialSuite) TestNextLeaderKey(c *C) {
+func (s *testManagerSuite) TestNextLeaderKey(c *C) {
 	tso.PriorityCheck = 5 * time.Second
 	defer func() {
 		tso.PriorityCheck = 1 * time.Minute

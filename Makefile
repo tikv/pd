@@ -4,6 +4,8 @@ TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/")
 INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/" | grep -E "tests")
+TSO_INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
+                     sort -u | sed -e "s/^\./github.com\/tikv\/pd/" | grep -E "server/tso")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 
 PACKAGES := go list ./...
@@ -143,27 +145,36 @@ pd-heartbeat-bench:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
 test: install-go-tools
-	# testing...
+	# testing all pkgs...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 GO111MODULE=on go test -tag tso_full_test -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
 basic-test:
+	# testing basic pkgs...
 	@$(FAILPOINT_ENABLE)
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 test-with-cover: install-go-tools dashboard-ui
-	# testing...
+	# testing all pkgs (expect TSO consistency test) with converage...
 	@$(FAILPOINT_ENABLE)
 	for PKG in $(TEST_PKGS); do\
 		set -euo pipefail;\
-		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG  2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
+		CGO_ENABLED=1 GO111MODULE=on go test -tags tso_function_test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG  2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
 		rm coverage.tmp;\
 	done
 	@$(FAILPOINT_DISABLE)
+
+test-tso-consistency: install-go-tools
+	# testing TSO consistency...
+	@$(DEADLOCK_ENABLE)
+	@$(FAILPOINT_ENABLE)
+	CGO_ENABLED=1 GO111MODULE=on go test -race -tags tso_consistency_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
+	@$(DEADLOCK_DISABLE)
 
 check: install-go-tools check-all check-plugin errdoc check-testing-t docker-build-test
 
