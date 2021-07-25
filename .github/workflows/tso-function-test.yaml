@@ -1,11 +1,13 @@
-name: TSO Consistency Test
+name: TSO Function Test
 on:
-  # Only run when the new code is merged into master.
   push:
     branches:
       - master
+  pull_request:
+    branches:
+      - master
 jobs:
-  tso-consistency-test:
+  tso-function-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-go@v2
@@ -13,5 +15,5 @@ jobs:
           go-version: 1.16
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: Make TSO Consistency Test
-        run: make test-tso-consistency
+      - name: Make TSO Function Test
+        run: make test-tso-function
