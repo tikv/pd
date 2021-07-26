@@ -14,7 +14,7 @@ name: PD Tests
 
 jobs:
   chunks:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted,X64]
     strategy:
       fail-fast: true
       matrix:
@@ -27,18 +27,6 @@ jobs:
           go-version: 1.16
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: Restore cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-            **/.tools
-            **/.dashboard_asset_cache
-          key: ${{ runner.os }}-go-${{ matrix.worker_id }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-${{ matrix.worker_id }}
-            ${{ runner.os }}-go-
       - name: Dispatch Packages
         id: packages-units
         env:
