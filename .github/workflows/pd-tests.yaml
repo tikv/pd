@@ -14,7 +14,7 @@ name: PD Tests
 
 jobs:
   chunks:
-    runs-on: [self-hosted,X64,internal-k8s]
+    runs-on: [self-hosted,X64]
     strategy:
       fail-fast: true
       matrix:
