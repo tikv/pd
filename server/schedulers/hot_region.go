@@ -511,6 +511,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			}
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
+				if !bs.checkDim() {
+					continue
+				}
 				bs.calcProgressiveRank()
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
 					if newOp, newInfl := bs.buildOperator(); newOp != nil {
@@ -556,8 +559,8 @@ func (bs *balanceSolver) checkDim() bool {
 			srcDimLoads := srcLoads.Loads[i]
 			peerDimLoads := infl.Loads[regionIndex(i)]
 			dstDimLoads := dstLoads.Loads[i]
-			return (srcDimLoads-peerDimLoads) < (dstDimLoads+peerDimLoads)*2 &&
-				(srcDimLoads-peerDimLoads)*2 < (dstDimLoads+peerDimLoads)
+			return (srcDimLoads-peerDimLoads) < (dstDimLoads+peerDimLoads)*1.5 &&
+				(srcDimLoads-peerDimLoads)*1.5 < (dstDimLoads+peerDimLoads)
 		}
 		return false
 	})
