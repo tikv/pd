@@ -14,7 +14,7 @@ name: PD Tests
 
 jobs:
   chunks:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted,X64,internal-k8s]
     strategy:
       fail-fast: true
       matrix:
