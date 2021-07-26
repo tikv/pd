@@ -134,6 +134,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewBalanceHotRegionSchedulerCommand())
 	c.AddCommand(NewRandomMergeSchedulerCommand())
 	c.AddCommand(NewLabelSchedulerCommand())
+	c.AddCommand(NewEvictSlowStoreSchedulerCommand())
 	return c
 }
 
@@ -261,6 +262,16 @@ func NewBalanceLeaderSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "balance-leader-scheduler",
 		Short: "add a scheduler to balance leaders between stores",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewEvictSlowStoreSchedulerCommand returns a command to add a evict-slow-store-scheduler.
+func NewEvictSlowStoreSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-slow-store-scheduler",
+		Short: "add a scheduler to detect and evict slow stores",
 		Run:   addSchedulerCommandFunc,
 	}
 	return c
