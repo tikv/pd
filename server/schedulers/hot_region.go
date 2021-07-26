@@ -568,8 +568,8 @@ func (bs *balanceSolver) checkDim() bool {
 			srcDimLoads := srcLoads.Loads[i]
 			peerDimLoads := infl.Loads[regionIndex(i)]
 			dstDimLoads := dstLoads.Loads[i]
-			return (srcDimLoads-peerDimLoads) < (dstDimLoads+peerDimLoads)*1.5 &&
-				(srcDimLoads-peerDimLoads)*1.5 < (dstDimLoads+peerDimLoads)
+			return (srcDimLoads-peerDimLoads) < (dstDimLoads+peerDimLoads)*2 &&
+				(srcDimLoads-peerDimLoads)*2 < (dstDimLoads+peerDimLoads)
 		}
 		return false
 	})
