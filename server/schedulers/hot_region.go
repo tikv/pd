@@ -554,7 +554,16 @@ func (bs *balanceSolver) checkDim() bool {
 	}
 	srcLoads := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
 	dstLoads := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
-	return slice.AllOf(srcLoads.Loads, func(i int) bool {
+	origin := slice.AllOf(srcLoads, func(i int) bool {
+		if statistics.IsSelectedDim(i) {
+			srcDimLoads := srcLoads.Loads[i]
+			dstDimLoads := dstLoads.Loads[i]
+			return srcDimLoads < dstDimLoads*2 &&
+				srcDimLoads*2 < dstDimLoads
+		}
+		return false
+	})
+	after := slice.AllOf(srcLoads.Loads, func(i int) bool {
 		if statistics.IsSelectedDim(i) {
 			srcDimLoads := srcLoads.Loads[i]
 			peerDimLoads := infl.Loads[regionIndex(i)]
@@ -564,6 +573,10 @@ func (bs *balanceSolver) checkDim() bool {
 		}
 		return false
 	})
+	if origin {
+		return after
+	}
+	return true
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if both key and byte rate is greater than
