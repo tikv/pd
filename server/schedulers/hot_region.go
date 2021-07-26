@@ -531,6 +531,38 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	return []*operator.Operator{op}
 }
 
+func (bs *balanceSolver) checkDim() bool {
+	infl := &Influence{
+		Loads: append(bs.cur.srcPeerStat.Loads[:0:0], bs.cur.srcPeerStat.Loads...),
+		Count: 1,
+	}
+	regionIndex := func(loadsDim int) statistics.RegionStatKind {
+		switch {
+		case bs.rwTy == read && loadsDim == statistics.ByteDim:
+			return statistics.RegionReadBytes
+		case bs.rwTy == read && loadsDim == statistics.KeyDim:
+			return statistics.RegionReadKeys
+		case bs.rwTy == write && loadsDim == statistics.ByteDim:
+			return statistics.RegionWriteBytes
+		case bs.rwTy == write && loadsDim == statistics.KeyDim:
+			return statistics.RegionWriteKeys
+		}
+		return 0
+	}
+	srcLoads := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
+	dstLoads := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
+	return slice.AllOf(srcLoads.Loads, func(i int) bool {
+		if statistics.IsSelectedDim(i) {
+			srcDimLoads := srcLoads.Loads[i]
+			peerDimLoads := infl.Loads[regionIndex(i)]
+			dstDimLoads := dstLoads.Loads[i]
+			return (srcDimLoads-peerDimLoads) < (dstDimLoads+peerDimLoads)*2 &&
+				(srcDimLoads-peerDimLoads)*2 < (dstDimLoads+peerDimLoads)
+		}
+		return false
+	})
+}
+
 // filterSrcStores compare the min rate and the ratio * expectation rate, if both key and byte rate is greater than
 // its expectation * ratio, the store would be selected as hot source store
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
@@ -555,13 +587,20 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 }
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad) bool {
-	//preferPriority := bs.preferPriority()
-	return slice.AllOf(minLoad.Loads, func(i int) bool {
-		if statistics.IsSelectedDim(i) {
-			return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
-		}
-		return true
-	})
+	switch bs.preferPriority() {
+	case NoneDimPriority:
+		return slice.AllOf(minLoad.Loads, func(i int) bool {
+			if statistics.IsSelectedDim(i) {
+				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
+			}
+			return true
+		})
+	case ByteDimPriority:
+		return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
+	case KeyDimPriority:
+		return minLoad.Loads[statistics.KeyDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.KeyDim]
+	}
+	return false
 }
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
@@ -751,12 +790,20 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad) bool {
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
-	return slice.AllOf(maxLoad.Loads, func(i int) bool {
-		if statistics.IsSelectedDim(i) {
-			return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
-		}
-		return true
-	})
+	switch bs.preferPriority() {
+	case NoneDimPriority:
+		return slice.AllOf(maxLoad.Loads, func(i int) bool {
+			if statistics.IsSelectedDim(i) {
+				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
+			}
+			return true
+		})
+	case ByteDimPriority:
+		return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
+	case KeyDimPriority:
+		return maxLoad.Loads[statistics.KeyDim]*dstToleranceRatio < expect.Loads[statistics.KeyDim]
+	}
+	return false
 }
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
@@ -771,7 +818,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	bs.cur.progressiveRank = bs.calRank(dimHotList, dimDecRatioList)
 }
 
-// calcProgressiveRank calculates `bs.cur.progressiveRank`.
+// defaultCalcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) defaultCalcProgressiveRank() {
 	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
@@ -859,14 +906,14 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 			return bs.defaultBetterThan(old)
 		case ByteDimPriority:
 			if byteRkCmp != 0 {
-				return byteRkCmp < 0
+				return byteRkCmp > 0
 			}
 			if keyRkCmp != 0 {
 				return keyRkCmp < 0
 			}
 		case KeyDimPriority:
 			if keyRkCmp != 0 {
-				return keyRkCmp < 0
+				return keyRkCmp > 0
 			}
 			if byteRkCmp != 0 {
 				return byteRkCmp < 0
