@@ -554,7 +554,7 @@ func (bs *balanceSolver) checkDim() bool {
 	}
 	srcLoads := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
 	dstLoads := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
-	origin := slice.AllOf(srcLoads, func(i int) bool {
+	origin := slice.AllOf(srcLoads.Loads, func(i int) bool {
 		if statistics.IsSelectedDim(i) {
 			srcDimLoads := srcLoads.Loads[i]
 			dstDimLoads := dstLoads.Loads[i]
