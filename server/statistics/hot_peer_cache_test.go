@@ -29,7 +29,7 @@ var _ = Suite(&testHotPeerCache{})
 type testHotPeerCache struct{}
 
 func (t *testHotPeerCache) TestStoreTimeUnsync(c *C) {
-	cache := NewHotStoresStats(WriteFlow)
+	cache := NewHotPeerCache(WriteFlow)
 	peers := newPeers(3,
 		func(i int) uint64 { return uint64(10000 + i) },
 		func(i int) uint64 { return uint64(i) })
@@ -92,7 +92,7 @@ func testCache(c *C, t *testCacheCase) {
 		ReadFlow:  3, // all peers
 		WriteFlow: 3, // all peers
 	}
-	cache := NewHotStoresStats(t.kind)
+	cache := NewHotPeerCache(t.kind)
 	region := buildRegion(nil, nil, t.kind)
 	checkAndUpdate(c, cache, region, defaultSize[t.kind])
 	checkHit(c, cache, region, t.kind, false) // all peers are new
@@ -226,7 +226,7 @@ func newPeers(n int, pid genID, sid genID) []*metapb.Peer {
 }
 
 func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
-	cache := NewHotStoresStats(ReadFlow)
+	cache := NewHotPeerCache(ReadFlow)
 
 	// skip interval=0
 	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: ReadFlow}
@@ -289,7 +289,7 @@ func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
 }
 
 func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold float64) {
-	cache := NewHotStoresStats(ReadFlow)
+	cache := NewHotPeerCache(ReadFlow)
 	storeID := uint64(1)
 	c.Assert(byteRate, GreaterEqual, minHotThresholds[RegionReadBytes])
 	for i := uint64(1); i < TopNN+10; i++ {
@@ -323,7 +323,7 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {
-	cache := NewHotStoresStats(ReadFlow)
+	cache := NewHotPeerCache(ReadFlow)
 	region := core.NewRegionInfo(&metapb.Region{
 		Id: 1,
 		Peers: []*metapb.Peer{

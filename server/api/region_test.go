@@ -313,17 +313,18 @@ func (s *testRegionSuite) TestAccelerateRegionsScheduleInRange(c *C) {
 
 func (s *testRegionSuite) TestScatterRegions(c *C) {
 	r1 := newTestRegionInfo(601, 13, []byte("b1"), []byte("b2"))
-	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 13}, &metapb.Peer{Id: 6, StoreId: 13})
+	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 14}, &metapb.Peer{Id: 6, StoreId: 15})
 	r2 := newTestRegionInfo(602, 13, []byte("b2"), []byte("b3"))
-	r2.GetMeta().Peers = append(r2.GetMeta().Peers, &metapb.Peer{Id: 7, StoreId: 13}, &metapb.Peer{Id: 8, StoreId: 13})
+	r2.GetMeta().Peers = append(r2.GetMeta().Peers, &metapb.Peer{Id: 7, StoreId: 14}, &metapb.Peer{Id: 8, StoreId: 15})
 	r3 := newTestRegionInfo(603, 13, []byte("b4"), []byte("b4"))
-	r3.GetMeta().Peers = append(r3.GetMeta().Peers, &metapb.Peer{Id: 9, StoreId: 13}, &metapb.Peer{Id: 10, StoreId: 13})
+	r3.GetMeta().Peers = append(r3.GetMeta().Peers, &metapb.Peer{Id: 9, StoreId: 14}, &metapb.Peer{Id: 10, StoreId: 15})
 	mustRegionHeartbeat(c, s.svr, r1)
 	mustRegionHeartbeat(c, s.svr, r2)
 	mustRegionHeartbeat(c, s.svr, r3)
 	mustPutStore(c, s.svr, 13, metapb.StoreState_Up, []*metapb.StoreLabel{})
 	mustPutStore(c, s.svr, 14, metapb.StoreState_Up, []*metapb.StoreLabel{})
 	mustPutStore(c, s.svr, 15, metapb.StoreState_Up, []*metapb.StoreLabel{})
+	mustPutStore(c, s.svr, 16, metapb.StoreState_Up, []*metapb.StoreLabel{})
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("b1")), hex.EncodeToString([]byte("b3")))
 
 	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body))

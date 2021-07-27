@@ -73,13 +73,14 @@ func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
 		replicated2          bool
 	}
 
+	// healthy only check down peer and pending peer
 	cases := []testCase{
 		{region(peers(1, 2, 3)), true, true, true, true, true, true},
 		{region(peers(1, 2, 3), core.WithPendingPeers(peers(1))), false, true, true, false, true, true},
-		{region(peers(1, 2, 3), core.WithLearners(peers(1))), false, false, false, true, true, false},
+		{region(peers(1, 2, 3), core.WithLearners(peers(1))), true, true, false, true, true, false},
 		{region(peers(1, 2, 3), core.WithDownPeers([]*pdpb.PeerStats{{Peer: peers(1)[0]}})), false, false, true, false, false, true},
 		{region(peers(1, 2)), true, true, false, true, true, false},
-		{region(peers(1, 2, 3, 4), core.WithLearners(peers(1))), false, false, false, true, true, false},
+		{region(peers(1, 2, 3, 4), core.WithLearners(peers(1))), true, true, false, true, true, false},
 	}
 
 	opt := config.NewTestOptions()
