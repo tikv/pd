@@ -179,6 +179,31 @@ func (s *testRegionInfoSuite) TestRegionRoundingFlow(c *C) {
 	}
 }
 
+func (s *testRegionInfoSuite) TestRegionWriteRate(c *C) {
+	testcases := []struct {
+		bytes           uint64
+		keys            uint64
+		interval        uint64
+		expectBytesRate float64
+		expectKeysRate  float64
+	}{
+		{0, 0, 0, 0, 0},
+		{10, 3, 0, 0, 0},
+		{0, 0, 1, 0, 0},
+		{10, 3, 1, 0, 0},
+		{0, 0, 5, 0, 0},
+		{10, 3, 5, 2, 0.6},
+		{0, 0, 500, 0, 0},
+		{10, 3, 500, 0, 0},
+	}
+	for _, t := range testcases {
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(t.bytes), SetWrittenKeys(t.keys), SetReportInterval(t.interval))
+		bytesRate, keysRate := r.GetWriteRate()
+		c.Assert(bytesRate, Equals, t.expectBytesRate)
+		c.Assert(keysRate, Equals, t.expectKeysRate)
+	}
+}
+
 var _ = Suite(&testRegionMapSuite{})
 
 type testRegionMapSuite struct{}
@@ -331,15 +356,21 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	c.Assert(regions.GetRegion(18), IsNil)
 
 	// Test update keys and size of region.
-	region = region.Clone()
-	region.approximateKeys = 20
-	region.approximateSize = 30
+	region = region.Clone(
+		SetApproximateKeys(20),
+		SetApproximateSize(30),
+		SetWrittenBytes(40),
+		SetWrittenKeys(10),
+		SetReportInterval(5))
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 96)
 	c.Assert(len(regions.GetRegions()), Equals, 96)
 	c.Assert(regions.GetRegion(201), NotNil)
 	c.Assert(regions.tree.TotalSize(), Equals, int64(30))
+	bytesRate, keysRate := regions.tree.TotalWriteRate()
+	c.Assert(bytesRate, Equals, float64(8))
+	c.Assert(keysRate, Equals, float64(2))
 }
 
 func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
