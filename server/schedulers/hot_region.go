@@ -604,13 +604,6 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad) bool {
 	switch bs.preferPriority() {
-	case NoneDimPriority:
-		return slice.AllOf(minLoad.Loads, func(i int) bool {
-			if statistics.IsSelectedDim(i) {
-				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
-			}
-			return true
-		})
 	case ByteDimPriority:
 		return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
 	case KeyDimPriority:
@@ -807,13 +800,6 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad) bool {
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	switch bs.preferPriority() {
-	case NoneDimPriority:
-		return slice.AllOf(maxLoad.Loads, func(i int) bool {
-			if statistics.IsSelectedDim(i) {
-				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
-			}
-			return true
-		})
 	case ByteDimPriority:
 		return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
 	case KeyDimPriority:
@@ -825,56 +811,8 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
-	preferPriority := bs.preferPriority()
-	if preferPriority == NoneDimPriority {
-		bs.defaultCalcProgressiveRank()
-		return
-	}
 	dimHotList, dimDecRatioList := bs.getDimList()
 	bs.cur.progressiveRank = bs.calRank(dimHotList, dimDecRatioList)
-}
-
-// defaultCalcProgressiveRank calculates `bs.cur.progressiveRank`.
-// See the comments of `solution.progressiveRank` for more about progressive rank.
-func (bs *balanceSolver) defaultCalcProgressiveRank() {
-	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
-	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
-	peer := bs.cur.srcPeerStat
-	rank := int64(0)
-	if bs.rwTy == write && bs.opTy == transferLeader {
-		// In this condition, CPU usage is the matter.
-		// Only consider about key rate.
-		srcKeyRate := srcLd.Loads[statistics.KeyDim]
-		dstKeyRate := dstLd.Loads[statistics.KeyDim]
-		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
-		if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
-			rank = -1
-		}
-	} else {
-		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
-		// than the src store's (key/byte) rate after scheduling one peer.
-		keyHot, keyDecRatio := bs.checkHot(statistics.KeyDim, srcLd, dstLd, peer)
-		byteHot, byteDecRatio := bs.checkHot(statistics.ByteDim, srcLd, dstLd, peer)
-
-		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
-		switch {
-		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
-			rank = -3
-		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
-			rank = -2
-		case byteHot && byteDecRatio <= greatDecRatio:
-			// If belong to the case, byte rate will be more balanced, ignore the key rate.
-			rank = -1
-		}
-	}
-	log.Debug("calcProgressiveRank",
-		zap.Uint64("region-id", bs.cur.region.GetID()),
-		zap.Uint64("from-store-id", bs.cur.srcStoreID),
-		zap.Uint64("to-store-id", bs.cur.dstStoreID),
-		zap.Int64("rank", rank))
-	bs.cur.progressiveRank = rank
 }
 
 func (bs *balanceSolver) getMinRate(dim int) float64 {
@@ -918,8 +856,6 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 		byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(bk), old.srcPeerStat.GetLoad(bk), stepRank(0, 100))
 		keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(kk), old.srcPeerStat.GetLoad(kk), stepRank(0, 10))
 		switch bs.preferPriority() {
-		case NoneDimPriority:
-			return bs.defaultBetterThan(old)
 		case ByteDimPriority:
 			if byteRkCmp != 0 {
 				return byteRkCmp > 0
@@ -1251,9 +1187,6 @@ func (bs *balanceSolver) preferPriority() string {
 	if bs.rwTy == read {
 		priorities = bs.sche.conf.ReadPriority
 	}
-	if len(priorities) == 0 {
-		return NoneDimPriority
-	}
 	return priorities[0]
 }
 
@@ -1337,41 +1270,4 @@ func (bs *balanceSolver) getDimList() ([statistics.DimLen]bool, [statistics.DimL
 	dimDecRatio[statistics.KeyDim] = keyDecRatio
 	dimDecRatio[statistics.ByteDim] = byteDecRatio
 	return dimHot, dimDecRatio
-}
-
-func (bs *balanceSolver) defaultBetterThan(old *solution) bool {
-	if bs.rwTy == write && bs.opTy == transferLeader {
-		switch {
-		case bs.cur.srcPeerStat.GetLoad(statistics.RegionWriteKeys) > old.srcPeerStat.GetLoad(statistics.RegionWriteKeys):
-			return true
-		case bs.cur.srcPeerStat.GetLoad(statistics.RegionWriteKeys) < old.srcPeerStat.GetLoad(statistics.RegionWriteKeys):
-			return false
-		}
-	} else {
-		bk, kk := getRegionStatKind(bs.rwTy, statistics.ByteDim), getRegionStatKind(bs.rwTy, statistics.KeyDim)
-		byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(bk), old.srcPeerStat.GetLoad(bk), stepRank(0, 100))
-		keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(kk), old.srcPeerStat.GetLoad(kk), stepRank(0, 10))
-
-		switch bs.cur.progressiveRank {
-		case -2: // greatDecRatio < byteDecRatio <= minorDecRatio && keyDecRatio <= greatDecRatio
-			if keyRkCmp != 0 {
-				return keyRkCmp > 0
-			}
-			if byteRkCmp != 0 {
-				// prefer smaller byte rate, to reduce oscillation
-				return byteRkCmp < 0
-			}
-		case -3: // byteDecRatio <= greatDecRatio && keyDecRatio <= greatDecRatio
-			if keyRkCmp != 0 {
-				return keyRkCmp > 0
-			}
-			fallthrough
-		case -1: // byteDecRatio <= greatDecRatio
-			if byteRkCmp != 0 {
-				// prefer region with larger byte rate, to converge faster
-				return byteRkCmp > 0
-			}
-		}
-	}
-	return false
 }
