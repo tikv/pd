@@ -424,34 +424,19 @@ func (c *coordinator) stop() {
 // Hack to retrieve info from scheduler.
 // TODO: remove it.
 type hasHotStatus interface {
-	GetHotStatus(typ string) *statistics.StoreHotPeersInfos
 	GetPendingInfluence() map[uint64]*schedulers.Influence
 }
 
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
 	c.RLock()
 	defer c.RUnlock()
-	s, ok := c.schedulers[schedulers.HotRegionName]
-	if !ok {
-		return nil
-	}
-	if h, ok := s.Scheduler.(hasHotStatus); ok {
-		return h.GetHotStatus(schedulers.HotWriteRegionType)
-	}
-	return nil
+	return schedulers.GetWriteStoresLoad(c.cluster)
 }
 
 func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
 	c.RLock()
 	defer c.RUnlock()
-	s, ok := c.schedulers[schedulers.HotRegionName]
-	if !ok {
-		return nil
-	}
-	if h, ok := s.Scheduler.(hasHotStatus); ok {
-		return h.GetHotStatus(schedulers.HotReadRegionType)
-	}
-	return nil
+	return schedulers.GetReadStoresLoad(c.cluster)
 }
 
 func (c *coordinator) getSchedulers() []string {
@@ -503,15 +488,15 @@ func (c *coordinator) collectHotSpotMetrics() {
 	c.RUnlock()
 	stores := c.cluster.GetStores()
 	// Collects hot write region metrics.
-	collectHotMetrics(s, stores, schedulers.HotWriteRegionType)
+	c.collectHotMetrics(stores, schedulers.HotWriteRegionType)
 	// Collects hot read region metrics.
-	collectHotMetrics(s, stores, schedulers.HotReadRegionType)
+	c.collectHotMetrics(stores, schedulers.HotReadRegionType)
 	// Collects pending influence.
 	collectPendingInfluence(s, stores)
 }
 
-func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ string) {
-	status := s.Scheduler.(hasHotStatus).GetHotStatus(typ)
+func (c *coordinator) collectHotMetrics(stores []*core.StoreInfo, typ string) {
+	status := schedulers.GetReadStoresLoad(c.cluster)
 	var (
 		kind                      string
 		byteTyp, keyTyp, queryTyp statistics.RegionStatKind
