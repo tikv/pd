@@ -128,7 +128,7 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		return nil
 	}
 
-	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpAdmin)
+	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpMerge)
 	if err != nil {
 		log.Debug("fail to create merge region operator", errs.ZapError(err))
 		return nil

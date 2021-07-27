@@ -299,6 +299,8 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
 	}
 
 	testcases := []struct {

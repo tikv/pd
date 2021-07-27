@@ -208,7 +208,6 @@ func (r *RollingStoreStats) GetLoad(k StoreStatKind) float64 {
 }
 
 // GetInstantLoad returns store's instant load.
-// MovingAvgs do not support GetInstantaneous() so they return average values.
 func (r *RollingStoreStats) GetInstantLoad(k StoreStatKind) float64 {
 	r.RLock()
 	defer r.RUnlock()
@@ -216,7 +215,7 @@ func (r *RollingStoreStats) GetInstantLoad(k StoreStatKind) float64 {
 	case StoreReadBytes, StoreReadKeys, StoreReadQuery, StoreWriteBytes, StoreWriteKeys, StoreWriteQuery:
 		return r.timeMedians[k].GetInstantaneous()
 	case StoreCPUUsage, StoreDiskReadRate, StoreDiskWriteRate:
-		return r.movingAvgs[k].Get()
+		return r.movingAvgs[k].GetInstantaneous()
 	}
 	return 0
 }
