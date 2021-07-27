@@ -443,7 +443,8 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 
 	b, k, q := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim), getRegionStatKind(kind, statistics.QueryDim)
 	byteRate, keyRate, queryRate := totalLoads[b], totalLoads[k], totalLoads[q]
-	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[b], li.LoadPred.Current.Loads[k], li.LoadPred.Current.Loads[k]
+	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[statistics.ByteDim],
+		li.LoadPred.Current.Loads[statistics.KeyDim], li.LoadPred.Current.Loads[statistics.QueryDim]
 
 	return &statistics.HotPeersStat{
 		TotalLoads:     totalLoads,
