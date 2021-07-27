@@ -25,7 +25,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
@@ -418,6 +417,9 @@ type balanceSolver struct {
 	maxSrc   *storeLoad
 	minDst   *storeLoad
 	rankStep *storeLoad
+
+	byteIsBetter bool
+	keyIsBetter  bool
 }
 
 type solution struct {
@@ -795,12 +797,16 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
 			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
 			rank = -3
+			bs.byteIsBetter = true
+			bs.keyIsBetter = true
 		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
 			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
 			rank = -2
+			bs.keyIsBetter = true
 		case byteHot && byteDecRatio <= greatDecRatio:
 			// If belong to the case, byte rate will be more balanced, ignore the key rate.
 			rank = -1
+			bs.byteIsBetter = true
 		}
 	}
 	log.Debug("calcProgressiveRank",
@@ -979,15 +985,19 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 		return nil, nil
 	}
 	var (
-		counters []prometheus.Counter
-		err      error
+		err         error
+		typ         string
+		sourceLabel string
+		targetLabel string
 	)
 
 	switch bs.opTy {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
 		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
-		typ := "move-peer"
+		sourceLabel = strconv.FormatUint(bs.cur.srcStoreID, 10)
+		targetLabel = strconv.FormatUint(dstPeer.GetStoreId(), 10)
+
 		if bs.rwTy == read && bs.cur.region.GetLeader().StoreId == bs.cur.srcStoreID { // move read leader
 			op, err = operator.CreateMoveLeaderOperator(
 				"move-hot-read-leader",
@@ -999,6 +1009,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 			typ = "move-leader"
 		} else {
 			desc := "move-hot-" + bs.rwTy.String() + "-peer"
+			typ = "move-peer"
 			op, err = operator.CreateMovePeerOperator(
 				desc,
 				bs.cluster,
@@ -1007,14 +1018,13 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 				bs.cur.srcStoreID,
 				dstPeer)
 		}
-		counters = append(counters,
-			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
-			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
 	case transferLeader:
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
 			return nil, nil
 		}
 		desc := "transfer-hot-" + bs.rwTy.String() + "-leader"
+		sourceLabel = strconv.FormatUint(bs.cur.srcStoreID, 10)
+		targetLabel = strconv.FormatUint(bs.cur.dstStoreID, 10)
 		op, err = operator.CreateTransferLeaderOperator(
 			desc,
 			bs.cluster,
@@ -1022,9 +1032,6 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 			bs.cur.srcStoreID,
 			bs.cur.dstStoreID,
 			operator.OpHotRegion)
-		counters = append(counters,
-			hotDirectionCounter.WithLabelValues("transfer-leader", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
-			hotDirectionCounter.WithLabelValues("transfer-leader", bs.rwTy.String(), strconv.FormatUint(bs.cur.dstStoreID, 10), "in"))
 	}
 
 	if err != nil {
@@ -1033,8 +1040,20 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 		return nil, nil
 	}
 
+	dim := ""
+	if bs.byteIsBetter && bs.keyIsBetter {
+		dim = "both"
+	} else if bs.byteIsBetter {
+		dim = "byte"
+	} else if bs.keyIsBetter {
+		dim = "key"
+	}
+
 	op.SetPriorityLevel(core.HighPriority)
-	op.Counters = append(op.Counters, counters...)
+	op.FinishedCounters = append(op.FinishedCounters,
+		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out", dim),
+		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in", dim),
+		balanceDirectionCounter.WithLabelValues(bs.sche.GetName(), sourceLabel, targetLabel))
 	op.Counters = append(op.Counters,
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
