@@ -530,6 +530,7 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	}
 	if schedulerName == "balance-hot-region-scheduler" && (key == "read-priorities" || key == "write-priorities") {
 		priorities := make([]string, 0)
+		prioritiesMap := make(map[string]struct{}, 0)
 		for _, priority := range strings.Split(value, ",") {
 			if priority != schedulers.BytePriority && priority != schedulers.KeyPriority {
 				cmd.Println(fmt.Sprintf("priority should be one of %s,%s",
@@ -538,8 +539,13 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 				return
 			}
 			priorities = append(priorities, priority)
+			prioritiesMap[priority] = struct{}{}
 		}
 		input[key] = priorities
+		if len(priorities) != len(prioritiesMap) {
+			cmd.Println("priorities shouldn't be repeated")
+			return
+		}
 	} else {
 		input[key] = val
 	}
