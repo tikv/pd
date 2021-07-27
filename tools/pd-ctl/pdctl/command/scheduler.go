@@ -532,10 +532,9 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 		priorities := make([]string, 0)
 		for _, priority := range strings.Split(value, ",") {
 			if priority != schedulers.BytePriority && priority != schedulers.KeyPriority {
-				cmd.Println(fmt.Sprintf("priority should be one of %s,%s,%s",
+				cmd.Println(fmt.Sprintf("priority should be one of %s,%s",
 					schedulers.BytePriority,
-					schedulers.KeyPriority,
-					"none"))
+					schedulers.KeyPriority))
 				return
 			}
 			priorities = append(priorities, priority)
