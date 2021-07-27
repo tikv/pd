@@ -93,7 +93,7 @@ var hotDirectionCounter = prometheus.NewCounterVec(
 		Subsystem: "scheduler",
 		Name:      "hot_region_direction",
 		Help:      "Counter of hot region scheduler.",
-	}, []string{"type", "rw", "store", "direction"})
+	}, []string{"type", "rw", "store", "direction", "dim"})
 
 var scatterRangeLeaderCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{

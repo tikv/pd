@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// +build tso_full_test tso_function_test
+
 package tso_test
 
 import (

@@ -410,6 +410,7 @@ func maxLoad(a, b *storeLoad) *storeLoad {
 }
 
 type storeLoadDetail struct {
+	Store    *core.StoreInfo
 	LoadPred *storeLoadPred
 	HotPeers []*statistics.HotPeerStat
 }
