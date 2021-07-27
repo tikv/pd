@@ -356,9 +356,6 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 	if count == 0 {
 		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 	}
-	failpoint.Inject("skipRetryGetTS", func() {
-		maxRetryCount = 1
-	})
 	for i := 0; i < maxRetryCount; i++ {
 		currentPhysical, currentLogical := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {
