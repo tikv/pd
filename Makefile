@@ -4,6 +4,8 @@ TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/")
 INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/" | grep -E "tests")
+TSO_INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
+                     sort -u | sed -e "s/^\./github.com\/tikv\/pd/" | grep -E "server/tso")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 
 PACKAGES := go list ./...
@@ -143,20 +145,21 @@ pd-heartbeat-bench:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
 test: install-go-tools
-	# testing...
+	# testing all pkgs...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 GO111MODULE=on go test -tags tso_function_test -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
 basic-test:
+	# testing basic pkgs...
 	@$(FAILPOINT_ENABLE)
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 test-with-cover: install-go-tools dashboard-ui
-	# testing...
+	# testing all pkgs (expect TSO consistency test) with converage...
 	@$(FAILPOINT_ENABLE)
 	for PKG in $(TEST_PKGS); do\
 		set -euo pipefail;\
@@ -164,6 +167,22 @@ test-with-cover: install-go-tools dashboard-ui
 		rm coverage.tmp;\
 	done
 	@$(FAILPOINT_DISABLE)
+
+test-tso-function: install-go-tools dashboard-ui
+	# testing TSO function...
+	@$(DEADLOCK_ENABLE)
+	@$(FAILPOINT_ENABLE)
+	CGO_ENABLED=1 GO111MODULE=on go test -race -tags tso_function_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
+	@$(DEADLOCK_DISABLE)
+
+test-tso-consistency: install-go-tools dashboard-ui
+	# testing TSO consistency...
+	@$(DEADLOCK_ENABLE)
+	@$(FAILPOINT_ENABLE)
+	CGO_ENABLED=1 GO111MODULE=on go test -race -tags tso_consistency_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
+	@$(DEADLOCK_DISABLE)
 
 check: install-go-tools check-all check-plugin errdoc check-testing-t docker-build-test
 
@@ -220,6 +239,7 @@ clean-test:
 	rm -rf /tmp/test_pd*
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
+	go clean -testcache
 
 clean-build:
 	# Cleaning building files...
