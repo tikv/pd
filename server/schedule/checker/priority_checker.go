@@ -16,6 +16,8 @@ package checker
 import (
 	"time"
 
+	"github.com/tikv/pd/server/schedule/placement"
+
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -34,10 +36,9 @@ type PriorityChecker struct {
 
 // NewPriorityChecker creates a priority checker.
 func NewPriorityChecker(cluster opt.Cluster) *PriorityChecker {
-	opts := cluster.GetOpts()
 	return &PriorityChecker{
 		cluster: cluster,
-		opts:    opts,
+		opts:    cluster.GetOpts(),
 		queue:   cache.NewPriorityQueue(defaultPriorityQueueSize),
 	}
 }
@@ -82,7 +83,12 @@ func (p *PriorityChecker) checkRegionInPlacementRule(region *core.RegionInfo) (m
 	if len(fit.RuleFits) == 0 {
 		return
 	}
+
 	for _, rf := range fit.RuleFits {
+		// skip learn rule
+		if rf.Rule.Role == placement.Learner {
+			continue
+		}
 		makeupCount = makeupCount + rf.Rule.Count - len(rf.Peers)
 	}
 	return
