@@ -31,8 +31,6 @@ import (
 )
 
 const (
-	// NonePriority indicates there is no dim priority for hot-region-scheduler
-	NonePriority = ""
 	// BytePriority indicates hot-region-scheduler prefer byte dim
 	BytePriority = "byte"
 	// KeyPriority indicates hot-region-scheduler prefer key dim
@@ -54,8 +52,8 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MaxPeerNum:             1000,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		ReadPriorities:         []string{},
-		WritePriorities:        []string{},
+		ReadPriorities:         []string{KeyPriority, BytePriority},
+		WritePriorities:        []string{BytePriority, KeyPriority},
 	}
 }
 
