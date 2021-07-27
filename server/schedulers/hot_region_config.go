@@ -52,7 +52,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MaxPeerNum:             1000,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		ReadPriorities:         []string{KeyPriority, BytePriority},
+		ReadPriorities:         []string{BytePriority, KeyPriority},
 		WritePriorities:        []string{BytePriority, KeyPriority},
 	}
 }

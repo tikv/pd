@@ -269,7 +269,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"minor-dec-ratio":            0.99,
 		"src-tolerance-ratio":        1.05,
 		"dst-tolerance-ratio":        1.05,
-		"read-priorities":            []interface{}{"key", "byte"},
+		"read-priorities":            []interface{}{"byte", "key"},
 		"write-priorities":           []interface{}{"byte", "key"},
 	}
 	c.Assert(conf, DeepEquals, expected1)
