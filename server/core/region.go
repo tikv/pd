@@ -27,6 +27,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/logutil"
+	"go.uber.org/zap"
 )
 
 // errRegionIsStale is error info for region is stale.
@@ -458,6 +461,94 @@ func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 // GetReplicationStatus returns the region's replication status.
 func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicationStatus {
 	return r.replicationStatus
+}
+
+// RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
+// and new region information.
+type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
+
+// GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
+// nil means do not print the log.
+func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
+	noLog := func(msg string, fields ...zap.Field) {}
+	debug, info := noLog, noLog
+	if enableLog {
+		debug = log.Debug
+		info = log.Info
+	}
+	// Save to storage if meta is updated.
+	// Save to cache if meta or leader is updated, or contains any down/pending peer.
+	// Mark isNew if the region in cache does not have leader.
+	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
+		if origin == nil {
+			debug("insert new region",
+				zap.Uint64("region-id", region.GetID()),
+				logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
+			saveKV, saveCache, isNew = true, true, true
+		} else {
+			r := region.GetRegionEpoch()
+			o := origin.GetRegionEpoch()
+			if r.GetVersion() > o.GetVersion() {
+				info("region Version changed",
+					zap.Uint64("region-id", region.GetID()),
+					logutil.ZapRedactString("detail", DiffRegionKeyInfo(origin, region)),
+					zap.Uint64("old-version", o.GetVersion()),
+					zap.Uint64("new-version", r.GetVersion()),
+				)
+				saveKV, saveCache = true, true
+			}
+			if r.GetConfVer() > o.GetConfVer() {
+				info("region ConfVer changed",
+					zap.Uint64("region-id", region.GetID()),
+					zap.String("detail", DiffRegionPeersInfo(origin, region)),
+					zap.Uint64("old-confver", o.GetConfVer()),
+					zap.Uint64("new-confver", r.GetConfVer()),
+				)
+				saveKV, saveCache = true, true
+			}
+			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
+				if origin.GetLeader().GetId() == 0 {
+					isNew = true
+				} else {
+					info("leader changed",
+						zap.Uint64("region-id", region.GetID()),
+						zap.Uint64("from", origin.GetLeader().GetStoreId()),
+						zap.Uint64("to", region.GetLeader().GetStoreId()),
+					)
+				}
+				saveCache, needSync = true, true
+			}
+			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
+				debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+				saveCache, needSync = true, true
+			}
+			if !SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
+				debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
+				saveCache, needSync = true, true
+			}
+			if len(region.GetPeers()) != len(origin.GetPeers()) {
+				saveKV, saveCache = true, true
+			}
+
+			if region.GetApproximateSize() != origin.GetApproximateSize() ||
+				region.GetApproximateKeys() != origin.GetApproximateKeys() {
+				saveCache = true
+			}
+			// Once flow has changed, will update the cache.
+			// Because keys and bytes are strongly related, only bytes are judged.
+			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
+				region.GetRoundBytesRead() != origin.GetRoundBytesRead() {
+				saveCache, needSync = true, true
+			}
+
+			if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
+				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
+					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
+				saveCache = true
+			}
+		}
+		return
+	}
 }
 
 // regionMap wraps a map[uint64]*regionItem and supports randomly pick a region. They are the leaves of regionTree.

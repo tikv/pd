@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/component"
@@ -570,6 +569,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	return nil
 }
 
+var regionGuide = core.GenerateRegionGuideFunc(true)
+
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
@@ -594,75 +595,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
-	var saveKV, saveCache, isNew, needSync bool
-	if origin == nil {
-		log.Debug("insert new region",
-			zap.Uint64("region-id", region.GetID()),
-			logutil.ZapRedactStringer("meta-region", core.RegionToHexMeta(region.GetMeta())))
-		saveKV, saveCache, isNew = true, true, true
-	} else {
-		r := region.GetRegionEpoch()
-		o := origin.GetRegionEpoch()
-		if r.GetVersion() > o.GetVersion() {
-			log.Info("region Version changed",
-				zap.Uint64("region-id", region.GetID()),
-				logutil.ZapRedactString("detail", core.DiffRegionKeyInfo(origin, region)),
-				zap.Uint64("old-version", o.GetVersion()),
-				zap.Uint64("new-version", r.GetVersion()),
-			)
-			saveKV, saveCache = true, true
-		}
-		if r.GetConfVer() > o.GetConfVer() {
-			log.Info("region ConfVer changed",
-				zap.Uint64("region-id", region.GetID()),
-				zap.String("detail", core.DiffRegionPeersInfo(origin, region)),
-				zap.Uint64("old-confver", o.GetConfVer()),
-				zap.Uint64("new-confver", r.GetConfVer()),
-			)
-			saveKV, saveCache = true, true
-		}
-		if region.GetLeader().GetId() != origin.GetLeader().GetId() {
-			if origin.GetLeader().GetId() == 0 {
-				isNew = true
-			} else {
-				log.Info("leader changed",
-					zap.Uint64("region-id", region.GetID()),
-					zap.Uint64("from", origin.GetLeader().GetStoreId()),
-					zap.Uint64("to", region.GetLeader().GetStoreId()),
-				)
-			}
-			saveCache, needSync = true, true
-		}
-		if !core.SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
-			log.Debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
-			saveCache, needSync = true, true
-		}
-		if !core.SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
-			log.Debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
-			saveCache, needSync = true, true
-		}
-		if len(region.GetPeers()) != len(origin.GetPeers()) {
-			saveKV, saveCache = true, true
-		}
-
-		if region.GetApproximateSize() != origin.GetApproximateSize() ||
-			region.GetApproximateKeys() != origin.GetApproximateKeys() {
-			saveCache = true
-		}
-		// Once flow has changed, will update the cache.
-		// Because keys and bytes are strongly related, only bytes are judged.
-		if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
-			region.GetRoundBytesRead() != origin.GetRoundBytesRead() {
-			saveCache, needSync = true, true
-		}
-
-		if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
-			(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
-				region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
-			saveCache = true
-		}
-	}
-
+	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
 	if !saveKV && !saveCache && !isNew {
 		return nil
 	}
