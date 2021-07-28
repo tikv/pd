@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server/schedulers"
 )
 
 var (
@@ -527,7 +528,27 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	if err != nil {
 		val = value
 	}
-	input[key] = val
+	if schedulerName == "balance-hot-region-scheduler" && (key == "read-priorities" || key == "write-priorities") {
+		priorities := make([]string, 0)
+		prioritiesMap := make(map[string]struct{})
+		for _, priority := range strings.Split(value, ",") {
+			if priority != schedulers.BytePriority && priority != schedulers.KeyPriority {
+				cmd.Println(fmt.Sprintf("priority should be one of [%s, %s]",
+					schedulers.BytePriority,
+					schedulers.KeyPriority))
+				return
+			}
+			priorities = append(priorities, priority)
+			prioritiesMap[priority] = struct{}{}
+		}
+		input[key] = priorities
+		if len(priorities) != len(prioritiesMap) {
+			cmd.Println("priorities shouldn't be repeated")
+			return
+		}
+	} else {
+		input[key] = val
+	}
 	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 

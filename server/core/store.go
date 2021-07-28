@@ -245,10 +245,10 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 // Deviation It is used to control the direction of the deviation considered
 // when calculating the region score. It is set to -1 when it is the source
 // store of balance, 1 when it is the target, and 0 in the rest of cases.
-func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64, deviation int) float64 {
+func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	switch version {
 	case "v2":
-		return s.regionScoreV2(delta, deviation, lowSpaceRatio)
+		return s.regionScoreV2(delta, lowSpaceRatio)
 	case "v1":
 		fallthrough
 	default:
@@ -301,10 +301,20 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 	return score / math.Max(s.GetRegionWeight(), minWeight)
 }
 
-func (s *StoreInfo) regionScoreV2(delta int64, deviation int, lowSpaceRatio float64) float64 {
-	A := float64(float64(s.GetAvgAvailable())-float64(deviation)*float64(s.GetAvailableDeviation())) / gb
+func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
+	A := float64(s.GetAvgAvailable())
 	C := float64(s.GetCapacity()) / gb
 	R := float64(s.GetRegionSize() + delta)
+	if R < 0 {
+		R = float64(s.GetRegionSize())
+	}
+	U := C - A
+	if s.GetRegionSize() != 0 {
+		U = U + U*(float64(delta))/float64(s.GetRegionSize())
+		if U < C && U > 0 {
+			A = C - U
+		}
+	}
 	var (
 		K, M float64 = 1, 256 // Experience value to control the weight of the available influence on score
 		F    float64 = 50     // Experience value to prevent some nodes from running out of disk space prematurely.

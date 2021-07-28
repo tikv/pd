@@ -34,6 +34,7 @@ const (
 	adjustRatio             float64 = 0.005
 	leaderTolerantSizeRatio float64 = 5.0
 	minTolerantSizeRatio    float64 = 1.0
+	influenceAmp            int64   = 100
 )
 
 type balancePlan struct {
@@ -86,17 +87,31 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 	sourceID := p.source.GetID()
 	targetID := p.target.GetID()
 	tolerantResource := p.getTolerantResource()
+	// to avoid schedule too much, if A's core greater than B and C a little
+	// we want that A should be moved out one region not two
 	sourceInfluence := p.GetOpInfluence(sourceID)
+	// A->B, B's influence is positive , so B can become source schedule, it will move region from B to C
+	if sourceInfluence > 0 {
+		sourceInfluence = -sourceInfluence
+	}
+	// to avoid schedule too much, if A's score less than B and C in small range,
+	// we want that A can be moved in one region not two
 	targetInfluence := p.GetOpInfluence(targetID)
-	sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
+	// to avoid schedule call back
+	// A->B, A's influence is negative，so A will be target,C may move region to A
+	if targetInfluence < 0 {
+		targetInfluence = -targetInfluence
+	}
 	opts := p.cluster.GetOpts()
 	switch p.kind.Resource {
 	case core.LeaderKind:
+		sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
 		p.sourceScore = p.source.LeaderScore(p.kind.Policy, sourceDelta)
 		p.targetScore = p.target.LeaderScore(p.kind.Policy, targetDelta)
 	case core.RegionKind:
-		p.sourceScore = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta, -1)
-		p.targetScore = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta, 1)
+		sourceDelta, targetDelta := sourceInfluence*influenceAmp-tolerantResource, targetInfluence*influenceAmp+tolerantResource
+		p.sourceScore = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
+		p.targetScore = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
 	}
 	if opts.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
@@ -395,6 +410,7 @@ func maxLoad(a, b *storeLoad) *storeLoad {
 }
 
 type storeLoadDetail struct {
+	Store    *core.StoreInfo
 	LoadPred *storeLoadPred
 	HotPeers []*statistics.HotPeerStat
 }

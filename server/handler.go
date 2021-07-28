@@ -121,6 +121,15 @@ func (h *Handler) IsSchedulerDisabled(name string) (bool, error) {
 	return rc.IsSchedulerDisabled(name)
 }
 
+// IsSchedulerExisted returns whether scheduler is existed.
+func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return false, err
+	}
+	return rc.IsSchedulerExisted(name)
+}
+
 // GetScheduleConfig returns ScheduleConfig.
 func (h *Handler) GetScheduleConfig() *config.ScheduleConfig {
 	return h.s.GetScheduleConfig()

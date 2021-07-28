@@ -30,6 +30,13 @@ import (
 	"github.com/unrolled/render"
 )
 
+const (
+	// BytePriority indicates hot-region-scheduler prefer byte dim
+	BytePriority = "byte"
+	// KeyPriority indicates hot-region-scheduler prefer key dim
+	KeyPriority = "key"
+)
+
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	return &hotRegionSchedulerConfig{
@@ -45,6 +52,8 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MaxPeerNum:             1000,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
+		ReadPriorities:         []string{BytePriority, KeyPriority},
+		WritePriorities:        []string{BytePriority, KeyPriority},
 	}
 }
 
@@ -59,14 +68,16 @@ type hotRegionSchedulerConfig struct {
 
 	// rank step ratio decide the step when calculate rank
 	// step = max current * rank step ratio
-	ByteRateRankStepRatio  float64 `json:"byte-rate-rank-step-ratio"`
-	KeyRateRankStepRatio   float64 `json:"key-rate-rank-step-ratio"`
-	QueryRateRankStepRatio float64 `json:"query-rate-rank-step-ratio"`
-	CountRankStepRatio     float64 `json:"count-rank-step-ratio"`
-	GreatDecRatio          float64 `json:"great-dec-ratio"`
-	MinorDecRatio          float64 `json:"minor-dec-ratio"`
-	SrcToleranceRatio      float64 `json:"src-tolerance-ratio"`
-	DstToleranceRatio      float64 `json:"dst-tolerance-ratio"`
+	ByteRateRankStepRatio  float64  `json:"byte-rate-rank-step-ratio"`
+	KeyRateRankStepRatio   float64  `json:"key-rate-rank-step-ratio"`
+	QueryRateRankStepRatio float64  `json:"query-rate-rank-step-ratio"`
+	CountRankStepRatio     float64  `json:"count-rank-step-ratio"`
+	GreatDecRatio          float64  `json:"great-dec-ratio"`
+	MinorDecRatio          float64  `json:"minor-dec-ratio"`
+	SrcToleranceRatio      float64  `json:"src-tolerance-ratio"`
+	DstToleranceRatio      float64  `json:"dst-tolerance-ratio"`
+	ReadPriorities         []string `json:"read-priorities"`
+	WritePriorities        []string `json:"write-priorities"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
