@@ -30,6 +30,7 @@ const (
 	DimLen
 )
 
+// DimToString returns string with dim
 func DimToString(dim int) string {
 	switch dim {
 	case ByteDim:
@@ -43,6 +44,7 @@ func DimToString(dim int) string {
 	}
 }
 
+// StringToDim returns dim with string
 func StringToDim(name string) int {
 	switch name {
 	case DimToString(ByteDim):

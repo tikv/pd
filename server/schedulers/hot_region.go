@@ -1019,8 +1019,8 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
 		sourceLabel = strconv.FormatUint(bs.cur.srcStoreID, 10)
 		targetLabel = strconv.FormatUint(dstPeer.GetStoreId(), 10)
+
 		if bs.rwTy == read && bs.cur.region.GetLeader().StoreId == bs.cur.srcStoreID { // move read leader
-			typ = "move-leader"
 			op, err = operator.CreateMoveLeaderOperator(
 				"move-hot-read-leader",
 				bs.cluster,
@@ -1028,6 +1028,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 				operator.OpHotRegion,
 				bs.cur.srcStoreID,
 				dstPeer)
+			typ = "move-leader"
 		} else {
 			desc := "move-hot-" + bs.rwTy.String() + "-peer"
 			typ = "move-peer"
