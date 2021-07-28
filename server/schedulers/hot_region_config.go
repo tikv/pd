@@ -31,10 +31,10 @@ import (
 )
 
 const (
-	// KeyDimPriority indicates hot-region-scheduler prefer read key dim
-	KeyDimPriority = "key"
-	// ByteDimPriority indicates hot-region-scheduler prefer read byte dim
-	ByteDimPriority = "byte"
+	// BytePriority indicates hot-region-scheduler prefer byte dim
+	BytePriority = "byte"
+	// KeyPriority indicates hot-region-scheduler prefer key dim
+	KeyPriority = "key"
 )
 
 // params about hot region.
@@ -52,8 +52,8 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MaxPeerNum:             1000,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		WritePriority:          []string{ByteDimPriority, KeyDimPriority},
-		ReadPriority:           []string{KeyDimPriority, ByteDimPriority},
+		ReadPriorities:         []string{BytePriority, KeyPriority},
+		WritePriorities:        []string{BytePriority, KeyPriority},
 	}
 }
 
@@ -76,8 +76,8 @@ type hotRegionSchedulerConfig struct {
 	MinorDecRatio          float64  `json:"minor-dec-ratio"`
 	SrcToleranceRatio      float64  `json:"src-tolerance-ratio"`
 	DstToleranceRatio      float64  `json:"dst-tolerance-ratio"`
-	WritePriority          []string `json:"write-priority"`
-	ReadPriority           []string `json:"read-priority"`
+	ReadPriorities         []string `json:"read-priorities"`
+	WritePriorities        []string `json:"write-priorities"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {

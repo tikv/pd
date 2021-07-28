@@ -28,10 +28,6 @@ var (
 	ErrIncorrectSystemTime = errors.Normalize("incorrect system time", errors.RFCCodeText("PD:common:ErrIncorrectSystemTime"))
 )
 
-// The internal error which is generated in PD project.
-// main errors
-var ()
-
 // tso errors
 var (
 	ErrSetLocalTSOConfig  = errors.Normalize("set local tso config failed, %s", errors.RFCCodeText("PD:tso:ErrSetLocalTSOConfig"))

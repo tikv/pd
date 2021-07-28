@@ -75,3 +75,11 @@ func (w *WMA) Set(n float64) {
 	w.Reset()
 	w.Add(n)
 }
+
+// GetInstantaneous returns the value just added.
+func (w *WMA) GetInstantaneous() float64 {
+	if w.count == 0 {
+		return 0
+	}
+	return w.records[(w.count-1)%w.size]
+}
