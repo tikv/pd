@@ -1246,6 +1246,7 @@ func calRank(greatDecRatio, minorDecRatio float64, priorities []string,
 	}
 	return int64(-originValue)
 }
+
 func getValue(n int) int {
 	x := 1
 	for i := 0; i < n; i++ {
