@@ -807,6 +807,21 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
+	if bs.rwTy == write && bs.opTy == transferLeader {
+		bs.cur.progressiveRank = 0
+		srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
+		dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
+		peer := bs.cur.srcPeerStat
+		// In this condition, CPU usage is the matter.
+		// Only consider about key rate.
+		srcKeyRate := srcLd.Loads[statistics.KeyDim]
+		dstKeyRate := dstLd.Loads[statistics.KeyDim]
+		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, statistics.KeyDim))
+		if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
+			bs.cur.progressiveRank = -1
+		}
+		return
+	}
 	dimHotList, dimDecRatioList := bs.getDimList()
 	priorities := bs.sche.conf.WritePriorities
 	if bs.rwTy == read {
