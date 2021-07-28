@@ -394,6 +394,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 		}
 	default:
 	}
+
 	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
 	ops := leaderSolver.solve()
 	if len(ops) > 0 {
@@ -525,7 +526,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			}
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
-				if !bs.checkDim() {
+				if !bs.checkDimDiffTolerance() {
 					continue
 				}
 				bs.calcProgressiveRank()
@@ -548,7 +549,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	return []*operator.Operator{op}
 }
 
-func (bs *balanceSolver) checkDim() bool {
+// checkDimDiffTolerance is used to control that the value of every dimension between each 2 stores
+// should not be
+func (bs *balanceSolver) checkDimDiffTolerance() bool {
 	infl := &Influence{
 		Loads: append(bs.cur.srcPeerStat.Loads[:0:0], bs.cur.srcPeerStat.Loads...),
 		Count: 1,

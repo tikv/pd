@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/server/schedulers"
 	"net/http"
 	"net/url"
 	"path"
