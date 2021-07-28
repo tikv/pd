@@ -30,6 +30,32 @@ const (
 	DimLen
 )
 
+func DimToString(dim int) string {
+	switch dim {
+	case ByteDim:
+		return "byte"
+	case KeyDim:
+		return "key"
+	case QueryDim:
+		return "qps"
+	default:
+		return ""
+	}
+}
+
+func StringToDim(name string) int {
+	switch name {
+	case DimToString(ByteDim):
+		return ByteDim
+	case DimToString(KeyDim):
+		return KeyDim
+	case DimToString(QueryDim):
+		return QueryDim
+	default:
+		return DimLen
+	}
+}
+
 // IsSelectedDim return whether the dim is selected for hot scheduler
 func IsSelectedDim(dim int) bool {
 	// TODO: configure
