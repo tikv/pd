@@ -555,18 +555,32 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			continue
 		}
 		minLoad := detail.LoadPred.min()
-		if slice.AllOf(minLoad.Loads, func(i int) bool {
-			if statistics.IsSelectedDim(i) {
-				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.Loads[i]
-			}
-			return true
-		}) {
+		if bs.checkSrcByDimPriorityAndTolerance(minLoad, &detail.LoadPred.Expect) {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+		} else {
+			hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 		}
-		hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 	}
 	return ret
+}
+
+func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad) bool {
+	if bs.rwTy == write && bs.opTy == transferLeader {
+		return slice.AllOf(minLoad.Loads, func(i int) bool {
+			if statistics.IsSelectedDim(i) {
+				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
+			}
+			return true
+		})
+	}
+	switch bs.preferPriority() {
+	case BytePriority:
+		return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
+	case KeyPriority:
+		return minLoad.Loads[statistics.KeyDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.KeyDim]
+	}
+	return false
 }
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
@@ -740,25 +754,41 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*storeLoadDetail) map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
-	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	for _, detail := range candidates {
-		store := detail.Store
-		if filter.Target(bs.cluster.GetOpts(), store, filters) {
-			maxLoads := detail.LoadPred.max().Loads
-			if slice.AllOf(maxLoads, func(i int) bool {
-				if statistics.IsSelectedDim(i) {
-					return maxLoads[i]*dstToleranceRatio < detail.LoadPred.Expect.Loads[i]
-				}
-				return true
-			}) {
-				ret[store.GetID()] = detail
-				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
+		id := detail.Store.GetID()
+		maxLoad := detail.LoadPred.max()
+		if filter.Target(bs.cluster.GetOpts(), detail.Store, filters) {
+			if bs.checkDstByPriorityAndTolerance(maxLoad, &detail.LoadPred.Expect) {
+				ret[id] = detail
+				hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+			} else {
+				hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 			}
-			hotSchedulerResultCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
 		}
+
 	}
 	return ret
 }
+
+func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad) bool {
+	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
+	if bs.rwTy == write && bs.opTy == transferLeader {
+		return slice.AllOf(maxLoad.Loads, func(i int) bool {
+			if statistics.IsSelectedDim(i) {
+				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
+			}
+			return true
+		})
+	}
+	switch bs.preferPriority() {
+	case BytePriority:
+		return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
+	case KeyPriority:
+		return maxLoad.Loads[statistics.KeyDim]*dstToleranceRatio < expect.Loads[statistics.KeyDim]
+	}
+	return false
+}
+
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
