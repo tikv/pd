@@ -1442,3 +1442,66 @@ func (s *testHotSchedulerSuite) TestHotReadPeerSchedule(c *C) {
 	op := hb.Schedule(tc)[0]
 	testutil.CheckTransferPeer(c, op, operator.OpHotRegion, 1, 4)
 }
+
+func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1.05)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1.05)
+
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.AddRegionStore(4, 20)
+	tc.AddRegionStore(5, 20)
+
+	tc.UpdateStorageWrittenStats(1, 10*MB*statistics.StoreHeartBeatReportInterval, 9*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 6*MB*statistics.StoreHeartBeatReportInterval, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 6*MB*statistics.StoreHeartBeatReportInterval, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 9*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 1*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	// must transfer peer
+	schedulePeerPr = 1.0
+	addRegionInfo(tc, write, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 2 * MB, 1 * MB},
+		{6, []uint64{4, 2, 3}, 1 * MB, 2 * MB},
+	})
+	hb.(*hotScheduler).conf.WritePriorities = []string{BytePriority}
+	ops := hb.Schedule(tc)
+	c.Assert(len(ops), Equals, 1)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 1, 5)
+	hb.(*hotScheduler).clearPendingInfluence()
+	hb.(*hotScheduler).conf.WritePriorities = []string{KeyPriority}
+	ops = hb.Schedule(tc)
+	c.Assert(len(ops), Equals, 1)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 4, 5)
+	hb.(*hotScheduler).clearPendingInfluence()
+
+	// assert read priority schedule
+	hb, err = schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	tc.UpdateStorageReadStats(5, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(4, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(1, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(2, 1*MB*statistics.StoreHeartBeatReportInterval, 7*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(3, 7*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	addRegionInfo(tc, read, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 2 * MB, 2 * MB},
+	})
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority}
+	ops = hb.Schedule(tc)
+	c.Assert(len(ops), Equals, 1)
+	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 2)
+	hb.(*hotScheduler).clearPendingInfluence()
+	hb.(*hotScheduler).conf.ReadPriorities = []string{KeyPriority}
+	ops = hb.Schedule(tc)
+	c.Assert(len(ops), Equals, 1)
+	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 3)
+}
