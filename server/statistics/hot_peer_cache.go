@@ -62,8 +62,8 @@ type hotPeerCache struct {
 	reportIntervalSecs int
 }
 
-// NewHotStoresStats creates a HotStoresStats
-func NewHotStoresStats(kind FlowKind) *hotPeerCache {
+// NewHotPeerCache creates a hotPeerCache
+func NewHotPeerCache(kind FlowKind) *hotPeerCache {
 	c := &hotPeerCache{
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),

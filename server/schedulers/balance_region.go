@@ -229,10 +229,8 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 		}
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
-		op.Counters = append(op.Counters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
-		)
 		op.FinishedCounters = append(op.FinishedCounters,
+			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
 			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
 			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
 		)
