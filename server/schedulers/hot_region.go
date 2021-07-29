@@ -773,7 +773,6 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 				hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 			}
 		}
-
 	}
 	return ret
 }
