@@ -196,8 +196,7 @@ func (s *evictSlowStoreScheduler) initEvictLeaderScheduler() {
 	s.evictLeaderScheduler = newEvictLeaderScheduler(s.OpController, evictLeaderConf)
 }
 
-// newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
-// each store balanced.
+// newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
 func newEvictSlowStoreScheduler(opController *schedule.OperatorController, conf *evictSlowStoreSchedulerConfig) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
 
