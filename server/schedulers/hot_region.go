@@ -942,7 +942,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 	return false
 }
 
-func (bs *balanceSolver) getRkCmpPriorities(old *solution) (int, int) {
+func (bs *balanceSolver) getRkCmpPriorities(old *solution) (firstCmp int, secondCmp int) {
 	bk, kk := getRegionStatKind(bs.rwTy, statistics.ByteDim), getRegionStatKind(bs.rwTy, statistics.KeyDim)
 	byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(bk), old.srcPeerStat.GetLoad(bk), stepRank(0, 100))
 	keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(kk), old.srcPeerStat.GetLoad(kk), stepRank(0, 10))
@@ -990,7 +990,7 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 	return 0
 }
 
-func (bs *balanceSolver) getLdRankPriorities() (storeLoadCmp, storeLoadCmp, storeLoadCmp) {
+func (bs *balanceSolver) getLdRankPriorities() (firstLoadCmp storeLoadCmp, secondLoadCmp storeLoadCmp, zeroRkLoadCmp storeLoadCmp) {
 	preferPriorities := bs.preferPriority()
 	switch {
 	case preferPriorities[0] == BytePriority && preferPriorities[1] == KeyPriority:

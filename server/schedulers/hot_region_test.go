@@ -1473,12 +1473,12 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 		{1, []uint64{1, 2, 3}, 2 * MB, 1 * MB},
 		{6, []uint64{4, 2, 3}, 1 * MB, 2 * MB},
 	})
-	hb.(*hotScheduler).conf.WritePriorities = []string{BytePriority}
+	hb.(*hotScheduler).conf.WritePriorities = []string{BytePriority, KeyPriority}
 	ops := hb.Schedule(tc)
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 1, 5)
 	hb.(*hotScheduler).clearPendingInfluence()
-	hb.(*hotScheduler).conf.WritePriorities = []string{KeyPriority}
+	hb.(*hotScheduler).conf.WritePriorities = []string{KeyPriority, BytePriority}
 	ops = hb.Schedule(tc)
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 4, 5)
@@ -1495,12 +1495,12 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 	addRegionInfo(tc, read, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 2 * MB, 2 * MB},
 	})
-	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 	ops = hb.Schedule(tc)
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 2)
 	hb.(*hotScheduler).clearPendingInfluence()
-	hb.(*hotScheduler).conf.ReadPriorities = []string{KeyPriority}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{KeyPriority, BytePriority}
 	ops = hb.Schedule(tc)
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 3)
