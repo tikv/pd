@@ -570,3 +570,36 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 		}
 	}
 }
+
+var _ = Suite(&testEvictSlowStoreSuite{})
+
+type testEvictSlowStoreSuite struct{}
+
+func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+
+	// Add stores 1, 2, 3
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	// Add regions 1, 2, 3 with leaders in stores 1, 2, 3
+	tc.AddLeaderRegion(1, 1, 2)
+	tc.AddLeaderRegion(2, 2, 1)
+	tc.AddLeaderRegion(3, 3, 1)
+
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	storage := core.NewStorage(kv.NewMemoryKV())
+	es, err := schedule.CreateScheduler(EvictSlowStoreType, oc, storage, schedule.ConfigSliceDecoder(EvictSlowStoreType, []string{}))
+	c.Assert(err, IsNil)
+	storeInfo := tc.GetStore(1)
+	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 100
+	})
+	tc.PutStore(newStoreInfo)
+	c.Assert(es.IsScheduleAllowed(tc), IsTrue)
+	op := es.Schedule(tc)
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+}
