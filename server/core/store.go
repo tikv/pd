@@ -142,7 +142,7 @@ func (s *StoreInfo) IsTombstone() bool {
 	return s.GetState() == metapb.StoreState_Tombstone
 }
 
-func (s *StoreInfo) GetSlowScore() uint64 {
+func (s *StoreInfo) SlowScore() uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.rawStats.GetSlowScore()
@@ -244,15 +244,11 @@ const maxScore = 1024 * 1024 * 1024
 
 // LeaderScore returns the store's leader score.
 func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
-	weight := math.Max(s.GetLeaderWeight(), minWeight)
-	if math.Dim(weight, minWeight) <= minWeight {
-		return math.MaxFloat64
-	}
 	switch policy {
 	case BySize:
-		return float64(s.GetLeaderSize()+delta) / weight
+		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
 	case ByCount:
-		return float64(int64(s.GetLeaderCount())+delta) / weight
+		return float64(int64(s.GetLeaderCount())+delta) / math.Max(s.GetLeaderWeight(), minWeight)
 	default:
 		return 0
 	}
