@@ -98,6 +98,9 @@ const (
 	// They need to be filtered so as not to affect downstream.
 	// (flow size >= 1024TB)
 	ImpossibleFlowSize = 1 << 50
+	// Only statistics within this interval limit are valid.
+	statsReportMinInterval = 3      // 3s
+	statsReportMaxInterval = 5 * 60 // 5min
 )
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
@@ -431,6 +434,16 @@ func (r *RegionInfo) GetKeysWritten() uint64 {
 // GetKeysRead returns the read keys of the region.
 func (r *RegionInfo) GetKeysRead() uint64 {
 	return r.readKeys
+}
+
+// GetWriteRate returns the write rate of the region.
+func (r *RegionInfo) GetWriteRate() (bytesRate, keysRate float64) {
+	reportInterval := r.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	if interval >= statsReportMinInterval && interval <= statsReportMaxInterval {
+		return float64(r.writtenBytes) / float64(interval), float64(r.writtenKeys) / float64(interval)
+	}
+	return 0, 0
 }
 
 // GetLeader returns the leader of the region.
@@ -891,6 +904,25 @@ func (r *RegionsInfo) GetStoreLearnerRegionSize(storeID uint64) int64 {
 // GetStoreRegionSize get total size of store's regions
 func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) int64 {
 	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID) + r.GetStoreLearnerRegionSize(storeID)
+}
+
+// GetStoreLeaderWriteRate get total write rate of store's leaders
+func (r *RegionsInfo) GetStoreLeaderWriteRate(storeID uint64) (bytesRate, keysRate float64) {
+	return r.leaders[storeID].TotalWriteRate()
+}
+
+// GetStoreWriteRate get total write rate of store's regions
+func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate float64) {
+	storeBytesRate, storeKeysRate := r.leaders[storeID].TotalWriteRate()
+	bytesRate += storeBytesRate
+	keysRate += storeKeysRate
+	storeBytesRate, storeKeysRate = r.followers[storeID].TotalWriteRate()
+	bytesRate += storeBytesRate
+	keysRate += storeKeysRate
+	storeBytesRate, storeKeysRate = r.learners[storeID].TotalWriteRate()
+	bytesRate += storeBytesRate
+	keysRate += storeKeysRate
+	return
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
