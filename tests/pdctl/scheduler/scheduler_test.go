@@ -259,6 +259,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	expected1 := map[string]interface{}{
 		"min-hot-byte-rate":          float64(100),
 		"min-hot-key-rate":           float64(10),
+		"min-hot-query-rate":         float64(10),
 		"max-zombie-rounds":          float64(3),
 		"max-peer-number":            float64(1000),
 		"byte-rate-rank-step-ratio":  0.05,

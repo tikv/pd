@@ -532,9 +532,10 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 		priorities := make([]string, 0)
 		prioritiesMap := make(map[string]struct{})
 		for _, priority := range strings.Split(value, ",") {
-			if priority != schedulers.BytePriority && priority != schedulers.KeyPriority {
-				cmd.Println(fmt.Sprintf("priorities should be one of [%s, %s]",
+			if priority != schedulers.BytePriority && priority != schedulers.KeyPriority && priority != schedulers.QueryPriority {
+				cmd.Println(fmt.Sprintf("priority should be one of [%s, %s, %s]",
 					schedulers.BytePriority,
+					schedulers.QueryPriority,
 					schedulers.KeyPriority))
 				return
 			}
@@ -549,6 +550,9 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 		if len(priorities) != len(prioritiesMap) {
 			cmd.Println("priorities shouldn't be repeated")
 			return
+		}
+		if len(priorities) != 2 {
+			cmd.Println("priorities should be two dims")
 		}
 	} else {
 		input[key] = val
