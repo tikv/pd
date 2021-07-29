@@ -414,14 +414,12 @@ type balanceSolver struct {
 
 	cur *solution
 
-	maxSrc         *storeLoad
-	minDst         *storeLoad
-	rankStep       *storeLoad
-	firstPriority  int
-	secondPriority int
+	maxSrc   *storeLoad
+	minDst   *storeLoad
+	rankStep *storeLoad
 
-	secondPriority            int
 	firstPriority             int
+	secondPriority            int
 	writeLeaderFirstPriority  int
 	writeLeaderSecondPriority int
 	isSelectedDim             func(int) bool
@@ -480,20 +478,19 @@ func (bs *balanceSolver) init() {
 		Loads: stepLoads,
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
-	
 
 	priorities := bs.sche.conf.ReadPriorities
 	if bs.rwTy == write {
 		priorities = bs.sche.conf.WritePriorities
 		bs.writeLeaderFirstPriority = statistics.KeyDim
-		if  bs.firstPriority == statistics.QueryDim {
+		if bs.firstPriority == statistics.QueryDim {
 			bs.writeLeaderFirstPriority = statistics.QueryDim
 		}
 		bs.writeLeaderSecondPriority = statistics.ByteDim
 	}
 
-	bs.firstPriority = statistics.StringToDim(priorities[0])
-	bs.secondPriority = statistics.StringToDim(priorities[1])
+	bs.firstPriority = stringToDim(priorities[0])
+	bs.secondPriority = stringToDim(priorities[1])
 	bs.isSelectedDim = func(dim int) bool {
 		return dim == bs.firstPriority || dim == bs.secondPriority
 	}
@@ -1095,9 +1092,9 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 	if bs.firstPriorityIsBetter && bs.secondPriorityIsBetter {
 		dim = "both"
 	} else if bs.firstPriorityIsBetter {
-		dim = statistics.DimToString(bs.firstPriority)
+		dim = dimToString(bs.firstPriority)
 	} else if bs.secondPriorityIsBetter {
-		dim = statistics.DimToString(bs.secondPriority)
+		dim = dimToString(bs.secondPriority)
 	}
 
 	op.SetPriorityLevel(core.HighPriority)
@@ -1264,14 +1261,6 @@ func getRegionStatKind(rwTy rwType, dim int) statistics.RegionStatKind {
 	return 0
 }
 
-func (bs *balanceSolver) preferPriority() [2]string {
-	priorities := bs.sche.conf.WritePriorities
-	if bs.rwTy == read {
-		priorities = bs.sche.conf.ReadPriorities
-	}
-	return [2]string{priorities[0], priorities[1]}
-}
-
 func stringToDim(name string) int {
 	switch name {
 	case BytePriority:
@@ -1280,4 +1269,17 @@ func stringToDim(name string) int {
 		return statistics.KeyDim
 	}
 	return statistics.ByteDim
+}
+
+func dimToString(dim int) string {
+	switch dim {
+	case statistics.ByteDim:
+		return BytePriority
+	case statistics.KeyDim:
+		return KeyPriority
+	case statistics.QueryDim:
+		return QueryPriority
+	default:
+		return ""
+	}
 }

@@ -551,9 +551,6 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 			cmd.Println("priorities shouldn't be repeated")
 			return
 		}
-		if len(priorities) != 2 {
-			cmd.Println("priorities should be two dims")
-		}
 	} else {
 		input[key] = val
 	}
