@@ -1256,9 +1256,6 @@ func (bs *balanceSolver) preferPriority() [2]string {
 	if bs.rwTy == read {
 		priorities = bs.sche.conf.ReadPriorities
 	}
-	if len(priorities) == 1 {
-		return [2]string{priorities[0], priorities[0]}
-	}
 	return [2]string{priorities[0], priorities[1]}
 }
 
