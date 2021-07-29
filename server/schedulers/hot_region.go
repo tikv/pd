@@ -789,7 +789,6 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 	return false
 }
 
-
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
