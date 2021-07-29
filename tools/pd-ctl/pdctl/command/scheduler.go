@@ -533,13 +533,17 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 		prioritiesMap := make(map[string]struct{})
 		for _, priority := range strings.Split(value, ",") {
 			if priority != schedulers.BytePriority && priority != schedulers.KeyPriority {
-				cmd.Println(fmt.Sprintf("priority should be one of [%s, %s]",
+				cmd.Println(fmt.Sprintf("priorities should be one of [%s, %s]",
 					schedulers.BytePriority,
 					schedulers.KeyPriority))
 				return
 			}
 			priorities = append(priorities, priority)
 			prioritiesMap[priority] = struct{}{}
+		}
+		if len(priorities) < 2 {
+			cmd.Println("priorities should have at least 2 dimensions")
+			return
 		}
 		input[key] = priorities
 		if len(priorities) != len(prioritiesMap) {
