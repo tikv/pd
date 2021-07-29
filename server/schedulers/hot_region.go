@@ -787,7 +787,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			rank = -1
 		}
 	} else {
-		firstPriorityDimHot, firstPriorityDecRatio, secondPriorityDimHot, secondPriorityDecRatio := bs.getHotDecRatioByPriorities()
+		firstPriorityDimHot, firstPriorityDecRatio, secondPriorityDimHot, secondPriorityDecRatio := bs.getHotDecRatioByPriorities(srcLd, dstLd, peer)
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
 		switch {
 		case firstPriorityDimHot && firstPriorityDecRatio <= greatDecRatio && secondPriorityDimHot && secondPriorityDecRatio <= greatDecRatio:
@@ -813,7 +813,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	bs.cur.progressiveRank = rank
 }
 
-func (bs *balanceSolver) getHotDecRatioByPriorities() (bool, float64, bool, float64) {
+func (bs *balanceSolver) getHotDecRatioByPriorities(srcLd, dstLd *storeLoad, peer *statistics.HotPeerStat) (bool, float64, bool, float64) {
 	// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
 	// than the src store's (key/byte) rate after scheduling one peer.
 	getSrcDecRate := func(a, b float64) float64 {
@@ -822,9 +822,6 @@ func (bs *balanceSolver) getHotDecRatioByPriorities() (bool, float64, bool, floa
 		}
 		return a - b
 	}
-	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
-	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
-	peer := bs.cur.srcPeerStat
 	checkHot := func(dim int) (bool, float64) {
 		srcRate := srcLd.Loads[dim]
 		dstRate := dstLd.Loads[dim]
@@ -913,8 +910,17 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 
 func (bs *balanceSolver) getRkCmpPriorities(old *solution) (firstCmp int, secondCmp int) {
 	fk, sk := getRegionStatKind(bs.rwTy, bs.firstPriority), getRegionStatKind(bs.rwTy, bs.secondPriority)
-	fkRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(fk), old.srcPeerStat.GetLoad(fk), stepRank(0, 100))
-	skRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(sk), old.srcPeerStat.GetLoad(sk), stepRank(0, 10))
+	dimToStep := func(priority int) float64 {
+		switch priority {
+		case statistics.ByteDim:
+			return 100
+		case statistics.KeyDim:
+			return 10
+		}
+		return 100
+	}
+	fkRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(fk), old.srcPeerStat.GetLoad(fk), stepRank(0, dimToStep(bs.firstPriority)))
+	skRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(sk), old.srcPeerStat.GetLoad(sk), stepRank(0, dimToStep(bs.secondPriority)))
 	return fkRkCmp, skRkCmp
 }
 
@@ -936,13 +942,21 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 				)),
 			)
 		} else {
-			firstLdRankCmp, secondLdRankCmp, firstLdRankCmpZeroStep := bs.getLdRankPriorities()
+			f := func(dim int) func(ld *storeLoad) float64 {
+				switch dim {
+				case statistics.ByteDim:
+					return stLdByteRate
+				case statistics.KeyDim:
+					return stLdKeyRate
+				}
+				return stLdByteRate
+			}
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
-					firstLdRankCmp,
-					secondLdRankCmp,
+					stLdRankCmp(f(bs.firstPriority), stepRank(bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
+					stLdRankCmp(f(bs.secondPriority), stepRank(bs.maxSrc.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
 				))),
-				diffCmp(firstLdRankCmpZeroStep),
+				diffCmp(stLdRankCmp(f(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority]))),
 			)
 		}
 		lp1 := bs.stLoadDetail[st1].LoadPred
@@ -950,21 +964,6 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 		return lpCmp(lp1, lp2)
 	}
 	return 0
-}
-
-func (bs *balanceSolver) getLdRankPriorities() (firstLoadCmp storeLoadCmp, secondLoadCmp storeLoadCmp, zeroRkLoadCmp storeLoadCmp) {
-	f := func(dim int) func(ld *storeLoad) float64 {
-		switch dim {
-		case statistics.ByteDim:
-			return stLdByteRate
-		case statistics.KeyDim:
-			return stLdKeyRate
-		}
-		return stLdByteRate
-	}
-	return stLdRankCmp(f(bs.firstPriority), stepRank(bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-		stLdRankCmp(f(bs.secondPriority), stepRank(bs.maxSrc.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
-		stLdRankCmp(f(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority]))
 }
 
 // smaller is better
