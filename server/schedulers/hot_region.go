@@ -418,11 +418,11 @@ type balanceSolver struct {
 	minDst   *storeLoad
 	rankStep *storeLoad
 
-	secondPriority  int
-	firstPriority   int
-	cpuPriority     int
-	anotherPriority int
-	isSelectedDim   func(int) bool
+	secondPriority            int
+	firstPriority             int
+	writeLeaderFirstPriority  int
+	writeLeaderSecondPriority int
+	isSelectedDim             func(int) bool
 
 	firstPriorityIsBetter  bool
 	secondPriorityIsBetter bool
@@ -491,11 +491,11 @@ func (bs *balanceSolver) init() {
 	}
 
 	// write leader
-	bs.cpuPriority = statistics.KeyDim
+	bs.writeLeaderFirstPriority = statistics.KeyDim
 	if bs.firstPriority == statistics.QueryDim {
-		bs.cpuPriority = statistics.QueryDim
+		bs.writeLeaderFirstPriority = statistics.QueryDim
 	}
-	bs.anotherPriority = statistics.ByteDim
+	bs.writeLeaderSecondPriority = statistics.ByteDim
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
@@ -629,13 +629,13 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum 
 	firstPrioritySort := make([]*statistics.HotPeerStat, len(ret))
 	copy(firstPrioritySort, ret)
 	sort.Slice(firstPrioritySort, func(i, j int) bool {
-		k := getRegionStatKind(bs.rwTy, statistics.ByteDim)
+		k := getRegionStatKind(bs.rwTy, bs.firstPriority)
 		return firstPrioritySort[i].GetLoad(k) > firstPrioritySort[j].GetLoad(k)
 	})
 	secondPrioritySort := make([]*statistics.HotPeerStat, len(ret))
 	copy(secondPrioritySort, ret)
 	sort.Slice(secondPrioritySort, func(i, j int) bool {
-		k := getRegionStatKind(bs.rwTy, statistics.KeyDim)
+		k := getRegionStatKind(bs.rwTy, bs.secondPriority)
 		return secondPrioritySort[i].GetLoad(k) > secondPrioritySort[j].GetLoad(k)
 	})
 
@@ -790,9 +790,9 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
 		// Only consider about key rate.
-		srcKeyRate := srcLd.Loads[bs.cpuPriority]
-		dstKeyRate := dstLd.Loads[bs.cpuPriority]
-		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, bs.cpuPriority))
+		srcKeyRate := srcLd.Loads[bs.writeLeaderFirstPriority]
+		dstKeyRate := dstLd.Loads[bs.writeLeaderFirstPriority]
+		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, bs.writeLeaderFirstPriority))
 		if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
 			rank = -1
 		}
@@ -877,7 +877,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 		// compare region
 
 		if bs.rwTy == write && bs.opTy == transferLeader {
-			kind := getRegionStatKind(write, bs.cpuPriority)
+			kind := getRegionStatKind(write, bs.writeLeaderFirstPriority)
 			switch {
 			case bs.cur.srcPeerStat.GetLoad(kind) > old.srcPeerStat.GetLoad(kind):
 				return true
@@ -923,13 +923,13 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.cpuPriority), stepRank(bs.maxSrc.Loads[bs.cpuPriority], bs.rankStep.Loads[bs.cpuPriority])),
-					stLdRankCmp(stLdRate(bs.anotherPriority), stepRank(bs.maxSrc.Loads[bs.anotherPriority], bs.rankStep.Loads[bs.anotherPriority])),
+					stLdRankCmp(stLdRate(bs.writeLeaderFirstPriority), stepRank(bs.maxSrc.Loads[bs.writeLeaderFirstPriority], bs.rankStep.Loads[bs.writeLeaderFirstPriority])),
+					stLdRankCmp(stLdRate(bs.writeLeaderSecondPriority), stepRank(bs.maxSrc.Loads[bs.writeLeaderSecondPriority], bs.rankStep.Loads[bs.writeLeaderSecondPriority])),
 				))),
 				diffCmp(sliceLoadCmp(
 					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
-					stLdRankCmp(stLdRate(bs.cpuPriority), stepRank(0, bs.rankStep.Loads[bs.cpuPriority])),
-					stLdRankCmp(stLdRate(bs.anotherPriority), stepRank(0, bs.rankStep.Loads[bs.anotherPriority])),
+					stLdRankCmp(stLdRate(bs.writeLeaderFirstPriority), stepRank(0, bs.rankStep.Loads[bs.writeLeaderFirstPriority])),
+					stLdRankCmp(stLdRate(bs.writeLeaderSecondPriority), stepRank(0, bs.rankStep.Loads[bs.writeLeaderSecondPriority])),
 				)),
 			)
 		} else {
@@ -958,13 +958,13 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			lpCmp = sliceLPCmp(
 				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.cpuPriority), stepRank(bs.minDst.Loads[bs.cpuPriority], bs.rankStep.Loads[bs.cpuPriority])),
-					stLdRankCmp(stLdRate(bs.anotherPriority), stepRank(bs.minDst.Loads[bs.anotherPriority], bs.rankStep.Loads[bs.anotherPriority])),
+					stLdRankCmp(stLdRate(bs.writeLeaderFirstPriority), stepRank(bs.minDst.Loads[bs.writeLeaderFirstPriority], bs.rankStep.Loads[bs.writeLeaderFirstPriority])),
+					stLdRankCmp(stLdRate(bs.writeLeaderSecondPriority), stepRank(bs.minDst.Loads[bs.writeLeaderSecondPriority], bs.rankStep.Loads[bs.writeLeaderSecondPriority])),
 				)),
 				diffCmp(sliceLoadCmp(
 					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
-					stLdRankCmp(stLdRate(bs.cpuPriority), stepRank(0, bs.rankStep.Loads[bs.cpuPriority])),
-					stLdRankCmp(stLdRate(bs.anotherPriority), stepRank(0, bs.rankStep.Loads[bs.anotherPriority])),
+					stLdRankCmp(stLdRate(bs.writeLeaderFirstPriority), stepRank(0, bs.rankStep.Loads[bs.writeLeaderFirstPriority])),
+					stLdRankCmp(stLdRate(bs.writeLeaderSecondPriority), stepRank(0, bs.rankStep.Loads[bs.writeLeaderSecondPriority])),
 				)))
 		} else {
 			lpCmp = sliceLPCmp(
