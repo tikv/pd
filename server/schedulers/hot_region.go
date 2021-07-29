@@ -414,9 +414,11 @@ type balanceSolver struct {
 
 	cur *solution
 
-	maxSrc   *storeLoad
-	minDst   *storeLoad
-	rankStep *storeLoad
+	maxSrc         *storeLoad
+	minDst         *storeLoad
+	rankStep       *storeLoad
+	firstPriority  int
+	secondPriority int
 
 	byteIsBetter bool
 	keyIsBetter  bool
@@ -472,6 +474,8 @@ func (bs *balanceSolver) init() {
 		Loads: stepLoads,
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
+	bs.firstPriority = stringToDim(bs.preferPriority()[0])
+	bs.secondPriority = stringToDim(bs.preferPriority()[1])
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
@@ -607,29 +611,18 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 }
 
 func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum int) map[*statistics.HotPeerStat]struct{} {
-	byteSort := make([]*statistics.HotPeerStat, len(ret))
-	copy(byteSort, ret)
-	sort.Slice(byteSort, func(i, j int) bool {
-		k := getRegionStatKind(bs.rwTy, statistics.ByteDim)
-		return byteSort[i].GetLoad(k) > byteSort[j].GetLoad(k)
+	firstSort := make([]*statistics.HotPeerStat, len(ret))
+	copy(firstSort, ret)
+	sort.Slice(firstSort, func(i, j int) bool {
+		k := getRegionStatKind(bs.rwTy, bs.firstPriority)
+		return firstSort[i].GetLoad(k) > firstSort[j].GetLoad(k)
 	})
-	keySort := make([]*statistics.HotPeerStat, len(ret))
-	copy(keySort, ret)
-	sort.Slice(keySort, func(i, j int) bool {
-		k := getRegionStatKind(bs.rwTy, statistics.KeyDim)
-		return keySort[i].GetLoad(k) > keySort[j].GetLoad(k)
+	secondSort := make([]*statistics.HotPeerStat, len(ret))
+	copy(secondSort, ret)
+	sort.Slice(secondSort, func(i, j int) bool {
+		k := getRegionStatKind(bs.rwTy, bs.secondPriority)
+		return secondSort[i].GetLoad(k) > secondSort[j].GetLoad(k)
 	})
-	preferPriorities := bs.preferPriority()
-	f := func(priority string) []*statistics.HotPeerStat {
-		switch priority {
-		case BytePriority:
-			return byteSort
-		case KeyPriority:
-			return keySort
-		}
-		return byteSort
-	}
-	firstSort, secondSort := f(preferPriorities[0]), f(preferPriorities[1])
 	union := make(map[*statistics.HotPeerStat]struct{}, maxPeerNum)
 	for len(union) < maxPeerNum {
 		for len(firstSort) > 0 {
@@ -840,21 +833,9 @@ func (bs *balanceSolver) getHotDecRatioByPriorities() (bool, float64, bool, floa
 		isHot := peerRate >= bs.getMinRate(dim)
 		return isHot, decRatio
 	}
-	keyHot, keyDecRatio := checkHot(statistics.KeyDim)
-	byteHot, byteDecRatio := checkHot(statistics.ByteDim)
-	preferPriorities := bs.preferPriority()
-	f := func(priority string) (bool, float64) {
-		switch priority {
-		case BytePriority:
-			return byteHot, byteDecRatio
-		case KeyPriority:
-			return keyHot, keyDecRatio
-		}
-		return byteHot, byteDecRatio
-	}
-	fh, fr := f(preferPriorities[0])
-	sh, sr := f(preferPriorities[1])
-	return fh, fr, sh, sr
+	firstHot, firstDecRatio := checkHot(bs.firstPriority)
+	secondHot, secondDecRatio := checkHot(bs.secondPriority)
+	return firstHot, firstDecRatio, secondHot, secondDecRatio
 }
 
 func (bs *balanceSolver) getMinRate(dim int) float64 {
@@ -931,20 +912,10 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 }
 
 func (bs *balanceSolver) getRkCmpPriorities(old *solution) (firstCmp int, secondCmp int) {
-	bk, kk := getRegionStatKind(bs.rwTy, statistics.ByteDim), getRegionStatKind(bs.rwTy, statistics.KeyDim)
-	byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(bk), old.srcPeerStat.GetLoad(bk), stepRank(0, 100))
-	keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(kk), old.srcPeerStat.GetLoad(kk), stepRank(0, 10))
-	preferPriorities := bs.preferPriority()
-	f := func(priority string) int {
-		switch priority {
-		case BytePriority:
-			return byteRkCmp
-		case KeyPriority:
-			return keyRkCmp
-		}
-		return byteRkCmp
-	}
-	return f(preferPriorities[0]), f(preferPriorities[1])
+	fk, sk := getRegionStatKind(bs.rwTy, bs.firstPriority), getRegionStatKind(bs.rwTy, bs.secondPriority)
+	fkRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(fk), old.srcPeerStat.GetLoad(fk), stepRank(0, 100))
+	skRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(sk), old.srcPeerStat.GetLoad(sk), stepRank(0, 10))
+	return fkRkCmp, skRkCmp
 }
 
 // smaller is better
@@ -982,26 +953,18 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 }
 
 func (bs *balanceSolver) getLdRankPriorities() (firstLoadCmp storeLoadCmp, secondLoadCmp storeLoadCmp, zeroRkLoadCmp storeLoadCmp) {
-	preferPriorities := bs.preferPriority()
-	f1 := func(priority string) storeLoadCmp {
-		switch priority {
-		case BytePriority:
-			return stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.Loads[statistics.ByteDim], bs.rankStep.Loads[statistics.ByteDim]))
-		case KeyPriority:
-			return stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.Loads[statistics.KeyDim], bs.rankStep.Loads[statistics.KeyDim]))
+	f := func(dim int) func(ld *storeLoad) float64 {
+		switch dim {
+		case statistics.ByteDim:
+			return stLdByteRate
+		case statistics.KeyDim:
+			return stLdKeyRate
 		}
-		return stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.Loads[statistics.ByteDim], bs.rankStep.Loads[statistics.ByteDim]))
+		return stLdByteRate
 	}
-	f2 := func(priority string) storeLoadCmp {
-		switch priority {
-		case BytePriority:
-			return stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.Loads[statistics.ByteDim]))
-		case KeyPriority:
-			return stLdRankCmp(stLdKeyRate, stepRank(0, bs.rankStep.Loads[statistics.KeyDim]))
-		}
-		return stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.Loads[statistics.ByteDim]))
-	}
-	return f1(preferPriorities[0]), f1(preferPriorities[1]), f2(preferPriorities[0])
+	return stLdRankCmp(f(bs.firstPriority), stepRank(bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
+		stLdRankCmp(f(bs.secondPriority), stepRank(bs.maxSrc.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
+		stLdRankCmp(f(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority]))
 }
 
 // smaller is better
@@ -1298,4 +1261,14 @@ func (bs *balanceSolver) preferPriority() [2]string {
 		return [2]string{priorities[0], priorities[0]}
 	}
 	return [2]string{priorities[0], priorities[1]}
+}
+
+func stringToDim(name string) int {
+	switch name {
+	case BytePriority:
+		return statistics.ByteDim
+	case KeyPriority:
+		return statistics.KeyDim
+	}
+	return statistics.ByteDim
 }
