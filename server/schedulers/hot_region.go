@@ -233,7 +233,6 @@ func summaryStoresLoad(
 	allLoadSum := make([]float64, statistics.DimLen)
 	allCount := 0.0
 
-	// Stores without byte rate statistics is not available to schedule.
 	for _, store := range stores {
 		id := store.GetID()
 		storeLoads, ok := storesLoads[id]
@@ -303,7 +302,7 @@ func summaryStoresLoad(
 		}
 	}
 	storeLen := float64(len(storesLoads))
-	// store expectation byte/key rate and count for each store-load detail.
+	// store expectation rate and count for each store-load detail.
 	for id, detail := range loadDetail {
 		expectLoads := make([]float64, len(allLoadSum))
 		for i := range expectLoads {
@@ -469,7 +468,10 @@ func (bs *balanceSolver) init() {
 		maxCur = maxLoad(maxCur, &detail.LoadPred.Current)
 	}
 
-	rankStepRatios := []float64{bs.sche.conf.GetByteRankStepRatio(), bs.sche.conf.GetKeyRankStepRatio(), bs.sche.conf.GetQueryRateRankStepRatio()}
+	rankStepRatios := []float64{
+		statistics.ByteDim:  bs.sche.conf.GetByteRankStepRatio(),
+		statistics.KeyDim:   bs.sche.conf.GetKeyRankStepRatio(),
+		statistics.QueryDim: bs.sche.conf.GetQueryRateRankStepRatio()}
 	stepLoads := make([]float64, statistics.DimLen)
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
@@ -482,6 +484,11 @@ func (bs *balanceSolver) init() {
 	priorities := bs.sche.conf.ReadPriorities
 	if bs.rwTy == write {
 		priorities = bs.sche.conf.WritePriorities
+	}
+	bs.firstPriority = stringToDim(priorities[0])
+	bs.secondPriority = stringToDim(priorities[1])
+
+	if bs.rwTy == write {
 		bs.writeLeaderFirstPriority = statistics.KeyDim
 		if bs.firstPriority == statistics.QueryDim {
 			bs.writeLeaderFirstPriority = statistics.QueryDim
@@ -489,8 +496,6 @@ func (bs *balanceSolver) init() {
 		bs.writeLeaderSecondPriority = statistics.ByteDim
 	}
 
-	bs.firstPriority = stringToDim(priorities[0])
-	bs.secondPriority = stringToDim(priorities[1])
 	bs.isSelectedDim = func(dim int) bool {
 		return dim == bs.firstPriority || dim == bs.secondPriority
 	}
@@ -568,7 +573,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	return []*operator.Operator{op}
 }
 
-// filterSrcStores compare the min rate and the ratio * expectation rate, if both key and byte rate is greater than
+// filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
 // its expectation * ratio, the store would be selected as hot source store
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
@@ -796,11 +801,11 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	rank := int64(0)
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
-		// Only consider about key rate.
-		srcKeyRate := srcLd.Loads[bs.writeLeaderFirstPriority]
-		dstKeyRate := dstLd.Loads[bs.writeLeaderFirstPriority]
-		peerKeyRate := peer.GetLoad(getRegionStatKind(bs.rwTy, bs.writeLeaderFirstPriority))
-		if srcKeyRate-peerKeyRate >= dstKeyRate+peerKeyRate {
+		// Only consider about key rate or query rate.
+		srcRate := srcLd.Loads[bs.writeLeaderFirstPriority]
+		dstRate := dstLd.Loads[bs.writeLeaderFirstPriority]
+		peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, bs.writeLeaderFirstPriority))
+		if srcRate-peerRate >= dstRate+peerRate {
 			rank = -1
 		}
 	} else {
@@ -808,16 +813,16 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
 		switch {
 		case firstPriorityDimHot && firstPriorityDecRatio <= greatDecRatio && secondPriorityDimHot && secondPriorityDecRatio <= greatDecRatio:
-			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
+			// If belong to the case, two dim will be more balanced, the best choice.
 			rank = -3
 			bs.firstPriorityIsBetter = true
 			bs.secondPriorityIsBetter = true
 		case firstPriorityDecRatio <= minorDecRatio && secondPriorityDimHot && secondPriorityDecRatio <= greatDecRatio:
-			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
+			// If belong to the case, first priority dim will be not worsened, second priority dim will be more balanced.
 			rank = -2
 			bs.secondPriorityIsBetter = true
 		case firstPriorityDimHot && firstPriorityDecRatio <= greatDecRatio:
-			// If belong to the case, byte rate will be more balanced, ignore the key rate.
+			// If belong to the case, first priority dim will be more balanced, ignore the second priority dim.
 			rank = -1
 			bs.firstPriorityIsBetter = true
 		}
@@ -826,8 +831,8 @@ func (bs *balanceSolver) calcProgressiveRank() {
 }
 
 func (bs *balanceSolver) getHotDecRatioByPriorities(srcLd, dstLd *storeLoad, peer *statistics.HotPeerStat) (bool, float64, bool, float64) {
-	// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
-	// than the src store's (key/byte) rate after scheduling one peer.
+	// we use DecRatio(Decline Ratio) to expect that the dst store's rate should still be less
+	// than the src store's rate after scheduling one peer.
 	getSrcDecRate := func(a, b float64) float64 {
 		if a-b <= 0 {
 			return 1
@@ -898,22 +903,22 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 		} else {
 			firstCmp, secondCmp := bs.getRkCmpPriorities(old)
 			switch bs.cur.progressiveRank {
-			case -2: // greatDecRatio < byteDecRatio <= minorDecRatio && keyDecRatio <= greatDecRatio
+			case -2: // greatDecRatio < firstPriorityDecRatio <= minorDecRatio && secondPriorityDecRatio <= greatDecRatio
 				if secondCmp != 0 {
 					return secondCmp > 0
 				}
 				if firstCmp != 0 {
-					// prefer smaller byte rate, to reduce oscillation
+					// prefer smaller first priority rate, to reduce oscillation
 					return firstCmp < 0
 				}
-			case -3: // byteDecRatio <= greatDecRatio && keyDecRatio <= greatDecRatio
+			case -3: // firstPriorityDecRatio <= greatDecRatio && secondPriorityDecRatio <= greatDecRatio
 				if secondCmp != 0 {
 					return secondCmp > 0
 				}
 				fallthrough
-			case -1: // byteDecRatio <= greatDecRatio
+			case -1: // firstPriorityDecRatio <= greatDecRatio
 				if firstCmp != 0 {
-					// prefer region with larger byte rate, to converge faster
+					// prefer region with larger first priority rate, to converge faster
 					return firstCmp > 0
 				}
 			}
@@ -930,6 +935,8 @@ func (bs *balanceSolver) getRkCmpPriorities(old *solution) (firstCmp int, second
 		case statistics.ByteDim:
 			return 100
 		case statistics.KeyDim:
+			return 10
+		case statistics.QueryDim:
 			return 10
 		}
 		return 100
@@ -1266,6 +1273,8 @@ func stringToDim(name string) int {
 		return statistics.ByteDim
 	case KeyPriority:
 		return statistics.KeyDim
+	case QueryPriority:
+		return statistics.QueryDim
 	}
 	return statistics.ByteDim
 }

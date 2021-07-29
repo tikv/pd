@@ -35,7 +35,9 @@ import (
 func init() {
 	schedulePeerPr = 1.0
 	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newHotWriteScheduler(opController, initHotRegionScheduleConfig()), nil
+		cfg := initHotRegionScheduleConfig()
+		cfg.ReadPriorities = []string{BytePriority, KeyPriority}
+		return newHotWriteScheduler(opController, cfg), nil
 	})
 	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
@@ -842,6 +844,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	hb.(*hotScheduler).conf.GreatDecRatio = 0.99
 	hb.(*hotScheduler).conf.MinorDecRatio = 1
 	hb.(*hotScheduler).conf.DstToleranceRatio = 1
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 
 	for i := 0; i < 2; i++ {
 		// 0: byte rate
@@ -1295,24 +1298,23 @@ func (s *testHotCacheSuite) TestSortHotPeer(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 	leaderSolver := newBalanceSolver(hb, tc, read, transferLeader)
-
 	hotPeers := []*statistics.HotPeerStat{{
 		RegionID: 1,
 		Loads: []float64{
-			statistics.RegionReadBytes: 10,
-			statistics.RegionReadKeys:  1,
+			statistics.RegionReadQuery: 10,
+			statistics.RegionReadBytes: 1,
 		},
 	}, {
 		RegionID: 2,
 		Loads: []float64{
-			statistics.RegionReadBytes: 1,
-			statistics.RegionReadKeys:  10,
+			statistics.RegionReadQuery: 1,
+			statistics.RegionReadBytes: 10,
 		},
 	}, {
 		RegionID: 3,
 		Loads: []float64{
-			statistics.RegionReadBytes: 5,
-			statistics.RegionReadKeys:  6,
+			statistics.RegionReadQuery: 5,
+			statistics.RegionReadBytes: 6,
 		},
 	}}
 
