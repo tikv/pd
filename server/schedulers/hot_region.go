@@ -196,7 +196,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
-// It makes each key/byte rate or count become (1+w) times to the origin value while f is the function to provide w(weight).
+// It makes each key/byte rate or count become `weight` times to the origin value.
 func (h *hotScheduler) summaryPendingInfluence() {
 	maxZombieDur := h.conf.GetMaxZombieDuration()
 	ret := make(map[uint64]*Influence)
