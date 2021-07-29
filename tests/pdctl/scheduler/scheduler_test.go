@@ -280,7 +280,6 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	c.Assert(conf1, DeepEquals, expected1)
 
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key"}, nil)
-	expected1["read-priorities"] = []interface{}{"key"}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,byte"}, nil)
