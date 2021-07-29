@@ -574,7 +574,7 @@ func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *
 			return true
 		})
 	}
-	switch bs.preferPriority() {
+	switch bs.preferPriority()[0] {
 	case BytePriority:
 		return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
 	case KeyPriority:
@@ -630,9 +630,14 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum 
 	})
 
 	firstSort, secondSort := byteSort, keySort
-	if bs.preferPriority() == KeyPriority {
+	preferPriorities := bs.preferPriority()
+	switch {
+	case preferPriorities[0] == BytePriority && preferPriorities[1] == KeyPriority:
+		firstSort, secondSort = byteSort, keySort
+	case preferPriorities[0] == KeyPriority && preferPriorities[1] == BytePriority:
 		firstSort, secondSort = keySort, byteSort
 	}
+
 	union := make(map[*statistics.HotPeerStat]struct{}, maxPeerNum)
 	for len(union) < maxPeerNum {
 		for len(firstSort) > 0 {
@@ -780,7 +785,7 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 			return true
 		})
 	}
-	switch bs.preferPriority() {
+	switch bs.preferPriority()[0] {
 	case BytePriority:
 		return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
 	case KeyPriority:
@@ -854,10 +859,11 @@ func (bs *balanceSolver) getHotDecRatioByPriorities() (bool, float64, bool, floa
 	}
 	keyHot, keyDecRatio := checkHot(statistics.KeyDim)
 	byteHot, byteDecRatio := checkHot(statistics.ByteDim)
-	switch bs.preferPriority() {
-	case BytePriority:
+	preferPriorities := bs.preferPriority()
+	switch {
+	case preferPriorities[0] == BytePriority && preferPriorities[1] == KeyPriority:
 		return byteHot, byteDecRatio, keyHot, keyDecRatio
-	case KeyPriority:
+	case preferPriorities[0] == KeyPriority && preferPriorities[1] == BytePriority:
 		return keyHot, keyDecRatio, byteHot, byteDecRatio
 	}
 	return byteHot, byteDecRatio, keyHot, keyDecRatio
@@ -940,10 +946,11 @@ func (bs *balanceSolver) getRkCmpPriorities(old *solution) (int, int) {
 	bk, kk := getRegionStatKind(bs.rwTy, statistics.ByteDim), getRegionStatKind(bs.rwTy, statistics.KeyDim)
 	byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(bk), old.srcPeerStat.GetLoad(bk), stepRank(0, 100))
 	keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(kk), old.srcPeerStat.GetLoad(kk), stepRank(0, 10))
-	switch bs.preferPriority() {
-	case BytePriority:
+	preferPriorities := bs.preferPriority()
+	switch {
+	case preferPriorities[0] == BytePriority && preferPriorities[1] == KeyPriority:
 		return byteRkCmp, keyRkCmp
-	case KeyPriority:
+	case preferPriorities[0] == KeyPriority && preferPriorities[1] == BytePriority:
 		return keyRkCmp, byteRkCmp
 	}
 	return byteRkCmp, keyRkCmp
@@ -984,12 +991,13 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 }
 
 func (bs *balanceSolver) getLdRankPriorities() (storeLoadCmp, storeLoadCmp, storeLoadCmp) {
-	switch bs.preferPriority() {
-	case BytePriority:
+	preferPriorities := bs.preferPriority()
+	switch {
+	case preferPriorities[0] == BytePriority && preferPriorities[1] == KeyPriority:
 		return stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.Loads[statistics.ByteDim], bs.rankStep.Loads[statistics.ByteDim])),
 			stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.Loads[statistics.KeyDim], bs.rankStep.Loads[statistics.KeyDim])),
 			stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.Loads[statistics.ByteDim]))
-	case KeyPriority:
+	case preferPriorities[0] == KeyPriority && preferPriorities[1] == BytePriority:
 		return stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.Loads[statistics.KeyDim], bs.rankStep.Loads[statistics.KeyDim])),
 			stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.Loads[statistics.ByteDim], bs.rankStep.Loads[statistics.ByteDim])),
 			stLdRankCmp(stLdKeyRate, stepRank(0, bs.rankStep.Loads[statistics.KeyDim]))
@@ -1284,10 +1292,13 @@ func getRegionStatKind(rwTy rwType, dim int) statistics.RegionStatKind {
 	return 0
 }
 
-func (bs *balanceSolver) preferPriority() string {
+func (bs *balanceSolver) preferPriority() [2]string {
 	priorities := bs.sche.conf.WritePriorities
 	if bs.rwTy == read {
 		priorities = bs.sche.conf.ReadPriorities
 	}
-	return priorities[0]
+	if len(priorities) == 1 {
+		return [2]string{priorities[0], priorities[0]}
+	}
+	return [2]string{priorities[0], priorities[1]}
 }
