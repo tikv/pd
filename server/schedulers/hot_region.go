@@ -630,7 +630,7 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum 
 	})
 
 	firstSort, secondSort := byteSort, keySort
-	if bs.preferPriority() == BytePriority {
+	if bs.preferPriority() == KeyPriority {
 		firstSort, secondSort = keySort, byteSort
 	}
 	union := make(map[*statistics.HotPeerStat]struct{}, maxPeerNum)
