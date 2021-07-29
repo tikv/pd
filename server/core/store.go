@@ -142,12 +142,14 @@ func (s *StoreInfo) IsTombstone() bool {
 	return s.GetState() == metapb.StoreState_Tombstone
 }
 
+// GetSlowScore returns the slow score of the store.
 func (s *StoreInfo) GetSlowScore() uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.rawStats.GetSlowScore()
 }
 
+// IsSlow checks if the slow score reaches the threshold.
 func (s *StoreInfo) IsSlow() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
