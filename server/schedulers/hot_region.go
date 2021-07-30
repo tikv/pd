@@ -594,7 +594,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad) bool {
 	return slice.AllOf(minLoad.Loads, func(i int) bool {
-		if statistics.IsSelectedDim(i) {
+		if bs.isSelectedDim(i) {
 			return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
 		}
 		return true
@@ -785,7 +785,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad) bool {
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	return slice.AllOf(maxLoad.Loads, func(i int) bool {
-		if statistics.IsSelectedDim(i) {
+		if bs.isSelectedDim(i) {
 			return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
 		}
 		return true
