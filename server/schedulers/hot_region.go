@@ -365,19 +365,37 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 }
 
 func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
-	// prefer to balance by leader
 	leaderSolver := newBalanceSolver(h, cluster, read, transferLeader)
-	ops := leaderSolver.solve()
-	if len(ops) > 0 {
-		return ops
-	}
-
+	leaderOps := leaderSolver.solve()
 	peerSolver := newBalanceSolver(h, cluster, read, movePeer)
-	ops = peerSolver.solve()
-	if len(ops) > 0 {
-		return ops
+	peerOps := peerSolver.solve()
+	if len(leaderOps) == 0 && len(peerOps) == 0 {
+		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
+		return nil
 	}
+	if len(leaderOps) == 0 && peerSolver.addPendingInfluence() {
+		return peerOps
+	}
+	if len(peerOps) == 0 && leaderSolver.addPendingInfluence() {
+		return leaderOps
+	}
+	leaderSolver.cur = leaderSolver.best
+	if leaderSolver.betterThan(peerSolver.best) {
+		if leaderSolver.addPendingInfluence() {
+			return leaderOps
+		}
+		if peerSolver.addPendingInfluence() {
+			return peerOps
+		}
 
+	} else {
+		if peerSolver.addPendingInfluence() {
+			return peerOps
+		}
+		if leaderSolver.addPendingInfluence() {
+			return leaderOps
+		}
+	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
 }
@@ -389,7 +407,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 	case s < int(schedulePeerPr*100):
 		peerSolver := newBalanceSolver(h, cluster, write, movePeer)
 		ops := peerSolver.solve()
-		if len(ops) > 0 {
+		if len(ops) > 0 && peerSolver.addPendingInfluence() {
 			return ops
 		}
 	default:
@@ -397,7 +415,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 
 	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
 	ops := leaderSolver.solve()
-	if len(ops) > 0 {
+	if len(ops) > 0 && leaderSolver.addPendingInfluence() {
 		return ops
 	}
 
@@ -412,7 +430,10 @@ type balanceSolver struct {
 	rwTy         rwType
 	opTy         opType
 
-	cur *solution
+	cur  *solution
+	best *solution
+	ops  []*operator.Operator
+	infl Influence
 
 	maxSrc         *storeLoad
 	minDst         *storeLoad
@@ -434,6 +455,13 @@ type solution struct {
 	// The smaller the rank, the better this solution is.
 	// If rank < 0, this solution makes thing better.
 	progressiveRank int64
+}
+
+func (bs *balanceSolver) addPendingInfluence() bool {
+	if bs.best == nil || len(bs.ops) == 0 {
+		return false
+	}
+	return bs.sche.addPendingInfluence(bs.ops[0], bs.best.srcStoreID, bs.best.dstStoreID, bs.infl)
 }
 
 func (bs *balanceSolver) init() {
@@ -513,11 +541,6 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 	bs.cur = &solution{}
-	var (
-		best *solution
-		op   *operator.Operator
-		infl Influence
-	)
 
 	for srcStoreID := range bs.filterSrcStores() {
 		bs.cur.srcStoreID = srcStoreID
@@ -531,23 +554,19 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
 				bs.calcProgressiveRank()
-				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
+				if bs.cur.progressiveRank < 0 && bs.betterThan(bs.best) {
 					if newOp, newInfl := bs.buildOperator(); newOp != nil {
-						op = newOp
-						infl = *newInfl
+						bs.ops = []*operator.Operator{newOp}
+						bs.infl = *newInfl
 						clone := *bs.cur
-						best = &clone
+						bs.best = &clone
 					}
 				}
 			}
 		}
 	}
 
-	if best == nil || !bs.sche.addPendingInfluence(op, best.srcStoreID, best.dstStoreID, infl) {
-		return nil
-	}
-
-	return []*operator.Operator{op}
+	return bs.ops
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if both key and byte rate is greater than
