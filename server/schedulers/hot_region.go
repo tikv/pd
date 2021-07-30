@@ -219,7 +219,7 @@ func (h *hotScheduler) gcRegionPendings() {
 }
 
 // summaryStoresLoad Load information of all available stores.
-// it will filtered the hot peer and calculate the current and future stat(rate,count) for each store
+// it will filter the hot peer and calculate the current and future stat(rate,count) for each store
 func summaryStoresLoad(
 	stores []*core.StoreInfo,
 	storesLoads map[uint64][]float64,
@@ -1096,7 +1096,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 
 	dim := ""
 	if bs.firstPriorityIsBetter && bs.secondPriorityIsBetter {
-		dim = "both"
+		dim = "all"
 	} else if bs.firstPriorityIsBetter {
 		dim = dimToString(bs.firstPriority)
 	} else if bs.secondPriorityIsBetter {

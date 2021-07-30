@@ -286,11 +286,7 @@ func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 
 func stLdRate(dim int) func(ld *storeLoad) float64 {
 	return func(ld *storeLoad) float64 {
-		switch dim {
-		case statistics.ByteDim, statistics.KeyDim, statistics.QueryDim:
-			return ld.Loads[dim]
-		}
-		return 0
+		return ld.Loads[dim]
 	}
 }
 
