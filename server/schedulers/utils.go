@@ -334,6 +334,7 @@ type storeLoadPred struct {
 	Current storeLoad
 	Future  storeLoad
 	Expect  storeLoad
+	Stddev  storeLoad
 }
 
 func (lp *storeLoadPred) min() *storeLoad {

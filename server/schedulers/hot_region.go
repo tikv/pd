@@ -64,6 +64,7 @@ const (
 
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
+	stddevThreshold        = 0.1
 )
 
 // schedulePeerPr the probability of schedule the hot peer.
@@ -302,16 +303,37 @@ func summaryStoresLoad(
 			HotPeers: hotPeers,
 		}
 	}
-	storeLen := float64(len(storesLoads))
 	// store expectation byte/key rate and count for each store-load detail.
-	for id, detail := range loadDetail {
-		expectLoads := make([]float64, len(allLoadSum))
+	storeLen := float64(len(storesLoads))
+	expectLoads := make([]float64, statistics.DimLen)
+	for i := range expectLoads {
+		expectLoads[i] = allLoadSum[i] / storeLen
+	}
+	allLoadSum2 := make([]float64, statistics.DimLen)
+	for _, detail := range loadDetail {
 		for i := range expectLoads {
-			expectLoads[i] = allLoadSum[i] / storeLen
+			if detail.LoadPred.Current.Loads[i] <= statistics.StoreMinHotThreshold[i] {
+				continue
+			}
+			v := detail.LoadPred.Current.Loads[i] - expectLoads[i]
+			allLoadSum2[i] += v * v
 		}
-		expectCount := allCount / storeLen
+	}
+	stddevLoads := make([]float64, statistics.DimLen)
+	for i := range allLoadSum2 {
+		// log.Info("expect2", zap.Float64("sum", allLoadSum2[i]), zap.Float64("thre", statistics.StoreMinHotThreshold[i]))
+		if allLoadSum2[i] < storeLen*statistics.StoreMinHotThreshold[i]*statistics.StoreMinHotThreshold[i] {
+			stddevLoads[i] = 0
+			continue
+		}
+		stddevLoads[i] = math.Sqrt(allLoadSum2[i]/storeLen) / expectLoads[i]
+	}
+
+	for id, detail := range loadDetail {
 		detail.LoadPred.Expect.Loads = expectLoads
-		detail.LoadPred.Expect.Count = expectCount
+		detail.LoadPred.Expect.Count = allCount / storeLen
+		detail.LoadPred.Stddev.Loads = stddevLoads
+		detail.LoadPred.Stddev.Count = allCount / storeLen
 		// Debug
 		{
 			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
@@ -326,8 +348,16 @@ func summaryStoresLoad(
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.QueryDim])
 		}
 		{
-			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectCount)
+			ty := "std-byte-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(stddevLoads[statistics.ByteDim])
+		}
+		{
+			ty := "std-key-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(stddevLoads[statistics.KeyDim])
+		}
+		{
+			ty := "std-query-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(stddevLoads[statistics.QueryDim])
 		}
 	}
 	return loadDetail
@@ -555,6 +585,10 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
 	for id, detail := range bs.stLoadDetail {
+		if detail.LoadPred.Stddev.Loads[bs.firstPriority] <= stddevThreshold/2 && detail.LoadPred.Stddev.Loads[bs.secondPriority] <= stddevThreshold {
+			hotSchedulerResultCounter.WithLabelValues("src-store-exp", strconv.FormatUint(id, 10)).Inc()
+			continue
+		}
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
@@ -773,8 +807,10 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
-	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
-	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
+	src := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred
+	dst := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred
+	srcLd := src.min()
+	dstLd := dst.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
 	if bs.rwTy == write && bs.opTy == transferLeader {
@@ -801,6 +837,10 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			bs.keyIsBetter = true
 		case firstPriorityDimHot && firstPriorityDecRatio <= greatDecRatio:
 			// If belong to the case, byte rate will be more balanced, ignore the key rate.
+			if dst.Stddev.Loads[bs.firstPriority] <= stddevThreshold/2 {
+				hotSchedulerResultCounter.WithLabelValues("dst-store-exp", strconv.FormatUint(bs.cur.dstStoreID, 10)).Inc()
+				return
+			}
 			rank = -1
 			bs.byteIsBetter = true
 		}
