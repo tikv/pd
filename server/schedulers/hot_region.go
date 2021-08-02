@@ -1187,16 +1187,13 @@ func (h *hotScheduler) calcPendingInfluence(op *operator.Operator, maxZombieDur 
 		weight = 1
 	}
 
-	switch status {
-	case operator.SUCCESS:
-		return weight, weight == 0
-	case operator.CANCELED, operator.REPLACED, operator.TIMEOUT:
-		return 0, weight == 0
-	case operator.EXPIRED:
-		fallthrough
-	default:
-		return 0, true
+	needGC = weight == 0
+	if status != operator.SUCCESS {
+		// CANCELED, REPLACED, TIMEOUT, EXPIRED, etc.
+		// The actual weight is 0, but there is still a delay in GC.
+		weight = 0
 	}
+	return
 }
 
 func (h *hotScheduler) clearPendingInfluence() {
