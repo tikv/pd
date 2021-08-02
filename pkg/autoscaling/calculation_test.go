@@ -251,10 +251,6 @@ func (s *calculationTestSuite) TearDownTest(c *C) {
 	s.cancel()
 }
 
-func (s *calculationTestSuite) getHeterogeneousGroupsByComponent(c *C) {
-
-}
-
 type mockQuerier struct{}
 
 func (q *mockQuerier) Query(options *QueryOptions) (QueryResult, error) {
