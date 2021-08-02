@@ -84,7 +84,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 
-	notDoneOp := func(region *core.RegionInfo, ty opType) *pendingInfluence {
+	notDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		var op *operator.Operator
 		var err error
 		switch ty {
@@ -100,36 +100,36 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add((-5*statistics.StoreHeartBeatReportInterval+1)*time.Second))
 		return newPendingInfluence(op, 2, 4, Influence{})
 	}
-	doneOp := func(region *core.RegionInfo, ty opType) *pendingInfluence {
-		infl := notDoneOp(region, ty)
+	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
+		infl := notDoneOpInfluence(region, ty)
 		infl.op.Cancel()
 		return infl
 	}
-	shouldRemoveOp := func(region *core.RegionInfo, ty opType) *pendingInfluence {
-		infl := doneOp(region, ty)
+	shouldRemoveOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
+		infl := justDoneOpInfluence(region, ty)
 		operator.SetOperatorStatusReachTime(infl.op, operator.CANCELED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
 		return infl
 	}
-	opCreaters := [3]func(region *core.RegionInfo, ty opType) *pendingInfluence{shouldRemoveOp, notDoneOp, doneOp}
+	opInfluenceCreators := [3]func(region *core.RegionInfo, ty opType) *pendingInfluence{shouldRemoveOpInfluence, notDoneOpInfluence, justDoneOpInfluence}
 
 	typs := []opType{movePeer, transferLeader}
 
-	for i, opCreator := range opCreaters {
+	for i, creator := range opInfluenceCreators {
 		for j, typ := range typs {
 			regionID := uint64(i*len(typs) + j + 1)
 			region := newTestRegion(regionID)
-			hb.regionPendings[regionID] = opCreator(region, typ)
+			hb.regionPendings[regionID] = creator(region, typ)
 		}
 	}
 
 	hb.summaryPendingInfluence() // Calling this function will GC.
 
-	for i := range opCreaters {
+	for i := range opInfluenceCreators {
 		for j, typ := range typs {
 			regionID := uint64(i*len(typs) + j + 1)
-			if i < 1 { // shouldRemoveOp
+			if i < 1 { // shouldRemoveOpInfluence
 				c.Assert(hb.regionPendings, Not(HasKey), regionID)
-			} else { // notDoneOp, doneOp
+			} else { // notDoneOpInfluence, justDoneOpInfluence
 				c.Assert(hb.regionPendings, HasKey, regionID)
 				kind := hb.regionPendings[regionID].op.Kind()
 				switch typ {
