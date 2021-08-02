@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -485,12 +486,18 @@ func (bs *balanceSolver) init() {
 	if bs.rwTy == write {
 		priorities = bs.sche.conf.WritePriorities
 	}
+
+	querySupport := bs.cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
+	if !querySupport {
+		priorities = []string{"byte", "key"}
+	}
+
 	bs.firstPriority = stringToDim(priorities[0])
 	bs.secondPriority = stringToDim(priorities[1])
 
 	if bs.rwTy == write {
 		bs.writeLeaderFirstPriority = statistics.KeyDim
-		if bs.firstPriority == statistics.QueryDim {
+		if bs.firstPriority == statistics.QueryDim && querySupport {
 			bs.writeLeaderFirstPriority = statistics.QueryDim
 		}
 		bs.writeLeaderSecondPriority = statistics.ByteDim
