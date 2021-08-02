@@ -730,19 +730,20 @@ func getScaleInPlansForHomogeneous(scaleInCount uint64, resources []*Resource, r
 	var plans []*Plan
 
 	for _, resource := range resources {
-		if resource.ResourceType != homogeneousTiKVResourceType {
+		if resource.ResourceType != homogeneousTiKVResourceType && resource.ResourceType != homogeneousTiDBResourceType {
 			resourceInstanceCount, ok := resourceMap[resource.ResourceType]
 			if ok {
 				// this resource type exists, try to scale in
 				if scaleInCount <= resourceInstanceCount {
 					// scaling in this resource type is enough
-					scaleInPlan := NewPlan(TiKV, resourceInstanceCount-scaleInCount, resource.ResourceType)
+					scaleInPlan := NewPlan(component, resourceInstanceCount-scaleInCount, resource.ResourceType)
 
 					return 0, append(plans, scaleInPlan)
 				}
 
 				// scaling in this resource type is not enough, need to scale in all instances of this resource type
-				scaleInPlan := NewPlan(TiKV, 0, resource.ResourceType)
+				// and look for other resource types
+				scaleInPlan := NewPlan(component, 0, resource.ResourceType)
 				plans = append(plans, scaleInPlan)
 				scaleInCount -= resourceInstanceCount
 			}
