@@ -483,9 +483,11 @@ func (bs *balanceSolver) init() {
 
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
-	bs.firstPriority, bs.secondPriority = bs.priorities(bs.rwTy, movePeer)
-	if bs.rwTy == write {
-		bs.writeLeaderFirstPriority, bs.writeLeaderSecondPriority = bs.priorities(bs.rwTy, transferLeader)
+	if bs.rwTy == read {
+		bs.firstPriority, bs.secondPriority = prioritiesTodim(bs.sche.conf.ReadPriorities)
+	} else {
+		bs.firstPriority, bs.secondPriority = prioritiesTodim(bs.sche.conf.WritePeerPriorities)
+		bs.writeLeaderFirstPriority, bs.writeLeaderSecondPriority = prioritiesTodim(bs.sche.conf.WritePeerPriorities)
 	}
 
 	bs.isSelectedDim = func(dim int) bool {
@@ -1290,16 +1292,6 @@ func dimToString(dim int) string {
 	}
 }
 
-func (bs *balanceSolver) priorities(rw rwType, op opType) (int, int) {
-	var priorities []string
-	if rw == read {
-		priorities = bs.sche.conf.ReadPriorities
-	} else {
-		if op == transferLeader {
-			priorities = bs.sche.conf.WriteLeaderPriorities
-		} else {
-			priorities = bs.sche.conf.WritePeerPriorities
-		}
-	}
+func prioritiesTodim(priorities []string) (int, int) {
 	return stringToDim(priorities[0]), stringToDim(priorities[1])
 }
