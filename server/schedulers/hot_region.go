@@ -70,10 +70,6 @@ const (
 // schedulePeerPr the probability of schedule the hot peer.
 var schedulePeerPr = 0.66
 
-// tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
-var prioritiesWithoutQuery = []string{"byte", "key"}
-var writeLeaderPrioritiesWithoutQuery = []string{"key", "byte"}
-
 type hotScheduler struct {
 	name string
 	*BaseScheduler
@@ -489,10 +485,10 @@ func (bs *balanceSolver) init() {
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	if bs.rwTy == read {
-		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.ReadPriorities, prioritiesWithoutQuery)
+		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.ReadPriorities, []string{"byte", "key"})
 	} else {
-		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.WritePeerPriorities, prioritiesWithoutQuery)
-		bs.writeLeaderFirstPriority, bs.writeLeaderSecondPriority = bs.adjustConfig(bs.sche.conf.WriteLeaderPriorities, writeLeaderPrioritiesWithoutQuery)
+		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.WritePeerPriorities, []string{"byte", "key"})
+		bs.writeLeaderFirstPriority, bs.writeLeaderSecondPriority = bs.adjustConfig(bs.sche.conf.WriteLeaderPriorities, []string{"key", "byte"})
 	}
 
 	bs.isSelectedDim = func(dim int) bool {
@@ -500,6 +496,8 @@ func (bs *balanceSolver) init() {
 	}
 }
 
+// adjustConfig will adjust config for cluster with low version tikv
+// because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
 func (bs *balanceSolver) adjustConfig(origins, defaults []string) (first, second int) {
 	querySupport := bs.cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
 	priorities := origins
