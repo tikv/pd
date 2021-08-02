@@ -357,7 +357,6 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 	c.Assert(rep.drSampleTotalRegion, Equals, 6) // 9 + 10,11,12,13,14
 	c.Assert(rep.drSampleRecoverCount, Equals, 3)
 	c.Assert(rep.estimateProgress(), Equals, (float32(9)+float32(30-9)/2)/float32(30))
-
 }
 
 func (s *testReplicationMode) TestRecoverProgressWithSplitAndMerge(c *C) {
