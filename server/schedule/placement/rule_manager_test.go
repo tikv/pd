@@ -107,16 +107,29 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 		{GroupID: "foo", ID: "bar", Role: "learner", Count: 1},
 	}
 	for _, r := range rules {
-		c.Assert(s.manager.SetRule(r), IsNil)
+		c.Assert(s.manager.SetRule(r.Clone()), IsNil)
 	}
 
 	m2 := NewRuleManager(s.store, nil)
 	err := m2.Initialize(3, []string{"no", "labels"})
 	c.Assert(err, IsNil)
 	c.Assert(m2.GetAllRules(), HasLen, 3)
-	c.Assert(m2.GetRule("pd", "default"), DeepEquals, rules[0])
-	c.Assert(m2.GetRule("foo", "baz"), DeepEquals, rules[1])
-	c.Assert(m2.GetRule("foo", "bar"), DeepEquals, rules[2])
+	c.Assert(m2.GetRule("pd", "default").String(), Equals, rules[0].String())
+	c.Assert(m2.GetRule("foo", "baz").String(), Equals, rules[1].String())
+	c.Assert(m2.GetRule("foo", "bar").String(), Equals, rules[2].String())
+}
+
+// https://github.com/tikv/pd/issues/3886
+func (s *testManagerSuite) TestSetAfterGet(c *C) {
+	rule := s.manager.GetRule("pd", "default")
+	rule.Count = 1
+	s.manager.SetRule(rule)
+
+	m2 := NewRuleManager(s.store, nil)
+	err := m2.Initialize(100, []string{})
+	c.Assert(err, IsNil)
+	rule = m2.GetRule("pd", "default")
+	c.Assert(rule.Count, Equals, 1)
 }
 
 func (s *testManagerSuite) checkRules(c *C, rules []*Rule, expect [][2]string) {
