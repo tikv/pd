@@ -259,6 +259,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	expected1 := map[string]interface{}{
 		"min-hot-byte-rate":          float64(100),
 		"min-hot-key-rate":           float64(10),
+		"min-hot-query-rate":         float64(10),
 		"max-zombie-rounds":          float64(3),
 		"max-peer-number":            float64(1000),
 		"byte-rate-rank-step-ratio":  0.05,
@@ -269,13 +270,19 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"minor-dec-ratio":            0.99,
 		"src-tolerance-ratio":        1.05,
 		"dst-tolerance-ratio":        1.05,
-		"read-priorities":            []interface{}{"byte", "key"},
+		"read-priorities":            []interface{}{"qps", "byte"},
 		"write-priorities":           []interface{}{"byte", "key"},
+		"strict-picking-store":       true,
 	}
 	c.Assert(conf, DeepEquals, expected1)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.02"}, nil)
 	expected1["src-tolerance-ratio"] = 1.02
 	var conf1 map[string]interface{}
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "byte,key"}, nil)
+	expected1["read-priorities"] = []interface{}{"byte", "key"}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
 

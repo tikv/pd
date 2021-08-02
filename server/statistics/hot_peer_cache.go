@@ -433,10 +433,7 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 		return nil
 	}
 	isHot := slice.AnyOf(regionStats, func(i int) bool {
-		if IsSelectedDim(i) {
-			return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
-		}
-		return false
+		return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
 	})
 	if !isHot {
 		return nil
