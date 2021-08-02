@@ -1292,6 +1292,6 @@ func dimToString(dim int) string {
 	}
 }
 
-func prioritiesTodim(priorities []string) (int, int) {
+func prioritiesTodim(priorities []string) (firstPriority int, secondPriority int) {
 	return stringToDim(priorities[0]), stringToDim(priorities[1])
 }
