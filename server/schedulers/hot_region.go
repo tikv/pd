@@ -204,6 +204,7 @@ func (h *hotScheduler) summaryPendingInfluence() {
 		weight, needGC := h.calcPendingInfluence(p.op, maxZombieDur)
 		if needGC {
 			delete(h.regionPendings, id)
+			schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
 			log.Debug("gc pending influence in hot region scheduler",
 				zap.Uint64("region-id", id),
 				zap.Time("create", p.op.GetCreateTime()),
