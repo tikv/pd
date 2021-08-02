@@ -1167,13 +1167,11 @@ func (h *hotScheduler) GetPendingInfluence() map[uint64]*Influence {
 
 // calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]
 func (h *hotScheduler) calcPendingInfluence(op *operator.Operator, maxZombieDur time.Duration) (weight float64, needGC bool) {
-	status := op.Status()
 	switch {
 	case op.CheckExpired():
-		status = operator.EXPIRED
 	case op.CheckTimeout():
-		status = operator.TIMEOUT
 	}
+	status := op.Status()
 
 	if !operator.IsEndStatus(status) {
 		return 1, false
