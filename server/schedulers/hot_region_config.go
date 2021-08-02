@@ -83,7 +83,7 @@ type hotRegionSchedulerConfig struct {
 	DstToleranceRatio      float64  `json:"dst-tolerance-ratio"`
 	ReadPriorities         []string `json:"read-priorities"`
 	WritePriorities        []string `json:"write-priorities"`
-	StrictPickingStore     bool     `json:"strict-picking-store"`
+	StrictPickingStore     bool     `json:"strict-picking-store,string"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
