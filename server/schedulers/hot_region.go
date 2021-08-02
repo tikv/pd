@@ -601,13 +601,7 @@ func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *
 			return true
 		})
 	}
-	switch bs.firstPriority {
-	case stringToDim(BytePriority):
-		return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
-	case stringToDim(KeyPriority):
-		return minLoad.Loads[statistics.KeyDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.KeyDim]
-	}
-	return false
+	return minLoad.Loads[bs.firstPriority] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[bs.firstPriority]
 }
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
@@ -801,13 +795,7 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 			return true
 		})
 	}
-	switch bs.firstPriority {
-	case stringToDim(BytePriority):
-		return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
-	case stringToDim(KeyPriority):
-		return maxLoad.Loads[statistics.KeyDim]*dstToleranceRatio < expect.Loads[statistics.KeyDim]
-	}
-	return false
+	return maxLoad.Loads[bs.firstPriority]*dstToleranceRatio < expect.Loads[bs.firstPriority]
 }
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
