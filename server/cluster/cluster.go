@@ -254,12 +254,13 @@ func (c *RaftCluster) Start(s Server) error {
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 
-	c.wg.Add(4)
+	c.wg.Add(5)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
+	go c.runStatsBackgroundJobs()
 	go c.syncRegions()
 	go c.runReplicationMode()
 	c.running = true
@@ -321,6 +322,29 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 			c.checkStores()
 			c.collectMetrics()
 			c.coordinator.opController.PruneHistory()
+		}
+	}
+}
+
+func (c *RaftCluster) runStatsBackgroundJobs() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(statistics.RegionsStatsObserveInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.quit:
+			log.Info("statistics background jobs has been stopped")
+			return
+		case <-ticker.C:
+			c.RLock()
+			storeIDs, writeBytesRates, writeKeysRates := c.core.GetStoresWriteRate()
+			c.RUnlock()
+			c.Lock()
+			c.hotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
+			c.Unlock()
 		}
 	}
 }
