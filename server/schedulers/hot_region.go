@@ -600,13 +600,12 @@ func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *
 			}
 			return true
 		})
-	} else {
-		switch bs.firstPriority {
-		case stringToDim(BytePriority):
-			return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
-		case stringToDim(KeyPriority):
-			return minLoad.Loads[statistics.KeyDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.KeyDim]
-		}
+	}
+	switch bs.firstPriority {
+	case stringToDim(BytePriority):
+		return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
+	case stringToDim(KeyPriority):
+		return minLoad.Loads[statistics.KeyDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.KeyDim]
 	}
 	return false
 }
@@ -801,13 +800,12 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 			}
 			return true
 		})
-	} else {
-		switch bs.firstPriority {
-		case stringToDim(BytePriority):
-			return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
-		case stringToDim(KeyPriority):
-			return maxLoad.Loads[statistics.KeyDim]*dstToleranceRatio < expect.Loads[statistics.KeyDim]
-		}
+	}
+	switch bs.firstPriority {
+	case stringToDim(BytePriority):
+		return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
+	case stringToDim(KeyPriority):
+		return maxLoad.Loads[statistics.KeyDim]*dstToleranceRatio < expect.Loads[statistics.KeyDim]
 	}
 	return false
 }
