@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	mockDuration                = 1 * time.Second
+	mockDuration                = 60 * time.Second
 	mockClusterName             = "mock"
 	mockTiDBInstanceNamePattern = "%s-tidb-%d"
 	mockTiKVInstanceNamePattern = "%s-tikv-%d"
@@ -59,20 +59,6 @@ func generatePodNames(component ComponentType) []string {
 var podNames = map[ComponentType][]string{
 	TiDB: generatePodNames(TiDB),
 	TiKV: generatePodNames(TiKV),
-}
-
-func generateAddresses(component ComponentType) []string {
-	pods := podNames[component]
-	addresses := make([]string, 0, len(pods))
-	for _, pod := range pods {
-		addresses = append(addresses, fmt.Sprintf("%s.%s-%s-peer.%s.svc:20080", pod, mockClusterName, component.String(), mockKubernetesNamespace))
-	}
-	return addresses
-}
-
-var podAddresses = map[ComponentType][]string{
-	TiDB: generateAddresses(TiDB),
-	TiKV: generateAddresses(TiKV),
 }
 
 type testPrometheusQuerierSuite struct{}
@@ -118,7 +104,7 @@ func doURL(ep string, args map[string]string) *url.URL {
 
 func (c *normalClient) buildCPUMockData(component ComponentType) {
 	pods := podNames[component]
-	cpuUsageQuery := fmt.Sprintf(cpuUsagePromQLTemplate[component], mockDuration)
+	cpuUsageQuery := fmt.Sprintf(cpuUsagePromQLTemplate[component], getDurationExpression(mockDuration))
 	cpuQuotaQuery := cpuQuotaPromQLTemplate[component]
 
 	var results []result
@@ -189,19 +175,17 @@ func (s *testPrometheusQuerierSuite) TestRetrieveCPUMetrics(c *C) {
 	client.buildMockData()
 	querier := NewPrometheusQuerier(client)
 	metrics := []MetricType{CPUQuota, CPUUsage}
-	for component, addresses := range podAddresses {
+	for component, names := range podNames {
 		for _, metric := range metrics {
-			options := NewQueryOptions(component, metric, addresses[:len(addresses)-1], time.Now(), mockDuration)
+			options := NewQueryOptions(component, metric, time.Now(), mockDuration)
 			result, err := querier.Query(options)
 			c.Assert(err, IsNil)
-			for i := 0; i < len(addresses)-1; i++ {
-				value, ok := result[addresses[i]]
+			for i := 0; i < len(names); i++ {
+				podFullName := fmt.Sprintf("%s_%s", names[i], mockKubernetesNamespace)
+				value, ok := result[podFullName]
 				c.Assert(ok, IsTrue)
 				c.Assert(math.Abs(value-mockResultValue) < 1e-6, IsTrue)
 			}
-
-			_, ok := result[addresses[len(addresses)-1]]
-			c.Assert(ok, IsFalse)
 		}
 	}
 }
@@ -228,7 +212,7 @@ func (c *emptyResponseClient) Do(_ context.Context, req *http.Request) (r *http.
 func (s *testPrometheusQuerierSuite) TestEmptyResponse(c *C) {
 	client := &emptyResponseClient{}
 	querier := NewPrometheusQuerier(client)
-	options := NewQueryOptions(TiDB, CPUUsage, podAddresses[TiDB], time.Now(), mockDuration)
+	options := NewQueryOptions(TiDB, CPUUsage, time.Now(), mockDuration)
 	result, err := querier.Query(options)
 	c.Assert(result, IsNil)
 	c.Assert(err, NotNil)
@@ -254,7 +238,7 @@ func (c *errorHTTPStatusClient) Do(_ context.Context, req *http.Request) (r *htt
 func (s *testPrometheusQuerierSuite) TestErrorHTTPStatus(c *C) {
 	client := &errorHTTPStatusClient{}
 	querier := NewPrometheusQuerier(client)
-	options := NewQueryOptions(TiDB, CPUUsage, podAddresses[TiDB], time.Now(), mockDuration)
+	options := NewQueryOptions(TiDB, CPUUsage, time.Now(), mockDuration)
 	result, err := querier.Query(options)
 	c.Assert(result, IsNil)
 	c.Assert(err, NotNil)
@@ -278,46 +262,10 @@ func (c *errorPrometheusStatusClient) Do(_ context.Context, req *http.Request) (
 func (s *testPrometheusQuerierSuite) TestErrorPrometheusStatus(c *C) {
 	client := &errorPrometheusStatusClient{}
 	querier := NewPrometheusQuerier(client)
-	options := NewQueryOptions(TiDB, CPUUsage, podAddresses[TiDB], time.Now(), mockDuration)
+	options := NewQueryOptions(TiDB, CPUUsage, time.Now(), mockDuration)
 	result, err := querier.Query(options)
 	c.Assert(result, IsNil)
 	c.Assert(err, NotNil)
-}
-
-func (s *testPrometheusQuerierSuite) TestGetInstanceNameFromAddress(c *C) {
-	testcases := []struct {
-		address              string
-		expectedInstanceName string
-	}{
-		{
-			address:              "test-tikv-0.test-tikv-peer.namespace.svc:20080",
-			expectedInstanceName: "test-tikv-0_namespace",
-		},
-		{
-			address:              "test-tikv-0.test-tikv-peer.namespace.svc",
-			expectedInstanceName: "test-tikv-0_namespace",
-		},
-		{
-			address:              "tidb-0_10080",
-			expectedInstanceName: "",
-		},
-		{
-			address:              "127.0.0.1:2333",
-			expectedInstanceName: "",
-		},
-		{
-			address:              "127.0.0.1",
-			expectedInstanceName: "",
-		},
-	}
-	for _, testcase := range testcases {
-		instanceName, err := getInstanceNameFromAddress(testcase.address)
-		if testcase.expectedInstanceName == "" {
-			c.Assert(err, NotNil)
-		} else {
-			c.Assert(instanceName, Equals, testcase.expectedInstanceName)
-		}
-	}
 }
 
 func (s *testPrometheusQuerierSuite) TestGetDurationExpression(c *C) {
