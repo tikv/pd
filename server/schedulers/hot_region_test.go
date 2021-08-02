@@ -1535,25 +1535,43 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 4, 5)
 	hb.(*hotScheduler).clearPendingInfluence()
-	// test write leader priority schedule
-	hb, err = schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+}
+func (s *testHotSchedulerSuite) TestHotWriteLeaderScheduleWithPriority(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
-	tc.UpdateStorageWrittenStats(1, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(2, 1*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(3, 10*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.UpdateStorageWrittenStats(1, 31*MB*statistics.StoreHeartBeatReportInterval, 31*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 10*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 1*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+
 	addRegionInfo(tc, write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 1 * MB, 1 * MB},
-		{2, []uint64{1, 2, 3}, 1 * MB, 1 * MB},
-		{3, []uint64{1, 2, 3}, 1 * MB, 1 * MB},
+		{1, []uint64{1, 2, 3}, 10 * MB, 10 * MB},
+		{2, []uint64{1, 2, 3}, 10 * MB, 10 * MB},
+		{3, []uint64{1, 2, 3}, 10 * MB, 10 * MB},
+		{4, []uint64{2, 1, 3}, 10 * MB, 0 * MB},
+		{5, []uint64{3, 2, 1}, 0 * MB, 10 * MB},
 	})
+	old := schedulePeerPr
 	schedulePeerPr = 0.0
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{KeyPriority, BytePriority}
-	ops = hb.Schedule(tc)
+	ops := hb.Schedule(tc)
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 2)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{BytePriority, KeyPriority}
 	ops = hb.Schedule(tc)
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 3)
-	schedulePeerPr = 0.66
+	schedulePeerPr = old
 }
