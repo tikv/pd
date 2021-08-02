@@ -540,7 +540,7 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 				return
 			}
 			if priority == schedulers.QueryPriority && key == "write-peer-priorities" {
-				cmd.Println("For hotspot scheduling of write peers, it is not reasonable to use the qps dimension.")
+				cmd.Println("qps is not allowed to be set in priorities for write-peer-priorities")
 				return
 			}
 			priorities = append(priorities, priority)

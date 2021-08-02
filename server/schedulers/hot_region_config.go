@@ -85,7 +85,7 @@ type hotRegionSchedulerConfig struct {
 	ReadPriorities         []string `json:"read-priorities"`
 	WriteLeaderPriorities  []string `json:"write-leader-priorities"`
 	WritePeerPriorities    []string `json:"write-peer-priorities"`
-	StrictPickingStore     bool     `json:"strict-picking-store"`
+	StrictPickingStore     bool     `json:"strict-picking-store,string"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
