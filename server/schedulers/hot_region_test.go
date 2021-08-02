@@ -35,7 +35,9 @@ import (
 func init() {
 	schedulePeerPr = 1.0
 	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newHotWriteScheduler(opController, initHotRegionScheduleConfig()), nil
+		cfg := initHotRegionScheduleConfig()
+		cfg.ReadPriorities = []string{BytePriority, KeyPriority}
+		return newHotWriteScheduler(opController, cfg), nil
 	})
 	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
@@ -683,6 +685,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	tc.DisableFeature(versioninfo.JointConsensus)
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 	tc.SetHotRegionCacheHitsThreshold(0)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
@@ -788,6 +791,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -842,6 +846,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	hb.(*hotScheduler).conf.GreatDecRatio = 0.99
 	hb.(*hotScheduler).conf.MinorDecRatio = 1
 	hb.(*hotScheduler).conf.DstToleranceRatio = 1
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 
 	for i := 0; i < 2; i++ {
 		// 0: byte rate
@@ -1295,24 +1300,23 @@ func (s *testHotCacheSuite) TestSortHotPeer(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 	leaderSolver := newBalanceSolver(hb, tc, read, transferLeader)
-
 	hotPeers := []*statistics.HotPeerStat{{
 		RegionID: 1,
 		Loads: []float64{
-			statistics.RegionReadBytes: 10,
-			statistics.RegionReadKeys:  1,
+			statistics.RegionReadQuery: 10,
+			statistics.RegionReadBytes: 1,
 		},
 	}, {
 		RegionID: 2,
 		Loads: []float64{
-			statistics.RegionReadBytes: 1,
-			statistics.RegionReadKeys:  10,
+			statistics.RegionReadQuery: 1,
+			statistics.RegionReadBytes: 10,
 		},
 	}, {
 		RegionID: 3,
 		Loads: []float64{
-			statistics.RegionReadBytes: 5,
-			statistics.RegionReadKeys:  6,
+			statistics.RegionReadQuery: 5,
+			statistics.RegionReadBytes: 6,
 		},
 	}}
 
@@ -1433,6 +1437,7 @@ func (s *testHotSchedulerSuite) TestHotReadPeerSchedule(c *C) {
 	sche, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
+	hb.conf.ReadPriorities = []string{BytePriority, KeyPriority}
 
 	tc.UpdateStorageReadStats(1, 20*MB, 20*MB)
 	tc.UpdateStorageReadStats(2, 19*MB, 19*MB)
