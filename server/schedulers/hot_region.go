@@ -570,12 +570,22 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 }
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad) bool {
-	return slice.AllOf(minLoad.Loads, func(i int) bool {
-		if statistics.IsSelectedDim(i) {
-			return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
+	if bs.sche.conf.StrictPickingStore {
+		return slice.AllOf(minLoad.Loads, func(i int) bool {
+			if statistics.IsSelectedDim(i) {
+				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
+			}
+			return true
+		})
+	} else {
+		switch bs.preferPriority()[0] {
+		case BytePriority:
+			return minLoad.Loads[statistics.ByteDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.ByteDim]
+		case KeyPriority:
+			return minLoad.Loads[statistics.KeyDim] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[statistics.KeyDim]
 		}
-		return true
-	})
+	}
+	return false
 }
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
@@ -762,12 +772,22 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad) bool {
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
-	return slice.AllOf(maxLoad.Loads, func(i int) bool {
-		if statistics.IsSelectedDim(i) {
-			return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
+	if bs.sche.conf.StrictPickingStore {
+		return slice.AllOf(maxLoad.Loads, func(i int) bool {
+			if statistics.IsSelectedDim(i) {
+				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
+			}
+			return true
+		})
+	} else {
+		switch bs.preferPriority()[0] {
+		case BytePriority:
+			return maxLoad.Loads[statistics.ByteDim]*dstToleranceRatio < expect.Loads[statistics.ByteDim]
+		case KeyPriority:
+			return maxLoad.Loads[statistics.KeyDim]*dstToleranceRatio < expect.Loads[statistics.KeyDim]
 		}
-		return true
-	})
+	}
+	return false
 }
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
