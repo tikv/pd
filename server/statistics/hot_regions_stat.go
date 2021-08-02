@@ -20,8 +20,12 @@ import (
 // HotPeersStat records all hot regions statistics
 type HotPeersStat struct {
 	TotalLoads     []float64         `json:"-"`
+	StoreByteRate  float64           `json:"store_bytes"`
+	StoreKeyRate   float64           `json:"store_keys"`
+	StoreQueryRate float64           `json:"store_query"`
 	TotalBytesRate float64           `json:"total_flow_bytes"`
 	TotalKeysRate  float64           `json:"total_flow_keys"`
+	TotalQueryRate float64           `json:"total_flow_query"`
 	Count          int               `json:"regions_count"`
 	Stats          []HotPeerStatShow `json:"statistics"`
 }
@@ -33,6 +37,7 @@ type HotPeerStatShow struct {
 	HotDegree      int       `json:"hot_degree"`
 	ByteRate       float64   `json:"flow_bytes"`
 	KeyRate        float64   `json:"flow_keys"`
+	QueryRate      float64   `json:"flow_query"`
 	AntiCount      int       `json:"anti_count"`
 	LastUpdateTime time.Time `json:"last_update_time"`
 }

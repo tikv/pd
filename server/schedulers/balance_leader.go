@@ -164,6 +164,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("source-store", plan.SourceStoreID()))
 			l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
 			for j := 0; j < balanceLeaderRetryLimit; j++ {
+				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
 				if ops := l.transferLeaderOut(plan); len(ops) > 0 {
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", plan.SourceMetricLabel()))
 					return ops
@@ -177,6 +178,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
 
 			for j := 0; j < balanceLeaderRetryLimit; j++ {
+				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
 				if ops := l.transferLeaderIn(plan); len(ops) > 0 {
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-in", plan.TargetMetricLabel()))
 					return ops
@@ -279,9 +281,9 @@ func (l *balanceLeaderScheduler) createOperator(plan *balancePlan) []*operator.O
 	}
 	op.Counters = append(op.Counters,
 		schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
-		balanceDirectionCounter.WithLabelValues(l.GetName(), plan.SourceMetricLabel(), plan.TargetMetricLabel()),
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
+		balanceDirectionCounter.WithLabelValues(l.GetName(), plan.SourceMetricLabel(), plan.TargetMetricLabel()),
 		l.counter.WithLabelValues("move-leader", plan.SourceMetricLabel()+"-out"),
 		l.counter.WithLabelValues("move-leader", plan.TargetMetricLabel()+"-in"),
 	)

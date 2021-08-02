@@ -1277,6 +1277,9 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	})
 }
 
+// Only used for the TestLocalAllocatorLeaderChange.
+var mockLocalAllocatorLeaderChangeFlag = false
+
 // SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
 // and write it into all Local TSO Allocators then if it's indeed the biggest one.
 func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
@@ -1310,6 +1313,21 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 				maxLocalTS = currentLocalTSO
 			}
 			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
+		}
+
+		failpoint.Inject("mockLocalAllocatorLeaderChange", func() {
+			if !mockLocalAllocatorLeaderChangeFlag {
+				maxLocalTS = nil
+				request.MaxTs = nil
+				mockLocalAllocatorLeaderChangeFlag = true
+			}
+		})
+
+		if maxLocalTS == nil {
+			return nil, status.Errorf(codes.Unknown, "local tso allocator leaders have changed during the sync, should retry")
+		}
+		if request.GetMaxTs() == nil {
+			return nil, status.Errorf(codes.Unknown, "empty maxTS in the request, should retry")
 		}
 		// Found a bigger or equal maxLocalTS, return it directly.
 		cmpResult := tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs())
@@ -1437,7 +1455,7 @@ func (s *Server) getDelegateClient(ctx context.Context, forwardedHost string) (*
 func getForwardedHost(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		log.Error("failed to get forwarding metadata")
+		log.Debug("failed to get forwarding metadata")
 	}
 	if t, ok := md[grpcutil.ForwardMetadataKey]; ok {
 		return t[0]

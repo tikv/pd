@@ -34,6 +34,28 @@ import (
 
 func init() {
 	schedulePeerPr = 1.0
+	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		cfg := initHotRegionScheduleConfig()
+		cfg.ReadPriorities = []string{BytePriority, KeyPriority}
+		return newHotWriteScheduler(opController, cfg), nil
+	})
+	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
+	})
+}
+
+func newHotReadScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
+	ret := newHotScheduler(opController, conf)
+	ret.name = ""
+	ret.types = []rwType{read}
+	return ret
+}
+
+func newHotWriteScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
+	ret := newHotScheduler(opController, conf)
+	ret.name = ""
+	ret.types = []rwType{write}
+	return ret
 }
 
 type testHotSchedulerSuite struct{}
@@ -210,12 +232,10 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 
 	// hot region scheduler is restricted by `hot-region-schedule-limit`.
 	tc.SetHotRegionScheduleLimit(0)
-	c.Assert(hb.Schedule(tc), HasLen, 0)
+	c.Assert(hb.IsScheduleAllowed(tc), IsFalse)
 	hb.(*hotScheduler).clearPendingInfluence()
 	tc.SetHotRegionScheduleLimit(int(config.NewTestOptions().GetScheduleConfig().HotRegionScheduleLimit))
 
-	// hot region scheduler is restricted by schedule limit.
-	tc.SetLeaderScheduleLimit(0)
 	for i := 0; i < 20; i++ {
 		op := hb.Schedule(tc)[0]
 		hb.(*hotScheduler).clearPendingInfluence()
@@ -228,7 +248,6 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 			testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 6)
 		}
 	}
-	tc.SetLeaderScheduleLimit(int(config.NewTestOptions().GetScheduleConfig().LeaderScheduleLimit))
 
 	// hot region scheduler is not affect by `balance-region-schedule-limit`.
 	tc.SetRegionScheduleLimit(0)
@@ -279,7 +298,7 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 	//   Region 1 and 2 are the same, cannot move peer to store 5 due to the label.
 	//   Region 3 can only move peer to store 5.
 	//   Region 5 can only move peer to store 6.
-	tc.SetLeaderScheduleLimit(0)
+	tc.SetHotRegionScheduleLimit(0)
 	for i := 0; i < 30; i++ {
 		op := hb.Schedule(tc)[0]
 		hb.(*hotScheduler).clearPendingInfluence()
@@ -512,7 +531,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 		// 1: key rate
 		tc := mockcluster.NewCluster(ctx, opt)
 		tc.SetHotRegionCacheHitsThreshold(0)
-		tc.SetLeaderScheduleLimit(0)
+		tc.SetHotRegionScheduleLimit(0)
 		tc.DisableFeature(versioninfo.JointConsensus)
 		tc.AddRegionStore(1, 20)
 		tc.AddRegionStore(2, 20)
@@ -666,6 +685,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	tc.DisableFeature(versioninfo.JointConsensus)
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 	tc.SetHotRegionCacheHitsThreshold(0)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
@@ -771,6 +791,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -825,6 +846,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	hb.(*hotScheduler).conf.GreatDecRatio = 0.99
 	hb.(*hotScheduler).conf.MinorDecRatio = 1
 	hb.(*hotScheduler).conf.DstToleranceRatio = 1
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 
 	for i := 0; i < 2; i++ {
 		// 0: byte rate
@@ -1278,24 +1300,23 @@ func (s *testHotCacheSuite) TestSortHotPeer(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 	leaderSolver := newBalanceSolver(hb, tc, read, transferLeader)
-
 	hotPeers := []*statistics.HotPeerStat{{
 		RegionID: 1,
 		Loads: []float64{
-			statistics.RegionReadBytes: 10,
-			statistics.RegionReadKeys:  1,
+			statistics.RegionReadQuery: 10,
+			statistics.RegionReadBytes: 1,
 		},
 	}, {
 		RegionID: 2,
 		Loads: []float64{
-			statistics.RegionReadBytes: 1,
-			statistics.RegionReadKeys:  10,
+			statistics.RegionReadQuery: 1,
+			statistics.RegionReadBytes: 10,
 		},
 	}, {
 		RegionID: 3,
 		Loads: []float64{
-			statistics.RegionReadBytes: 5,
-			statistics.RegionReadKeys:  6,
+			statistics.RegionReadQuery: 5,
+			statistics.RegionReadBytes: 6,
 		},
 	}}
 
@@ -1416,6 +1437,7 @@ func (s *testHotSchedulerSuite) TestHotReadPeerSchedule(c *C) {
 	sche, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
+	hb.conf.ReadPriorities = []string{BytePriority, KeyPriority}
 
 	tc.UpdateStorageReadStats(1, 20*MB, 20*MB)
 	tc.UpdateStorageReadStats(2, 19*MB, 19*MB)
@@ -1424,4 +1446,67 @@ func (s *testHotSchedulerSuite) TestHotReadPeerSchedule(c *C) {
 	tc.AddRegionWithPeerReadInfo(1, 3, 1, uint64(0.9*KB*float64(10)), uint64(0.9*KB*float64(10)), 10, []uint64{1, 2}, 3)
 	op := hb.Schedule(tc)[0]
 	testutil.CheckTransferPeer(c, op, operator.OpHotRegion, 1, 4)
+}
+
+func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1.05)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1.05)
+
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.AddRegionStore(4, 20)
+	tc.AddRegionStore(5, 20)
+
+	tc.UpdateStorageWrittenStats(1, 10*MB*statistics.StoreHeartBeatReportInterval, 9*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 6*MB*statistics.StoreHeartBeatReportInterval, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 6*MB*statistics.StoreHeartBeatReportInterval, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 9*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 1*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	// must transfer peer
+	schedulePeerPr = 1.0
+	addRegionInfo(tc, write, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 2 * MB, 1 * MB},
+		{6, []uint64{4, 2, 3}, 1 * MB, 2 * MB},
+	})
+	hb.(*hotScheduler).conf.WritePriorities = []string{BytePriority, KeyPriority}
+	ops := hb.Schedule(tc)
+	c.Assert(len(ops), Equals, 1)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 1, 5)
+	hb.(*hotScheduler).clearPendingInfluence()
+	hb.(*hotScheduler).conf.WritePriorities = []string{KeyPriority, BytePriority}
+	ops = hb.Schedule(tc)
+	c.Assert(len(ops), Equals, 1)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 4, 5)
+	hb.(*hotScheduler).clearPendingInfluence()
+
+	// assert read priority schedule
+	hb, err = schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	tc.UpdateStorageReadStats(5, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(4, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(1, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(2, 1*MB*statistics.StoreHeartBeatReportInterval, 7*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(3, 7*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	addRegionInfo(tc, read, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 2 * MB, 2 * MB},
+	})
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	ops = hb.Schedule(tc)
+	c.Assert(len(ops), Equals, 1)
+	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 2)
+	hb.(*hotScheduler).clearPendingInfluence()
+	hb.(*hotScheduler).conf.ReadPriorities = []string{KeyPriority, BytePriority}
+	ops = hb.Schedule(tc)
+	c.Assert(len(ops), Equals, 1)
+	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 3)
 }

@@ -15,6 +15,7 @@ package statistics
 
 import (
 	"context"
+
 	"github.com/tikv/pd/server/core"
 )
 
@@ -41,8 +42,8 @@ func NewHotCache(ctx context.Context, quit <-chan struct{}) *HotCache {
 		quit:           quit,
 		readFlowQueue:  make(chan FlowItemTask, queueCap),
 		writeFlowQueue: make(chan FlowItemTask, queueCap),
-		writeFlow:      NewHotStoresStats(WriteFlow),
-		readFlow:       NewHotStoresStats(ReadFlow),
+		writeFlow:      NewHotPeerCache(WriteFlow),
+		readFlow:       NewHotPeerCache(ReadFlow),
 	}
 	go w.updateItems(w.readFlowQueue, w.runReadTask)
 	go w.updateItems(w.writeFlowQueue, w.runWriteTask)
@@ -137,14 +138,8 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 func (w *HotCache) CollectMetrics() {
 	writeMetricsTask := newCollectMetricsTask("write")
 	readMetricsTask := newCollectMetricsTask("read")
-	succ1 := w.CheckWriteAsync(writeMetricsTask)
-	succ2 := w.CheckReadAsync(readMetricsTask)
-	if succ1 {
-		writeMetricsTask.waitDone(w.ctx, w.quit)
-	}
-	if succ2 {
-		readMetricsTask.waitDone(w.ctx, w.quit)
-	}
+	w.CheckWriteAsync(writeMetricsTask)
+	w.CheckReadAsync(readMetricsTask)
 }
 
 // ResetMetrics resets the hot cache metrics.
@@ -200,6 +195,7 @@ func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task Flow
 
 func (w *HotCache) runReadTask(task FlowItemTask) {
 	if task != nil {
+		// TODO: do we need a run-task timeout to protect the queue won't be stucked by a task?
 		task.runTask(w.readFlow)
 		hotCacheFlowQueueStatusGauge.WithLabelValues(ReadFlow.String()).Set(float64(len(w.readFlowQueue)))
 	}
@@ -207,6 +203,7 @@ func (w *HotCache) runReadTask(task FlowItemTask) {
 
 func (w *HotCache) runWriteTask(task FlowItemTask) {
 	if task != nil {
+		// TODO: do we need a run-task timeout to protect the queue won't be stucked by a task?
 		task.runTask(w.writeFlow)
 		hotCacheFlowQueueStatusGauge.WithLabelValues(WriteFlow.String()).Set(float64(len(w.writeFlowQueue)))
 	}

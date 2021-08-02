@@ -187,6 +187,13 @@ func SetReadKeys(v uint64) RegionCreateOption {
 	}
 }
 
+// SetQueryStats sets the query stats for the region.
+func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.QueryStats = v
+	}
+}
+
 // SetApproximateSize sets the approximate size for the region.
 func SetApproximateSize(v int64) RegionCreateOption {
 	return func(region *RegionInfo) {

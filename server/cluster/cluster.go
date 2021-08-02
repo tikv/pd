@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/component"
@@ -255,12 +254,13 @@ func (c *RaftCluster) Start(s Server) error {
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 
-	c.wg.Add(4)
+	c.wg.Add(5)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
+	go c.runStatsBackgroundJobs()
 	go c.syncRegions()
 	go c.runReplicationMode()
 	c.running = true
@@ -322,6 +322,29 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 			c.checkStores()
 			c.collectMetrics()
 			c.coordinator.opController.PruneHistory()
+		}
+	}
+}
+
+func (c *RaftCluster) runStatsBackgroundJobs() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(statistics.RegionsStatsObserveInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.quit:
+			log.Info("statistics background jobs has been stopped")
+			return
+		case <-ticker.C:
+			c.RLock()
+			storeIDs, writeBytesRates, writeKeysRates := c.core.GetStoresWriteRate()
+			c.RUnlock()
+			c.Lock()
+			c.hotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
+			c.Unlock()
 		}
 	}
 }
@@ -554,11 +577,14 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 				zap.Uint64("store-id", storeID))
 			continue
 		}
+		readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
 		loads := []float64{
 			statistics.RegionReadBytes:  float64(peerStat.GetReadBytes()),
 			statistics.RegionReadKeys:   float64(peerStat.GetReadKeys()),
+			statistics.RegionReadQuery:  float64(readQueryNum),
 			statistics.RegionWriteBytes: 0,
 			statistics.RegionWriteKeys:  0,
+			statistics.RegionWriteQuery: 0,
 		}
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
@@ -566,6 +592,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regionIDs, interval))
 	return nil
 }
+
+var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
@@ -591,75 +619,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
-	var saveKV, saveCache, isNew, needSync bool
-	if origin == nil {
-		log.Debug("insert new region",
-			zap.Uint64("region-id", region.GetID()),
-			logutil.ZapRedactStringer("meta-region", core.RegionToHexMeta(region.GetMeta())))
-		saveKV, saveCache, isNew = true, true, true
-	} else {
-		r := region.GetRegionEpoch()
-		o := origin.GetRegionEpoch()
-		if r.GetVersion() > o.GetVersion() {
-			log.Info("region Version changed",
-				zap.Uint64("region-id", region.GetID()),
-				logutil.ZapRedactString("detail", core.DiffRegionKeyInfo(origin, region)),
-				zap.Uint64("old-version", o.GetVersion()),
-				zap.Uint64("new-version", r.GetVersion()),
-			)
-			saveKV, saveCache = true, true
-		}
-		if r.GetConfVer() > o.GetConfVer() {
-			log.Info("region ConfVer changed",
-				zap.Uint64("region-id", region.GetID()),
-				zap.String("detail", core.DiffRegionPeersInfo(origin, region)),
-				zap.Uint64("old-confver", o.GetConfVer()),
-				zap.Uint64("new-confver", r.GetConfVer()),
-			)
-			saveKV, saveCache = true, true
-		}
-		if region.GetLeader().GetId() != origin.GetLeader().GetId() {
-			if origin.GetLeader().GetId() == 0 {
-				isNew = true
-			} else {
-				log.Info("leader changed",
-					zap.Uint64("region-id", region.GetID()),
-					zap.Uint64("from", origin.GetLeader().GetStoreId()),
-					zap.Uint64("to", region.GetLeader().GetStoreId()),
-				)
-			}
-			saveCache, needSync = true, true
-		}
-		if !core.SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
-			log.Debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
-			saveCache, needSync = true, true
-		}
-		if !core.SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
-			log.Debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
-			saveCache, needSync = true, true
-		}
-		if len(region.GetPeers()) != len(origin.GetPeers()) {
-			saveKV, saveCache = true, true
-		}
-
-		if region.GetApproximateSize() != origin.GetApproximateSize() ||
-			region.GetApproximateKeys() != origin.GetApproximateKeys() {
-			saveCache = true
-		}
-		// Once flow has changed, will update the cache.
-		// Because keys and bytes are strongly related, only bytes are judged.
-		if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
-			region.GetRoundBytesRead() != origin.GetRoundBytesRead() {
-			saveCache, needSync = true, true
-		}
-
-		if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
-			(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
-				region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
-			saveCache = true
-		}
-	}
-
+	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
 	if !saveKV && !saveCache && !isNew {
 		return nil
 	}
@@ -915,8 +875,9 @@ func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
 // IsRegionHot checks if a region is in hot state.
 func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
 	c.RLock()
-	defer c.RUnlock()
-	return c.hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
+	hotStat := c.hotStat
+	c.RUnlock()
+	return hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
 }
 
 // GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
@@ -1296,26 +1257,30 @@ func (c *RaftCluster) resetMetrics() {
 
 func (c *RaftCluster) collectClusterMetrics() {
 	c.RLock()
-	defer c.RUnlock()
 	if c.regionStats == nil {
 		return
 	}
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
+	hotStat := c.hotStat
+	c.RUnlock()
 	// collect hot cache metrics
-	c.hotStat.CollectMetrics()
+	hotStat.CollectMetrics()
 }
 
 func (c *RaftCluster) resetClusterMetrics() {
 	c.RLock()
-	defer c.RUnlock()
+
 	if c.regionStats == nil {
+		c.RUnlock()
 		return
 	}
 	c.regionStats.Reset()
 	c.labelLevelStats.Reset()
+	hotStat := c.hotStat
+	c.RUnlock()
 	// reset hot cache metrics
-	c.hotStat.ResetMetrics()
+	hotStat.ResetMetrics()
 }
 
 func (c *RaftCluster) collectHealthStatus() {
@@ -1572,19 +1537,40 @@ func (checker *prepareChecker) collect(region *core.RegionInfo) {
 }
 
 // GetHotWriteRegions gets hot write regions' info.
-func (c *RaftCluster) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
+func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
 	c.RLock()
 	co := c.coordinator
 	c.RUnlock()
-	return co.getHotWriteRegions()
+	hotWriteRegions := co.getHotWriteRegions()
+	if len(storeIDs) > 0 {
+		hotWriteRegions = getHotRegionsByStoreIDs(hotWriteRegions, storeIDs...)
+	}
+	return hotWriteRegions
 }
 
 // GetHotReadRegions gets hot read regions' info.
-func (c *RaftCluster) GetHotReadRegions() *statistics.StoreHotPeersInfos {
+func (c *RaftCluster) GetHotReadRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
 	c.RLock()
 	co := c.coordinator
 	c.RUnlock()
-	return co.getHotReadRegions()
+	hotReadRegions := co.getHotReadRegions()
+	if len(storeIDs) > 0 {
+		hotReadRegions = getHotRegionsByStoreIDs(hotReadRegions, storeIDs...)
+	}
+	return hotReadRegions
+}
+
+func getHotRegionsByStoreIDs(hotPeerInfos *statistics.StoreHotPeersInfos, storeIDs ...uint64) *statistics.StoreHotPeersInfos {
+	asLeader := statistics.StoreHotPeersStat{}
+	asPeer := statistics.StoreHotPeersStat{}
+	for _, storeID := range storeIDs {
+		asLeader[storeID] = hotPeerInfos.AsLeader[storeID]
+		asPeer[storeID] = hotPeerInfos.AsPeer[storeID]
+	}
+	return &statistics.StoreHotPeersInfos{
+		AsLeader: asLeader,
+		AsPeer:   asPeer,
+	}
 }
 
 // GetSchedulers gets all schedulers.
@@ -1634,6 +1620,13 @@ func (c *RaftCluster) IsSchedulerDisabled(name string) (bool, error) {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.isSchedulerDisabled(name)
+}
+
+// IsSchedulerExisted checks if a scheduler is existed.
+func (c *RaftCluster) IsSchedulerExisted(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.isSchedulerExisted(name)
 }
 
 // GetStoreLimiter returns the dynamic adjusting limiter

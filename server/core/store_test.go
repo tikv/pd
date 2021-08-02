@@ -110,7 +110,7 @@ func (s *testStoreSuite) TestRegionScore(c *C) {
 		SetStoreStats(stats),
 		SetRegionSize(1),
 	)
-	score := store.RegionScore("v1", 0.7, 0.9, 0, 0)
+	score := store.RegionScore("v1", 0.7, 0.9, 0)
 	// Region score should never be NaN, or /store API would fail.
 	c.Assert(math.IsNaN(score), Equals, false)
 }

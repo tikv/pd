@@ -299,6 +299,8 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
 	}
 
 	testcases := []struct {
@@ -462,7 +464,7 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
 		for i := uint64(1); i <= uint64(storeCount); i++ {
-			count := ss.totalCountByStore(i)
+			count := ss.TotalCountByStore(i)
 			if count > max {
 				max = count
 			}

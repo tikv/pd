@@ -34,6 +34,7 @@ const (
 	adjustRatio             float64 = 0.005
 	leaderTolerantSizeRatio float64 = 5.0
 	minTolerantSizeRatio    float64 = 1.0
+	influenceAmp            int64   = 100
 )
 
 type balancePlan struct {
@@ -86,17 +87,31 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 	sourceID := p.source.GetID()
 	targetID := p.target.GetID()
 	tolerantResource := p.getTolerantResource()
+	// to avoid schedule too much, if A's core greater than B and C a little
+	// we want that A should be moved out one region not two
 	sourceInfluence := p.GetOpInfluence(sourceID)
+	// A->B, B's influence is positive , so B can become source schedule, it will move region from B to C
+	if sourceInfluence > 0 {
+		sourceInfluence = -sourceInfluence
+	}
+	// to avoid schedule too much, if A's score less than B and C in small range,
+	// we want that A can be moved in one region not two
 	targetInfluence := p.GetOpInfluence(targetID)
-	sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
+	// to avoid schedule call back
+	// A->B, A's influence is negative，so A will be target,C may move region to A
+	if targetInfluence < 0 {
+		targetInfluence = -targetInfluence
+	}
 	opts := p.cluster.GetOpts()
 	switch p.kind.Resource {
 	case core.LeaderKind:
+		sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
 		p.sourceScore = p.source.LeaderScore(p.kind.Policy, sourceDelta)
 		p.targetScore = p.target.LeaderScore(p.kind.Policy, targetDelta)
 	case core.RegionKind:
-		p.sourceScore = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta, -1)
-		p.targetScore = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta, 1)
+		sourceDelta, targetDelta := sourceInfluence*influenceAmp-tolerantResource, targetInfluence*influenceAmp+tolerantResource
+		p.sourceScore = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
+		p.targetScore = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
 	}
 	if opts.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
@@ -220,7 +235,7 @@ func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence)
 }
 
 // summaryPendingInfluence calculate the summary pending Influence for each store and return storeID -> Influence
-// It makes each key/byte rate or count become (1+w) times to the origin value while f is the function to provide w(weight)
+// It makes each dim rate or count become (1+w) times to the origin value while f is the function to provide w(weight)
 func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]*Influence {
 	ret := make(map[uint64]*Influence)
 	for p := range pendings {
@@ -255,9 +270,11 @@ func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 		case read:
 			future.Loads[statistics.ByteDim] += infl.Loads[statistics.RegionReadBytes]
 			future.Loads[statistics.KeyDim] += infl.Loads[statistics.RegionReadKeys]
+			future.Loads[statistics.QueryDim] += infl.Loads[statistics.RegionReadQuery]
 		case write:
 			future.Loads[statistics.ByteDim] += infl.Loads[statistics.RegionWriteBytes]
 			future.Loads[statistics.KeyDim] += infl.Loads[statistics.RegionWriteKeys]
+			future.Loads[statistics.QueryDim] += infl.Loads[statistics.RegionWriteQuery]
 		}
 		future.Count += infl.Count
 	}
@@ -267,12 +284,10 @@ func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 	}
 }
 
-func stLdByteRate(ld *storeLoad) float64 {
-	return ld.Loads[statistics.ByteDim]
-}
-
-func stLdKeyRate(ld *storeLoad) float64 {
-	return ld.Loads[statistics.KeyDim]
+func stLdRate(dim int) func(ld *storeLoad) float64 {
+	return func(ld *storeLoad) float64 {
+		return ld.Loads[dim]
+	}
 }
 
 func stLdCount(ld *storeLoad) float64 {
@@ -395,6 +410,7 @@ func maxLoad(a, b *storeLoad) *storeLoad {
 }
 
 type storeLoadDetail struct {
+	Store    *core.StoreInfo
 	LoadPred *storeLoadPred
 	HotPeers []*statistics.HotPeerStat
 }
@@ -406,6 +422,7 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 			TotalLoads:     totalLoads,
 			TotalBytesRate: 0.0,
 			TotalKeysRate:  0.0,
+			TotalQueryRate: 0.0,
 			Count:          0,
 			Stats:          make([]statistics.HotPeerStatShow, 0),
 		}
@@ -425,29 +442,36 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 		}
 	}
 
-	b, k := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim)
-	byteRate := totalLoads[b]
-	keyRate := totalLoads[k]
+	b, k, q := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim), getRegionStatKind(kind, statistics.QueryDim)
+	byteRate, keyRate, queryRate := totalLoads[b], totalLoads[k], totalLoads[q]
+	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[statistics.ByteDim],
+		li.LoadPred.Current.Loads[statistics.KeyDim], li.LoadPred.Current.Loads[statistics.QueryDim]
 
 	return &statistics.HotPeersStat{
 		TotalLoads:     totalLoads,
 		TotalBytesRate: byteRate,
 		TotalKeysRate:  keyRate,
+		TotalQueryRate: queryRate,
+		StoreByteRate:  storeByteRate,
+		StoreKeyRate:   storeKeyRate,
+		StoreQueryRate: storeQueryRate,
 		Count:          len(peers),
 		Stats:          peers,
 	}
 }
 
 func toHotPeerStatShow(p *statistics.HotPeerStat, kind rwType) statistics.HotPeerStatShow {
-	b, k := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim)
+	b, k, q := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim), getRegionStatKind(kind, statistics.QueryDim)
 	byteRate := p.Loads[b]
 	keyRate := p.Loads[k]
+	queryRate := p.Loads[q]
 	return statistics.HotPeerStatShow{
 		StoreID:        p.StoreID,
 		RegionID:       p.RegionID,
 		HotDegree:      p.HotDegree,
 		ByteRate:       byteRate,
 		KeyRate:        keyRate,
+		QueryRate:      queryRate,
 		AntiCount:      p.AntiCount,
 		LastUpdateTime: p.LastUpdateTime,
 	}

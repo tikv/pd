@@ -26,6 +26,7 @@ import (
 const (
 	ByteDim int = iota
 	KeyDim
+	QueryDim
 	DimLen
 )
 

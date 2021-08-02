@@ -27,6 +27,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/logutil"
+	"go.uber.org/zap"
 )
 
 // errRegionIsStale is error info for region is stale.
@@ -52,6 +55,7 @@ type RegionInfo struct {
 	approximateKeys   int64
 	interval          *pdpb.TimeInterval
 	replicationStatus *replication_modepb.RegionReplicationStatus
+	QueryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
 }
 
@@ -94,6 +98,9 @@ const (
 	// They need to be filtered so as not to affect downstream.
 	// (flow size >= 1024TB)
 	ImpossibleFlowSize = 1 << 50
+	// Only statistics within this interval limit are valid.
+	statsReportMinInterval = 3      // 3s
+	statsReportMaxInterval = 5 * 60 // 5min
 )
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
@@ -119,6 +126,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
+		QueryStats:        heartbeat.GetQueryStats(),
 	}
 
 	for _, opt := range opts {
@@ -428,6 +436,16 @@ func (r *RegionInfo) GetKeysRead() uint64 {
 	return r.readKeys
 }
 
+// GetWriteRate returns the write rate of the region.
+func (r *RegionInfo) GetWriteRate() (bytesRate, keysRate float64) {
+	reportInterval := r.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	if interval >= statsReportMinInterval && interval <= statsReportMaxInterval {
+		return float64(r.writtenBytes) / float64(interval), float64(r.writtenKeys) / float64(interval)
+	}
+	return 0, 0
+}
+
 // GetLeader returns the leader of the region.
 func (r *RegionInfo) GetLeader() *metapb.Peer {
 	return r.leader
@@ -456,6 +474,94 @@ func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 // GetReplicationStatus returns the region's replication status.
 func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicationStatus {
 	return r.replicationStatus
+}
+
+// RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
+// and new region information.
+type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
+
+// GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
+// nil means do not print the log.
+func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
+	noLog := func(msg string, fields ...zap.Field) {}
+	debug, info := noLog, noLog
+	if enableLog {
+		debug = log.Debug
+		info = log.Info
+	}
+	// Save to storage if meta is updated.
+	// Save to cache if meta or leader is updated, or contains any down/pending peer.
+	// Mark isNew if the region in cache does not have leader.
+	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
+		if origin == nil {
+			debug("insert new region",
+				zap.Uint64("region-id", region.GetID()),
+				logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
+			saveKV, saveCache, isNew = true, true, true
+		} else {
+			r := region.GetRegionEpoch()
+			o := origin.GetRegionEpoch()
+			if r.GetVersion() > o.GetVersion() {
+				info("region Version changed",
+					zap.Uint64("region-id", region.GetID()),
+					logutil.ZapRedactString("detail", DiffRegionKeyInfo(origin, region)),
+					zap.Uint64("old-version", o.GetVersion()),
+					zap.Uint64("new-version", r.GetVersion()),
+				)
+				saveKV, saveCache = true, true
+			}
+			if r.GetConfVer() > o.GetConfVer() {
+				info("region ConfVer changed",
+					zap.Uint64("region-id", region.GetID()),
+					zap.String("detail", DiffRegionPeersInfo(origin, region)),
+					zap.Uint64("old-confver", o.GetConfVer()),
+					zap.Uint64("new-confver", r.GetConfVer()),
+				)
+				saveKV, saveCache = true, true
+			}
+			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
+				if origin.GetLeader().GetId() == 0 {
+					isNew = true
+				} else {
+					info("leader changed",
+						zap.Uint64("region-id", region.GetID()),
+						zap.Uint64("from", origin.GetLeader().GetStoreId()),
+						zap.Uint64("to", region.GetLeader().GetStoreId()),
+					)
+				}
+				saveCache, needSync = true, true
+			}
+			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
+				debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+				saveCache, needSync = true, true
+			}
+			if !SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
+				debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
+				saveCache, needSync = true, true
+			}
+			if len(region.GetPeers()) != len(origin.GetPeers()) {
+				saveKV, saveCache = true, true
+			}
+
+			if region.GetApproximateSize() != origin.GetApproximateSize() ||
+				region.GetApproximateKeys() != origin.GetApproximateKeys() {
+				saveCache = true
+			}
+			// Once flow has changed, will update the cache.
+			// Because keys and bytes are strongly related, only bytes are judged.
+			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
+				region.GetRoundBytesRead() != origin.GetRoundBytesRead() {
+				saveCache, needSync = true, true
+			}
+
+			if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
+				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
+					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
+				saveCache = true
+			}
+		}
+		return
+	}
 }
 
 // regionMap wraps a map[uint64]*regionItem and supports randomly pick a region. They are the leaves of regionTree.
@@ -800,6 +906,25 @@ func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) int64 {
 	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID) + r.GetStoreLearnerRegionSize(storeID)
 }
 
+// GetStoreLeaderWriteRate get total write rate of store's leaders
+func (r *RegionsInfo) GetStoreLeaderWriteRate(storeID uint64) (bytesRate, keysRate float64) {
+	return r.leaders[storeID].TotalWriteRate()
+}
+
+// GetStoreWriteRate get total write rate of store's regions
+func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate float64) {
+	storeBytesRate, storeKeysRate := r.leaders[storeID].TotalWriteRate()
+	bytesRate += storeBytesRate
+	keysRate += storeKeysRate
+	storeBytesRate, storeKeysRate = r.followers[storeID].TotalWriteRate()
+	bytesRate += storeBytesRate
+	keysRate += storeKeysRate
+	storeBytesRate, storeKeysRate = r.learners[storeID].TotalWriteRate()
+	bytesRate += storeBytesRate
+	keysRate += storeKeysRate
+	return
+}
+
 // GetMetaRegions gets a set of metapb.Region from regionMap
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
@@ -879,7 +1004,7 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 	return r.learners[storeID].RandomRegions(n, ranges)
 }
 
-// GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
+// GetLeader returns leader RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	if leaders, ok := r.leaders[storeID]; ok {
 		return leaders.find(region).region
@@ -887,7 +1012,7 @@ func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo 
 	return nil
 }
 
-// GetFollower return follower RegionInfo by storeID and regionID(now only used in test)
+// GetFollower returns follower RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
 	if followers, ok := r.followers[storeID]; ok {
 		return followers.find(region).region
@@ -895,13 +1020,41 @@ func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInf
 	return nil
 }
 
+// GetReadQueryNum returns read query num from this region
+func (r *RegionInfo) GetReadQueryNum() uint64 {
+	return GetReadQueryNum(r.QueryStats)
+}
+
+// GetWriteQueryNum returns write query num from this region
+func (r *RegionInfo) GetWriteQueryNum() uint64 {
+	return GetWriteQueryNum(r.QueryStats)
+}
+
+// GetReadQueryNum returns read query num from this QueryStats
+func GetReadQueryNum(stats *pdpb.QueryStats) uint64 {
+	if stats == nil {
+		return 0
+	}
+	return stats.Coprocessor + stats.Get + stats.Scan
+}
+
+// GetWriteQueryNum returns write query num from this QueryStats
+func GetWriteQueryNum(stats *pdpb.QueryStats) uint64 {
+	if stats == nil {
+		return 0
+	}
+	return stats.Put + stats.Delete + stats.DeleteRange
+}
+
 // GetLoads returns loads from region
 func (r *RegionInfo) GetLoads() []float64 {
 	return []float64{
 		float64(r.GetBytesRead()),
 		float64(r.GetKeysRead()),
+		float64(r.GetReadQueryNum()),
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
+		float64(r.GetWriteQueryNum()),
 	}
 }
 
@@ -910,8 +1063,10 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 	return []float64{
 		0,
 		0,
+		0,
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
+		float64(r.GetWriteQueryNum()),
 	}
 }
 

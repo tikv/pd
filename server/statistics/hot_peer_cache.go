@@ -45,8 +45,10 @@ const (
 var minHotThresholds = [RegionStatCount]float64{
 	RegionWriteBytes: 1 * 1024,
 	RegionWriteKeys:  32,
+	RegionWriteQuery: 32,
 	RegionReadBytes:  8 * 1024,
 	RegionReadKeys:   128,
+	RegionReadQuery:  128,
 }
 
 // hotPeerCache saves the hot peer's statistics.
@@ -60,8 +62,8 @@ type hotPeerCache struct {
 	reportIntervalSecs int
 }
 
-// NewHotStoresStats creates a HotStoresStats
-func NewHotStoresStats(kind FlowKind) *hotPeerCache {
+// NewHotPeerCache creates a hotPeerCache
+func NewHotPeerCache(kind FlowKind) *hotPeerCache {
 	c := &hotPeerCache{
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
@@ -123,6 +125,10 @@ func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 			writeByteHist.Observe(loads[int(k)])
 		case RegionWriteKeys:
 			writeKeyHist.Observe(loads[int(k)])
+		case RegionWriteQuery:
+			writeQueryHist.Observe(loads[int(k)])
+		case RegionReadQuery:
+			readQueryHist.Observe(loads[int(k)])
 		}
 	}
 }

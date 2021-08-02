@@ -22,7 +22,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -853,15 +852,14 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
 				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			rule = defaultRule
-			if !(rule.Count == int(old.MaxReplicas) && reflect.DeepEqual(rule.LocationLabels, []string(old.LocationLabels))) {
+			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.StringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
-		if !(cfg.MaxReplicas == old.MaxReplicas && reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels)) {
+		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.StringsEqual(cfg.LocationLabels, old.LocationLabels)) {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
@@ -1239,6 +1237,11 @@ func (s *Server) campaignLeader() {
 		return
 	}
 
+	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
+		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
+		return
+	}
+
 	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
 		log.Error("failed to initialize encryption", errs.ZapError(err))
 		return
@@ -1250,10 +1253,6 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.stopRaftCluster()
-	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
-		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
-		return
-	}
 	if err := s.idAllocator.Rebase(); err != nil {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return

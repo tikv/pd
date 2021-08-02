@@ -216,7 +216,10 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 func (m *RuleManager) GetRule(group, id string) *Rule {
 	m.RLock()
 	defer m.RUnlock()
-	return m.ruleConfig.getRule([2]string{group, id})
+	if r := m.ruleConfig.getRule([2]string{group, id}); r != nil {
+		return r.Clone()
+	}
+	return nil
 }
 
 // SetRule inserts or updates a Rule.
@@ -261,7 +264,7 @@ func (m *RuleManager) GetAllRules() []*Rule {
 	defer m.RUnlock()
 	rules := make([]*Rule, 0, len(m.ruleConfig.rules))
 	for _, r := range m.ruleConfig.rules {
-		rules = append(rules, r)
+		rules = append(rules, r.Clone())
 	}
 	sortRules(rules)
 	return rules
@@ -274,7 +277,7 @@ func (m *RuleManager) GetRulesByGroup(group string) []*Rule {
 	var rules []*Rule
 	for _, r := range m.ruleConfig.rules {
 		if r.GroupID == group {
-			rules = append(rules, r)
+			rules = append(rules, r.Clone())
 		}
 	}
 	sortRules(rules)
@@ -285,7 +288,12 @@ func (m *RuleManager) GetRulesByGroup(group string) []*Rule {
 func (m *RuleManager) GetRulesByKey(key []byte) []*Rule {
 	m.RLock()
 	defer m.RUnlock()
-	return m.ruleList.getRulesByKey(key)
+	rules := m.ruleList.getRulesByKey(key)
+	ret := make([]*Rule, 0, len(rules))
+	for _, r := range rules {
+		ret = append(ret, r.Clone())
+	}
+	return ret
 }
 
 // GetRulesForApplyRegion returns the rules list that should be applied to a region.
