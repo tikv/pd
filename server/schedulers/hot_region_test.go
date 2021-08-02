@@ -1509,4 +1509,30 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 	ops = hb.Schedule(tc)
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 3)
+
+	hb, err = schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.StrictPickingStore = false
+	// assert loose store picking
+	tc.UpdateStorageWrittenStats(1, 10*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 6*MB*statistics.StoreHeartBeatReportInterval, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 6*MB*statistics.StoreHeartBeatReportInterval, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 6*MB*statistics.StoreHeartBeatReportInterval, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 1*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	hb.(*hotScheduler).conf.WritePriorities = []string{BytePriority, KeyPriority}
+	ops = hb.Schedule(tc)
+	c.Assert(len(ops), Equals, 1)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 1, 5)
+	hb.(*hotScheduler).clearPendingInfluence()
+
+	tc.UpdateStorageWrittenStats(1, 6*MB*statistics.StoreHeartBeatReportInterval, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 6*MB*statistics.StoreHeartBeatReportInterval, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 6*MB*statistics.StoreHeartBeatReportInterval, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 1*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 1*MB*statistics.StoreHeartBeatReportInterval, 1*MB*statistics.StoreHeartBeatReportInterval)
+	hb.(*hotScheduler).conf.WritePriorities = []string{KeyPriority, BytePriority}
+	ops = hb.Schedule(tc)
+	c.Assert(len(ops), Equals, 1)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 4, 5)
+	hb.(*hotScheduler).clearPendingInfluence()
 }
