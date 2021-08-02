@@ -70,6 +70,10 @@ const (
 // schedulePeerPr the probability of schedule the hot peer.
 var schedulePeerPr = 0.66
 
+// tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
+var prioritiesWithoutQuery = []string{"byte", "key"}
+var writeLeaderPrioritiesWithoutQuery = []string{"key", "byte"}
+
 type hotScheduler struct {
 	name string
 	*BaseScheduler
@@ -482,30 +486,29 @@ func (bs *balanceSolver) init() {
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
 
-	priorities := bs.sche.conf.ReadPriorities
-	if bs.rwTy == write {
-		priorities = bs.sche.conf.WritePriorities
-	}
-
-	querySupport := bs.cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
-	if !querySupport {
-		priorities = []string{"byte", "key"}
-	}
-
-	bs.firstPriority = stringToDim(priorities[0])
-	bs.secondPriority = stringToDim(priorities[1])
-
-	if bs.rwTy == write {
-		bs.writeLeaderFirstPriority = statistics.KeyDim
-		if bs.firstPriority == statistics.QueryDim && querySupport {
-			bs.writeLeaderFirstPriority = statistics.QueryDim
-		}
-		bs.writeLeaderSecondPriority = statistics.ByteDim
+	// For read, transfer-leader and move-peer have the same priority config
+	// For write, they are different
+	if bs.rwTy == read {
+		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.ReadPriorities, prioritiesWithoutQuery)
+	} else {
+		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.WritePeerPriorities, prioritiesWithoutQuery)
+		bs.writeLeaderFirstPriority, bs.writeLeaderSecondPriority = bs.adjustConfig(bs.sche.conf.WriteLeaderPriorities, writeLeaderPrioritiesWithoutQuery)
 	}
 
 	bs.isSelectedDim = func(dim int) bool {
 		return dim == bs.firstPriority || dim == bs.secondPriority
 	}
+}
+
+func (bs *balanceSolver) adjustConfig(origins, defaults []string) (first, second int) {
+	querySupport := bs.cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
+	priorities := origins
+	if !querySupport && slice.AnyOf(origins, func(i int) bool {
+		return origins[i] == QueryPriority
+	}) {
+		priorities = defaults
+	}
+	return prioritiesTodim(priorities)
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
@@ -1303,4 +1306,8 @@ func dimToString(dim int) string {
 	default:
 		return ""
 	}
+}
+
+func prioritiesTodim(priorities []string) (firstPriority int, secondPriority int) {
+	return stringToDim(priorities[0]), stringToDim(priorities[1])
 }

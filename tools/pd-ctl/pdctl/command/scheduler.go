@@ -528,7 +528,7 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	if err != nil {
 		val = value
 	}
-	if schedulerName == "balance-hot-region-scheduler" && (key == "read-priorities" || key == "write-priorities") {
+	if schedulerName == "balance-hot-region-scheduler" && (key == "read-priorities" || key == "write-leader-priorities" || key == "write-peer-priorities") {
 		priorities := make([]string, 0)
 		prioritiesMap := make(map[string]struct{})
 		for _, priority := range strings.Split(value, ",") {
@@ -537,6 +537,10 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 					schedulers.BytePriority,
 					schedulers.QueryPriority,
 					schedulers.KeyPriority))
+				return
+			}
+			if priority == schedulers.QueryPriority && key == "write-peer-priorities" {
+				cmd.Println("qps is not allowed to be set in priorities for write-peer-priorities")
 				return
 			}
 			priorities = append(priorities, priority)
