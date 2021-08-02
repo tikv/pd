@@ -52,7 +52,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Info(fmt.Sprintf("autoscale: strategy data: %s", string(data)))
+	log.Debug(fmt.Sprintf("autoscale: strategy data: %s", string(data)))
 
 	strategy := Strategy{}
 	if err := json.Unmarshal(data, &strategy); err != nil {
@@ -60,15 +60,17 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plans := calculate(rc, &strategy)
+	plans, err := calculate(rc, &strategy)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
-	if plans != nil {
-		data, err = json.Marshal(plans)
-		if err != nil {
-			log.Error("marshal plans failed.", errs.ZapError(err))
-		} else {
-			log.Info(fmt.Sprintf("autoscaling plans: %s", string(data)))
-		}
+	data, err = json.Marshal(plans)
+	if err != nil {
+		log.Error("marshal plans failed.", errs.ZapError(err))
+	} else {
+		log.Debug(fmt.Sprintf("autoscaling plans: %s", string(data)))
 	}
 
 	h.rd.JSON(w, http.StatusOK, plans)

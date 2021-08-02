@@ -17,11 +17,8 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net"
-	"strings"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	promClient "github.com/prometheus/client_golang/api"
 	promAPI "github.com/prometheus/client_golang/api/prometheus/v1"
@@ -174,34 +171,6 @@ func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
 
 	query := fmt.Sprintf(pattern, getDurationExpression(options.duration))
 	return query, nil
-}
-
-// this function assumes that addr is already a valid resolvable address
-// returns in format "podname_namespace"
-func getInstanceNameFromAddress(addr string) (string, error) {
-	// In K8s, a StatefulSet pod address is composed of pod-name.peer-svc.namespace.svc:port
-	// Extract the hostname part without port
-	hostname := addr
-	portColonIdx := strings.LastIndex(addr, ":")
-	if portColonIdx >= 0 {
-		hostname = addr[:portColonIdx]
-	}
-
-	// Just to make sure it is not an IP address
-	ip := net.ParseIP(hostname)
-	if ip != nil {
-		// Hostname is an IP address, return the whole address
-		return "", errors.Errorf("address %s is an ip address", addr)
-	}
-
-	parts := strings.Split(hostname, ".")
-	if len(parts) < 4 {
-		return "", errors.Errorf("address %s does not match the expected format %s", addr, addressFormat)
-	}
-
-	podName, namespace := parts[0], parts[2]
-
-	return buildInstanceIdentifier(podName, namespace), nil
 }
 
 func buildInstanceIdentifier(podName string, namespace string) string {

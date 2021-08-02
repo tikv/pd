@@ -102,6 +102,10 @@ func NewPlan(component ComponentType, count uint64, resourceType string) *Plan {
 	}
 }
 
+func (p *Plan) String() string {
+	return fmt.Sprintf("{Component: %s, Count: %d, ResourceType: %s, Labels: %v}", p.Component, p.Count, p.ResourceType, p.Labels)
+}
+
 func (p *Plan) Clone() *Plan {
 	var component ComponentType
 
