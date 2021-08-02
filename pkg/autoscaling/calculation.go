@@ -262,7 +262,7 @@ func getCPUPlans(querier Querier, instances []instance, strategy *Strategy, reso
 	cpuUsageTarget := (cpuMaxThreshold + cpuMinThreshold) / 2
 	resources := getCPUResourcesByComponent(strategy, component)
 
-	log.Debug(fmt.Sprintf("autoscale: calculate total cpu usage infomation completed. component: %s, totalInstanceCount: %d, totalCPUUsage: %f, cpuUsageHighMap: %v, cpuUsageLowNum: %d",
+	log.Debug(fmt.Sprintf("autoscale: calculate total cpu usage information completed. component: %s, totalInstanceCount: %d, totalCPUUsage: %f, cpuUsageHighMap: %v, cpuUsageLowNum: %d",
 		component.String(), totalInstanceCount, totalCPUUsage, cpuUsageHighMap, cpuUsageLowNum))
 
 	if totalCPUUsage > cpuMaxThreshold {
