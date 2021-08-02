@@ -249,9 +249,11 @@ func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 		case read:
 			future.Loads[statistics.ByteDim] += infl.Loads[statistics.RegionReadBytes]
 			future.Loads[statistics.KeyDim] += infl.Loads[statistics.RegionReadKeys]
+			future.Loads[statistics.QueryDim] += infl.Loads[statistics.RegionReadQuery]
 		case write:
 			future.Loads[statistics.ByteDim] += infl.Loads[statistics.RegionWriteBytes]
 			future.Loads[statistics.KeyDim] += infl.Loads[statistics.RegionWriteKeys]
+			future.Loads[statistics.QueryDim] += infl.Loads[statistics.RegionWriteQuery]
 		}
 		future.Count += infl.Count
 	}
@@ -261,12 +263,10 @@ func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 	}
 }
 
-func stLdByteRate(ld *storeLoad) float64 {
-	return ld.Loads[statistics.ByteDim]
-}
-
-func stLdKeyRate(ld *storeLoad) float64 {
-	return ld.Loads[statistics.KeyDim]
+func stLdRate(dim int) func(ld *storeLoad) float64 {
+	return func(ld *storeLoad) float64 {
+		return ld.Loads[dim]
+	}
 }
 
 func stLdCount(ld *storeLoad) float64 {
