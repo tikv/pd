@@ -272,7 +272,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"dst-tolerance-ratio":        1.05,
 		"read-priorities":            []interface{}{"qps", "byte"},
 		"write-priorities":           []interface{}{"byte", "key"},
-		"strict-picking-store":       true,
+		"strict-picking-store":       "true",
 	}
 	c.Assert(conf, DeepEquals, expected1)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.02"}, nil)
