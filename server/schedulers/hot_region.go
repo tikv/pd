@@ -593,12 +593,15 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 }
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad) bool {
-	return slice.AllOf(minLoad.Loads, func(i int) bool {
-		if bs.isSelectedDim(i) {
-			return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
-		}
-		return true
-	})
+	if bs.sche.conf.StrictPickingStore {
+		return slice.AllOf(minLoad.Loads, func(i int) bool {
+			if bs.isSelectedDim(i) {
+				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
+			}
+			return true
+		})
+	}
+	return minLoad.Loads[bs.firstPriority] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[bs.firstPriority]
 }
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
@@ -784,12 +787,15 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad) bool {
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
-	return slice.AllOf(maxLoad.Loads, func(i int) bool {
-		if bs.isSelectedDim(i) {
-			return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
-		}
-		return true
-	})
+	if bs.sche.conf.StrictPickingStore {
+		return slice.AllOf(maxLoad.Loads, func(i int) bool {
+			if bs.isSelectedDim(i) {
+				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]
+			}
+			return true
+		})
+	}
+	return maxLoad.Loads[bs.firstPriority]*dstToleranceRatio < expect.Loads[bs.firstPriority]
 }
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.

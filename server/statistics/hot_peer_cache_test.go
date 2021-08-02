@@ -227,6 +227,8 @@ func newPeers(n int, pid genID, sid genID) []*metapb.Peer {
 
 func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 	cache := NewHotPeerCache(ReadFlow)
+	// we statistic read peer info from store heartbeat rather than region heartbeat
+	m := RegionHeartBeatReportInterval / StoreHeartBeatReportInterval
 
 	// skip interval=0
 	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: ReadFlow}
@@ -253,27 +255,29 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 	oldItem = newItem
 	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
-	c.Check(newItem.AntiCount, Equals, 2)
+	c.Check(newItem.AntiCount, Equals, 2*m)
 	// sum of interval is less than report interval
 	oldItem = newItem
 	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
-	c.Check(newItem.AntiCount, Equals, 2)
+	c.Check(newItem.AntiCount, Equals, 2*m)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
 	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 2)
-	c.Check(newItem.AntiCount, Equals, 2)
+	c.Check(newItem.AntiCount, Equals, 2*m)
 	// sum of interval is larger than report interval, and cold
 	oldItem = newItem
 	newItem.thresholds = []float64{10.0, 10.0, 10.0}
 	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
-	c.Check(newItem.AntiCount, Equals, 1)
+	c.Check(newItem.AntiCount, Equals, 2*m-1)
 	// sum of interval is larger than report interval, and cold
-	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
-	c.Check(newItem.HotDegree, Equals, 0)
+	for i := 0; i < 2*m-1; i++ {
+		oldItem = newItem
+		newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
+	}
+	c.Check(newItem.HotDegree, Less, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
 	c.Check(newItem.needDelete, Equals, true)
 }
