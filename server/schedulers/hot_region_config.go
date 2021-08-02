@@ -57,7 +57,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
 		ReadPriorities:         []string{QueryPriority, BytePriority},
 		WritePriorities:        []string{BytePriority, KeyPriority},
-		StrictStorePicking:     true,
+		StrictPickingStore:     true,
 	}
 }
 
