@@ -487,10 +487,11 @@ func (m *ModeManager) estimateProgress() float32 {
 }
 
 func (m *ModeManager) checkRegionRecover(region *core.RegionInfo, startKey []byte) bool {
-	if !bytes.Equal(startKey, region.GetStartKey()) {
+	// if the region not contains the key, log it and return false
+	if bytes.Compare(startKey, region.GetStartKey()) < 0 || (len(region.GetEndKey()) != 0 && bytes.Compare(startKey, region.GetEndKey()) > 0) {
 		log.Warn("found region gap",
-			logutil.ZapRedactByteString("key", startKey),
-			logutil.ZapRedactByteString("region-start-key", region.GetStartKey()),
+			logutil.ZapRedactByteString("key", core.HexRegionKey(startKey)),
+			logutil.ZapRedactStringer("region", core.RegionToHexMeta(region.GetMeta())),
 			zap.Uint64("region-id", region.GetID()))
 		return false
 	}
