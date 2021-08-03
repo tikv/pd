@@ -315,6 +315,11 @@ func (f *StoreStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store
 	return !store.AllowLeaderTransfer()
 }
 
+func (f *StoreStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "slow-store"
+	return !store.AllowLeaderTransfer()
+}
+
 func (f *StoreStateFilter) isDisconnected(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	f.Reason = "disconnected"
 	return !f.AllowTemporaryStates && store.IsDisconnected()
@@ -378,12 +383,13 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 	var funcs []conditionFunc
 	switch typ {
 	case leaderSource:
-		funcs = []conditionFunc{f.isTombstone, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
+		funcs = []conditionFunc{f.isTombstone, f.isDown, f.pauseLeaderTransfer, f.isDisconnected,
+			f.slowStoreEvicted}
 	case regionSource:
 		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.pauseLeaderTransfer,
-			f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+			f.slowStoreEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
 	case regionTarget:
 		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}

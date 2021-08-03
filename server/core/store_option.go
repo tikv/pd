@@ -117,6 +117,21 @@ func ResumeLeaderTransfer() StoreCreateOption {
 	}
 }
 
+// SlowStoreEvicted marks a store as a slow store and prevents transfering
+// leader to the store
+func SlowStoreEvicted() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.slowStoreEvicted = true
+	}
+}
+
+// SlowStoreRecovered cleans the evicted state of a store.
+func SlowStoreRecovered() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.slowStoreEvicted = false
+	}
+}
+
 // SetLeaderCount sets the leader count for the store.
 func SetLeaderCount(leaderCount int) StoreCreateOption {
 	return func(store *StoreInfo) {

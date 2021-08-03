@@ -41,6 +41,7 @@ type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
 	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
+	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
 	leaderCount         int
 	regionCount         int
 	leaderSize          int64
@@ -117,6 +118,11 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 // as source or target of transfer leader.
 func (s *StoreInfo) AllowLeaderTransfer() bool {
 	return !s.pauseLeaderTransfer
+}
+
+// EvictedAsSlowStore returns if the store should be evicted as a slow store.
+func (s *StoreInfo) EvictedAsSlowStore() bool {
+	return !s.slowStoreEvicted
 }
 
 // IsAvailable returns if the store bucket of limitation is available
@@ -568,6 +574,31 @@ func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 		return
 	}
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
+}
+
+// SlowStoreEvicted marks a store as a slow store and prevents transfering
+// leader to the store
+func (s *StoresInfo) SlowStoreEvicted(storeID uint64) error {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if !store.EvictedAsSlowStore() {
+		return errs.ErrSlowStoreEvicted.FastGenByArgs(storeID)
+	}
+	s.stores[storeID] = store.Clone(SlowStoreEvicted())
+	return nil
+}
+
+// SlowStoreRecovered cleans the evicted state of a store.
+func (s *StoresInfo) SlowStoreRecovered(storeID uint64) {
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Warn("try to clean a store's evicted as a slow store state, but it is not found. It may be cleanup",
+			zap.Uint64("store-id", storeID))
+		return
+	}
+	s.stores[storeID] = store.Clone(SlowStoreRecovered())
 }
 
 // AttachAvailableFunc attaches f to a specific store.

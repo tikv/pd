@@ -145,6 +145,21 @@ func (bc *BasicCluster) ResumeLeaderTransfer(storeID uint64) {
 	bc.Stores.ResumeLeaderTransfer(storeID)
 }
 
+// SlowStoreEvicted marks a store as a slow store and prevents transfering
+// leader to the store
+func (bc *BasicCluster) SlowStoreEvicted(storeID uint64) error {
+	bc.Lock()
+	defer bc.Unlock()
+	return bc.Stores.SlowStoreEvicted(storeID)
+}
+
+// SlowStoreRecovered cleans the evicted state of a store.
+func (bc *BasicCluster) SlowStoreRecovered(storeID uint64) {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Stores.SlowStoreRecovered(storeID)
+}
+
 // AttachAvailableFunc attaches an available function to a specific store.
 func (bc *BasicCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
 	bc.Lock()
@@ -428,6 +443,9 @@ type StoreSetInformer interface {
 type StoreSetController interface {
 	PauseLeaderTransfer(id uint64) error
 	ResumeLeaderTransfer(id uint64)
+
+	SlowStoreEvicted(id uint64) error
+	SlowStoreRecovered(id uint64)
 
 	AttachAvailableFunc(id uint64, limitType storelimit.Type, f func() bool)
 }

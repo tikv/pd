@@ -91,7 +91,7 @@ func (conf *evictSlowStoreSchedulerConfig) getSchedulerName() string {
 type evictSlowStoreScheduler struct {
 	*BaseScheduler
 	conf                 *evictSlowStoreSchedulerConfig
-	evictLeaderScheduler schedule.Scheduler
+	evictLeaderScheduler *evictLeaderScheduler
 }
 
 func (s *evictSlowStoreScheduler) GetName() string {
@@ -108,16 +108,30 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 
 func (s *evictSlowStoreScheduler) Prepare(cluster opt.Cluster) error {
 	if s.evictLeaderScheduler != nil {
-		if err := s.evictLeaderScheduler.Prepare(cluster); err != nil {
-			return err
-		}
+		return s.prepareEvictLeader(cluster)
 	}
 	return nil
 }
 
+func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster opt.Cluster) error {
+	var res error
+	for id := range s.evictLeaderScheduler.conf.StoreIDWithRanges {
+		if err := cluster.SlowStoreEvicted(id); err != nil {
+			res = err
+		}
+	}
+	return res
+}
+
 func (s *evictSlowStoreScheduler) Cleanup(cluster opt.Cluster) {
 	if s.evictLeaderScheduler != nil {
-		s.evictLeaderScheduler.Cleanup(cluster)
+		s.cleanupEvictLeader(cluster)
+	}
+}
+
+func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster opt.Cluster) {
+	for id := range s.evictLeaderScheduler.conf.StoreIDWithRanges {
+		cluster.SlowStoreRecovered(id)
 	}
 }
 
@@ -148,7 +162,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 		}
 		s.conf.EvictedStores = []uint64{0}
 		s.conf.Persist()
-		s.evictLeaderScheduler.Cleanup(cluster)
+		s.cleanupEvictLeader(cluster)
 		s.evictLeaderScheduler = nil
 	} else {
 		slowStores := make([]*core.StoreInfo, 0)
@@ -172,7 +186,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 				return ops
 			}
 			s.initEvictLeaderScheduler()
-			err = s.evictLeaderScheduler.Prepare(cluster)
+			err = s.prepareEvictLeader(cluster)
 			if err != nil {
 				log.Info("prepare for evicting leader failed", zap.Error(err), zap.Stringer("store", store.GetMeta()))
 				return ops
@@ -193,7 +207,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 func (s *evictSlowStoreScheduler) initEvictLeaderScheduler() {
 	evictLeaderConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange), storage: s.conf.storage}
 	evictLeaderConf.BuildWithArgs([]string{strconv.FormatUint(s.conf.EvictedStores[0], 10)})
-	s.evictLeaderScheduler = newEvictLeaderScheduler(s.OpController, evictLeaderConf)
+	s.evictLeaderScheduler = newEvictLeaderScheduler(s.OpController, evictLeaderConf).(*evictLeaderScheduler)
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
