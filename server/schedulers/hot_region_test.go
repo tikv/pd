@@ -907,11 +907,11 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 
 			op1 := hb.Schedule(tc)[0]
 			testutil.CheckTransferPeer(c, op1, operator.OpHotRegion, 1, 4)
-			// After move-peer, store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5,5.5)
+			// After move-peer, store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
 			op2 := hb.Schedule(tc)[0]
 			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
-			// After move-peer,  store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
+			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 
 			ops := hb.Schedule(tc)
 			c.Logf("%v", ops)

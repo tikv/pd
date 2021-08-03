@@ -377,11 +377,17 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 		return nil
 	}
-	if len(leaderOps) == 0 && peerSolver.tryAddPendingInfluence() {
-		return peerOps
+	if len(leaderOps) == 0 {
+		if peerSolver.tryAddPendingInfluence() {
+			return peerOps
+		}
+		return nil
 	}
-	if len(peerOps) == 0 && leaderSolver.tryAddPendingInfluence() {
-		return leaderOps
+	if len(peerOps) == 0 {
+		if leaderSolver.tryAddPendingInfluence() {
+			return leaderOps
+		}
+		return nil
 	}
 	leaderSolver.cur = leaderSolver.best
 	if leaderSolver.betterThan(peerSolver.best) {
