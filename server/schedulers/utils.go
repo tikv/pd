@@ -175,6 +175,7 @@ func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence)
 	}
 }
 
+<<<<<<< HEAD
 // summaryPendingInfluence calculate the summary pending Influence for each store and return storeID -> Influence
 // It makes each key/byte rate or count become (1+w) times to the origin value while f is the function to provide w(weight)
 func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]Influence {
@@ -190,6 +191,8 @@ func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*op
 	return ret
 }
 
+=======
+>>>>>>> c06414f58 (schedulers: unify the use and GC of hot-region's pendings and regionPendings (#3921))
 type storeLoad struct {
 	ByteRate float64
 	KeyRate  float64

@@ -89,12 +89,19 @@ type hotScheduler struct {
 	types       []rwType
 	r           *rand.Rand
 
+<<<<<<< HEAD
 	// states across multiple `Schedule` calls
 	pendings [resourceTypeLen]map[*pendingInfluence]struct{}
 	// regionPendings stores regionID -> [opType]Operator
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
 	regionPendings map[uint64][2]*operator.Operator
+=======
+	// regionPendings stores regionID -> pendingInfluence
+	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
+	// be selected if its owner region is tracked in this attribute.
+	regionPendings map[uint64]*pendingInfluence
+>>>>>>> c06414f58 (schedulers: unify the use and GC of hot-region's pendings and regionPendings (#3921))
 
 	// temporary states but exported to API or metrics
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
@@ -114,7 +121,11 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 		peerLimit:      1,
 		types:          []rwType{write, read},
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
+<<<<<<< HEAD
 		regionPendings: make(map[uint64][2]*operator.Operator),
+=======
+		regionPendings: make(map[uint64]*pendingInfluence),
+>>>>>>> c06414f58 (schedulers: unify the use and GC of hot-region's pendings and regionPendings (#3921))
 		conf:           conf,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
@@ -223,7 +234,9 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
+// It makes each dim rate or count become `weight` times to the origin value.
 func (h *hotScheduler) summaryPendingInfluence() {
+<<<<<<< HEAD
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		h.pendingSums[ty] = summaryPendingInfluence(h.pendings[ty], h.calcPendingWeight)
 	}
@@ -251,8 +264,32 @@ func (h *hotScheduler) gcRegionPendings() {
 			delete(h.regionPendings, regionID)
 		} else {
 			h.regionPendings[regionID] = pendings
+=======
+	maxZombieDur := h.conf.GetMaxZombieDuration()
+	ret := make(map[uint64]*Influence)
+	for id, p := range h.regionPendings {
+		weight, needGC := h.calcPendingInfluence(p.op, maxZombieDur)
+		if needGC {
+			delete(h.regionPendings, id)
+			schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
+			log.Debug("gc pending influence in hot region scheduler",
+				zap.Uint64("region-id", id),
+				zap.Time("create", p.op.GetCreateTime()),
+				zap.Time("now", time.Now()),
+				zap.Duration("zombie", maxZombieDur))
+			continue
+>>>>>>> c06414f58 (schedulers: unify the use and GC of hot-region's pendings and regionPendings (#3921))
 		}
+		if _, ok := ret[p.to]; !ok {
+			ret[p.to] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
+		}
+		ret[p.to] = ret[p.to].add(&p.origin, weight)
+		if _, ok := ret[p.from]; !ok {
+			ret[p.from] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
+		}
+		ret[p.from] = ret[p.from].add(&p.origin, -weight)
 	}
+	h.pendingSums = ret
 }
 
 // summaryStoresLoad Load information of all available stores.
@@ -386,6 +423,7 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 	}
 
 	influence := newPendingInfluence(op, srcStore, dstStore, infl)
+<<<<<<< HEAD
 	rcTy := toResourceType(rwTy, opTy)
 	h.pendings[rcTy][influence] = struct{}{}
 
@@ -395,6 +433,9 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 		tmp[opTy] = op
 		h.regionPendings[regionID] = tmp
 	}
+=======
+	h.regionPendings[regionID] = influence
+>>>>>>> c06414f58 (schedulers: unify the use and GC of hot-region's pendings and regionPendings (#3921))
 
 	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
 	return true
@@ -659,12 +700,22 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		return false
 	}
 
+<<<<<<< HEAD
 	if pendings, ok := bs.sche.regionPendings[region.GetID()]; ok {
 		if bs.opTy == transferLeader {
 			return false
 		}
 		if pendings[movePeer] != nil ||
 			(pendings[transferLeader] != nil && !pendings[transferLeader].IsEnd()) {
+=======
+	if influence, ok := bs.sche.regionPendings[region.GetID()]; ok {
+		if bs.opTy == transferLeader {
+			return false
+		}
+		op := influence.op
+		if op.Kind()&operator.OpRegion != 0 ||
+			(op.Kind()&operator.OpLeader != 0 && !op.IsEnd()) {
+>>>>>>> c06414f58 (schedulers: unify the use and GC of hot-region's pendings and regionPendings (#3921))
 			return false
 		}
 	}
@@ -1074,35 +1125,41 @@ func (h *hotScheduler) copyPendingInfluence(ty resourceType) map[uint64]Influenc
 	return ret
 }
 
-// calcPendingWeight return the calculate weight of one Operator, the value will between [0,1]
-func (h *hotScheduler) calcPendingWeight(op *operator.Operator) float64 {
-	if op.CheckExpired() || op.CheckTimeout() {
-		return 0
-	}
-	status := op.Status()
+// calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]
+func (h *hotScheduler) calcPendingInfluence(op *operator.Operator, maxZombieDur time.Duration) (weight float64, needGC bool) {
+	status := op.CheckAndGetStatus()
 	if !operator.IsEndStatus(status) {
-		return 1
+		return 1, false
 	}
-	switch status {
-	case operator.SUCCESS:
-		zombieDur := time.Since(op.GetReachTimeOf(status))
-		maxZombieDur := h.conf.GetMaxZombieDuration()
-		if zombieDur >= maxZombieDur {
-			return 0
-		}
-		// TODO: use store statistics update time to make a more accurate estimation
-		return float64(maxZombieDur-zombieDur) / float64(maxZombieDur)
-	default:
-		return 0
+
+	// TODO: use store statistics update time to make a more accurate estimation
+	zombieDur := time.Since(op.GetReachTimeOf(status))
+	if zombieDur >= maxZombieDur {
+		weight = 0
+	} else {
+		weight = 1
 	}
+
+	needGC = weight == 0
+	if status != operator.SUCCESS {
+		// CANCELED, REPLACED, TIMEOUT, EXPIRED, etc.
+		// The actual weight is 0, but there is still a delay in GC.
+		weight = 0
+	}
+	return
 }
 
 func (h *hotScheduler) clearPendingInfluence() {
+<<<<<<< HEAD
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		h.pendings[ty] = map[*pendingInfluence]struct{}{}
 		h.pendingSums[ty] = nil
 	}
 	h.regionPendings = make(map[uint64][2]*operator.Operator)
+=======
+	h.pendingSums = nil
+	h.regionPendings = make(map[uint64]*pendingInfluence)
+>>>>>>> c06414f58 (schedulers: unify the use and GC of hot-region's pendings and regionPendings (#3921))
 }
 
 // rwType : the perspective of balance

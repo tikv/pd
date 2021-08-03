@@ -56,10 +56,14 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 
+<<<<<<< HEAD:server/schedulers/hot_test.go
 	nilOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
 		return nil
 	}
 	notDoneOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
+=======
+	notDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
+>>>>>>> c06414f58 (schedulers: unify the use and GC of hot-region's pendings and regionPendings (#3921)):server/schedulers/hot_region_test.go
 		var op *operator.Operator
 		var err error
 		switch ty {
@@ -70,18 +74,22 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		}
 		c.Assert(err, IsNil)
 		c.Assert(op, NotNil)
-		return op
+		op.Start()
+		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-5*statistics.StoreHeartBeatReportInterval*time.Second))
+		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add((-5*statistics.StoreHeartBeatReportInterval+1)*time.Second))
+		return newPendingInfluence(op, 2, 4, Influence{})
 	}
-	doneOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
-		op := notDoneOp(region, ty)
-		op.Cancel()
-		return op
+	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
+		infl := notDoneOpInfluence(region, ty)
+		infl.op.Cancel()
+		return infl
 	}
-	shouldRemoveOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
-		op := doneOp(region, ty)
-		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
-		return op
+	shouldRemoveOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
+		infl := justDoneOpInfluence(region, ty)
+		operator.SetOperatorStatusReachTime(infl.op, operator.CANCELED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
+		return infl
 	}
+<<<<<<< HEAD:server/schedulers/hot_test.go
 	opCreaters := [4]func(region *core.RegionInfo, ty opType) *operator.Operator{nilOp, shouldRemoveOp, notDoneOp, doneOp}
 
 	for i := 0; i < len(opCreaters); i++ {
@@ -92,11 +100,23 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 				movePeer:       opCreaters[i](region, movePeer),
 				transferLeader: opCreaters[j](region, transferLeader),
 			}
+=======
+	opInfluenceCreators := [3]func(region *core.RegionInfo, ty opType) *pendingInfluence{shouldRemoveOpInfluence, notDoneOpInfluence, justDoneOpInfluence}
+
+	typs := []opType{movePeer, transferLeader}
+
+	for i, creator := range opInfluenceCreators {
+		for j, typ := range typs {
+			regionID := uint64(i*len(typs) + j + 1)
+			region := newTestRegion(regionID)
+			hb.regionPendings[regionID] = creator(region, typ)
+>>>>>>> c06414f58 (schedulers: unify the use and GC of hot-region's pendings and regionPendings (#3921)):server/schedulers/hot_region_test.go
 		}
 	}
 
-	hb.gcRegionPendings()
+	hb.summaryPendingInfluence() // Calling this function will GC.
 
+<<<<<<< HEAD:server/schedulers/hot_test.go
 	for i := 0; i < len(opCreaters); i++ {
 		for j := 0; j < len(opCreaters); j++ {
 			regionID := uint64(i*len(opCreaters) + j + 1)
@@ -114,6 +134,24 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 				c.Assert(hb.regionPendings, HasKey, regionID)
 				c.Assert(hb.regionPendings[regionID][movePeer], NotNil)
 				c.Assert(hb.regionPendings[regionID][transferLeader], NotNil)
+=======
+	for i := range opInfluenceCreators {
+		for j, typ := range typs {
+			regionID := uint64(i*len(typs) + j + 1)
+			if i < 1 { // shouldRemoveOpInfluence
+				c.Assert(hb.regionPendings, Not(HasKey), regionID)
+			} else { // notDoneOpInfluence, justDoneOpInfluence
+				c.Assert(hb.regionPendings, HasKey, regionID)
+				kind := hb.regionPendings[regionID].op.Kind()
+				switch typ {
+				case transferLeader:
+					c.Assert(kind&operator.OpLeader != 0, IsTrue)
+					c.Assert(kind&operator.OpRegion == 0, IsTrue)
+				case movePeer:
+					c.Assert(kind&operator.OpLeader == 0, IsTrue)
+					c.Assert(kind&operator.OpRegion != 0, IsTrue)
+				}
+>>>>>>> c06414f58 (schedulers: unify the use and GC of hot-region's pendings and regionPendings (#3921)):server/schedulers/hot_region_test.go
 			}
 		}
 	}
