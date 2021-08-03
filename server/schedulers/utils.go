@@ -234,27 +234,6 @@ func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence)
 	}
 }
 
-// summaryPendingInfluence calculate the summary pending Influence for each store and return storeID -> Influence
-// It makes each key/byte rate or count become (1+w) times to the origin value while f is the function to provide w(weight)
-func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]*Influence {
-	ret := make(map[uint64]*Influence)
-	for p := range pendings {
-		w := f(p.op)
-		if w == 0 {
-			delete(pendings, p)
-		}
-		if _, ok := ret[p.to]; !ok {
-			ret[p.to] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
-		}
-		ret[p.to] = ret[p.to].add(&p.origin, w)
-		if _, ok := ret[p.from]; !ok {
-			ret[p.from] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
-		}
-		ret[p.from] = ret[p.from].add(&p.origin, -w)
-	}
-	return ret
-}
-
 type storeLoad struct {
 	Loads []float64
 	Count float64
@@ -270,9 +249,11 @@ func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 		case read:
 			future.Loads[statistics.ByteDim] += infl.Loads[statistics.RegionReadBytes]
 			future.Loads[statistics.KeyDim] += infl.Loads[statistics.RegionReadKeys]
+			future.Loads[statistics.QueryDim] += infl.Loads[statistics.RegionReadQuery]
 		case write:
 			future.Loads[statistics.ByteDim] += infl.Loads[statistics.RegionWriteBytes]
 			future.Loads[statistics.KeyDim] += infl.Loads[statistics.RegionWriteKeys]
+			future.Loads[statistics.QueryDim] += infl.Loads[statistics.RegionWriteQuery]
 		}
 		future.Count += infl.Count
 	}
@@ -282,12 +263,10 @@ func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 	}
 }
 
-func stLdByteRate(ld *storeLoad) float64 {
-	return ld.Loads[statistics.ByteDim]
-}
-
-func stLdKeyRate(ld *storeLoad) float64 {
-	return ld.Loads[statistics.KeyDim]
+func stLdRate(dim int) func(ld *storeLoad) float64 {
+	return func(ld *storeLoad) float64 {
+		return ld.Loads[dim]
+	}
 }
 
 func stLdCount(ld *storeLoad) float64 {

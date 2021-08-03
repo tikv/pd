@@ -35,6 +35,8 @@ const (
 	BytePriority = "byte"
 	// KeyPriority indicates hot-region-scheduler prefer key dim
 	KeyPriority = "key"
+	// QueryPriority indicates hot-region-scheduler prefer query dim
+	QueryPriority = "qps"
 )
 
 // params about hot region.
@@ -42,6 +44,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	return &hotRegionSchedulerConfig{
 		MinHotByteRate:         100,
 		MinHotKeyRate:          10,
+		MinHotQueryRate:        10,
 		MaxZombieRounds:        3,
 		ByteRateRankStepRatio:  0.05,
 		KeyRateRankStepRatio:   0.05,
@@ -52,8 +55,10 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MaxPeerNum:             1000,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		ReadPriorities:         []string{BytePriority, KeyPriority},
-		WritePriorities:        []string{BytePriority, KeyPriority},
+		ReadPriorities:         []string{QueryPriority, BytePriority},
+		WriteLeaderPriorities:  []string{KeyPriority, BytePriority},
+		WritePeerPriorities:    []string{BytePriority, KeyPriority},
+		StrictPickingStore:     true,
 	}
 }
 
@@ -63,6 +68,7 @@ type hotRegionSchedulerConfig struct {
 
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
+	MinHotQueryRate float64 `json:"min-hot-query-rate"`
 	MaxZombieRounds int     `json:"max-zombie-rounds"`
 	MaxPeerNum      int     `json:"max-peer-number"`
 
@@ -77,7 +83,9 @@ type hotRegionSchedulerConfig struct {
 	SrcToleranceRatio      float64  `json:"src-tolerance-ratio"`
 	DstToleranceRatio      float64  `json:"dst-tolerance-ratio"`
 	ReadPriorities         []string `json:"read-priorities"`
-	WritePriorities        []string `json:"write-priorities"`
+	WriteLeaderPriorities  []string `json:"write-leader-priorities"`
+	WritePeerPriorities    []string `json:"write-peer-priorities"`
+	StrictPickingStore     bool     `json:"strict-picking-store,string"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
@@ -168,6 +176,12 @@ func (conf *hotRegionSchedulerConfig) GetMinHotByteRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotByteRate
+}
+
+func (conf *hotRegionSchedulerConfig) GetMinHotQueryRate() float64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.MinHotQueryRate
 }
 
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {

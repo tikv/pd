@@ -27,7 +27,7 @@ const (
 	// DefaultWriteMfSize is default size of write median filter.
 	DefaultWriteMfSize = 5
 	// DefaultReadMfSize is default size of read median filter.
-	DefaultReadMfSize = 3
+	DefaultReadMfSize = 5
 )
 
 func storeTag(id uint64) string {
