@@ -174,11 +174,11 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 			s.initEvictLeaderScheduler()
 			err = s.evictLeaderScheduler.Prepare(cluster)
 			if err != nil {
+				log.Info("prepare for evicting leader failed", zap.Error(err), zap.Stringer("store", store.GetMeta()))
 				return ops
 			}
 			ops = s.evictLeaderScheduler.Schedule(cluster)
 		} else if len(slowStores) > 1 {
-			// TODO: alert user here or another place.
 			storeIds := make([]uint64, len(slowStores))
 			for _, store := range slowStores {
 				storeIds = append(storeIds, store.GetID())
