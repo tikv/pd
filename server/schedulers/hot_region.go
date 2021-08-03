@@ -1177,12 +1177,11 @@ func (h *hotScheduler) calcPendingInfluence(op *operator.Operator, maxZombieDur 
 		return 1, false
 	}
 
+	// TODO: use store statistics update time to make a more accurate estimation
 	zombieDur := time.Since(op.GetReachTimeOf(status))
 	if zombieDur >= maxZombieDur {
 		weight = 0
 	} else {
-		// TODO: use store statistics update time to make a more accurate estimation
-		// weight = float64(maxZombieDur-zombieDur) / float64(maxZombieDur)
 		weight = 1
 	}
 
