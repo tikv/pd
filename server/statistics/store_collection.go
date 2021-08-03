@@ -145,6 +145,7 @@ func (s *storeStatistics) Collect() {
 	metrics["store_offline_count"] = float64(s.Offline)
 	metrics["store_tombstone_count"] = float64(s.Tombstone)
 	metrics["store_low_space_count"] = float64(s.LowSpace)
+	metrics["store_slow_count"] = float64(s.Slow)
 	metrics["region_count"] = float64(s.RegionCount)
 	metrics["leader_count"] = float64(s.LeaderCount)
 	metrics["storage_size"] = float64(s.StorageSize)
