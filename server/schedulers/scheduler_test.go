@@ -295,7 +295,7 @@ func (s *testShuffleRegionSuite) TestShuffle(c *C) {
 	for i := 0; i < 4; i++ {
 		op := sl.Schedule(tc)
 		c.Assert(op, NotNil)
-		c.Assert(op[0].Kind(), Equals, operator.OpRegion|operator.OpAdmin)
+		c.Assert(op[0].Kind(), Equals, operator.OpRegion)
 	}
 }
 

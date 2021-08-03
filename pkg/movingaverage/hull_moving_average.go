@@ -65,3 +65,8 @@ func (h *HMA) Set(n float64) {
 	h.Reset()
 	h.Add(n)
 }
+
+// GetInstantaneous returns the value just added.
+func (h *HMA) GetInstantaneous() float64 {
+	return h.wma[1].GetInstantaneous()
+}

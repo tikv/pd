@@ -258,7 +258,7 @@ func (bc *BasicCluster) GetStoreLeaderRegionSize(storeID uint64) int64 {
 func (bc *BasicCluster) GetStoreRegionSize(storeID uint64) int64 {
 	bc.RLock()
 	defer bc.RUnlock()
-	return bc.Regions.GetStoreLeaderRegionSize(storeID) + bc.Regions.GetStoreFollowerRegionSize(storeID) + bc.Regions.GetStoreLearnerRegionSize(storeID)
+	return bc.Regions.GetStoreRegionSize(storeID)
 }
 
 // GetAverageRegionSize returns the average region approximate size.
@@ -266,6 +266,35 @@ func (bc *BasicCluster) GetAverageRegionSize() int64 {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Regions.GetAverageRegionSize()
+}
+
+func (bc *BasicCluster) getWriteRate(
+	f func(storeID uint64) (bytesRate, keysRate float64),
+) (storeIDs []uint64, bytesRates, keysRates []float64) {
+	bc.RLock()
+	defer bc.RUnlock()
+	count := len(bc.Stores.stores)
+	storeIDs = make([]uint64, 0, count)
+	bytesRates = make([]float64, 0, count)
+	keysRates = make([]float64, 0, count)
+	for _, store := range bc.Stores.stores {
+		id := store.GetID()
+		bytesRate, keysRate := f(id)
+		storeIDs = append(storeIDs, id)
+		bytesRates = append(bytesRates, bytesRate)
+		keysRates = append(keysRates, keysRate)
+	}
+	return
+}
+
+// GetStoresLeaderWriteRate get total write rate of each store's leaders.
+func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
+	return bc.getWriteRate(bc.Regions.GetStoreLeaderWriteRate)
+}
+
+// GetStoresWriteRate get total write rate of each store's regions.
+func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
+	return bc.getWriteRate(bc.Regions.GetStoreWriteRate)
 }
 
 // PutStore put a store.

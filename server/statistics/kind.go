@@ -61,6 +61,9 @@ const (
 	StoreDiskReadRate
 	StoreDiskWriteRate
 
+	StoreRegionsWriteBytes // Same as StoreWriteBytes, but it is counted by RegionHeartbeat.
+	StoreRegionsWriteKeys  // Same as StoreWriteKeys, but it is counted by RegionHeartbeat.
+
 	StoreStatCount
 )
 
@@ -84,6 +87,10 @@ func (k StoreStatKind) String() string {
 		return "store_disk_read_rate"
 	case StoreDiskWriteRate:
 		return "store_disk_write_rate"
+	case StoreRegionsWriteBytes:
+		return "store_regions_write_bytes"
+	case StoreRegionsWriteKeys:
+		return "store_regions_write_keys"
 	}
 
 	return "unknown StoreStatKind"
