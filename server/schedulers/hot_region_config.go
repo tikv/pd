@@ -49,7 +49,6 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		ByteRateRankStepRatio:  0.05,
 		KeyRateRankStepRatio:   0.05,
 		QueryRateRankStepRatio: 0.05,
-		CountRankStepRatio:     0.01,
 		GreatDecRatio:          0.95,
 		MinorDecRatio:          0.99,
 		MaxPeerNum:             1000,
@@ -77,7 +76,6 @@ type hotRegionSchedulerConfig struct {
 	ByteRateRankStepRatio  float64  `json:"byte-rate-rank-step-ratio"`
 	KeyRateRankStepRatio   float64  `json:"key-rate-rank-step-ratio"`
 	QueryRateRankStepRatio float64  `json:"query-rate-rank-step-ratio"`
-	CountRankStepRatio     float64  `json:"count-rank-step-ratio"`
 	GreatDecRatio          float64  `json:"great-dec-ratio"`
 	MinorDecRatio          float64  `json:"minor-dec-ratio"`
 	SrcToleranceRatio      float64  `json:"src-tolerance-ratio"`
@@ -146,12 +144,6 @@ func (conf *hotRegionSchedulerConfig) GetQueryRateRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.QueryRateRankStepRatio
-}
-
-func (conf *hotRegionSchedulerConfig) GetCountRankStepRatio() float64 {
-	conf.RLock()
-	defer conf.RUnlock()
-	return conf.CountRankStepRatio
 }
 
 func (conf *hotRegionSchedulerConfig) GetGreatDecRatio() float64 {

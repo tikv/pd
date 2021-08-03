@@ -257,13 +257,11 @@ func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*op
 
 type storeLoad struct {
 	Loads []float64
-	Count float64
 }
 
 func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 	future := storeLoad{
 		Loads: append(load.Loads[:0:0], load.Loads...),
-		Count: load.Count,
 	}
 	if infl != nil {
 		switch rwTy {
@@ -276,22 +274,11 @@ func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 			future.Loads[statistics.KeyDim] += infl.Loads[statistics.RegionWriteKeys]
 			future.Loads[statistics.QueryDim] += infl.Loads[statistics.RegionWriteQuery]
 		}
-		future.Count += infl.Count
 	}
 	return &storeLoadPred{
 		Current: load,
 		Future:  future,
 	}
-}
-
-func stLdRate(dim int) func(ld *storeLoad) float64 {
-	return func(ld *storeLoad) float64 {
-		return ld.Loads[dim]
-	}
-}
-
-func stLdCount(ld *storeLoad) float64 {
-	return ld.Count
 }
 
 type storeLoadCmp func(ld1, ld2 *storeLoad) int
@@ -311,22 +298,6 @@ func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
 		}
 		return 0
 	}
-}
-
-func stLdRankCmp(dim func(ld *storeLoad) float64, rank func(value float64) int64) storeLoadCmp {
-	return func(ld1, ld2 *storeLoad) int {
-		return rankCmp(dim(ld1), dim(ld2), rank)
-	}
-}
-
-func rankCmp(a, b float64, rank func(value float64) int64) int {
-	aRk, bRk := rank(a), rank(b)
-	if aRk < bRk {
-		return -1
-	} else if aRk > bRk {
-		return 1
-	}
-	return 0
 }
 
 // store load prediction
@@ -352,7 +323,6 @@ func (lp *storeLoadPred) diff() *storeLoad {
 	}
 	return &storeLoad{
 		Loads: loads,
-		Count: mx.Count - mn.Count,
 	}
 }
 
@@ -387,6 +357,23 @@ func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
 	}
 }
 
+func stLdRankCmp(dim int, rk0, step float64) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		return rankCmp(ld1.Loads[dim], ld2.Loads[dim], rk0, step)
+	}
+}
+
+func rankCmp(a, b, rk0, step float64) int {
+	aRk := int64((a - rk0) / step)
+	bRk := int64((b - rk0) / step)
+	if aRk < bRk {
+		return -1
+	} else if aRk > bRk {
+		return 1
+	}
+	return 0
+}
+
 func minLoad(a, b *storeLoad) *storeLoad {
 	loads := make([]float64, len(a.Loads))
 	for i := range loads {
@@ -394,7 +381,6 @@ func minLoad(a, b *storeLoad) *storeLoad {
 	}
 	return &storeLoad{
 		Loads: loads,
-		Count: math.Min(a.Count, b.Count),
 	}
 }
 
@@ -405,7 +391,6 @@ func maxLoad(a, b *storeLoad) *storeLoad {
 	}
 	return &storeLoad{
 		Loads: loads,
-		Count: math.Max(a.Count, b.Count),
 	}
 }
 

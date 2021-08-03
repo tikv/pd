@@ -291,7 +291,6 @@ func summaryStoresLoad(
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
 			Loads: loads,
-			Count: float64(len(hotPeers)),
 		}).ToLoadPred(rwTy, storePendings[id])
 
 		// Construct store load info.
@@ -310,7 +309,6 @@ func summaryStoresLoad(
 		}
 		expectCount := allCount / storeLen
 		detail.LoadPred.Expect.Loads = expectLoads
-		detail.LoadPred.Expect.Count = expectCount
 		// Debug
 		{
 			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
@@ -455,7 +453,6 @@ func (bs *balanceSolver) init() {
 	bs.maxSrc = &storeLoad{Loads: make([]float64, statistics.DimLen)}
 	bs.minDst = &storeLoad{
 		Loads: make([]float64, statistics.DimLen),
-		Count: math.MaxFloat64,
 	}
 	for i := range bs.minDst.Loads {
 		bs.minDst.Loads[i] = math.MaxFloat64
@@ -478,7 +475,6 @@ func (bs *balanceSolver) init() {
 	}
 	bs.rankStep = &storeLoad{
 		Loads: stepLoads,
-		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
 
 	// For read, transfer-leader and move-peer have the same priority config
@@ -941,8 +937,8 @@ func (bs *balanceSolver) getRkCmpPriorities(old *solution) (firstCmp int, second
 		}
 		return 100
 	}
-	fkRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(fk), old.srcPeerStat.GetLoad(fk), stepRank(0, dimToStep(bs.firstPriority)))
-	skRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(sk), old.srcPeerStat.GetLoad(sk), stepRank(0, dimToStep(bs.secondPriority)))
+	fkRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(fk), old.srcPeerStat.GetLoad(fk), 0, dimToStep(bs.firstPriority))
+	skRkCmp := rankCmp(bs.cur.srcPeerStat.GetLoad(sk), old.srcPeerStat.GetLoad(sk), 0, dimToStep(bs.secondPriority))
 	return fkRkCmp, skRkCmp
 }
 
@@ -954,23 +950,22 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.writeLeaderFirstPriority), stepRank(bs.maxSrc.Loads[bs.writeLeaderFirstPriority], bs.rankStep.Loads[bs.writeLeaderFirstPriority])),
-					stLdRankCmp(stLdRate(bs.writeLeaderSecondPriority), stepRank(bs.maxSrc.Loads[bs.writeLeaderSecondPriority], bs.rankStep.Loads[bs.writeLeaderSecondPriority])),
+					stLdRankCmp(bs.writeLeaderFirstPriority, bs.maxSrc.Loads[bs.writeLeaderFirstPriority], bs.rankStep.Loads[bs.writeLeaderFirstPriority]),
+					stLdRankCmp(bs.writeLeaderSecondPriority, bs.maxSrc.Loads[bs.writeLeaderSecondPriority], bs.rankStep.Loads[bs.writeLeaderSecondPriority]),
 				))),
 				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
-					stLdRankCmp(stLdRate(bs.writeLeaderFirstPriority), stepRank(0, bs.rankStep.Loads[bs.writeLeaderFirstPriority])),
-					stLdRankCmp(stLdRate(bs.writeLeaderSecondPriority), stepRank(0, bs.rankStep.Loads[bs.writeLeaderSecondPriority])),
+					stLdRankCmp(bs.writeLeaderFirstPriority, 0, bs.rankStep.Loads[bs.writeLeaderFirstPriority]),
+					stLdRankCmp(bs.writeLeaderSecondPriority, 0, bs.rankStep.Loads[bs.writeLeaderSecondPriority]),
 				)),
 			)
 		} else {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.maxSrc.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
+					stLdRankCmp(bs.firstPriority, bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority]),
+					stLdRankCmp(bs.secondPriority, bs.maxSrc.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority]),
 				))),
 				diffCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
+					stLdRankCmp(bs.firstPriority, 0, bs.rankStep.Loads[bs.firstPriority]),
 				),
 			)
 		}
@@ -989,36 +984,25 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			lpCmp = sliceLPCmp(
 				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.writeLeaderFirstPriority), stepRank(bs.minDst.Loads[bs.writeLeaderFirstPriority], bs.rankStep.Loads[bs.writeLeaderFirstPriority])),
-					stLdRankCmp(stLdRate(bs.writeLeaderSecondPriority), stepRank(bs.minDst.Loads[bs.writeLeaderSecondPriority], bs.rankStep.Loads[bs.writeLeaderSecondPriority])),
-				)),
-				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
-					stLdRankCmp(stLdRate(bs.writeLeaderFirstPriority), stepRank(0, bs.rankStep.Loads[bs.writeLeaderFirstPriority])),
-					stLdRankCmp(stLdRate(bs.writeLeaderSecondPriority), stepRank(0, bs.rankStep.Loads[bs.writeLeaderSecondPriority])),
+					stLdRankCmp(bs.writeLeaderFirstPriority, bs.minDst.Loads[bs.writeLeaderFirstPriority], bs.rankStep.Loads[bs.writeLeaderFirstPriority]),
+					stLdRankCmp(bs.writeLeaderSecondPriority, bs.minDst.Loads[bs.writeLeaderSecondPriority], bs.rankStep.Loads[bs.writeLeaderSecondPriority]),
+				)), diffCmp(sliceLoadCmp(
+					stLdRankCmp(bs.writeLeaderFirstPriority, 0, bs.rankStep.Loads[bs.writeLeaderFirstPriority]),
+					stLdRankCmp(bs.writeLeaderSecondPriority, 0, bs.rankStep.Loads[bs.writeLeaderSecondPriority]),
 				)))
 		} else {
-			lpCmp = sliceLPCmp(
-				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.minDst.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.minDst.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
-				)),
-				diffCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
-				),
-			)
+			lpCmp = sliceLPCmp(maxLPCmp(sliceLoadCmp(
+				stLdRankCmp(bs.firstPriority, bs.minDst.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority]),
+				stLdRankCmp(bs.secondPriority, bs.minDst.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority]),
+			)), diffCmp(
+				stLdRankCmp(bs.firstPriority, 0, bs.rankStep.Loads[bs.firstPriority]),
+			))
 		}
 		lp1 := bs.stLoadDetail[st1].LoadPred
 		lp2 := bs.stLoadDetail[st2].LoadPred
 		return lpCmp(lp1, lp2)
 	}
 	return 0
-}
-
-func stepRank(rk0 float64, step float64) func(float64) int64 {
-	return func(rate float64) int64 {
-		return int64((rate - rk0) / step)
-	}
 }
 
 func (bs *balanceSolver) isReadyToBuild() bool {
@@ -1114,7 +1098,6 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 
 	infl = &Influence{
 		Loads: append(bs.cur.srcPeerStat.Loads[:0:0], bs.cur.srcPeerStat.Loads...),
-		Count: 1,
 	}
 	return op, infl
 }
