@@ -353,7 +353,7 @@ func filterHotPeers(
 	return ret
 }
 
-func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence) bool {
+func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence) bool {
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
 	if ok {
@@ -377,26 +377,26 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 		return nil
 	}
-	if len(leaderOps) == 0 && peerSolver.addPendingInfluence() {
+	if len(leaderOps) == 0 && peerSolver.tryAddPendingInfluence() {
 		return peerOps
 	}
-	if len(peerOps) == 0 && leaderSolver.addPendingInfluence() {
+	if len(peerOps) == 0 && leaderSolver.tryAddPendingInfluence() {
 		return leaderOps
 	}
 	leaderSolver.cur = leaderSolver.best
 	if leaderSolver.betterThan(peerSolver.best) {
-		if leaderSolver.addPendingInfluence() {
+		if leaderSolver.tryAddPendingInfluence() {
 			return leaderOps
 		}
-		if peerSolver.addPendingInfluence() {
+		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
 		}
 
 	} else {
-		if peerSolver.addPendingInfluence() {
+		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
 		}
-		if leaderSolver.addPendingInfluence() {
+		if leaderSolver.tryAddPendingInfluence() {
 			return leaderOps
 		}
 	}
@@ -411,7 +411,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 	case s < int(schedulePeerPr*100):
 		peerSolver := newBalanceSolver(h, cluster, write, movePeer)
 		ops := peerSolver.solve()
-		if len(ops) > 0 && peerSolver.addPendingInfluence() {
+		if len(ops) > 0 && peerSolver.tryAddPendingInfluence() {
 			return ops
 		}
 	default:
@@ -419,7 +419,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 
 	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
 	ops := leaderSolver.solve()
-	if len(ops) > 0 && leaderSolver.addPendingInfluence() {
+	if len(ops) > 0 && leaderSolver.tryAddPendingInfluence() {
 		return ops
 	}
 
@@ -465,11 +465,11 @@ type solution struct {
 	progressiveRank int64
 }
 
-func (bs *balanceSolver) addPendingInfluence() bool {
+func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	if bs.best == nil || len(bs.ops) == 0 {
 		return false
 	}
-	return bs.sche.addPendingInfluence(bs.ops[0], bs.best.srcStoreID, bs.best.dstStoreID, bs.infl)
+	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.srcStoreID, bs.best.dstStoreID, bs.infl)
 }
 
 func (bs *balanceSolver) init() {
