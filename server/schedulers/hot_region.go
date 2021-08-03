@@ -488,12 +488,12 @@ func (bs *balanceSolver) init() {
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	if bs.rwTy == read {
-		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.ReadPriorities, []string{"byte", "key"})
+		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.ReadPriorities, []string{BytePriority, KeyPriority})
 	} else {
 		if bs.opTy == transferLeader {
-			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.WriteLeaderPriorities, []string{"key", "byte"})
+			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.WriteLeaderPriorities, []string{KeyPriority, BytePriority})
 		} else {
-			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.WritePeerPriorities, []string{"byte", "key"})
+			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.WritePeerPriorities, []string{BytePriority, KeyPriority})
 		}
 	}
 
