@@ -74,6 +74,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		meta:                meta,
 		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
+		slowStoreEvicted:    s.slowStoreEvicted,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
 		leaderSize:          s.leaderSize,
@@ -97,6 +98,7 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 		meta:                s.meta,
 		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
+		slowStoreEvicted:    s.slowStoreEvicted,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
 		leaderSize:          s.leaderSize,
@@ -122,7 +124,7 @@ func (s *StoreInfo) AllowLeaderTransfer() bool {
 
 // EvictedAsSlowStore returns if the store should be evicted as a slow store.
 func (s *StoreInfo) EvictedAsSlowStore() bool {
-	return !s.slowStoreEvicted
+	return s.slowStoreEvicted
 }
 
 // IsAvailable returns if the store bucket of limitation is available
@@ -583,7 +585,7 @@ func (s *StoresInfo) SlowStoreEvicted(storeID uint64) error {
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-	if !store.EvictedAsSlowStore() {
+	if store.EvictedAsSlowStore() {
 		return errs.ErrSlowStoreEvicted.FastGenByArgs(storeID)
 	}
 	s.stores[storeID] = store.Clone(SlowStoreEvicted())

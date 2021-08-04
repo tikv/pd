@@ -594,6 +594,8 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	storage := core.NewStorage(kv.NewMemoryKV())
 	es, err := schedule.CreateScheduler(EvictSlowStoreType, oc, storage, schedule.ConfigSliceDecoder(EvictSlowStoreType, []string{}))
 	c.Assert(err, IsNil)
+	bs, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(BalanceLeaderType, []string{}))
+	c.Assert(err, IsNil)
 	storeInfo := tc.GetStore(1)
 	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 100
@@ -603,14 +605,15 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	// Add evict leader scheduler to store 1
 	op := es.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	// Cannot balance leaders to store 1
+	op = bs.Schedule(tc)
+	c.Check(op, IsNil)
 	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 0
 	})
 	tc.PutStore(newStoreInfo)
 	// Evict leader scheduler of store 1 should be removed, then leader can be balanced to store 1
 	c.Check(es.Schedule(tc), IsNil)
-	bs, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(BalanceLeaderType, []string{}))
-	c.Assert(err, IsNil)
 	op = bs.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 2, 1)
 }

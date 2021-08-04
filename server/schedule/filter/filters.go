@@ -317,7 +317,7 @@ func (f *StoreStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store
 
 func (f *StoreStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	f.Reason = "slow-store"
-	return !store.AllowLeaderTransfer()
+	return store.EvictedAsSlowStore()
 }
 
 func (f *StoreStateFilter) isDisconnected(opt *config.PersistOptions, store *core.StoreInfo) bool {

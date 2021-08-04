@@ -160,6 +160,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 		} else {
 			return s.evictLeaderScheduler.Schedule(cluster)
 		}
+		// Stop to evcit leaders
 		s.conf.EvictedStores = []uint64{0}
 		s.conf.Persist()
 		s.cleanupEvictLeader(cluster)
@@ -176,6 +177,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 			}
 		}
 
+		// If there is only one slow store, evict leaders from that store.
 		if len(slowStores) == 1 && slowStores[0].GetSlowScore() >= slowStoreEvictThreshold {
 			store := slowStores[0]
 			log.Info("detected slow store, start to evict leaders",
@@ -192,12 +194,6 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 				return ops
 			}
 			ops = s.evictLeaderScheduler.Schedule(cluster)
-		} else if len(slowStores) > 1 {
-			storeIds := make([]uint64, len(slowStores))
-			for _, store := range slowStores {
-				storeIds = append(storeIds, store.GetID())
-			}
-			log.Info("detected slow stores", zap.Reflect("stores", storeIds))
 		}
 	}
 
