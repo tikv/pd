@@ -488,12 +488,12 @@ func (bs *balanceSolver) init() {
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	if bs.rwTy == read {
-		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.ReadPriorities, []string{BytePriority, KeyPriority})
+		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetReadPriorities(), []string{BytePriority, KeyPriority})
 	} else {
 		if bs.opTy == transferLeader {
-			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.WriteLeaderPriorities, []string{KeyPriority, BytePriority})
+			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWriteLeaderPriorites(), []string{KeyPriority, BytePriority})
 		} else {
-			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.WritePeerPriorities, []string{BytePriority, KeyPriority})
+			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWritePeerPriorites(), []string{BytePriority, KeyPriority})
 		}
 	}
 
@@ -608,7 +608,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 }
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad) bool {
-	if bs.sche.conf.StrictPickingStore {
+	if bs.sche.conf.IsStrictPickingStoreEnabled() {
 		return slice.AllOf(minLoad.Loads, func(i int) bool {
 			if bs.isSelectedDim(i) {
 				return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[i]
@@ -803,7 +803,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad) bool {
 	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
-	if bs.sche.conf.StrictPickingStore {
+	if bs.sche.conf.IsStrictPickingStoreEnabled() {
 		return slice.AllOf(maxLoad.Loads, func(i int) bool {
 			if bs.isSelectedDim(i) {
 				return maxLoad.Loads[i]*dstToleranceRatio < expect.Loads[i]

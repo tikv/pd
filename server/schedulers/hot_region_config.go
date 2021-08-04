@@ -184,6 +184,30 @@ func (conf *hotRegionSchedulerConfig) GetMinHotQueryRate() float64 {
 	return conf.MinHotQueryRate
 }
 
+func (conf *hotRegionSchedulerConfig) GetReadPriorities() []string {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.ReadPriorities
+}
+
+func (conf *hotRegionSchedulerConfig) GetWriteLeaderPriorites() []string {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.WriteLeaderPriorities
+}
+
+func (conf *hotRegionSchedulerConfig) GetWritePeerPriorites() []string {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.WritePeerPriorities
+}
+
+func (conf *hotRegionSchedulerConfig) IsStrictPickingStoreEnabled() bool {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.StrictPickingStore
+}
+
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
 	router.HandleFunc("/list", conf.handleGetConfig).Methods("GET")
