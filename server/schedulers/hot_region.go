@@ -486,22 +486,6 @@ type solution struct {
 	progressiveRank int64
 }
 
-func (bs *balanceSolver) tryAddPendingInfluence() bool {
-	if bs.best == nil || len(bs.ops) == 0 {
-		return false
-	}
-	// Depending on the source of the statistics used, a different ZombieDuration will be used.
-	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
-	var maxZombieDur time.Duration
-	switch {
-	case bs.rwTy == write && bs.opTy == transferLeader:
-		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-	default:
-		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-	}
-	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.srcStoreID, bs.best.dstStoreID, bs.infl)
-}
-
 func (bs *balanceSolver) init() {
 	switch toResourceType(bs.rwTy, bs.opTy) {
 	case writePeer:
@@ -637,6 +621,22 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		}
 	}
 	return bs.ops
+}
+
+func (bs *balanceSolver) tryAddPendingInfluence() bool {
+	if bs.best == nil || len(bs.ops) == 0 {
+		return false
+	}
+	// Depending on the source of the statistics used, a different ZombieDuration will be used.
+	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
+	var maxZombieDur time.Duration
+	switch {
+	case bs.rwTy == write && bs.opTy == transferLeader:
+		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
+	default:
+		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
+	}
+	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.srcStoreID, bs.best.dstStoreID, bs.infl)
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
