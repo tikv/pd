@@ -437,7 +437,7 @@ type balanceSolver struct {
 	rankStep *storeLoad
 
 	// firstPriority and secondPriority indicate priority of hot schedule
-	// they may be byte（0）,key（1），query（2），and always less than dimLen
+	// they may be byte(0), key(1), query(2), and always less than dimLen
 	firstPriority  int
 	secondPriority int
 	isSelectedDim  func(int) bool
