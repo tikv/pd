@@ -76,12 +76,10 @@ type hotScheduler struct {
 	types []rwType
 	r     *rand.Rand
 
-	// states across multiple `Schedule` calls
-	pendings map[*pendingInfluence]struct{}
-	// regionPendings stores regionID -> Operator
+	// regionPendings stores regionID -> pendingInfluence
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
-	regionPendings map[uint64]*operator.Operator
+	regionPendings map[uint64]*pendingInfluence
 
 	// temporary states but exported to API or metrics
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
@@ -98,8 +96,7 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 		BaseScheduler:  base,
 		types:          []rwType{write, read},
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
-		pendings:       map[*pendingInfluence]struct{}{},
-		regionPendings: make(map[uint64]*operator.Operator),
+		regionPendings: make(map[uint64]*pendingInfluence),
 		conf:           conf,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
@@ -199,23 +196,32 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
+// It makes each dim rate or count become `weight` times to the origin value.
 func (h *hotScheduler) summaryPendingInfluence() {
-	h.pendingSums = summaryPendingInfluence(h.pendings, h.calcPendingWeight)
-	h.gcRegionPendings()
-}
-
-// gcRegionPendings check the region whether it need to be deleted from regionPendings depended on whether it have
-// ended operator
-func (h *hotScheduler) gcRegionPendings() {
-	for regionID, op := range h.regionPendings {
-		if op != nil && op.IsEnd() {
-			if time.Now().After(op.GetCreateTime().Add(h.conf.GetMaxZombieDuration())) {
-				log.Debug("gc pending influence in hot region scheduler", zap.Uint64("region-id", regionID), zap.Time("create", op.GetCreateTime()), zap.Time("now", time.Now()), zap.Duration("zombie", h.conf.GetMaxZombieDuration()))
-				schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
-				delete(h.regionPendings, regionID)
-			}
+	maxZombieDur := h.conf.GetMaxZombieDuration()
+	ret := make(map[uint64]*Influence)
+	for id, p := range h.regionPendings {
+		weight, needGC := h.calcPendingInfluence(p.op, maxZombieDur)
+		if needGC {
+			delete(h.regionPendings, id)
+			schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
+			log.Debug("gc pending influence in hot region scheduler",
+				zap.Uint64("region-id", id),
+				zap.Time("create", p.op.GetCreateTime()),
+				zap.Time("now", time.Now()),
+				zap.Duration("zombie", maxZombieDur))
+			continue
 		}
+		if _, ok := ret[p.to]; !ok {
+			ret[p.to] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
+		}
+		ret[p.to] = ret[p.to].add(&p.origin, weight)
+		if _, ok := ret[p.from]; !ok {
+			ret[p.from] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
+		}
+		ret[p.from] = ret[p.from].add(&p.origin, -weight)
 	}
+	h.pendingSums = ret
 }
 
 // summaryStoresLoad Load information of all available stores.
@@ -263,10 +269,12 @@ func summaryStoresLoad(
 				hotPeers = append(hotPeers, peer.Clone())
 			}
 			// Use sum of hot peers to estimate leader-only byte rate.
-			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time, while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
-			// But none of the current dimension reflect this difference, so we create a new dimension to reflect it.
+			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time,
+			// while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
+			// Write{QPS} does not require such processing.
 			if kind == core.LeaderKind && rwTy == write {
-				loads = peerLoadSum
+				loads[statistics.ByteDim] = peerLoadSum[statistics.ByteDim]
+				loads[statistics.KeyDim] = peerLoadSum[statistics.KeyDim]
 			}
 
 			// Metric for debug.
@@ -356,8 +364,7 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 	}
 
 	influence := newPendingInfluence(op, srcStore, dstStore, infl)
-	h.pendings[influence] = struct{}{}
-	h.regionPendings[regionID] = op
+	h.regionPendings[regionID] = influence
 
 	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
 	return true
@@ -481,19 +488,13 @@ func (bs *balanceSolver) init() {
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
 
-	priorities := bs.sche.conf.ReadPriorities
-	if bs.rwTy == write {
-		priorities = bs.sche.conf.WritePriorities
-	}
-	bs.firstPriority = stringToDim(priorities[0])
-	bs.secondPriority = stringToDim(priorities[1])
-
-	if bs.rwTy == write {
-		bs.writeLeaderFirstPriority = statistics.KeyDim
-		if bs.firstPriority == statistics.QueryDim {
-			bs.writeLeaderFirstPriority = statistics.QueryDim
-		}
-		bs.writeLeaderSecondPriority = statistics.ByteDim
+	// For read, transfer-leader and move-peer have the same priority config
+	// For write, they are different
+	if bs.rwTy == read {
+		bs.firstPriority, bs.secondPriority = prioritiesTodim(bs.sche.conf.ReadPriorities)
+	} else {
+		bs.firstPriority, bs.secondPriority = prioritiesTodim(bs.sche.conf.WritePeerPriorities)
+		bs.writeLeaderFirstPriority, bs.writeLeaderSecondPriority = prioritiesTodim(bs.sche.conf.WriteLeaderPriorities)
 	}
 
 	bs.isSelectedDim = func(dim int) bool {
@@ -678,10 +679,11 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		return false
 	}
 
-	if op, ok := bs.sche.regionPendings[region.GetID()]; ok {
+	if influence, ok := bs.sche.regionPendings[region.GetID()]; ok {
 		if bs.opTy == transferLeader {
 			return false
 		}
+		op := influence.op
 		if op.Kind()&operator.OpRegion != 0 ||
 			(op.Kind()&operator.OpLeader != 0 && !op.IsEnd()) {
 			return false
@@ -1159,33 +1161,33 @@ func (h *hotScheduler) GetPendingInfluence() map[uint64]*Influence {
 	return ret
 }
 
-// calcPendingWeight return the calculate weight of one Operator, the value will between [0,1]
-func (h *hotScheduler) calcPendingWeight(op *operator.Operator) float64 {
-	if op.CheckExpired() || op.CheckTimeout() {
-		return 0
-	}
-	status := op.Status()
+// calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]
+func (h *hotScheduler) calcPendingInfluence(op *operator.Operator, maxZombieDur time.Duration) (weight float64, needGC bool) {
+	status := op.CheckAndGetStatus()
 	if !operator.IsEndStatus(status) {
-		return 1
+		return 1, false
 	}
-	switch status {
-	case operator.SUCCESS:
-		zombieDur := time.Since(op.GetReachTimeOf(status))
-		maxZombieDur := h.conf.GetMaxZombieDuration()
-		if zombieDur >= maxZombieDur {
-			return 0
-		}
-		// TODO: use store statistics update time to make a more accurate estimation
-		return float64(maxZombieDur-zombieDur) / float64(maxZombieDur)
-	default:
-		return 0
+
+	// TODO: use store statistics update time to make a more accurate estimation
+	zombieDur := time.Since(op.GetReachTimeOf(status))
+	if zombieDur >= maxZombieDur {
+		weight = 0
+	} else {
+		weight = 1
 	}
+
+	needGC = weight == 0
+	if status != operator.SUCCESS {
+		// CANCELED, REPLACED, TIMEOUT, EXPIRED, etc.
+		// The actual weight is 0, but there is still a delay in GC.
+		weight = 0
+	}
+	return
 }
 
 func (h *hotScheduler) clearPendingInfluence() {
-	h.pendings = map[*pendingInfluence]struct{}{}
 	h.pendingSums = nil
-	h.regionPendings = make(map[uint64]*operator.Operator)
+	h.regionPendings = make(map[uint64]*pendingInfluence)
 }
 
 // rwType : the perspective of balance
@@ -1296,4 +1298,8 @@ func dimToString(dim int) string {
 	default:
 		return ""
 	}
+}
+
+func prioritiesTodim(priorities []string) (firstPriority int, secondPriority int) {
+	return stringToDim(priorities[0]), stringToDim(priorities[1])
 }
