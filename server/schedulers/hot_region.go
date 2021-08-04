@@ -440,7 +440,6 @@ type balanceSolver struct {
 	// they may be byte(0), key(1), query(2), and always less than dimLen
 	firstPriority  int
 	secondPriority int
-	isSelectedDim  func(int) bool
 
 	firstPriorityIsBetter  bool
 	secondPriorityIsBetter bool
@@ -513,10 +512,10 @@ func (bs *balanceSolver) init() {
 			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWritePeerPriorites(), []string{BytePriority, KeyPriority})
 		}
 	}
+}
 
-	bs.isSelectedDim = func(dim int) bool {
-		return dim == bs.firstPriority || dim == bs.secondPriority
-	}
+func (bs *balanceSolver) isSelectedDim(dim int) bool {
+	return dim == bs.firstPriority || dim == bs.secondPriority
 }
 
 // adjustConfig will adjust config for cluster with low version tikv
