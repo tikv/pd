@@ -59,6 +59,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		WriteLeaderPriorities:  []string{KeyPriority, BytePriority},
 		WritePeerPriorities:    []string{BytePriority, KeyPriority},
 		StrictPickingStore:     true,
+		EnableForTiFlash:       true,
 	}
 }
 
@@ -86,6 +87,9 @@ type hotRegionSchedulerConfig struct {
 	WriteLeaderPriorities  []string `json:"write-leader-priorities"`
 	WritePeerPriorities    []string `json:"write-peer-priorities"`
 	StrictPickingStore     bool     `json:"strict-picking-store,string"`
+
+	// Separately control whether to start hotspot scheduling for TiFlash
+	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
@@ -182,6 +186,12 @@ func (conf *hotRegionSchedulerConfig) GetMinHotByteRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotByteRate
+}
+
+func (conf *hotRegionSchedulerConfig) GetEnableForTiFlash() bool {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.EnableForTiFlash
 }
 
 func (conf *hotRegionSchedulerConfig) GetMinHotQueryRate() float64 {
