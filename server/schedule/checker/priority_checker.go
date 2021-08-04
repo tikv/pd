@@ -49,7 +49,7 @@ func (p *PriorityChecker) GetType() string {
 
 // RegionPriorityEntry records region priority info
 type RegionPriorityEntry struct {
-	Retry    int
+	Attempt  int
 	Last     time.Time
 	regionID uint64
 }
@@ -61,7 +61,7 @@ func (r RegionPriorityEntry) ID() uint64 {
 
 // NewRegionEntry construct of region priority entry
 func NewRegionEntry(regionID uint64) *RegionPriorityEntry {
-	return &RegionPriorityEntry{regionID: regionID, Last: time.Now(), Retry: 1}
+	return &RegionPriorityEntry{regionID: regionID, Last: time.Now(), Attempt: 1}
 }
 
 // Check check region's replicas, it will put into priority queue if the region lack of replicas.
@@ -105,7 +105,7 @@ func (p *PriorityChecker) addPriorityQueue(priority int, regionID uint64) {
 	if priority < 0 {
 		if entry := p.queue.Get(regionID); entry != nil && entry.Priority == priority {
 			e := entry.Value.(*RegionPriorityEntry)
-			e.Retry = e.Retry + 1
+			e.Attempt = e.Attempt + 1
 			e.Last = time.Now()
 		}
 		entry := NewRegionEntry(regionID)
@@ -122,7 +122,7 @@ func (p *PriorityChecker) GetPriorityRegions() (ids []uint64) {
 		re := e.Value.(*RegionPriorityEntry)
 		// avoid to some priority region occupy checker, region don't need check on next check interval
 		// the next run time is : last_time+retry*10*patrol_region_interval
-		if t := re.Last.Add(time.Duration(re.Retry*10) * p.opts.GetPatrolRegionInterval()); t.Before(time.Now()) {
+		if t := re.Last.Add(time.Duration(re.Attempt*10) * p.opts.GetPatrolRegionInterval()); t.Before(time.Now()) {
 			ids = append(ids, re.regionID)
 		}
 	}
