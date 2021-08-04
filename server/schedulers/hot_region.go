@@ -423,6 +423,8 @@ type balanceSolver struct {
 	minDst   *storeLoad
 	rankStep *storeLoad
 
+	// firstPriority and secondPriority indicate priority of hot schedule
+	// they may be byte（0）,key（1），query（2），and always less than dimLen
 	firstPriority  int
 	secondPriority int
 	isSelectedDim  func(int) bool
@@ -487,12 +489,14 @@ func (bs *balanceSolver) init() {
 
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
-	if bs.rwTy == read {
+	switch bs.rwTy {
+	case read:
 		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetReadPriorities(), []string{BytePriority, KeyPriority})
-	} else {
-		if bs.opTy == transferLeader {
+	case write:
+		switch bs.opTy {
+		case transferLeader:
 			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWriteLeaderPriorites(), []string{KeyPriority, BytePriority})
-		} else {
+		case movePeer:
 			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWritePeerPriorites(), []string{BytePriority, KeyPriority})
 		}
 	}
@@ -513,7 +517,7 @@ func (bs *balanceSolver) adjustConfig(origins, defaults []string) (first, second
 	if !querySupport && withQuery {
 		priorities = defaults
 	}
-	return prioritiesTodim(priorities)
+	return prioritiesToDim(priorities)
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
@@ -1314,6 +1318,6 @@ func dimToString(dim int) string {
 	}
 }
 
-func prioritiesTodim(priorities []string) (firstPriority int, secondPriority int) {
+func prioritiesToDim(priorities []string) (firstPriority int, secondPriority int) {
 	return stringToDim(priorities[0]), stringToDim(priorities[1])
 }
