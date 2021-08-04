@@ -237,7 +237,10 @@ func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence,
 	}
 }
 
-type storeLoad Influence
+type storeLoad struct {
+	Loads []float64
+	Count float64
+}
 
 func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 	future := storeLoad{

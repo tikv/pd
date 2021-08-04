@@ -582,6 +582,8 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 
+	// Depending on the source of the statistics used, a different ZombieDuration will be used.
+	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
 	var maxZombieDur time.Duration
 	switch {
 	case bs.rwTy == write && bs.opTy == transferLeader:
@@ -589,6 +591,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	default:
 		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
 	}
+
 	if !bs.sche.addPendingInfluence(op, best.srcStoreID, best.dstStoreID, infl, maxZombieDur) {
 		return nil
 	}
