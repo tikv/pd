@@ -17,6 +17,7 @@ import (
 	"math"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/log"
@@ -220,17 +221,19 @@ func (lhs *Influence) add(rhs *Influence, w float64) *Influence {
 
 // TODO: merge it into OperatorInfluence.
 type pendingInfluence struct {
-	op       *operator.Operator
-	from, to uint64
-	origin   Influence
+	op                *operator.Operator
+	from, to          uint64
+	origin            Influence
+	maxZombieDuration time.Duration
 }
 
-func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence) *pendingInfluence {
+func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence, maxZombieDur time.Duration) *pendingInfluence {
 	return &pendingInfluence{
-		op:     op,
-		from:   from,
-		to:     to,
-		origin: infl,
+		op:                op,
+		from:              from,
+		to:                to,
+		origin:            infl,
+		maxZombieDuration: maxZombieDur,
 	}
 }
 
