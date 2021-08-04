@@ -610,6 +610,7 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	// Evict leader scheduler of store 1 should be removed, then leader can be balanced to store 1
 	c.Check(es.Schedule(tc), IsNil)
 	bs, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(BalanceLeaderType, []string{}))
+	c.Assert(err, IsNil)
 	op = bs.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 2, 1)
 }

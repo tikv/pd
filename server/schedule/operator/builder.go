@@ -304,7 +304,7 @@ func (b *Builder) EnableLightWeight() *Builder {
 	return b
 }
 
-// EnableForceTargetLeader marks the step of transferring leader to target is forcible.
+// EnableForceTargetLeader marks the step of transfering leader to target is forcible.
 func (b *Builder) EnableForceTargetLeader() *Builder {
 	b.forceTargetLeader = true
 	return b
@@ -1006,7 +1006,7 @@ func (b *Builder) planPreferOldPeerAsLeader(p stepPlan) int {
 	return ret
 }
 
-// It is better to avoid transferring leader.
+// It is better to avoid transfering leader.
 func (b *Builder) planPreferLessLeaderTransfer(p stepPlan) int {
 	if p.leaderBeforeAdd == 0 || p.leaderBeforeAdd == b.currentLeaderStoreID {
 		// 3: current == leaderBeforeAdd == leaderBeforeRemove
