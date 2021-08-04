@@ -16,12 +16,11 @@ package checker
 import (
 	"time"
 
-	"github.com/tikv/pd/server/schedule/placement"
-
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 // the default value of priority queue size
@@ -121,6 +120,8 @@ func (p *PriorityChecker) GetPriorityRegions() (ids []uint64) {
 	entries := p.queue.Elems()
 	for _, e := range entries {
 		re := e.Value.(*RegionPriorityEntry)
+		// avoid to some priority region occupy checker, region don't need check on next check interval
+		// the next run time is : last_time+retry*10*patrol_region_interval
 		if t := re.Last.Add(time.Duration(re.Retry*10) * p.opts.GetPatrolRegionInterval()); t.Before(time.Now()) {
 			ids = append(ids, re.regionID)
 		}

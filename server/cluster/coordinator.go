@@ -108,7 +108,7 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
-		//  Check priority regions first.
+		// Check priority regions first.
 		c.checkPriorityRegions()
 		// Check suspect regions first.
 		c.checkSuspectRegions()
