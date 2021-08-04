@@ -739,9 +739,14 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 		}
 	}
 
-	testutil.CheckTransferLeader(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 3)
+	op := hb.Schedule(tc)[0]
+
+	// move leader from store 1 to store 5
+	// it is better than transfer leader from store 1 to store 3
+	testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 5)
 	hb.(*hotScheduler).clearPendingInfluence()
-	// assume handle the operator
+
+	// assume handle the transfer leader operator rather than move leader
 	tc.AddRegionWithReadInfo(3, 3, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{1, 2})
 	// After transfer a hot region leader from store 1 to store 3
 	// the three region leader will be evenly distributed in three stores
@@ -894,37 +899,40 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 			})
 		}
 
+		// Before schedule, store byte/key rate: 7.1 | 6.1 | 6 | 5
+		// Min and max from storeLoadPred. They will be generated in the comparison of current and future.
 		for i := 0; i < 20; i++ {
 			hb.(*hotScheduler).clearPendingInfluence()
 
 			op1 := hb.Schedule(tc)[0]
-			testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
-			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
+			testutil.CheckTransferPeer(c, op1, operator.OpHotRegion, 1, 4)
+			// After move-peer, store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
 			op2 := hb.Schedule(tc)[0]
 			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
-			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
+			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 
 			ops := hb.Schedule(tc)
 			c.Logf("%v", ops)
 			c.Assert(ops, HasLen, 0)
 		}
+
+		// Before schedule, store byte/key rate: 7.1 | 6.1 | 6 | 5
 		for i := 0; i < 20; i++ {
 			hb.(*hotScheduler).clearPendingInfluence()
 
 			op1 := hb.Schedule(tc)[0]
-			testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
-			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
+			testutil.CheckTransferPeer(c, op1, operator.OpHotRegion, 1, 4)
+			// After move-peer, store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
 			op2 := hb.Schedule(tc)[0]
 			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
-			// store bytekey rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
+			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 			c.Assert(op2.Cancel(), IsTrue)
-			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
 
 			op2 = hb.Schedule(tc)[0]
 			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
-			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
+			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
 
 			c.Assert(op1.Cancel(), IsTrue)
 			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
