@@ -62,8 +62,8 @@ type hotPeerCache struct {
 	reportIntervalSecs int
 }
 
-// NewHotStoresStats creates a HotStoresStats
-func NewHotStoresStats(kind FlowKind) *hotPeerCache {
+// NewHotPeerCache creates a hotPeerCache
+func NewHotPeerCache(kind FlowKind) *hotPeerCache {
 	c := &hotPeerCache{
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
@@ -433,10 +433,7 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 		return nil
 	}
 	isHot := slice.AnyOf(regionStats, func(i int) bool {
-		if IsSelectedDim(i) {
-			return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
-		}
-		return false
+		return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
 	})
 	if !isHot {
 		return nil
@@ -517,11 +514,17 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 func hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree + 1
 	newItem.AntiCount = hotRegionAntiCount
+	if newItem.Kind == ReadFlow {
+		newItem.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	}
 }
 
 func initItemDegree(item *HotPeerStat) {
 	item.HotDegree = 1
 	item.AntiCount = hotRegionAntiCount
+	if item.Kind == ReadFlow {
+		item.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	}
 }
 
 func inheritItemDegree(newItem, oldItem *HotPeerStat) {
