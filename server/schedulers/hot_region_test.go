@@ -36,7 +36,6 @@ func init() {
 	schedulePeerPr = 1.0
 	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		cfg := initHotRegionScheduleConfig()
-		cfg.ReadPriorities = []string{BytePriority, KeyPriority}
 		return newHotWriteScheduler(opController, cfg), nil
 	})
 	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
@@ -1577,4 +1576,57 @@ func (s *testHotSchedulerSuite) TestHotWriteLeaderScheduleWithPriority(c *C) {
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 3)
 	schedulePeerPr = old
+}
+
+func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	tc := mockcluster.NewCluster(ctx, opt)
+	// default
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.QueryDim, statistics.ByteDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+	// low version
+	tc.DisableFeature(versioninfo.HotScheduleWithQuery)
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.ByteDim, statistics.KeyDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+	// config byte and key
+	hb.(*hotScheduler).conf.ReadPriorities = []string{"key", "byte"}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"byte", "key"}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"key", "byte"}
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+		{statistics.KeyDim, statistics.ByteDim},
+	})
+	// config query in low version
+	hb.(*hotScheduler).conf.ReadPriorities = []string{"qps", "byte"}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"qps", "byte"}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"qps", "byte"}
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.ByteDim, statistics.KeyDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+}
+
+func checkPriority(c *C, hb *hotScheduler, tc *mockcluster.Cluster, dims [3][2]int) {
+	readSolver := newBalanceSolver(hb, tc, read, transferLeader)
+	writeLeaderSolver := newBalanceSolver(hb, tc, write, transferLeader)
+	writePeerSolver := newBalanceSolver(hb, tc, write, movePeer)
+	c.Assert(readSolver.firstPriority, Equals, dims[0][0])
+	c.Assert(readSolver.secondPriority, Equals, dims[0][1])
+	c.Assert(writeLeaderSolver.firstPriority, Equals, dims[1][0])
+	c.Assert(writeLeaderSolver.secondPriority, Equals, dims[1][1])
+	c.Assert(writePeerSolver.firstPriority, Equals, dims[2][0])
+	c.Assert(writePeerSolver.secondPriority, Equals, dims[2][1])
 }
