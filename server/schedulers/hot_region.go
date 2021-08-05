@@ -527,8 +527,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			continue
 		}
 
-		minLoad := detail.LoadPred.min()
-		if bs.checkSrcByDimPriorityAndTolerance(minLoad, &detail.LoadPred.Expect, srcToleranceRatio) {
+		if bs.checkSrcByDimPriorityAndTolerance(detail.LoadPred.min(), &detail.LoadPred.Expect, srcToleranceRatio) {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 		} else {
@@ -733,8 +732,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		}
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
 			id := store.GetID()
-			maxLoad := detail.LoadPred.max()
-			if bs.checkDstByPriorityAndTolerance(maxLoad, &detail.LoadPred.Expect, dstToleranceRatio) {
+			if bs.checkDstByPriorityAndTolerance(detail.LoadPred.max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				ret[id] = detail
 				hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 			} else {

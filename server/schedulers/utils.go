@@ -37,11 +37,6 @@ const (
 	leaderTolerantSizeRatio float64 = 5.0
 	minTolerantSizeRatio    float64 = 1.0
 	influenceAmp            int64   = 100
-
-	// EngineTiFlash is the tiflash value of the engine label.
-	EngineTiFlash = "tiflash"
-	// EngineTiKV indicates the tikv engine in metrics
-	EngineTiKV = "tikv"
 )
 
 type balancePlan struct {
@@ -518,7 +513,6 @@ func summaryStoresLoad(
 		if !ok {
 			continue
 		}
-		isTiFlash := core.IsTiFlashStore(store.GetMeta())
 
 		// Find all hot peers first
 		var hotPeers []*statistics.HotPeerStat
@@ -558,7 +552,7 @@ func summaryStoresLoad(
 				loads[statistics.ByteDim] = peerLoadSum[statistics.ByteDim]
 				loads[statistics.KeyDim] = peerLoadSum[statistics.KeyDim]
 			case core.RegionKind:
-				if isTiFlash {
+				if info.IsTiFlash {
 					// TiFlash is currently unable to report statistics in the same unit as Region,
 					// so it uses the sum of Regions. If it is not accurate enough, use sum of hot peer.
 					if isTraceRegionFlow {
@@ -575,7 +569,7 @@ func summaryStoresLoad(
 			}
 		}
 
-		if isTiFlash {
+		if info.IsTiFlash {
 			for i := range allTiFlashLoadSum {
 				allTiFlashLoadSum[i] += loads[i]
 			}
@@ -624,8 +618,8 @@ func summaryStoresLoad(
 		hotPeerSummary.WithLabelValues(ty, engine).Set(expectCount)
 		return
 	}
-	tikvExpect := calcExpect(EngineTiKV, allTiKVLoadSum, allTiKVCount, allTiKVHotPeersCount)
-	tiflashExpect := calcExpect(EngineTiFlash, allTiFlashLoadSum, allTiFlashCount, allTiKVHotPeersCount)
+	tikvExpect := calcExpect(core.EngineTiKV, allTiKVLoadSum, allTiKVCount, allTiKVHotPeersCount)
+	tiflashExpect := calcExpect(core.EngineTiFlash, allTiFlashLoadSum, allTiFlashCount, allTiKVHotPeersCount)
 	// store expectation rate and count for each store-load detail.
 	for _, detail := range loadDetail {
 		if detail.Info.IsTiFlash {
