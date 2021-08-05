@@ -173,8 +173,10 @@ func (conf *evictLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRa
 
 type evictLeaderScheduler struct {
 	*BaseScheduler
-	conf    *evictLeaderSchedulerConfig
-	handler http.Handler
+	conf          *evictLeaderSchedulerConfig
+	handler       http.Handler
+	name          string
+	schedulerType string
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
@@ -186,6 +188,8 @@ func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *ev
 		BaseScheduler: base,
 		conf:          conf,
 		handler:       handler,
+		name:          EvictLeaderName,
+		schedulerType: EvictLeaderType,
 	}
 }
 
@@ -194,11 +198,11 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *evictLeaderScheduler) GetName() string {
-	return EvictLeaderName
+	return s.name
 }
 
 func (s *evictLeaderScheduler) GetType() string {
-	return EvictLeaderType
+	return s.schedulerType
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {

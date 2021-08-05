@@ -204,6 +204,8 @@ func (s *evictSlowStoreScheduler) initEvictLeaderScheduler() {
 	evictLeaderConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange), storage: s.conf.storage}
 	evictLeaderConf.BuildWithArgs([]string{strconv.FormatUint(s.conf.EvictedStores[0], 10)})
 	s.evictLeaderScheduler = newEvictLeaderScheduler(s.OpController, evictLeaderConf).(*evictLeaderScheduler)
+	s.evictLeaderScheduler.name = EvictSlowStoreName
+	s.evictLeaderScheduler.schedulerType = EvictSlowStoreType
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
