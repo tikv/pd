@@ -492,6 +492,7 @@ func summaryStoresLoad(
 	storeInfos map[uint64]*storeInfo,
 	storesLoads map[uint64][]float64,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
+	isTraceRegionFlow bool,
 	rwTy rwType,
 	kind core.ResourceKind,
 ) map[uint64]*storeLoadDetail {
@@ -514,6 +515,27 @@ func summaryStoresLoad(
 		}
 		isTiFlash := core.IsTiFlashStore(store.GetMeta())
 
+		// Find all hot peers first
+		var hotPeers []*statistics.HotPeerStat
+		peerLoadSum := make([]float64, statistics.DimLen)
+		// TODO: To remove `filterHotPeers`, we need to:
+		// HotLeaders consider `Write{Bytes,Keys}`, so when we schedule `writeLeader`, all peers are leader.
+		for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
+			for i := range peerLoadSum {
+				peerLoadSum[i] += peer.GetLoad(getRegionStatKind(rwTy, i))
+			}
+			hotPeers = append(hotPeers, peer.Clone())
+		}
+		{
+			// Metric for debug.
+			ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.ByteDim])
+			ty = "key-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.KeyDim])
+			ty = "query-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.QueryDim])
+		}
+
 		loads := make([]float64, statistics.DimLen)
 		switch rwTy {
 		case read:
@@ -521,51 +543,30 @@ func summaryStoresLoad(
 			loads[statistics.KeyDim] = storeLoads[statistics.StoreReadKeys]
 			loads[statistics.QueryDim] = storeLoads[statistics.StoreReadQuery]
 		case write:
-			if isTiFlash {
-				// TiFlash is currently unable to report statistics in the same unit as Region,
-				// so it uses the sum of Regions.
-				loads[statistics.ByteDim] = storeLoads[statistics.StoreRegionsWriteBytes]
-				loads[statistics.KeyDim] = storeLoads[statistics.StoreRegionsWriteKeys]
-			} else {
-				loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
-				loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
-			}
-			loads[statistics.QueryDim] = storeLoads[statistics.StoreWriteQuery]
-		}
-
-		// Find all hot peers first
-		var hotPeers []*statistics.HotPeerStat
-		{
-			peerLoadSum := make([]float64, statistics.DimLen)
-			// TODO: To remove `filterHotPeers`, we need to:
-			// HotLeaders consider `Write{Bytes,Keys}`, so when we schedule `writeLeader`, all peers are leader.
-			for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
-				for i := range peerLoadSum {
-					peerLoadSum[i] += peer.GetLoad(getRegionStatKind(rwTy, i))
-				}
-				hotPeers = append(hotPeers, peer.Clone())
-			}
-			// Use sum of hot peers to estimate leader-only byte rate.
-			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time,
-			// while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
-			// Write{QPS} does not require such processing.
-			if kind == core.LeaderKind && rwTy == write {
+			switch kind {
+			case core.LeaderKind:
+				// Use sum of hot peers to estimate leader-only byte rate.
+				// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time,
+				// while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
+				// Write{QPS} does not require such processing.
 				loads[statistics.ByteDim] = peerLoadSum[statistics.ByteDim]
 				loads[statistics.KeyDim] = peerLoadSum[statistics.KeyDim]
-			}
-
-			// Metric for debug.
-			{
-				ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
-				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.ByteDim])
-			}
-			{
-				ty := "key-rate-" + rwTy.String() + "-" + kind.String()
-				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.KeyDim])
-			}
-			{
-				ty := "query-rate-" + rwTy.String() + "-" + kind.String()
-				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.QueryDim])
+			case core.RegionKind:
+				if isTiFlash {
+					// TiFlash is currently unable to report statistics in the same unit as Region,
+					// so it uses the sum of Regions. If it is not accurate enough, use sum of hot peer.
+					if isTraceRegionFlow {
+						loads[statistics.ByteDim] = storeLoads[statistics.StoreRegionsWriteBytes]
+						loads[statistics.KeyDim] = storeLoads[statistics.StoreRegionsWriteKeys]
+					} else {
+						loads[statistics.ByteDim] = peerLoadSum[statistics.ByteDim]
+						loads[statistics.KeyDim] = peerLoadSum[statistics.KeyDim]
+					}
+				} else {
+					loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
+					loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
+				}
+				loads[statistics.QueryDim] = storeLoads[statistics.StoreWriteQuery]
 			}
 		}
 

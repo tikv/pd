@@ -162,6 +162,7 @@ func (h *hotScheduler) prepareForBalance(typ rwType, cluster opt.Cluster) {
 	h.stInfos = summaryStoreInfos(cluster)
 	h.summaryPendingInfluence()
 	storesLoads := cluster.GetStoresLoads()
+	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
 	switch typ {
 	case read:
@@ -171,11 +172,13 @@ func (h *hotScheduler) prepareForBalance(typ rwType, cluster opt.Cluster) {
 			h.stInfos,
 			storesLoads,
 			regionRead,
+			isTraceRegionFlow,
 			read, core.LeaderKind)
 		h.stLoadInfos[readPeer] = summaryStoresLoad(
 			h.stInfos,
 			storesLoads,
 			regionRead,
+			isTraceRegionFlow,
 			read, core.RegionKind)
 	case write:
 		// update write statistics
@@ -184,11 +187,13 @@ func (h *hotScheduler) prepareForBalance(typ rwType, cluster opt.Cluster) {
 			h.stInfos,
 			storesLoads,
 			regionWrite,
+			isTraceRegionFlow,
 			write, core.LeaderKind)
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			h.stInfos,
 			storesLoads,
 			regionWrite,
+			isTraceRegionFlow,
 			write, core.RegionKind)
 	}
 }

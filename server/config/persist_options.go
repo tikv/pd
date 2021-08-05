@@ -492,6 +492,12 @@ func (o *PersistOptions) IsUseJointConsensus() bool {
 	return o.GetScheduleConfig().EnableJointConsensus
 }
 
+// IsTraceRegionFlow returns if the region flow is tracing.
+// If the accuracy cannot reach MB, it is considered not.
+func (o *PersistOptions) IsTraceRegionFlow() bool {
+	return o.GetPDServerConfig().FlowRoundByDigit <= maxTraceFlowRoundByDigit
+}
+
 // GetHotRegionCacheHitsThreshold is a threshold to decide if a region is hot.
 func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)

@@ -226,11 +226,12 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage = true
-	defaultTraceRegionFlow  = true
-	defaultFlowRoundByDigit = 3
-	defaultMaxResetTSGap    = 24 * time.Hour
-	defaultKeyType          = "table"
+	defaultUseRegionStorage  = true
+	defaultTraceRegionFlow   = true
+	defaultFlowRoundByDigit  = 3 // KB
+	maxTraceFlowRoundByDigit = 6 // MB
+	defaultMaxResetTSGap     = 24 * time.Hour
+	defaultKeyType           = "table"
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
