@@ -69,6 +69,7 @@ const (
 
 // schedulePeerPr the probability of schedule the hot peer.
 var schedulePeerPr = 0.66
+var pendingAmpFactor = 8.0
 
 type hotScheduler struct {
 	name string
@@ -631,12 +632,16 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
 	var maxZombieDur time.Duration
 	switch {
-	case bs.rwTy == write && bs.opTy == transferLeader:
+	case bs.isForWriteLeader():
 		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
 	default:
 		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
 	}
 	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.srcStoreID, bs.best.dstStoreID, bs.infl, maxZombieDur)
+}
+
+func (bs *balanceSolver) isForWriteLeader() bool {
+	return bs.rwTy == write && bs.opTy == transferLeader
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
@@ -868,18 +873,22 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
-	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
-	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
+	src := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred
+	dst := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred
+	bs.cur.progressiveRank = 0
+	srcLd := src.min()
+	dstLd := dst.max()
 	peer := bs.cur.srcPeerStat
-	rank := int64(0)
-	if bs.rwTy == write && bs.opTy == transferLeader {
-		// In this condition, CPU usage is the matter.
-		// Only consider key rate or query rate.
+
+	if bs.isForWriteLeader() {
+		if !bs.isTolerance(src, dst, bs.firstPriority) {
+			return
+		}
 		srcRate := srcLd.Loads[bs.firstPriority]
 		dstRate := dstLd.Loads[bs.firstPriority]
 		peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, bs.firstPriority))
 		if srcRate-peerRate >= dstRate+peerRate {
-			rank = -1
+			bs.cur.progressiveRank = -1
 		}
 	} else {
 		firstPriorityDimHot, firstPriorityDecRatio, secondPriorityDimHot, secondPriorityDecRatio := bs.getHotDecRatioByPriorities(srcLd, dstLd, peer)
@@ -887,20 +896,43 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		switch {
 		case firstPriorityDimHot && firstPriorityDecRatio <= greatDecRatio && secondPriorityDimHot && secondPriorityDecRatio <= greatDecRatio:
 			// If belong to the case, two dim will be more balanced, the best choice.
-			rank = -3
+			if !bs.isTolerance(src, dst, bs.firstPriority) || !bs.isTolerance(src, dst, bs.secondPriority) {
+				return
+			}
+			bs.cur.progressiveRank = -3
 			bs.firstPriorityIsBetter = true
 			bs.secondPriorityIsBetter = true
 		case firstPriorityDecRatio <= minorDecRatio && secondPriorityDimHot && secondPriorityDecRatio <= greatDecRatio:
 			// If belong to the case, first priority dim will be not worsened, second priority dim will be more balanced.
-			rank = -2
+			if !bs.isTolerance(src, dst, bs.secondPriority) {
+				return
+			}
+			bs.cur.progressiveRank = -2
 			bs.secondPriorityIsBetter = true
 		case firstPriorityDimHot && firstPriorityDecRatio <= greatDecRatio:
 			// If belong to the case, first priority dim will be more balanced, ignore the second priority dim.
-			rank = -1
+			if !bs.isTolerance(src, dst, bs.firstPriority) {
+				return
+			}
+			bs.cur.progressiveRank = -1
 			bs.firstPriorityIsBetter = true
 		}
 	}
-	bs.cur.progressiveRank = rank
+}
+
+// isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
+// This will make the hot region scheduling slow even serializely running when each 2 store's pending influence is close.
+func (bs *balanceSolver) isTolerance(src, dst *storeLoadPred, dim int) bool {
+	srcRate := src.Current.Loads[dim]
+	dstRate := dst.Current.Loads[dim]
+	if srcRate <= dstRate {
+		return false
+	}
+	pendingAmp := (1 + pendingAmpFactor*srcRate/(srcRate-dstRate))
+	srcPending := src.pending().Loads[dim]
+	dstPending := dst.pending().Loads[dim]
+	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), strconv.FormatUint(bs.cur.dstStoreID, 10)).Set(float64(pendingAmp))
+	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
 func (bs *balanceSolver) getHotDecRatioByPriorities(srcLd, dstLd *storeLoad, peer *statistics.HotPeerStat) (bool, float64, bool, float64) {
@@ -965,7 +997,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 	if bs.cur.srcPeerStat != old.srcPeerStat {
 		// compare region
 
-		if bs.rwTy == write && bs.opTy == transferLeader {
+		if bs.isForWriteLeader() {
 			kind := getRegionStatKind(write, bs.firstPriority)
 			switch {
 			case bs.cur.srcPeerStat.GetLoad(kind) > old.srcPeerStat.GetLoad(kind):
@@ -1024,7 +1056,7 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare source store
 		var lpCmp storeLPCmp
-		if bs.rwTy == write && bs.opTy == transferLeader {
+		if bs.isForWriteLeader() {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
 					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
@@ -1059,7 +1091,7 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare destination store
 		var lpCmp storeLPCmp
-		if bs.rwTy == write && bs.opTy == transferLeader {
+		if bs.isForWriteLeader() {
 			lpCmp = sliceLPCmp(
 				maxLPCmp(sliceLoadCmp(
 					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.minDst.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),

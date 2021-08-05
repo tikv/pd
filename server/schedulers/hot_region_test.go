@@ -528,6 +528,11 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
+	old := pendingAmpFactor
+	pendingAmpFactor = 0.0
+	defer func() {
+		pendingAmpFactor = old
+	}()
 	for i := 0; i < 2; i++ {
 		// 0: byte rate
 		// 1: key rate
@@ -854,7 +859,11 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	hb.(*hotScheduler).conf.MinorDecRatio = 1
 	hb.(*hotScheduler).conf.DstToleranceRatio = 1
 	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
-
+	old := pendingAmpFactor
+	pendingAmpFactor = 0.0
+	defer func() {
+		pendingAmpFactor = old
+	}()
 	for i := 0; i < 2; i++ {
 		// 0: byte rate
 		// 1: key rate
@@ -908,11 +917,16 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 			testutil.CheckTransferPeer(c, op1, operator.OpHotRegion, 1, 4)
 			// After move-peer, store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
+			pendingAmpFactor = old
+			ops := hb.Schedule(tc)
+			c.Assert(ops, HasLen, 0)
+			pendingAmpFactor = 0.0
+
 			op2 := hb.Schedule(tc)[0]
 			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
 			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 
-			ops := hb.Schedule(tc)
+			ops = hb.Schedule(tc)
 			c.Logf("%v", ops)
 			c.Assert(ops, HasLen, 0)
 		}
@@ -1397,10 +1411,19 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionReadKeys], 0.5*MB), IsTrue)
 	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionReadBytes], 0.5*MB), IsTrue)
 
+	// consider pending amp, there are nine regions or more.
 	addRegionInfo(tc, write, []testRegionInfo{
 		{2, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
 		{3, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
 		{4, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{5, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{6, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{7, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{8, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{9, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{10, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{11, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		{12, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
 	})
 	addRegionInfo(tc, read, []testRegionInfo{
 		{2, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
@@ -1546,6 +1569,7 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 4, 5)
 	hb.(*hotScheduler).clearPendingInfluence()
 }
+
 func (s *testHotSchedulerSuite) TestHotWriteLeaderScheduleWithPriority(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1573,17 +1597,19 @@ func (s *testHotSchedulerSuite) TestHotWriteLeaderScheduleWithPriority(c *C) {
 		{4, []uint64{2, 1, 3}, 10 * MB, 0 * MB},
 		{5, []uint64{3, 2, 1}, 0 * MB, 10 * MB},
 	})
-	old := schedulePeerPr
-	schedulePeerPr = 0.0
+	old1, old2 := schedulePeerPr, pendingAmpFactor
+	schedulePeerPr, pendingAmpFactor = 0.0, 0.0
+	defer func() {
+		schedulePeerPr, pendingAmpFactor = old1, old2
+	}()
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{KeyPriority, BytePriority}
 	ops := hb.Schedule(tc)
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 2)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{BytePriority, KeyPriority}
 	ops = hb.Schedule(tc)
-	c.Assert(len(ops), Equals, 1)
+	c.Assert(ops, HasLen, 1)
 	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 3)
-	schedulePeerPr = old
 }
 
 func (s *testHotSchedulerSuite) TestCompatibility(c *C) {

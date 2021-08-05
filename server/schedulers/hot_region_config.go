@@ -83,9 +83,10 @@ type hotRegionSchedulerConfig struct {
 	SrcToleranceRatio      float64  `json:"src-tolerance-ratio"`
 	DstToleranceRatio      float64  `json:"dst-tolerance-ratio"`
 	ReadPriorities         []string `json:"read-priorities"`
-	WriteLeaderPriorities  []string `json:"write-leader-priorities"`
-	WritePeerPriorities    []string `json:"write-peer-priorities"`
-	StrictPickingStore     bool     `json:"strict-picking-store,string"`
+	// For first priority of write leader, it is better to consider key rate or query rather than byte
+	WriteLeaderPriorities []string `json:"write-leader-priorities"`
+	WritePeerPriorities   []string `json:"write-peer-priorities"`
+	StrictPickingStore    bool     `json:"strict-picking-store,string"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
