@@ -1412,19 +1412,12 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionReadBytes], 0.5*MB), IsTrue)
 
 	// consider pending amp, there are nine regions or more.
-	addRegionInfo(tc, write, []testRegionInfo{
-		{2, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-		{3, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-		{4, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-		{5, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-		{6, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-		{7, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-		{8, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-		{9, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-		{10, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-		{11, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-		{12, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
-	})
+	for i := 2; i < 13; i++ {
+		addRegionInfo(tc, write, []testRegionInfo{
+			{uint64(i), []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
+		})
+	}
+
 	addRegionInfo(tc, read, []testRegionInfo{
 		{2, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
 		{3, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
