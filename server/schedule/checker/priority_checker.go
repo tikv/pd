@@ -65,20 +65,21 @@ func NewRegionEntry(regionID uint64) *RegionPriorityEntry {
 }
 
 // Check check region's replicas, it will put into priority queue if the region lack of replicas.
-func (p *PriorityChecker) Check(region *core.RegionInfo) {
+func (p *PriorityChecker) Check(region *core.RegionInfo) (fit *placement.RegionFit) {
 	makeupCount := 0
 	if p.opts.IsPlacementRulesEnabled() {
-		makeupCount = p.checkRegionInPlacementRule(region)
+		makeupCount, fit = p.checkRegionInPlacementRule(region)
 	} else {
 		makeupCount = p.checkRegionInReplica(region)
 	}
 	priority := 0 - makeupCount
 	p.addPriorityQueue(priority, region.GetID())
+	return
 }
 
 // checkRegionInPlacementRule check region in placement rule mode
-func (p *PriorityChecker) checkRegionInPlacementRule(region *core.RegionInfo) (makeupCount int) {
-	fit := p.cluster.FitRegion(region)
+func (p *PriorityChecker) checkRegionInPlacementRule(region *core.RegionInfo) (makeupCount int, fit *placement.RegionFit) {
+	fit = p.cluster.FitRegion(region)
 	if len(fit.RuleFits) == 0 {
 		return
 	}

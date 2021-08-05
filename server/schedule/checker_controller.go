@@ -69,10 +69,10 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 	if op := c.jointStateChecker.Check(region); op != nil {
 		return []*operator.Operator{op}
 	}
-	c.priorityChecker.Check(region)
+	fit := c.priorityChecker.Check(region)
 
 	if c.opts.IsPlacementRulesEnabled() {
-		if op := c.ruleChecker.Check(region); op != nil {
+		if op := c.ruleChecker.Check(region, fit); op != nil {
 			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
 			}
