@@ -1166,9 +1166,7 @@ func (c *RaftCluster) checkStores() {
 	var offlineStores []*metapb.Store
 	var upStoreCount int
 	stores := c.GetStores()
-	storesMap := make(map[uint64]*core.StoreInfo)
 	for _, store := range stores {
-		storesMap[store.GetID()] = store
 		// the store has already been tombstone
 		if store.IsTombstone() {
 			continue
