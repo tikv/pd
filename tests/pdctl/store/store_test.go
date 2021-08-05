@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -26,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -49,26 +51,23 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := cmd.GetRootCmd()
 
 	stores := []*metapb.Store{
 		{
-			Id:      1,
-			Address: "tikv1",
-			State:   metapb.StoreState_Up,
-			Version: "2.0.0",
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:      3,
-			Address: "tikv3",
-			State:   metapb.StoreState_Up,
-			Version: "2.0.0",
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:      2,
-			Address: "tikv2",
-			State:   metapb.StoreState_Tombstone,
-			Version: "2.0.0",
+			Id:            2,
+			State:         metapb.StoreState_Tombstone,
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
 
@@ -76,13 +75,13 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
 
 	// store command
 	args := []string{"-u", pdAddr, "store"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	storesInfo := new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
@@ -90,7 +89,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	// store --state=<query states> command
 	args = []string{"-u", pdAddr, "store", "--state", "Up,Tombstone"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	storesInfo = new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
@@ -98,7 +97,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	// store <store_id> command
 	args = []string{"-u", pdAddr, "store", "1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	storeInfo := new(api.StoreInfo)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
@@ -107,10 +106,10 @@ func (s *storeTestSuite) TestStore(c *C) {
 	// store label <store_id> <key> <value> [<key> <value>]... [flags] command
 	c.Assert(storeInfo.Store.Labels, IsNil)
 	args = []string{"-u", pdAddr, "store", "label", "1", "zone", "cn"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	label := storeInfo.Store.Labels[0]
@@ -119,10 +118,10 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	// store label <store_id> <key> <value> <key> <value>... command
 	args = []string{"-u", pdAddr, "store", "label", "1", "zone", "us", "language", "English"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	label0 := storeInfo.Store.Labels[0]
@@ -134,10 +133,10 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	// store label <store_id> <key> <value> <key> <value>... -f command
 	args = []string{"-u", pdAddr, "store", "label", "1", "zone", "uk", "-f"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	label0 = storeInfo.Store.Labels[0]
@@ -149,10 +148,10 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(storeInfo.Status.LeaderWeight, Equals, float64(1))
 	c.Assert(storeInfo.Status.RegionWeight, Equals, float64(1))
 	args = []string{"-u", pdAddr, "store", "weight", "1", "5", "10"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	c.Assert(storeInfo.Status.LeaderWeight, Equals, float64(5))
@@ -160,7 +159,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	// store limit <store_id> <rate>
 	args = []string{"-u", pdAddr, "store", "limit", "1", "10"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	limit := leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.AddPeer)
 	c.Assert(limit, Equals, float64(10))
@@ -169,7 +168,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	// store limit <store_id> <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "1", "5", "remove-peer"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
 	c.Assert(limit, Equals, float64(5))
@@ -178,7 +177,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	// store limit all <rate>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "20"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	limit1 := leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.AddPeer)
 	limit2 := leaderServer.GetRaftCluster().GetStoreLimitByType(2, storelimit.AddPeer)
@@ -193,9 +192,16 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(limit2, Equals, float64(20))
 	c.Assert(limit3, Equals, float64(20))
 
+	c.Assert(leaderServer.Stop(), IsNil)
+	c.Assert(leaderServer.Run(), IsNil)
+	cluster.WaitLeader()
+	storesLimit := leaderServer.GetPersistOptions().GetAllStoresLimit()
+	c.Assert(storesLimit[1].AddPeer, Equals, float64(20))
+	c.Assert(storesLimit[1].RemovePeer, Equals, float64(20))
+
 	// store limit all <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "25", "remove-peer"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	limit1 = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
 	limit3 = leaderServer.GetRaftCluster().GetStoreLimitByType(3, storelimit.RemovePeer)
@@ -206,29 +212,35 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	// store limit all <key> <value> <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "zone", "uk", "20", "remove-peer"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	limit1 = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
 	c.Assert(limit1, Equals, float64(20))
 
 	// store limit all 0 is invalid
 	args = []string{"-u", pdAddr, "store", "limit", "all", "0"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "rate should be a number that > 0"), IsTrue)
 
 	// store limit <type>
-	echo := pdctl.GetEcho([]string{"-u", pdAddr, "store", "limit"})
+	args = []string{"-u", pdAddr, "store", "limit"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+
 	allAddPeerLimit := make(map[string]map[string]interface{})
-	json.Unmarshal([]byte(echo), &allAddPeerLimit)
+	json.Unmarshal([]byte(output), &allAddPeerLimit)
 	c.Assert(allAddPeerLimit["1"]["add-peer"].(float64), Equals, float64(20))
 	c.Assert(allAddPeerLimit["3"]["add-peer"].(float64), Equals, float64(20))
 	_, ok := allAddPeerLimit["2"]["add-peer"]
 	c.Assert(ok, Equals, false)
 
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "store", "limit", "remove-peer"})
+	args = []string{"-u", pdAddr, "store", "limit", "remove-peer"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+
 	allRemovePeerLimit := make(map[string]map[string]interface{})
-	json.Unmarshal([]byte(echo), &allRemovePeerLimit)
+	json.Unmarshal([]byte(output), &allRemovePeerLimit)
 	c.Assert(allRemovePeerLimit["1"]["remove-peer"].(float64), Equals, float64(20))
 	c.Assert(allRemovePeerLimit["3"]["remove-peer"].(float64), Equals, float64(25))
 	_, ok = allRemovePeerLimit["2"]["add-peer"]
@@ -237,46 +249,72 @@ func (s *storeTestSuite) TestStore(c *C) {
 	// store delete <store_id> command
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
 	args = []string{"-u", pdAddr, "store", "delete", "1"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
 
+	// store check status
+	args = []string{"-u", pdAddr, "store", "check", "Offline"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "\"id\": 1,"), IsTrue)
+	args = []string{"-u", pdAddr, "store", "check", "Tombstone"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "\"id\": 2,"), IsTrue)
+	args = []string{"-u", pdAddr, "store", "check", "Up"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "\"id\": 3,"), IsTrue)
+	args = []string{"-u", pdAddr, "store", "check", "Invalid_State"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Unknown state: Invalid_state"), IsTrue)
+
 	// store delete addr <address>
 	args = []string{"-u", pdAddr, "store", "delete", "addr", "tikv3"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(string(output), Equals, "Success!\n")
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "3"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
 
 	// store remove-tombstone
 	args = []string{"-u", pdAddr, "store", "remove-tombstone"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	storesInfo = new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
 	c.Assert(len([]*api.StoreInfo{storeInfo}), Equals, 1)
 
 	// It should be called after stores remove-tombstone.
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit"})
-	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit", "remove-peer"})
-	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
-	echo = pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit", "add-peer"})
-	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
+	args = []string{"-u", pdAddr, "stores", "show", "limit"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "PANIC"), IsFalse)
+
+	args = []string{"-u", pdAddr, "stores", "show", "limit", "remove-peer"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "PANIC"), IsFalse)
+
+	args = []string{"-u", pdAddr, "stores", "show", "limit", "add-peer"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "PANIC"), IsFalse)
 	// store limit-scene
 	args = []string{"-u", pdAddr, "store", "limit-scene"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	scene := &storelimit.Scene{}
 	err = json.Unmarshal(output, scene)
@@ -285,11 +323,11 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	// store limit-scene <scene> <rate>
 	args = []string{"-u", pdAddr, "store", "limit-scene", "idle", "200"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "limit-scene"}
 	scene = &storelimit.Scene{}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	err = json.Unmarshal(output, scene)
 	c.Assert(err, IsNil)
@@ -297,14 +335,13 @@ func (s *storeTestSuite) TestStore(c *C) {
 
 	// store limit-scene <scene> <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit-scene", "idle", "100", "remove-peer"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "limit-scene", "remove-peer"}
 	scene = &storelimit.Scene{}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	err = json.Unmarshal(output, scene)
 	c.Assert(err, IsNil)
 	c.Assert(scene.Idle, Equals, 100)
-
 }

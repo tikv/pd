@@ -15,7 +15,6 @@ package join
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"strings"
@@ -29,6 +28,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
+	"go.uber.org/zap"
 )
 
 const (
@@ -91,7 +91,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	filePath := path.Join(cfg.DataDir, "join")
 	// Read the persist join config
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
-		s, err := ioutil.ReadFile(filePath)
+		s, err := os.ReadFile(filePath)
 		if err != nil {
 			log.Fatal("read the join config meet error", errs.ZapError(errs.ErrIORead, err))
 		}
@@ -113,10 +113,13 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   strings.Split(cfg.Join, ","),
 		DialTimeout: etcdutil.DefaultDialTimeout,
 		TLS:         tlsConfig,
+		LogConfig:   &lgc,
 	})
 	if err != nil {
 		return errors.WithStack(err)
@@ -203,14 +206,14 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return errors.WithStack(err)
 	}
 
-	err = ioutil.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
+	err = os.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
 	return errors.WithStack(err)
 }
 
 func isDataExist(d string) bool {
 	dir, err := os.Open(d)
 	if err != nil {
-		log.Error("failed to open directory", errs.ZapError(errs.ErrOSOpen, err))
+		log.Info("failed to open directory, maybe start for the first time", errs.ZapError(err))
 		return false
 	}
 	defer dir.Close()

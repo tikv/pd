@@ -3,12 +3,14 @@ on:
     branches:
       - master
       - release-4.0
+      - release-5.*
     paths:
       - "go.mod"
   pull_request:
     branches:
       - master
       - release-4.0
+      - release-5.*
     paths:
       - "go.mod"
 
@@ -23,7 +25,7 @@ jobs:
         uses: actions/checkout@master
       - uses: actions/setup-go@v1
         with:
-          go-version: "1.13.5"
+          go-version: "1.16.4"
       - uses: actions/cache@v1
         with:
           path: ~/go/pkg/mod
@@ -33,7 +35,8 @@ jobs:
       - name: Fetch Go module
         run: |
           go mod download
-          DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap-incubator/tidb-dashboard)
+          go mod tidy
+          DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
           DASHBOARD_RELEASE_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/release-version")
           echo DASHBOARD_DIR="$DASHBOARD_DIR" >> $GITHUB_ENV
           echo DASHBOARD_RELEASE_VERSION="$DASHBOARD_RELEASE_VERSION" >> $GITHUB_ENV
@@ -42,7 +45,7 @@ jobs:
           rm -rf /tmp/dashboard
           mkdir -p /tmp/dashboard
           cd /tmp/dashboard
-          DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/archive/v${DASHBOARD_RELEASE_VERSION}.zip"
+          DOWNLOAD_URL="https://github.com/pingcap/tidb-dashboard/archive/v${DASHBOARD_RELEASE_VERSION}.zip"
           curl -L "${DOWNLOAD_URL}" --fail --output source.zip
           unzip source.zip
       - name: Check diff

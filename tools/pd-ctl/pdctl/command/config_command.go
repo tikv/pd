@@ -16,9 +16,9 @@ package command
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"reflect"
 	"strconv"
@@ -219,9 +219,10 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	delete(scheduleConfig, "schedulers-v2")
-	delete(scheduleConfig, "schedulers-payload")
-	delete(scheduleConfig, "store-limit")
+	for _, config := range hideConfig {
+		delete(scheduleConfig, config)
+	}
+
 	data["schedule"] = scheduleConfig
 	r, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -229,6 +230,21 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(string(r))
+}
+
+var hideConfig = []string{
+	"schedulers-v2",
+	"schedulers-payload",
+	"store-limit",
+	"enable-remove-down-replica",
+	"enable-replace-offline-replica",
+	"enable-make-up-replica",
+	"enable-remove-extra-replica",
+	"enable-location-replacement",
+	"enable-one-way-merge",
+	"enable-debug-metrics",
+	"store-limit-mode",
+	"scheduler-max-waiting-operator",
 }
 
 func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
@@ -549,7 +565,7 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	if !respIsList {
 		res = "[\n" + res + "]\n"
 	}
-	err = ioutil.WriteFile(file, []byte(res), 0644)
+	err = os.WriteFile(file, []byte(res), 0644)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -562,7 +578,7 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
 	}
-	content, err := ioutil.ReadFile(file)
+	content, err := os.ReadFile(file)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -676,7 +692,7 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	err = ioutil.WriteFile(file, []byte(res), 0644)
+	err = os.WriteFile(file, []byte(res), 0644)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -689,7 +705,7 @@ func setRuleBundle(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
 	}
-	content, err := ioutil.ReadFile(file)
+	content, err := os.ReadFile(file)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -751,7 +767,7 @@ func loadRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	err = ioutil.WriteFile(file, []byte(res), 0644)
+	err = os.WriteFile(file, []byte(res), 0644)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -764,7 +780,7 @@ func saveRuleBundle(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
 	}
-	content, err := ioutil.ReadFile(file)
+	content, err := os.ReadFile(file)
 	if err != nil {
 		cmd.Println(err)
 		return

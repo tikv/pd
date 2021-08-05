@@ -8,10 +8,11 @@ mkdir -p $CACHE_DIR -Force | Out-Null
 
 echo '+ Fetch TiDB Dashboard Go module'
 go mod download
+go mod tidy
 
 echo '+ Discover TiDB Dashboard release version'
 
-$DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap-incubator/tidb-dashboard)
+$DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
 echo "  - Dashboard directory: $DASHBOARD_DIR"
 
 $DASHBOARD_RELEASE_VERSION= cat "${DASHBOARD_DIR}/release-version" | Select-String -Pattern "^#" -NotMatch
@@ -26,7 +27,7 @@ if (Test-Path "$CACHE_FILE" ){
 else{
   echo '  - Cached archive does not exist'
   echo '  - Download pre-built embedded assets from GitHub release'
-  $DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/releases/download/v${DASHBOARD_RELEASE_VERSION}/embedded-assets-golang.zip"
+  $DOWNLOAD_URL="https://github.com/pingcap/tidb-dashboard/releases/download/v${DASHBOARD_RELEASE_VERSION}/embedded-assets-golang.zip"
   $DOWNLOAD_FILE= Join-Path($CACHE_DIR) \embedded-assets-golang.zip
   echo "  - Download ${DOWNLOAD_URL}"
   Invoke-WebRequest -Uri "${DOWNLOAD_URL}" -OutFile "${DOWNLOAD_FILE}"

@@ -56,6 +56,11 @@ func NewReplicaChecker(cluster opt.Cluster, regionWaitingList cache.Cache) *Repl
 	}
 }
 
+// GetType return ReplicaChecker's type
+func (r *ReplicaChecker) GetType() string {
+	return "replica-checker"
+}
+
 // Check verifies a region's replicas, creating an operator.Operator if need.
 func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("replica_checker", "check").Inc()
@@ -232,7 +237,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	}
 
 	regionStores := r.cluster.GetRegionStores(region)
-	target := r.strategy(region).SelectStoreToReplace(regionStores, storeID)
+	target := r.strategy(region).SelectStoreToFix(regionStores, storeID)
 	if target == 0 {
 		reason := fmt.Sprintf("no-store-%s", status)
 		checkerCounter.WithLabelValues("replica_checker", reason).Inc()

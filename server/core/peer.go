@@ -72,3 +72,39 @@ func CountInJointState(peers ...*metapb.Peer) int {
 	}
 	return count
 }
+
+// PeerInfo provides peer information
+type PeerInfo struct {
+	*metapb.Peer
+	loads    []float64
+	interval uint64
+}
+
+// NewPeerInfo creates PeerInfo
+func NewPeerInfo(meta *metapb.Peer, loads []float64, interval uint64) *PeerInfo {
+	return &PeerInfo{
+		Peer:     meta,
+		loads:    loads,
+		interval: interval,
+	}
+}
+
+// GetStoreID provides located storeID
+func (p *PeerInfo) GetStoreID() uint64 {
+	return p.GetStoreId()
+}
+
+// GetLoads provides loads
+func (p *PeerInfo) GetLoads() []float64 {
+	return p.loads
+}
+
+// GetPeerID provides peer id
+func (p *PeerInfo) GetPeerID() uint64 {
+	return p.GetId()
+}
+
+// GetInterval returns reporting interval
+func (p *PeerInfo) GetInterval() uint64 {
+	return p.interval
+}

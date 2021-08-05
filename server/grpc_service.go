@@ -28,14 +28,17 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -93,6 +96,17 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
+	var (
+		forwardStream     pdpb.PD_TsoClient
+		cancel            context.CancelFunc
+		lastForwardedHost string
+	)
+	defer func() {
+		// cancel the forward stream
+		if cancel != nil {
+			cancel()
+		}
+	}()
 	for {
 		request, err := stream.Recv()
 		if err == io.EOF {
@@ -101,6 +115,42 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
+
+		forwardedHost := getForwardedHost(stream.Context())
+		if !s.isLocalRequest(forwardedHost) {
+			if forwardStream == nil || lastForwardedHost != forwardedHost {
+				if cancel != nil {
+					cancel()
+				}
+				client, err := s.getDelegateClient(s.ctx, forwardedHost)
+				if err != nil {
+					return err
+				}
+				// TODO: change it to the info level once the TiKV doesn't use it in a unary way.
+				log.Debug("create TSO forward stream", zap.String("forwarded-host", forwardedHost))
+				forwardStream, cancel, err = s.createTsoForwardStream(client)
+				if err != nil {
+					return err
+				}
+				lastForwardedHost = forwardedHost
+			}
+
+			// In order to avoid the forwarding stream being canceled, we are not going to handle the EOF before the
+			// forwarding stream responds.
+			// TODO: we should change this part of logic once the TiKV uses this RPC call in the streaming way.
+			if err := forwardStream.Send(request); err != nil {
+				return errors.WithStack(err)
+			}
+			resp, err := forwardStream.Recv()
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			if err := stream.Send(resp); err != nil {
+				return errors.WithStack(err)
+			}
+			continue
+		}
+
 		start := time.Now()
 		// TSO uses leader lease to determine validity. No need to check leader here.
 		if s.IsClosed() {
@@ -119,6 +169,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if elapsed > slowThreshold {
 			log.Warn("get timestamp too slow", zap.Duration("cost", elapsed))
 		}
+		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		response := &pdpb.TsoResponse{
 			Header:    s.header(),
 			Timestamp: &ts,
@@ -127,12 +178,21 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
 		}
-		tsoHandleDuration.Observe(time.Since(start).Seconds())
 	}
 }
 
 // Bootstrap implements gRPC PDServer.
 func (s *Server) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).Bootstrap(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -159,6 +219,16 @@ func (s *Server) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) 
 
 // IsBootstrapped implements gRPC PDServer.
 func (s *Server) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstrappedRequest) (*pdpb.IsBootstrappedResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).IsBootstrapped(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -172,6 +242,16 @@ func (s *Server) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstrappe
 
 // AllocID implements gRPC PDServer.
 func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pdpb.AllocIDResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).AllocID(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -190,6 +270,16 @@ func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pd
 
 // GetStore implements gRPC PDServer.
 func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).GetStore(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -228,6 +318,16 @@ func checkStore(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
 
 // PutStore implements gRPC PDServer.
 func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*pdpb.PutStoreResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).PutStore(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -264,6 +364,16 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 
 // GetAllStores implements gRPC PDServer.
 func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).GetAllStores(ctx, request)
+	}
+
 	failpoint.Inject("customTimeout", func() {
 		time.Sleep(5 * time.Second)
 	})
@@ -296,6 +406,16 @@ func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresReq
 
 // StoreHeartbeat implements gRPC PDServer.
 func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).StoreHeartbeat(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -382,22 +502,67 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 	server := &heartbeatServer{stream: stream}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		resp := &pdpb.RegionHeartbeatResponse{
-			Header: s.notBootstrappedHeader(),
+	FlowRoundByDigit := s.persistOptions.GetPDServerConfig().FlowRoundByDigit
+	var (
+		forwardStream     pdpb.PD_RegionHeartbeatClient
+		cancel            context.CancelFunc
+		lastForwardedHost string
+		lastBind          time.Time
+		errCh             chan error
+	)
+	defer func() {
+		// cancel the forward stream
+		if cancel != nil {
+			cancel()
 		}
-		err := server.Send(resp)
-		return errors.WithStack(err)
-	}
+	}()
 
-	var lastBind time.Time
 	for {
 		request, err := server.Recv()
 		if err == io.EOF {
 			return nil
 		}
 		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		forwardedHost := getForwardedHost(stream.Context())
+		if !s.isLocalRequest(forwardedHost) {
+			if forwardStream == nil || lastForwardedHost != forwardedHost {
+				if cancel != nil {
+					cancel()
+				}
+				client, err := s.getDelegateClient(s.ctx, forwardedHost)
+				if err != nil {
+					return err
+				}
+				log.Info("create region heartbeat forward stream", zap.String("forwarded-host", forwardedHost))
+				forwardStream, cancel, err = s.createHeartbeatForwardStream(client)
+				if err != nil {
+					return err
+				}
+				lastForwardedHost = forwardedHost
+				errCh = make(chan error, 1)
+				go forwardRegionHeartbeatClientToServer(forwardStream, server, errCh)
+			}
+			if err := forwardStream.Send(request); err != nil {
+				return errors.WithStack(err)
+			}
+
+			select {
+			case err := <-errCh:
+				return err
+			default:
+			}
+			continue
+		}
+
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			resp := &pdpb.RegionHeartbeatResponse{
+				Header: s.notBootstrappedHeader(),
+			}
+			err := server.Send(resp)
 			return errors.WithStack(err)
 		}
 
@@ -419,10 +584,12 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		if time.Since(lastBind) > s.cfg.HeartbeatStreamBindInterval.Duration {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
 			s.hbStreams.BindStream(storeID, server)
+			// refresh FlowRoundByDigit
+			FlowRoundByDigit = s.persistOptions.GetPDServerConfig().FlowRoundByDigit
 			lastBind = time.Now()
 		}
 
-		region := core.RegionFromHeartbeat(request)
+		region := core.RegionFromHeartbeat(request, core.WithFlowRoundByDigit(FlowRoundByDigit))
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
@@ -446,7 +613,6 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
-
 		start := time.Now()
 
 		err = rc.HandleRegionHeartbeat(region)
@@ -456,7 +622,6 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
-
 		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 	}
@@ -464,6 +629,16 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 // GetRegion implements gRPC PDServer.
 func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).GetRegion(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -487,6 +662,16 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) 
 
 // GetPrevRegion implements gRPC PDServer
 func (s *Server) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).GetPrevRegion(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -511,6 +696,16 @@ func (s *Server) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionReque
 
 // GetRegionByID implements gRPC PDServer.
 func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).GetRegionByID(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -534,6 +729,16 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 
 // ScanRegions implements gRPC PDServer.
 func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).ScanRegions(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -564,6 +769,16 @@ func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsReque
 
 // AskSplit implements gRPC PDServer.
 func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).AskSplit(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -592,6 +807,16 @@ func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*
 
 // AskBatchSplit implements gRPC PDServer.
 func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).AskBatchSplit(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -624,6 +849,16 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 
 // ReportSplit implements gRPC PDServer.
 func (s *Server) ReportSplit(ctx context.Context, request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).ReportSplit(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -644,6 +879,16 @@ func (s *Server) ReportSplit(ctx context.Context, request *pdpb.ReportSplitReque
 
 // ReportBatchSplit implements gRPC PDServer.
 func (s *Server) ReportBatchSplit(ctx context.Context, request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).ReportBatchSplit(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -665,6 +910,16 @@ func (s *Server) ReportBatchSplit(ctx context.Context, request *pdpb.ReportBatch
 
 // GetClusterConfig implements gRPC PDServer.
 func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb.GetClusterConfigRequest) (*pdpb.GetClusterConfigResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).GetClusterConfig(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -681,6 +936,16 @@ func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb.GetClusterC
 
 // PutClusterConfig implements gRPC PDServer.
 func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterConfigRequest) (*pdpb.PutClusterConfigResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).PutClusterConfig(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -703,6 +968,16 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 
 // ScatterRegion implements gRPC PDServer.
 func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionRequest) (*pdpb.ScatterRegionResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).ScatterRegion(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -765,6 +1040,16 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 
 // GetGCSafePoint implements gRPC PDServer.
 func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePointRequest) (*pdpb.GetGCSafePointResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).GetGCSafePoint(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -795,6 +1080,16 @@ func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 
 // UpdateGCSafePoint implements gRPC PDServer.
 func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (*pdpb.UpdateGCSafePointResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).UpdateGCSafePoint(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -836,6 +1131,16 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 	s.serviceSafePointLock.Lock()
 	defer s.serviceSafePointLock.Unlock()
 
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).UpdateServiceGCSafePoint(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -850,7 +1155,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		}
 	}
 
-	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(config.GlobalDCLocation, 1)
+	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -866,7 +1171,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			ExpiredAt: now.Unix() + request.TTL,
 			SafePoint: request.SafePoint,
 		}
-		if request.TTL == math.MaxInt64 {
+		if math.MaxInt64-now.Unix() <= request.TTL {
 			ssp.ExpiredAt = math.MaxInt64
 		}
 		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
@@ -895,6 +1200,16 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 
 // GetOperator gets information about the operator belonging to the specify region.
 func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).GetOperator(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -962,32 +1277,28 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	})
 }
 
-// SyncMaxTS is a RPC method used to synchronize the timestamp of TSO between the
-// Global TSO Allocator and multi Local TSO Allocator leaders. It contains two
-// phases:
-// 1. Collect timestamps among all Local TSO Allocator leaders, and choose the
-//    greatest one as MaxTS.
-// 2. Send the MaxTS to all Local TSO Allocator leaders. They will compare MaxTS
-//    with its current TSO in memory to make sure their local TSOs are not less
-//    than MaxTS by writing MaxTS into memory to finish the global TSO synchronization.
+// Only used for the TestLocalAllocatorLeaderChange.
+var mockLocalAllocatorLeaderChangeFlag = false
+
+// SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
+// and write it into all Local TSO Allocators then if it's indeed the biggest one.
 func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
 		return nil, err
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
 	// There is no dc-location found in this server, return err.
-	if len(tsoAllocatorManager.GetClusterDCLocations()) == 0 {
-		return nil, status.Errorf(codes.Unknown, "empty cluster dc-Location found, checker may not work properly")
+	if tsoAllocatorManager.GetClusterDCLocationsNumber() == 0 {
+		return nil, status.Errorf(codes.Unknown, "empty cluster dc-location found, checker may not work properly")
 	}
 	// Get all Local TSO Allocator leaders
 	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
-	var processedDCs []string
-	if request.GetMaxTs() == nil || request.GetMaxTs().GetPhysical() == 0 {
-		// The first phase of synchronization: collect the max local ts
-		var maxLocalTS pdpb.Timestamp
+	if !request.GetSkipCheck() {
+		var maxLocalTS *pdpb.Timestamp
+		syncedDCs := make([]string, 0, len(allocatorLeaders))
 		for _, allocator := range allocatorLeaders {
 			// No longer leader, just skip here because
 			// the global allocator will check if all DCs are handled.
@@ -998,18 +1309,45 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 			if err != nil {
 				return nil, status.Errorf(codes.Unknown, err.Error())
 			}
-			if tsoutil.CompareTimestamp(&currentLocalTSO, &maxLocalTS) > 0 {
+			if tsoutil.CompareTimestamp(currentLocalTSO, maxLocalTS) > 0 {
 				maxLocalTS = currentLocalTSO
 			}
-			processedDCs = append(processedDCs, allocator.GetDCLocation())
+			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 		}
-		return &pdpb.SyncMaxTSResponse{
-			Header:     s.header(),
-			MaxLocalTs: &maxLocalTS,
-			Dcs:        processedDCs,
-		}, nil
+
+		failpoint.Inject("mockLocalAllocatorLeaderChange", func() {
+			if !mockLocalAllocatorLeaderChangeFlag {
+				maxLocalTS = nil
+				request.MaxTs = nil
+				mockLocalAllocatorLeaderChangeFlag = true
+			}
+		})
+
+		if maxLocalTS == nil {
+			return nil, status.Errorf(codes.Unknown, "local tso allocator leaders have changed during the sync, should retry")
+		}
+		if request.GetMaxTs() == nil {
+			return nil, status.Errorf(codes.Unknown, "empty maxTS in the request, should retry")
+		}
+		// Found a bigger or equal maxLocalTS, return it directly.
+		cmpResult := tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs())
+		if cmpResult >= 0 {
+			// Found an equal maxLocalTS, plus 1 to logical part before returning it.
+			// For example, we have a Global TSO t1 and a Local TSO t2, they have the
+			// same physical and logical parts. After being differentiating with suffix,
+			// there will be (t1.logical << suffixNum + 0) < (t2.logical << suffixNum + N),
+			// where N is bigger than 0, which will cause a Global TSO fallback than the previous Local TSO.
+			if cmpResult == 0 {
+				maxLocalTS.Logical += 1
+			}
+			return &pdpb.SyncMaxTSResponse{
+				Header:     s.header(),
+				MaxLocalTs: maxLocalTS,
+				SyncedDcs:  syncedDCs,
+			}, nil
+		}
 	}
-	// The second phase of synchronization: do the writing
+	syncedDCs := make([]string, 0, len(allocatorLeaders))
 	for _, allocator := range allocatorLeaders {
 		if !allocator.IsAllocatorLeader() {
 			continue
@@ -1017,16 +1355,26 @@ func (s *Server) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) 
 		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
 			return nil, status.Errorf(codes.Unknown, err.Error())
 		}
-		processedDCs = append(processedDCs, allocator.GetDCLocation())
+		syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 	}
 	return &pdpb.SyncMaxTSResponse{
-		Header: s.header(),
-		Dcs:    processedDCs,
+		Header:    s.header(),
+		SyncedDcs: syncedDCs,
 	}, nil
 }
 
 // SplitRegions split regions by the given split keys
 func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).SplitRegions(ctx, request)
+	}
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -1038,8 +1386,7 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 	}, nil
 }
 
-// GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager, and will collect current max
-// Local TSO if the NeedSyncMaxTSO flag in dc-location info is true.
+// GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
 func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
 	var err error
 	if err = s.validateInternalRequest(request.GetHeader(), false); err != nil {
@@ -1082,8 +1429,94 @@ func (s *Server) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLe
 	if onlyAllowLeader {
 		leaderID := s.GetLeader().GetMemberId()
 		if leaderID != header.GetSenderId() {
-			return status.Errorf(codes.FailedPrecondition, "mismatch leader id, need %d but got %d", leaderID, header.GetSenderId())
+			return status.Errorf(codes.FailedPrecondition, "%s, need %d but got %d", errs.MismatchLeaderErr, leaderID, header.GetSenderId())
 		}
 	}
 	return nil
+}
+
+func (s *Server) getDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error) {
+	client, ok := s.clientConns.Load(forwardedHost)
+	if !ok {
+		tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+		if err != nil {
+			return nil, err
+		}
+		cc, err := grpcutil.GetClientConn(ctx, forwardedHost, tlsConfig)
+		if err != nil {
+			return nil, err
+		}
+		client = cc
+		s.clientConns.Store(forwardedHost, cc)
+	}
+	return client.(*grpc.ClientConn), nil
+}
+
+func getForwardedHost(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		log.Debug("failed to get forwarding metadata")
+	}
+	if t, ok := md[grpcutil.ForwardMetadataKey]; ok {
+		return t[0]
+	}
+	return ""
+}
+
+func (s *Server) isLocalRequest(forwardedHost string) bool {
+	if forwardedHost == "" {
+		return true
+	}
+	memberAddrs := s.GetMember().Member().GetClientUrls()
+	for _, addr := range memberAddrs {
+		if addr == forwardedHost {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) createTsoForwardStream(client *grpc.ClientConn) (pdpb.PD_TsoClient, context.CancelFunc, error) {
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(s.ctx)
+	go checkStream(ctx, cancel, done)
+	forwardStream, err := pdpb.NewPDClient(client).Tso(ctx)
+	done <- struct{}{}
+	return forwardStream, cancel, err
+}
+
+func (s *Server) createHeartbeatForwardStream(client *grpc.ClientConn) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(s.ctx)
+	go checkStream(ctx, cancel, done)
+	forwardStream, err := pdpb.NewPDClient(client).RegionHeartbeat(ctx)
+	done <- struct{}{}
+	return forwardStream, cancel, err
+}
+
+func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
+	defer close(errCh)
+	for {
+		resp, err := forwardStream.Recv()
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		if err := server.Send(resp); err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+	}
+}
+
+// TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
+func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	select {
+	case <-done:
+		return
+	case <-time.After(3 * time.Second):
+		cancel()
+	case <-streamCtx.Done():
+	}
+	<-done
 }

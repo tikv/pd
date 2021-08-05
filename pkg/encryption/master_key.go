@@ -15,7 +15,7 @@ package encryption
 
 import (
 	"encoding/hex"
-	"io/ioutil"
+	"os"
 	"strings"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
@@ -108,7 +108,7 @@ func newMasterKeyFromFile(config *encryptionpb.MasterKeyFile) (*MasterKey, error
 	if path == "" {
 		return nil, errs.ErrEncryptionNewMasterKey.GenWithStack("missing master key file path")
 	}
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, errs.ErrEncryptionNewMasterKey.Wrap(err).GenWithStack(
 			"fail to get encryption key from file %s", path, err.Error())

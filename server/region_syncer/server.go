@@ -67,16 +67,18 @@ type Server interface {
 
 // RegionSyncer is used to sync the region information without raft.
 type RegionSyncer struct {
-	sync.RWMutex
-	streams            map[string]ServerStream
-	regionSyncerCtx    context.Context
-	regionSyncerCancel context.CancelFunc
-	server             Server
-	closed             chan struct{}
-	wg                 sync.WaitGroup
-	history            *historyBuffer
-	limit              *ratelimit.Bucket
-	tlsConfig          *grpcutil.TLSConfig
+	mu struct {
+		sync.RWMutex
+		streams            map[string]ServerStream
+		regionSyncerCtx    context.Context
+		regionSyncerCancel context.CancelFunc
+		closed             chan struct{}
+	}
+	server    Server
+	wg        sync.WaitGroup
+	history   *historyBuffer
+	limit     *ratelimit.Bucket
+	tlsConfig *grpcutil.TLSConfig
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -85,14 +87,15 @@ type RegionSyncer struct {
 // Usually open the region syncer in huge cluster and the server
 // no longer etcd but go-leveldb.
 func NewRegionSyncer(s Server) *RegionSyncer {
-	return &RegionSyncer{
-		streams:   make(map[string]ServerStream),
+	syncer := &RegionSyncer{
 		server:    s,
-		closed:    make(chan struct{}),
 		history:   newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
 		limit:     ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
 		tlsConfig: s.GetTLSConfig(),
 	}
+	syncer.mu.streams = make(map[string]ServerStream)
+	syncer.mu.closed = make(chan struct{})
+	return syncer
 }
 
 // RunServer runs the server of the region syncer.
@@ -109,8 +112,8 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 			return
 		case first := <-regionNotifier:
 			requests = append(requests, first.GetMeta())
-			stats := append(stats, first.GetStat())
-			leaders := append(leaders, first.GetLeader())
+			stats = append(stats, first.GetStat())
+			leaders = append(leaders, first.GetLeader())
 			startIndex := s.history.GetNextIndex()
 			s.history.Record(first)
 			pending := len(regionNotifier)
@@ -137,6 +140,8 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 			s.broadcast(alive)
 		}
 		requests = requests[:0]
+		stats = stats[:0]
+		leaders = leaders[:0]
 	}
 }
 
@@ -207,9 +212,11 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 				lastIndex += len(metas)
 				if err := stream.Send(resp); err != nil {
 					log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
+					return err
 				}
 				metas = metas[:0]
 				stats = stats[:0]
+				leaders = leaders[:0]
 			}
 			log.Info("requested server has completed full synchronization with server",
 				zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))
@@ -247,28 +254,28 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 
 // bindStream binds the established server stream.
 func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
-	s.Lock()
-	defer s.Unlock()
-	s.streams[name] = stream
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mu.streams[name] = stream
 }
 
 func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
 	var failed []string
-	s.RLock()
-	for name, sender := range s.streams {
+	s.mu.RLock()
+	for name, sender := range s.mu.streams {
 		err := sender.Send(regions)
 		if err != nil {
 			log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
 			failed = append(failed, name)
 		}
 	}
-	s.RUnlock()
+	s.mu.RUnlock()
 	if len(failed) > 0 {
-		s.Lock()
+		s.mu.Lock()
 		for _, name := range failed {
-			delete(s.streams, name)
+			delete(s.mu.streams, name)
 			log.Info("region syncer delete the stream", zap.String("stream", name))
 		}
-		s.Unlock()
+		s.mu.Unlock()
 	}
 }

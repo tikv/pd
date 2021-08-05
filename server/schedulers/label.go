@@ -90,7 +90,11 @@ func (s *labelScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *labelScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+	}
+	return allowed
 }
 
 func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

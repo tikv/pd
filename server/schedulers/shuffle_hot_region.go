@@ -113,15 +113,15 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool 
 	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
-	// TODO: Increment OperatorLimitCounter for OpHotRegion
-	//if !hotRegionAllowed {
-	//}
+	if !hotRegionAllowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpHotRegion.String()).Inc()
+	}
 	if !regionAllowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
 	}
-	// TODO: Increment OperatorLimitCounter for OpLeader
-	//if !leaderAllowed {
-	//}
+	if !leaderAllowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+	}
 	return hotRegionAllowed && regionAllowed && leaderAllowed
 }
 
@@ -132,19 +132,22 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 }
 
 func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
+	stores := cluster.GetStores()
 	storesLoads := cluster.GetStoresLoads()
 	switch typ {
 	case read:
 		s.stLoadInfos[readLeader] = summaryStoresLoad(
+			stores,
 			storesLoads,
-			map[uint64]Influence{},
+			map[uint64]*Influence{},
 			cluster.RegionReadStats(),
 			read, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos[readLeader])
 	case write:
 		s.stLoadInfos[writeLeader] = summaryStoresLoad(
+			stores,
 			storesLoads,
-			map[uint64]Influence{},
+			map[uint64]*Influence{},
 			cluster.RegionWriteStats(),
 			write, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos[writeLeader])

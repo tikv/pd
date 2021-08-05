@@ -15,8 +15,6 @@ package movingaverage
 
 import (
 	"time"
-
-	"github.com/phf/go-queue/queue"
 )
 
 type deltaWithInterval struct {
@@ -30,7 +28,7 @@ type deltaWithInterval struct {
 // stores recent changes that happened in the last avgInterval,
 // then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
-	que         *queue.Queue      // The element is `deltaWithInterval`, sum of all elements' interval is less than `avgInterval`
+	que         *SafeQueue        // The element is `deltaWithInterval`, sum of all elements' interval is less than `avgInterval`
 	margin      deltaWithInterval // The last element from `PopFront` in `que`
 	deltaSum    float64           // Including `margin` and all elements in `que`
 	intervalSum time.Duration     // Including `margin` and all elements in `que`
@@ -40,7 +38,7 @@ type AvgOverTime struct {
 // NewAvgOverTime returns an AvgOverTime with given interval.
 func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 	return &AvgOverTime{
-		que: queue.New(),
+		que: NewSafeQueue(),
 		margin: deltaWithInterval{
 			delta:    0,
 			interval: 0,

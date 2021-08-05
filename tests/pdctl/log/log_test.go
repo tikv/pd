@@ -16,12 +16,14 @@ package log_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -45,16 +47,17 @@ func (s *logTestSuite) TestLog(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	var testCases = []struct {
@@ -85,7 +88,7 @@ func (s *logTestSuite) TestLog(c *C) {
 	}
 
 	for _, testCase := range testCases {
-		_, _, err = pdctl.ExecuteCommandC(cmd, testCase.cmd...)
+		_, err = pdctl.ExecuteCommand(cmd, testCase.cmd...)
 		c.Assert(err, IsNil)
 		c.Assert(svr.GetConfig().Log.Level, Equals, testCase.expect)
 	}

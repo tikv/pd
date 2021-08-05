@@ -258,7 +258,7 @@ func (bc *BasicCluster) GetStoreLeaderRegionSize(storeID uint64) int64 {
 func (bc *BasicCluster) GetStoreRegionSize(storeID uint64) int64 {
 	bc.RLock()
 	defer bc.RUnlock()
-	return bc.Regions.GetStoreLeaderRegionSize(storeID) + bc.Regions.GetStoreFollowerRegionSize(storeID) + bc.Regions.GetStoreLearnerRegionSize(storeID)
+	return bc.Regions.GetStoreRegionSize(storeID)
 }
 
 // GetAverageRegionSize returns the average region approximate size.
@@ -266,6 +266,35 @@ func (bc *BasicCluster) GetAverageRegionSize() int64 {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Regions.GetAverageRegionSize()
+}
+
+func (bc *BasicCluster) getWriteRate(
+	f func(storeID uint64) (bytesRate, keysRate float64),
+) (storeIDs []uint64, bytesRates, keysRates []float64) {
+	bc.RLock()
+	defer bc.RUnlock()
+	count := len(bc.Stores.stores)
+	storeIDs = make([]uint64, 0, count)
+	bytesRates = make([]float64, 0, count)
+	keysRates = make([]float64, 0, count)
+	for _, store := range bc.Stores.stores {
+		id := store.GetID()
+		bytesRate, keysRate := f(id)
+		storeIDs = append(storeIDs, id)
+		bytesRates = append(bytesRates, bytesRate)
+		keysRates = append(keysRates, keysRate)
+	}
+	return
+}
+
+// GetStoresLeaderWriteRate get total write rate of each store's leaders.
+func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
+	return bc.getWriteRate(bc.Regions.GetStoreLeaderWriteRate)
+}
+
+// GetStoresWriteRate get total write rate of each store's regions.
+func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
+	return bc.getWriteRate(bc.Regions.GetStoreWriteRate)
 }
 
 // PutStore put a store.
@@ -282,37 +311,34 @@ func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 	bc.Stores.DeleteStore(store)
 }
 
-// TakeStore returns the point of the origin StoreInfo with the specified storeID.
-func (bc *BasicCluster) TakeStore(storeID uint64) *StoreInfo {
+func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
 	bc.RLock()
 	defer bc.RUnlock()
-	return bc.Stores.TakeStore(storeID)
+	origin = bc.Regions.GetRegion(region.GetID())
+	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
+		overlaps = bc.Regions.GetOverlaps(region)
+	}
+	return
 }
 
 // PreCheckPutRegion checks if the region is valid to put.
 func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
-	bc.RLock()
-	origin := bc.Regions.GetRegion(region.GetID())
-	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		for _, item := range bc.Regions.GetOverlaps(region) {
-			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
-				bc.RUnlock()
-				return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
-			}
+	origin, overlaps := bc.getRelevantRegions(region)
+	for _, item := range overlaps {
+		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
+			return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
 		}
 	}
-	bc.RUnlock()
 	if origin == nil {
 		return nil, nil
 	}
+
 	r := region.GetRegionEpoch()
 	o := origin.GetRegionEpoch()
-
 	// TiKV reports term after v3.0
 	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
-
 	// Region meta is stale, return an error.
-	if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() || isTermBehind {
+	if isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
 		return origin, errRegionIsStale(region.GetMeta(), origin.GetMeta())
 	}
 

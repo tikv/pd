@@ -91,7 +91,11 @@ func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *randomMergeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.OpController.OperatorCount(operator.OpMerge) < cluster.GetOpts().GetMergeScheduleLimit()
+	allowed := s.OpController.OperatorCount(operator.OpMerge) < cluster.GetOpts().GetMergeScheduleLimit()
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpMerge.String()).Inc()
+	}
+	return allowed
 }
 
 func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
@@ -124,7 +128,7 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		return nil
 	}
 
-	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpAdmin)
+	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpMerge)
 	if err != nil {
 		log.Debug("fail to create merge region operator", errs.ZapError(err))
 		return nil

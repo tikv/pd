@@ -72,6 +72,15 @@ var (
 			Help:      "Status of the scheduling configurations.",
 		}, []string{"type"})
 
+	// StoreLimitGauge is used to record the current store limit.
+	StoreLimitGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "store_limit",
+			Help:      "Status of the store limit.",
+		}, []string{"store", "type"})
+
 	regionLabelLevelGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -111,6 +120,22 @@ var (
 			Help:      "The distribution of region write keys",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 18),
 		})
+	readQueryHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "read_query_hist",
+			Help:      "The distribution of region read query",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+		})
+	writeQueryHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "write_query_hist",
+			Help:      "The distribution of region write query",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+		})
 	regionHeartbeatIntervalHist = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -127,6 +152,29 @@ var (
 			Help:      "Bucketed histogram of the batch size of handled requests.",
 			Buckets:   prometheus.LinearBuckets(0, 5, 12),
 		})
+
+	regionAbnormalPeerDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "abnormal_peer_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
+			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
+		}, []string{"type"})
+
+	hotCacheFlowQueueStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "hotcache",
+			Name:      "flow_queue_status",
+			Help:      "Status of the hotspot flow queue.",
+		}, []string{"type"})
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	regionMissVoterPeerDuration = regionAbnormalPeerDuration.WithLabelValues("miss-voter-peer")
+	regionDownPeerDuration      = regionAbnormalPeerDuration.WithLabelValues("down-peer")
 )
 
 func init() {
@@ -137,6 +185,7 @@ func init() {
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)
+	prometheus.MustRegister(StoreLimitGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
 	prometheus.MustRegister(readByteHist)
 	prometheus.MustRegister(readKeyHist)
@@ -144,4 +193,6 @@ func init() {
 	prometheus.MustRegister(writeByteHist)
 	prometheus.MustRegister(regionHeartbeatIntervalHist)
 	prometheus.MustRegister(storeHeartbeatIntervalHist)
+	prometheus.MustRegister(regionAbnormalPeerDuration)
+	prometheus.MustRegister(hotCacheFlowQueueStatusGauge)
 }

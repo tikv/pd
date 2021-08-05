@@ -14,6 +14,7 @@
 package operator
 
 import (
+	"context"
 	"encoding/json"
 	"sync/atomic"
 	"testing"
@@ -36,11 +37,14 @@ var _ = Suite(&testOperatorSuite{})
 
 type testOperatorSuite struct {
 	cluster *mockcluster.Cluster
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (s *testOperatorSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(cfg)
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
@@ -54,6 +58,10 @@ func (s *testOperatorSuite) SetUpTest(c *C) {
 	for storeID, labels := range stores {
 		s.cluster.PutStoreWithLabels(storeID, labels...)
 	}
+}
+
+func (s *testOperatorSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {
@@ -87,7 +95,7 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 }
 
 func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
-	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, OpAdmin|kind, steps...)
+	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, kind, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OpStep) {
@@ -105,7 +113,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 		TransferLeader{FromStore: 3, ToStore: 1},
 		RemovePeer{FromStore: 3},
 	}
-	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+	op := s.newTestOperator(1, OpAdmin|OpLeader|OpRegion, steps...)
 	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	s.checkSteps(c, op, steps)
 	op.Start()
@@ -225,7 +233,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 }
 
 func (s *testOperatorSuite) TestOperatorKind(c *C) {
-	c.Assert((OpLeader | OpReplica).String(), Equals, "leader,replica")
+	c.Assert((OpLeader | OpReplica).String(), Equals, "replica,leader")
 	c.Assert(OpKind(0).String(), Equals, "unknown")
 	k, err := ParseOperatorKind("region,leader")
 	c.Assert(err, IsNil)
@@ -372,5 +380,41 @@ func (s *testOperatorSuite) TestCheck(c *C) {
 		region = s.newTestRegion(1, 1, [2]uint64{1, 1})
 		c.Assert(op.Check(region), IsNil)
 		c.Assert(op.Status(), Equals, SUCCESS)
+	}
+}
+
+func (s *testOperatorSuite) TestSchedulerKind(c *C) {
+	testdata := []struct {
+		op     *Operator
+		expect OpKind
+	}{
+		{
+			op:     s.newTestOperator(1, OpAdmin|OpMerge|OpRegion),
+			expect: OpAdmin,
+		}, {
+			op:     s.newTestOperator(1, OpMerge|OpLeader|OpRegion),
+			expect: OpMerge,
+		}, {
+			op:     s.newTestOperator(1, OpReplica|OpRegion),
+			expect: OpReplica,
+		}, {
+			op:     s.newTestOperator(1, OpSplit|OpRegion),
+			expect: OpSplit,
+		}, {
+			op:     s.newTestOperator(1, OpRange|OpRegion),
+			expect: OpRange,
+		}, {
+			op:     s.newTestOperator(1, OpHotRegion|OpLeader|OpRegion),
+			expect: OpHotRegion,
+		}, {
+			op:     s.newTestOperator(1, OpRegion|OpLeader),
+			expect: OpRegion,
+		}, {
+			op:     s.newTestOperator(1, OpLeader),
+			expect: OpLeader,
+		},
+	}
+	for _, v := range testdata {
+		c.Assert(v.op.SchedulerKind(), Equals, v.expect)
 	}
 }

@@ -52,6 +52,8 @@ var (
 	PushOperatorTickInterval = 500 * time.Millisecond
 	// StoreBalanceBaseTime represents the base time of balance rate.
 	StoreBalanceBaseTime float64 = 60
+	// FastOperatorFinishTime min finish time, if finish duration less than it,op will be pushed to fast operator queue
+	FastOperatorFinishTime = 10 * time.Second
 )
 
 // OperatorController is used to limit the speed of scheduling.
@@ -61,6 +63,7 @@ type OperatorController struct {
 	cluster         opt.Cluster
 	operators       map[uint64]*operator.Operator
 	hbStreams       *hbstream.HeartbeatStreams
+	fastOperators   *cache.TTLUint64
 	histories       *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
@@ -78,6 +81,7 @@ func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams *
 		operators:       make(map[uint64]*operator.Operator),
 		hbStreams:       hbStreams,
 		histories:       list.New(),
+		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
 		storesLimit:     make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit),
@@ -125,6 +129,10 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
+			}
+			if time.Since(op.GetStartTime()) < FastOperatorFinishTime {
+				log.Debug("op finish duration less than 10s", zap.Uint64("region-id", op.RegionID()))
+				oc.pushFastOperator(op)
 			}
 		case operator.TIMEOUT:
 			if oc.RemoveOperator(op) {
@@ -641,85 +649,29 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			// The newly added peer is pending.
 			return
 		}
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_AddNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Voter,
-				},
-			},
-		}
+		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.AddLightPeer:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_AddNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Voter,
-				},
-			},
-		}
+		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.AddLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Learner,
-				},
-			},
-		}
+		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Learner,
-				},
-			},
-		}
+		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.PromoteLearner:
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				// reuse AddNode type
-				ChangeType: eraftpb.ConfChangeType_AddNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Voter,
-				},
-			},
-		}
+		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.DemoteFollower:
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				// reuse AddLearnerNode type
-				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
-				Peer: &metapb.Peer{
-					Id:      st.PeerID,
-					StoreId: st.ToStore,
-					Role:    metapb.PeerRole_Learner,
-				},
-			},
-		}
+		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.RemovePeer:
 		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
@@ -758,12 +710,42 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 	oc.hbStreams.SendMsg(region, cmd)
 }
 
+func addNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
+	return &pdpb.RegionHeartbeatResponse{
+		ChangePeer: &pdpb.ChangePeer{
+			ChangeType: eraftpb.ConfChangeType_AddNode,
+			Peer: &metapb.Peer{
+				Id:      id,
+				StoreId: storeID,
+				Role:    metapb.PeerRole_Voter,
+			},
+		},
+	}
+}
+
+func addLearnerNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
+	return &pdpb.RegionHeartbeatResponse{
+		ChangePeer: &pdpb.ChangePeer{
+			ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+			Peer: &metapb.Peer{
+				Id:      id,
+				StoreId: storeID,
+				Role:    metapb.PeerRole_Learner,
+			},
+		},
+	}
+}
+
 func (oc *OperatorController) pushHistory(op *operator.Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	for _, h := range op.History() {
 		oc.histories.PushFront(h)
 	}
+}
+
+func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
+	oc.fastOperators.Put(op.RegionID(), op)
 }
 
 // PruneHistory prunes a part of operators' history.
@@ -799,21 +781,16 @@ func (oc *OperatorController) updateCounts(operators map[uint64]*operator.Operat
 		delete(oc.counts, k)
 	}
 	for _, op := range operators {
-		oc.counts[op.Kind()]++
+		oc.counts[op.SchedulerKind()]++
 	}
 }
 
-// OperatorCount gets the count of operators filtered by mask.
-func (oc *OperatorController) OperatorCount(mask operator.OpKind) uint64 {
+// OperatorCount gets the count of operators filtered by kind.
+// kind only has one OpKind.
+func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
 	oc.RLock()
 	defer oc.RUnlock()
-	var total uint64
-	for k, count := range oc.counts {
-		if k&mask != 0 {
-			total += count
-		}
-	}
-	return total
+	return oc.counts[kind]
 }
 
 // GetOpInfluence gets OpInfluence.
@@ -832,6 +809,25 @@ func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInf
 		}
 	}
 	return influence
+}
+
+// GetFastOpInfluence get fast finish operator influence
+func (oc *OperatorController) GetFastOpInfluence(cluster opt.Cluster, influence operator.OpInfluence) {
+	for _, id := range oc.fastOperators.GetAllID() {
+		value, ok := oc.fastOperators.Get(id)
+		if !ok {
+			continue
+		}
+		op, ok := value.(*operator.Operator)
+		if !ok {
+			continue
+		}
+		region := cluster.GetRegion(op.RegionID())
+		if region != nil {
+			log.Debug("op influence less than 10s", zap.Uint64("region-id", op.RegionID()))
+			op.TotalInfluence(influence, region)
+		}
+	}
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
@@ -967,31 +963,4 @@ func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
 		return core.ByCount
 	}
 	return oc.cluster.GetOpts().GetLeaderSchedulePolicy()
-}
-
-// CollectStoreLimitMetrics collects the metrics about store limit
-func (oc *OperatorController) CollectStoreLimitMetrics() {
-	oc.RLock()
-	defer oc.RUnlock()
-	if oc.storesLimit == nil {
-		return
-	}
-	stores := oc.cluster.GetStores()
-	for _, store := range stores {
-		if store != nil {
-			storeID := store.GetID()
-			storeIDStr := strconv.FormatUint(storeID, 10)
-			for n, v := range storelimit.TypeNameValue {
-				var storeLimit *storelimit.StoreLimit
-				if oc.storesLimit[storeID] == nil || oc.storesLimit[storeID][v] == nil {
-					// Set to 0 to represent the store limit of the specific type is not initialized.
-					storeLimitRateGauge.WithLabelValues(storeIDStr, n).Set(0)
-					continue
-				}
-				storeLimit = oc.storesLimit[storeID][v]
-				storeLimitAvailableGauge.WithLabelValues(storeIDStr, n).Set(float64(storeLimit.Available()) / float64(storelimit.RegionInfluence[v]))
-				storeLimitRateGauge.WithLabelValues(storeIDStr, n).Set(storeLimit.Rate() * StoreBalanceBaseTime)
-			}
-		}
-	}
 }

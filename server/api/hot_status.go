@@ -14,9 +14,12 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 )
@@ -32,6 +35,8 @@ type HotStoreStats struct {
 	BytesReadStats  map[uint64]float64 `json:"bytes-read-rate,omitempty"`
 	KeysWriteStats  map[uint64]float64 `json:"keys-write-rate,omitempty"`
 	KeysReadStats   map[uint64]float64 `json:"keys-read-rate,omitempty"`
+	QueryWriteStats map[uint64]float64 `json:"query-write-rate,omitempty"`
+	QueryReadStats  map[uint64]float64 `json:"query-read-rate,omitempty"`
 }
 
 func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusHandler {
@@ -47,7 +52,34 @@ func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusH
 // @Success 200 {object} statistics.StoreHotPeersInfos
 // @Router /hotspot/regions/write [get]
 func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.Handler.GetHotWriteRegions())
+	storeIDs := r.URL.Query()["store_id"]
+	if len(storeIDs) < 1 {
+		h.rd.JSON(w, http.StatusOK, h.Handler.GetHotWriteRegions())
+		return
+	}
+
+	rc, err := h.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var ids []uint64
+	for _, storeID := range storeIDs {
+		id, err := strconv.ParseUint(storeID, 10, 64)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid store id: %s", storeID))
+			return
+		}
+		store := rc.GetStore(id)
+		if store == nil {
+			h.rd.JSON(w, http.StatusNotFound, server.ErrStoreNotFound(id).Error())
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	h.rd.JSON(w, http.StatusOK, rc.GetHotWriteRegions(ids...))
 }
 
 // @Tags hotspot
@@ -56,7 +88,34 @@ func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Req
 // @Success 200 {object} statistics.StoreHotPeersInfos
 // @Router /hotspot/regions/read [get]
 func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.Handler.GetHotReadRegions())
+	storeIDs := r.URL.Query()["store_id"]
+	if len(storeIDs) < 1 {
+		h.rd.JSON(w, http.StatusOK, h.Handler.GetHotReadRegions())
+		return
+	}
+
+	rc, err := h.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var ids []uint64
+	for _, storeID := range storeIDs {
+		id, err := strconv.ParseUint(storeID, 10, 64)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid store id: %s", storeID))
+			return
+		}
+		store := rc.GetStore(id)
+		if store == nil {
+			h.rd.JSON(w, http.StatusNotFound, server.ErrStoreNotFound(id).Error())
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	h.rd.JSON(w, http.StatusOK, rc.GetHotReadRegions(ids...))
 }
 
 // @Tags hotspot
@@ -70,12 +129,26 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 		BytesReadStats:  make(map[uint64]float64),
 		KeysWriteStats:  make(map[uint64]float64),
 		KeysReadStats:   make(map[uint64]float64),
+		QueryWriteStats: make(map[uint64]float64),
+		QueryReadStats:  make(map[uint64]float64),
 	}
-	for id, loads := range h.GetStoresLoads() {
-		stats.BytesWriteStats[id] = loads[statistics.StoreWriteBytes]
-		stats.BytesReadStats[id] = loads[statistics.StoreReadBytes]
-		stats.KeysWriteStats[id] = loads[statistics.StoreWriteKeys]
-		stats.KeysReadStats[id] = loads[statistics.StoreReadKeys]
+	stores, _ := h.GetStores()
+	storesLoads := h.GetStoresLoads()
+	for _, store := range stores {
+		id := store.GetID()
+		if loads, ok := storesLoads[id]; ok {
+			if core.IsTiFlashStore(store.GetMeta()) {
+				stats.BytesWriteStats[id] = loads[statistics.StoreRegionsWriteBytes]
+				stats.KeysWriteStats[id] = loads[statistics.StoreRegionsWriteKeys]
+			} else {
+				stats.BytesWriteStats[id] = loads[statistics.StoreWriteBytes]
+				stats.KeysWriteStats[id] = loads[statistics.StoreWriteKeys]
+			}
+			stats.BytesReadStats[id] = loads[statistics.StoreReadBytes]
+			stats.KeysReadStats[id] = loads[statistics.StoreReadKeys]
+			stats.QueryWriteStats[id] = loads[statistics.StoreWriteQuery]
+			stats.QueryReadStats[id] = loads[statistics.StoreReadQuery]
+		}
 	}
 	h.rd.JSON(w, http.StatusOK, stats)
 }

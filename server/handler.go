@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/tso"
 	"go.uber.org/zap"
 )
 
@@ -118,6 +119,15 @@ func (h *Handler) IsSchedulerDisabled(name string) (bool, error) {
 		return false, err
 	}
 	return rc.IsSchedulerDisabled(name)
+}
+
+// IsSchedulerExisted returns whether scheduler is existed.
+func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return false, err
+	}
+	return rc.IsSchedulerExisted(name)
 }
 
 // GetScheduleConfig returns ScheduleConfig.
@@ -394,8 +404,7 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	if err != nil {
 		return err
 	}
-	c.SetAllStoresLimit(limitType, ratePerMin)
-	return nil
+	return c.SetAllStoresLimit(limitType, ratePerMin)
 }
 
 // SetAllStoresLimitTTL is used to set limit of all stores with ttl
@@ -418,7 +427,8 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 		for _, label := range labels {
 			for _, sl := range store.GetLabels() {
 				if label.Key == sl.Key && label.Value == sl.Value {
-					c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
+					// TODO: need to handle some of stores are persisted, and some of stores are not.
+					_ = c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
 				}
 			}
 		}
@@ -441,8 +451,7 @@ func (h *Handler) SetStoreLimit(storeID uint64, ratePerMin float64, limitType st
 	if err != nil {
 		return err
 	}
-	c.SetStoreLimit(storeID, limitType, ratePerMin)
-	return nil
+	return c.SetStoreLimit(storeID, limitType, ratePerMin)
 }
 
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.
@@ -493,15 +502,9 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 			}
 		}
 	}
-
-	var store *core.StoreInfo
 	for id := range storeIDs {
-		store = c.GetStore(id)
-		if store == nil {
-			return errs.ErrStoreNotFound.FastGenByArgs(id)
-		}
-		if store.IsTombstone() {
-			return errs.ErrStoreTombstone.FastGenByArgs(id)
+		if err := checkStoreState(c, id); err != nil {
+			return err
 		}
 	}
 
@@ -540,12 +543,8 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errors.Errorf("region has no peer in store %v", fromStoreID)
 	}
 
-	toStore := c.GetStore(toStoreID)
-	if toStore == nil {
-		return errs.ErrStoreNotFound.FastGenByArgs(toStoreID)
-	}
-	if toStore.IsTombstone() {
-		return errs.ErrStoreTombstone.FastGenByArgs(toStoreID)
+	if err := checkStoreState(c, toStoreID); err != nil {
+		return err
 	}
 
 	newPeer := &metapb.Peer{StoreId: toStoreID, Role: oldPeer.GetRole()}
@@ -576,12 +575,8 @@ func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (
 		return nil, nil, errors.Errorf("region already has peer in store %v", toStoreID)
 	}
 
-	toStore := c.GetStore(toStoreID)
-	if toStore == nil {
-		return nil, nil, errs.ErrStoreNotFound.FastGenByArgs(toStoreID)
-	}
-	if toStore.IsTombstone() {
-		return nil, nil, errs.ErrStoreTombstone.FastGenByArgs(toStoreID)
+	if err := checkStoreState(c, toStoreID); err != nil {
+		return nil, nil, err
 	}
 
 	return c, region, nil
@@ -843,7 +838,7 @@ func (h *Handler) GetOfflinePeer(typ statistics.RegionStatisticType) ([]*core.Re
 
 // ResetTS resets the ts with specified tso.
 func (h *Handler) ResetTS(ts uint64) error {
-	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(config.GlobalDCLocation)
+	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		return err
 	}
@@ -901,4 +896,18 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	return h.s.SaveTTLConfig(map[string]interface{}{
 		data: value,
 	}, ttl)
+}
+
+func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {
+	store := rc.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if store.IsTombstone() {
+		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
+	}
+	if store.IsUnhealthy() {
+		return errs.ErrStoreUnhealthy.FastGenByArgs(storeID)
+	}
+	return nil
 }

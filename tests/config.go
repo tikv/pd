@@ -15,7 +15,7 @@ package tests
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 
 	"github.com/tikv/pd/pkg/tempurl"
@@ -34,7 +34,7 @@ type serverConfig struct {
 }
 
 func newServerConfig(name string, cc *clusterConfig, join bool) *serverConfig {
-	tempDir, _ := ioutil.TempDir("/tmp", "pd-tests")
+	tempDir, _ := os.MkdirTemp("/tmp", "pd-tests")
 	return &serverConfig{
 		Name:          name,
 		DataDir:       tempDir,
@@ -112,7 +112,7 @@ func (c *clusterConfig) GetClientURL() string {
 }
 
 func (c *clusterConfig) GetClientURLs() []string {
-	var urls []string
+	urls := make([]string, 0, len(c.InitialServers))
 	for _, svr := range c.InitialServers {
 		urls = append(urls, svr.ClientURLs)
 	}

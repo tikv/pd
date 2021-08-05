@@ -48,10 +48,10 @@ func (s *testClientSuite) TestTsLessEqual(c *C) {
 
 func (s *testClientSuite) TestUpdateURLs(c *C) {
 	members := []*pdpb.Member{
-		{Name: "pd4", ClientUrls: []string{"tmp//pd4"}},
-		{Name: "pd1", ClientUrls: []string{"tmp//pd1"}},
-		{Name: "pd3", ClientUrls: []string{"tmp//pd3"}},
-		{Name: "pd2", ClientUrls: []string{"tmp//pd2"}},
+		{Name: "pd4", ClientUrls: []string{"tmp://pd4"}},
+		{Name: "pd1", ClientUrls: []string{"tmp://pd1"}},
+		{Name: "pd3", ClientUrls: []string{"tmp://pd3"}},
+		{Name: "pd2", ClientUrls: []string{"tmp://pd2"}},
 	}
 	getURLs := func(ms []*pdpb.Member) (urls []string) {
 		for _, m := range ms {
@@ -68,6 +68,8 @@ func (s *testClientSuite) TestUpdateURLs(c *C) {
 	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
 }
 
+const testClientURL = "tmp://test.url:5255"
+
 var _ = Suite(&testClientCtxSuite{})
 
 type testClientCtxSuite struct{}
@@ -76,16 +78,16 @@ func (s *testClientCtxSuite) TestClientCtx(c *C) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*3)
 	defer cancel()
-	_, err := NewClientWithContext(ctx, []string{"localhost:8080"}, SecurityOption{})
+	_, err := NewClientWithContext(ctx, []string{testClientURL}, SecurityOption{})
 	c.Assert(err, NotNil)
-	c.Assert(time.Since(start), Less, time.Second*4)
+	c.Assert(time.Since(start), Less, time.Second*5)
 }
 
 func (s *testClientCtxSuite) TestClientWithRetry(c *C) {
 	start := time.Now()
-	_, err := NewClientWithContext(context.TODO(), []string{"localhost:8080"}, SecurityOption{}, WithMaxErrorRetry(5))
+	_, err := NewClientWithContext(context.TODO(), []string{testClientURL}, SecurityOption{}, WithMaxErrorRetry(5))
 	c.Assert(err, NotNil)
-	c.Assert(time.Since(start), Less, time.Second*6)
+	c.Assert(time.Since(start), Less, time.Second*10)
 }
 
 var _ = Suite(&testClientDialOptionSuite{})
@@ -98,15 +100,16 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	defer cancel()
 	// nolint
 	cli := &baseClient{
-		urls:            []string{"localhost:8080"},
-		checkLeaderCh:   make(chan struct{}, 1),
-		ctx:             ctx,
-		cancel:          cancel,
-		security:        SecurityOption{},
-		gRPCDialOptions: []grpc.DialOption{grpc.WithBlock()},
+		urls:                 []string{testClientURL},
+		checkLeaderCh:        make(chan struct{}, 1),
+		checkTSODispatcherCh: make(chan struct{}, 1),
+		ctx:                  ctx,
+		cancel:               cancel,
+		security:             SecurityOption{},
+		gRPCDialOptions:      []grpc.DialOption{grpc.WithBlock()},
 	}
 
-	err := cli.updateLeader()
+	err := cli.updateMember()
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Greater, 500*time.Millisecond)
 }

@@ -26,6 +26,7 @@ import (
 	clusterpkg "github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -53,22 +54,20 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	i := strings.Index(pdAddr, "//")
 	pdAddr = pdAddr[i+2:]
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 	defer cluster.Destroy()
 
 	// cluster
 	args := []string{"-u", pdAddr, "cluster"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	ci := &metapb.Cluster{}
 	c.Assert(json.Unmarshal(output, ci), IsNil)
 	c.Assert(ci, DeepEquals, cluster.GetCluster())
-	echo := pdctl.GetEcho([]string{"-u", pdAddr, "--cacert=ca.pem", "cluster"})
-	c.Assert(strings.Contains(echo, "no such file or directory"), IsTrue)
 
 	// cluster info
 	args = []string{"-u", pdAddr, "cluster"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	ci = &metapb.Cluster{}
 	c.Assert(json.Unmarshal(output, ci), IsNil)
@@ -76,7 +75,7 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 
 	// cluster status
 	args = []string{"-u", pdAddr, "cluster", "status"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	cs := &clusterpkg.Status{}
 	c.Assert(json.Unmarshal(output, cs), IsNil)
@@ -91,7 +90,12 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 
 	// ping
 	args = []string{"-u", pdAddr, "ping"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(output, NotNil)
+
+	// does not exist
+	args = []string{"-u", pdAddr, "--cacert=ca.pem", "cluster"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, ErrorMatches, ".*no such file or directory.*")
 }

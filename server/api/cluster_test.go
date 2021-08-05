@@ -47,6 +47,13 @@ func (s *testClusterSuite) TearDownSuite(c *C) {
 func (s *testClusterSuite) TestCluster(c *C) {
 	// Test get cluster status, and bootstrap cluster
 	s.testGetClusterStatus(c)
+	s.svr.GetPersistOptions().SetPlacementRuleEnabled(true)
+	s.svr.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
+	rm := s.svr.GetRaftCluster().GetRuleManager()
+	rule := rm.GetRule("pd", "default")
+	rule.LocationLabels = []string{"host"}
+	rule.Count = 1
+	rm.SetRule(rule)
 
 	// Test set the config
 	url := fmt.Sprintf("%s/cluster", s.urlPrefix)
@@ -56,7 +63,8 @@ func (s *testClusterSuite) TestCluster(c *C) {
 
 	c2 := &metapb.Cluster{}
 	r := config.ReplicationConfig{
-		MaxReplicas: 6,
+		MaxReplicas:          6,
+		EnablePlacementRules: true,
 	}
 	c.Assert(s.svr.SetReplicationConfig(r), IsNil)
 	err = readJSON(testDialClient, url, c2)
@@ -64,6 +72,7 @@ func (s *testClusterSuite) TestCluster(c *C) {
 
 	c1.MaxPeerCount = 6
 	c.Assert(c1, DeepEquals, c2)
+	c.Assert(int(r.MaxReplicas), Equals, s.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default").Count)
 }
 
 func (s *testClusterSuite) testGetClusterStatus(c *C) {

@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -33,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -42,12 +44,23 @@ func Test(t *testing.T) {
 
 var _ = Suite(&testClusterInfoSuite{})
 
-type testClusterInfoSuite struct{}
+type testClusterInfoSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testClusterInfoSuite) TearDownTest(c *C) {
+	s.cancel()
+}
+
+func (s *testClusterInfoSuite) SetUpTest(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
 
 func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
 	n, np := uint64(3), uint64(3)
 	stores := newTestStores(n, "2.0.0")
@@ -91,12 +104,83 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(tmp, DeepEquals, storeMetasAfterHeartbeat[i])
 	}
+	hotHeartBeat := &pdpb.StoreStats{
+		StoreId:     1,
+		RegionCount: 1,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: 0,
+			EndTimestamp:   10,
+		},
+		PeerStats: []*pdpb.PeerStat{
+			{
+				RegionId:  1,
+				ReadKeys:  9999999,
+				ReadBytes: 9999998,
+				QueryStats: &pdpb.QueryStats{
+					Get: 9999997,
+				},
+			},
+		},
+	}
+	coldHeartBeat := &pdpb.StoreStats{
+		StoreId:     1,
+		RegionCount: 1,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: 0,
+			EndTimestamp:   10,
+		},
+		PeerStats: []*pdpb.PeerStat{},
+	}
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats := cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	interval := float64(hotHeartBeat.Interval.EndTimestamp - hotHeartBeat.Interval.StartTimestamp)
+	c.Assert(storeStats[1][0].Loads, HasLen, int(statistics.RegionStatCount))
+	c.Assert(storeStats[1][0].Loads[statistics.RegionReadBytes], Equals, float64(hotHeartBeat.PeerStats[0].ReadBytes)/interval)
+	c.Assert(storeStats[1][0].Loads[statistics.RegionReadKeys], Equals, float64(hotHeartBeat.PeerStats[0].ReadKeys)/interval)
+	c.Assert(storeStats[1][0].Loads[statistics.RegionReadQuery], Equals, float64(hotHeartBeat.PeerStats[0].QueryStats.Get)/interval)
+	// After cold heartbeat, we won't find region 1 peer in regionStats
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	c.Assert(storeStats[1], HasLen, 0)
+	// After hot heartbeat, we can find region 1 peer again
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	//  after several cold heartbeats, and one hot heartbeat, we also can't find region 1 peer
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 0)
+	c.Assert(storeStats[1], HasLen, 0)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 0)
+	// after 2 hot heartbeats, wo can find region 1 peer again
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
+	time.Sleep(20 * time.Millisecond)
+	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	c.Assert(storeStats[1], HasLen, 1)
+	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
 }
 
 func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
 	stores := newTestStores(3, "2.0.0")
 	for _, store := range stores {
@@ -118,41 +202,138 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 			Available:   50,
 			RegionCount: 1,
 		}
-		newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+		newStore := store.Clone(core.TombstoneStore())
 		c.Assert(cluster.putStoreLocked(newStore), IsNil)
 		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
 		c.Assert(cluster.hotStat.GetRollingStoreStats(store.GetID()), IsNil)
 	}
 }
 
-func (s *testClusterInfoSuite) TestSetStoreState(c *C) {
+func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
-
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	// Put 4 stores.
 	for _, store := range newTestStores(4, "2.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
-	// Store 3 and 4 offline normally.
-	for _, id := range []uint64{3, 4} {
-		c.Assert(cluster.RemoveStore(id), IsNil)
-		c.Assert(cluster.BuryStore(id, false), IsNil)
+	// store 1: up -> offline
+	c.Assert(cluster.RemoveStore(1, false), IsNil)
+	store := cluster.GetStore(1)
+	c.Assert(store.IsOffline(), IsTrue)
+	c.Assert(store.IsPhysicallyDestroyed(), IsFalse)
+
+	// store 1: set physically to true success
+	c.Assert(cluster.RemoveStore(1, true), IsNil)
+	store = cluster.GetStore(1)
+	c.Assert(store.IsOffline(), IsTrue)
+	c.Assert(store.IsPhysicallyDestroyed(), IsTrue)
+
+	// store 2:up -> offline & physically destroyed
+	c.Assert(cluster.RemoveStore(2, true), IsNil)
+	// store 2: set physically destroyed to false failed
+	c.Assert(cluster.RemoveStore(2, false), NotNil)
+	c.Assert(cluster.RemoveStore(2, true), IsNil)
+
+	// store 3: up to offline
+	c.Assert(cluster.RemoveStore(3, false), IsNil)
+	c.Assert(cluster.RemoveStore(3, false), IsNil)
+
+	cluster.checkStores()
+	// store 1,2,3 shuold be to tombstone
+	for storeID := uint64(1); storeID <= 3; storeID++ {
+		c.Assert(cluster.GetStore(storeID).IsTombstone(), IsTrue)
 	}
-	// Change the status of 3 directly back to Up.
-	c.Assert(cluster.SetStoreState(3, metapb.StoreState_Up), IsNil)
-	// Update store 1 2 3
-	for _, store := range newTestStores(3, "3.0.0") {
+	// test bury store
+	for storeID := uint64(0); storeID <= 4; storeID++ {
+		store := cluster.GetStore(storeID)
+		if store == nil || store.IsUp() {
+			c.Assert(cluster.buryStore(storeID), NotNil)
+		} else {
+			c.Assert(cluster.buryStore(storeID), IsNil)
+		}
+	}
+}
+
+func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	// Put 4 stores.
+	for _, store := range newTestStores(4, "2.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
-	// Since the store 4 version is too low, setting it to Up should fail.
-	c.Assert(cluster.SetStoreState(4, metapb.StoreState_Up), NotNil)
+	// store 1: up
+	// store 2: offline
+	c.Assert(cluster.RemoveStore(2, false), IsNil)
+	// store 3: offline and physically destroyed
+	c.Assert(cluster.RemoveStore(3, true), IsNil)
+	// store 4: tombstone
+	c.Assert(cluster.RemoveStore(4, true), IsNil)
+	c.Assert(cluster.buryStore(4), IsNil)
+
+	for id := uint64(1); id <= 4; id++ {
+		storeInfo := cluster.GetStore(id)
+		storeID := storeInfo.GetID() + 1000
+		newStore := &metapb.Store{
+			Id:         storeID,
+			Address:    storeInfo.GetAddress(),
+			State:      metapb.StoreState_Up,
+			Version:    storeInfo.GetVersion(),
+			DeployPath: getTestDeployPath(storeID),
+		}
+
+		if storeInfo.IsPhysicallyDestroyed() || storeInfo.IsTombstone() {
+			// try to start a new store with the same address with store which is physically destryed or tombstone should be success
+			c.Assert(cluster.PutStore(newStore), IsNil)
+		} else {
+			c.Assert(cluster.PutStore(newStore), NotNil)
+		}
+	}
+}
+
+func getTestDeployPath(storeID uint64) string {
+	return fmt.Sprintf("test/store%d", storeID)
+}
+
+func (s *testClusterInfoSuite) TestUpStore(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	// Put 3 stores.
+	for _, store := range newTestStores(3, "2.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+
+	// set store 1 offline
+	c.Assert(cluster.RemoveStore(1, false), IsNil)
+	// up a offline store should be success.
+	c.Assert(cluster.UpStore(1), IsNil)
+
+	// set store 2 offline and physically destroyed
+	c.Assert(cluster.RemoveStore(2, true), IsNil)
+	c.Assert(cluster.UpStore(2), NotNil)
+
+	// bury store 2
+	cluster.checkStores()
+	// store is tombstone
+	err = cluster.UpStore(2)
+	c.Assert(errors.ErrorEqual(err, errs.ErrStoreTombstone.FastGenByArgs(2)), IsTrue)
+
+	// store 3 is up
+	c.Assert(cluster.UpStore(3), IsNil)
+
+	// store 4 not exist
+	err = cluster.UpStore(4)
+	c.Assert(errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(4)), IsTrue)
+
 }
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
 	// Put 3 new 4.0.9 stores.
 	for _, store := range newTestStores(3, "4.0.9") {
@@ -167,15 +348,72 @@ func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	c.Assert(cluster.GetClusterVersion(), Equals, "4.0.9")
 
 	// Bury the other store.
-	c.Assert(cluster.RemoveStore(3), IsNil)
-	c.Assert(cluster.BuryStore(3, false), IsNil)
+	c.Assert(cluster.RemoveStore(3, true), IsNil)
+	cluster.checkStores()
 	c.Assert(cluster.GetClusterVersion(), Equals, "5.0.0")
+}
+
+func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	newTestStores(4, "2.0.0")
+	peers := []*metapb.Peer{
+		{
+			Id:      1,
+			StoreId: 1,
+		},
+		{
+			Id:      2,
+			StoreId: 2,
+		},
+		{
+			Id:      3,
+			StoreId: 3,
+		},
+	}
+	leader := &metapb.Peer{
+		Id:      1,
+		StoreId: 1,
+	}
+	regionMeta := &metapb.Region{
+		Id:          1,
+		Peers:       peers,
+		StartKey:    []byte{byte(1)},
+		EndKey:      []byte{byte(1 + 1)},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+	}
+	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}),
+		core.SetWrittenBytes(30000*10),
+		core.SetWrittenKeys(300000*10))
+	err = cluster.processRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+	// wait HotStat to update items
+	time.Sleep(1 * time.Second)
+	stats := cluster.hotStat.RegionStats(statistics.WriteFlow, 0)
+	c.Assert(stats[1], HasLen, 1)
+	c.Assert(stats[2], HasLen, 1)
+	c.Assert(stats[3], HasLen, 1)
+	newPeer := &metapb.Peer{
+		Id:      4,
+		StoreId: 4,
+	}
+	region = region.Clone(core.WithRemoveStorePeer(2), core.WithAddPeer(newPeer))
+	err = cluster.processRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+	// wait HotStat to update items
+	time.Sleep(1 * time.Second)
+	stats = cluster.hotStat.RegionStats(statistics.WriteFlow, 0)
+	c.Assert(stats[1], HasLen, 1)
+	c.Assert(stats[2], HasLen, 0)
+	c.Assert(stats[3], HasLen, 1)
+	c.Assert(stats[4], HasLen, 1)
 }
 
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
 	n, np := uint64(3), uint64(3)
 
@@ -293,20 +531,8 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 
-		// Change keys written.
-		region = region.Clone(core.SetWrittenKeys(240))
-		regions[i] = region
-		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
-
 		// Change bytes read.
 		region = region.Clone(core.SetReadBytes(1080000))
-		regions[i] = region
-		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
-
-		// Change keys read.
-		region = region.Clone(core.SetReadKeys(1080))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
@@ -400,7 +626,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
 	processRegions := func(regions []*core.RegionInfo) {
 		for _, r := range regions {
@@ -415,19 +641,12 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	processRegions(regions)
 	newRegion := cluster.GetRegion(region.GetID())
 	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
-
-	// do not trace the flow changes
-	cluster.traceRegionFlow = false
-	processRegions([]*core.RegionInfo{region})
-	newRegion = cluster.GetRegion(region.GetID())
-	c.Assert(region.GetBytesRead(), Equals, uint64(0))
-	c.Assert(newRegion.GetBytesRead(), Not(Equals), uint64(0))
 }
 
 func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
 	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
 	regions = core.SplitRegions(regions)
@@ -488,7 +707,7 @@ func heartbeatRegions(c *C, cluster *RaftCluster, regions []*core.RegionInfo) {
 func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
 	// 1: [nil, nil)
 	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
@@ -527,7 +746,7 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
 	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
 
@@ -557,10 +776,72 @@ func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	storage := core.NewStorage(kv.NewMemoryKV())
+	cluster.ruleManager = placement.NewRuleManager(storage, cluster)
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		if err != nil {
+			panic(err)
+		}
+	}
+	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
+
+	// Put 3 stores.
+	for _, store := range newTestStores(4, "5.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+
+	peers := []*metapb.Peer{
+		{
+			Id:      4,
+			StoreId: 1,
+		}, {
+			Id:      5,
+			StoreId: 2,
+		}, {
+			Id:      6,
+			StoreId: 3,
+		},
+	}
+	origin := core.NewRegionInfo(
+		&metapb.Region{
+			StartKey:    []byte{},
+			EndKey:      []byte{},
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+			Id:          1,
+			Peers:       peers}, peers[0])
+	regions := []*core.RegionInfo{origin}
+
+	// store 1: up -> offline
+	c.Assert(cluster.RemoveStore(1, false), IsNil)
+	store := cluster.GetStore(1)
+	c.Assert(store.IsOffline(), IsTrue)
+
+	// Split.
+	n := 7
+	for i := 0; i < n; i++ {
+		regions = core.SplitRegions(regions)
+	}
+	heartbeatRegions(c, cluster, regions)
+	c.Assert(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), HasLen, len(regions))
+
+	// Merge.
+	for i := 0; i < n; i++ {
+		regions = core.MergeRegions(regions)
+		heartbeatRegions(c, cluster, regions)
+		c.Assert(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), HasLen, len(regions))
+	}
+}
+
 func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestCluster(opt)
+	tc := newTestCluster(s.ctx, opt)
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
 		c.Assert(tc.putStoreLocked(s), IsNil)
@@ -627,14 +908,25 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 
 var _ = Suite(&testRegionsInfoSuite{})
 
-type testRegionsInfoSuite struct{}
+type testRegionsInfoSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testRegionsInfoSuite) TearDownTest(c *C) {
+	s.cancel()
+}
+
+func (s *testRegionsInfoSuite) SetUpTest(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
 
 func (s *testRegionsInfoSuite) Test(c *C) {
 	n, np := uint64(10), uint64(3)
 	regions := newTestRegions(n, np)
 	_, opts, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestRaftCluster(mockid.NewIDAllocator(), opts, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	tc := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opts, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	cache := tc.core.Regions
 
 	for i := uint64(0); i < n; i++ {
@@ -645,7 +937,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		c.Assert(cache.SearchRegion(regionKey), IsNil)
 		checkRegions(c, cache, regions[0:i])
 
-		cache.AddRegion(region)
+		cache.SetRegion(region)
 		checkRegion(c, cache.GetRegion(i), region)
 		checkRegion(c, cache.SearchRegion(regionKey), region)
 		checkRegions(c, cache, regions[0:(i+1)])
@@ -671,7 +963,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		// Reset leader to peer 0.
 		newRegion = region.Clone(core.WithLeader(region.GetPeers()[0]))
 		regions[i] = newRegion
-		cache.AddRegion(newRegion)
+		cache.SetRegion(newRegion)
 		checkRegion(c, cache.GetRegion(i), newRegion)
 		checkRegions(c, cache, regions[0:(i+1)])
 		checkRegion(c, cache.SearchRegion(regionKey), newRegion)
@@ -690,7 +982,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// check overlaps
 	// clone it otherwise there are two items with the same key in the tree
 	overlapRegion := regions[n-1].Clone(core.WithStartKey(regions[n-2].GetStartKey()))
-	cache.AddRegion(overlapRegion)
+	cache.SetRegion(overlapRegion)
 	c.Assert(cache.GetRegion(n-2), IsNil)
 	c.Assert(cache.GetRegion(n-1), NotNil)
 
@@ -738,13 +1030,20 @@ func (s *testClusterUtilSuite) TestCheckStaleRegion(c *C) {
 var _ = Suite(&testGetStoresSuite{})
 
 type testGetStoresSuite struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
 	cluster *RaftCluster
+}
+
+func (s *testGetStoresSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testGetStoresSuite) SetUpSuite(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	s.cluster = cluster
 
 	stores := newTestStores(200, "2.0.0")
@@ -776,9 +1075,9 @@ func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, er
 	return &cfg.Schedule, opt, nil
 }
 
-func newTestCluster(opt *config.PersistOptions) *testCluster {
+func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluster {
 	storage := core.NewStorage(kv.NewMemoryKV())
-	rc := newTestRaftCluster(mockid.NewIDAllocator(), opt, storage, core.NewBasicCluster())
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage, core.NewBasicCluster())
 	rc.ruleManager = placement.NewRuleManager(storage, rc)
 	if opt.IsPlacementRulesEnabled() {
 		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
@@ -790,8 +1089,8 @@ func newTestCluster(opt *config.PersistOptions) *testCluster {
 	return &testCluster{RaftCluster: rc}
 }
 
-func newTestRaftCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
-	rc := &RaftCluster{ctx: context.TODO()}
+func newTestRaftCluster(ctx context.Context, id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
+	rc := &RaftCluster{ctx: ctx}
 	rc.InitCluster(id, opt, storage, basicCluster)
 	return rc
 }
@@ -805,7 +1104,7 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 			Address:    fmt.Sprintf("127.0.0.1:%d", i),
 			State:      metapb.StoreState_Up,
 			Version:    version,
-			DeployPath: fmt.Sprintf("test/store%d", i),
+			DeployPath: getTestDeployPath(i),
 		}
 		stores = append(stores, core.NewStoreInfo(store))
 	}

@@ -34,30 +34,38 @@ type CheckFunc func(c *check.C) bool
 
 // WaitOp represents available options when execute WaitUntil
 type WaitOp struct {
-	SleepInterval time.Duration
+	retryTimes    int
+	sleepInterval time.Duration
 }
 
 // WaitOption configures WaitOp
 type WaitOption func(op *WaitOp)
 
+// WithRetryTimes specify the retry times
+func WithRetryTimes(retryTimes int) WaitOption {
+	return func(op *WaitOp) { op.retryTimes = retryTimes }
+}
+
 // WithSleepInterval specify the sleep duration
 func WithSleepInterval(sleep time.Duration) WaitOption {
-	return func(op *WaitOp) { op.SleepInterval = sleep }
+	return func(op *WaitOp) { op.sleepInterval = sleep }
 }
 
 // WaitUntil repeatedly evaluates f() for a period of time, util it returns true.
 func WaitUntil(c *check.C, f CheckFunc, opts ...WaitOption) {
 	c.Log("wait start")
-	options := &WaitOp{}
-	options.SleepInterval = waitRetrySleep
-	for _, opt := range opts {
-		opt(options)
+	option := &WaitOp{
+		retryTimes:    waitMaxRetry,
+		sleepInterval: waitRetrySleep,
 	}
-	for i := 0; i < waitMaxRetry; i++ {
+	for _, opt := range opts {
+		opt(option)
+	}
+	for i := 0; i < option.retryTimes; i++ {
 		if f(c) {
 			return
 		}
-		time.Sleep(options.SleepInterval)
+		time.Sleep(option.sleepInterval)
 	}
 	c.Fatal("wait timeout")
 }

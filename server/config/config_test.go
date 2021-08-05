@@ -16,6 +16,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"strings"
@@ -82,7 +83,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(newOpt.Reload(storage), IsNil)
 	schedulers := newOpt.GetSchedulers()
-	c.Assert(schedulers, HasLen, 5)
+	c.Assert(schedulers, HasLen, 4)
 	c.Assert(newOpt.IsUseRegionStorage(), IsTrue)
 	for i, s := range schedulers {
 		c.Assert(s.Type, Equals, DefaultSchedulers[i].Type)
@@ -284,6 +285,8 @@ func (s *testConfigSuite) TestMigrateFlags(c *C) {
 		return cfg, err
 	}
 	cfg, err := load(`
+[pd-server]
+trace-region-flow = false
 [schedule]
 disable-remove-down-replica = true
 enable-make-up-replica = false
@@ -291,6 +294,7 @@ disable-remove-extra-replica = true
 enable-remove-extra-replica = false
 `)
 	c.Assert(err, IsNil)
+	c.Assert(cfg.PDServerCfg.FlowRoundByDigit, Equals, math.MaxInt8)
 	c.Assert(cfg.Schedule.EnableReplaceOfflineReplica, IsTrue)
 	c.Assert(cfg.Schedule.EnableRemoveDownReplica, IsFalse)
 	c.Assert(cfg.Schedule.EnableMakeUpReplica, IsFalse)

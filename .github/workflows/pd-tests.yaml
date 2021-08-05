@@ -1,13 +1,15 @@
+name: PD Tests
 on:
   push:
     branches:
       - master
       - release-4.0
+      - release-5.*
   pull_request:
     branches:
       - master
       - release-4.0
-name: PD Tests
+      - release-5.*
 jobs:
   chunks:
     runs-on: ubuntu-latest
@@ -20,7 +22,7 @@ jobs:
     steps:
       - uses: actions/setup-go@v2
         with:
-          go-version: 1.14
+          go-version: 1.16
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Restore cache
@@ -39,14 +41,16 @@ jobs:
         id: packages-units
         env:
           WORKER_ID: ${{ matrix.worker_id }}
+        # github.com/tikv/pd/tests/server/tso is the integration test of TSO, which will take a long time,
+        # will be run independently in the TSO Function Test.
         run: |
-          go list ./... |grep -v -E  "github.com/tikv/pd/tests/client|github.com/tikv/pd/server/api" > packages.list
+          go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list
           total=$(expr ${{ strategy.job-total }} - 1)
           echo  "Dispatched ${total} normal chunks"
           split packages.list -n r/${total} packages_unit_ -a 1 --numeric-suffixes=1
-          echo  "Dispatched 2 special task to the last chunk(the special test takes a long time)"
-          echo github.com/tikv/pd/tests/client > packages_unit_${{ strategy.job-total }}
-          echo github.com/tikv/pd/server/api >> packages_unit_${{ strategy.job-total }}
+          echo  "Dispatched 2 special task to the last chunk (the special tests take a long time)"
+          echo github.com/tikv/pd/server/api > packages_unit_${{ strategy.job-total }}
+          echo github.com/tikv/pd/tests/client >> packages_unit_${{ strategy.job-total }}
           packages="{$(cat packages_unit_${WORKER_ID} |tr "\n" ",")}"
           echo "This worker will test the chunk - ${packages}"
           echo "::set-output name=list::${packages}"

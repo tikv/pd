@@ -1,7 +1,7 @@
 # PD
 
-[![TravisCI Build Status](https://travis-ci.org/tikv/pd.svg?branch=master)](https://travis-ci.org/tikv/pd)
-![GitHub release](https://img.shields.io/github/release/tikv/pd.svg)
+[![Build & Test Status](https://github.com/tikv/pd/actions/workflows/pd-tests.yaml/badge.svg?branch=master)](https://github.com/tikv/pd/actions/workflows/pd-tests.yaml)
+[![GitHub release](https://img.shields.io/github/release/tikv/pd.svg)](https://github.com/tikv/pd/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tikv/pd)](https://goreportcard.com/report/github.com/tikv/pd)
 [![codecov](https://codecov.io/gh/tikv/pd/branch/master/graph/badge.svg)](https://codecov.io/gh/tikv/pd)
 
@@ -15,7 +15,7 @@ If you're interested in contributing to PD, see [CONTRIBUTING.md](./CONTRIBUTING
 
 ## Build
 
-1. Make sure [​*Go*​](https://golang.org/) (version 1.13) is installed.
+1. Make sure [​*Go*​](https://golang.org/) (version 1.16) is installed.
 2. Use `make` to install PD. PD is installed in the `bin` directory.
 
 ## Usage

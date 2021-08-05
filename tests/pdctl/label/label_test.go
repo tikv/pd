@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -26,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -49,44 +51,41 @@ func (s *labelTestSuite) TestLabel(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
 	stores := []*metapb.Store{
 		{
-			Id:      1,
-			Address: "tikv1",
-			State:   metapb.StoreState_Up,
+			Id:    1,
+			State: metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
 					Value: "us-west",
 				},
 			},
-			Version: "2.0.0",
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:      2,
-			Address: "tikv2",
-			State:   metapb.StoreState_Up,
+			Id:    2,
+			State: metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
 					Value: "us-east",
 				},
 			},
-			Version: "2.0.0",
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:      3,
-			Address: "tikv3",
-			State:   metapb.StoreState_Up,
+			Id:    3,
+			State: metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
 					Value: "us-west",
 				},
 			},
-			Version: "2.0.0",
+			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
 
@@ -94,13 +93,13 @@ func (s *labelTestSuite) TestLabel(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
 
 	// label command
 	args := []string{"-u", pdAddr, "label"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	labels := make([]*metapb.StoreLabel, 0, len(stores))
 	c.Assert(json.Unmarshal(output, &labels), IsNil)
@@ -124,7 +123,7 @@ func (s *labelTestSuite) TestLabel(c *C) {
 
 	// label store <name> command
 	args = []string{"-u", pdAddr, "label", "store", "zone", "us-west"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	storesInfo := new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)

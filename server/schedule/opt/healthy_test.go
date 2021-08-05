@@ -14,6 +14,7 @@
 package opt
 
 import (
+	"context"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -30,7 +31,18 @@ func TestOpt(t *testing.T) {
 
 var _ = Suite(&testRegionHealthySuite{})
 
-type testRegionHealthySuite struct{}
+type testRegionHealthySuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testRegionHealthySuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testRegionHealthySuite) TearDownSuite(c *C) {
+	s.cancel()
+}
 
 func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
 	peers := func(ids ...uint64) []*metapb.Peer {
@@ -61,17 +73,18 @@ func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
 		replicated2          bool
 	}
 
+	// healthy only check down peer and pending peer
 	cases := []testCase{
 		{region(peers(1, 2, 3)), true, true, true, true, true, true},
 		{region(peers(1, 2, 3), core.WithPendingPeers(peers(1))), false, true, true, false, true, true},
-		{region(peers(1, 2, 3), core.WithLearners(peers(1))), false, false, false, true, true, false},
+		{region(peers(1, 2, 3), core.WithLearners(peers(1))), true, true, false, true, true, false},
 		{region(peers(1, 2, 3), core.WithDownPeers([]*pdpb.PeerStats{{Peer: peers(1)[0]}})), false, false, true, false, false, true},
 		{region(peers(1, 2)), true, true, false, true, true, false},
-		{region(peers(1, 2, 3, 4), core.WithLearners(peers(1))), false, false, false, true, true, false},
+		{region(peers(1, 2, 3, 4), core.WithLearners(peers(1))), true, true, false, true, true, false},
 	}
 
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 	tc.AddRegionStore(3, 1)

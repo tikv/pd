@@ -28,9 +28,11 @@ import (
 
 const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
-	storePersistInterval = 5 * time.Minute
-	mb                   = 1 << 20 // megabyte
-	gb                   = 1 << 30
+	storePersistInterval   = 5 * time.Minute
+	mb                     = 1 << 20 // megabyte
+	gb                     = 1 << 30 // 1GB size
+	initialMaxRegionCounts = 30      // exclude storage Threshold Filter when region less than 30
+	initialMinSpace        = 1 << 33 // 2^33=8GB
 )
 
 // StoreInfo contains information about a store.
@@ -139,6 +141,11 @@ func (s *StoreInfo) IsTombstone() bool {
 	return s.GetState() == metapb.StoreState_Tombstone
 }
 
+// IsPhysicallyDestroyed checks if the store's physically destroyed.
+func (s *StoreInfo) IsPhysicallyDestroyed() bool {
+	return s.GetMeta().GetPhysicallyDestroyed()
+}
+
 // DownTime returns the time elapsed since last heartbeat.
 func (s *StoreInfo) DownTime() time.Duration {
 	return time.Since(s.GetLastHeartbeatTS())
@@ -238,10 +245,10 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 // Deviation It is used to control the direction of the deviation considered
 // when calculating the region score. It is set to -1 when it is the source
 // store of balance, 1 when it is the target, and 0 in the rest of cases.
-func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64, deviation int) float64 {
+func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	switch version {
 	case "v2":
-		return s.regionScoreV2(delta, deviation)
+		return s.regionScoreV2(delta, lowSpaceRatio)
 	case "v1":
 		fallthrough
 	default:
@@ -294,15 +301,26 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 	return score / math.Max(s.GetRegionWeight(), minWeight)
 }
 
-func (s *StoreInfo) regionScoreV2(delta int64, deviation int) float64 {
-	A := float64(float64(s.GetAvgAvailable())-float64(deviation)*float64(s.GetAvailableDeviation())) / gb
+func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
+	A := float64(s.GetAvgAvailable())
 	C := float64(s.GetCapacity()) / gb
 	R := float64(s.GetRegionSize() + delta)
+	if R < 0 {
+		R = float64(s.GetRegionSize())
+	}
+	U := C - A
+	if s.GetRegionSize() != 0 {
+		U = U + U*(float64(delta))/float64(s.GetRegionSize())
+		if U < C && U > 0 {
+			A = C - U
+		}
+	}
 	var (
 		K, M float64 = 1, 256 // Experience value to control the weight of the available influence on score
-		F    float64 = 20     // Experience value to prevent some nodes from running out of disk space prematurely.
+		F    float64 = 50     // Experience value to prevent some nodes from running out of disk space prematurely.
+		B            = 1e7
 	)
-
+	F = math.Max(F, C*(1-lowSpaceRatio))
 	var score float64
 	if A >= C || C < 1 {
 		score = R
@@ -312,7 +330,8 @@ func (s *StoreInfo) regionScoreV2(delta int64, deviation int) float64 {
 		score = (K + M*(math.Log(C)-math.Log(A-F+1))/(C-A+F-1)) * R
 	} else {
 		// When remaining space is less then F, the score is mainly determined by available space.
-		score = (K+M*math.Log(C)/C)*R + (F-A)*(K+M*math.Log(F)/F)
+		// store's score will increase rapidly after it has few space. and it will reach similar score when they has no space
+		score = (K+M*math.Log(C)/C)*R + B*(F-A)/F
 	}
 	return score / math.Max(s.GetRegionWeight(), minWeight)
 }
@@ -330,9 +349,17 @@ func (s *StoreInfo) AvailableRatio() float64 {
 	return float64(s.GetAvailable()) / float64(s.GetCapacity())
 }
 
-// IsLowSpace checks if the store is lack of space.
+// IsLowSpace checks if the store is lack of space. Not check if region count less
+// than initialMaxRegionCounts and available space more than initialMinSpace
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
-	return s.GetStoreStats() != nil && s.AvailableRatio() < 1-lowSpaceRatio
+	if s.GetStoreStats() == nil {
+		return false
+	}
+	// issue #3444
+	if s.regionCount < initialMaxRegionCounts && s.GetAvailable() > initialMinSpace {
+		return false
+	}
+	return s.AvailableRatio() < 1-lowSpaceRatio
 }
 
 // ResourceCount returns count of leader/region in the store.
@@ -498,15 +525,6 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	return store
 }
 
-// TakeStore returns the point of the origin StoreInfo with the specified storeID.
-func (s *StoresInfo) TakeStore(storeID uint64) *StoreInfo {
-	store, ok := s.stores[storeID]
-	if !ok {
-		return nil
-	}
-	return store
-}
-
 // SetStore sets a StoreInfo with storeID.
 func (s *StoresInfo) SetStore(store *StoreInfo) {
 	s.stores[store.GetID()] = store
@@ -530,8 +548,9 @@ func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
 func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
-		log.Fatal("try to clean a store's pause state, but it is not found",
-			zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrStoreNotFound.FastGenByArgs(storeID)))
+		log.Warn("try to clean a store's pause state, but it is not found. It may be cleanup",
+			zap.Uint64("store-id", storeID))
+		return
 	}
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
 }

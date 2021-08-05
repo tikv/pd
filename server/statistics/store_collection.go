@@ -93,7 +93,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	s.RegionCount += store.GetRegionCount()
 	s.LeaderCount += store.GetLeaderCount()
 
-	storeStatusGauge.WithLabelValues(storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetRegionScoreFormulaVersion(), s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0, 0))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetRegionScoreFormulaVersion(), s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderSchedulePolicy(), 0))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_size").Set(float64(store.GetRegionSize()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_count").Set(float64(store.GetRegionCount()))
@@ -115,14 +115,22 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes").Set(storeFlowStats.GetLoad(StoreReadBytes))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys").Set(storeFlowStats.GetLoad(StoreWriteKeys))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys").Set(storeFlowStats.GetLoad(StoreReadKeys))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_query_rate").Set(storeFlowStats.GetLoad(StoreWriteQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_query_rate").Set(storeFlowStats.GetLoad(StoreReadQuery))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_cpu_usage").Set(storeFlowStats.GetLoad(StoreCPUUsage))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_read_rate").Set(storeFlowStats.GetLoad(StoreDiskReadRate))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_write_rate").Set(storeFlowStats.GetLoad(StoreDiskWriteRate))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_bytes").Set(storeFlowStats.GetLoad(StoreRegionsWriteBytes))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_keys").Set(storeFlowStats.GetLoad(StoreRegionsWriteKeys))
 
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(StoreWriteBytes))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(StoreReadBytes))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(StoreWriteKeys))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(StoreReadKeys))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_query_rate_instant").Set(storeFlowStats.GetInstantLoad(StoreWriteQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_query_rate_instant").Set(storeFlowStats.GetInstantLoad(StoreReadQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(StoreRegionsWriteBytes))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(StoreRegionsWriteKeys))
 }
 
 func (s *storeStatistics) Collect() {
@@ -186,6 +194,12 @@ func (s *storeStatistics) Collect() {
 	for name, value := range s.LabelCounter {
 		placementStatusGauge.WithLabelValues(labelType, name).Set(float64(value))
 	}
+
+	for storeID, limit := range s.opt.GetStoresLimit() {
+		id := strconv.FormatUint(storeID, 10)
+		StoreLimitGauge.WithLabelValues(id, "add-peer").Set(limit.AddPeer)
+		StoreLimitGauge.WithLabelValues(id, "remove-peer").Set(limit.RemovePeer)
+	}
 }
 
 func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
@@ -203,6 +217,10 @@ func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
 		"store_read_rate_bytes",
 		"store_write_rate_keys",
 		"store_read_rate_keys",
+		"store_write_query_rate",
+		"store_read_query_rate",
+		"store_regions_write_rate_bytes",
+		"store_regions_write_rate_keys",
 	}
 	for _, m := range metrics {
 		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)

@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -49,7 +50,7 @@ func (s *healthTestSuite) TestHealth(c *C) {
 	leaderServer := tc.GetServer(tc.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	pdAddr := tc.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 	defer tc.Destroy()
 
 	client := tc.GetEtcdClient()
@@ -72,7 +73,7 @@ func (s *healthTestSuite) TestHealth(c *C) {
 
 	// health command
 	args := []string{"-u", pdAddr, "health"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	h := make([]api.Health, len(healths))
 	c.Assert(json.Unmarshal(output, &h), IsNil)

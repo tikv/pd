@@ -24,6 +24,8 @@ import (
 	"unsafe"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
@@ -245,14 +247,14 @@ func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, rate
 	switch typ {
 	case storelimit.AddPeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
 		} else {
 			rate = v.StoreLimit[storeID].RemovePeer
 		}
 		sc = StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
 	case storelimit.RemovePeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 		} else {
 			rate = v.StoreLimit[storeID].AddPeer
 		}
@@ -495,6 +497,11 @@ func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
 }
 
+// GetStoresLimit gets the stores' limit.
+func (o *PersistOptions) GetStoresLimit() map[uint64]StoreLimitConfig {
+	return o.GetScheduleConfig().StoreLimit
+}
+
 // GetSchedulers gets the scheduler configurations.
 func (o *PersistOptions) GetSchedulers() SchedulerConfigs {
 	return o.GetScheduleConfig().Schedulers
@@ -561,7 +568,11 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 		LabelProperty:   o.GetLabelPropertyConfig(),
 		ClusterVersion:  *o.GetClusterVersion(),
 	}
-	return storage.SaveConfig(cfg)
+	err := storage.SaveConfig(cfg)
+	failpoint.Inject("persistFail", func() {
+		err = errors.New("fail to persist")
+	})
+	return err
 }
 
 // Reload reloads the configuration from the storage.
@@ -575,6 +586,7 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 		return err
 	}
 	o.adjustScheduleCfg(&cfg.Schedule)
+	cfg.PDServerCfg.MigrateDeprecatedFlags()
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)

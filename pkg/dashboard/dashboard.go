@@ -20,9 +20,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
+	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
+	"github.com/pingcap/tidb-dashboard/pkg/config"
+	"github.com/pingcap/tidb-dashboard/pkg/uiserver"
 
 	"github.com/tikv/pd/pkg/dashboard/adapter"
 	"github.com/tikv/pd/pkg/dashboard/keyvisual"

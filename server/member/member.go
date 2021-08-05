@@ -172,11 +172,14 @@ func (m *Member) CheckLeader() (*pdpb.Member, int64, bool) {
 			// oh, we are already a PD leader, which indicates we may meet something wrong
 			// in previous CampaignLeader. We should delete the leadership and campaign again.
 			log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
-			if err = m.leadership.DeleteLeader(); err != nil {
+			// Delete the leader itself and let others start a new election again.
+			if err = m.leadership.DeleteLeaderKey(); err != nil {
 				log.Error("deleting pd leader key meets error", errs.ZapError(err))
 				time.Sleep(200 * time.Millisecond)
 				return nil, 0, true
 			}
+			// Return nil and false to make sure the campaign will start immediately.
+			return nil, 0, false
 		}
 	}
 	return leader, rev, false
@@ -275,6 +278,12 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	if err != nil {
 		return err
 	}
+
+	// Do nothing when I am the only member of cluster.
+	if len(res.Members) == 1 && res.Members[0].ID == m.id && nextEtcdLeader == "" {
+		return nil
+	}
+
 	for _, member := range res.Members {
 		if (nextEtcdLeader == "" && member.ID != m.id) || (nextEtcdLeader != "" && member.Name == nextEtcdLeader) {
 			etcdLeaderIDs = append(etcdLeaderIDs, member.GetID())

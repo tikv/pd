@@ -37,23 +37,78 @@ import (
 	"go.uber.org/zap"
 )
 
+// MetaPeer is api compatible with *metapb.Peer.
+type MetaPeer struct {
+	*metapb.Peer
+	// RoleName is `Role.String()`.
+	// Since Role is serialized as int by json by default,
+	// introducing it will make the output of pd-ctl easier to identify Role.
+	RoleName string `json:"role_name"`
+	// IsLearner is `Role == "Learner"`.
+	// Since IsLearner was changed to Role in kvproto in 5.0, this field was introduced to ensure api compatibility.
+	IsLearner bool `json:"is_learner,omitempty"`
+}
+
+// PDPeerStats is api compatible with *pdpb.PeerStats.
+type PDPeerStats struct {
+	*pdpb.PeerStats
+	Peer MetaPeer `json:"peer"`
+}
+
+func fromPeer(peer *metapb.Peer) MetaPeer {
+	return MetaPeer{
+		Peer:      peer,
+		RoleName:  peer.GetRole().String(),
+		IsLearner: core.IsLearner(peer),
+	}
+}
+
+func fromPeerSlice(peers []*metapb.Peer) []MetaPeer {
+	if peers == nil {
+		return nil
+	}
+	slice := make([]MetaPeer, len(peers))
+	for i, peer := range peers {
+		slice[i] = fromPeer(peer)
+	}
+	return slice
+}
+
+func fromPeerStats(peer *pdpb.PeerStats) PDPeerStats {
+	return PDPeerStats{
+		PeerStats: peer,
+		Peer:      fromPeer(peer.Peer),
+	}
+}
+
+func fromPeerStatsSlice(peers []*pdpb.PeerStats) []PDPeerStats {
+	if peers == nil {
+		return nil
+	}
+	slice := make([]PDPeerStats, len(peers))
+	for i, peer := range peers {
+		slice[i] = fromPeerStats(peer)
+	}
+	return slice
+}
+
 // RegionInfo records detail region info for api usage.
 type RegionInfo struct {
 	ID          uint64              `json:"id"`
 	StartKey    string              `json:"start_key"`
 	EndKey      string              `json:"end_key"`
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
-	Peers       []*metapb.Peer      `json:"peers,omitempty"`
+	Peers       []MetaPeer          `json:"peers,omitempty"`
 
-	Leader          *metapb.Peer      `json:"leader,omitempty"`
-	DownPeers       []*pdpb.PeerStats `json:"down_peers,omitempty"`
-	PendingPeers    []*metapb.Peer    `json:"pending_peers,omitempty"`
-	WrittenBytes    uint64            `json:"written_bytes"`
-	ReadBytes       uint64            `json:"read_bytes"`
-	WrittenKeys     uint64            `json:"written_keys"`
-	ReadKeys        uint64            `json:"read_keys"`
-	ApproximateSize int64             `json:"approximate_size"`
-	ApproximateKeys int64             `json:"approximate_keys"`
+	Leader          MetaPeer      `json:"leader,omitempty"`
+	DownPeers       []PDPeerStats `json:"down_peers,omitempty"`
+	PendingPeers    []MetaPeer    `json:"pending_peers,omitempty"`
+	WrittenBytes    uint64        `json:"written_bytes"`
+	ReadBytes       uint64        `json:"read_bytes"`
+	WrittenKeys     uint64        `json:"written_keys"`
+	ReadKeys        uint64        `json:"read_keys"`
+	ApproximateSize int64         `json:"approximate_size"`
+	ApproximateKeys int64         `json:"approximate_keys"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
@@ -69,7 +124,7 @@ func fromPBReplicationStatus(s *replication_modepb.RegionReplicationStatus) *Rep
 		return nil
 	}
 	return &ReplicationStatus{
-		State:   replication_modepb.RegionReplicationState_name[int32(s.GetState())],
+		State:   s.GetState().String(),
 		StateID: s.GetStateId(),
 	}
 }
@@ -89,10 +144,10 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.StartKey = core.HexRegionKeyStr(r.GetStartKey())
 	s.EndKey = core.HexRegionKeyStr(r.GetEndKey())
 	s.RegionEpoch = r.GetRegionEpoch()
-	s.Peers = r.GetPeers()
-	s.Leader = r.GetLeader()
-	s.DownPeers = r.GetDownPeers()
-	s.PendingPeers = r.GetPendingPeers()
+	s.Peers = fromPeerSlice(r.GetPeers())
+	s.Leader = fromPeer(r.GetLeader())
+	s.DownPeers = fromPeerStatsSlice(r.GetDownPeers())
+	s.PendingPeers = fromPeerSlice(r.GetPendingPeers())
 	s.WrittenBytes = r.GetBytesWritten()
 	s.WrittenKeys = r.GetKeysWritten()
 	s.ReadBytes = r.GetBytesRead()
@@ -104,10 +159,26 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	return s
 }
 
+// Adjust is only used in testing, in order to compare the data from json deserialization.
+func (r *RegionInfo) Adjust() {
+	for _, peer := range r.DownPeers {
+		// Since api.PDPeerStats uses the api.MetaPeer type variable Peer to overwrite PeerStats.Peer,
+		// it needs to be restored after deserialization to be completely consistent with the original.
+		peer.PeerStats.Peer = peer.Peer.Peer
+	}
+}
+
 // RegionsInfo contains some regions with the detailed region info.
 type RegionsInfo struct {
-	Count   int           `json:"count"`
-	Regions []*RegionInfo `json:"regions"`
+	Count   int          `json:"count"`
+	Regions []RegionInfo `json:"regions"`
+}
+
+// Adjust is only used in testing, in order to compare the data from json deserialization.
+func (s *RegionsInfo) Adjust() {
+	for _, r := range s.Regions {
+		r.Adjust()
+	}
 }
 
 type regionHandler struct {
@@ -130,7 +201,7 @@ func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
 // @Failure 400 {string} string "The input is invalid."
 // @Router /region/id/{id} [get]
 func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
@@ -151,7 +222,7 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} RegionInfo
 // @Router /region/key/{key} [get]
 func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	vars := mux.Vars(r)
 	key := vars["key"]
 	key, err := url.QueryUnescape(key)
@@ -177,17 +248,12 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 
 func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
 	regionInfos := make([]RegionInfo, len(regions))
-	regionInfosRefs := make([]*RegionInfo, len(regions))
-
-	for i := 0; i < len(regions); i++ {
-		regionInfosRefs[i] = &regionInfos[i]
-	}
 	for i, r := range regions {
-		regionInfosRefs[i] = InitRegion(r, regionInfosRefs[i])
+		InitRegion(r, &regionInfos[i])
 	}
 	return &RegionsInfo{
 		Count:   len(regions),
-		Regions: regionInfosRefs,
+		Regions: regionInfos,
 	}
 }
 
@@ -197,7 +263,7 @@ func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
 // @Success 200 {object} RegionsInfo
 // @Router /regions [get]
 func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	regions := rc.GetRegions()
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
@@ -212,7 +278,7 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/key [get]
 func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	startKey := r.URL.Query().Get("key")
 
 	limit := defaultRegionLimit
@@ -238,7 +304,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} RegionsInfo
 // @Router /regions/count [get]
 func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	count := rc.GetRegionCount()
 	h.rd.JSON(w, http.StatusOK, &RegionsInfo{Count: count})
 }
@@ -251,7 +317,7 @@ func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) 
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/store/{id} [get]
 func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
@@ -417,7 +483,7 @@ func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	regions := rc.GetRegions()
 	histSizes := make([]int64, 0, len(regions))
 	for _, region := range regions {
@@ -441,7 +507,7 @@ func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	regions := rc.GetRegions()
 	histKeys := make([]int64, 0, len(regions))
 	for _, region := range regions {
@@ -495,7 +561,7 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 // @Failure 404 {string} string "The region does not exist."
 // @Router /regions/sibling/{id} [get]
 func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
@@ -592,7 +658,7 @@ func (h *regionsHandler) GetTopSize(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/accelerate-schedule [post]
 func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -634,7 +700,7 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 }
 
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	limit := defaultRegionLimit
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		var err error
@@ -661,7 +727,7 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/scatter [post]
 func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -737,7 +803,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/split [post]
 func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return

@@ -1,6 +1,6 @@
 module github.com/tikv/pd
 
-go 1.13
+go 1.16
 
 require (
 	github.com/BurntSushi/toml v0.3.1
@@ -24,18 +24,20 @@ require (
 	github.com/opentracing/opentracing-go v1.1.0
 	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
-	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20210104140916-41a0a3a87e75
 	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20201126102027-b0a155152ca3
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20210112051026-540f4cb76c1c
-	github.com/pingcap/log v0.0.0-20201112100606-8f1e84a3abc8
-	github.com/pingcap/sysutil v0.0.0-20201130064824-f0c8aa6a6966
-	github.com/prometheus/client_golang v1.2.1
-	github.com/prometheus/common v0.9.1
+	github.com/pingcap/kvproto v0.0.0-20210604082642-dda0a102bc6a
+	github.com/pingcap/log v0.0.0-20210625125904-98ed8e2eb1c7
+	github.com/pingcap/sysutil v0.0.0-20210730114356-fcd8a63f68c5
+	github.com/pingcap/tidb-dashboard v0.0.0-20210716172320-2226872e3296
+	github.com/prometheus/client_golang v1.1.0
+	github.com/prometheus/client_model v0.2.0 // indirect
+	github.com/prometheus/common v0.6.0
+	github.com/prometheus/procfs v0.0.5 // indirect
 	github.com/sasha-s/go-deadlock v0.2.0
-	github.com/sirupsen/logrus v1.4.2
+	github.com/sirupsen/logrus v1.2.0
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
@@ -43,15 +45,12 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
+	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
+	go.etcd.io/bbolt v1.3.5 // indirect
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
-	go.uber.org/goleak v0.10.0
-	go.uber.org/zap v1.15.0
-	golang.org/x/tools v0.0.0-20200527183253-8e7acdbce89d
+	go.uber.org/goleak v1.1.10
+	go.uber.org/zap v1.16.0
+	golang.org/x/tools v0.0.0-20210112230658-8b4aab62c064
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
-)
-
-replace (
-	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
-	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 )

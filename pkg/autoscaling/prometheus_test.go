@@ -18,12 +18,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
 	"strings"
-	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -40,10 +39,6 @@ const (
 
 	instanceCount = 3
 )
-
-func TestPrometheus(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testPrometheusQuerierSuite{})
 
@@ -167,7 +162,7 @@ func makeJSONResponse(promResp *response) (*http.Response, []byte, error) {
 		Proto:         "HTTP/1.1",
 		ProtoMajor:    1,
 		ProtoMinor:    1,
-		Body:          ioutil.NopCloser(bytes.NewBufferString(string(body))),
+		Body:          io.NopCloser(bytes.NewBufferString(string(body))),
 		ContentLength: int64(len(body)),
 		Header:        make(http.Header),
 	}
@@ -307,11 +302,11 @@ func (s *testPrometheusQuerierSuite) TestGetInstanceNameFromAddress(c *C) {
 			expectedInstanceName: "",
 		},
 		{
-			address:              "1.2.3.4:2333",
+			address:              "127.0.0.1:2333",
 			expectedInstanceName: "",
 		},
 		{
-			address:              "1.2.3.4",
+			address:              "127.0.0.1",
 			expectedInstanceName: "",
 		},
 	}

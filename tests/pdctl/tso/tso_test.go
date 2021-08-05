@@ -22,6 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -37,7 +38,7 @@ func (s *tsoTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *tsoTestSuite) TestTSO(c *C) {
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
 	const (
 		physicalShiftBits = 18
@@ -47,7 +48,7 @@ func (s *tsoTestSuite) TestTSO(c *C) {
 	// tso command
 	ts := "395181938313123110"
 	args := []string{"-u", "127.0.0.1", "tso", ts}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	t, e := strconv.ParseUint(ts, 10, 64)
 	c.Assert(e, IsNil)
@@ -55,6 +56,6 @@ func (s *tsoTestSuite) TestTSO(c *C) {
 	logicalTime := t & logicalBits
 	physical := t >> physicalShiftBits
 	physicalTime := time.Unix(int64(physical/1000), int64(physical%1000)*time.Millisecond.Nanoseconds())
-	str := fmt.Sprintln("system: ", physicalTime) + fmt.Sprintln("logic: ", logicalTime)
+	str := fmt.Sprintln("system: ", physicalTime) + fmt.Sprintln("logic:  ", logicalTime)
 	c.Assert(str, Equals, string(output))
 }

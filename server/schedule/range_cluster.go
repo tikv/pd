@@ -32,7 +32,7 @@ type RangeCluster struct {
 func GenRangeCluster(cluster opt.Cluster, startKey, endKey []byte) *RangeCluster {
 	subCluster := core.NewBasicCluster()
 	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
-		subCluster.Regions.AddRegion(r)
+		subCluster.Regions.SetRegion(r)
 	}
 	return &RangeCluster{
 		Cluster:    cluster,
@@ -57,7 +57,7 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 	newStats.UsedSize = uint64(float64(regionSize)/amplification) * (1 << 20)
 	newStats.Available = s.GetCapacity() - newStats.UsedSize
 	newStore := s.Clone(
-		core.SetStoreStats(newStats),
+		core.SetNewStoreStats(newStats), // it means to use instant value directly
 		core.SetLeaderCount(leaderCount),
 		core.SetRegionCount(regionCount),
 		core.SetPendingPeerCount(pendingPeerCount),

@@ -14,6 +14,9 @@
 package core
 
 import (
+	"math"
+	"sort"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
@@ -28,14 +31,23 @@ type RegionCreateOption func(region *RegionInfo)
 // WithDownPeers sets the down peers for the region.
 func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.downPeers = downPeers
+		region.downPeers = append(downPeers[:0:0], downPeers...)
+		sort.Sort(peerStatsSlice(region.downPeers))
+	}
+}
+
+// WithFlowRoundByDigit set the digit, which use to round to the nearest number
+func WithFlowRoundByDigit(digit int) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.flowRoundDivisor = uint64(math.Pow10(digit))
 	}
 }
 
 // WithPendingPeers sets the pending peers for the region.
 func WithPendingPeers(pendingPeers []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.pendingPeers = pendingPeers
+		region.pendingPeers = append(pendingPeers[:0:0], pendingPeers...)
+		sort.Sort(peerSlice(region.pendingPeers))
 	}
 }
 
@@ -175,6 +187,13 @@ func SetReadKeys(v uint64) RegionCreateOption {
 	}
 }
 
+// SetQueryStats sets the query stats for the region.
+func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.QueryStats = v
+	}
+}
+
 // SetApproximateSize sets the approximate size for the region.
 func SetApproximateSize(v int64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -263,5 +282,12 @@ func WithReplacePeerStore(oldStoreID, newStoreID uint64) RegionCreateOption {
 				p.StoreId = newStoreID
 			}
 		}
+	}
+}
+
+// WithInterval sets the interval
+func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.interval = interval
 	}
 }

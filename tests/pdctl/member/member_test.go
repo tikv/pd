@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -53,7 +54,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	pdAddr := cluster.GetConfig().GetClientURL()
 	c.Assert(err, IsNil)
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 	svr := cluster.GetServer("pd2")
 	id := svr.GetServerID()
 	name := svr.GetServer().Name()
@@ -62,7 +63,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 
 	// member leader show
 	args := []string{"-u", pdAddr, "member", "leader", "show"}
-	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	leader := pdpb.Member{}
 	c.Assert(json.Unmarshal(output, &leader), IsNil)
@@ -70,7 +71,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 
 	// member leader transfer <member_name>
 	args = []string{"-u", pdAddr, "member", "leader", "transfer", "pd2"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	testutil.WaitUntil(c, func(c *C) bool {
 		return c.Check("pd2", Equals, svr.GetLeader().GetName())
@@ -79,7 +80,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	// member leader resign
 	cluster.WaitLeader()
 	args = []string{"-u", pdAddr, "member", "leader", "resign"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(strings.Contains(string(output), "Success"), IsTrue)
 	c.Assert(err, IsNil)
 	testutil.WaitUntil(c, func(c *C) bool {
@@ -89,7 +90,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	// member leader_priority <member_name> <priority>
 	cluster.WaitLeader()
 	args = []string{"-u", pdAddr, "member", "leader_priority", name, "100"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	priority, err := svr.GetServer().GetMember().GetMemberLeaderPriority(id)
 	c.Assert(err, IsNil)
@@ -102,7 +103,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(len(members.Members), Equals, 3)
 	args = []string{"-u", pdAddr, "member", "delete", "name", name}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	members, err = etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
@@ -110,7 +111,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 
 	// member delete id <member_id>
 	args = []string{"-u", pdAddr, "member", "delete", "id", fmt.Sprint(id)}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	members, err = etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)

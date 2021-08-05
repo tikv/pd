@@ -60,3 +60,11 @@ func (r *MaxFilter) Set(n float64) {
 	r.records[0] = n
 	r.count = 1
 }
+
+// GetInstantaneous returns the value just added.
+func (r *MaxFilter) GetInstantaneous() float64 {
+	if r.count == 0 {
+		return 0
+	}
+	return r.records[(r.count-1)%r.size]
+}

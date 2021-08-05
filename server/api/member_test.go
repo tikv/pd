@@ -17,7 +17,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math/rand"
 	"net/http"
 	"sort"
@@ -30,6 +30,7 @@ import (
 )
 
 var _ = Suite(&testMemberAPISuite{})
+var _ = Suite(&testResignAPISuite{})
 
 type testMemberAPISuite struct {
 	cfgs    []*config.Config
@@ -38,7 +39,12 @@ type testMemberAPISuite struct {
 }
 
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
-	s.cfgs, s.servers, s.clean = mustNewCluster(c, 3)
+	s.cfgs, s.servers, s.clean = mustNewCluster(c, 3, func(cfg *config.Config) {
+		cfg.EnableLocalTSO = true
+		cfg.Labels = map[string]string{
+			config.ZoneLabel: "dc-1",
+		}
+	})
 }
 
 func (s *testMemberAPISuite) TearDownSuite(c *C) {
@@ -66,7 +72,7 @@ func checkListResponse(c *C, body []byte, cfgs []*config.Config) {
 			if member.GetName() != cfg.Name {
 				continue
 			}
-
+			c.Assert(member.DcLocation, Equals, "dc-1")
 			relaxEqualStings(c, member.ClientUrls, strings.Split(cfg.ClientUrls, ","))
 			relaxEqualStings(c, member.PeerUrls, strings.Split(cfg.PeerUrls, ","))
 		}
@@ -78,7 +84,7 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/members"
 		resp, err := testDialClient.Get(addr)
 		c.Assert(err, IsNil)
-		buf, err := ioutil.ReadAll(resp.Body)
+		buf, err := io.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
 		resp.Body.Close()
 		checkListResponse(c, buf, s.cfgs)
@@ -91,7 +97,7 @@ func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	resp, err := testDialClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
-	buf, err := ioutil.ReadAll(resp.Body)
+	buf, err := io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 
 	var got pdpb.Member
@@ -106,7 +112,7 @@ func (s *testMemberAPISuite) TestChangeLeaderPeerUrls(c *C) {
 	resp, err := testDialClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
-	buf, err := ioutil.ReadAll(resp.Body)
+	buf, err := io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 
 	var got pdpb.Member
@@ -119,7 +125,7 @@ func (s *testMemberAPISuite) TestChangeLeaderPeerUrls(c *C) {
 	addr = s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/members"
 	resp, err = testDialClient.Get(addr)
 	c.Assert(err, IsNil)
-	buf, err = ioutil.ReadAll(resp.Body)
+	buf, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
 	got1 := make(map[string]*pdpb.Member)
@@ -141,4 +147,28 @@ func changeLeaderPeerUrls(c *C, leader *pdpb.Member, id uint64, urls []string) {
 	resp, err := testDialClient.Do(req)
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, 204)
+	resp.Body.Close()
+}
+
+type testResignAPISuite struct {
+	cfgs    []*config.Config
+	servers []*server.Server
+	clean   func()
+}
+
+func (s *testResignAPISuite) SetUpSuite(c *C) {
+	s.cfgs, s.servers, s.clean = mustNewCluster(c, 1)
+}
+
+func (s *testResignAPISuite) TearDownSuite(c *C) {
+	s.clean()
+}
+
+func (s *testResignAPISuite) TestResignMyself(c *C) {
+	addr := s.cfgs[0].ClientUrls + apiPrefix + "/api/v1/leader/resign"
+	resp, err := testDialClient.Post(addr, "", nil)
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
 }

@@ -25,7 +25,8 @@ rm -f ASSET_DEST_PATH
 
 echo '+ Fetch TiDB Dashboard Go module'
 go mod download
-DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap-incubator/tidb-dashboard)
+go mod tidy
+DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
 echo "  - TiDB Dashboard directory: ${DASHBOARD_DIR}"
 
 
@@ -47,7 +48,7 @@ function download_embed_asset {
     echo '  - Cached archive does not exist'
     echo '  - Download pre-built embedded assets from GitHub release'
 
-    DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/releases/download/v${DASHBOARD_RELEASE_VERSION}/embedded-assets-golang.zip"
+    DOWNLOAD_URL="https://github.com/pingcap/tidb-dashboard/releases/download/v${DASHBOARD_RELEASE_VERSION}/embedded-assets-golang.zip"
     DOWNLOAD_FILE=${CACHE_DIR}/embedded-assets-golang.zip
     echo "  - Download ${DOWNLOAD_URL}"
     if ! curl -L "${DOWNLOAD_URL}" --fail --output "${DOWNLOAD_FILE}"; then

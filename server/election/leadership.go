@@ -89,7 +89,7 @@ func (ls *Leadership) GetLeaderKey() string {
 }
 
 // Campaign is used to campaign the leader with given lease and returns a leadership
-func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
+func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
 	ls.setLease(&lease{
@@ -100,19 +100,22 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 	if err := ls.getLease().Grant(leaseTimeout); err != nil {
 		return err
 	}
+	finalCmps := make([]clientv3.Cmp, 0, len(cmps)+1)
+	finalCmps = append(finalCmps, cmps...)
 	// The leader key must not exist, so the CreateRevision is 0.
+	finalCmps = append(finalCmps, clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
 	resp, err := kv.NewSlowLogTxn(ls.client).
-		If(clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0)).
+		If(finalCmps...).
 		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(ls.getLease().ID))).
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
 		ls.getLease().Close()
-		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
 		ls.getLease().Close()
-		return errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	log.Info("write leaderData to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
@@ -139,17 +142,18 @@ func (ls *Leadership) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.leaderValue)
 }
 
-// DeleteLeader deletes the corresponding leader from etcd by given leaderPath (as the key).
-func (ls *Leadership) DeleteLeader() error {
-	// delete leader itself and let others start a new election again.
-	resp, err := ls.LeaderTxn().Then(clientv3.OpDelete(ls.leaderKey)).Commit()
+// DeleteLeaderKey deletes the corresponding leader from etcd by the leaderPath as the key.
+func (ls *Leadership) DeleteLeaderKey() error {
+	resp, err := kv.NewSlowLogTxn(ls.client).Then(clientv3.OpDelete(ls.leaderKey)).Commit()
 	if err != nil {
 		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxn.FastGenByArgs()
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
-
+	// Reset the lease as soon as possible.
+	ls.Reset()
+	log.Info("delete the leader key ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
 }
 

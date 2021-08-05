@@ -40,22 +40,22 @@ const (
 // StopSyncWithLeader stop to sync the region with leader.
 func (s *RegionSyncer) StopSyncWithLeader() {
 	s.reset()
-	s.Lock()
-	close(s.closed)
-	s.closed = make(chan struct{})
-	s.Unlock()
+	s.mu.Lock()
+	close(s.mu.closed)
+	s.mu.closed = make(chan struct{})
+	s.mu.Unlock()
 	s.wg.Wait()
 }
 
 func (s *RegionSyncer) reset() {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if s.regionSyncerCancel == nil {
+	if s.mu.regionSyncerCancel == nil {
 		return
 	}
-	s.regionSyncerCancel()
-	s.regionSyncerCancel, s.regionSyncerCtx = nil, nil
+	s.mu.regionSyncerCancel()
+	s.mu.regionSyncerCancel, s.mu.regionSyncerCtx = nil, nil
 }
 
 func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
@@ -92,15 +92,22 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 		return nil, errors.WithStack(err)
 	}
 
-	s.Lock()
-	s.regionSyncerCtx, s.regionSyncerCancel = ctx, cancel
-	s.Unlock()
+	s.mu.Lock()
+	s.mu.regionSyncerCtx, s.mu.regionSyncerCancel = ctx, cancel
+	s.mu.Unlock()
 	return cc, nil
 }
 
 func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 	cli := pdpb.NewPDClient(conn)
-	syncStream, err := cli.SyncRegions(s.regionSyncerCtx)
+	var ctx context.Context
+	s.mu.RLock()
+	ctx = s.mu.regionSyncerCtx
+	s.mu.RUnlock()
+	if ctx == nil {
+		return nil, errors.New("syncRegion failed due to regionSyncerCtx is nil")
+	}
+	syncStream, err := cli.SyncRegions(ctx)
 	if err != nil {
 		return syncStream, errs.ErrGRPCCreateStream.Wrap(err).FastGenWithCause()
 	}
@@ -116,16 +123,20 @@ func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 	return syncStream, nil
 }
 
+var regionGuide = core.GenerateRegionGuideFunc(false)
+
 // StartSyncWithLeader starts to sync with leader.
 func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	s.wg.Add(1)
-	s.RLock()
-	closed := s.closed
-	s.RUnlock()
+	s.mu.RLock()
+	closed := s.mu.closed
+	s.mu.RUnlock()
 	go func() {
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.
-		err := s.server.GetStorage().LoadRegionsOnce(s.server.GetBasicCluster().CheckAndPutRegion)
+		bc := s.server.GetBasicCluster()
+		storage := s.server.GetStorage()
+		err := storage.LoadRegionsOnce(bc.CheckAndPutRegion)
 		if err != nil {
 			log.Warn("failed to load regions.", errs.ZapError(err))
 		}
@@ -142,9 +153,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				log.Error("cannot establish connection with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
 				continue
 			}
-			defer conn.Close()
 			break
 		}
+		defer conn.Close()
 
 		// Start syncing data.
 		for {
@@ -165,6 +176,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				time.Sleep(time.Second)
 				continue
 			}
+
 			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.GetNextIndex()))
 			for {
 				resp, err := stream.Recv()
@@ -194,7 +206,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						region       *core.RegionInfo
 						regionLeader *metapb.Peer
 					)
-					if len(regionLeaders) > i && regionLeaders[i].Id != 0 {
+					if len(regionLeaders) > i && regionLeaders[i].GetId() != 0 {
 						regionLeader = regionLeaders[i]
 					}
 					if hasStats {
@@ -208,10 +220,22 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						region = core.NewRegionInfo(r, regionLeader)
 					}
 
-					s.server.GetBasicCluster().CheckAndPutRegion(region)
-					err = s.server.GetStorage().SaveRegion(r)
+					origin, err := bc.PreCheckPutRegion(region)
+					if err != nil {
+						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
+						continue
+					}
+					_, saveKV, _, _ := regionGuide(region, origin)
+					overlaps := bc.PutRegion(region)
+
+					if saveKV {
+						err = storage.SaveRegion(r)
+					}
 					if err == nil {
 						s.history.Record(region)
+					}
+					for _, old := range overlaps {
+						_ = storage.DeleteRegion(old.GetMeta())
 					}
 				}
 			}

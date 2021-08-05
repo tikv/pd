@@ -27,10 +27,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/logutil"
+	"go.uber.org/zap"
 )
 
 // errRegionIsStale is error info for region is stale.
-var errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
+func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 	return errors.Errorf("region is stale: region %v origin %v", region, origin)
 }
 
@@ -52,6 +55,8 @@ type RegionInfo struct {
 	approximateKeys   int64
 	interval          *pdpb.TimeInterval
 	replicationStatus *replication_modepb.RegionReplicationStatus
+	QueryStats        *pdpb.QueryStats
+	flowRoundDivisor  uint64
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -60,7 +65,6 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 		meta:   region,
 		leader: leader,
 	}
-
 	for _, opt := range opts {
 		opt(regionInfo)
 	}
@@ -79,16 +83,28 @@ func classifyVoterAndLearner(region *RegionInfo) {
 			voters = append(voters, p)
 		}
 	}
+	sort.Sort(peerSlice(learners))
+	sort.Sort(peerSlice(voters))
 	region.learners = learners
 	region.voters = voters
 }
 
-// EmptyRegionApproximateSize is the region approximate size of an empty region
-// (heartbeat size <= 1MB).
-const EmptyRegionApproximateSize = 1
+const (
+	// EmptyRegionApproximateSize is the region approximate size of an empty region
+	// (heartbeat size <= 1MB).
+	EmptyRegionApproximateSize = 1
+	// ImpossibleFlowSize is an impossible flow size (such as written_bytes, read_keys, etc.)
+	// It may be caused by overflow, refer to https://github.com/tikv/pd/issues/3379.
+	// They need to be filtered so as not to affect downstream.
+	// (flow size >= 1024TB)
+	ImpossibleFlowSize = 1 << 50
+	// Only statistics within this interval limit are valid.
+	statsReportMinInterval = 3      // 3s
+	statsReportMaxInterval = 5 * 60 // 5min
+)
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
-func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
+func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
 	// Convert unit to MB.
 	// If region is empty or less than 1MB, use 1MB instead.
 	regionSize := heartbeat.GetApproximateSize() / (1 << 20)
@@ -110,7 +126,24 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
+		QueryStats:        heartbeat.GetQueryStats(),
 	}
+
+	for _, opt := range opts {
+		opt(region)
+	}
+
+	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
+		region.writtenKeys = 0
+		region.writtenBytes = 0
+	}
+	if region.readKeys >= ImpossibleFlowSize || region.readBytes >= ImpossibleFlowSize {
+		region.readKeys = 0
+		region.readBytes = 0
+	}
+
+	sort.Sort(peerStatsSlice(region.downPeers))
+	sort.Sort(peerSlice(region.pendingPeers))
 
 	classifyVoterAndLearner(region)
 	return region
@@ -372,9 +405,25 @@ func (r *RegionInfo) GetBytesRead() uint64 {
 	return r.readBytes
 }
 
+// GetRoundBytesRead returns the read bytes of the region.
+func (r *RegionInfo) GetRoundBytesRead() uint64 {
+	if r.flowRoundDivisor == 0 {
+		return r.readBytes
+	}
+	return ((r.readBytes + r.flowRoundDivisor/2) / r.flowRoundDivisor) * r.flowRoundDivisor
+}
+
 // GetBytesWritten returns the written bytes of the region.
 func (r *RegionInfo) GetBytesWritten() uint64 {
 	return r.writtenBytes
+}
+
+// GetRoundBytesWritten returns the written bytes of the region.
+func (r *RegionInfo) GetRoundBytesWritten() uint64 {
+	if r.flowRoundDivisor == 0 {
+		return r.writtenBytes
+	}
+	return ((r.writtenBytes + r.flowRoundDivisor/2) / r.flowRoundDivisor) * r.flowRoundDivisor
 }
 
 // GetKeysWritten returns the written keys of the region.
@@ -385,6 +434,16 @@ func (r *RegionInfo) GetKeysWritten() uint64 {
 // GetKeysRead returns the read keys of the region.
 func (r *RegionInfo) GetKeysRead() uint64 {
 	return r.readKeys
+}
+
+// GetWriteRate returns the write rate of the region.
+func (r *RegionInfo) GetWriteRate() (bytesRate, keysRate float64) {
+	reportInterval := r.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	if interval >= statsReportMinInterval && interval <= statsReportMaxInterval {
+		return float64(r.writtenBytes) / float64(interval), float64(r.writtenKeys) / float64(interval)
+	}
+	return 0, 0
 }
 
 // GetLeader returns the leader of the region.
@@ -417,155 +476,130 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
-// regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
-type regionMap struct {
-	m         map[uint64]*RegionInfo
-	totalSize int64
-	totalKeys int64
-}
+// RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
+// and new region information.
+type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
 
-func newRegionMap() *regionMap {
-	return &regionMap{
-		m: make(map[uint64]*RegionInfo),
+// GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
+// nil means do not print the log.
+func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
+	noLog := func(msg string, fields ...zap.Field) {}
+	debug, info := noLog, noLog
+	if enableLog {
+		debug = log.Debug
+		info = log.Info
 	}
-}
+	// Save to storage if meta is updated.
+	// Save to cache if meta or leader is updated, or contains any down/pending peer.
+	// Mark isNew if the region in cache does not have leader.
+	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
+		if origin == nil {
+			debug("insert new region",
+				zap.Uint64("region-id", region.GetID()),
+				logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
+			saveKV, saveCache, isNew = true, true, true
+		} else {
+			r := region.GetRegionEpoch()
+			o := origin.GetRegionEpoch()
+			if r.GetVersion() > o.GetVersion() {
+				info("region Version changed",
+					zap.Uint64("region-id", region.GetID()),
+					logutil.ZapRedactString("detail", DiffRegionKeyInfo(origin, region)),
+					zap.Uint64("old-version", o.GetVersion()),
+					zap.Uint64("new-version", r.GetVersion()),
+				)
+				saveKV, saveCache = true, true
+			}
+			if r.GetConfVer() > o.GetConfVer() {
+				info("region ConfVer changed",
+					zap.Uint64("region-id", region.GetID()),
+					zap.String("detail", DiffRegionPeersInfo(origin, region)),
+					zap.Uint64("old-confver", o.GetConfVer()),
+					zap.Uint64("new-confver", r.GetConfVer()),
+				)
+				saveKV, saveCache = true, true
+			}
+			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
+				if origin.GetLeader().GetId() == 0 {
+					isNew = true
+				} else {
+					info("leader changed",
+						zap.Uint64("region-id", region.GetID()),
+						zap.Uint64("from", origin.GetLeader().GetStoreId()),
+						zap.Uint64("to", region.GetLeader().GetStoreId()),
+					)
+				}
+				saveCache, needSync = true, true
+			}
+			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
+				debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+				saveCache, needSync = true, true
+			}
+			if !SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
+				debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
+				saveCache, needSync = true, true
+			}
+			if len(region.GetPeers()) != len(origin.GetPeers()) {
+				saveKV, saveCache = true, true
+			}
 
-func (rm *regionMap) Len() int {
-	if rm == nil {
-		return 0
-	}
-	return len(rm.m)
-}
+			if region.GetApproximateSize() != origin.GetApproximateSize() ||
+				region.GetApproximateKeys() != origin.GetApproximateKeys() {
+				saveCache = true
+			}
+			// Once flow has changed, will update the cache.
+			// Because keys and bytes are strongly related, only bytes are judged.
+			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
+				region.GetRoundBytesRead() != origin.GetRoundBytesRead() {
+				saveCache, needSync = true, true
+			}
 
-func (rm *regionMap) Get(id uint64) *RegionInfo {
-	if rm == nil {
-		return nil
-	}
-	if r, ok := rm.m[id]; ok {
-		return r
-	}
-	return nil
-}
-
-func (rm *regionMap) Put(region *RegionInfo) {
-	if old, ok := rm.m[region.GetID()]; ok {
-		rm.totalSize -= old.approximateSize
-		rm.totalKeys -= old.approximateKeys
-	}
-	rm.m[region.GetID()] = region
-	rm.totalSize += region.approximateSize
-	rm.totalKeys += region.approximateKeys
-}
-
-func (rm *regionMap) Delete(id uint64) {
-	if rm == nil {
-		return
-	}
-	if old, ok := rm.m[id]; ok {
-		delete(rm.m, id)
-		rm.totalSize -= old.approximateSize
-		rm.totalKeys -= old.approximateKeys
-	}
-}
-
-func (rm *regionMap) TotalSize() int64 {
-	if rm.Len() == 0 {
-		return 0
-	}
-	return rm.totalSize
-}
-
-// regionSubTree is used to manager different types of regions.
-type regionSubTree struct {
-	*regionTree
-	totalSize int64
-	totalKeys int64
-}
-
-func newRegionSubTree() *regionSubTree {
-	return &regionSubTree{
-		regionTree: newRegionTree(),
-		totalSize:  0,
-	}
-}
-
-func (rst *regionSubTree) TotalSize() int64 {
-	if rst.length() == 0 {
-		return 0
-	}
-	return rst.totalSize
-}
-
-func (rst *regionSubTree) scanRanges() []*RegionInfo {
-	if rst.length() == 0 {
-		return nil
-	}
-	var res []*RegionInfo
-	rst.scanRange([]byte(""), func(region *RegionInfo) bool {
-		res = append(res, region)
-		return true
-	})
-	return res
-}
-
-func (rst *regionSubTree) update(region *RegionInfo) {
-	overlaps := rst.regionTree.update(region)
-	rst.totalSize += region.approximateSize
-	rst.totalKeys += region.approximateKeys
-	for _, r := range overlaps {
-		rst.totalSize -= r.approximateSize
-		rst.totalKeys -= r.approximateKeys
-	}
-}
-
-func (rst *regionSubTree) remove(region *RegionInfo) {
-	if rst.length() == 0 {
-		return
-	}
-	if rst.regionTree.remove(region) != nil {
-		rst.totalSize -= region.approximateSize
-		rst.totalKeys -= region.approximateKeys
-	}
-}
-
-func (rst *regionSubTree) length() int {
-	if rst == nil {
-		return 0
-	}
-	return rst.regionTree.length()
-}
-
-func (rst *regionSubTree) RandomRegion(ranges []KeyRange) *RegionInfo {
-	if rst.length() == 0 {
-		return nil
-	}
-
-	return rst.regionTree.RandomRegion(ranges)
-}
-
-func (rst *regionSubTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
-	if rst.length() == 0 {
-		return nil
-	}
-
-	regions := make([]*RegionInfo, 0, n)
-
-	for i := 0; i < n; i++ {
-		if region := rst.regionTree.RandomRegion(ranges); region != nil {
-			regions = append(regions, region)
+			if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
+				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
+					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
+				saveCache = true
+			}
 		}
+		return
 	}
-	return regions
+}
+
+// regionMap wraps a map[uint64]*regionItem and supports randomly pick a region. They are the leaves of regionTree.
+type regionMap map[uint64]*regionItem
+
+func newRegionMap() regionMap {
+	return make(map[uint64]*regionItem)
+}
+
+func (rm regionMap) Len() int {
+	return len(rm)
+}
+
+func (rm regionMap) Get(id uint64) *regionItem {
+	return rm[id]
+}
+
+// AddNew uses RegionInfo to generate a new regionItem.
+// If the regionItem already exists, it will be overwritten.
+// Note: Do not use this function when you only need to update the RegionInfo and do not need a new regionItem.
+func (rm regionMap) AddNew(region *RegionInfo) *regionItem {
+	item := &regionItem{region: region}
+	rm[region.GetID()] = item
+	return item
+}
+
+func (rm regionMap) Delete(id uint64) {
+	delete(rm, id)
 }
 
 // RegionsInfo for export
 type RegionsInfo struct {
 	tree         *regionTree
-	regions      *regionMap                // regionID -> regionInfo
-	leaders      map[uint64]*regionSubTree // storeID -> regionSubTree
-	followers    map[uint64]*regionSubTree // storeID -> regionSubTree
-	learners     map[uint64]*regionSubTree // storeID -> regionSubTree
-	pendingPeers map[uint64]*regionSubTree // storeID -> regionSubTree
+	regions      regionMap              // regionID -> regionInfo
+	leaders      map[uint64]*regionTree // storeID -> sub regionTree
+	followers    map[uint64]*regionTree // storeID -> sub regionTree
+	learners     map[uint64]*regionTree // storeID -> sub regionTree
+	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -573,43 +607,153 @@ func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
 		tree:         newRegionTree(),
 		regions:      newRegionMap(),
-		leaders:      make(map[uint64]*regionSubTree),
-		followers:    make(map[uint64]*regionSubTree),
-		learners:     make(map[uint64]*regionSubTree),
-		pendingPeers: make(map[uint64]*regionSubTree),
+		leaders:      make(map[uint64]*regionTree),
+		followers:    make(map[uint64]*regionTree),
+		learners:     make(map[uint64]*regionTree),
+		pendingPeers: make(map[uint64]*regionTree),
 	}
 }
 
 // GetRegion returns the RegionInfo with regionID
 func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
-	region := r.regions.Get(regionID)
-	if region == nil {
-		return nil
+	if item := r.regions.Get(regionID); item != nil {
+		return item.region
 	}
-	return region
+	return nil
 }
 
-// SetRegion sets the RegionInfo with regionID
-func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
-	if origin := r.regions.Get(region.GetID()); origin != nil {
-		if !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-			r.removeRegionFromTreeAndMap(origin)
+// SetRegion sets the RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
+// overlaps: Other regions that overlap with the specified region, excluding itself.
+func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
+	var item *regionItem   // Pointer to the *RegionInfo of this ID.
+	var origin *RegionInfo // This is the original region information of this ID.
+	var rangeChanged bool  // This Region is new, or its range has changed.
+	var peersChanged bool  // This Region is new, or its peers have changed, including leader-change/pending/down.
+
+	if item = r.regions.Get(region.GetID()); item != nil {
+		// If this ID already exists, use the existing regionItem and pick out the origin.
+		origin = item.region
+		rangeChanged = !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) ||
+			!bytes.Equal(origin.GetEndKey(), region.GetEndKey())
+		if rangeChanged {
+			// Delete itself in regionTree so that overlaps will not contain itself.
+			// Because the regionItem is reused, there is no need to delete it in the regionMap.
+			r.tree.remove(origin)
+			// A change in the range is equivalent to a change in all peers.
+			peersChanged = true
+		} else {
+			peersChanged = r.shouldRemoveFromSubTree(region, origin)
 		}
-		if r.shouldRemoveFromSubTree(region, origin) {
+		// If the peers have changed, the sub regionTree needs to be cleaned up.
+		if peersChanged {
+			// TODO: Improve performance by deleting only the different peers.
 			r.removeRegionFromSubTree(origin)
 		}
+		// Update the RegionInfo in the regionItem.
+		item.region = region
+	} else {
+		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
+		rangeChanged = true
+		peersChanged = true
+		item = r.regions.AddNew(region)
 	}
-	return r.AddRegion(region)
+
+	if !rangeChanged {
+		// If the range is not changed, only the statistical on the regionTree needs to be updated.
+		r.tree.updateStat(origin, region)
+	} else {
+		// It has been removed and all information needs to be updated again.
+		overlaps = r.tree.update(item)
+		for _, old := range overlaps {
+			r.RemoveRegion(r.GetRegion(old.GetID()))
+		}
+	}
+
+	if !peersChanged {
+		// If the peers are not changed, only the statistical on the sub regionTree needs to be updated.
+		r.updateSubTreeStat(origin, region)
+	} else {
+		// It has been removed and all information needs to be updated again.
+
+		// Add to leaders and followers.
+		for _, peer := range region.GetVoters() {
+			storeID := peer.GetStoreId()
+			if peer.GetId() == region.leader.GetId() {
+				// Add leader peer to leaders.
+				store, ok := r.leaders[storeID]
+				if !ok {
+					store = newRegionTree()
+					r.leaders[storeID] = store
+				}
+				store.update(item)
+			} else {
+				// Add follower peer to followers.
+				store, ok := r.followers[storeID]
+				if !ok {
+					store = newRegionTree()
+					r.followers[storeID] = store
+				}
+				store.update(item)
+			}
+		}
+		// Add to learners.
+		for _, peer := range region.GetLearners() {
+			storeID := peer.GetStoreId()
+			store, ok := r.learners[storeID]
+			if !ok {
+				store = newRegionTree()
+				r.learners[storeID] = store
+			}
+			store.update(item)
+		}
+		// Add to PendingPeers
+		for _, peer := range region.GetPendingPeers() {
+			storeID := peer.GetStoreId()
+			store, ok := r.pendingPeers[storeID]
+			if !ok {
+				store = newRegionTree()
+				r.pendingPeers[storeID] = store
+			}
+			store.update(item)
+		}
+	}
+
+	return
 }
 
-// Length returns the RegionsInfo length
-func (r *RegionsInfo) Length() int {
+// Len returns the RegionsInfo length
+func (r *RegionsInfo) Len() int {
 	return r.regions.Len()
 }
 
-// TreeLength returns the RegionsInfo tree length(now only used in test)
-func (r *RegionsInfo) TreeLength() int {
+// TreeLen returns the RegionsInfo tree length(now only used in test)
+func (r *RegionsInfo) TreeLen() int {
 	return r.tree.length()
+}
+
+func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) {
+	for _, peer := range region.GetVoters() {
+		storeID := peer.GetStoreId()
+		if peer.GetId() == region.leader.GetId() {
+			if tree, ok := r.leaders[storeID]; ok {
+				tree.updateStat(origin, region)
+			}
+		} else {
+			if tree, ok := r.followers[storeID]; ok {
+				tree.updateStat(origin, region)
+			}
+		}
+	}
+	for _, peer := range region.GetLearners() {
+		if tree, ok := r.learners[peer.GetStoreId()]; ok {
+			tree.updateStat(origin, region)
+		}
+	}
+	for _, peer := range region.GetPendingPeers() {
+		if tree, ok := r.pendingPeers[peer.GetStoreId()]; ok {
+			tree.updateStat(origin, region)
+		}
+	}
 }
 
 // GetOverlaps returns the regions which are overlapped with the specified region range.
@@ -617,92 +761,13 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 	return r.tree.getOverlaps(region)
 }
 
-// AddRegion adds RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
-func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
-	// the regions which are overlapped with the specified region range.
-	var overlaps []*RegionInfo
-	// when the value is true, add the region to the tree. otherwise use the region replace the origin region in the tree.
-	treeNeedAdd := true
-	if origin := r.GetRegion(region.GetID()); origin != nil {
-		if regionOld := r.tree.find(region); regionOld != nil {
-			// Update to tree.
-			if bytes.Equal(regionOld.region.GetStartKey(), region.GetStartKey()) &&
-				bytes.Equal(regionOld.region.GetEndKey(), region.GetEndKey()) &&
-				regionOld.region.GetID() == region.GetID() {
-				regionOld.region = region
-				treeNeedAdd = false
-			}
-		}
-	}
-	if treeNeedAdd {
-		// Add to tree.
-		overlaps = r.tree.update(region)
-		for _, item := range overlaps {
-			r.RemoveRegion(r.GetRegion(item.GetID()))
-		}
-	}
-	// Add to regions.
-	r.regions.Put(region)
-
-	// Add to leaders and followers.
-	for _, peer := range region.GetVoters() {
-		storeID := peer.GetStoreId()
-		if peer.GetId() == region.leader.GetId() {
-			// Add leader peer to leaders.
-			store, ok := r.leaders[storeID]
-			if !ok {
-				store = newRegionSubTree()
-				r.leaders[storeID] = store
-			}
-			store.update(region)
-		} else {
-			// Add follower peer to followers.
-			store, ok := r.followers[storeID]
-			if !ok {
-				store = newRegionSubTree()
-				r.followers[storeID] = store
-			}
-			store.update(region)
-		}
-	}
-
-	// Add to learners.
-	for _, peer := range region.GetLearners() {
-		storeID := peer.GetStoreId()
-		store, ok := r.learners[storeID]
-		if !ok {
-			store = newRegionSubTree()
-			r.learners[storeID] = store
-		}
-		store.update(region)
-	}
-
-	for _, peer := range region.pendingPeers {
-		storeID := peer.GetStoreId()
-		store, ok := r.pendingPeers[storeID]
-		if !ok {
-			store = newRegionSubTree()
-			r.pendingPeers[storeID] = store
-		}
-		store.update(region)
-	}
-
-	return overlaps
-}
-
 // RemoveRegion removes RegionInfo from regionTree and regionMap
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	// Remove from tree and regions.
-	r.removeRegionFromTreeAndMap(region)
-	// Remove from leaders and followers.
-	r.removeRegionFromSubTree(region)
-}
-
-// removeRegionFromTreeAndMap removes RegionInfo from regionTree and regionMap
-func (r *RegionsInfo) removeRegionFromTreeAndMap(region *RegionInfo) {
-	// Remove from tree and regions.
 	r.tree.remove(region)
 	r.regions.Delete(region.GetID())
+	// Remove from leaders and followers.
+	r.removeRegionFromSubTree(region)
 }
 
 // removeRegionFromSubTree removes RegionInfo from regionSubTrees
@@ -729,28 +794,54 @@ func (s peerSlice) Less(i, j int) bool {
 	return s[i].GetId() < s[j].GetId()
 }
 
+// SortedPeersEqual judges whether two sorted `peerSlice` are equal
+func SortedPeersEqual(peersA, peersB []*metapb.Peer) bool {
+	if len(peersA) != len(peersB) {
+		return false
+	}
+	for i, peerA := range peersA {
+		peerB := peersB[i]
+		if peerA.GetStoreId() != peerB.GetStoreId() || peerA.GetId() != peerB.GetId() {
+			return false
+		}
+	}
+	return true
+}
+
+type peerStatsSlice []*pdpb.PeerStats
+
+func (s peerStatsSlice) Len() int {
+	return len(s)
+}
+func (s peerStatsSlice) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s peerStatsSlice) Less(i, j int) bool {
+	return s[i].GetPeer().GetId() < s[j].GetPeer().GetId()
+}
+
+// SortedPeersStatsEqual judges whether two sorted `peerStatsSlice` are equal
+func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
+	if len(peersA) != len(peersB) {
+		return false
+	}
+	for i, peerStatsA := range peersA {
+		peerA := peerStatsA.GetPeer()
+		peerB := peersB[i].GetPeer()
+		if peerA.GetStoreId() != peerB.GetStoreId() || peerA.GetId() != peerB.GetId() {
+			return false
+		}
+	}
+	return true
+}
+
 // shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
 // new peer was created, learners changed, pendingPeers changed, and so on.
 func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
-	checkPeersChange := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
-		if len(origin) != len(other) {
-			return true
-		}
-		sort.Sort(peerSlice(origin))
-		sort.Sort(peerSlice(other))
-		for index, peer := range origin {
-			if peer.GetStoreId() == other[index].GetStoreId() && peer.GetId() == other[index].GetId() {
-				continue
-			}
-			return true
-		}
-		return false
-	}
-
 	return origin.leader.GetId() != region.leader.GetId() ||
-		checkPeersChange(origin.GetVoters(), region.GetVoters()) ||
-		checkPeersChange(origin.GetLearners(), region.GetLearners()) ||
-		checkPeersChange(origin.GetPendingPeers(), region.GetPendingPeers())
+		!SortedPeersEqual(origin.GetVoters(), region.GetVoters()) ||
+		!SortedPeersEqual(origin.GetLearners(), region.GetLearners()) ||
+		!SortedPeersEqual(origin.GetPendingPeers(), region.GetPendingPeers())
 }
 
 // SearchRegion searches RegionInfo from regionTree
@@ -774,8 +865,8 @@ func (r *RegionsInfo) SearchPrevRegion(regionKey []byte) *RegionInfo {
 // GetRegions gets all RegionInfo from regionMap
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.regions.Len())
-	for _, region := range r.regions.m {
-		regions = append(regions, region)
+	for _, item := range r.regions {
+		regions = append(regions, item.region)
 	}
 	return regions
 }
@@ -815,11 +906,30 @@ func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) int64 {
 	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID) + r.GetStoreLearnerRegionSize(storeID)
 }
 
+// GetStoreLeaderWriteRate get total write rate of store's leaders
+func (r *RegionsInfo) GetStoreLeaderWriteRate(storeID uint64) (bytesRate, keysRate float64) {
+	return r.leaders[storeID].TotalWriteRate()
+}
+
+// GetStoreWriteRate get total write rate of store's regions
+func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate float64) {
+	storeBytesRate, storeKeysRate := r.leaders[storeID].TotalWriteRate()
+	bytesRate += storeBytesRate
+	keysRate += storeKeysRate
+	storeBytesRate, storeKeysRate = r.followers[storeID].TotalWriteRate()
+	bytesRate += storeBytesRate
+	keysRate += storeKeysRate
+	storeBytesRate, storeKeysRate = r.learners[storeID].TotalWriteRate()
+	bytesRate += storeBytesRate
+	keysRate += storeKeysRate
+	return
+}
+
 // GetMetaRegions gets a set of metapb.Region from regionMap
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
-	for _, region := range r.regions.m {
-		regions = append(regions, proto.Clone(region.meta).(*metapb.Region))
+	for _, item := range r.regions {
+		regions = append(regions, proto.Clone(item.region.meta).(*metapb.Region))
 	}
 	return regions
 }
@@ -894,7 +1004,7 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 	return r.learners[storeID].RandomRegions(n, ranges)
 }
 
-// GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
+// GetLeader returns leader RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	if leaders, ok := r.leaders[storeID]; ok {
 		return leaders.find(region).region
@@ -902,12 +1012,62 @@ func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo 
 	return nil
 }
 
-// GetFollower return follower RegionInfo by storeID and regionID(now only used in test)
+// GetFollower returns follower RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
 	if followers, ok := r.followers[storeID]; ok {
 		return followers.find(region).region
 	}
 	return nil
+}
+
+// GetReadQueryNum returns read query num from this region
+func (r *RegionInfo) GetReadQueryNum() uint64 {
+	return GetReadQueryNum(r.QueryStats)
+}
+
+// GetWriteQueryNum returns write query num from this region
+func (r *RegionInfo) GetWriteQueryNum() uint64 {
+	return GetWriteQueryNum(r.QueryStats)
+}
+
+// GetReadQueryNum returns read query num from this QueryStats
+func GetReadQueryNum(stats *pdpb.QueryStats) uint64 {
+	if stats == nil {
+		return 0
+	}
+	return stats.Coprocessor + stats.Get + stats.Scan
+}
+
+// GetWriteQueryNum returns write query num from this QueryStats
+func GetWriteQueryNum(stats *pdpb.QueryStats) uint64 {
+	if stats == nil {
+		return 0
+	}
+	return stats.Put + stats.Delete + stats.DeleteRange
+}
+
+// GetLoads returns loads from region
+func (r *RegionInfo) GetLoads() []float64 {
+	return []float64{
+		float64(r.GetBytesRead()),
+		float64(r.GetKeysRead()),
+		float64(r.GetReadQueryNum()),
+		float64(r.GetBytesWritten()),
+		float64(r.GetKeysWritten()),
+		float64(r.GetWriteQueryNum()),
+	}
+}
+
+// GetWriteLoads returns write loads from region
+func (r *RegionInfo) GetWriteLoads() []float64 {
+	return []float64{
+		0,
+		0,
+		0,
+		float64(r.GetBytesWritten()),
+		float64(r.GetKeysWritten()),
+		float64(r.GetWriteQueryNum()),
+	}
 }
 
 // ScanRange scans regions intersecting [start key, end key), returns at most
@@ -949,10 +1109,10 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Regi
 
 // GetAverageRegionSize returns the average region approximate size.
 func (r *RegionsInfo) GetAverageRegionSize() int64 {
-	if r.regions.Len() == 0 {
+	if r.tree.length() == 0 {
 		return 0
 	}
-	return r.regions.TotalSize() / int64(r.regions.Len())
+	return r.tree.TotalSize() / int64(r.tree.length())
 }
 
 // DiffRegionPeersInfo return the difference of peers info  between two RegionInfo
@@ -1065,9 +1225,6 @@ func RegionToHexMeta(meta *metapb.Region) HexRegionMeta {
 	if meta == nil {
 		return HexRegionMeta{}
 	}
-	meta = proto.Clone(meta).(*metapb.Region)
-	meta.StartKey = HexRegionKey(meta.StartKey)
-	meta.EndKey = HexRegionKey(meta.EndKey)
 	return HexRegionMeta{meta}
 }
 
@@ -1077,20 +1234,17 @@ type HexRegionMeta struct {
 }
 
 func (h HexRegionMeta) String() string {
-	return strings.TrimSpace(proto.CompactTextString(h.Region))
+	var meta = proto.Clone(h.Region).(*metapb.Region)
+	meta.StartKey = HexRegionKey(meta.StartKey)
+	meta.EndKey = HexRegionKey(meta.EndKey)
+	return strings.TrimSpace(proto.CompactTextString(meta))
 }
 
 // RegionsToHexMeta converts regions' meta keys to hex format. Used for formating
 // region in logs.
 func RegionsToHexMeta(regions []*metapb.Region) HexRegionsMeta {
 	hexRegionMetas := make([]*metapb.Region, len(regions))
-	for i, region := range regions {
-		meta := proto.Clone(region).(*metapb.Region)
-		meta.StartKey = HexRegionKey(meta.StartKey)
-		meta.EndKey = HexRegionKey(meta.EndKey)
-
-		hexRegionMetas[i] = meta
-	}
+	copy(hexRegionMetas, regions)
 	return hexRegionMetas
 }
 
@@ -1101,7 +1255,11 @@ type HexRegionsMeta []*metapb.Region
 func (h HexRegionsMeta) String() string {
 	var b strings.Builder
 	for _, r := range h {
-		b.WriteString(proto.CompactTextString(r))
+		meta := proto.Clone(r).(*metapb.Region)
+		meta.StartKey = HexRegionKey(meta.StartKey)
+		meta.EndKey = HexRegionKey(meta.EndKey)
+
+		b.WriteString(proto.CompactTextString(meta))
 	}
 	return strings.TrimSpace(b.String())
 }

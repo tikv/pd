@@ -120,7 +120,7 @@ func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 func (c *testCluster) setStoreDown(storeID uint64) error {
 	store := c.GetStore(storeID)
 	newStore := store.Clone(
-		core.SetStoreState(metapb.StoreState_Up),
+		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Time{}),
 	)
 	c.Lock()
@@ -130,7 +130,7 @@ func (c *testCluster) setStoreDown(storeID uint64) error {
 
 func (c *testCluster) setStoreOffline(storeID uint64) error {
 	store := c.GetStore(storeID)
-	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
+	newStore := store.Clone(core.OfflineStore(false))
 	c.Lock()
 	defer c.Unlock()
 	return c.putStoreLocked(newStore)
@@ -172,19 +172,19 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 
 	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 	oc.AddWaitingOperator(op1)
-	c.Assert(oc.OperatorCount(op1.Kind()), Equals, uint64(1))
+	c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(1))
 	c.Assert(oc.GetOperator(1).RegionID(), Equals, op1.RegionID())
 
 	// Region 1 already has an operator, cannot add another one.
 	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 	oc.AddWaitingOperator(op2)
-	c.Assert(oc.OperatorCount(op2.Kind()), Equals, uint64(0))
+	c.Assert(oc.OperatorCount(operator.OpRegion), Equals, uint64(0))
 
 	// Remove the operator manually, then we can add a new operator.
 	c.Assert(oc.RemoveOperator(op1), IsTrue)
 	op3 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 	oc.AddWaitingOperator(op3)
-	c.Assert(oc.OperatorCount(op3.Kind()), Equals, uint64(1))
+	c.Assert(oc.OperatorCount(operator.OpRegion), Equals, uint64(1))
 	c.Assert(oc.GetOperator(1).RegionID(), Equals, op3.RegionID())
 }
 
@@ -283,7 +283,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	if setCfg != nil {
 		setCfg(cfg)
 	}
-	tc := newTestCluster(opt)
+	tc := newTestCluster(ctx, opt)
 	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.getClusterID(), tc, true /* need to run */)
 	if setTc != nil {
 		setTc(tc)
@@ -300,7 +300,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	}
 }
 
-func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy bool, expectAddOperator int) {
+func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectAddOperator int) {
 	ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
 	if ops == nil {
 		c.Assert(expectAddOperator, Equals, 0)
@@ -319,10 +319,10 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
-	s.checkRegion(c, tc, co, 1, false, 1)
+	s.checkRegion(c, tc, co, 1, 1)
 	waitOperator(c, co, 1)
 	testutil.CheckAddPeer(c, co.opController.GetOperator(1), operator.OpReplica, 1)
-	s.checkRegion(c, tc, co, 1, false, 0)
+	s.checkRegion(c, tc, co, 1, 0)
 
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}
@@ -331,11 +331,11 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
 	)
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, 0)
+	s.checkRegion(c, tc, co, 1, 0)
 	co.stop()
 	co.wg.Wait()
 
-	tc = newTestCluster(opt)
+	tc = newTestCluster(s.ctx, opt)
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 
@@ -344,15 +344,15 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, 0)
+	s.checkRegion(c, tc, co, 1, 0)
 	r = r.Clone(core.WithPendingPeers(nil))
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, 1)
+	s.checkRegion(c, tc, co, 1, 1)
 	waitOperator(c, co, 1)
 	op := co.opController.GetOperator(1)
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
-	s.checkRegion(c, tc, co, 1, false, 0)
+	s.checkRegion(c, tc, co, 1, 0)
 }
 
 func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
@@ -385,7 +385,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 
 		}
 	}
-	s.checkRegion(c, tc, co, num, true, 0)
+	s.checkRegion(c, tc, co, num, 0)
 }
 
 func (s *testCoordinatorSuite) TestReplica(c *C) {
@@ -629,11 +629,10 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
-	c.Assert(co.schedulers, HasLen, 4)
+	c.Assert(co.schedulers, HasLen, 3)
 	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
 	c.Assert(co.schedulers, HasLen, 0)
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -684,7 +683,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(tc.addLeaderStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderStore(2, 1), IsNil)
 
-	c.Assert(co.schedulers, HasLen, 4)
+	c.Assert(co.schedulers, HasLen, 3)
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
@@ -694,14 +693,13 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	evict, err := schedule.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(evict, "2"), IsNil)
-	c.Assert(co.schedulers, HasLen, 6)
+	c.Assert(co.schedulers, HasLen, 5)
 	sches, _, err := storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 6)
+	c.Assert(sches, HasLen, 5)
 	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
 	c.Assert(co.schedulers, HasLen, 2)
 	c.Assert(co.cluster.opt.Persist(storage), IsNil)
 	co.stop()
@@ -717,15 +715,15 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	defer func() {
 		config.DefaultSchedulers = config.DefaultSchedulers[:len(config.DefaultSchedulers)-1]
 	}()
-	c.Assert(newOpt.GetSchedulers(), HasLen, 4)
+	c.Assert(newOpt.GetSchedulers(), HasLen, 3)
 	c.Assert(newOpt.Reload(storage), IsNil)
 	// only remains 3 items with independent config.
 	sches, _, err = storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(sches, HasLen, 3)
 
-	// option have 7 items because the default scheduler do not remove.
-	c.Assert(newOpt.GetSchedulers(), HasLen, 7)
+	// option have 6 items because the default scheduler do not remove.
+	c.Assert(newOpt.GetSchedulers(), HasLen, 6)
 	c.Assert(newOpt.Persist(storage), IsNil)
 	tc.RaftCluster.opt = newOpt
 
@@ -751,12 +749,12 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.addScheduler(brs), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
 
-	// the scheduler option should contain 7 items
-	// the `hot scheduler` and `label scheduler` are disabled
-	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 7)
+	// the scheduler option should contain 6 items
+	// the `hot scheduler` are disabled
+	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 6)
 	c.Assert(co.removeScheduler(schedulers.GrantLeaderName), IsNil)
 	// the scheduler that is not enable by default will be completely deleted
-	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 6)
+	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 5)
 	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
 	co.stop()
@@ -784,23 +782,22 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	c.Assert(tc.addLeaderStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderStore(2, 1), IsNil)
 
-	c.Assert(co.schedulers, HasLen, 4)
+	c.Assert(co.schedulers, HasLen, 3)
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
 	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
-	c.Assert(co.schedulers, HasLen, 5)
+	c.Assert(co.schedulers, HasLen, 4)
 	sches, _, err := storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 5)
+	c.Assert(sches, HasLen, 4)
 
 	// remove all schedulers
 	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.GrantLeaderName), IsNil)
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
@@ -820,7 +817,7 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	co.run()
 	c.Assert(co.schedulers, HasLen, 0)
 	// the option remains default scheduler
-	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 4)
+	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 3)
 	co.stop()
 	co.wg.Wait()
 }

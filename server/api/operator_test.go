@@ -17,7 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"strings"
 
 	. "github.com/pingcap/check"
@@ -105,7 +105,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	c.Assert(strings.Contains(operator, "add learner peer 2 on store 4"), IsTrue)
 
 	// Fail to add peer to tombstone store.
-	err = s.svr.GetRaftCluster().BuryStore(3, true)
+	err = s.svr.GetRaftCluster().RemoveStore(3, true)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`))
 	c.Assert(err, NotNil)
@@ -404,7 +404,7 @@ func mustReadURL(c *C, url string) string {
 	res, err := testDialClient.Get(url)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()
-	data, err := ioutil.ReadAll(res.Body)
+	data, err := io.ReadAll(res.Body)
 	c.Assert(err, IsNil)
 	return string(data)
 }
