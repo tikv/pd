@@ -931,7 +931,7 @@ func (bs *balanceSolver) isTolerance(src, dst *storeLoadPred, dim int) bool {
 	pendingAmp := (1 + pendingAmpFactor*srcRate/(srcRate-dstRate))
 	srcPending := src.pending().Loads[dim]
 	dstPending := dst.pending().Loads[dim]
-	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), strconv.FormatUint(bs.cur.dstStoreID, 10)).Set(float64(pendingAmp))
+	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), strconv.FormatUint(bs.cur.dstStoreID, 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
