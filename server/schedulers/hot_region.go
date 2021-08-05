@@ -84,7 +84,7 @@ type hotScheduler struct {
 
 	// store information, including pending Influence by resource type
 	// Every time Schedule will recalculate it.
-	stInfos map[uint64]*storeInfo
+	stInfos map[uint64]*storePendingSummaryInfo
 	// temporary states but exported to API or metrics
 	// Every time Schedule will recalculate it.
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
@@ -521,7 +521,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			if bs.rwTy != write || bs.opTy != movePeer {
 				continue
 			}
-			srcToleranceRatio += 0.1
+			srcToleranceRatio += tiflashToleranceRatioCorrection
 		}
 		if len(detail.HotPeers) == 0 {
 			continue
@@ -729,7 +729,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 			if bs.rwTy != write || bs.opTy != movePeer {
 				continue
 			}
-			dstToleranceRatio += 0.1
+			dstToleranceRatio += tiflashToleranceRatioCorrection
 		}
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
 			id := store.GetID()

@@ -37,6 +37,11 @@ const (
 	leaderTolerantSizeRatio float64 = 5.0
 	minTolerantSizeRatio    float64 = 1.0
 	influenceAmp            int64   = 100
+
+	// EngineTiFlash is the tiflash value of the engine label.
+	EngineTiFlash = "tiflash"
+	// EngineTiKV indicates the tikv engine in metrics
+	EngineTiKV = "tikv"
 )
 
 type balancePlan struct {
@@ -382,17 +387,17 @@ func maxLoad(a, b *storeLoad) *storeLoad {
 	}
 }
 
-type storeInfo struct {
+type storePendingSummaryInfo struct {
 	Store      *core.StoreInfo
 	IsTiFlash  bool
 	PendingSum *Influence
 }
 
-func summaryStoreInfos(cluster opt.Cluster) map[uint64]*storeInfo {
+func summaryStoreInfos(cluster opt.Cluster) map[uint64]*storePendingSummaryInfo {
 	stores := cluster.GetStores()
-	infos := make(map[uint64]*storeInfo, len(stores))
+	infos := make(map[uint64]*storePendingSummaryInfo, len(stores))
 	for _, store := range stores {
-		info := &storeInfo{
+		info := &storePendingSummaryInfo{
 			Store:      store,
 			IsTiFlash:  core.IsTiFlashStore(store.GetMeta()),
 			PendingSum: nil,
@@ -402,7 +407,7 @@ func summaryStoreInfos(cluster opt.Cluster) map[uint64]*storeInfo {
 	return infos
 }
 
-func (s *storeInfo) addInfluence(infl *Influence, w float64) {
+func (s *storePendingSummaryInfo) addInfluence(infl *Influence, w float64) {
 	if infl == nil || w == 0 {
 		return
 	}
@@ -419,7 +424,7 @@ func (s *storeInfo) addInfluence(infl *Influence, w float64) {
 }
 
 type storeLoadDetail struct {
-	Info     *storeInfo
+	Info     *storePendingSummaryInfo
 	LoadPred *storeLoadPred
 	HotPeers []*statistics.HotPeerStat
 }
@@ -489,7 +494,7 @@ func toHotPeerStatShow(p *statistics.HotPeerStat, kind rwType) statistics.HotPee
 // summaryStoresLoad Load information of all available stores.
 // it will filter the hot peer and calculate the current and future stat(rate,count) for each store
 func summaryStoresLoad(
-	storeInfos map[uint64]*storeInfo,
+	storeInfos map[uint64]*storePendingSummaryInfo,
 	storesLoads map[uint64][]float64,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
 	isTraceRegionFlow bool,
@@ -598,45 +603,38 @@ func summaryStoresLoad(
 		}
 	}
 
-	// store expectation rate and count for each store-load detail.
-	for id, detail := range loadDetail {
-		var allLoadSum []float64
-		var allStoreCount float64
-		var allHotPeersCount float64
-		if detail.Info.IsTiFlash {
-			allLoadSum = allTiFlashLoadSum
-			allStoreCount = float64(allTiFlashCount)
-			allHotPeersCount = float64(allTiFlashHotPeersCount)
-		} else {
-			allLoadSum = allTiKVLoadSum
-			allStoreCount = float64(allTiKVCount)
-			allHotPeersCount = float64(allTiKVHotPeersCount)
-		}
+	calcExpect := func(engine string, allLoadSum []float64, allStoreCnt, allHotPeersCnt int) (expect storeLoad) {
+		allStoreCount := float64(allStoreCnt)
+		allHotPeersCount := float64(allHotPeersCnt)
 		expectLoads := make([]float64, len(allLoadSum))
 		for i := range expectLoads {
 			expectLoads[i] = allLoadSum[i] / allStoreCount
 		}
 		expectCount := allHotPeersCount / allStoreCount
-		detail.LoadPred.Expect.Loads = expectLoads
-		detail.LoadPred.Expect.Count = expectCount
+		expect.Loads = expectLoads
+		expect.Count = expectCount
 		// Debug
-		{
-			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.ByteDim])
-		}
-		{
-			ty := "exp-key-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.KeyDim])
-		}
-		{
-			ty := "exp-query-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.QueryDim])
-		}
-		{
-			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectCount)
+		ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[statistics.ByteDim])
+		ty = "exp-key-rate-" + rwTy.String() + "-" + kind.String()
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[statistics.KeyDim])
+		ty = "exp-query-rate-" + rwTy.String() + "-" + kind.String()
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[statistics.QueryDim])
+		ty = "exp-count-rate-" + rwTy.String() + "-" + kind.String()
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expectCount)
+		return
+	}
+	tikvExpect := calcExpect(EngineTiKV, allTiKVLoadSum, allTiKVCount, allTiKVHotPeersCount)
+	tiflashExpect := calcExpect(EngineTiFlash, allTiFlashLoadSum, allTiFlashCount, allTiKVHotPeersCount)
+	// store expectation rate and count for each store-load detail.
+	for _, detail := range loadDetail {
+		if detail.Info.IsTiFlash {
+			detail.LoadPred.Expect = tiflashExpect
+		} else {
+			detail.LoadPred.Expect = tikvExpect
 		}
 	}
+
 	return loadDetail
 }
 

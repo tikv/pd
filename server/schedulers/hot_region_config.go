@@ -37,6 +37,9 @@ const (
 	KeyPriority = "key"
 	// QueryPriority indicates hot-region-scheduler prefer query dim
 	QueryPriority = "qps"
+
+	// Scheduling has a bigger impact on TiFlash, so it needs to be corrected in configuration items
+	tiflashToleranceRatioCorrection = 0.1
 )
 
 // params about hot region.
