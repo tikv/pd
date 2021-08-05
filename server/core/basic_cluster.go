@@ -145,7 +145,7 @@ func (bc *BasicCluster) ResumeLeaderTransfer(storeID uint64) {
 	bc.Stores.ResumeLeaderTransfer(storeID)
 }
 
-// SlowStoreEvicted marks a store as a slow store and prevents transfering
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
 // leader to the store
 func (bc *BasicCluster) SlowStoreEvicted(storeID uint64) error {
 	bc.Lock()

@@ -1085,7 +1085,7 @@ func (c *RaftCluster) ResumeLeaderTransfer(storeID uint64) {
 	c.core.ResumeLeaderTransfer(storeID)
 }
 
-// SlowStoreEvicted marks a store as a slow store and prevents transfering
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
 // leader to the store
 func (c *RaftCluster) SlowStoreEvicted(storeID uint64) error {
 	return c.core.SlowStoreEvicted(storeID)

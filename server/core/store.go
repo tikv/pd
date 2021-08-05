@@ -578,7 +578,7 @@ func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
 }
 
-// SlowStoreEvicted marks a store as a slow store and prevents transfering
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
 // leader to the store
 func (s *StoresInfo) SlowStoreEvicted(storeID uint64) error {
 	store, ok := s.stores[storeID]
