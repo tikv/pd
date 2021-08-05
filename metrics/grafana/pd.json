@@ -4525,7 +4525,8 @@
           },
           "yaxes": [
             {
-              "format": "decbytes",
+              "decimals": null,
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
