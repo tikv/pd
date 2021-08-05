@@ -56,9 +56,14 @@ func (c *RuleChecker) GetType() string {
 	return "rule-checker"
 }
 
+func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
+	fit := c.cluster.FitRegion(region)
+	return c.CheckWithFit(region, fit)
+}
+
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
-func (c *RuleChecker) Check(region *core.RegionInfo, fit *placement.RegionFit) *operator.Operator {
+func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) *operator.Operator {
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
 	c.record.refresh(c.cluster)
 
