@@ -548,6 +548,7 @@ func summaryStoresLoad(
 			loads[statistics.KeyDim] = storeLoads[statistics.StoreReadKeys]
 			loads[statistics.QueryDim] = storeLoads[statistics.StoreReadQuery]
 		case write:
+			loads[statistics.QueryDim] = storeLoads[statistics.StoreWriteQuery]
 			switch kind {
 			case core.LeaderKind:
 				// Use sum of hot peers to estimate leader-only byte rate.
@@ -571,7 +572,6 @@ func summaryStoresLoad(
 					loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
 					loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
 				}
-				loads[statistics.QueryDim] = storeLoads[statistics.StoreWriteQuery]
 			}
 		}
 
