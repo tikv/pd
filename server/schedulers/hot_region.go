@@ -547,7 +547,7 @@ func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *
 			return true
 		})
 	}
-	return minLoad.Loads[bs.firstPriority] > bs.sche.conf.GetSrcToleranceRatio()*expectLoad.Loads[bs.firstPriority]
+	return minLoad.Loads[bs.firstPriority] > toleranceRatio*expectLoad.Loads[bs.firstPriority]
 }
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
