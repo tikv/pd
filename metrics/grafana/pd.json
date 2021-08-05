@@ -4699,7 +4699,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Store write qps",
+          "title": "Store write query",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -5618,7 +5618,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Store read qps",
+          "title": "Store read query",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -5932,7 +5932,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Hot cache Read entry numbers",
+          "title": "Hot cache read entry numbers",
           "tooltip": {
             "shared": true,
             "sort": 0,
