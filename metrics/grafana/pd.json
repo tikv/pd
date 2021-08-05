@@ -4794,7 +4794,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Hot cache Write entry numbers",
+          "title": "Hot cache write entry numbers",
           "tooltip": {
             "shared": true,
             "sort": 0,
