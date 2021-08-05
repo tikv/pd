@@ -382,17 +382,17 @@ func maxLoad(a, b *storeLoad) *storeLoad {
 	}
 }
 
-type storePendingSummaryInfo struct {
+type storeSummaryInfo struct {
 	Store      *core.StoreInfo
 	IsTiFlash  bool
 	PendingSum *Influence
 }
 
-func summaryStoreInfos(cluster opt.Cluster) map[uint64]*storePendingSummaryInfo {
+func summaryStoreInfos(cluster opt.Cluster) map[uint64]*storeSummaryInfo {
 	stores := cluster.GetStores()
-	infos := make(map[uint64]*storePendingSummaryInfo, len(stores))
+	infos := make(map[uint64]*storeSummaryInfo, len(stores))
 	for _, store := range stores {
-		info := &storePendingSummaryInfo{
+		info := &storeSummaryInfo{
 			Store:      store,
 			IsTiFlash:  core.IsTiFlashStore(store.GetMeta()),
 			PendingSum: nil,
@@ -402,7 +402,7 @@ func summaryStoreInfos(cluster opt.Cluster) map[uint64]*storePendingSummaryInfo 
 	return infos
 }
 
-func (s *storePendingSummaryInfo) addInfluence(infl *Influence, w float64) {
+func (s *storeSummaryInfo) addInfluence(infl *Influence, w float64) {
 	if infl == nil || w == 0 {
 		return
 	}
@@ -419,9 +419,13 @@ func (s *storePendingSummaryInfo) addInfluence(infl *Influence, w float64) {
 }
 
 type storeLoadDetail struct {
-	Info     *storePendingSummaryInfo
+	Info     *storeSummaryInfo
 	LoadPred *storeLoadPred
 	HotPeers []*statistics.HotPeerStat
+}
+
+func (li *storeLoadDetail) getID() uint64 {
+	return li.Info.Store.GetID()
 }
 
 func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
@@ -489,7 +493,7 @@ func toHotPeerStatShow(p *statistics.HotPeerStat, kind rwType) statistics.HotPee
 // summaryStoresLoad Load information of all available stores.
 // it will filter the hot peer and calculate the current and future stat(rate,count) for each store
 func summaryStoresLoad(
-	storeInfos map[uint64]*storePendingSummaryInfo,
+	storeInfos map[uint64]*storeSummaryInfo,
 	storesLoads map[uint64][]float64,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
 	isTraceRegionFlow bool,
@@ -632,17 +636,12 @@ func summaryStoresLoad(
 	return loadDetail
 }
 
-// filterHotPeers filter the peer whose hot degree is less than minHotDegress
-func filterHotPeers(
-	kind core.ResourceKind,
-	peers []*statistics.HotPeerStat,
-) []*statistics.HotPeerStat {
+func filterHotPeers(kind core.ResourceKind, peers []*statistics.HotPeerStat) []*statistics.HotPeerStat {
 	ret := make([]*statistics.HotPeerStat, 0, len(peers))
 	for _, peer := range peers {
-		if kind == core.LeaderKind && !peer.IsLeader() {
-			continue
+		if kind != core.LeaderKind || !peer.IsLeader() {
+			ret = append(ret, peer)
 		}
-		ret = append(ret, peer)
 	}
 	return ret
 }

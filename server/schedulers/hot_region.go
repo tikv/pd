@@ -84,7 +84,7 @@ type hotScheduler struct {
 
 	// store information, including pending Influence by resource type
 	// Every time Schedule will recalculate it.
-	stInfos map[uint64]*storePendingSummaryInfo
+	stInfos map[uint64]*storeSummaryInfo
 	// temporary states but exported to API or metrics
 	// Every time Schedule will recalculate it.
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
@@ -503,7 +503,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	default:
 		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
 	}
-	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.srcDetail.Info.Store.GetID(), bs.best.dstDetail.Info.Store.GetID(), bs.infl, maxZombieDur)
+	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.srcDetail.getID(), bs.best.dstDetail.getID(), bs.infl, maxZombieDur)
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
@@ -656,13 +656,13 @@ func (bs *balanceSolver) getRegion() *core.RegionInfo {
 
 	switch bs.opTy {
 	case movePeer:
-		srcPeer := region.GetStorePeer(bs.cur.srcDetail.Info.Store.GetID())
+		srcPeer := region.GetStorePeer(bs.cur.srcDetail.getID())
 		if srcPeer == nil {
 			log.Debug("region does not have a peer on source store, maybe stat out of date", zap.Uint64("region-id", bs.cur.srcPeerStat.ID()))
 			return nil
 		}
 	case transferLeader:
-		if region.GetLeader().GetStoreId() != bs.cur.srcDetail.Info.Store.GetID() {
+		if region.GetLeader().GetStoreId() != bs.cur.srcDetail.getID() {
 			log.Debug("region leader is not on source store, maybe stat out of date", zap.Uint64("region-id", bs.cur.srcPeerStat.ID()))
 			return nil
 		}
@@ -985,7 +985,7 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 		bs.cur.srcPeerStat == nil || bs.cur.region == nil {
 		return false
 	}
-	if bs.cur.srcDetail.Info.Store.GetID() != bs.cur.srcPeerStat.StoreID ||
+	if bs.cur.srcDetail.getID() != bs.cur.srcPeerStat.StoreID ||
 		bs.cur.region.GetID() != bs.cur.srcPeerStat.ID() {
 		return false
 	}
@@ -1003,8 +1003,8 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 		targetLabel string
 	)
 
-	srcStoreID := bs.cur.srcDetail.Info.Store.GetID()
-	dstStoreID := bs.cur.dstDetail.Info.Store.GetID()
+	srcStoreID := bs.cur.srcDetail.getID()
+	dstStoreID := bs.cur.dstDetail.getID()
 	switch bs.opTy {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(srcStoreID) // checked in getRegionAndSrcPeer
