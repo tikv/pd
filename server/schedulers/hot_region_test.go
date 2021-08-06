@@ -370,6 +370,12 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 
 	// Add TiKV stores 1, 2, 3, 4, 5, 6, 7(Down) with region counts 3, 2, 2, 2, 0, 0, 0.
 	// Add TiFlash stores 8, 9, 10, 11 with region counts 3, 1, 1, 0.
+	storeCount := uint64(11)
+	aliveTiKVStartID := uint64(1)
+	aliveTiKVLastID := uint64(6)
+	aliveTiFlashStartID := uint64(8)
+	aliveTiFlashLastID := uint64(11)
+	downStoreID := uint64(7)
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 3, map[string]string{"zone": "z2", "host": "h2"})
 	tc.AddLabelsStore(3, 2, map[string]string{"zone": "z3", "host": "h3"})
@@ -381,9 +387,9 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 	tc.AddLabelsStore(9, 1, map[string]string{"zone": "z2", "host": "h9", "engine": "tiflash"})
 	tc.AddLabelsStore(10, 1, map[string]string{"zone": "z5", "host": "h10", "engine": "tiflash"})
 	tc.AddLabelsStore(11, 0, map[string]string{"zone": "z3", "host": "h11", "engine": "tiflash"})
-	tc.SetStoreDown(7)
-	for i := uint64(1); i <= 11; i++ {
-		if i != 7 {
+	tc.SetStoreDown(downStoreID)
+	for i := uint64(1); i <= storeCount; i++ {
+		if i != downStoreID {
 			tc.UpdateStorageWrittenBytes(i, 0)
 		}
 	}
@@ -394,12 +400,25 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 	//|     3     |       1      |        2       |       4        |       9       |      512 KB   |
 	//|     4     |       2      |                |                |      10       |      100 B    |
 	// Region 1, 2 and 3 are hot regions.
-	addRegionInfo(tc, write, []testRegionInfo{
+	testRegions := []testRegionInfo{
 		{1, []uint64{1, 2, 3, 8}, 512 * KB, 5 * KB},
 		{2, []uint64{1, 3, 4, 8}, 512 * KB, 5 * KB},
 		{3, []uint64{1, 2, 4, 9}, 512 * KB, 5 * KB},
 		{4, []uint64{2, 10}, 100, 1},
-	})
+	}
+	addRegionInfo(tc, write, testRegions)
+	regionBytesSum := 0.0
+	regionKeysSum := 0.0
+	hotRegionBytesSum := 0.0
+	hotRegionKeysSum := 0.0
+	for _, r := range testRegions {
+		regionBytesSum += r.byteRate
+		regionKeysSum += r.keyRate
+	}
+	for _, r := range testRegions[0:3] {
+		hotRegionBytesSum += r.byteRate
+		hotRegionKeysSum += r.keyRate
+	}
 	// Will transfer a hot learner from store 8, because the total count of peers
 	// which is hot for store 8 is larger than other TiFlash stores.
 	for i := 0; i < 20; i++ {
@@ -436,29 +455,53 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 	//|    9     |        n/a       |
 	//|   10     |        n/a       |
 	//|   11     |        n/a       |
-	tc.UpdateStorageWrittenBytes(1, 7.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 4.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 6*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(5, 0)
-	tc.UpdateStorageWrittenBytes(6, 0)
-	tc.UpdateStorageWrittenBytes(8, 0)
-	tc.UpdateStorageWrittenBytes(9, 0)
-	tc.UpdateStorageWrittenBytes(10, 0)
-	tc.UpdateStorageWrittenBytes(11, 0)
+	storesBytes := map[uint64]uint64{
+		1: 7.5 * MB * statistics.StoreHeartBeatReportInterval,
+		2: 4.5 * MB * statistics.StoreHeartBeatReportInterval,
+		3: 4.5 * MB * statistics.StoreHeartBeatReportInterval,
+		4: 6 * MB * statistics.StoreHeartBeatReportInterval,
+	}
+	tikvBytesSum, tikvKeysSum := 0.0, 0.0
+	for i := aliveTiKVStartID; i <= aliveTiKVLastID; i++ {
+		tikvBytesSum += float64(storesBytes[i]) / 10
+		tikvKeysSum += float64(storesBytes[i]/100) / 10
+	}
+	for i := uint64(1); i <= storeCount; i++ {
+		if i != downStoreID {
+			tc.UpdateStorageWrittenBytes(i, storesBytes[i])
+		}
+	}
 	{ // Check the load expect
+		aliveTiKVCount := float64(aliveTiKVLastID - aliveTiKVStartID + 1)
+		aliveTiFlashCount := float64(aliveTiFlashLastID - aliveTiFlashStartID + 1)
 		tc.ObserveRegionsStats()
 		c.Assert(len(hb.Schedule(tc)) == 0, IsFalse)
-		c.Assert(loadsEqual(hb.stLoadInfos[writeLeader][1].LoadPred.Expect.Loads, []float64{262144, 2560, 0}), IsTrue)
-		c.Assert(loadsEqual(hb.stLoadInfos[writePeer][1].LoadPred.Expect.Loads, []float64{3932160, 39322, 0}), IsTrue)
-		c.Assert(loadsEqual(hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads, []float64{393241, 3840, 0}), IsTrue)
+		c.Assert(
+			loadsEqual(
+				hb.stLoadInfos[writeLeader][1].LoadPred.Expect.Loads,
+				[]float64{hotRegionBytesSum / aliveTiKVCount, hotRegionKeysSum / aliveTiKVCount, 0}),
+			IsTrue)
+		c.Assert(
+			loadsEqual(
+				hb.stLoadInfos[writePeer][1].LoadPred.Expect.Loads,
+				[]float64{tikvBytesSum / aliveTiKVCount, tikvKeysSum / aliveTiKVCount, 0}),
+			IsTrue)
+		c.Assert(
+			loadsEqual(
+				hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads,
+				[]float64{regionBytesSum / aliveTiFlashCount, regionKeysSum / aliveTiFlashCount, 0}),
+			IsTrue)
 		// check IsTraceRegionFlow == false
 		pdServerCfg := tc.GetOpts().GetPDServerConfig()
 		pdServerCfg.FlowRoundByDigit = 8
 		tc.GetOpts().SetPDServerConfig(pdServerCfg)
 		hb.clearPendingInfluence()
 		c.Assert(len(hb.Schedule(tc)) == 0, IsFalse)
-		c.Assert(loadsEqual(hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads, []float64{393216, 3840, 0}), IsTrue)
+		c.Assert(
+			loadsEqual(
+				hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads,
+				[]float64{hotRegionBytesSum / aliveTiFlashCount, hotRegionKeysSum / aliveTiFlashCount, 0}),
+			IsTrue)
 		// revert
 		pdServerCfg.FlowRoundByDigit = 3
 		tc.GetOpts().SetPDServerConfig(pdServerCfg)
@@ -1593,7 +1636,7 @@ func loadsEqual(loads1, loads2 []float64) bool {
 		return false
 	}
 	for i, load := range loads1 {
-		if math.Abs(load-loads2[i]) > 1 {
+		if math.Abs(load-loads2[i]) > 0.01 {
 			return false
 		}
 	}
