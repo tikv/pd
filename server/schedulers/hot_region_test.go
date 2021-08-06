@@ -36,7 +36,6 @@ func init() {
 	schedulePeerPr = 1.0
 	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		cfg := initHotRegionScheduleConfig()
-		cfg.ReadPriorities = []string{BytePriority, KeyPriority}
 		return newHotWriteScheduler(opController, cfg), nil
 	})
 	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
@@ -84,7 +83,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 
-	notDoneOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
+	notDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		var op *operator.Operator
 		var err error
 		switch ty {
@@ -95,40 +94,43 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		}
 		c.Assert(err, IsNil)
 		c.Assert(op, NotNil)
-		return op
+		op.Start()
+		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-5*statistics.StoreHeartBeatReportInterval*time.Second))
+		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add((-5*statistics.StoreHeartBeatReportInterval+1)*time.Second))
+		return newPendingInfluence(op, 2, 4, Influence{}, hb.conf.GetStoreStatZombieDuration())
 	}
-	doneOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
-		op := notDoneOp(region, ty)
-		op.Cancel()
-		return op
+	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
+		infl := notDoneOpInfluence(region, ty)
+		infl.op.Cancel()
+		return infl
 	}
-	shouldRemoveOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
-		op := doneOp(region, ty)
-		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
-		return op
+	shouldRemoveOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
+		infl := justDoneOpInfluence(region, ty)
+		operator.SetOperatorStatusReachTime(infl.op, operator.CANCELED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
+		return infl
 	}
-	opCreaters := [3]func(region *core.RegionInfo, ty opType) *operator.Operator{shouldRemoveOp, notDoneOp, doneOp}
+	opInfluenceCreators := [3]func(region *core.RegionInfo, ty opType) *pendingInfluence{shouldRemoveOpInfluence, notDoneOpInfluence, justDoneOpInfluence}
 
 	typs := []opType{movePeer, transferLeader}
 
-	for i := 0; i < len(opCreaters); i++ {
+	for i, creator := range opInfluenceCreators {
 		for j, typ := range typs {
-			regionID := uint64(i*len(opCreaters) + j + 1)
+			regionID := uint64(i*len(typs) + j + 1)
 			region := newTestRegion(regionID)
-			hb.regionPendings[regionID] = opCreaters[i](region, typ)
+			hb.regionPendings[regionID] = creator(region, typ)
 		}
 	}
 
-	hb.gcRegionPendings()
+	hb.summaryPendingInfluence() // Calling this function will GC.
 
-	for i := 0; i < len(opCreaters); i++ {
+	for i := range opInfluenceCreators {
 		for j, typ := range typs {
-			regionID := uint64(i*len(opCreaters) + j + 1)
-			if i < 1 { // shouldRemoveOp
+			regionID := uint64(i*len(typs) + j + 1)
+			if i < 1 { // shouldRemoveOpInfluence
 				c.Assert(hb.regionPendings, Not(HasKey), regionID)
-			} else { // notDoneOp, doneOp
+			} else { // notDoneOpInfluence, justDoneOpInfluence
 				c.Assert(hb.regionPendings, HasKey, regionID)
-				kind := hb.regionPendings[regionID].Kind()
+				kind := hb.regionPendings[regionID].op.Kind()
 				switch typ {
 				case transferLeader:
 					c.Assert(kind&operator.OpLeader != 0, IsTrue)
@@ -737,9 +739,14 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 		}
 	}
 
-	testutil.CheckTransferLeader(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 3)
+	op := hb.Schedule(tc)[0]
+
+	// move leader from store 1 to store 5
+	// it is better than transfer leader from store 1 to store 3
+	testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 5)
 	hb.(*hotScheduler).clearPendingInfluence()
-	// assume handle the operator
+
+	// assume handle the transfer leader operator rather than move leader
 	tc.AddRegionWithReadInfo(3, 3, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{1, 2})
 	// After transfer a hot region leader from store 1 to store 3
 	// the three region leader will be evenly distributed in three stores
@@ -892,37 +899,40 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 			})
 		}
 
+		// Before schedule, store byte/key rate: 7.1 | 6.1 | 6 | 5
+		// Min and max from storeLoadPred. They will be generated in the comparison of current and future.
 		for i := 0; i < 20; i++ {
 			hb.(*hotScheduler).clearPendingInfluence()
 
 			op1 := hb.Schedule(tc)[0]
-			testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
-			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
+			testutil.CheckTransferPeer(c, op1, operator.OpHotRegion, 1, 4)
+			// After move-peer, store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
 			op2 := hb.Schedule(tc)[0]
 			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
-			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
+			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 
 			ops := hb.Schedule(tc)
 			c.Logf("%v", ops)
 			c.Assert(ops, HasLen, 0)
 		}
+
+		// Before schedule, store byte/key rate: 7.1 | 6.1 | 6 | 5
 		for i := 0; i < 20; i++ {
 			hb.(*hotScheduler).clearPendingInfluence()
 
 			op1 := hb.Schedule(tc)[0]
-			testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
-			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
+			testutil.CheckTransferPeer(c, op1, operator.OpHotRegion, 1, 4)
+			// After move-peer, store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
 			op2 := hb.Schedule(tc)[0]
 			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
-			// store bytekey rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
+			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 			c.Assert(op2.Cancel(), IsTrue)
-			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
 
 			op2 = hb.Schedule(tc)[0]
 			testutil.CheckTransferPeer(c, op2, operator.OpHotRegion, 1, 4)
-			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
+			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
 
 			c.Assert(op1.Cancel(), IsTrue)
 			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
@@ -1228,7 +1238,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 
 		if testcase.DegreeAfterTransferLeader >= 3 {
 			// try schedule
-			hb.prepareForBalance(tc)
+			hb.prepareForBalance(testcase.kind, tc)
 			leaderSolver := newBalanceSolver(hb, tc, testcase.kind, transferLeader)
 			leaderSolver.cur = &solution{srcStoreID: 2}
 			c.Check(leaderSolver.filterHotPeers(), HasLen, 0) // skip schedule
@@ -1574,4 +1584,57 @@ func (s *testHotSchedulerSuite) TestHotWriteLeaderScheduleWithPriority(c *C) {
 	c.Assert(len(ops), Equals, 1)
 	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 3)
 	schedulePeerPr = old
+}
+
+func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	tc := mockcluster.NewCluster(ctx, opt)
+	// default
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.QueryDim, statistics.ByteDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+	// low version
+	tc.DisableFeature(versioninfo.HotScheduleWithQuery)
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.ByteDim, statistics.KeyDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+	// config byte and key
+	hb.(*hotScheduler).conf.ReadPriorities = []string{"key", "byte"}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"byte", "key"}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"key", "byte"}
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+		{statistics.KeyDim, statistics.ByteDim},
+	})
+	// config query in low version
+	hb.(*hotScheduler).conf.ReadPriorities = []string{"qps", "byte"}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"qps", "byte"}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"qps", "byte"}
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.ByteDim, statistics.KeyDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+}
+
+func checkPriority(c *C, hb *hotScheduler, tc *mockcluster.Cluster, dims [3][2]int) {
+	readSolver := newBalanceSolver(hb, tc, read, transferLeader)
+	writeLeaderSolver := newBalanceSolver(hb, tc, write, transferLeader)
+	writePeerSolver := newBalanceSolver(hb, tc, write, movePeer)
+	c.Assert(readSolver.firstPriority, Equals, dims[0][0])
+	c.Assert(readSolver.secondPriority, Equals, dims[0][1])
+	c.Assert(writeLeaderSolver.firstPriority, Equals, dims[1][0])
+	c.Assert(writeLeaderSolver.secondPriority, Equals, dims[1][1])
+	c.Assert(writePeerSolver.firstPriority, Equals, dims[2][0])
+	c.Assert(writePeerSolver.secondPriority, Equals, dims[2][1])
 }
