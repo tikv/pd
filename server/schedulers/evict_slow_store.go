@@ -90,8 +90,7 @@ func (conf *evictSlowStoreSchedulerConfig) getSchedulerName() string {
 
 type evictSlowStoreScheduler struct {
 	*BaseScheduler
-	conf                 *evictSlowStoreSchedulerConfig
-	evictLeaderScheduler *evictLeaderScheduler
+	conf *evictSlowStoreSchedulerConfig
 }
 
 func (s *evictSlowStoreScheduler) GetName() string {
@@ -107,37 +106,40 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *evictSlowStoreScheduler) Prepare(cluster opt.Cluster) error {
-	if s.evictLeaderScheduler != nil {
+	if len(s.conf.EvictedStores) != 0 {
 		return s.prepareEvictLeader(cluster)
 	}
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster opt.Cluster) error {
-	var res error
-	for id := range s.evictLeaderScheduler.conf.StoreIDWithRanges {
-		if err := cluster.SlowStoreEvicted(id); err != nil {
-			res = err
-		}
-	}
-	return res
-}
-
 func (s *evictSlowStoreScheduler) Cleanup(cluster opt.Cluster) {
-	if s.evictLeaderScheduler != nil {
+	if len(s.conf.EvictedStores) != 0 {
 		s.cleanupEvictLeader(cluster)
 	}
 }
 
+func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster opt.Cluster) error {
+	return cluster.SlowStoreEvicted(s.conf.EvictedStores[0])
+}
+
 func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster opt.Cluster) {
-	for id := range s.evictLeaderScheduler.conf.StoreIDWithRanges {
-		cluster.SlowStoreRecovered(id)
+	cluster.SlowStoreRecovered(s.conf.EvictedStores[0])
+}
+
+func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster opt.Cluster) []*operator.Operator {
+	storeMap := map[uint64][]core.KeyRange{
+		s.conf.EvictedStores[0]: {core.NewKeyRange("", "")},
 	}
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, storeMap, EvictLeaderBatchSize)
 }
 
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	if s.evictLeaderScheduler != nil {
-		return s.evictLeaderScheduler.IsScheduleAllowed(cluster)
+	if len(s.conf.EvictedStores) != 0 {
+		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+		if !allowed {
+			operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		}
+		return allowed
 	}
 	return true
 }
@@ -158,13 +160,12 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 			log.Info("slow store has been recovered",
 				zap.Stringer("store", store.GetMeta()))
 		} else {
-			return s.evictLeaderScheduler.Schedule(cluster)
+			return s.schedulerEvictLeader(cluster)
 		}
-		// Stop to evcit leaders
-		s.conf.EvictedStores = []uint64{0}
+		// Stop to evict leaders
+		s.conf.EvictedStores = []uint64{}
 		s.conf.Persist()
 		s.cleanupEvictLeader(cluster)
-		s.evictLeaderScheduler = nil
 	} else {
 		slowStores := make([]*core.StoreInfo, 0)
 		for _, store := range cluster.GetStores() {
@@ -187,25 +188,16 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 			if err != nil {
 				return ops
 			}
-			s.initEvictLeaderScheduler()
 			err = s.prepareEvictLeader(cluster)
 			if err != nil {
 				log.Info("prepare for evicting leader failed", zap.Error(err), zap.Stringer("store", store.GetMeta()))
 				return ops
 			}
-			ops = s.evictLeaderScheduler.Schedule(cluster)
+			ops = s.schedulerEvictLeader(cluster)
 		}
 	}
 
 	return ops
-}
-
-func (s *evictSlowStoreScheduler) initEvictLeaderScheduler() {
-	evictLeaderConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange), storage: s.conf.storage}
-	evictLeaderConf.BuildWithArgs([]string{strconv.FormatUint(s.conf.EvictedStores[0], 10)})
-	s.evictLeaderScheduler = newEvictLeaderScheduler(s.OpController, evictLeaderConf).(*evictLeaderScheduler)
-	s.evictLeaderScheduler.name = EvictSlowStoreName
-	s.evictLeaderScheduler.schedulerType = EvictSlowStoreType
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
@@ -215,9 +207,6 @@ func newEvictSlowStoreScheduler(opController *schedule.OperatorController, conf 
 	s := &evictSlowStoreScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-	}
-	if len(conf.EvictedStores) != 0 {
-		s.initEvictLeaderScheduler()
 	}
 	return s
 }

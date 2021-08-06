@@ -19,9 +19,6 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
@@ -30,6 +27,10 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/unrolled/render"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 )
 
 const (
@@ -173,10 +174,8 @@ func (conf *evictLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRa
 
 type evictLeaderScheduler struct {
 	*BaseScheduler
-	conf          *evictLeaderSchedulerConfig
-	handler       http.Handler
-	name          string
-	schedulerType string
+	conf    *evictLeaderSchedulerConfig
+	handler http.Handler
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
@@ -188,8 +187,6 @@ func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *ev
 		BaseScheduler: base,
 		conf:          conf,
 		handler:       handler,
-		name:          EvictLeaderName,
-		schedulerType: EvictLeaderType,
 	}
 }
 
@@ -198,11 +195,11 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *evictLeaderScheduler) GetName() string {
-	return s.name
+	return EvictLeaderName
 }
 
 func (s *evictLeaderScheduler) GetType() string {
-	return s.schedulerType
+	return EvictLeaderType
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -267,7 +264,15 @@ func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Ope
 	return ops
 }
 
-func (s *evictLeaderScheduler) uniqueAppend(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
+func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
+
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf.StoreIDWithRanges, EvictLeaderBatchSize)
+}
+
+func uniqueAppend(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
 	regionIDs := make(map[uint64]struct{})
 	for i := range dst {
 		regionIDs[dst[i].RegionID()] = struct{}{}
@@ -282,25 +287,48 @@ func (s *evictLeaderScheduler) uniqueAppend(dst []*operator.Operator, src ...*op
 	return dst
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+func scheduleEvictLeaderBatch(name string, cluster opt.Cluster, storeRanges map[uint64][]core.KeyRange, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
-
-	for i := 0; i < EvictLeaderBatchSize; i++ {
-		once := s.scheduleOnce(cluster)
+	for i := 0; i < batchSize; i++ {
+		once := scheduleEvictLeaderOnce(name, cluster, storeRanges)
 		// no more regions
 		if len(once) == 0 {
 			break
 		}
-		ops = s.uniqueAppend(ops, once...)
+		ops = uniqueAppend(ops, once...)
 		// the batch has been fulfilled
-		if len(ops) > EvictLeaderBatchSize {
+		if len(ops) > batchSize {
 			break
 		}
 	}
+	return ops
+}
 
+func scheduleEvictLeaderOnce(name string, cluster opt.Cluster, storeRanges map[uint64][]core.KeyRange) []*operator.Operator {
+	ops := make([]*operator.Operator, 0, len(storeRanges))
+	for id, ranges := range storeRanges {
+		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
+		if region == nil {
+			schedulerCounter.WithLabelValues(name, "no-leader").Inc()
+			continue
+		}
+
+		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
+			FilterTarget(cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
+			RandomPick()
+		if target == nil {
+			schedulerCounter.WithLabelValues(name, "no-target-store").Inc()
+			continue
+		}
+		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		if err != nil {
+			log.Debug("fail to create evict leader operator", errs.ZapError(err))
+			continue
+		}
+		op.SetPriorityLevel(core.HighPriority)
+		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(name, "new-operator"))
+		ops = append(ops, op)
+	}
 	return ops
 }
 
