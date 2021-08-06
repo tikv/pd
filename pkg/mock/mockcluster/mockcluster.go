@@ -93,6 +93,7 @@ func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 
 // GetStoresLoads gets stores load statistics.
 func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
+	mc.HotStat.FilterUnhealthyStore(mc)
 	return mc.HotStat.GetStoresLoads()
 }
 
@@ -805,4 +806,10 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 		items = append(items, item)
 	}
 	return items
+}
+
+// ObserveRegionsStats records the current stores stats from region stats.
+func (mc *Cluster) ObserveRegionsStats() {
+	storeIDs, writeBytesRates, writeKeysRates := mc.BasicCluster.GetStoresWriteRate()
+	mc.HotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
 }

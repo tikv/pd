@@ -197,6 +197,12 @@ func (conf *hotRegionSchedulerConfig) GetEnableForTiFlash() bool {
 	return conf.EnableForTiFlash
 }
 
+func (conf *hotRegionSchedulerConfig) SetEnableForTiFlash(enable bool) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.EnableForTiFlash = enable
+}
+
 func (conf *hotRegionSchedulerConfig) GetMinHotQueryRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
