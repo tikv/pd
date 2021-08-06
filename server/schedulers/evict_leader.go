@@ -19,6 +19,9 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
@@ -27,10 +30,6 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/unrolled/render"
-
-	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 )
 
 const (
@@ -244,7 +243,7 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf.StoreIDWithRanges, EvictLeaderBatchSize)
 }
 
-func uniqueAppend(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
+func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
 	regionIDs := make(map[uint64]struct{})
 	for i := range dst {
 		regionIDs[dst[i].RegionID()] = struct{}{}
@@ -267,7 +266,7 @@ func scheduleEvictLeaderBatch(name string, cluster opt.Cluster, storeRanges map[
 		if len(once) == 0 {
 			break
 		}
-		ops = uniqueAppend(ops, once...)
+		ops = uniqueAppendOperator(ops, once...)
 		// the batch has been fulfilled
 		if len(ops) > batchSize {
 			break
