@@ -83,7 +83,7 @@ type hotScheduler struct {
 	regionPendings map[uint64]*pendingInfluence
 
 	// store information, including pending Influence by resource type
-	// Every time Schedule will recalculate it.
+	// Every time `Schedule()` will recalculate it.
 	stInfos map[uint64]*storeSummaryInfo
 	// temporary states but exported to API or metrics
 	// Every time `Schedule()` will recalculate it.
