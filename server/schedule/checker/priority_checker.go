@@ -73,7 +73,7 @@ func (p *PriorityChecker) Check(region *core.RegionInfo) (fit *placement.RegionF
 		makeupCount = p.checkRegionInReplica(region)
 	}
 	priority := 0 - makeupCount
-	p.addPriorityQueue(priority, region.GetID())
+	p.addOrRemoveRegion(priority, region.GetID())
 	return
 }
 
@@ -99,10 +99,10 @@ func (p *PriorityChecker) checkRegionInReplica(region *core.RegionInfo) (makeupC
 	return p.opts.GetMaxReplicas() - len(region.GetPeers())
 }
 
-// addPriorityQueue add region into queue
+// addOrRemoveRegion add or remove region from  queue
 // it will remove if region's priority equal 0
-// it's retry will increase if region's priority equal last
-func (p *PriorityChecker) addPriorityQueue(priority int, regionID uint64) {
+// it's Attempt will increase if region's priority equal last
+func (p *PriorityChecker) addOrRemoveRegion(priority int, regionID uint64) {
 	if priority < 0 {
 		if entry := p.queue.Get(regionID); entry != nil && entry.Priority == priority {
 			e := entry.Value.(*RegionPriorityEntry)
