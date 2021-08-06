@@ -16,15 +16,16 @@ package schedulers
 import (
 	"strconv"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 )
 
 const (
@@ -155,10 +156,10 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 			// Previous slow store had been removed, remove the sheduler and check
 			// slow node next time.
 			log.Info("slow store has been removed",
-				zap.Uint64("store", store.GetID()))
+				zap.Uint64("store-id", store.GetID()))
 		} else if store.GetSlowScore() <= slowStoreRecoverThreshold {
 			log.Info("slow store has been recovered",
-				zap.Uint64("store", store.GetID()))
+				zap.Uint64("store-id", store.GetID()))
 		} else {
 			return s.schedulerEvictLeader(cluster)
 		}
@@ -186,7 +187,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 		if len(slowStores) == 1 && slowStores[0].GetSlowScore() >= slowStoreEvictThreshold {
 			store := slowStores[0]
 			log.Info("detected slow store, start to evict leaders",
-				zap.Uint64("store", store.GetID()))
+				zap.Uint64("store-id", store.GetID()))
 			s.conf.EvictedStores = []uint64{store.GetID()}
 			err := s.conf.Persist()
 			if err != nil {
@@ -195,7 +196,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 			}
 			err = s.prepareEvictLeader(cluster)
 			if err != nil {
-				log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store", store.GetID()))
+				log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", store.GetID()))
 				return ops
 			}
 			ops = s.schedulerEvictLeader(cluster)
