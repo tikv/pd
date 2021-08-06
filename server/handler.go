@@ -295,6 +295,11 @@ func (h *Handler) AddRandomMergeScheduler() error {
 	return h.AddScheduler(schedulers.RandomMergeType)
 }
 
+// AddRandomSplitScheduler adds a random-split-scheduler.
+func (h *Handler) AddRandomSplitScheduler() error {
+	return h.AddScheduler(schedulers.RandomSplitType)
+}
+
 // GetOperator returns the region operator.
 func (h *Handler) GetOperator(regionID uint64) (*operator.Operator, error) {
 	c, err := h.GetOperatorController()

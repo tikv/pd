@@ -192,6 +192,11 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case schedulers.RandomSplitName:
+		if err := h.AddRandomSplitScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	default:
 		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
 		return
