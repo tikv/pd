@@ -155,17 +155,21 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 			// Previous slow store had been removed, remove the sheduler and check
 			// slow node next time.
 			log.Info("slow store has been removed",
-				zap.Stringer("store", store.GetMeta()))
+				zap.Uint64("store", store.GetID()))
 		} else if store.GetSlowScore() <= slowStoreRecoverThreshold {
 			log.Info("slow store has been recovered",
-				zap.Stringer("store", store.GetMeta()))
+				zap.Uint64("store", store.GetID()))
 		} else {
 			return s.schedulerEvictLeader(cluster)
+		}
+		err := s.conf.Persist()
+		if err != nil {
+			log.Info("evict-slow-store-scheduler persist config failed")
+			return ops
 		}
 		// Stop to evict leaders
 		s.cleanupEvictLeader(cluster)
 		s.conf.EvictedStores = []uint64{}
-		s.conf.Persist()
 	} else {
 		slowStores := make([]*core.StoreInfo, 0)
 		for _, store := range cluster.GetStores() {
@@ -182,15 +186,16 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 		if len(slowStores) == 1 && slowStores[0].GetSlowScore() >= slowStoreEvictThreshold {
 			store := slowStores[0]
 			log.Info("detected slow store, start to evict leaders",
-				zap.Stringer("store", store.GetMeta()))
+				zap.Uint64("store", store.GetID()))
 			s.conf.EvictedStores = []uint64{store.GetID()}
 			err := s.conf.Persist()
 			if err != nil {
+				log.Info("evict-slow-store-scheduler persist config failed")
 				return ops
 			}
 			err = s.prepareEvictLeader(cluster)
 			if err != nil {
-				log.Info("prepare for evicting leader failed", zap.Error(err), zap.Stringer("store", store.GetMeta()))
+				log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store", store.GetID()))
 				return ops
 			}
 			ops = s.schedulerEvictLeader(cluster)
