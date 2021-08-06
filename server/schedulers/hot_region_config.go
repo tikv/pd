@@ -39,6 +39,7 @@ const (
 	QueryPriority = "qps"
 
 	// Scheduling has a bigger impact on TiFlash, so it needs to be corrected in configuration items
+	// In the default config, the TiKV difference is 1.05*1.05-1 = 0.1025, and the TiFlash difference is 1.15*1.15-1 = 0.3225
 	tiflashToleranceRatioCorrection = 0.1
 )
 
