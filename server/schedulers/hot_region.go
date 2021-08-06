@@ -86,7 +86,7 @@ type hotScheduler struct {
 	// Every time Schedule will recalculate it.
 	stInfos map[uint64]*storeSummaryInfo
 	// temporary states but exported to API or metrics
-	// Every time Schedule will recalculate it.
+	// Every time `Schedule()` will recalculate it.
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
 
 	// config of hot scheduler
@@ -488,6 +488,10 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	if bs.best == nil || len(bs.ops) == 0 {
 		return false
 	}
+	if bs.best.srcDetail.Info.IsTiFlash != bs.best.dstDetail.Info.IsTiFlash {
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "not-same-engine").Inc()
+		return false
+	}
 	// Depending on the source of the statistics used, a different ZombieDuration will be used.
 	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
 	var maxZombieDur time.Duration
@@ -495,7 +499,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	case bs.rwTy == write && bs.opTy == transferLeader:
 		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
 	case bs.rwTy == write && bs.opTy == movePeer:
-		if bs.best.srcDetail.Info.IsTiFlash || bs.best.dstDetail.Info.IsTiFlash {
+		if bs.best.srcDetail.Info.IsTiFlash {
 			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
 		} else {
 			maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
@@ -734,9 +738,9 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 			id := store.GetID()
 			if bs.checkDstByPriorityAndTolerance(detail.LoadPred.max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				ret[id] = detail
-				hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(id, 10)).Inc()
 			} else {
-				hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+				hotSchedulerResultCounter.WithLabelValues("dst-store-failed", strconv.FormatUint(id, 10)).Inc()
 			}
 		}
 	}
