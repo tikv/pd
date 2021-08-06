@@ -709,7 +709,7 @@ func summaryStoresLoadByEngine(
 func filterHotPeers(kind core.ResourceKind, peers []*statistics.HotPeerStat) []*statistics.HotPeerStat {
 	ret := make([]*statistics.HotPeerStat, 0, len(peers))
 	for _, peer := range peers {
-		if kind != core.LeaderKind || !peer.IsLeader() {
+		if kind != core.LeaderKind || peer.IsLeader() {
 			ret = append(ret, peer)
 		}
 	}
