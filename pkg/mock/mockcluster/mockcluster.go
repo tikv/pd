@@ -321,8 +321,8 @@ func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, f
 }
 
 // AddLeaderRegionWithRange adds region with specified leader, followers and key range.
-func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, endKey string, LeaderStoreID uint64, otherPeerStoreIDs ...uint64) {
-	o := mc.newMockRegionInfo(regionID, LeaderStoreID, otherPeerStoreIDs...)
+func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderStoreID uint64, otherPeerStoreIDs ...uint64) {
+	o := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r := o.Clone(
 		core.WithStartKey([]byte(startKey)),
 		core.WithEndKey([]byte(endKey)),
@@ -332,11 +332,11 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 
 // AddRegionWithReadInfo adds region with specified leader, followers and read info.
 func (mc *Cluster) AddRegionWithReadInfo(
-	regionID uint64, LeaderStoreID uint64,
+	regionID uint64, leaderStoreID uint64,
 	readBytes, readKeys uint64,
 	reportInterval uint64,
 	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, LeaderStoreID, otherPeerStoreIDs...)
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
@@ -357,9 +357,9 @@ func (mc *Cluster) AddRegionWithReadInfo(
 }
 
 // AddRegionWithPeerReadInfo adds region with specified peer read info.
-func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, LeaderStoreID, targetStoreID, readBytes, readKeys, reportInterval uint64,
+func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStoreID, readBytes, readKeys, reportInterval uint64,
 	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, LeaderStoreID, otherPeerStoreIDs...)
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes), core.SetReadKeys(readKeys), core.SetReportInterval(reportInterval))
 	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
 	if len(filledNums) > 0 {
@@ -380,11 +380,11 @@ func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, LeaderStoreID, targetStor
 
 // AddRegionLeaderWithReadInfo add region leader read info
 func (mc *Cluster) AddRegionLeaderWithReadInfo(
-	regionID uint64, LeaderStoreID uint64,
+	regionID uint64, leaderStoreID uint64,
 	readBytes, readKeys uint64,
 	reportInterval uint64,
 	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, LeaderStoreID, otherPeerStoreIDs...)
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
@@ -406,11 +406,11 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 
 // AddLeaderRegionWithWriteInfo adds region with specified leader and peers write info.
 func (mc *Cluster) AddLeaderRegionWithWriteInfo(
-	regionID uint64, LeaderStoreID uint64,
+	regionID uint64, leaderStoreID uint64,
 	writtenBytes, writtenKeys uint64,
 	reportInterval uint64,
 	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, LeaderStoreID, otherPeerStoreIDs...)
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	r = r.Clone(core.SetWrittenKeys(writtenKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
