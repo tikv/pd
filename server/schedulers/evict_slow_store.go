@@ -163,9 +163,9 @@ func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 			return s.schedulerEvictLeader(cluster)
 		}
 		// Stop to evict leaders
+		s.cleanupEvictLeader(cluster)
 		s.conf.EvictedStores = []uint64{}
 		s.conf.Persist()
-		s.cleanupEvictLeader(cluster)
 	} else {
 		slowStores := make([]*core.StoreInfo, 0)
 		for _, store := range cluster.GetStores() {

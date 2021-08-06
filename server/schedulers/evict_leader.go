@@ -236,34 +236,6 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Operator {
-	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
-	for id, ranges := range s.conf.StoreIDWithRanges {
-		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
-		if region == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
-			continue
-		}
-
-		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
-			RandomPick()
-		if target == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
-			continue
-		}
-		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
-		if err != nil {
-			log.Debug("fail to create evict leader operator", errs.ZapError(err))
-			continue
-		}
-		op.SetPriorityLevel(core.HighPriority)
-		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-		ops = append(ops, op)
-	}
-	return ops
-}
-
 func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	s.conf.mu.RLock()
