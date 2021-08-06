@@ -36,6 +36,7 @@ type storeStatistics struct {
 	Offline         int
 	Tombstone       int
 	LowSpace        int
+	Slow            int
 	StorageSize     uint64
 	StorageCapacity uint64
 	RegionCount     int
@@ -73,6 +74,8 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 			s.Unhealthy++
 		} else if store.IsDisconnected() {
 			s.Disconnect++
+		} else if store.IsSlow() {
+			s.Slow++
 		} else {
 			s.Up++
 		}
@@ -142,6 +145,7 @@ func (s *storeStatistics) Collect() {
 	metrics["store_offline_count"] = float64(s.Offline)
 	metrics["store_tombstone_count"] = float64(s.Tombstone)
 	metrics["store_low_space_count"] = float64(s.LowSpace)
+	metrics["store_slow_count"] = float64(s.Slow)
 	metrics["region_count"] = float64(s.RegionCount)
 	metrics["leader_count"] = float64(s.LeaderCount)
 	metrics["storage_size"] = float64(s.StorageSize)
