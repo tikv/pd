@@ -17,6 +17,7 @@ import (
 	"math"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/log"
@@ -220,39 +221,20 @@ func (lhs *Influence) add(rhs *Influence, w float64) *Influence {
 
 // TODO: merge it into OperatorInfluence.
 type pendingInfluence struct {
-	op       *operator.Operator
-	from, to uint64
-	origin   Influence
+	op                *operator.Operator
+	from, to          uint64
+	origin            Influence
+	maxZombieDuration time.Duration
 }
 
-func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence) *pendingInfluence {
+func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence, maxZombieDur time.Duration) *pendingInfluence {
 	return &pendingInfluence{
-		op:     op,
-		from:   from,
-		to:     to,
-		origin: infl,
+		op:                op,
+		from:              from,
+		to:                to,
+		origin:            infl,
+		maxZombieDuration: maxZombieDur,
 	}
-}
-
-// summaryPendingInfluence calculate the summary pending Influence for each store and return storeID -> Influence
-// It makes each dim rate or count become (1+w) times to the origin value while f is the function to provide w(weight)
-func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]*Influence {
-	ret := make(map[uint64]*Influence)
-	for p := range pendings {
-		w := f(p.op)
-		if w == 0 {
-			delete(pendings, p)
-		}
-		if _, ok := ret[p.to]; !ok {
-			ret[p.to] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
-		}
-		ret[p.to] = ret[p.to].add(&p.origin, w)
-		if _, ok := ret[p.from]; !ok {
-			ret[p.from] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
-		}
-		ret[p.from] = ret[p.from].add(&p.origin, -w)
-	}
-	return ret
 }
 
 type storeLoad struct {

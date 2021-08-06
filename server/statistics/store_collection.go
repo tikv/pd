@@ -221,6 +221,10 @@ func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
 		"store_read_rate_bytes",
 		"store_write_rate_keys",
 		"store_read_rate_keys",
+		"store_write_query_rate",
+		"store_read_query_rate",
+		"store_regions_write_rate_bytes",
+		"store_regions_write_rate_keys",
 	}
 	for _, m := range metrics {
 		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
