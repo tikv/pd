@@ -16,6 +16,7 @@ package schedulers
 import (
 	"context"
 	"encoding/hex"
+	"math"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -210,26 +211,29 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 		{3, []uint64{1, 2, 4}, 512 * KB, 0},
 	})
 	c.Assert(len(hb.Schedule(tc)) == 0, IsFalse)
+	hb.(*hotScheduler).clearPendingInfluence()
 
 	// Will transfer a hot region from store 1, because the total count of peers
-	// which is hot for store 1 is more larger than other stores.
-	op := hb.Schedule(tc)[0]
-	hb.(*hotScheduler).clearPendingInfluence()
-	switch op.Len() {
-	case 1:
-		// balance by leader selected
-		testutil.CheckTransferLeaderFrom(c, op, operator.OpHotRegion, 1)
-	case 4:
-		// balance by peer selected
-		if op.RegionID() == 2 {
-			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-			testutil.CheckTransferPeerWithLeaderTransferFrom(c, op, operator.OpHotRegion, 1)
-		} else {
-			// peer in store 1 of the region 1,3 can only transfer to store 6
-			testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 6)
+	// which is hot for store 1 is larger than other stores.
+	for i := 0; i < 20; i++ {
+		op := hb.Schedule(tc)[0]
+		hb.(*hotScheduler).clearPendingInfluence()
+		switch op.Len() {
+		case 1:
+			// balance by leader selected
+			testutil.CheckTransferLeaderFrom(c, op, operator.OpHotRegion, 1)
+		case 4:
+			// balance by peer selected
+			if op.RegionID() == 2 {
+				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
+				testutil.CheckTransferPeerWithLeaderTransferFrom(c, op, operator.OpHotRegion, 1)
+			} else {
+				// peer in store 1 of the region 1,3 can only transfer to store 6
+				testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 6)
+			}
+		default:
+			c.Fatalf("wrong op: %v", op)
 		}
-	default:
-		c.Fatalf("wrong op: %v", op)
 	}
 
 	// hot region scheduler is restricted by `hot-region-schedule-limit`.
@@ -327,6 +331,203 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 	}
 	hb.Schedule(tc)
 	hb.(*hotScheduler).clearPendingInfluence()
+}
+
+func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	c.Assert(tc.RuleManager.SetRules([]*placement.Rule{
+		{
+			GroupID:        "pd",
+			ID:             "default",
+			Role:           placement.Voter,
+			Count:          3,
+			LocationLabels: []string{"zone", "host"},
+		},
+		{
+			GroupID:        "tiflash",
+			ID:             "tiflash",
+			Role:           placement.Learner,
+			Count:          1,
+			LocationLabels: []string{"zone", "host"},
+			LabelConstraints: []placement.LabelConstraint{
+				{
+					Key:    core.EngineKey,
+					Op:     placement.In,
+					Values: []string{core.EngineTiFlash},
+				},
+			},
+		},
+	}), IsNil)
+	sche, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	hb := sche.(*hotScheduler)
+
+	// Add TiKV stores 1, 2, 3, 4, 5, 6, 7(Down) with region counts 3, 2, 2, 2, 0, 0, 0.
+	// Add TiFlash stores 8, 9, 10, 11 with region counts 3, 1, 1, 0.
+	storeCount := uint64(11)
+	aliveTiKVStartID := uint64(1)
+	aliveTiKVLastID := uint64(6)
+	aliveTiFlashStartID := uint64(8)
+	aliveTiFlashLastID := uint64(11)
+	downStoreID := uint64(7)
+	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 3, map[string]string{"zone": "z2", "host": "h2"})
+	tc.AddLabelsStore(3, 2, map[string]string{"zone": "z3", "host": "h3"})
+	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z4", "host": "h4"})
+	tc.AddLabelsStore(5, 0, map[string]string{"zone": "z2", "host": "h5"})
+	tc.AddLabelsStore(6, 0, map[string]string{"zone": "z5", "host": "h6"})
+	tc.AddLabelsStore(7, 0, map[string]string{"zone": "z5", "host": "h7"})
+	tc.AddLabelsStore(8, 3, map[string]string{"zone": "z1", "host": "h8", "engine": "tiflash"})
+	tc.AddLabelsStore(9, 1, map[string]string{"zone": "z2", "host": "h9", "engine": "tiflash"})
+	tc.AddLabelsStore(10, 1, map[string]string{"zone": "z5", "host": "h10", "engine": "tiflash"})
+	tc.AddLabelsStore(11, 0, map[string]string{"zone": "z3", "host": "h11", "engine": "tiflash"})
+	tc.SetStoreDown(downStoreID)
+	for i := uint64(1); i <= storeCount; i++ {
+		if i != downStoreID {
+			tc.UpdateStorageWrittenBytes(i, 0)
+		}
+	}
+	//| region_id | leader_store | follower_store | follower_store | learner_store | written_bytes |
+	//|-----------|--------------|----------------|----------------|---------------|---------------|
+	//|     1     |       1      |        2       |       3        |       8       |      512 KB   |
+	//|     2     |       1      |        3       |       4        |       8       |      512 KB   |
+	//|     3     |       1      |        2       |       4        |       9       |      512 KB   |
+	//|     4     |       2      |                |                |      10       |      100 B    |
+	// Region 1, 2 and 3 are hot regions.
+	testRegions := []testRegionInfo{
+		{1, []uint64{1, 2, 3, 8}, 512 * KB, 5 * KB},
+		{2, []uint64{1, 3, 4, 8}, 512 * KB, 5 * KB},
+		{3, []uint64{1, 2, 4, 9}, 512 * KB, 5 * KB},
+		{4, []uint64{2, 10}, 100, 1},
+	}
+	addRegionInfo(tc, write, testRegions)
+	regionBytesSum := 0.0
+	regionKeysSum := 0.0
+	hotRegionBytesSum := 0.0
+	hotRegionKeysSum := 0.0
+	for _, r := range testRegions {
+		regionBytesSum += r.byteRate
+		regionKeysSum += r.keyRate
+	}
+	for _, r := range testRegions[0:3] {
+		hotRegionBytesSum += r.byteRate
+		hotRegionKeysSum += r.keyRate
+	}
+	// Will transfer a hot learner from store 8, because the total count of peers
+	// which is hot for store 8 is larger than other TiFlash stores.
+	for i := 0; i < 20; i++ {
+		hb.clearPendingInfluence()
+		op := hb.Schedule(tc)[0]
+		switch op.Len() {
+		case 1:
+			// balance by leader selected
+			testutil.CheckTransferLeaderFrom(c, op, operator.OpHotRegion, 1)
+		case 2:
+			// balance by peer selected
+			testutil.CheckTransferLearner(c, op, operator.OpHotRegion, 8, 10)
+		default:
+			c.Fatalf("wrong op: %v", op)
+		}
+	}
+	// Disable for TiFlash
+	hb.conf.SetEnableForTiFlash(false)
+	for i := 0; i < 20; i++ {
+		hb.clearPendingInfluence()
+		op := hb.Schedule(tc)[0]
+		testutil.CheckTransferLeaderFrom(c, op, operator.OpHotRegion, 1)
+	}
+	//| store_id | write_bytes_rate |
+	//|----------|------------------|
+	//|    1     |       7.5MB      |
+	//|    2     |       4.5MB      |
+	//|    3     |       4.5MB      |
+	//|    4     |        6MB       |
+	//|    5     |        0MB       |
+	//|    6     |        0MB       |
+	//|    7     |        n/a (Down)|
+	//|    8     |        n/a       | <- TiFlash is always 0.
+	//|    9     |        n/a       |
+	//|   10     |        n/a       |
+	//|   11     |        n/a       |
+	storesBytes := map[uint64]uint64{
+		1: 7.5 * MB * statistics.StoreHeartBeatReportInterval,
+		2: 4.5 * MB * statistics.StoreHeartBeatReportInterval,
+		3: 4.5 * MB * statistics.StoreHeartBeatReportInterval,
+		4: 6 * MB * statistics.StoreHeartBeatReportInterval,
+	}
+	tikvBytesSum, tikvKeysSum := 0.0, 0.0
+	for i := aliveTiKVStartID; i <= aliveTiKVLastID; i++ {
+		tikvBytesSum += float64(storesBytes[i]) / 10
+		tikvKeysSum += float64(storesBytes[i]/100) / 10
+	}
+	for i := uint64(1); i <= storeCount; i++ {
+		if i != downStoreID {
+			tc.UpdateStorageWrittenBytes(i, storesBytes[i])
+		}
+	}
+	{ // Check the load expect
+		aliveTiKVCount := float64(aliveTiKVLastID - aliveTiKVStartID + 1)
+		aliveTiFlashCount := float64(aliveTiFlashLastID - aliveTiFlashStartID + 1)
+		tc.ObserveRegionsStats()
+		c.Assert(len(hb.Schedule(tc)) == 0, IsFalse)
+		c.Assert(
+			loadsEqual(
+				hb.stLoadInfos[writeLeader][1].LoadPred.Expect.Loads,
+				[]float64{hotRegionBytesSum / aliveTiKVCount, hotRegionKeysSum / aliveTiKVCount, 0}),
+			IsTrue)
+		c.Assert(
+			loadsEqual(
+				hb.stLoadInfos[writePeer][1].LoadPred.Expect.Loads,
+				[]float64{tikvBytesSum / aliveTiKVCount, tikvKeysSum / aliveTiKVCount, 0}),
+			IsTrue)
+		c.Assert(
+			loadsEqual(
+				hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads,
+				[]float64{regionBytesSum / aliveTiFlashCount, regionKeysSum / aliveTiFlashCount, 0}),
+			IsTrue)
+		// check IsTraceRegionFlow == false
+		pdServerCfg := tc.GetOpts().GetPDServerConfig()
+		pdServerCfg.FlowRoundByDigit = 8
+		tc.GetOpts().SetPDServerConfig(pdServerCfg)
+		hb.clearPendingInfluence()
+		c.Assert(len(hb.Schedule(tc)) == 0, IsFalse)
+		c.Assert(
+			loadsEqual(
+				hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads,
+				[]float64{hotRegionBytesSum / aliveTiFlashCount, hotRegionKeysSum / aliveTiFlashCount, 0}),
+			IsTrue)
+		// revert
+		pdServerCfg.FlowRoundByDigit = 3
+		tc.GetOpts().SetPDServerConfig(pdServerCfg)
+	}
+	// Will transfer a hot region from store 1, because the total count of peers
+	// which is hot for store 1 is larger than other stores.
+	for i := 0; i < 20; i++ {
+		hb.clearPendingInfluence()
+		op := hb.Schedule(tc)[0]
+		switch op.Len() {
+		case 1:
+			// balance by leader selected
+			testutil.CheckTransferLeaderFrom(c, op, operator.OpHotRegion, 1)
+		case 4:
+			// balance by peer selected
+			if op.RegionID() == 2 {
+				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
+				testutil.CheckTransferPeerWithLeaderTransferFrom(c, op, operator.OpHotRegion, 1)
+			} else {
+				// peer in store 1 of the region 1,3 can only transfer to store 6
+				testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 6)
+			}
+		default:
+			c.Fatalf("wrong op: %v", op)
+		}
+	}
 }
 
 func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
@@ -1238,7 +1439,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 			// try schedule
 			hb.prepareForBalance(testcase.kind, tc)
 			leaderSolver := newBalanceSolver(hb, tc, testcase.kind, transferLeader)
-			leaderSolver.cur = &solution{srcStoreID: 2}
+			leaderSolver.cur = &solution{srcDetail: hb.stLoadInfos[toResourceType(testcase.kind, transferLeader)][2]}
 			c.Check(leaderSolver.filterHotPeers(), HasLen, 0) // skip schedule
 			threshold := tc.GetHotRegionCacheHitsThreshold()
 			tc.SetHotRegionCacheHitsThreshold(0)
@@ -1385,15 +1586,15 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	op := hb.Schedule(tc)[0]
 	c.Assert(op, NotNil)
 	hb.(*hotScheduler).summaryPendingInfluence()
-	pendingInfluence := hb.(*hotScheduler).pendingSums
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteKeys], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteBytes], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionWriteKeys], 0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionWriteBytes], 0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadKeys], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadBytes], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionReadKeys], 0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionReadBytes], 0.5*MB), IsTrue)
+	stInfos := hb.(*hotScheduler).stInfos
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteKeys], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteBytes], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[4].PendingSum.Loads[statistics.RegionWriteKeys], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[4].PendingSum.Loads[statistics.RegionWriteBytes], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionReadKeys], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionReadBytes], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[4].PendingSum.Loads[statistics.RegionReadKeys], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[4].PendingSum.Loads[statistics.RegionReadBytes], 0.5*MB), IsTrue)
 
 	addRegionInfo(tc, write, []testRegionInfo{
 		{2, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
@@ -1411,16 +1612,16 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	op = hb.Schedule(tc)[0]
 	c.Assert(op, NotNil)
 	hb.(*hotScheduler).summaryPendingInfluence()
-	pendingInfluence = hb.(*hotScheduler).pendingSums
+	stInfos = hb.(*hotScheduler).stInfos
 	// assert read/write influence is the sum of write peer and write leader
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteKeys], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteBytes], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionWriteKeys], 0.7*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionWriteBytes], 0.7*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadKeys], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadBytes], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionReadKeys], 0.7*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionReadBytes], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteKeys], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteBytes], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[3].PendingSum.Loads[statistics.RegionWriteKeys], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[3].PendingSum.Loads[statistics.RegionWriteBytes], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionReadKeys], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionReadBytes], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[3].PendingSum.Loads[statistics.RegionReadKeys], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[3].PendingSum.Loads[statistics.RegionReadBytes], 0.7*MB), IsTrue)
 }
 
 func nearlyAbout(f1, f2 float64) bool {
@@ -1428,6 +1629,18 @@ func nearlyAbout(f1, f2 float64) bool {
 		return true
 	}
 	return false
+}
+
+func loadsEqual(loads1, loads2 []float64) bool {
+	if len(loads1) != statistics.DimLen || len(loads2) != statistics.DimLen {
+		return false
+	}
+	for i, load := range loads1 {
+		if math.Abs(load-loads2[i]) > 0.01 {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *testHotSchedulerSuite) TestHotReadPeerSchedule(c *C) {

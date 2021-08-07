@@ -85,14 +85,15 @@ func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.Regio
 }
 
 // LoadRegion puts region info without leader
-func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
+func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 	//  regions load from etcd will have no leader
-	r := mc.newMockRegionInfo(regionID, 0, followerIds...).Clone(core.WithLeader(nil))
+	r := mc.newMockRegionInfo(regionID, 0, peerStoreIDs...).Clone(core.WithLeader(nil))
 	mc.PutRegion(r)
 }
 
 // GetStoresLoads gets stores load statistics.
 func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
+	mc.HotStat.FilterUnhealthyStore(mc)
 	return mc.HotStat.GetStoresLoads()
 }
 
@@ -304,8 +305,8 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 }
 
 // AddLeaderRegion adds region with specified leader and followers.
-func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
-	origin := mc.newMockRegionInfo(regionID, leaderStoreID, followerStoreIDs...)
+func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
+	origin := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
@@ -320,8 +321,8 @@ func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, f
 }
 
 // AddLeaderRegionWithRange adds region with specified leader, followers and key range.
-func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderID uint64, followerIds ...uint64) {
-	o := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderStoreID uint64, otherPeerStoreIDs ...uint64) {
+	o := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r := o.Clone(
 		core.WithStartKey([]byte(startKey)),
 		core.WithEndKey([]byte(endKey)),
@@ -331,11 +332,11 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 
 // AddRegionWithReadInfo adds region with specified leader, followers and read info.
 func (mc *Cluster) AddRegionWithReadInfo(
-	regionID uint64, leaderID uint64,
+	regionID uint64, leaderStoreID uint64,
 	readBytes, readKeys uint64,
 	reportInterval uint64,
-	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
@@ -356,9 +357,9 @@ func (mc *Cluster) AddRegionWithReadInfo(
 }
 
 // AddRegionWithPeerReadInfo adds region with specified peer read info.
-func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderID, targetStoreID, readBytes, readKeys, reportInterval uint64,
-	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStoreID, readBytes, readKeys, reportInterval uint64,
+	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes), core.SetReadKeys(readKeys), core.SetReportInterval(reportInterval))
 	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
 	if len(filledNums) > 0 {
@@ -379,11 +380,11 @@ func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderID, targetStoreID, 
 
 // AddRegionLeaderWithReadInfo add region leader read info
 func (mc *Cluster) AddRegionLeaderWithReadInfo(
-	regionID uint64, leaderID uint64,
+	regionID uint64, leaderStoreID uint64,
 	readBytes, readKeys uint64,
 	reportInterval uint64,
-	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
@@ -405,11 +406,11 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 
 // AddLeaderRegionWithWriteInfo adds region with specified leader and peers write info.
 func (mc *Cluster) AddLeaderRegionWithWriteInfo(
-	regionID uint64, leaderID uint64,
+	regionID uint64, leaderStoreID uint64,
 	writtenBytes, writtenKeys uint64,
 	reportInterval uint64,
-	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	r = r.Clone(core.SetWrittenKeys(writtenKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
@@ -623,8 +624,17 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	mc.PutStore(newStore)
 }
 
-func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
-	return mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, []uint64{}, nil)
+func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
+	var followerStoreIDs []uint64
+	var learnerStoreIDs []uint64
+	for _, storeID := range otherPeerStoreIDs {
+		if store := mc.GetStore(storeID); store != nil && core.IsTiFlashStore(store.GetMeta()) {
+			learnerStoreIDs = append(learnerStoreIDs, storeID)
+		} else {
+			followerStoreIDs = append(followerStoreIDs, storeID)
+		}
+	}
+	return mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)
 }
 
 // CheckLabelProperty checks label property.
@@ -796,4 +806,10 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 		items = append(items, item)
 	}
 	return items
+}
+
+// ObserveRegionsStats records the current stores stats from region stats.
+func (mc *Cluster) ObserveRegionsStats() {
+	storeIDs, writeBytesRates, writeKeysRates := mc.BasicCluster.GetStoresWriteRate()
+	mc.HotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
 }

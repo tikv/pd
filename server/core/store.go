@@ -34,6 +34,13 @@ const (
 	initialMaxRegionCounts = 30      // exclude storage Threshold Filter when region less than 30
 	initialMinSpace        = 1 << 33 // 2^33=8GB
 	slowStoreThreshold     = 80
+
+	// EngineKey is the label key used to indicate engine.
+	EngineKey = "engine"
+	// EngineTiFlash is the tiflash value of the engine label.
+	EngineTiFlash = "tiflash"
+	// EngineTiKV indicates the tikv engine in metrics
+	EngineTiKV = "tikv"
 )
 
 // StoreInfo contains information about a store.

@@ -618,7 +618,7 @@ type ordinaryEngineFilter struct {
 func NewOrdinaryEngineFilter(scope string) Filter {
 	return &ordinaryEngineFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: allSpeicalEngines},
+		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: allSpecialEngines},
 	}
 }
 
@@ -685,17 +685,10 @@ const (
 	SpecialUseHotRegion = "hotRegion"
 	// SpecialUseReserved is the reserved value of special use label
 	SpecialUseReserved = "reserved"
-
-	// EngineKey is the label key used to indicate engine.
-	EngineKey = "engine"
-	// EngineTiFlash is the tiflash value of the engine label.
-	EngineTiFlash = "tiflash"
-	// EngineTiKV indicates the tikv engine in metrics
-	EngineTiKV = "tikv"
 )
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
-var allSpeicalEngines = []string{EngineTiFlash}
+var allSpecialEngines = []string{core.EngineTiFlash}
 
 type isolationFilter struct {
 	scope          string
