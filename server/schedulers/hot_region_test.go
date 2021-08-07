@@ -1905,6 +1905,15 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 		{statistics.KeyDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
+	// config error value
+	hb.(*hotScheduler).conf.ReadPriorities = []string{"hahaha"}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"hahaha", "byte"}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"qps", "byte", "key"}
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.QueryDim, statistics.ByteDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
 	// low version
 	tc.DisableFeature(versioninfo.HotScheduleWithQuery)
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
@@ -1925,6 +1934,15 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 	hb.(*hotScheduler).conf.ReadPriorities = []string{"qps", "byte"}
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"qps", "byte"}
 	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"qps", "byte"}
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.ByteDim, statistics.KeyDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+	// config error value
+	hb.(*hotScheduler).conf.ReadPriorities = []string{"error", "error"}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"qps", "byte", "key"}
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.ByteDim, statistics.KeyDim},
 		{statistics.KeyDim, statistics.ByteDim},

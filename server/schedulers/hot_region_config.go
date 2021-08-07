@@ -43,6 +43,19 @@ const (
 	tiflashToleranceRatioCorrection = 0.1
 )
 
+var defaultConfig = prioritiesConfig{
+	readLeader:  []string{QueryPriority, BytePriority},
+	writeLeader: []string{KeyPriority, BytePriority},
+	writePeer:   []string{BytePriority, KeyPriority},
+}
+
+// because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
+var lowConfig = prioritiesConfig{
+	readLeader:  []string{BytePriority, KeyPriority},
+	writeLeader: []string{KeyPriority, BytePriority},
+	writePeer:   []string{BytePriority, KeyPriority},
+}
+
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	return &hotRegionSchedulerConfig{
@@ -59,9 +72,9 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MinorDecRatio:          0.99,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		ReadPriorities:         []string{QueryPriority, BytePriority},
-		WriteLeaderPriorities:  []string{KeyPriority, BytePriority},
-		WritePeerPriorities:    []string{BytePriority, KeyPriority},
+		ReadPriorities:         defaultConfig.readLeader,
+		WriteLeaderPriorities:  defaultConfig.writeLeader,
+		WritePeerPriorities:    defaultConfig.writePeer,
 		StrictPickingStore:     true,
 		EnableForTiFlash:       true,
 	}
@@ -218,13 +231,13 @@ func (conf *hotRegionSchedulerConfig) GetReadPriorities() []string {
 	return conf.ReadPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) GetWriteLeaderPriorites() []string {
+func (conf *hotRegionSchedulerConfig) GetWriteLeaderPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.WriteLeaderPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) GetWritePeerPriorites() []string {
+func (conf *hotRegionSchedulerConfig) GetWritePeerPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.WritePeerPriorities
@@ -299,4 +312,22 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 
 	}
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
+}
+
+type prioritiesConfig struct {
+	readLeader  []string
+	writeLeader []string
+	writePeer   []string
+}
+
+func getReadLeaderPriorities(c *prioritiesConfig) []string {
+	return c.readLeader
+}
+
+func getWriteLeaderPriorities(c *prioritiesConfig) []string {
+	return c.writeLeader
+}
+
+func getWritePeerPriorities(c *prioritiesConfig) []string {
+	return c.writePeer
 }

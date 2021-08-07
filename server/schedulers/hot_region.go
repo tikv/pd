@@ -394,13 +394,13 @@ func (bs *balanceSolver) init() {
 	// For write, they are different
 	switch bs.rwTy {
 	case read:
-		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetReadPriorities(), []string{BytePriority, KeyPriority})
+		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetReadPriorities(), getReadLeaderPriorities)
 	case write:
 		switch bs.opTy {
 		case transferLeader:
-			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWriteLeaderPriorites(), []string{KeyPriority, BytePriority})
+			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWriteLeaderPriorities(), getWriteLeaderPriorities)
 		case movePeer:
-			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWritePeerPriorites(), []string{BytePriority, KeyPriority})
+			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
 		}
 	}
 }
@@ -411,16 +411,28 @@ func (bs *balanceSolver) isSelectedDim(dim int) bool {
 
 // adjustConfig will adjust config for cluster with low version tikv
 // because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
-func (bs *balanceSolver) adjustConfig(origins, defaults []string) (first, second int) {
+func (bs *balanceSolver) adjustConfig(origins []string, getPriorities func(*prioritiesConfig) []string) (first, second int) {
 	querySupport := bs.cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
 	withQuery := slice.AnyOf(origins, func(i int) bool {
 		return origins[i] == QueryPriority
 	})
-	priorities := origins
+	lows := getPriorities(&lowConfig)
 	if !querySupport && withQuery {
-		priorities = defaults
+		return prioritiesToDim(lows)
 	}
-	return prioritiesToDim(priorities)
+
+	defaults := getPriorities(&defaultConfig)
+	isLegal := slice.AllOf(origins, func(i int) bool {
+		return origins[i] == BytePriority || origins[i] == KeyPriority || origins[i] == QueryPriority
+	})
+	if len(defaults) == len(origins) && isLegal && origins[0] != origins[1] {
+		return prioritiesToDim(origins)
+	}
+
+	if !querySupport {
+		return prioritiesToDim(lows)
+	}
+	return prioritiesToDim(defaults)
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
