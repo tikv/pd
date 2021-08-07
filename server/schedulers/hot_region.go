@@ -70,6 +70,9 @@ const (
 // schedulePeerPr the probability of schedule the hot peer.
 var schedulePeerPr = 0.66
 
+// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
+var pendingAmpFactor = 8.0
+
 type hotScheduler struct {
 	name string
 	*BaseScheduler
@@ -393,13 +396,13 @@ func (bs *balanceSolver) init() {
 	// For write, they are different
 	switch bs.rwTy {
 	case read:
-		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetReadPriorities(), []string{BytePriority, KeyPriority})
+		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetReadPriorities(), getReadLeaderPriorities)
 	case write:
 		switch bs.opTy {
 		case transferLeader:
-			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWriteLeaderPriorites(), []string{KeyPriority, BytePriority})
+			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWriteLeaderPriorities(), getWriteLeaderPriorities)
 		case movePeer:
-			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWritePeerPriorites(), []string{BytePriority, KeyPriority})
+			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
 		}
 	}
 }
@@ -410,16 +413,31 @@ func (bs *balanceSolver) isSelectedDim(dim int) bool {
 
 // adjustConfig will adjust config for cluster with low version tikv
 // because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
-func (bs *balanceSolver) adjustConfig(origins, defaults []string) (first, second int) {
+func (bs *balanceSolver) adjustConfig(origins []string, getPriorities func(*prioritiesConfig) []string) (first, second int) {
 	querySupport := bs.cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
 	withQuery := slice.AnyOf(origins, func(i int) bool {
 		return origins[i] == QueryPriority
 	})
-	priorities := origins
+	compatibles := getPriorities(&compatibleConfig)
 	if !querySupport && withQuery {
-		priorities = defaults
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "use-compatible-config").Inc()
+		return prioritiesToDim(compatibles)
 	}
-	return prioritiesToDim(priorities)
+
+	defaults := getPriorities(&defaultConfig)
+	isLegal := slice.AllOf(origins, func(i int) bool {
+		return origins[i] == BytePriority || origins[i] == KeyPriority || origins[i] == QueryPriority
+	})
+	if len(defaults) == len(origins) && isLegal && origins[0] != origins[1] {
+		return prioritiesToDim(origins)
+	}
+
+	if !querySupport {
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "use-compatible-config").Inc()
+		return prioritiesToDim(compatibles)
+	}
+	schedulerCounter.WithLabelValues(bs.sche.GetName(), "use-default-config").Inc()
+	return prioritiesToDim(defaults)
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
@@ -496,9 +514,9 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
 	var maxZombieDur time.Duration
 	switch {
-	case bs.rwTy == write && bs.opTy == transferLeader:
+	case bs.isForWriteLeader():
 		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-	case bs.rwTy == write && bs.opTy == movePeer:
+	case bs.isForWritePeer():
 		if bs.best.srcDetail.Info.IsTiFlash {
 			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
 		} else {
@@ -508,6 +526,14 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
 	}
 	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.srcDetail.getID(), bs.best.dstDetail.getID(), bs.infl, maxZombieDur)
+}
+
+func (bs *balanceSolver) isForWriteLeader() bool {
+	return bs.rwTy == write && bs.opTy == transferLeader
+}
+
+func (bs *balanceSolver) isForWritePeer() bool {
+	return bs.rwTy == write && bs.opTy == movePeer
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
@@ -762,18 +788,22 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
-	srcLd := bs.cur.srcDetail.LoadPred.min()
-	dstLd := bs.cur.dstDetail.LoadPred.max()
+	src := bs.cur.srcDetail
+	dst := bs.cur.dstDetail
+	srcLd := src.LoadPred.min()
+	dstLd := dst.LoadPred.max()
+	bs.cur.progressiveRank = 0
 	peer := bs.cur.srcPeerStat
-	rank := int64(0)
-	if bs.rwTy == write && bs.opTy == transferLeader {
-		// In this condition, CPU usage is the matter.
-		// Only consider key rate or query rate.
+
+	if bs.isForWriteLeader() {
+		if !bs.isTolerance(src, dst, bs.firstPriority) {
+			return
+		}
 		srcRate := srcLd.Loads[bs.firstPriority]
 		dstRate := dstLd.Loads[bs.firstPriority]
 		peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, bs.firstPriority))
 		if srcRate-peerRate >= dstRate+peerRate {
-			rank = -1
+			bs.cur.progressiveRank = -1
 		}
 	} else {
 		firstPriorityDimHot, firstPriorityDecRatio, secondPriorityDimHot, secondPriorityDecRatio := bs.getHotDecRatioByPriorities(srcLd, dstLd, peer)
@@ -781,20 +811,43 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		switch {
 		case firstPriorityDimHot && firstPriorityDecRatio <= greatDecRatio && secondPriorityDimHot && secondPriorityDecRatio <= greatDecRatio:
 			// If belong to the case, two dim will be more balanced, the best choice.
-			rank = -3
+			if !bs.isTolerance(src, dst, bs.firstPriority) || !bs.isTolerance(src, dst, bs.secondPriority) {
+				return
+			}
+			bs.cur.progressiveRank = -3
 			bs.firstPriorityIsBetter = true
 			bs.secondPriorityIsBetter = true
 		case firstPriorityDecRatio <= minorDecRatio && secondPriorityDimHot && secondPriorityDecRatio <= greatDecRatio:
 			// If belong to the case, first priority dim will be not worsened, second priority dim will be more balanced.
-			rank = -2
+			if !bs.isTolerance(src, dst, bs.secondPriority) {
+				return
+			}
+			bs.cur.progressiveRank = -2
 			bs.secondPriorityIsBetter = true
 		case firstPriorityDimHot && firstPriorityDecRatio <= greatDecRatio:
 			// If belong to the case, first priority dim will be more balanced, ignore the second priority dim.
-			rank = -1
+			if !bs.isTolerance(src, dst, bs.firstPriority) {
+				return
+			}
+			bs.cur.progressiveRank = -1
 			bs.firstPriorityIsBetter = true
 		}
 	}
-	bs.cur.progressiveRank = rank
+}
+
+// isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
+// This will make the hot region scheduling slow even serializely running when each 2 store's pending influence is close.
+func (bs *balanceSolver) isTolerance(src, dst *storeLoadDetail, dim int) bool {
+	srcRate := src.LoadPred.Current.Loads[dim]
+	dstRate := dst.LoadPred.Current.Loads[dim]
+	if srcRate <= dstRate {
+		return false
+	}
+	pendingAmp := (1 + pendingAmpFactor*srcRate/(srcRate-dstRate))
+	srcPending := src.LoadPred.pending().Loads[dim]
+	dstPending := dst.LoadPred.pending().Loads[dim]
+	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(src.getID(), 10), strconv.FormatUint(dst.getID(), 10)).Set(pendingAmp)
+	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
 func (bs *balanceSolver) getHotDecRatioByPriorities(srcLd, dstLd *storeLoad, peer *statistics.HotPeerStat) (bool, float64, bool, float64) {
@@ -859,7 +912,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 	if bs.cur.srcPeerStat != old.srcPeerStat {
 		// compare region
 
-		if bs.rwTy == write && bs.opTy == transferLeader {
+		if bs.isForWriteLeader() {
 			kind := getRegionStatKind(write, bs.firstPriority)
 			switch {
 			case bs.cur.srcPeerStat.GetLoad(kind) > old.srcPeerStat.GetLoad(kind):
@@ -918,7 +971,7 @@ func (bs *balanceSolver) compareSrcStore(detail1, detail2 *storeLoadDetail) int 
 	if detail1 != detail2 {
 		// compare source store
 		var lpCmp storeLPCmp
-		if bs.rwTy == write && bs.opTy == transferLeader {
+		if bs.isForWriteLeader() {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
 					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
@@ -951,7 +1004,7 @@ func (bs *balanceSolver) compareDstStore(detail1, detail2 *storeLoadDetail) int 
 	if detail1 != detail2 {
 		// compare destination store
 		var lpCmp storeLPCmp
-		if bs.rwTy == write && bs.opTy == transferLeader {
+		if bs.isForWriteLeader() {
 			lpCmp = sliceLPCmp(
 				maxLPCmp(sliceLoadCmp(
 					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.minDst.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),

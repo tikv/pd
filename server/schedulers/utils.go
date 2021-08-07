@@ -317,6 +317,18 @@ func (lp *storeLoadPred) max() *storeLoad {
 	return maxLoad(&lp.Current, &lp.Future)
 }
 
+func (lp *storeLoadPred) pending() *storeLoad {
+	mx, mn := lp.max(), lp.min()
+	loads := make([]float64, len(mx.Loads))
+	for i := range loads {
+		loads[i] = mx.Loads[i] - mn.Loads[i]
+	}
+	return &storeLoad{
+		Loads: loads,
+		Count: 0,
+	}
+}
+
 func (lp *storeLoadPred) diff() *storeLoad {
 	mx, mn := lp.max(), lp.min()
 	loads := make([]float64, len(mx.Loads))
