@@ -422,7 +422,6 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 		hotRegionBytesSum += r.byteRate
 		hotRegionKeysSum += r.keyRate
 		hotRegionQuerySum += r.queryRate
-
 	}
 	// Will transfer a hot learner from store 8, because the total count of peers
 	// which is hot for store 8 is larger than other TiFlash stores.

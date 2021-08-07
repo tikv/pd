@@ -69,6 +69,8 @@ const (
 
 // schedulePeerPr the probability of schedule the hot peer.
 var schedulePeerPr = 0.66
+
+// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
 var pendingAmpFactor = 8.0
 
 type hotScheduler struct {
@@ -514,7 +516,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	switch {
 	case bs.isForWriteLeader():
 		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-	case bs.rwTy == write && bs.opTy == movePeer:
+	case bs.isForWritePeer():
 		if bs.best.srcDetail.Info.IsTiFlash {
 			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
 		} else {
@@ -528,6 +530,10 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 
 func (bs *balanceSolver) isForWriteLeader() bool {
 	return bs.rwTy == write && bs.opTy == transferLeader
+}
+
+func (bs *balanceSolver) isForWritePeer() bool {
+	return bs.rwTy == write && bs.opTy == movePeer
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than

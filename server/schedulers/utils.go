@@ -325,7 +325,7 @@ func (lp *storeLoadPred) pending() *storeLoad {
 	}
 	return &storeLoad{
 		Loads: loads,
-		Count: mx.Count,
+		Count: 0,
 	}
 }
 
