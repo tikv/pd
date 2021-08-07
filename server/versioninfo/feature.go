@@ -42,17 +42,20 @@ const (
 	Version5_0
 	// JointConsensus can support safe conf change across data center.
 	JointConsensus
+	// HotScheduleWithQuery supports schedule hot region with query info.
+	HotScheduleWithQuery
 )
 
 var featuresDict = map[Feature]string{
-	Base:           "1.0.0",
-	Version2_0:     "2.0.0",
-	RegionMerge:    "2.0.0",
-	BatchSplit:     "2.1.0-rc.1",
-	Version3_0:     "3.0.0",
-	Version4_0:     "4.0.0",
-	Version5_0:     "5.0.0",
-	JointConsensus: "5.0.0",
+	Base:                 "1.0.0",
+	Version2_0:           "2.0.0",
+	RegionMerge:          "2.0.0",
+	BatchSplit:           "2.1.0-rc.1",
+	Version3_0:           "3.0.0",
+	Version4_0:           "4.0.0",
+	Version5_0:           "5.0.0",
+	JointConsensus:       "5.0.0",
+	HotScheduleWithQuery: "5.2.0",
 }
 
 // MinSupportedVersion returns the minimum support version for the specified feature.

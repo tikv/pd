@@ -271,8 +271,10 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"src-tolerance-ratio":        1.05,
 		"dst-tolerance-ratio":        1.05,
 		"read-priorities":            []interface{}{"qps", "byte"},
-		"write-priorities":           []interface{}{"byte", "key"},
-		"strict-picking-store":       true,
+		"write-leader-priorities":    []interface{}{"key", "byte"},
+		"write-peer-priorities":      []interface{}{"byte", "key"},
+		"strict-picking-store":       "true",
+		"enable-for-tiflash":         "true",
 	}
 	c.Assert(conf, DeepEquals, expected1)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.02"}, nil)
@@ -306,6 +308,15 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,key,byte"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+
+	// write-priorities is divided into write-leader-priorities and write-peer-priorities
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-priorities", "key,byte"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+	// cannot set qps as write-peer-priorities
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "qps,byte"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
 

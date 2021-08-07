@@ -315,6 +315,11 @@ func (f *StoreStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store
 	return !store.AllowLeaderTransfer()
 }
 
+func (f *StoreStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "slow-store"
+	return store.EvictedAsSlowStore()
+}
+
 func (f *StoreStateFilter) isDisconnected(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	f.Reason = "disconnected"
 	return !f.AllowTemporaryStates && store.IsDisconnected()
@@ -383,7 +388,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.pauseLeaderTransfer,
-			f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+			f.slowStoreEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
 	case regionTarget:
 		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
@@ -613,7 +618,7 @@ type ordinaryEngineFilter struct {
 func NewOrdinaryEngineFilter(scope string) Filter {
 	return &ordinaryEngineFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: allSpeicalEngines},
+		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: allSpecialEngines},
 	}
 }
 
@@ -680,17 +685,10 @@ const (
 	SpecialUseHotRegion = "hotRegion"
 	// SpecialUseReserved is the reserved value of special use label
 	SpecialUseReserved = "reserved"
-
-	// EngineKey is the label key used to indicate engine.
-	EngineKey = "engine"
-	// EngineTiFlash is the tiflash value of the engine label.
-	EngineTiFlash = "tiflash"
-	// EngineTiKV indicates the tikv engine in metrics
-	EngineTiKV = "tikv"
 )
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
-var allSpeicalEngines = []string{EngineTiFlash}
+var allSpecialEngines = []string{core.EngineTiFlash}
 
 type isolationFilter struct {
 	scope          string
