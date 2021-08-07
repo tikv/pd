@@ -767,11 +767,11 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
-	src := bs.cur.srcDetail.LoadPred
-	dst := bs.cur.dstDetail.LoadPred
+	src := bs.cur.srcDetail
+	dst := bs.cur.dstDetail
+	srcLd := src.LoadPred.min()
+	dstLd := dst.LoadPred.max()
 	bs.cur.progressiveRank = 0
-	srcLd := src.min()
-	dstLd := dst.max()
 	peer := bs.cur.srcPeerStat
 
 	if bs.isForWriteLeader() {
@@ -816,16 +816,16 @@ func (bs *balanceSolver) calcProgressiveRank() {
 
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
 // This will make the hot region scheduling slow even serializely running when each 2 store's pending influence is close.
-func (bs *balanceSolver) isTolerance(src, dst *storeLoadPred, dim int) bool {
-	srcRate := src.Current.Loads[dim]
-	dstRate := dst.Current.Loads[dim]
+func (bs *balanceSolver) isTolerance(src, dst *storeLoadDetail, dim int) bool {
+	srcRate := src.LoadPred.Current.Loads[dim]
+	dstRate := dst.LoadPred.Current.Loads[dim]
 	if srcRate <= dstRate {
 		return false
 	}
 	pendingAmp := (1 + pendingAmpFactor*srcRate/(srcRate-dstRate))
-	srcPending := src.pending().Loads[dim]
-	dstPending := dst.pending().Loads[dim]
-	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), strconv.FormatUint(bs.cur.dstStoreID, 10)).Set(pendingAmp)
+	srcPending := src.LoadPred.pending().Loads[dim]
+	dstPending := dst.LoadPred.pending().Loads[dim]
+	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(src.getID(), 10), strconv.FormatUint(dst.getID(), 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
