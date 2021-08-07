@@ -229,7 +229,7 @@ const (
 	defaultUseRegionStorage  = true
 	defaultTraceRegionFlow   = true
 	defaultFlowRoundByDigit  = 3 // KB
-	maxTraceFlowRoundByDigit = 6 // MB
+	maxTraceFlowRoundByDigit = 5 // 0.1 MB
 	defaultMaxResetTSGap     = 24 * time.Hour
 	defaultKeyType           = "table"
 

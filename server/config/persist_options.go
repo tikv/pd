@@ -493,7 +493,7 @@ func (o *PersistOptions) IsUseJointConsensus() bool {
 }
 
 // IsTraceRegionFlow returns if the region flow is tracing.
-// If the accuracy cannot reach MB, it is considered not.
+// If the accuracy cannot reach 0.1 MB, it is considered not.
 func (o *PersistOptions) IsTraceRegionFlow() bool {
 	return o.GetPDServerConfig().FlowRoundByDigit <= maxTraceFlowRoundByDigit
 }
