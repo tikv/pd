@@ -50,7 +50,7 @@ var defaultConfig = prioritiesConfig{
 }
 
 // because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
-var lowConfig = prioritiesConfig{
+var compatibleConfig = prioritiesConfig{
 	readLeader:  []string{BytePriority, KeyPriority},
 	writeLeader: []string{KeyPriority, BytePriority},
 	writePeer:   []string{BytePriority, KeyPriority},

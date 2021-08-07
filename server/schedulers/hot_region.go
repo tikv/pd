@@ -416,9 +416,10 @@ func (bs *balanceSolver) adjustConfig(origins []string, getPriorities func(*prio
 	withQuery := slice.AnyOf(origins, func(i int) bool {
 		return origins[i] == QueryPriority
 	})
-	lows := getPriorities(&lowConfig)
+	compatibles := getPriorities(&compatibleConfig)
 	if !querySupport && withQuery {
-		return prioritiesToDim(lows)
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "use-compatible-config").Inc()
+		return prioritiesToDim(compatibles)
 	}
 
 	defaults := getPriorities(&defaultConfig)
@@ -430,8 +431,10 @@ func (bs *balanceSolver) adjustConfig(origins []string, getPriorities func(*prio
 	}
 
 	if !querySupport {
-		return prioritiesToDim(lows)
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "use-compatible-config").Inc()
+		return prioritiesToDim(compatibles)
 	}
+	schedulerCounter.WithLabelValues(bs.sche.GetName(), "use-default-config").Inc()
 	return prioritiesToDim(defaults)
 }
 
