@@ -1085,6 +1085,17 @@ func (c *RaftCluster) ResumeLeaderTransfer(storeID uint64) {
 	c.core.ResumeLeaderTransfer(storeID)
 }
 
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
+// leader to the store
+func (c *RaftCluster) SlowStoreEvicted(storeID uint64) error {
+	return c.core.SlowStoreEvicted(storeID)
+}
+
+// SlowStoreRecovered cleans the evicted state of a store.
+func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
+	c.core.SlowStoreRecovered(storeID)
+}
+
 // AttachAvailableFunc attaches an available function to a specific store.
 func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
 	c.core.AttachAvailableFunc(storeID, limitType, f)
