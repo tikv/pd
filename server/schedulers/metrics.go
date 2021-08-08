@@ -93,7 +93,7 @@ var hotDirectionCounter = prometheus.NewCounterVec(
 		Subsystem: "scheduler",
 		Name:      "hot_region_direction",
 		Help:      "Counter of hot region scheduler.",
-	}, []string{"type", "rw", "store", "direction"})
+	}, []string{"type", "rw", "store", "direction", "dim"})
 
 var scatterRangeLeaderCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -111,6 +111,14 @@ var scatterRangeRegionCounter = prometheus.NewCounterVec(
 		Help:      "Counter of scatter range region scheduler.",
 	}, []string{"type", "store"})
 
+var hotPendingStatus = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "hot_pending",
+		Help:      "Counter of direction of balance related schedulers.",
+	}, []string{"type", "source", "target"})
+
 func init() {
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(schedulerStatus)
@@ -124,4 +132,5 @@ func init() {
 	prometheus.MustRegister(scatterRangeRegionCounter)
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
+	prometheus.MustRegister(hotPendingStatus)
 }

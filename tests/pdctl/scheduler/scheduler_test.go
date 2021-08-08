@@ -259,6 +259,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	expected1 := map[string]interface{}{
 		"min-hot-byte-rate":          float64(100),
 		"min-hot-key-rate":           float64(10),
+		"min-hot-query-rate":         float64(10),
 		"max-zombie-rounds":          float64(3),
 		"max-peer-number":            float64(1000),
 		"byte-rate-rank-step-ratio":  0.05,
@@ -269,11 +270,53 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"minor-dec-ratio":            0.99,
 		"src-tolerance-ratio":        1.05,
 		"dst-tolerance-ratio":        1.05,
+		"read-priorities":            []interface{}{"qps", "byte"},
+		"write-leader-priorities":    []interface{}{"key", "byte"},
+		"write-peer-priorities":      []interface{}{"byte", "key"},
+		"strict-picking-store":       "true",
+		"enable-for-tiflash":         "true",
 	}
 	c.Assert(conf, DeepEquals, expected1)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.02"}, nil)
 	expected1["src-tolerance-ratio"] = 1.02
 	var conf1 map[string]interface{}
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "byte,key"}, nil)
+	expected1["read-priorities"] = []interface{}{"byte", "key"}
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,byte"}, nil)
+	expected1["read-priorities"] = []interface{}{"key", "byte"}
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "foo,bar"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", ""}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,key"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "byte,byte"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,key,byte"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+
+	// write-priorities is divided into write-leader-priorities and write-peer-priorities
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-priorities", "key,byte"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+	// cannot set qps as write-peer-priorities
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "qps,byte"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
 

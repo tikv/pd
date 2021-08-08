@@ -85,14 +85,15 @@ func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.Regio
 }
 
 // LoadRegion puts region info without leader
-func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
+func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 	//  regions load from etcd will have no leader
-	r := mc.newMockRegionInfo(regionID, 0, followerIds...).Clone(core.WithLeader(nil))
+	r := mc.newMockRegionInfo(regionID, 0, peerStoreIDs...).Clone(core.WithLeader(nil))
 	mc.PutRegion(r)
 }
 
 // GetStoresLoads gets stores load statistics.
 func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
+	mc.HotStat.FilterUnhealthyStore(mc)
 	return mc.HotStat.GetStoresLoads()
 }
 
@@ -304,8 +305,8 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 }
 
 // AddLeaderRegion adds region with specified leader and followers.
-func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
-	origin := mc.newMockRegionInfo(regionID, leaderStoreID, followerStoreIDs...)
+func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
+	origin := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
@@ -320,8 +321,8 @@ func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, f
 }
 
 // AddLeaderRegionWithRange adds region with specified leader, followers and key range.
-func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderID uint64, followerIds ...uint64) {
-	o := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderStoreID uint64, otherPeerStoreIDs ...uint64) {
+	o := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r := o.Clone(
 		core.WithStartKey([]byte(startKey)),
 		core.WithEndKey([]byte(endKey)),
@@ -331,14 +332,15 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 
 // AddRegionWithReadInfo adds region with specified leader, followers and read info.
 func (mc *Cluster) AddRegionWithReadInfo(
-	regionID uint64, leaderID uint64,
-	readBytes, readKeys uint64,
+	regionID uint64, leaderStoreID uint64,
+	readBytes, readKeys, readQuery uint64,
 	reportInterval uint64,
-	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
+	r = r.Clone(core.SetReadQuery(readQuery))
 	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
 	if len(filledNums) > 0 {
 		filledNum = filledNums[0]
@@ -356,9 +358,9 @@ func (mc *Cluster) AddRegionWithReadInfo(
 }
 
 // AddRegionWithPeerReadInfo adds region with specified peer read info.
-func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderID, targetStoreID, readBytes, readKeys, reportInterval uint64,
-	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStoreID, readBytes, readKeys, reportInterval uint64,
+	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes), core.SetReadKeys(readKeys), core.SetReportInterval(reportInterval))
 	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
 	if len(filledNums) > 0 {
@@ -379,13 +381,14 @@ func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderID, targetStoreID, 
 
 // AddRegionLeaderWithReadInfo add region leader read info
 func (mc *Cluster) AddRegionLeaderWithReadInfo(
-	regionID uint64, leaderID uint64,
-	readBytes, readKeys uint64,
+	regionID uint64, leaderStoreID uint64,
+	readBytes, readKeys, readQuery uint64,
 	reportInterval uint64,
-	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
+	r = r.Clone(core.SetReadQuery(readQuery))
 	r = r.Clone(core.SetReportInterval(reportInterval))
 	filledNum := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
 	if len(filledNums) > 0 {
@@ -405,14 +408,15 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 
 // AddLeaderRegionWithWriteInfo adds region with specified leader and peers write info.
 func (mc *Cluster) AddLeaderRegionWithWriteInfo(
-	regionID uint64, leaderID uint64,
-	writtenBytes, writtenKeys uint64,
+	regionID uint64, leaderStoreID uint64,
+	writtenBytes, writtenKeys, writtenQuery uint64,
 	reportInterval uint64,
-	followerIds []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	r = r.Clone(core.SetWrittenKeys(writtenKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
+	r = r.Clone(core.SetWrittenQuery(writtenQuery))
 
 	filledNum := mc.HotCache.GetFilledPeriod(statistics.WriteFlow)
 	if len(filledNums) > 0 {
@@ -490,11 +494,9 @@ func (mc *Cluster) UpdateRegionCount(storeID uint64, regionCount int) {
 
 // UpdateSnapshotCount updates store snapshot count.
 func (mc *Cluster) UpdateSnapshotCount(storeID uint64, snapshotCount int) {
-	store := mc.GetStore(storeID)
-	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.ReceivingSnapCount = uint32(snapshotCount)
-	newStore := store.Clone(core.SetStoreStats(newStats))
-	mc.PutStore(newStore)
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.ReceivingSnapCount = uint32(snapshotCount)
+	})
 }
 
 // UpdatePendingPeerCount updates store pending peer count.
@@ -506,91 +508,92 @@ func (mc *Cluster) UpdatePendingPeerCount(storeID uint64, pendingPeerCount int) 
 
 // UpdateStorageRatio updates store storage ratio count.
 func (mc *Cluster) UpdateStorageRatio(storeID uint64, usedRatio, availableRatio float64) {
-	store := mc.GetStore(storeID)
-	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.Capacity = defaultStoreCapacity
-	newStats.UsedSize = uint64(float64(newStats.Capacity) * usedRatio)
-	newStats.Available = uint64(float64(newStats.Capacity) * availableRatio)
-	newStore := store.Clone(core.SetStoreStats(newStats))
-	mc.PutStore(newStore)
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.Capacity = defaultStoreCapacity
+		newStats.UsedSize = uint64(float64(newStats.Capacity) * usedRatio)
+		newStats.Available = uint64(float64(newStats.Capacity) * availableRatio)
+	})
 }
 
 // UpdateStorageWrittenStats updates store written bytes.
 func (mc *Cluster) UpdateStorageWrittenStats(storeID, bytesWritten, keysWritten uint64) {
-	store := mc.GetStore(storeID)
-	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.BytesWritten = bytesWritten
-	newStats.KeysWritten = keysWritten
-	now := time.Now().Second()
-	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
-	newStats.Interval = interval
-	newStore := store.Clone(core.SetStoreStats(newStats))
-	mc.Set(storeID, newStats)
-	mc.PutStore(newStore)
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.BytesWritten = bytesWritten
+		newStats.KeysWritten = keysWritten
+	})
 }
 
 // UpdateStorageReadStats updates store written bytes.
 func (mc *Cluster) UpdateStorageReadStats(storeID, bytesRead, keysRead uint64) {
-	store := mc.GetStore(storeID)
-	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.BytesRead = bytesRead
-	newStats.KeysRead = keysRead
-	now := time.Now().Second()
-	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
-	newStats.Interval = interval
-	newStore := store.Clone(core.SetStoreStats(newStats))
-	mc.Set(storeID, newStats)
-	mc.PutStore(newStore)
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.BytesRead = bytesRead
+		newStats.KeysRead = keysRead
+	})
 }
 
 // UpdateStorageWrittenBytes updates store written bytes.
 func (mc *Cluster) UpdateStorageWrittenBytes(storeID uint64, bytesWritten uint64) {
-	store := mc.GetStore(storeID)
-	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.BytesWritten = bytesWritten
-	newStats.KeysWritten = bytesWritten / 100
-	now := time.Now().Second()
-	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
-	newStats.Interval = interval
-	newStore := store.Clone(core.SetStoreStats(newStats))
-	mc.Set(storeID, newStats)
-	mc.PutStore(newStore)
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.BytesWritten = bytesWritten
+		newStats.KeysWritten = bytesWritten / 100
+		newStats.QueryStats = &pdpb.QueryStats{
+			Put: bytesWritten / 100,
+		}
+	})
 }
 
 // UpdateStorageReadBytes updates store read bytes.
 func (mc *Cluster) UpdateStorageReadBytes(storeID uint64, bytesRead uint64) {
-	store := mc.GetStore(storeID)
-	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.BytesRead = bytesRead
-	newStats.KeysRead = bytesRead / 100
-	now := time.Now().Second()
-	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
-	newStats.Interval = interval
-	newStore := store.Clone(core.SetStoreStats(newStats))
-	mc.Set(storeID, newStats)
-	mc.PutStore(newStore)
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.BytesRead = bytesRead
+		newStats.KeysRead = bytesRead / 100
+	})
 }
 
 // UpdateStorageWrittenKeys updates store written keys.
 func (mc *Cluster) UpdateStorageWrittenKeys(storeID uint64, keysWritten uint64) {
-	store := mc.GetStore(storeID)
-	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.KeysWritten = keysWritten
-	newStats.BytesWritten = keysWritten * 100
-	now := time.Now().Second()
-	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
-	newStats.Interval = interval
-	newStore := store.Clone(core.SetStoreStats(newStats))
-	mc.Set(storeID, newStats)
-	mc.PutStore(newStore)
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.KeysWritten = keysWritten
+		newStats.BytesWritten = keysWritten * 100
+	})
 }
 
 // UpdateStorageReadKeys updates store read bytes.
 func (mc *Cluster) UpdateStorageReadKeys(storeID uint64, keysRead uint64) {
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.KeysRead = keysRead
+		newStats.BytesRead = keysRead * 100
+	})
+}
+
+// UpdateStorageReadQuery updates store read query.
+func (mc *Cluster) UpdateStorageReadQuery(storeID uint64, queryRead uint64) {
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.QueryStats = &pdpb.QueryStats{
+			Coprocessor: queryRead / 3,
+			Scan:        queryRead / 3,
+			Get:         queryRead / 3,
+		}
+		newStats.BytesRead = queryRead * 100
+	})
+}
+
+// UpdateStorageWriteQuery updates store write query.
+func (mc *Cluster) UpdateStorageWriteQuery(storeID uint64, queryWrite uint64) {
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.QueryStats = &pdpb.QueryStats{
+			Put:         queryWrite / 3,
+			Delete:      queryWrite / 3,
+			DeleteRange: queryWrite / 3,
+		}
+		newStats.BytesWritten = queryWrite * 100
+	})
+}
+
+func (mc *Cluster) updateStorageStatistics(storeID uint64, update func(*pdpb.StoreStats)) {
 	store := mc.GetStore(storeID)
 	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.KeysRead = keysRead
-	newStats.BytesRead = keysRead * 100
+	update(newStats)
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
@@ -623,8 +626,17 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	mc.PutStore(newStore)
 }
 
-func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
-	return mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, []uint64{}, nil)
+func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
+	var followerStoreIDs []uint64
+	var learnerStoreIDs []uint64
+	for _, storeID := range otherPeerStoreIDs {
+		if store := mc.GetStore(storeID); store != nil && core.IsTiFlashStore(store.GetMeta()) {
+			learnerStoreIDs = append(learnerStoreIDs, storeID)
+		} else {
+			followerStoreIDs = append(followerStoreIDs, storeID)
+		}
+	}
+	return mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)
 }
 
 // CheckLabelProperty checks label property.
@@ -796,4 +808,10 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 		items = append(items, item)
 	}
 	return items
+}
+
+// ObserveRegionsStats records the current stores stats from region stats.
+func (mc *Cluster) ObserveRegionsStats() {
+	storeIDs, writeBytesRates, writeKeysRates := mc.BasicCluster.GetStoresWriteRate()
+	mc.HotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
 }

@@ -24,9 +24,10 @@ type EMA struct {
 	// unreasonably large effect on early forecasts. This problem can be overcome by allowing the process to evolve for
 	// a reasonable number of periods (say 10 or more) and using the arithmetic average of the demand during
 	// those periods as the initial forecast.
-	wakeNum uint64
-	count   uint64
-	value   float64
+	wakeNum       uint64
+	count         uint64
+	value         float64
+	instantaneous float64
 }
 
 // NewEMA returns an EMA.
@@ -44,6 +45,7 @@ func NewEMA(decays ...float64) *EMA {
 
 // Add adds a data point.
 func (e *EMA) Add(num float64) {
+	e.instantaneous = num
 	if e.count < e.wakeNum {
 		e.count++
 		e.value += num
@@ -77,4 +79,9 @@ func (e *EMA) Reset() {
 func (e *EMA) Set(n float64) {
 	e.value = n
 	e.count = 1
+}
+
+// GetInstantaneous returns the value just added.
+func (e *EMA) GetInstantaneous() float64 {
+	return e.instantaneous
 }

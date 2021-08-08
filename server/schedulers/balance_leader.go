@@ -281,9 +281,9 @@ func (l *balanceLeaderScheduler) createOperator(plan *balancePlan) []*operator.O
 	}
 	op.Counters = append(op.Counters,
 		schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
-		balanceDirectionCounter.WithLabelValues(l.GetName(), plan.SourceMetricLabel(), plan.TargetMetricLabel()),
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
+		balanceDirectionCounter.WithLabelValues(l.GetName(), plan.SourceMetricLabel(), plan.TargetMetricLabel()),
 		l.counter.WithLabelValues("move-leader", plan.SourceMetricLabel()+"-out"),
 		l.counter.WithLabelValues("move-leader", plan.TargetMetricLabel()+"-in"),
 	)
