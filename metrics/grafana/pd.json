@@ -4406,6 +4406,15 @@
               "legendFormat": "{{address}}-store-{{store}}",
               "refId": "A",
               "step": 4
+            },
+            {
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_regions_write_rate_bytes\"}",
+              "format": "time_series",
+              "hide": true,
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}-regions",
+              "refId": "B",
+              "step": 4
             }
           ],
           "thresholds": [],
@@ -4597,6 +4606,15 @@
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
               "refId": "A",
+              "step": 4
+            },
+            {
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_regions_write_rate_keys\"}",
+              "format": "time_series",
+              "hide": true,
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}-regions",
+              "refId": "B",
               "step": 4
             }
           ],
