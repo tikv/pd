@@ -59,9 +59,15 @@ func (c *RuleChecker) GetType() string {
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
+	fit := c.cluster.FitRegion(region)
+	return c.CheckWithFit(region, fit)
+}
+
+// CheckWithFit checkWithFit is similar with Checker with placement.RegionFit
+func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) *operator.Operator {
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
 	c.record.refresh(c.cluster)
-	fit := c.cluster.FitRegion(region)
+
 	if len(fit.RuleFits) == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "fix-range").Inc()
 		// If the region matches no rules, the most possible reason is it spans across

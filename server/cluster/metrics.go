@@ -71,13 +71,13 @@ var (
 			Help:      "Current state of the cluster",
 		}, []string{"state"})
 
-	regionWaitingListGauge = prometheus.NewGauge(
+	regionListGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "checker",
-			Name:      "region_waiting_list",
+			Name:      "region_list",
 			Help:      "Number of region in waiting list",
-		})
+		}, []string{"type"})
 )
 
 func init() {
@@ -88,5 +88,5 @@ func init() {
 	prometheus.MustRegister(patrolCheckRegionsGauge)
 	prometheus.MustRegister(clusterStateCPUGauge)
 	prometheus.MustRegister(clusterStateCurrent)
-	prometheus.MustRegister(regionWaitingListGauge)
+	prometheus.MustRegister(regionListGauge)
 }
