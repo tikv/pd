@@ -37,7 +37,24 @@ const (
 	KeyPriority = "key"
 	// QueryPriority indicates hot-region-scheduler prefer query dim
 	QueryPriority = "qps"
+
+	// Scheduling has a bigger impact on TiFlash, so it needs to be corrected in configuration items
+	// In the default config, the TiKV difference is 1.05*1.05-1 = 0.1025, and the TiFlash difference is 1.15*1.15-1 = 0.3225
+	tiflashToleranceRatioCorrection = 0.1
 )
+
+var defaultConfig = prioritiesConfig{
+	readLeader:  []string{QueryPriority, BytePriority},
+	writeLeader: []string{KeyPriority, BytePriority},
+	writePeer:   []string{BytePriority, KeyPriority},
+}
+
+// because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
+var compatibleConfig = prioritiesConfig{
+	readLeader:  []string{BytePriority, KeyPriority},
+	writeLeader: []string{KeyPriority, BytePriority},
+	writePeer:   []string{BytePriority, KeyPriority},
+}
 
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
@@ -55,10 +72,11 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MinorDecRatio:          0.99,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		ReadPriorities:         []string{QueryPriority, BytePriority},
-		WriteLeaderPriorities:  []string{KeyPriority, BytePriority},
-		WritePeerPriorities:    []string{BytePriority, KeyPriority},
+		ReadPriorities:         defaultConfig.readLeader,
+		WriteLeaderPriorities:  defaultConfig.writeLeader,
+		WritePeerPriorities:    defaultConfig.writePeer,
 		StrictPickingStore:     true,
+		EnableForTiFlash:       true,
 	}
 }
 
@@ -83,9 +101,14 @@ type hotRegionSchedulerConfig struct {
 	SrcToleranceRatio      float64  `json:"src-tolerance-ratio"`
 	DstToleranceRatio      float64  `json:"dst-tolerance-ratio"`
 	ReadPriorities         []string `json:"read-priorities"`
-	WriteLeaderPriorities  []string `json:"write-leader-priorities"`
-	WritePeerPriorities    []string `json:"write-peer-priorities"`
-	StrictPickingStore     bool     `json:"strict-picking-store,string"`
+
+	// For first priority of write leader, it is better to consider key rate or query rather than byte
+	WriteLeaderPriorities []string `json:"write-leader-priorities"`
+	WritePeerPriorities   []string `json:"write-peer-priorities"`
+	StrictPickingStore    bool     `json:"strict-picking-store,string"`
+
+	// Separately control whether to start hotspot scheduling for TiFlash
+	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
@@ -184,6 +207,18 @@ func (conf *hotRegionSchedulerConfig) GetMinHotByteRate() float64 {
 	return conf.MinHotByteRate
 }
 
+func (conf *hotRegionSchedulerConfig) GetEnableForTiFlash() bool {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.EnableForTiFlash
+}
+
+func (conf *hotRegionSchedulerConfig) SetEnableForTiFlash(enable bool) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.EnableForTiFlash = enable
+}
+
 func (conf *hotRegionSchedulerConfig) GetMinHotQueryRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -196,13 +231,13 @@ func (conf *hotRegionSchedulerConfig) GetReadPriorities() []string {
 	return conf.ReadPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) GetWriteLeaderPriorites() []string {
+func (conf *hotRegionSchedulerConfig) GetWriteLeaderPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.WriteLeaderPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) GetWritePeerPriorites() []string {
+func (conf *hotRegionSchedulerConfig) GetWritePeerPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.WritePeerPriorities
@@ -277,4 +312,22 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 
 	}
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
+}
+
+type prioritiesConfig struct {
+	readLeader  []string
+	writeLeader []string
+	writePeer   []string
+}
+
+func getReadLeaderPriorities(c *prioritiesConfig) []string {
+	return c.readLeader
+}
+
+func getWriteLeaderPriorities(c *prioritiesConfig) []string {
+	return c.writeLeader
+}
+
+func getWritePeerPriorities(c *prioritiesConfig) []string {
+	return c.writePeer
 }

@@ -274,6 +274,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"write-leader-priorities":    []interface{}{"key", "byte"},
 		"write-peer-priorities":      []interface{}{"byte", "key"},
 		"strict-picking-store":       "true",
+		"enable-for-tiflash":         "true",
 	}
 	c.Assert(conf, DeepEquals, expected1)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.02"}, nil)
