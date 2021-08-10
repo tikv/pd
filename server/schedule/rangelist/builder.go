@@ -25,7 +25,7 @@ const (
 	tEnd
 )
 
-// splitPoints represents key that exists in items.
+// splitPoint represents key that exists in items.
 type splitPoint struct {
 	ty   splitPointType
 	key  []byte
