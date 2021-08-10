@@ -368,7 +368,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 
-	// Add TiKV stores 1, 2, 3, 4, 5, 6, 7(Down) with region counts 3, 2, 2, 2, 0, 0, 0.
+	// Add TiKV stores 1, 2, 3, 4, 5, 6, 7(Down) with region counts 3, 3, 2, 2, 0, 0, 0.
 	// Add TiFlash stores 8, 9, 10, 11 with region counts 3, 1, 1, 0.
 	storeCount := uint64(11)
 	aliveTiKVStartID := uint64(1)

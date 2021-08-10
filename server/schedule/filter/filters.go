@@ -584,7 +584,7 @@ type engineFilter struct {
 func NewEngineFilter(scope string, allowedEngines ...string) Filter {
 	return &engineFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: "engine", Op: "in", Values: allowedEngines},
+		constraint: placement.LabelConstraint{Key: core.EngineKey, Op: placement.In, Values: allowedEngines},
 	}
 }
 
@@ -613,7 +613,7 @@ type ordinaryEngineFilter struct {
 func NewOrdinaryEngineFilter(scope string) Filter {
 	return &ordinaryEngineFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: allSpecialEngines},
+		constraint: placement.LabelConstraint{Key: core.EngineKey, Op: placement.NotIn, Values: allSpecialEngines},
 	}
 }
 
@@ -650,7 +650,7 @@ func NewSpecialUseFilter(scope string, allowUses ...string) Filter {
 	}
 	return &specialUseFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: SpecialUseKey, Op: "in", Values: values},
+		constraint: placement.LabelConstraint{Key: SpecialUseKey, Op: placement.In, Values: values},
 	}
 }
 

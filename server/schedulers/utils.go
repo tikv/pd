@@ -514,8 +514,8 @@ func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy rwType, 
 		switch kind {
 		case core.LeaderKind:
 			// Use sum of hot peers to estimate leader-only byte rate.
-			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time,
-			// while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
+			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time, while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
+			// But none of the current dimension reflect this difference, so we create a new dimension to reflect it.
 			loads[statistics.ByteDim] = peerLoadSum[statistics.ByteDim]
 			loads[statistics.KeyDim] = peerLoadSum[statistics.KeyDim]
 		case core.RegionKind:

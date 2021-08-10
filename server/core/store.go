@@ -648,7 +648,7 @@ func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCo
 // FIXME: remove the hack way
 func IsTiFlashStore(store *metapb.Store) bool {
 	for _, l := range store.GetLabels() {
-		if l.GetKey() == "engine" && l.GetValue() == "tiflash" {
+		if l.GetKey() == EngineKey && l.GetValue() == EngineTiFlash {
 			return true
 		}
 	}
