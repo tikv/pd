@@ -136,6 +136,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/labels", labelsHandler.Get).Methods("GET")
 	clusterRouter.HandleFunc("/labels/stores", labelsHandler.GetStores).Methods("GET")
 
+	hotHistoryStatusHandler := newHotHistoryStatusHandler(handler, rd)
+	apiRouter.HandleFunc("/hotspot/history-hot-regions", hotHistoryStatusHandler.GetHotHistoryRegions).Methods("POST")
+
 	hotStatusHandler := newHotStatusHandler(handler, rd)
 	apiRouter.HandleFunc("/hotspot/regions/write", hotStatusHandler.GetHotWriteRegions).Methods("GET")
 	apiRouter.HandleFunc("/hotspot/regions/read", hotStatusHandler.GetHotReadRegions).Methods("GET")

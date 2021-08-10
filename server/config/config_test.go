@@ -459,6 +459,21 @@ wait-store-timeout = "120s"
 	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
 }
 
+func (s *testConfigSuite) TestHotRegionConfig(c *C) {
+	cfgData := `
+[server.schedule]
+hot-regions-reserved-days= "30"
+hot-regions-write-interval= "20m"
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta, false)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, time.Minute*20)
+	c.Assert(cfg.Schedule.HotRegionsResevervedDays, Equals, int64(30))
+}
+
 func (s *testConfigSuite) TestConfigClone(c *C) {
 	cfg := &Config{}
 	cfg.Adjust(nil, false)

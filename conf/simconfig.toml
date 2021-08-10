@@ -29,3 +29,5 @@ leader-schedule-limit = 32
 region-schedule-limit = 128
 replica-schedule-limit = 32
 merge-schedule-limit = 32
+hot-regions-reserved-days= "30"
+hot-regions-write-interval= "20m"

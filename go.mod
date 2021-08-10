@@ -10,14 +10,20 @@ require (
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f
+	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
+	github.com/deckarep/golang-set v1.7.1
 	github.com/docker/go-units v0.4.0
 	github.com/go-echarts/go-echarts v1.0.0
+	github.com/go-openapi/jsonreference v0.19.6 // indirect
+	github.com/go-openapi/spec v0.20.3 // indirect
+	github.com/go-openapi/swag v0.19.15 // indirect
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/protobuf v1.3.4
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/juju/ratelimit v1.0.1
+	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.5.0
@@ -37,11 +43,12 @@ require (
 	github.com/prometheus/common v0.6.0
 	github.com/prometheus/procfs v0.0.5 // indirect
 	github.com/sasha-s/go-deadlock v0.2.0
+	github.com/shurcooL/vfsgen v0.0.0-20200824052919-0d455de96546 // indirect
 	github.com/sirupsen/logrus v1.2.0
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
-	github.com/swaggo/swag v1.6.6-0.20200529100950-7c765ddd0476
+	github.com/swaggo/swag v1.7.0
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
@@ -50,7 +57,11 @@ require (
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.uber.org/goleak v1.1.10
 	go.uber.org/zap v1.16.0
-	golang.org/x/tools v0.0.0-20210112230658-8b4aab62c064
+	golang.org/x/net v0.0.0-20210716203947-853a461950ff // indirect
+	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c // indirect
+	golang.org/x/tools v0.1.5
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+replace github.com/pingcap/kvproto => ../kvproto
