@@ -78,11 +78,11 @@ func (s *StoresStats) Observe(storeID uint64, stats *pdpb.StoreStats) {
 	rollingStoreStat.Observe(stats)
 }
 
-// ObserveRegionsStats records the current stores status from region stats.
-func (s *StoresStats) ObserveRegionsStats(storeIDs []uint64, writeBytesRates, writeKeysRates []float64) {
-	for i, storeID := range storeIDs {
-		rollingStoreStat := s.GetOrCreateRollingStoreStats(storeID)
-		rollingStoreStat.ObserveRegionsStats(writeBytesRates[i], writeKeysRates[i])
+// ObserveRegionsStats records the current stores stats from region stats.
+func (s *StoresStats) ObserveRegionsStats(storesWriteRate []core.StoreWriteRate) {
+	for _, writeRate := range storesWriteRate {
+		rollingStoreStat := s.GetOrCreateRollingStoreStats(writeRate.StoreID)
+		rollingStoreStat.ObserveRegionsStats(writeRate)
 	}
 }
 
@@ -93,10 +93,10 @@ func (s *StoresStats) Set(storeID uint64, stats *pdpb.StoreStats) {
 }
 
 // SetRegionsStats sets the store statistics from region stats (for test).
-func (s *StoresStats) SetRegionsStats(storeIDs []uint64, writeBytesRates, writeKeysRates []float64) {
-	for i, storeID := range storeIDs {
-		rollingStoreStat := s.GetOrCreateRollingStoreStats(storeID)
-		rollingStoreStat.SetRegionsStats(writeBytesRates[i], writeKeysRates[i])
+func (s *StoresStats) SetRegionsStats(storesWriteRate []core.StoreWriteRate) {
+	for _, writeRate := range storesWriteRate {
+		rollingStoreStat := s.GetOrCreateRollingStoreStats(writeRate.StoreID)
+		rollingStoreStat.SetRegionsStats(writeRate)
 	}
 }
 
@@ -158,6 +158,8 @@ func newRollingStoreStats() *RollingStoreStats {
 	// The data from regionStats is used in TiFlash, so higher tolerance is required
 	movingAvgs[StoreRegionsWriteBytes] = movingaverage.NewMedianFilter(RegionsStatsRollingWindowsSize)
 	movingAvgs[StoreRegionsWriteKeys] = movingaverage.NewMedianFilter(RegionsStatsRollingWindowsSize)
+	movingAvgs[StoreLeadersWriteBytes] = movingaverage.NewMedianFilter(RegionsStatsRollingWindowsSize)
+	movingAvgs[StoreLeadersWriteKeys] = movingaverage.NewMedianFilter(RegionsStatsRollingWindowsSize)
 
 	return &RollingStoreStats{
 		timeMedians: timeMedians,
@@ -203,11 +205,13 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 }
 
 // ObserveRegionsStats records current statistics from region stats.
-func (r *RollingStoreStats) ObserveRegionsStats(writeBytesRate, writeKeysRate float64) {
+func (r *RollingStoreStats) ObserveRegionsStats(writeRate core.StoreWriteRate) {
 	r.Lock()
 	defer r.Unlock()
-	r.movingAvgs[StoreRegionsWriteBytes].Add(writeBytesRate)
-	r.movingAvgs[StoreRegionsWriteKeys].Add(writeKeysRate)
+	r.movingAvgs[StoreRegionsWriteBytes].Add(writeRate.PeerBytesRate)
+	r.movingAvgs[StoreRegionsWriteKeys].Add(writeRate.PeerKeysRate)
+	r.movingAvgs[StoreLeadersWriteBytes].Add(writeRate.LeaderBytesRate)
+	r.movingAvgs[StoreLeadersWriteKeys].Add(writeRate.LeaderKeysRate)
 }
 
 // Set sets the statistics (for test).
@@ -232,11 +236,13 @@ func (r *RollingStoreStats) Set(stats *pdpb.StoreStats) {
 }
 
 // SetRegionsStats sets the statistics from region stats (for test).
-func (r *RollingStoreStats) SetRegionsStats(writeBytesRate, writeKeysRate float64) {
+func (r *RollingStoreStats) SetRegionsStats(writeRate core.StoreWriteRate) {
 	r.Lock()
 	defer r.Unlock()
-	r.movingAvgs[StoreRegionsWriteBytes].Set(writeBytesRate)
-	r.movingAvgs[StoreRegionsWriteKeys].Set(writeKeysRate)
+	r.movingAvgs[StoreRegionsWriteBytes].Set(writeRate.PeerBytesRate)
+	r.movingAvgs[StoreRegionsWriteKeys].Set(writeRate.PeerKeysRate)
+	r.movingAvgs[StoreLeadersWriteBytes].Set(writeRate.LeaderBytesRate)
+	r.movingAvgs[StoreLeadersWriteKeys].Set(writeRate.LeaderKeysRate)
 }
 
 // GetLoad returns store's load.
@@ -246,7 +252,7 @@ func (r *RollingStoreStats) GetLoad(k StoreStatKind) float64 {
 	switch k {
 	case StoreReadBytes, StoreReadKeys, StoreReadQuery, StoreWriteBytes, StoreWriteKeys, StoreWriteQuery:
 		return r.timeMedians[k].Get()
-	case StoreCPUUsage, StoreDiskReadRate, StoreDiskWriteRate, StoreRegionsWriteBytes, StoreRegionsWriteKeys:
+	case StoreCPUUsage, StoreDiskReadRate, StoreDiskWriteRate, StoreRegionsWriteBytes, StoreRegionsWriteKeys, StoreLeadersWriteBytes, StoreLeadersWriteKeys:
 		return r.movingAvgs[k].Get()
 	}
 	return 0
@@ -259,7 +265,7 @@ func (r *RollingStoreStats) GetInstantLoad(k StoreStatKind) float64 {
 	switch k {
 	case StoreReadBytes, StoreReadKeys, StoreReadQuery, StoreWriteBytes, StoreWriteKeys, StoreWriteQuery:
 		return r.timeMedians[k].GetInstantaneous()
-	case StoreCPUUsage, StoreDiskReadRate, StoreDiskWriteRate, StoreRegionsWriteBytes, StoreRegionsWriteKeys:
+	case StoreCPUUsage, StoreDiskReadRate, StoreDiskWriteRate, StoreRegionsWriteBytes, StoreRegionsWriteKeys, StoreLeadersWriteBytes, StoreLeadersWriteKeys:
 		return r.movingAvgs[k].GetInstantaneous()
 	}
 	return 0

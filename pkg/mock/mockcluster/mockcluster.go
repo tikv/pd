@@ -812,6 +812,6 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 
 // ObserveRegionsStats records the current stores stats from region stats.
 func (mc *Cluster) ObserveRegionsStats() {
-	storeIDs, writeBytesRates, writeKeysRates := mc.BasicCluster.GetStoresWriteRate()
-	mc.HotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
+	storesWriteRate := mc.BasicCluster.GetStoresWriteRate()
+	mc.HotStat.ObserveRegionsStats(storesWriteRate)
 }

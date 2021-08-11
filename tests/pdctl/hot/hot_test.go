@@ -96,7 +96,13 @@ func (s *hotTestSuite) TestHot(c *C) {
 	}
 
 	for i := statistics.RegionsStatsRollingWindowsSize; i > 0; i-- {
-		rc.GetStoresStats().ObserveRegionsStats([]uint64{2}, []float64{float64(bytesWritten)}, []float64{float64(keysWritten)})
+		rc.GetStoresStats().ObserveRegionsStats([]core.StoreWriteRate{{
+			2,
+			float64(bytesWritten),
+			float64(keysWritten),
+			float64(bytesWritten),
+			float64(keysWritten),
+		}})
 	}
 
 	args := []string{"-u", pdAddr, "hot", "store"}

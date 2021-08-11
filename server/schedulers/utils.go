@@ -512,10 +512,12 @@ type storeCollector interface {
 	GetLoads(storeLoads, peerLoadSum []float64, rwTy rwType, kind core.ResourceKind) (loads []float64)
 }
 
-type tikvCollector struct{}
+type tikvCollector struct {
+	isTraceRegionFlow bool
+}
 
-func newTikvCollector() storeCollector {
-	return tikvCollector{}
+func newTikvCollector(isTraceRegionFlow bool) storeCollector {
+	return tikvCollector{isTraceRegionFlow: isTraceRegionFlow}
 }
 
 func (c tikvCollector) Engine() string {
@@ -540,9 +542,14 @@ func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy rwType, 
 			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time,
 			// while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
 			// Write{QPS} does not require such processing.
-			loads[statistics.ByteDim] = peerLoadSum[statistics.ByteDim]
-			loads[statistics.KeyDim] = peerLoadSum[statistics.KeyDim]
 			loads[statistics.QueryDim] = storeLoads[statistics.StoreWriteQuery]
+			if c.isTraceRegionFlow {
+				loads[statistics.ByteDim] = storeLoads[statistics.StoreLeadersWriteBytes]
+				loads[statistics.KeyDim] = storeLoads[statistics.StoreLeadersWriteKeys]
+			} else {
+				loads[statistics.ByteDim] = peerLoadSum[statistics.ByteDim]
+				loads[statistics.KeyDim] = peerLoadSum[statistics.KeyDim]
+			}
 		case core.RegionKind:
 			loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
 			loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
@@ -611,7 +618,7 @@ func summaryStoresLoad(
 		storesLoads,
 		storeHotPeers,
 		rwTy, kind,
-		newTikvCollector(),
+		newTikvCollector(isTraceRegionFlow),
 	)
 	tiflashLoadDetail := summaryStoresLoadByEngine(
 		storeInfos,

@@ -340,10 +340,10 @@ func (c *RaftCluster) runStatsBackgroundJobs() {
 			return
 		case <-ticker.C:
 			c.RLock()
-			storeIDs, writeBytesRates, writeKeysRates := c.core.GetStoresWriteRate()
+			storesWriteRate := c.core.GetStoresWriteRate()
 			c.RUnlock()
 			c.Lock()
-			c.hotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
+			c.hotStat.ObserveRegionsStats(storesWriteRate)
 			c.Unlock()
 		}
 	}

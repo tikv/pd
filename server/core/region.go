@@ -906,23 +906,35 @@ func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) int64 {
 	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID) + r.GetStoreLearnerRegionSize(storeID)
 }
 
-// GetStoreLeaderWriteRate get total write rate of store's leaders
-func (r *RegionsInfo) GetStoreLeaderWriteRate(storeID uint64) (bytesRate, keysRate float64) {
-	return r.leaders[storeID].TotalWriteRate()
+// StoreWriteRate is the statistics of total write rate of store's regions.
+type StoreWriteRate struct {
+	StoreID         uint64
+	PeerBytesRate   float64
+	PeerKeysRate    float64
+	LeaderBytesRate float64
+	LeaderKeysRate  float64
 }
 
 // GetStoreWriteRate get total write rate of store's regions
-func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate float64) {
-	storeBytesRate, storeKeysRate := r.leaders[storeID].TotalWriteRate()
-	bytesRate += storeBytesRate
-	keysRate += storeKeysRate
-	storeBytesRate, storeKeysRate = r.followers[storeID].TotalWriteRate()
-	bytesRate += storeBytesRate
-	keysRate += storeKeysRate
+func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) StoreWriteRate {
+	leaderBytesRate, leaderKeysRate := r.leaders[storeID].TotalWriteRate()
+	peerBytesRate, peerKeysRate := leaderBytesRate, leaderKeysRate
+
+	storeBytesRate, storeKeysRate := r.followers[storeID].TotalWriteRate()
+	peerBytesRate += storeBytesRate
+	peerKeysRate += storeKeysRate
+
 	storeBytesRate, storeKeysRate = r.learners[storeID].TotalWriteRate()
-	bytesRate += storeBytesRate
-	keysRate += storeKeysRate
-	return
+	peerBytesRate += storeBytesRate
+	peerKeysRate += storeKeysRate
+
+	return StoreWriteRate{
+		StoreID:         storeID,
+		PeerBytesRate:   peerBytesRate,
+		PeerKeysRate:    peerKeysRate,
+		LeaderBytesRate: leaderBytesRate,
+		LeaderKeysRate:  leaderKeysRate,
+	}
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
