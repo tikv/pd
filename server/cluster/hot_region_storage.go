@@ -1,9 +1,8 @@
 package cluster
 
 import (
-	"bytes"
 	"context"
-	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"math"
 	"path"
@@ -37,6 +36,10 @@ type HotRegionStorage struct {
 	member               *member.Member
 }
 
+const (
+	defaultCompactionTime = 30
+)
+
 func NewHotRegionsHistoryStorage(
 	ctx context.Context,
 	path string,
@@ -57,7 +60,7 @@ func NewHotRegionsHistoryStorage(
 		batchHotInfo:         make(map[string]*statistics.HistoryHotRegion),
 		remianedDays:         remianedDays,
 		pullInterval:         pullInterval,
-		compactionCountdown:  90,
+		compactionCountdown:  defaultCompactionTime,
 		hotRegionInfoCtx:     hotRegionInfoCtx,
 		hotRegionInfoCancel:  hotRegionInfoCancle,
 		cluster:              cluster,
@@ -119,6 +122,7 @@ func (h *HotRegionStorage) backgroundFlush() {
 	}()
 }
 
+//return a iterator which can traverse from start_time to end_time
 func (h *HotRegionStorage) NewIterator(startTime, endTime int64) HotRegionStorageIterator {
 	start_key := HotRegionStorePath(startTime, 0)
 	end_key := HotRegionStorePath(endTime, math.MaxUint64)
@@ -189,17 +193,17 @@ func (h *HotRegionStorage) packHotRegionInfo(hotLeaderInfo statistics.StoreHotPe
 	}
 	return nil
 }
+
 func (h *HotRegionStorage) flush() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	batch := new(leveldb.Batch)
 	for key, stat := range h.batchHotInfo {
-		value, err := EncodeHistoryHotRegion(stat)
+		value, err := json.Marshal(stat)
 		if err != nil {
 			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
 		}
 		batch.Put([]byte(key), value)
-
 	}
 	if err := h.LeveldbKV.Write(batch, nil); err != nil {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
@@ -207,6 +211,7 @@ func (h *HotRegionStorage) flush() error {
 	h.batchHotInfo = make(map[string]*statistics.HistoryHotRegion)
 	return nil
 }
+
 func (h *HotRegionStorage) delete() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -225,7 +230,7 @@ func (h *HotRegionStorage) delete() error {
 	}
 	h.compactionCountdown--
 	if h.compactionCountdown == 0 {
-		h.compactionCountdown = 90
+		h.compactionCountdown = defaultCompactionTime
 		db.CompactRange(util.Range{})
 	}
 	return nil
@@ -236,6 +241,8 @@ type HotRegionStorageIterator struct {
 	encryptionKeyManager *encryptionkm.KeyManager
 }
 
+//next will return next history_hot_region,
+//there is no more historyhotregion,it will return nil
 func (it *HotRegionStorageIterator) Next() (*statistics.HistoryHotRegion, error) {
 	iter := it.iter
 	if !iter.Next() {
@@ -244,7 +251,8 @@ func (it *HotRegionStorageIterator) Next() (*statistics.HistoryHotRegion, error)
 	item := iter.Value()
 	value := make([]byte, len(item))
 	copy(value, item)
-	message, err := DecodeHistoryHotRegion(value)
+	var message statistics.HistoryHotRegion
+	err := json.Unmarshal(value, &message)
 	if err != nil {
 		return nil, err
 	}
@@ -260,22 +268,10 @@ func (it *HotRegionStorageIterator) Next() (*statistics.HistoryHotRegion, error)
 	message.StartKey = region.StartKey
 	message.EndKey = region.EndKey
 	message.EncryptionMeta = nil
-	return message, nil
+	return &message, nil
 }
 
 func HotRegionStorePath(update_time int64, region_id uint64) string {
 	return path.Join("schedule", "hot_region", fmt.Sprintf("%020d", update_time),
 		fmt.Sprintf("%020d", region_id))
-}
-func DecodeHistoryHotRegion(s []byte) (*statistics.HistoryHotRegion, error) {
-	h := &statistics.HistoryHotRegion{}
-	dec := gob.NewDecoder(bytes.NewReader(s))
-	err := dec.Decode(h)
-	return h, err
-}
-func EncodeHistoryHotRegion(h *statistics.HistoryHotRegion) ([]byte, error) {
-	buf := bytes.Buffer{}
-	enc := gob.NewEncoder(&buf)
-	err := enc.Encode(h)
-	return buf.Bytes(), err
 }

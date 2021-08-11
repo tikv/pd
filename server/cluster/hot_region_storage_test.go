@@ -11,9 +11,8 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/hotregionhistory"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/member"
 	"github.com/tikv/pd/server/statistics"
 )
 
@@ -29,14 +28,10 @@ func (t *testHotRegionStorage) SetUpSuite(c *C) {
 }
 
 func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
-	tc, _, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil)
-	}, func(co *coordinator) { co.run() }, c)
-	defer cleanup()
-	defer t.ctx.Done()
-	defer os.RemoveAll("./tmp")
-	raft := tc.RaftCluster
-	member := &member.Member{}
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, -1)
+	defer clear()
+	c.Assert(err, IsNil)
+	raft := regionStorage.cluster
 	stats := statistics.StoreHotPeersStat{}
 	statShows := []statistics.HotPeerStatShow{}
 	regions, statShows, start_time, end_time :=
@@ -45,9 +40,7 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 	stats[1] = &statistics.HotPeersStat{
 		Stats: statShows,
 	}
-	regionStorage, err := NewHotRegionsHistoryStorage(t.ctx,
-		"./tmp", nil, raft, member, 1, 10*time.Second)
-	defer regionStorage.LeveldbKV.Close()
+	defer regionStorage.Close()
 	defer os.RemoveAll("./tmp")
 	c.Assert(err, IsNil)
 	regionStorage.packHotRegionInfo(stats, "read")
@@ -57,7 +50,7 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 	for r, err := iter.Next(); r != nil && err == nil; r, err = iter.Next() {
 		c.Assert(r.RegionID, Equals, statShows[index].RegionID)
 		c.Assert(r.UpdateTime, Equals, statShows[index].LastUpdateTime.Unix())
-		c.Assert(r.HotRegionType, Equals, hotregionhistory.HotRegionType_Read)
+		c.Assert(r.HotRegionType, Equals, "read")
 		c.Assert(r.StartKey, Equals, regions[index].GetMeta().StartKey)
 		c.Assert(r.EndKey, Equals, regions[index].GetMeta().EndKey)
 		index++
@@ -65,21 +58,15 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(index, Equals, len(statShows)-1)
 }
+
 func (t *testHotRegionStorage) TestHotRegionDelete(c *C) {
-	tc, _, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil)
-	}, func(co *coordinator) { co.run() }, c)
-	raft := tc.RaftCluster
-	member := &member.Member{}
-	regionStorage, err := NewHotRegionsHistoryStorage(t.ctx,
-		"./tmp", nil, raft, member, 1, 10*time.Second)
-	defer cleanup()
-	defer t.ctx.Done()
-	defer regionStorage.LeveldbKV.Close()
-	defer os.RemoveAll("./tmp")
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, -1)
+	defer clear()
+	c.Assert(err, IsNil)
+	raft := regionStorage.cluster
 	stats := statistics.StoreHotPeersStat{}
 	now := time.Now()
-	next := time.Date(now.Year(), now.Month()-1, now.Day(), 0, 0, 0, 0, now.Location())
+	next := now.AddDate(0, 0, -1)
 	_, statShows, start_time, end_time :=
 		newTestHotRegionHistory(raft, next, 3, 3)
 	stats[1] = &statistics.HotPeersStat{
@@ -97,182 +84,165 @@ func (t *testHotRegionStorage) TestHotRegionDelete(c *C) {
 	c.Assert(r, NotNil)
 	c.Assert(r.RegionID, Equals, statShows[2].RegionID)
 	c.Assert(r.UpdateTime, Equals, statShows[2].LastUpdateTime.Unix())
-	c.Assert(r.HotRegionType, Equals, hotregionhistory.HotRegionType_Read)
+	c.Assert(r.HotRegionType, Equals, "read")
 	r, err = iter.Next()
 	c.Assert(err, IsNil)
 	c.Assert(r, IsNil)
 }
 
 func BenchmarkInsert(b *testing.B) {
-	ctx := context.Background()
-	defer ctx.Done()
-	_, opt, err := newTestScheduleConfig()
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, -1)
+	defer clear()
+	if err != nil {
+		b.Fatal(err)
+	}
+	raft := regionStorage.cluster
+	regions := newTestHotRegions(250, 3)
+	for _, region := range regions {
+		raft.putRegion(region)
+	}
+	stat := newBenchmarkHotRegoinHistory(raft, time.Now(), regions)
+	b.ResetTimer()
+	err = regionStorage.packHotRegionInfo(stat, "read")
 	if err != nil {
 		log.Fatal(err)
 	}
-	tc := newTestCluster(ctx, opt)
-	raft := tc.RaftCluster
-	regionStorage, err := NewHotRegionsHistoryStorage(ctx,
-		"./tmp", nil, raft, nil, 1, 1*time.Hour)
-	defer regionStorage.LeveldbKV.Close()
-	defer os.RemoveAll("./tmp")
-	_, stat, _, _ := newBenchmarkHotRegoinHistory(raft, time.Now(), 1000, 3)
-	b.ResetTimer()
-	b.StartTimer()
-	regionStorage.packHotRegionInfo(stat, "read")
 	regionStorage.flush()
 	b.StopTimer()
 }
+
 func BenchmarkInsertAfterMonth(b *testing.B) {
-	ctx := context.Background()
-	defer ctx.Done()
-	_, opt, err := newTestScheduleConfig()
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, -1)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer clear()
+	raft := regionStorage.cluster
+	endTime := time.Now()
+	regions := newTestHotRegions(1000, 3)
+	for _, region := range regions {
+		raft.putRegion(region)
+	}
+	//4320=(60*24*30)/10
+	writeIntoDB(regionStorage, regions, 4464, endTime)
+	stat := newBenchmarkHotRegoinHistory(raft, endTime, regions)
+	b.ResetTimer()
+	err = regionStorage.packHotRegionInfo(stat, "read")
 	if err != nil {
 		log.Fatal(err)
 	}
-	tc := newTestCluster(ctx, opt)
-	raft := tc.RaftCluster
-	regionStorage, err := NewHotRegionsHistoryStorage(ctx,
-		"./tmp", nil, raft, nil, 1, 1*time.Hour)
-	defer regionStorage.LeveldbKV.Close()
-	defer os.RemoveAll("./tmp")
-	end_time := time.Now()
-	//4320=(60*24*30)/10
-	for i := 1; i < 4320; i++ {
-		_, stat, _, _ := newBenchmarkHotRegoinHistory(raft, end_time, 1000, 3)
-		regionStorage.packHotRegionInfo(stat, "read")
-		regionStorage.flush()
-		end_time.Add(10 * time.Minute)
-	}
-	_, stat, _, _ := newBenchmarkHotRegoinHistory(raft, end_time, 1000, 3)
-	b.ResetTimer()
-	b.StartTimer()
-	regionStorage.packHotRegionInfo(stat, "read")
 	regionStorage.flush()
 	b.StopTimer()
-	size, err := DirSizeB("./tmp")
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("file size %d\n", size)
 }
+
 func BenchmarkDelete(b *testing.B) {
-	ctx := context.Background()
-	defer ctx.Done()
-	_, opt, err := newTestScheduleConfig()
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, -1)
 	if err != nil {
-		log.Fatal(err)
+		b.Fatal(err)
 	}
-	tc := newTestCluster(ctx, opt)
-	raft := tc.RaftCluster
-	//delete data in between today and tomrrow
-	regionStorage, err := NewHotRegionsHistoryStorage(ctx,
-		"./tmp", nil, raft, nil, -1, 1*time.Hour)
-	defer regionStorage.LeveldbKV.Close()
-	defer os.RemoveAll("./tmp")
-	end_time := time.Now()
-	//4320=(60*24*31)/10
-	for i := 1; i < 4464; i++ {
-		_, stat, _, _ := newBenchmarkHotRegoinHistory(raft, end_time, 1000, 3)
-		regionStorage.packHotRegionInfo(stat, "read")
-		regionStorage.flush()
-		end_time.Add(10 * time.Minute)
+	defer clear()
+	raft := regionStorage.cluster
+	endTime := time.Now()
+	regions := newTestHotRegions(1000, 3)
+	for _, region := range regions {
+		raft.putRegion(region)
 	}
+	//4464=(60*24*31)/10
+	writeIntoDB(regionStorage, regions, 4464, endTime)
 	b.ResetTimer()
-	b.StartTimer()
 	regionStorage.delete()
 	b.StopTimer()
-	size, err := DirSizeB("./tmp")
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("file size %d\n", size)
 }
-func BenchmarkDeleteAfterThreeMonth(b *testing.B) {
-	ctx := context.Background()
-	defer ctx.Done()
-	_, opt, err := newTestScheduleConfig()
-	if err != nil {
-		log.Fatal(err)
-	}
-	tc := newTestCluster(ctx, opt)
-	raft := tc.RaftCluster
+
+func BenchmarkCompaction(b *testing.B) {
 	//delete data in between today and tomrrow
-	regionStorage, err := NewHotRegionsHistoryStorage(ctx,
-		"./tmp", nil, raft, nil, -1, 1*time.Hour)
-	defer os.RemoveAll("./tmp")
-	end_time := time.Now()
-	//4464=(60*24*31)/10
-	for i := 0; i < 4464; i++ {
-		_, stat, _, _ := newBenchmarkHotRegoinHistory(raft, end_time, 1000, 3)
-		regionStorage.packHotRegionInfo(stat, "read")
-		regionStorage.flush()
-		end_time.Add(10 * time.Minute)
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, -1)
+	if err != nil {
+		b.Fatal(err)
 	}
-	//89=90-1,
-	//leveldb will compaction after 90 times delete
-	for i := 0; i < 89; i++ {
+	defer clear()
+	raft := regionStorage.cluster
+	endTime := time.Now()
+	//4464=(60*24*31)/10
+	regions := newTestHotRegions(1000, 3)
+	for _, region := range regions {
+		raft.putRegion(region)
+	}
+	endTime = writeIntoDB(regionStorage, regions, 4464, endTime)
+	//29=30-1,
+	//leveldb will compaction after 30 times delete
+	for i := 0; i < defaultCompactionTime-1; i++ {
 		regionStorage.delete()
 		//144=24*60/10
-		for i := 0; i < 144; i++ {
-			_, stat, _, _ := newBenchmarkHotRegoinHistory(raft, end_time, 1000, 3)
-			regionStorage.packHotRegionInfo(stat, "read")
-			regionStorage.flush()
-			end_time.Add(10 * time.Minute)
-		}
+		endTime = writeIntoDB(regionStorage, regions, 144, endTime)
+		regionStorage.remianedDays--
 	}
 	b.ResetTimer()
-	b.StartTimer()
 	regionStorage.delete()
 	b.StopTimer()
-	size, err := DirSizeB("./tmp")
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("file size %d\n", size)
 }
 
 func BenchmarkDeleteAfterYear(b *testing.B) {
-	ctx := context.Background()
-	defer ctx.Done()
-	_, opt, err := newTestScheduleConfig()
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, -1)
 	if err != nil {
-		log.Fatal(err)
+		b.Fatal(err)
 	}
-	tc := newTestCluster(ctx, opt)
-	raft := tc.RaftCluster
-	//delete data in between today and tomrrow
-	regionStorage, err := NewHotRegionsHistoryStorage(ctx,
-		"./tmp", nil, raft, nil, -1, 1*time.Hour)
-	defer os.RemoveAll("./tmp")
-	end_time := time.Now()
+	defer clear()
+	raft := regionStorage.cluster
+	regions := newTestHotRegions(1000, 3)
+	for _, region := range regions {
+		raft.putRegion(region)
+	}
+	endTime := time.Now()
 	//4464=(60*24*31)/10
-	for i := 0; i < 4464; i++ {
-		_, stat, _, _ := newBenchmarkHotRegoinHistory(raft, end_time, 1000, 3)
-		regionStorage.packHotRegionInfo(stat, "read")
-		regionStorage.flush()
-		end_time.Add(10 * time.Minute)
-	}
+	endTime = writeIntoDB(regionStorage, regions, 4464, endTime)
 	//334=365-31
 	for i := 0; i < 334; i++ {
 		regionStorage.delete()
 		//144=24*60/10
-		for i := 0; i < 144; i++ {
-			_, stat, _, _ := newBenchmarkHotRegoinHistory(raft, end_time, 1000, 3)
-			regionStorage.packHotRegionInfo(stat, "read")
-			regionStorage.flush()
-			end_time.Add(10 * time.Minute)
-		}
+		endTime = writeIntoDB(regionStorage, regions, 144, endTime)
 	}
 	b.ResetTimer()
-	b.StartTimer()
 	regionStorage.delete()
 	b.StopTimer()
-	size, err := DirSizeB("./tmp")
+}
+
+func newTestHotRegionStorage(pullInterval time.Duration, remianedDays int64) (
+	hotRegionStorage *HotRegionStorage,
+	clear func(), err error) {
+	ctx := context.Background()
+	_, opt, err := newTestScheduleConfig()
 	if err != nil {
-		log.Fatal(err)
+		return nil, nil, err
 	}
-	fmt.Printf("file size %d\n", size)
+	raft := newTestCluster(ctx, opt).RaftCluster
+	//delete data in between today and tomrrow
+	hotRegionStorage, err = NewHotRegionsHistoryStorage(ctx,
+		"./tmp", nil, raft, nil, remianedDays, pullInterval)
+	if err != nil {
+		return nil, nil, err
+	}
+	clear = func() {
+		PrintDirSize("./tmp")
+		hotRegionStorage.Close()
+		os.RemoveAll("./tmp")
+	}
+	return
+}
+func writeIntoDB(regionStorage *HotRegionStorage,
+	regions []*core.RegionInfo, times int,
+	endTime time.Time) time.Time {
+	raft := regionStorage.cluster
+	for i := 0; i < times; i++ {
+		stats := newBenchmarkHotRegoinHistory(raft, endTime, regions)
+		err := regionStorage.packHotRegionInfo(stats, "read")
+		if err != nil {
+			log.Fatal(err)
+		}
+		regionStorage.flush()
+		endTime = endTime.Add(10 * time.Minute)
+	}
+	return endTime
 }
 
 func newTestHotRegionHistory(
@@ -281,7 +251,7 @@ func newTestHotRegionHistory(
 	n, np uint64) (regions []*core.RegionInfo,
 	statShows []statistics.HotPeerStatShow,
 	start_time, end_time int64) {
-	regions = newTestRegions(n, np)
+	regions = newTestHotRegions(n, np)
 	start_time = start.Unix()
 	for _, region := range regions {
 		raft.putRegion(region)
@@ -299,14 +269,10 @@ func newTestHotRegionHistory(
 func newBenchmarkHotRegoinHistory(
 	raft *RaftCluster,
 	start time.Time,
-	n, np uint64) (regions []*core.RegionInfo,
-	stats statistics.StoreHotPeersStat,
-	start_time, end_time int64) {
+	regions []*core.RegionInfo) (
+	stats statistics.StoreHotPeersStat) {
 	stats = statistics.StoreHotPeersStat{}
-	regions = newTestRegions(n, np)
-	start_time = start.Unix()
 	for _, region := range regions {
-		raft.putRegion(region)
 		peers := region.GetPeers()
 		peer := peers[rand.Intn(len(peers))]
 		if stats[peer.StoreId] == nil {
@@ -317,16 +283,48 @@ func newBenchmarkHotRegoinHistory(
 			StoreID:        peer.StoreId,
 			LastUpdateTime: start,
 			HotDegree:      rand.Int(),
-			ByteRate:       rand.Float64(),
-			KeyRate:        rand.Float64(),
-			QueryRate:      rand.Float64(),
+			ByteRate:       rand.Float64() * 100,
+			KeyRate:        rand.Float64() * 100,
+			QueryRate:      rand.Float64() * 100,
 			AntiCount:      rand.Int(),
 		}
 		stats[peer.StoreId].Stats =
 			append(stats[peer.StoreId].Stats, statShow)
 	}
-	end_time = start.Unix()
 	return
+}
+
+// Create n regions (0..n) of n stores (0..n).
+// Each region contains np peers, the first peer is the leader.
+func newTestHotRegions(n, np uint64) []*core.RegionInfo {
+	regions := make([]*core.RegionInfo, 0, n)
+	for i := uint64(0); i < n; i++ {
+		peers := make([]*metapb.Peer, 0, np)
+		for j := uint64(0); j < np; j++ {
+			peer := &metapb.Peer{
+				Id: i*np + j,
+			}
+			peer.StoreId = (i + j) % n
+			peers = append(peers, peer)
+		}
+		region := &metapb.Region{
+			Id:          i,
+			Peers:       peers,
+			StartKey:    []byte(fmt.Sprintf("%020d", i+1)),
+			EndKey:      []byte(fmt.Sprintf("%020d", i+1)),
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+		}
+		regions = append(regions, core.NewRegionInfo(region, peers[0]))
+	}
+	return regions
+}
+
+func PrintDirSize(path string) {
+	size, err := DirSizeB(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("file size %d\n", size)
 }
 
 //getFileSize get file size by path(B)

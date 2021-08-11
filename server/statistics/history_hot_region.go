@@ -25,12 +25,14 @@ type HistoryHotRegion struct {
 	EncryptionMeta *encryptionpb.EncryptionMeta `json:"encryption_meta,omitempty"`
 }
 
+//TODO
+//find a better place to put this struct
 type HistoryHotRegionsRequest struct {
 	StartTime      int64    `json:"start_time,omitempty"`
 	EndTime        int64    `json:"end_time,omitempty"`
-	RegionID       []uint64 `json:"region_id,omitempty"`
-	StoreID        []uint64 `json:"store_id,omitempty"`
-	PeerID         []uint64 `json:"peer_id,omitempty"`
+	RegionIDs      []uint64 `json:"region_ids,omitempty"`
+	StoreIDs       []uint64 `json:"store_ids,omitempty"`
+	PeerIDs        []uint64 `json:"peer_ids,omitempty"`
 	HotRegionTypes []string `json:"hot_region_type,omitempty"`
 	LowHotDegree   int64    `json:"low_hot_degree,omitempty"`
 	HighHotDegree  int64    `json:"high_hot_degree,omitempty"`

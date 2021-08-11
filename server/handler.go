@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	mapset "github.com/deckarep/golang-set"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -902,32 +901,35 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRegionsRequest) (*statistics.HistoryHotRegions, error) {
 	iter := h.s.hotRegionStorage.NewIterator(request.StartTime, request.EndTime)
 	results := make([]*statistics.HistoryHotRegion, 0)
-	var regionSet, storeSet, peerSet, typeSet mapset.Set
-	if len(request.RegionID) != 0 {
-		regionSet = mapset.NewSet(request.RegionID)
+	regionSet := make(map[uint64]bool, 0)
+	storeSet := make(map[uint64]bool, 0)
+	peerSet := make(map[uint64]bool, 0)
+	typeSet := make(map[string]bool, 0)
+	for _, id := range request.RegionIDs {
+		regionSet[id] = true
 	}
-	if len(request.StoreID) != 0 {
-		storeSet = mapset.NewSet(request.StoreID)
+	for _, id := range request.StoreIDs {
+		storeSet[id] = true
 	}
-	if len(request.PeerID) != 0 {
-		peerSet = mapset.NewSet(request.PeerID)
+	for _, id := range request.PeerIDs {
+		peerSet[id] = true
 	}
-	if len(request.HotRegionTypes) != 0 {
-		typeSet = mapset.NewSet(request.HotRegionTypes)
+	for _, hotRegionType := range request.HotRegionTypes {
+		typeSet[hotRegionType] = true
 	}
 	var next *statistics.HistoryHotRegion
 	var err error
-	for next, err = iter.Next(); next != nil && err != nil; next, err = iter.Next() {
-		if regionSet != nil && !regionSet.Contains(next.RegionID) {
+	for next, err = iter.Next(); next != nil && err == nil; next, err = iter.Next() {
+		if len(regionSet) != 0 && !regionSet[next.RegionID] {
 			continue
 		}
-		if storeSet != nil && !storeSet.Contains(next.StoreID) {
+		if len(storeSet) != 0 && !storeSet[next.StoreID] {
 			continue
 		}
-		if peerSet != nil && !peerSet.Contains(next.StoreID) {
+		if len(peerSet) != 0 && !peerSet[next.PeerID] {
 			continue
 		}
-		if typeSet != nil && !typeSet.Contains(next.HotRegionType) {
+		if len(typeSet) != 0 && !typeSet[next.HotRegionType] {
 			continue
 		}
 		if request.HighHotDegree < next.HotDegree || request.LowHotDegree > next.HotDegree {

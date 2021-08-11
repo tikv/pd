@@ -14,7 +14,9 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -140,4 +142,31 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 		stats.QueryReadStats[id] = loads[statistics.StoreReadQuery]
 	}
 	h.rd.JSON(w, http.StatusOK, stats)
+}
+
+// @Tags hotspot
+// @Summary List the history hot regions.
+// @Accept json
+// @Produce json
+// @Success 200 {object} statistics.HistoryHotRegions
+// @Router /hotspot/regions/history [post]
+func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	historyHotRegionsRequest := &statistics.HistoryHotRegionsRequest{}
+	err = json.Unmarshal(data, historyHotRegionsRequest)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	results, err := h.Handler.GetAllRequestHistroyHotRegion(historyHotRegionsRequest)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, results)
 }
