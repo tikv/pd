@@ -59,15 +59,16 @@ func newHotWriteScheduler(opController *schedule.OperatorController, conf *hotRe
 }
 
 type testHotSchedulerSuite struct{}
+type testHotReadRegionSchedulerSuite struct{}
+type testHotWriteRegionSchedulerSuite struct{}
 type testInfluenceSerialSuite struct{}
 type testHotCacheSuite struct{}
-type testHotReadRegionSchedulerSuite struct{}
 
-var _ = Suite(&testHotWriteRegionSchedulerSuite{})
 var _ = Suite(&testHotSchedulerSuite{})
 var _ = Suite(&testHotReadRegionSchedulerSuite{})
-var _ = Suite(&testHotCacheSuite{})
+var _ = Suite(&testHotWriteRegionSchedulerSuite{})
 var _ = SerialSuites(&testInfluenceSerialSuite{})
+var _ = Suite(&testHotCacheSuite{})
 
 func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -149,8 +150,6 @@ func newTestRegion(id uint64) *core.RegionInfo {
 	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
 	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
 }
-
-type testHotWriteRegionSchedulerSuite struct{}
 
 func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1733,7 +1732,7 @@ func loadsEqual(loads1, loads2 []float64) bool {
 	return true
 }
 
-func (s *testHotSchedulerSuite) TestHotReadPeerSchedule(c *C) {
+func (s *testHotReadRegionSchedulerSuite) TestHotReadPeerSchedule(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
@@ -1848,7 +1847,7 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 	hb.(*hotScheduler).clearPendingInfluence()
 }
 
-func (s *testHotSchedulerSuite) TestHotWriteLeaderScheduleWithPriority(c *C) {
+func (s *testHotWriteRegionSchedulerSuite) TestHotWriteLeaderScheduleWithPriority(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
@@ -1945,6 +1944,64 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.ByteDim, statistics.KeyDim},
 		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+}
+
+func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+
+	// From new or 3.x cluster
+	hb, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("hot-region", nil))
+	c.Assert(err, IsNil)
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.QueryDim, statistics.ByteDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+
+	// from 4.0 or 5.0 or 5.1 cluster
+	var data []byte
+	storage := core.NewStorage(kv.NewMemoryKV())
+	data, err = schedule.EncodeConfig(map[string]interface{}{
+		"min-hot-byte-rate":         100,
+		"min-hot-key-rate":          10,
+		"max-zombie-rounds":         3,
+		"max-peer-number":           1000,
+		"byte-rate-rank-step-ratio": 0.05,
+		"key-rate-rank-step-ratio":  0.05,
+		"count-rank-step-ratio":     0.01,
+		"great-dec-ratio":           0.95,
+		"minor-dec-ratio":           0.99,
+		"src-tolerance-ratio":       1.05,
+		"dst-tolerance-ratio":       1.05,
+	})
+	err = storage.SaveScheduleConfig(HotRegionName, data)
+	c.Assert(err, IsNil)
+	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(data))
+	c.Assert(err, IsNil)
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.ByteDim, statistics.KeyDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+
+	// From configured cluster
+	storage = core.NewStorage(kv.NewMemoryKV())
+	cfg := initHotRegionScheduleConfig()
+	cfg.ReadPriorities = []string{"query", "key"}
+	cfg.WriteLeaderPriorities = []string{"query", "key"}
+	data, err = schedule.EncodeConfig(cfg)
+	err = storage.SaveScheduleConfig(HotRegionName, data)
+	c.Assert(err, IsNil)
+	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(data))
+	c.Assert(err, IsNil)
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.QueryDim, statistics.KeyDim},
+		{statistics.QueryDim, statistics.KeyDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 }
