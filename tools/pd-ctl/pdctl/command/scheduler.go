@@ -205,7 +205,6 @@ func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 		input["store_id"] = storeID
 		postJSON(cmd, schedulersPrefix, input)
 	}
-
 }
 
 // NewShuffleLeaderSchedulerCommand returns a command to add a shuffle-leader-scheduler.
@@ -400,7 +399,6 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		cmd.Println("Success!")
 	}
-
 }
 
 // NewConfigSchedulerCommand returns commands to config scheduler.

@@ -68,7 +68,7 @@ func checkPriorityRegionTest(pc *PriorityChecker, tc *mockcluster.Cluster, c *C)
 	// the region will not rerun after it checks
 	c.Assert(0, Equals, len(pc.GetPriorityRegions()))
 
-	//case3: check region-3, it will has high priority
+	// case3: check region-3, it will has high priority
 	region = tc.GetRegion(3)
 	pc.Check(region)
 	c.Assert(2, Equals, pc.queue.Len())
@@ -79,7 +79,7 @@ func checkPriorityRegionTest(pc *PriorityChecker, tc *mockcluster.Cluster, c *C)
 	c.Assert(uint64(3), Equals, ids[0])
 	c.Assert(uint64(2), Equals, ids[1])
 
-	// case3: check region-2 again after it fixup replicas
+	// case4: check region-2 again after it fixup replicas
 	tc.AddLeaderRegion(2, 2, 3, 1)
 	region = tc.GetRegion(2)
 	pc.Check(region)

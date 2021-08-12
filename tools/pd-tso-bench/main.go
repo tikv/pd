@@ -148,7 +148,7 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			//runtime.GC()
+			// runtime.GC()
 			if *verbose {
 				fmt.Println(s.Counter())
 			}

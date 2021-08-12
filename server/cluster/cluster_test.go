@@ -327,7 +327,6 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	// store 4 not exist
 	err = cluster.UpStore(4)
 	c.Assert(errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(4)), IsTrue)
-
 }
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {

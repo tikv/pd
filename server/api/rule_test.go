@@ -167,7 +167,6 @@ func (s *testRuleSuite) TestSet(c *C) {
 				_, ok := testcase.popKeyRange[k]
 				c.Assert(ok, Equals, true)
 			}
-
 		} else {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)
@@ -797,7 +796,6 @@ func (s *testRuleSuite) TestBundle(c *C) {
 	compareBundle(c, bundles[0], b1)
 	compareBundle(c, bundles[1], b4)
 	compareBundle(c, bundles[2], b5)
-
 }
 
 func (s *testRuleSuite) TestBundleBadRequest(c *C) {

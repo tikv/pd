@@ -78,5 +78,4 @@ func main() {
 	default:
 		Logger.Fatal("Style is not exist.")
 	}
-
 }
