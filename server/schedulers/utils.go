@@ -523,11 +523,14 @@ func (c tikvCollector) Engine() string {
 }
 
 func (c tikvCollector) Filter(info *storeSummaryInfo, kind core.ResourceKind) bool {
+	if info.IsTiFlash {
+		return false
+	}
 	switch kind {
 	case core.LeaderKind:
 		return info.Store.AllowLeaderTransfer()
 	case core.RegionKind:
-		return !info.IsTiFlash
+		return true
 	}
 	return false
 }
