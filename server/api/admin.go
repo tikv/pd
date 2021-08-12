@@ -14,7 +14,12 @@
 package api
 
 import (
+<<<<<<< HEAD
 	"io/ioutil"
+=======
+	"encoding/json"
+	"io"
+>>>>>>> bf3973498 (api: restrict persist-file to only accept JSON data (#3969))
 	"net/http"
 	"strconv"
 
@@ -95,7 +100,7 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 }
 
 // Intentionally no swagger mark as it is supposed to be only used in
-// server-to-server.
+// server-to-server. For security reason, it only accepts JSON formatted data.
 func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -103,6 +108,10 @@ func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
+	if !json.Valid(data) {
+		h.rd.Text(w, http.StatusBadRequest, "body should be json format")
+		return
+	}
 	err = h.svr.PersistFile(mux.Vars(r)["file_name"], data)
 	if err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, err.Error())
