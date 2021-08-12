@@ -187,7 +187,7 @@ func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
 	return nil
 }
 
-// DeleteRule removes a LabelRule.
+// DeleteLabelRule removes a LabelRule.
 func (l *RegionLabeler) DeleteLabelRule(id string) error {
 	l.Lock()
 	defer l.Unlock()
@@ -250,7 +250,7 @@ func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) stri
 	return ""
 }
 
-// GetRegionLabelsreturns the labels of the region.
+// GetRegionLabels returns the labels of the region.
 func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel {
 	l.RLock()
 	defer l.RUnlock()
