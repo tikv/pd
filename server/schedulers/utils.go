@@ -507,7 +507,7 @@ type storeCollector interface {
 	// Engine returns the type of Store.
 	Engine() string
 	// Filter determines whether the Store needs to be handled by itself.
-	Filter(info *storeSummaryInfo) bool
+	Filter(info *storeSummaryInfo, kind core.ResourceKind) bool
 	// GetLoads obtains available loads from storeLoads and peerLoadSum according to rwTy and kind.
 	GetLoads(storeLoads, peerLoadSum []float64, rwTy rwType, kind core.ResourceKind) (loads []float64)
 }
@@ -522,8 +522,17 @@ func (c tikvCollector) Engine() string {
 	return core.EngineTiKV
 }
 
-func (c tikvCollector) Filter(info *storeSummaryInfo) bool {
-	return !info.IsTiFlash
+func (c tikvCollector) Filter(info *storeSummaryInfo, kind core.ResourceKind) bool {
+	if info.IsTiFlash {
+		return false
+	}
+	switch kind {
+	case core.LeaderKind:
+		return info.Store.AllowLeaderTransfer()
+	case core.RegionKind:
+		return true
+	}
+	return false
 }
 
 func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy rwType, kind core.ResourceKind) (loads []float64) {
@@ -564,8 +573,14 @@ func (c tiflashCollector) Engine() string {
 	return core.EngineTiFlash
 }
 
-func (c tiflashCollector) Filter(info *storeSummaryInfo) bool {
-	return info.IsTiFlash
+func (c tiflashCollector) Filter(info *storeSummaryInfo, kind core.ResourceKind) bool {
+	switch kind {
+	case core.LeaderKind:
+		return false
+	case core.RegionKind:
+		return info.IsTiFlash
+	}
+	return false
 }
 
 func (c tiflashCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy rwType, kind core.ResourceKind) (loads []float64) {
@@ -640,12 +655,11 @@ func summaryStoresLoadByEngine(
 	allStoreCount := 0
 	allHotPeersCount := 0
 
-	// Stores without byte rate statistics is not available to schedule.
 	for _, info := range storeInfos {
 		store := info.Store
 		id := store.GetID()
 		storeLoads, ok := storesLoads[id]
-		if !ok || !collector.Filter(info) {
+		if !ok || !collector.Filter(info, kind) {
 			continue
 		}
 
@@ -689,6 +703,10 @@ func summaryStoresLoadByEngine(
 			LoadPred: stLoadPred,
 			HotPeers: hotPeers,
 		})
+	}
+
+	if allStoreCount == 0 {
+		return loadDetail
 	}
 
 	expectCount := float64(allHotPeersCount) / float64(allStoreCount)
