@@ -670,6 +670,10 @@ func summaryStoresLoadByEngine(
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.QueryDim])
 		}
 
+		if len(hotPeers) == 0 {
+			continue
+		}
+
 		loads := collector.GetLoads(storeLoads, peerLoadSum, rwTy, kind)
 		for i := range allStoreLoadSum {
 			allStoreLoadSum[i] += loads[i]
