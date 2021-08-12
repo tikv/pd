@@ -640,7 +640,6 @@ func summaryStoresLoadByEngine(
 	allStoreCount := 0
 	allHotPeersCount := 0
 
-	// Stores without byte rate statistics is not available to schedule.
 	for _, info := range storeInfos {
 		store := info.Store
 		id := store.GetID()
@@ -648,7 +647,9 @@ func summaryStoresLoadByEngine(
 		if !ok || !collector.Filter(info) {
 			continue
 		}
-
+		if !info.Store.AllowLeaderTransfer() && kind == core.LeaderKind {
+			continue
+		}
 		// Find all hot peers first
 		var hotPeers []*statistics.HotPeerStat
 		peerLoadSum := make([]float64, statistics.DimLen)
