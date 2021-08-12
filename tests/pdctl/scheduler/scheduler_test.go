@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/versioninfo"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -270,7 +271,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"minor-dec-ratio":            0.99,
 		"src-tolerance-ratio":        1.05,
 		"dst-tolerance-ratio":        1.05,
-		"read-priorities":            []interface{}{"query", "byte"},
+		"read-priorities":            []interface{}{"byte", "key"},
 		"write-leader-priorities":    []interface{}{"key", "byte"},
 		"write-peer-priorities":      []interface{}{"byte", "key"},
 		"strict-picking-store":       "true",
@@ -315,11 +316,17 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-priorities", "key,byte"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
+	// test compatibility
+	for _, store := range stores {
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store, versioninfo.HotScheduleWithQuery)
+		mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	}
+	conf["read-priorities"] = []interface{}{"query", "byte"}
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	// cannot set qps as write-peer-priorities
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
-
 	// test show scheduler with paused and disabled status.
 	checkSchedulerWithStatusCommand := func(args []string, status string, expected []string) {
 		if args != nil {

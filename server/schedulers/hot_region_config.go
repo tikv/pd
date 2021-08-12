@@ -24,9 +24,12 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/versioninfo"
 	"github.com/unrolled/render"
 )
 
@@ -44,14 +47,14 @@ const (
 )
 
 var defaultConfig = prioritiesConfig{
-	readLeader:  []string{QueryPriority, BytePriority},
+	read:        []string{QueryPriority, BytePriority},
 	writeLeader: []string{KeyPriority, BytePriority},
 	writePeer:   []string{BytePriority, KeyPriority},
 }
 
 // because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
 var compatibleConfig = prioritiesConfig{
-	readLeader:  []string{BytePriority, KeyPriority},
+	read:        []string{BytePriority, KeyPriority},
 	writeLeader: []string{KeyPriority, BytePriority},
 	writePeer:   []string{BytePriority, KeyPriority},
 }
@@ -72,7 +75,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MinorDecRatio:          0.99,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		ReadPriorities:         defaultConfig.readLeader,
+		ReadPriorities:         defaultConfig.read,
 		WriteLeaderPriorities:  defaultConfig.writeLeader,
 		WritePeerPriorities:    defaultConfig.writePeer,
 		StrictPickingStore:     true,
@@ -80,9 +83,33 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	}
 }
 
+func (conf *hotRegionSchedulerConfig) getRealtimeConf() *hotRegionSchedulerConfig {
+	return &hotRegionSchedulerConfig{
+		MinHotByteRate:         conf.MinHotByteRate,
+		MinHotKeyRate:          conf.MinHotKeyRate,
+		MinHotQueryRate:        conf.MinHotQueryRate,
+		MaxZombieRounds:        conf.MaxZombieRounds,
+		MaxPeerNum:             conf.MaxPeerNum,
+		ByteRateRankStepRatio:  conf.ByteRateRankStepRatio,
+		KeyRateRankStepRatio:   conf.KeyRateRankStepRatio,
+		QueryRateRankStepRatio: conf.QueryRateRankStepRatio,
+		CountRankStepRatio:     conf.CountRankStepRatio,
+		GreatDecRatio:          conf.GreatDecRatio,
+		MinorDecRatio:          conf.MinorDecRatio,
+		SrcToleranceRatio:      conf.SrcToleranceRatio,
+		DstToleranceRatio:      conf.DstToleranceRatio,
+		ReadPriorities:         adjustConfig(conf.cluster, conf.ReadPriorities, getReadPriorities),
+		WriteLeaderPriorities:  adjustConfig(conf.cluster, conf.WriteLeaderPriorities, getWriteLeaderPriorities),
+		WritePeerPriorities:    adjustConfig(conf.cluster, conf.WritePeerPriorities, getWritePeerPriorities),
+		StrictPickingStore:     conf.StrictPickingStore,
+		EnableForTiFlash:       conf.EnableForTiFlash,
+	}
+}
+
 type hotRegionSchedulerConfig struct {
 	sync.RWMutex
 	storage *core.Storage
+	cluster opt.Cluster
 
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
@@ -249,6 +276,18 @@ func (conf *hotRegionSchedulerConfig) IsStrictPickingStoreEnabled() bool {
 	return conf.StrictPickingStore
 }
 
+func (conf *hotRegionSchedulerConfig) GetCluster() opt.Cluster {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.cluster
+}
+
+func (conf *hotRegionSchedulerConfig) SetCluster(v opt.Cluster) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.cluster = v
+}
+
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
 	router.HandleFunc("/list", conf.handleGetConfig).Methods("GET")
@@ -260,7 +299,7 @@ func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, r *
 	conf.RLock()
 	defer conf.RUnlock()
 	rd := render.New(render.Options{IndentJSON: true})
-	rd.JSON(w, http.StatusOK, conf)
+	rd.JSON(w, http.StatusOK, conf.getRealtimeConf())
 }
 
 func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *http.Request) {
@@ -315,13 +354,13 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 }
 
 type prioritiesConfig struct {
-	readLeader  []string
+	read        []string
 	writeLeader []string
 	writePeer   []string
 }
 
-func getReadLeaderPriorities(c *prioritiesConfig) []string {
-	return c.readLeader
+func getReadPriorities(c *prioritiesConfig) []string {
+	return c.read
 }
 
 func getWriteLeaderPriorities(c *prioritiesConfig) []string {
@@ -330,4 +369,33 @@ func getWriteLeaderPriorities(c *prioritiesConfig) []string {
 
 func getWritePeerPriorities(c *prioritiesConfig) []string {
 	return c.writePeer
+}
+
+// adjustConfig will adjust config for cluster with low version tikv
+// because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
+func adjustConfig(cluster opt.Cluster, origins []string, getPriorities func(*prioritiesConfig) []string) []string {
+	querySupport := cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
+	withQuery := slice.AnyOf(origins, func(i int) bool {
+		return origins[i] == QueryPriority
+	})
+	compatibles := getPriorities(&compatibleConfig)
+	if !querySupport && withQuery {
+		schedulerCounter.WithLabelValues(HotRegionName, "use-compatible-config").Inc()
+		return compatibles
+	}
+
+	defaults := getPriorities(&defaultConfig)
+	isLegal := slice.AllOf(origins, func(i int) bool {
+		return origins[i] == BytePriority || origins[i] == KeyPriority || origins[i] == QueryPriority
+	})
+	if len(defaults) == len(origins) && isLegal && origins[0] != origins[1] {
+		return origins
+	}
+
+	if !querySupport {
+		schedulerCounter.WithLabelValues(HotRegionName, "use-compatible-config").Inc()
+		return compatibles
+	}
+	schedulerCounter.WithLabelValues(HotRegionName, "use-default-config").Inc()
+	return defaults
 }

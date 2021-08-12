@@ -81,9 +81,13 @@ func CheckRegionsInfo(c *check.C, output *api.RegionsInfo, expected []*core.Regi
 }
 
 // MustPutStore is used for test purpose.
-func MustPutStore(c *check.C, svr *server.Server, store *metapb.Store) {
+func MustPutStore(c *check.C, svr *server.Server, store *metapb.Store, versions ...versioninfo.Feature) {
 	store.Address = fmt.Sprintf("tikv%d", store.GetId())
-	store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
+	version := versioninfo.Version2_0
+	if len(versions) != 0 {
+		version = versions[0]
+	}
+	store.Version = versioninfo.MinSupportedVersion(version).String()
 
 	_, err := svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
