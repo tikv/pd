@@ -1963,6 +1963,16 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 
+	// Config file is not currently supported
+	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()),
+		schedule.ConfigSliceDecoder("hot-region", []string{"read-priorities=byte,query"}))
+	c.Assert(err, IsNil)
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.QueryDim, statistics.ByteDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+
 	// from 4.0 or 5.0 or 5.1 cluster
 	var data []byte
 	storage := core.NewStorage(kv.NewMemoryKV())
@@ -1992,7 +2002,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 	// From configured cluster
 	storage = core.NewStorage(kv.NewMemoryKV())
 	cfg := initHotRegionScheduleConfig()
-	cfg.ReadPriorities = []string{"query", "key"}
+	cfg.ReadPriorities = []string{"key", "query"}
 	cfg.WriteLeaderPriorities = []string{"query", "key"}
 	data, err = schedule.EncodeConfig(cfg)
 	err = storage.SaveScheduleConfig(HotRegionName, data)
@@ -2000,7 +2010,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(data))
 	c.Assert(err, IsNil)
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
-		{statistics.QueryDim, statistics.KeyDim},
+		{statistics.KeyDim, statistics.QueryDim},
 		{statistics.QueryDim, statistics.KeyDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
