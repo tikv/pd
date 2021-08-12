@@ -62,7 +62,6 @@ func init() {
 			}
 			conf.StoreIDWitRanges[id] = ranges
 			return nil
-
 		}
 	})
 
@@ -231,7 +230,6 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
-
 		}
 		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)

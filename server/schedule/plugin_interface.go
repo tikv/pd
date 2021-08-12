@@ -42,7 +42,7 @@ func (p *PluginInterface) GetFunction(path string, funcName string) (plugin.Symb
 	p.pluginMapLock.Lock()
 	defer p.pluginMapLock.Unlock()
 	if _, ok := p.pluginMap[path]; !ok {
-		//open plugin
+		// open plugin
 		filePath, err := filepath.Abs(path)
 		if err != nil {
 			return nil, errs.ErrFilePathAbs.Wrap(err).FastGenWithCause()
@@ -54,7 +54,7 @@ func (p *PluginInterface) GetFunction(path string, funcName string) (plugin.Symb
 		}
 		p.pluginMap[path] = plugin
 	}
-	//get func from plugin
+	// get func from plugin
 	f, err := p.pluginMap[path].Lookup(funcName)
 	if err != nil {
 		return nil, errs.ErrLookupPluginFunc.Wrap(err).FastGenWithCause()

@@ -66,7 +66,6 @@ func (h *historyBuffer) distanceToTail(pos int) int {
 		return h.tail + h.size - pos
 	}
 	return h.tail - pos
-
 }
 
 func (h *historyBuffer) nextIndex() uint64 {

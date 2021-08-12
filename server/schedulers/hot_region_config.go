@@ -309,7 +309,6 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 	data, err := schedule.EncodeConfig(conf)
 	if err != nil {
 		return err
-
 	}
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
 }

@@ -64,7 +64,6 @@ func init() {
 			}
 			conf.StoreIDWithRanges[id] = ranges
 			return nil
-
 		}
 	})
 

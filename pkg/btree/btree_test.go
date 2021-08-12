@@ -149,7 +149,6 @@ func TestBTreeSizeInfo(t *testing.T) {
 			assertEq(t, "delete max get nil rank", rk, x/3+1)
 		}
 	}
-
 }
 
 var btreeDegree = flag.Int("degree", 32, "B-Tree degree")
