@@ -441,6 +441,16 @@ func (mc *Cluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
 	mc.PutStore(newStore)
 }
 
+// SetStoreEvictLeader set store whether evict leader.
+func (mc *Cluster) SetStoreEvictLeader(storeID uint64, enableEvictLeader bool) {
+	store := mc.GetStore(storeID)
+	if enableEvictLeader {
+		mc.PutStore(store.Clone(core.PauseLeaderTransfer()))
+	} else {
+		mc.PutStore(store.Clone(core.ResumeLeaderTransfer()))
+	}
+}
+
 // UpdateStoreRegionWeight updates store region weight.
 func (mc *Cluster) UpdateStoreRegionWeight(storeID uint64, weight float64) {
 	store := mc.GetStore(storeID)
