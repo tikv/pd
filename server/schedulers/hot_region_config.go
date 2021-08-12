@@ -44,21 +44,21 @@ const (
 )
 
 var defaultConfig = prioritiesConfig{
-	readLeader:  []string{QueryPriority, BytePriority},
+	read:        []string{QueryPriority, BytePriority},
 	writeLeader: []string{KeyPriority, BytePriority},
 	writePeer:   []string{BytePriority, KeyPriority},
 }
 
 // because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
 var compatibleConfig = prioritiesConfig{
-	readLeader:  []string{BytePriority, KeyPriority},
+	read:        []string{BytePriority, KeyPriority},
 	writeLeader: []string{KeyPriority, BytePriority},
 	writePeer:   []string{BytePriority, KeyPriority},
 }
 
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
-	return &hotRegionSchedulerConfig{
+	cfg := &hotRegionSchedulerConfig{
 		MinHotByteRate:         100,
 		MinHotKeyRate:          10,
 		MinHotQueryRate:        10,
@@ -72,12 +72,11 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MinorDecRatio:          0.99,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		ReadPriorities:         defaultConfig.readLeader,
-		WriteLeaderPriorities:  defaultConfig.writeLeader,
-		WritePeerPriorities:    defaultConfig.writePeer,
 		StrictPickingStore:     true,
 		EnableForTiFlash:       true,
 	}
+	defaultConfig.apply(cfg)
+	return cfg
 }
 
 type hotRegionSchedulerConfig struct {
@@ -315,13 +314,19 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 }
 
 type prioritiesConfig struct {
-	readLeader  []string
+	read        []string
 	writeLeader []string
 	writePeer   []string
 }
 
-func getReadLeaderPriorities(c *prioritiesConfig) []string {
-	return c.readLeader
+func (p prioritiesConfig) apply(cfg *hotRegionSchedulerConfig) {
+	cfg.ReadPriorities = append(p.read[:0:0], p.read...)
+	cfg.WriteLeaderPriorities = append(p.writeLeader[:0:0], p.writeLeader...)
+	cfg.WritePeerPriorities = append(p.writePeer[:0:0], p.writePeer...)
+}
+
+func getReadPriorities(c *prioritiesConfig) []string {
+	return c.read
 }
 
 func getWriteLeaderPriorities(c *prioritiesConfig) []string {
