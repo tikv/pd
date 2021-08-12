@@ -662,6 +662,7 @@ func summaryStoresLoadByEngine(
 		if !ok || !collector.Filter(info, kind) {
 			continue
 		}
+
 		// Find all hot peers first
 		var hotPeers []*statistics.HotPeerStat
 		peerLoadSum := make([]float64, statistics.DimLen)
