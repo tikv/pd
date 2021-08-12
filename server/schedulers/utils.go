@@ -100,7 +100,7 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 	// we want that A can be moved in one region not two
 	targetInfluence := p.GetOpInfluence(targetID)
 	// to avoid schedule call back
-	// A->B, A's influence is negative，so A will be target,C may move region to A
+	// A->B, A's influence is negative, so A will be target, C may move region to A
 	if targetInfluence < 0 {
 		targetInfluence = -targetInfluence
 	}
