@@ -476,6 +476,16 @@ error = '''
 failed to unmarshal proto
 '''
 
+["PD:region:ErrRegionRuleContent"]
+error = '''
+invalid region rule content, %s
+'''
+
+["PD:region:ErrRegionRuleNotFound"]
+error = '''
+region label rule not found for id %s
+'''
+
 ["PD:schedule:ErrCreateOperator"]
 error = '''
 unable to create operator, %s
