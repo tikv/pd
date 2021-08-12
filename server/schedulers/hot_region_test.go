@@ -452,7 +452,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 	//|    2     |       4.5MB      |
 	//|    3     |       4.5MB      |
 	//|    4     |        6MB       |
-	//|    5     |        0MB(evict)|
+	//|    5     |        0MB(Evict)|
 	//|    6     |        0MB       |
 	//|    7     |        n/a (Down)|
 	//|    8     |        n/a       | <- TiFlash is always 0.
