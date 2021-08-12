@@ -255,7 +255,7 @@ func (m *RuleManager) DeleteRule(group, id string) error {
 func (m *RuleManager) GetSplitKeys(start, end []byte) [][]byte {
 	m.RLock()
 	defer m.RUnlock()
-	return m.ruleList.getSplitKeys(start, end)
+	return m.ruleList.rangeList.GetSplitKeys(start, end)
 }
 
 // GetAllRules returns sorted all rules.
