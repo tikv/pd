@@ -479,14 +479,14 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 	}
 	{ // Check the load expect
 		aliveTiKVCount := float64(aliveTiKVLastID - aliveTiKVStartID + 1)
-		aliveTiKVCountForLeader := aliveTiKVCount - 1 // store 5 with evict leader
+		allowLeaderTiKVCount := aliveTiKVCount - 1 // store 5 with evict leader
 		aliveTiFlashCount := float64(aliveTiFlashLastID - aliveTiFlashStartID + 1)
 		tc.ObserveRegionsStats()
 		c.Assert(len(hb.Schedule(tc)) == 0, IsFalse)
 		c.Assert(
 			loadsEqual(
 				hb.stLoadInfos[writeLeader][1].LoadPred.Expect.Loads,
-				[]float64{hotRegionBytesSum / aliveTiKVCountForLeader, hotRegionKeysSum / aliveTiKVCountForLeader, tikvQuerySum / aliveTiKVCountForLeader}),
+				[]float64{hotRegionBytesSum / allowLeaderTiKVCount, hotRegionKeysSum / allowLeaderTiKVCount, tikvQuerySum / allowLeaderTiKVCount}),
 			IsTrue)
 		c.Assert(tikvQuerySum != hotRegionQuerySum, IsTrue)
 		c.Assert(
