@@ -42,6 +42,7 @@ const (
 	gcPath                     = "gc"
 	rulesPath                  = "rules"
 	ruleGroupPath              = "rule_group"
+	regionLabelPath            = "region_label"
 	replicationPath            = "replication_mode"
 	componentPath              = "component"
 	customScheduleConfigPath   = "scheduler_config"
@@ -270,6 +271,21 @@ func (s *Storage) DeleteRule(ruleKey string) error {
 // LoadRules loads placement rules from storage.
 func (s *Storage) LoadRules(f func(k, v string)) error {
 	return s.LoadRangeByPrefix(rulesPath+"/", f)
+}
+
+// SaveRegionRule saves a region rule to the storage.
+func (s *Storage) SaveRegionRule(ruleKey string, rule interface{}) error {
+	return s.SaveJSON(regionLabelPath, ruleKey, rule)
+}
+
+// DeleteRegionRule removes a region rule from storage.
+func (s *Storage) DeleteRegionRule(ruleKey string) error {
+	return s.Remove(path.Join(regionLabelPath, ruleKey))
+}
+
+// LoadRegionRules loads region rules from storage.
+func (s *Storage) LoadRegionRules(f func(k, v string)) error {
+	return s.LoadRangeByPrefix(regionLabelPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.
