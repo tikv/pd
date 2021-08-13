@@ -87,7 +87,7 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 }
 
 func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
-	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, OpAdmin|kind, steps...)
+	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, kind, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OpStep) {
@@ -381,6 +381,9 @@ func (s *testOperatorSuite) TestSchedulerKind(c *C) {
 		expect OpKind
 	}{
 		{
+			op:     s.newTestOperator(1, OpAdmin|OpMerge|OpRegion),
+			expect: OpAdmin,
+		}, {
 			op:     s.newTestOperator(1, OpMerge|OpLeader|OpRegion),
 			expect: OpMerge,
 		}, {
