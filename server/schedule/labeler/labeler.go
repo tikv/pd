@@ -191,6 +191,9 @@ func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
 func (l *RegionLabeler) DeleteLabelRule(id string) error {
 	l.Lock()
 	defer l.Unlock()
+	if _, ok := l.labelRules[id]; !ok {
+		return errs.ErrRegionRuleNotFound.FastGenByArgs(id)
+	}
 	if err := l.storage.DeleteRegionRule(id); err != nil {
 		return err
 	}
