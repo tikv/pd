@@ -44,9 +44,20 @@ func init() {
 	})
 	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := initHotRegionScheduleConfig()
-		if err := decoder(conf); err != nil {
+
+		var data map[string]interface{}
+		if err := decoder(&data); err != nil {
 			return nil, err
 		}
+		if len(data) != 0 {
+			// After upgrading, use compatible config.
+			// For clusters with the initial version >= v5.2, it will be overwritten by the default config.
+			conf.apply(compatibleConfig)
+			if err := decoder(conf); err != nil {
+				return nil, err
+			}
+		}
+
 		conf.storage = storage
 		conf.cluster = opController.GetCluster()
 		return newHotScheduler(opController, conf), nil
@@ -277,7 +288,6 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
 		}
-
 	} else {
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps

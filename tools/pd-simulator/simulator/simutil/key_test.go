@@ -46,7 +46,6 @@ func (t *testTableKeySuite) TestGenerateTableKeys(c *C) {
 			e = split
 		}
 	}
-
 }
 
 func (t *testTableKeySuite) TestGenerateSplitKey(c *C) {
@@ -79,5 +78,4 @@ func (t *testTableKeySuite) TestGenerateSplitKey(c *C) {
 		c.Assert(splitKey, Less, e)
 		e = splitKey
 	}
-
 }

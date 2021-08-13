@@ -44,7 +44,7 @@ type BackupInfo struct {
 	Config            *config.Config `json:"config"`
 }
 
-//GetBackupInfo return the BackupInfo
+// GetBackupInfo return the BackupInfo
 func GetBackupInfo(client *clientv3.Client, pdAddr string) (*BackupInfo, error) {
 	backInfo := &BackupInfo{}
 	resp, err := etcdutil.EtcdKVGet(client, pdClusterIDPath)

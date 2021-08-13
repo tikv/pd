@@ -61,7 +61,7 @@ var compatibleConfig = prioritiesConfig{
 
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
-	return &hotRegionSchedulerConfig{
+	cfg := &hotRegionSchedulerConfig{
 		MinHotByteRate:         100,
 		MinHotKeyRate:          10,
 		MinHotQueryRate:        10,
@@ -75,12 +75,11 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MinorDecRatio:          0.99,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		ReadPriorities:         defaultConfig.read,
-		WriteLeaderPriorities:  defaultConfig.writeLeader,
-		WritePeerPriorities:    defaultConfig.writePeer,
 		StrictPickingStore:     true,
 		EnableForTiFlash:       true,
 	}
+	cfg.apply(defaultConfig)
+	return cfg
 }
 
 func (conf *hotRegionSchedulerConfig) getRealtimeConf() *hotRegionSchedulerConfig {
@@ -348,7 +347,6 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 	data, err := schedule.EncodeConfig(conf)
 	if err != nil {
 		return err
-
 	}
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
 }
@@ -357,6 +355,12 @@ type prioritiesConfig struct {
 	read        []string
 	writeLeader []string
 	writePeer   []string
+}
+
+func (conf *hotRegionSchedulerConfig) apply(p prioritiesConfig) {
+	conf.ReadPriorities = append(p.read[:0:0], p.read...)
+	conf.WriteLeaderPriorities = append(p.writeLeader[:0:0], p.writeLeader...)
+	conf.WritePeerPriorities = append(p.writePeer[:0:0], p.writePeer...)
 }
 
 func getReadPriorities(c *prioritiesConfig) []string {

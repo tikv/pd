@@ -220,7 +220,6 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 			"balance-hot-region-scheduler": true,
 		}
 		checkSchedulerCommand(args, expected)
-
 	}
 
 	// test shuffle region config

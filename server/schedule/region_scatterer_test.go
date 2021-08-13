@@ -125,7 +125,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 		}
 	}
 
-	//Each store should have the same number of peers.
+	// Each store should have the same number of peers.
 	for _, count := range countPeers {
 		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numStores))
 		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numStores))
