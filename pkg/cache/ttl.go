@@ -27,7 +27,7 @@ type ttlCacheItem struct {
 	expire time.Time
 }
 
-// ttlCache is a cache that assigns TTL(Time-To-Live) for each items.
+// ttlCache is a cache that assigns TTL (Time-To-Live) for each items.
 type ttlCache struct {
 	sync.RWMutex
 	ctx context.Context

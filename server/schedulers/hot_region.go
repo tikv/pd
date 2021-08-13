@@ -71,7 +71,7 @@ const (
 var schedulePeerPr = 0.66
 
 // pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
-var pendingAmpFactor = 8.0
+var pendingAmpFactor = 2.0
 
 type hotScheduler struct {
 	name string
@@ -277,7 +277,6 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
 		}
-
 	} else {
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps

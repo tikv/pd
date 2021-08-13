@@ -219,7 +219,6 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 			"balance-hot-region-scheduler": true,
 		}
 		checkSchedulerCommand(args, expected)
-
 	}
 
 	// test shuffle region config
@@ -270,7 +269,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"minor-dec-ratio":            0.99,
 		"src-tolerance-ratio":        1.05,
 		"dst-tolerance-ratio":        1.05,
-		"read-priorities":            []interface{}{"qps", "byte"},
+		"read-priorities":            []interface{}{"query", "byte"},
 		"write-leader-priorities":    []interface{}{"key", "byte"},
 		"write-peer-priorities":      []interface{}{"byte", "key"},
 		"strict-picking-store":       "true",
@@ -316,7 +315,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
 	// cannot set qps as write-peer-priorities
-	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "qps,byte"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
 

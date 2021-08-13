@@ -1004,7 +1004,7 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 	return r.learners[storeID].RandomRegions(n, ranges)
 }
 
-// GetLeader returns leader RegionInfo by storeID and regionID(now only used in test)
+// GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	if leaders, ok := r.leaders[storeID]; ok {
 		return leaders.find(region).region
@@ -1012,7 +1012,7 @@ func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo 
 	return nil
 }
 
-// GetFollower returns follower RegionInfo by storeID and regionID(now only used in test)
+// GetFollower returns follower RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
 	if followers, ok := r.followers[storeID]; ok {
 		return followers.find(region).region

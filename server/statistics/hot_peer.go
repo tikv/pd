@@ -91,7 +91,7 @@ type HotPeerStat struct {
 	needDelete bool
 	isLeader   bool
 	isNew      bool
-	//TODO: remove it when we send peer stat by store info
+	// TODO: remove it when we send peer stat by store info
 	justTransferLeader     bool
 	interval               uint64
 	thresholds             []float64

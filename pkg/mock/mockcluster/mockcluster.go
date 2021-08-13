@@ -441,6 +441,16 @@ func (mc *Cluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
 	mc.PutStore(newStore)
 }
 
+// SetStoreEvictLeader set store whether evict leader.
+func (mc *Cluster) SetStoreEvictLeader(storeID uint64, enableEvictLeader bool) {
+	store := mc.GetStore(storeID)
+	if enableEvictLeader {
+		mc.PutStore(store.Clone(core.PauseLeaderTransfer()))
+	} else {
+		mc.PutStore(store.Clone(core.ResumeLeaderTransfer()))
+	}
+}
+
 // UpdateStoreRegionWeight updates store region weight.
 func (mc *Cluster) UpdateStoreRegionWeight(storeID uint64, weight float64) {
 	store := mc.GetStore(storeID)
@@ -682,7 +692,6 @@ func (mc *Cluster) RemoveScheduler(name string) error {
 // If leaderStoreID is zero, the regions would have no leader
 func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	followerStoreIDs, learnerStoreIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
-
 	region := &metapb.Region{
 		Id:          regionID,
 		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),
