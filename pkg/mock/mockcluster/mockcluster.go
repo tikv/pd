@@ -692,7 +692,6 @@ func (mc *Cluster) RemoveScheduler(name string) error {
 // If leaderStoreID is zero, the regions would have no leader
 func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	followerStoreIDs, learnerStoreIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
-
 	region := &metapb.Region{
 		Id:          regionID,
 		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),

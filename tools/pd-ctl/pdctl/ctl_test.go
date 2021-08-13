@@ -66,5 +66,4 @@ func TestGenCompleter(t *testing.T) {
 			t.Errorf("%s not in prefix array", cmd)
 		}
 	}
-
 }

@@ -288,7 +288,6 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
 		}
-
 	} else {
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
