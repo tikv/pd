@@ -88,6 +88,15 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	c.Assert(region.GetRegionEpoch().Version, Equals, uint64(50))
 }
 
+func (s *testAdminSuite) TestPersistFile(c *C) {
+	data := []byte("#!/bin/sh\nrm -rf /")
+	err := postJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data)
+	c.Assert(err, NotNil)
+	data = []byte(`{"foo":"bar"}`)
+	err = postJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data)
+	c.Assert(err, IsNil)
+}
+
 var _ = Suite(&testTSOSuite{})
 
 type testTSOSuite struct {
