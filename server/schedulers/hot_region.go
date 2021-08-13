@@ -59,7 +59,7 @@ func init() {
 		}
 
 		conf.storage = storage
-		conf.cluster = opController.GetCluster()
+		conf.SetCluster(opController.GetCluster())
 		return newHotScheduler(opController, conf), nil
 	})
 }
@@ -402,6 +402,7 @@ func (bs *balanceSolver) init() {
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
 
+	bs.sche.conf.checkVersion()
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
 }
 
@@ -423,6 +424,7 @@ func (bs *balanceSolver) getPriorities() []string {
 			return adjustConfig(bs.cluster, bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
 		}
 	}
+	log.Error("illegal rwTy or illegal operator while getting the priority", zap.String("rwTy", bs.rwTy.String()), zap.String("operator", bs.opTy.String()))
 	return []string{}
 }
 

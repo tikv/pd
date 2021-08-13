@@ -23,7 +23,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	"github.com/gorilla/mux"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -31,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const (
@@ -82,7 +85,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	return cfg
 }
 
-func (conf *hotRegionSchedulerConfig) getRealtimeConf() *hotRegionSchedulerConfig {
+func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 	return &hotRegionSchedulerConfig{
 		MinHotByteRate:         conf.MinHotByteRate,
 		MinHotKeyRate:          conf.MinHotKeyRate,
@@ -107,8 +110,9 @@ func (conf *hotRegionSchedulerConfig) getRealtimeConf() *hotRegionSchedulerConfi
 
 type hotRegionSchedulerConfig struct {
 	sync.RWMutex
-	storage *core.Storage
-	cluster opt.Cluster
+	storage     *core.Storage
+	cluster     opt.Cluster
+	lastVersion *semver.Version
 
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
@@ -275,16 +279,14 @@ func (conf *hotRegionSchedulerConfig) IsStrictPickingStoreEnabled() bool {
 	return conf.StrictPickingStore
 }
 
-func (conf *hotRegionSchedulerConfig) GetCluster() opt.Cluster {
-	conf.RLock()
-	defer conf.RUnlock()
-	return conf.cluster
-}
-
 func (conf *hotRegionSchedulerConfig) SetCluster(v opt.Cluster) {
-	conf.RLock()
-	defer conf.RUnlock()
+	if v == nil { // for test
+		return
+	}
+	conf.Lock()
+	defer conf.Unlock()
 	conf.cluster = v
+	conf.lastVersion = conf.cluster.GetOpts().GetClusterVersion()
 }
 
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -298,7 +300,7 @@ func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, r *
 	conf.RLock()
 	defer conf.RUnlock()
 	rd := render.New(render.Options{IndentJSON: true})
-	rd.JSON(w, http.StatusOK, conf.getRealtimeConf())
+	rd.JSON(w, http.StatusOK, conf.getValidConf())
 }
 
 func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +353,21 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
 }
 
+func (conf *hotRegionSchedulerConfig) checkVersion() {
+	if conf.cluster == nil { // for test
+		return
+	}
+	version := conf.cluster.GetOpts().GetClusterVersion()
+	if version != conf.lastVersion {
+		log.Info("version changed",
+			zap.String("last version", conf.lastVersion.String()),
+			zap.String("current version", version.String()),
+			zap.Reflect("config", conf),
+			zap.Reflect("valid config", conf.getValidConf()))
+		conf.lastVersion = version
+	}
+}
+
 type prioritiesConfig struct {
 	read        []string
 	writeLeader []string
@@ -384,7 +401,6 @@ func adjustConfig(cluster opt.Cluster, origins []string, getPriorities func(*pri
 	})
 	compatibles := getPriorities(&compatibleConfig)
 	if !querySupport && withQuery {
-		schedulerCounter.WithLabelValues(HotRegionName, "use-compatible-config").Inc()
 		return compatibles
 	}
 
@@ -397,9 +413,7 @@ func adjustConfig(cluster opt.Cluster, origins []string, getPriorities func(*pri
 	}
 
 	if !querySupport {
-		schedulerCounter.WithLabelValues(HotRegionName, "use-compatible-config").Inc()
 		return compatibles
 	}
-	schedulerCounter.WithLabelValues(HotRegionName, "use-default-config").Inc()
 	return defaults
 }

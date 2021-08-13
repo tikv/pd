@@ -317,7 +317,9 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	c.Assert(conf1, DeepEquals, expected1)
 	// test compatibility
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store, versioninfo.HotScheduleWithQuery)
+		version := versioninfo.HotScheduleWithQuery
+		store.Version = versioninfo.MinSupportedVersion(version).String()
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 		mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	}
 	conf["read-priorities"] = []interface{}{"query", "byte"}
@@ -325,6 +327,10 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	// cannot set qps as write-peer-priorities
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+	// test remove and add
+	mustExec([]string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, nil)
 	c.Assert(conf1, DeepEquals, expected1)
 	// test show scheduler with paused and disabled status.
 	checkSchedulerWithStatusCommand := func(args []string, status string, expected []string) {
