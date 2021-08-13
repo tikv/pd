@@ -276,7 +276,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 func writeToDB(c *C, kv *kv.LeveldbKV, hotRegions []*statistics.HistoryHotRegion) {
 	batch := new(leveldb.Batch)
 	for _, region := range hotRegions {
-		key := cluster.HotRegionStorePath(region.UpdateTime, region.RegionID)
+		key := cluster.HotRegionStorePath("read", region.UpdateTime, region.RegionID)
 		value, err := json.Marshal(region)
 		c.Assert(err, IsNil)
 		batch.Put([]byte(key), value)

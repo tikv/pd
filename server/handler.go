@@ -899,12 +899,11 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 }
 
 func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRegionsRequest) (*statistics.HistoryHotRegions, error) {
-	iter := h.s.hotRegionStorage.NewIterator(request.StartTime, request.EndTime)
+	iter := h.s.hotRegionStorage.NewIterator(request.HotRegionTypes, request.StartTime, request.EndTime)
 	results := make([]*statistics.HistoryHotRegion, 0)
 	regionSet := make(map[uint64]bool, 0)
 	storeSet := make(map[uint64]bool, 0)
 	peerSet := make(map[uint64]bool, 0)
-	typeSet := make(map[string]bool, 0)
 	for _, id := range request.RegionIDs {
 		regionSet[id] = true
 	}
@@ -913,9 +912,6 @@ func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRe
 	}
 	for _, id := range request.PeerIDs {
 		peerSet[id] = true
-	}
-	for _, hotRegionType := range request.HotRegionTypes {
-		typeSet[hotRegionType] = true
 	}
 	var next *statistics.HistoryHotRegion
 	var err error
@@ -927,9 +923,6 @@ func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRe
 			continue
 		}
 		if len(peerSet) != 0 && !peerSet[next.PeerID] {
-			continue
-		}
-		if len(typeSet) != 0 && !typeSet[next.HotRegionType] {
 			continue
 		}
 		if request.HighHotDegree < next.HotDegree || request.LowHotDegree > next.HotDegree {

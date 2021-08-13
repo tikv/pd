@@ -395,7 +395,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	//initial hot_region_storage in here
 	hotregion_path := filepath.Join(s.cfg.DataDir, "hot-region")
-	// hotregion_path := filepath.Join("/tmp/pd", "hot-region")
 	s.hotRegionStorage, err = cluster.NewHotRegionsHistoryStorage(
 		ctx, hotregion_path, encryptionKeyManager, s.cluster, s.member,
 		s.cfg.Schedule.HotRegionsResevervedDays,

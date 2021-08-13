@@ -40,6 +40,11 @@ const (
 	defaultCompactionTime = 30
 )
 
+var hotRegionTypes = []string{
+	"read",
+	"write",
+}
+
 func NewHotRegionsHistoryStorage(
 	ctx context.Context,
 	path string,
@@ -123,12 +128,16 @@ func (h *HotRegionStorage) backgroundFlush() {
 }
 
 //return a iterator which can traverse from start_time to end_time
-func (h *HotRegionStorage) NewIterator(startTime, endTime int64) HotRegionStorageIterator {
-	start_key := HotRegionStorePath(startTime, 0)
-	end_key := HotRegionStorePath(endTime, math.MaxUint64)
+func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime int64) HotRegionStorageIterator {
+	iters := make([]iterator.Iterator, len(requireTypes))
+	for index, requireType := range requireTypes {
+		startKey := HotRegionStorePath(requireType, startTime, 0)
+		endKey := HotRegionStorePath(requireType, endTime, math.MaxInt64)
+		iter := h.LeveldbKV.NewIterator(&util.Range{[]byte(startKey), []byte(endKey)}, nil)
+		iters[index] = iter
+	}
 	return HotRegionStorageIterator{
-		iter: h.LeveldbKV.NewIterator(&util.Range{
-			Start: []byte(start_key), Limit: []byte(end_key)}, nil),
+		iters:                iters,
 		encryptionKeyManager: h.encryptionKeyManager,
 	}
 }
@@ -155,6 +164,7 @@ func (h *HotRegionStorage) pullHotRegionInfo() error {
 	}
 	return nil
 }
+
 func (h *HotRegionStorage) packHotRegionInfo(hotLeaderInfo statistics.StoreHotPeersStat,
 	hotRegionType string) error {
 	cluster := h.cluster
@@ -187,7 +197,9 @@ func (h *HotRegionStorage) packHotRegionInfo(hotLeaderInfo statistics.StoreHotPe
 				EncryptionMeta: region.EncryptionMeta,
 				HotRegionType:  hotRegionType,
 			}
-			batchHotInfo[HotRegionStorePath(hotPeerStat.LastUpdateTime.Unix(),
+			batchHotInfo[HotRegionStorePath(
+				stat.HotRegionType,
+				hotPeerStat.LastUpdateTime.Unix(),
 				hotPeerStat.RegionID)] = &stat
 		}
 	}
@@ -217,13 +229,15 @@ func (h *HotRegionStorage) delete() error {
 	defer h.mu.Unlock()
 	db := h.LeveldbKV
 	batch := new(leveldb.Batch)
-	start_key := HotRegionStorePath(0, 0)
-	end_time := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).Unix()
-	end_key := HotRegionStorePath(end_time, math.MaxInt64)
-	iter := db.NewIterator(&util.Range{
-		Start: []byte(start_key), Limit: []byte(end_key)}, nil)
-	for iter.Next() {
-		batch.Delete(iter.Key())
+	for _, hotRegionType := range hotRegionTypes {
+		startKey := HotRegionStorePath(hotRegionType, 0, 0)
+		endTime := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).Unix()
+		endKey := HotRegionStorePath(hotRegionType, endTime, math.MaxInt64)
+		iter := db.NewIterator(&util.Range{
+			Start: []byte(startKey), Limit: []byte(endKey)}, nil)
+		for iter.Next() {
+			batch.Delete(iter.Key())
+		}
 	}
 	if err := db.Write(batch, nil); err != nil {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
@@ -231,22 +245,32 @@ func (h *HotRegionStorage) delete() error {
 	h.compactionCountdown--
 	if h.compactionCountdown == 0 {
 		h.compactionCountdown = defaultCompactionTime
-		db.CompactRange(util.Range{})
+		for _, hotRegionType := range hotRegionTypes {
+			startKey := HotRegionStorePath(hotRegionType, 0, 0)
+			endTime := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).Unix()
+			endKey := HotRegionStorePath(hotRegionType, endTime, math.MaxInt64)
+			db.CompactRange(util.Range{[]byte(startKey), []byte(endKey)})
+		}
 	}
 	return nil
 }
 
 type HotRegionStorageIterator struct {
-	iter                 iterator.Iterator
+	iters                []iterator.Iterator
 	encryptionKeyManager *encryptionkm.KeyManager
 }
 
 //next will return next history_hot_region,
 //there is no more historyhotregion,it will return nil
 func (it *HotRegionStorageIterator) Next() (*statistics.HistoryHotRegion, error) {
-	iter := it.iter
+	iter := it.iters[0]
 	if !iter.Next() {
-		return nil, nil
+		iter.Release()
+		if len(it.iters) == 1 {
+			return nil, nil
+		}
+		it.iters = it.iters[1:]
+		iter = it.iters[0]
 	}
 	item := iter.Value()
 	value := make([]byte, len(item))
@@ -271,7 +295,14 @@ func (it *HotRegionStorageIterator) Next() (*statistics.HistoryHotRegion, error)
 	return &message, nil
 }
 
-func HotRegionStorePath(update_time int64, region_id uint64) string {
-	return path.Join("schedule", "hot_region", fmt.Sprintf("%020d", update_time),
-		fmt.Sprintf("%020d", region_id))
+//TODO
+//find a better place to put this function
+func HotRegionStorePath(hotRegionType string, update_time int64, region_id uint64) string {
+	return path.Join(
+		"schedule",
+		"hot_region",
+		hotRegionType,
+		fmt.Sprintf("%020d", update_time),
+		fmt.Sprintf("%020d", region_id),
+	)
 }
