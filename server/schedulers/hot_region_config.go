@@ -75,7 +75,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		StrictPickingStore:     true,
 		EnableForTiFlash:       true,
 	}
-	defaultConfig.apply(cfg)
+	cfg.apply(defaultConfig)
 	return cfg
 }
 
@@ -318,10 +318,10 @@ type prioritiesConfig struct {
 	writePeer   []string
 }
 
-func (p prioritiesConfig) apply(cfg *hotRegionSchedulerConfig) {
-	cfg.ReadPriorities = append(p.read[:0:0], p.read...)
-	cfg.WriteLeaderPriorities = append(p.writeLeader[:0:0], p.writeLeader...)
-	cfg.WritePeerPriorities = append(p.writePeer[:0:0], p.writePeer...)
+func (conf *hotRegionSchedulerConfig) apply(p prioritiesConfig) {
+	conf.ReadPriorities = append(p.read[:0:0], p.read...)
+	conf.WriteLeaderPriorities = append(p.writeLeader[:0:0], p.writeLeader...)
+	conf.WritePeerPriorities = append(p.writePeer[:0:0], p.writePeer...)
 }
 
 func getReadPriorities(c *prioritiesConfig) []string {

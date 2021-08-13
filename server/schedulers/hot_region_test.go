@@ -1991,6 +1991,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 		"src-tolerance-ratio":       1.05,
 		"dst-tolerance-ratio":       1.05,
 	})
+	c.Assert(err, IsNil)
 	err = storage.SaveScheduleConfig(HotRegionName, data)
 	c.Assert(err, IsNil)
 	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(data))
@@ -2007,6 +2008,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 	cfg.ReadPriorities = []string{"key", "query"}
 	cfg.WriteLeaderPriorities = []string{"query", "key"}
 	data, err = schedule.EncodeConfig(cfg)
+	c.Assert(err, IsNil)
 	err = storage.SaveScheduleConfig(HotRegionName, data)
 	c.Assert(err, IsNil)
 	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(data))
