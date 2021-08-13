@@ -105,7 +105,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 		TransferLeader{FromStore: 3, ToStore: 1},
 		RemovePeer{FromStore: 3},
 	}
-	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+	op := s.newTestOperator(1, OpAdmin|OpLeader|OpRegion, steps...)
 	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	s.checkSteps(c, op, steps)
 	op.Start()
