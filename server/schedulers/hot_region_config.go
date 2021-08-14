@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/go-semver/semver"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
@@ -100,9 +99,9 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 		MinorDecRatio:          conf.MinorDecRatio,
 		SrcToleranceRatio:      conf.SrcToleranceRatio,
 		DstToleranceRatio:      conf.DstToleranceRatio,
-		ReadPriorities:         adjustConfig(conf.cluster, conf.ReadPriorities, getReadPriorities),
-		WriteLeaderPriorities:  adjustConfig(conf.cluster, conf.WriteLeaderPriorities, getWriteLeaderPriorities),
-		WritePeerPriorities:    adjustConfig(conf.cluster, conf.WritePeerPriorities, getWritePeerPriorities),
+		ReadPriorities:         adjustConfig(conf.lastQuerySupported, conf.ReadPriorities, getReadPriorities),
+		WriteLeaderPriorities:  adjustConfig(conf.lastQuerySupported, conf.WriteLeaderPriorities, getWriteLeaderPriorities),
+		WritePeerPriorities:    adjustConfig(conf.lastQuerySupported, conf.WritePeerPriorities, getWritePeerPriorities),
 		StrictPickingStore:     conf.StrictPickingStore,
 		EnableForTiFlash:       conf.EnableForTiFlash,
 	}
@@ -110,9 +109,8 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 
 type hotRegionSchedulerConfig struct {
 	sync.RWMutex
-	storage     *core.Storage
-	cluster     opt.Cluster
-	lastVersion *semver.Version
+	storage            *core.Storage
+	lastQuerySupported bool
 
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
@@ -279,16 +277,6 @@ func (conf *hotRegionSchedulerConfig) IsStrictPickingStoreEnabled() bool {
 	return conf.StrictPickingStore
 }
 
-func (conf *hotRegionSchedulerConfig) SetCluster(v opt.Cluster) {
-	if v == nil { // for test
-		return
-	}
-	conf.Lock()
-	defer conf.Unlock()
-	conf.cluster = v
-	conf.lastVersion = conf.cluster.GetOpts().GetClusterVersion()
-}
-
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
 	router.HandleFunc("/list", conf.handleGetConfig).Methods("GET")
@@ -353,19 +341,17 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
 }
 
-func (conf *hotRegionSchedulerConfig) checkVersion() {
-	if conf.cluster == nil { // for test
-		return
-	}
-	version := conf.cluster.GetOpts().GetClusterVersion()
-	if version != conf.lastVersion {
-		log.Info("version changed",
-			zap.String("last version", conf.lastVersion.String()),
-			zap.String("current version", version.String()),
+func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster opt.Cluster) bool {
+	querySupport := cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
+	if querySupport != conf.lastQuerySupported {
+		log.Info("query supported changed",
+			zap.Bool("last query support", conf.lastQuerySupported),
+			zap.String("current version", cluster.GetOpts().GetClusterVersion().String()),
 			zap.Reflect("config", conf),
 			zap.Reflect("valid config", conf.getValidConf()))
-		conf.lastVersion = version
+		conf.lastQuerySupported = querySupport
 	}
+	return querySupport
 }
 
 type prioritiesConfig struct {
@@ -394,8 +380,7 @@ func getWritePeerPriorities(c *prioritiesConfig) []string {
 
 // adjustConfig will adjust config for cluster with low version tikv
 // because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
-func adjustConfig(cluster opt.Cluster, origins []string, getPriorities func(*prioritiesConfig) []string) []string {
-	querySupport := cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
+func adjustConfig(querySupport bool, origins []string, getPriorities func(*prioritiesConfig) []string) []string {
 	withQuery := slice.AnyOf(origins, func(i int) bool {
 		return origins[i] == QueryPriority
 	})

@@ -1950,15 +1950,15 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 	})
 	// test version change
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version5_0))
-	hb.(*hotScheduler).conf.SetCluster(tc)
-	c.Assert(hb.(*hotScheduler).conf.lastVersion.String(), Equals, "5.0.0")
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
+	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsFalse)
+	tc.EnableFeature(versioninfo.HotScheduleWithQuery)
+	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsFalse) // it will updated after scheduling
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
-		{statistics.ByteDim, statistics.KeyDim},
+		{statistics.QueryDim, statistics.ByteDim},
 		{statistics.KeyDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
-	c.Assert(hb.(*hotScheduler).conf.lastVersion.String(), Equals, "5.2.0")
+	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsTrue)
 }
 
 func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {

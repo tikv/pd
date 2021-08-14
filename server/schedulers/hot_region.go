@@ -59,7 +59,6 @@ func init() {
 		}
 
 		conf.storage = storage
-		conf.SetCluster(opController.GetCluster())
 		return newHotScheduler(opController, conf), nil
 	})
 }
@@ -402,26 +401,26 @@ func (bs *balanceSolver) init() {
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
 
-	bs.sche.conf.checkVersion()
-	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
+	querySupport := bs.sche.conf.checkQuerySupport(bs.cluster)
+	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities(querySupport))
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
 	return dim == bs.firstPriority || dim == bs.secondPriority
 }
 
-func (bs *balanceSolver) getPriorities() []string {
+func (bs *balanceSolver) getPriorities(querySupport bool) []string {
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	switch bs.rwTy {
 	case read:
-		return adjustConfig(bs.cluster, bs.sche.conf.GetReadPriorities(), getReadPriorities)
+		return adjustConfig(querySupport, bs.sche.conf.GetReadPriorities(), getReadPriorities)
 	case write:
 		switch bs.opTy {
 		case transferLeader:
-			return adjustConfig(bs.cluster, bs.sche.conf.GetWriteLeaderPriorities(), getWriteLeaderPriorities)
+			return adjustConfig(querySupport, bs.sche.conf.GetWriteLeaderPriorities(), getWriteLeaderPriorities)
 		case movePeer:
-			return adjustConfig(bs.cluster, bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
+			return adjustConfig(querySupport, bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
 		}
 	}
 	log.Error("illegal rwTy or illegal operator while getting the priority", zap.String("rwTy", bs.rwTy.String()), zap.String("operator", bs.opTy.String()))
