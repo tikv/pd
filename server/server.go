@@ -858,12 +858,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 				rules[0].GroupID == "pd" && rules[0].ID == "default") {
 				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-<<<<<<< HEAD
-			rule = rules[0]
-			if !(rule.Count == int(old.MaxReplicas) && reflect.DeepEqual(rule.LocationLabels, []string(old.LocationLabels))) {
-=======
-			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.StringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
->>>>>>> 9e157278c (placement: return rules after clone (#3892))
+			if !(rules[0].Count == int(old.MaxReplicas) && typeutil.StringsEqual(rules[0].LocationLabels, []string(old.LocationLabels))) {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 

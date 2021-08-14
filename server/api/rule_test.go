@@ -234,17 +234,6 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule4 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
-<<<<<<< HEAD
-=======
-	rule5 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 1,
-		LocationLabels: []string{"host"}}
-	rule6 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 3}
-
-	s.svr.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
-	defaultRule := s.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
-	defaultRule.LocationLabels = []string{"host"}
-	s.svr.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
->>>>>>> 9e157278c (placement: return rules after clone (#3892))
 
 	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
 	c.Assert(err, IsNil)

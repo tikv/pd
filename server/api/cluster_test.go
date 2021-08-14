@@ -47,16 +47,6 @@ func (s *testClusterSuite) TearDownSuite(c *C) {
 func (s *testClusterSuite) TestCluster(c *C) {
 	// Test get cluster status, and bootstrap cluster
 	s.testGetClusterStatus(c)
-<<<<<<< HEAD
-=======
-	s.svr.GetPersistOptions().SetPlacementRuleEnabled(true)
-	s.svr.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
-	rm := s.svr.GetRaftCluster().GetRuleManager()
-	rule := rm.GetRule("pd", "default")
-	rule.LocationLabels = []string{"host"}
-	rule.Count = 1
-	rm.SetRule(rule)
->>>>>>> 9e157278c (placement: return rules after clone (#3892))
 
 	// Test set the config
 	url := fmt.Sprintf("%s/cluster", s.urlPrefix)
