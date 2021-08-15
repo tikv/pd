@@ -1,9 +1,7 @@
 package cluster
 
 import (
-	"bytes"
 	"context"
-	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -24,6 +22,10 @@ import (
 	"github.com/tikv/pd/server/statistics"
 )
 
+// HotRegionStorage used to storage hot region info,
+// It will pull the hot region information according to the pullInterval interval
+// And delete and save data beyond the remainingDays
+// Close must be called after use
 type HotRegionStorage struct {
 	*kv.LeveldbKV
 	encryptionKeyManager *encryptionkm.KeyManager
@@ -42,12 +44,14 @@ const (
 	defaultCompactionTime = 30
 )
 
+// HotRegionTypes stands for hot type
 var HotRegionTypes = []string{
 	"read",
 	"write",
 }
 
-func NewHotRegionsHistoryStorage(
+// NewHotRegionsStorage create storage to store hot regions info
+func NewHotRegionsStorage(
 	ctx context.Context,
 	path string,
 	encryptionKeyManager *encryptionkm.KeyManager,
@@ -78,9 +82,9 @@ func NewHotRegionsHistoryStorage(
 	return &h, nil
 }
 
-//delete hot_region info which update_time is smaller than time.Now() minus /remain day in the backgroud
+//delete hot_region info which update_time is smaller than time.Now() minus /remain day in the background
 func (h *HotRegionStorage) backgroundDelete() {
-	//make delete happend in 0 clock
+	//make delete happened in 0 clock
 	now := time.Now()
 	next := now.Add(time.Hour * 24)
 	next = time.Date(next.Year(), next.Month(), next.Day(), 0, 0, 0, 0, next.Location())
@@ -106,7 +110,7 @@ func (h *HotRegionStorage) backgroundDelete() {
 
 }
 
-//write hot_region info into db in the backgroud
+//write hot_region info into db in the background
 func (h *HotRegionStorage) backgroundFlush() {
 	ticker := time.NewTicker(h.pullInterval)
 	go func() {
@@ -129,7 +133,7 @@ func (h *HotRegionStorage) backgroundFlush() {
 	}()
 }
 
-//return a iterator which can traverse from start_time to end_time
+//NewIterator return a iterator which can traverse all data as reqeust
 func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime int64) HotRegionStorageIterator {
 	iters := make([]iterator.Iterator, len(requireTypes))
 	for index, requireType := range requireTypes {
@@ -144,6 +148,7 @@ func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime
 	}
 }
 
+//Close close hotRegionStorage
 func (h *HotRegionStorage) Close() error {
 	h.hotRegionInfoCancel()
 	if err := h.LeveldbKV.Close(); err != nil {
@@ -160,11 +165,9 @@ func (h *HotRegionStorage) pullHotRegionInfo() error {
 		return err
 	}
 	hotWriteLeaderInfo := cluster.coordinator.getHotWriteRegions().AsLeader
-	if err := h.packHotRegionInfo(hotWriteLeaderInfo,
-		"write"); err != nil {
-		return err
-	}
-	return nil
+	err := h.packHotRegionInfo(hotWriteLeaderInfo,
+		"write")
+	return err
 }
 
 func (h *HotRegionStorage) packHotRegionInfo(hotLeaderInfo statistics.StoreHotPeersStat,
@@ -257,13 +260,15 @@ func (h *HotRegionStorage) delete() error {
 	return nil
 }
 
+// HotRegionStorageIterator iterates over a historyhotregion.
 type HotRegionStorageIterator struct {
 	iters                []iterator.Iterator
 	encryptionKeyManager *encryptionkm.KeyManager
 }
 
-//next will return next history_hot_region,
-//there is no more historyhotregion,it will return nil
+// Next moves the iterator to the next key/value pair.
+// And return historyHotRegion which it is now pointing to.
+// it will return nil,nilif there is no more historyHotRegion.
 func (it *HotRegionStorageIterator) Next() (*statistics.HistoryHotRegion, error) {
 	iter := it.iters[0]
 	for !iter.Next() {
@@ -297,27 +302,14 @@ func (it *HotRegionStorageIterator) Next() (*statistics.HistoryHotRegion, error)
 	return &message, nil
 }
 
-//TODO
-//find a better place to put this function
-func HotRegionStorePath(hotRegionType string, update_time int64, region_id uint64) string {
+//HotRegionStorePath generate hot region store key for HotRegionStorage
+//TODO:find a better place to put this function
+func HotRegionStorePath(hotRegionType string, updateTime int64, regionID uint64) string {
 	return path.Join(
 		"schedule",
 		"hot_region",
 		hotRegionType,
-		fmt.Sprintf("%020d", update_time),
-		fmt.Sprintf("%020d", region_id),
+		fmt.Sprintf("%020d", updateTime),
+		fmt.Sprintf("%020d", regionID),
 	)
-}
-
-func EncodeToBytes(p interface{}) ([]byte, error) {
-	buf := bytes.Buffer{}
-	enc := gob.NewEncoder(&buf)
-	err := enc.Encode(p)
-	return buf.Bytes(), err
-}
-
-func DecodeToStruct(s []byte, p interface{}) error {
-	dec := gob.NewDecoder(bytes.NewReader(s))
-	err := dec.Decode(p)
-	return err
 }

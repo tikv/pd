@@ -2,10 +2,14 @@ package statistics
 
 import "github.com/pingcap/kvproto/pkg/encryptionpb"
 
+// HistoryHotRegions wraps historyHotRegion
+// it will return to tidb
 type HistoryHotRegions struct {
-	HistoryHotRegion []*HistoryHotRegion `json:"historyHotRegion"`
+	HistoryHotRegion []*HistoryHotRegion `json:"history_hot_region"`
 }
 
+// HistoryHotRegion wraps hot region info
+// it is storage format of hot_region_storage
 type HistoryHotRegion struct {
 	UpdateTime    int64   `json:"update_time,omitempty"`
 	RegionID      uint64  `json:"region_id,omitempty"`
@@ -25,6 +29,8 @@ type HistoryHotRegion struct {
 	EncryptionMeta *encryptionpb.EncryptionMeta `json:"encryption_meta,omitempty"`
 }
 
+// HistoryHotRegionsRequest wrap request condition from tidb.
+//it is request from tidb
 //TODO
 //find a better place to put this struct
 type HistoryHotRegionsRequest struct {

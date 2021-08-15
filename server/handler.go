@@ -898,6 +898,7 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	}, ttl)
 }
 
+// GetAllRequestHistroyHotRegion get historyHotRegions as request
 func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRegionsRequest) (*statistics.HistoryHotRegions, error) {
 	var hotRegionTypes []string
 	if len(request.HotRegionTypes) != 0 {
@@ -907,9 +908,9 @@ func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRe
 	}
 	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, request.StartTime, request.EndTime)
 	results := make([]*statistics.HistoryHotRegion, 0)
-	regionSet := make(map[uint64]bool, 0)
-	storeSet := make(map[uint64]bool, 0)
-	peerSet := make(map[uint64]bool, 0)
+	regionSet := make(map[uint64]bool)
+	storeSet := make(map[uint64]bool)
+	peerSet := make(map[uint64]bool)
 	for _, id := range request.RegionIDs {
 		regionSet[id] = true
 	}
