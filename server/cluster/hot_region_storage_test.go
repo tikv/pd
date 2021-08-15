@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"runtime/pprof"
 	"testing"
 	"time"
 
@@ -131,7 +130,6 @@ func BenchmarkInsertAfterMonth(b *testing.B) {
 		log.Fatal(err)
 	}
 	regionStorage.flush()
-	b.StopTimer()
 }
 
 func BenchmarkDelete(b *testing.B) {
@@ -150,7 +148,6 @@ func BenchmarkDelete(b *testing.B) {
 	writeIntoDB(regionStorage, regions, 4464, endTime)
 	b.ResetTimer()
 	regionStorage.delete()
-	b.StopTimer()
 }
 
 func BenchmarkRead(b *testing.B) {
@@ -169,12 +166,12 @@ func BenchmarkRead(b *testing.B) {
 	}
 	//4320=(60*24*31)/10
 	endTime = writeIntoDB(regionStorage, regions, 4320, endTime)
-	f, _ := os.OpenFile("/root/cpu.pprof", os.O_CREATE|os.O_RDWR, 0644)
-	defer f.Close()
-	pprof.StartCPUProfile(f)
-	defer pprof.StopCPUProfile()
+	// f, _ := os.OpenFile("/root/cpu.pprof", os.O_CREATE|os.O_RDWR, 0644)
+	// defer f.Close()
+	// pprof.StartCPUProfile(f)
+	// defer pprof.StopCPUProfile()
 	b.ResetTimer()
-	iter := regionStorage.NewIterator(hotRegionTypes, startTime.Unix(), endTime.Unix())
+	iter := regionStorage.NewIterator(hotRegionTypes, startTime.Unix(), endTime.AddDate(0, 1, 0).Unix())
 	for next, err := iter.Next(); next != nil && err == nil; next, err = iter.Next() {
 
 	}
@@ -201,10 +198,6 @@ func BenchmarkCompaction(b *testing.B) {
 		regionStorage.delete()
 		regionStorage.remianedDays--
 	}
-	f, _ := os.OpenFile("/root/cpu.pprof", os.O_CREATE|os.O_RDWR, 0644)
-	defer f.Close()
-	pprof.StartCPUProfile(f)
-	defer pprof.StopCPUProfile()
 	b.ResetTimer()
 	regionStorage.delete()
 	b.StopTimer()
@@ -280,7 +273,7 @@ func newTestHotRegionStorage(pullInterval time.Duration, remianedDays int64) (
 	clear = func() {
 		hotRegionStorage.Close()
 		PrintDirSize(writePath)
-		os.RemoveAll(writePath)
+		// os.RemoveAll(writePath)
 	}
 	return
 }
@@ -289,6 +282,9 @@ func writeIntoDB(regionStorage *HotRegionStorage,
 	endTime time.Time) time.Time {
 	raft := regionStorage.cluster
 	for i := 0; i < times; i++ {
+		if i%1000 == 0 {
+			fmt.Println(i)
+		}
 		stats := newBenchmarkHotRegoinHistory(raft, endTime, regions)
 		err := regionStorage.packHotRegionInfo(stats, hotRegionTypes[i%len(hotRegionTypes)])
 		if err != nil {

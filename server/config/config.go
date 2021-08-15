@@ -736,9 +736,9 @@ type ScheduleConfig struct {
 	// Default: manual
 	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
 
-	HotRegionsWriteInterval typeutil.Duration `toml:"hot_regions_write_interval" json:"hot_regions_write_interval"`
+	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
 
-	HotRegionsResevervedDays int64 `toml:"hot_regions_reserved_days" json:"hot_regions_reserved_days"`
+	HotRegionsResevervedDays int64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -867,13 +867,14 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 		c.StoreLimit = make(map[uint64]StoreLimitConfig)
 	}
 
-	if !meta.IsDefined("hot_regions_write_interval") && !reloading {
+	if !meta.IsDefined("hot-regions-reserved-days") {
+		adjustInt64(&c.HotRegionsResevervedDays, defaultHotRegionsResevervedDays)
+	}
+
+	if !meta.IsDefined("hot-regions-write-interval") {
 		adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
 	}
 
-	if !meta.IsDefined("hot_regions_reserved_days") && !reloading {
-		adjustInt64(&c.HotRegionsResevervedDays, defaultHotRegionsResevervedDays)
-	}
 	return c.Validate()
 }
 

@@ -1,7 +1,9 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -133,7 +135,7 @@ func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime
 	for index, requireType := range requireTypes {
 		startKey := HotRegionStorePath(requireType, startTime, 0)
 		endKey := HotRegionStorePath(requireType, endTime, math.MaxInt64)
-		iter := h.LeveldbKV.NewIterator(&util.Range{[]byte(startKey), []byte(endKey)}, nil)
+		iter := h.LeveldbKV.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
 		iters[index] = iter
 	}
 	return HotRegionStorageIterator{
@@ -249,7 +251,7 @@ func (h *HotRegionStorage) delete() error {
 			startKey := HotRegionStorePath(hotRegionType, 0, 0)
 			endTime := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).Unix()
 			endKey := HotRegionStorePath(hotRegionType, endTime, math.MaxInt64)
-			db.CompactRange(util.Range{[]byte(startKey), []byte(endKey)})
+			db.CompactRange(util.Range{Start: []byte(startKey), Limit: []byte(endKey)})
 		}
 	}
 	return nil
@@ -305,4 +307,17 @@ func HotRegionStorePath(hotRegionType string, update_time int64, region_id uint6
 		fmt.Sprintf("%020d", update_time),
 		fmt.Sprintf("%020d", region_id),
 	)
+}
+
+func EncodeToBytes(p interface{}) ([]byte, error) {
+	buf := bytes.Buffer{}
+	enc := gob.NewEncoder(&buf)
+	err := enc.Encode(p)
+	return buf.Bytes(), err
+}
+
+func DecodeToStruct(s []byte, p interface{}) error {
+	dec := gob.NewDecoder(bytes.NewReader(s))
+	err := dec.Decode(p)
+	return err
 }
