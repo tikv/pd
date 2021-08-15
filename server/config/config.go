@@ -867,12 +867,12 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 		c.StoreLimit = make(map[uint64]StoreLimitConfig)
 	}
 
-	if !meta.IsDefined("hot-regions-reserved-days") {
-		adjustInt64(&c.HotRegionsResevervedDays, defaultHotRegionsResevervedDays)
-	}
-
 	if !meta.IsDefined("hot-regions-write-interval") {
 		adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
+	}
+
+	if !meta.IsDefined("hot-regions-reserved-days") {
+		adjustInt64(&c.HotRegionsResevervedDays, defaultHotRegionsResevervedDays)
 	}
 
 	return c.Validate()
