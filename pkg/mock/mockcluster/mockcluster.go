@@ -91,6 +91,7 @@ func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 
 // GetStoresLoads gets stores load statistics.
 func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
+	mc.HotStat.FilterUnhealthyStore(mc)
 	return mc.HotStat.GetStoresLoads()
 }
 

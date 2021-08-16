@@ -708,7 +708,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestExpect(c *C) {
 	}
 	{ // Check the load expect
 		aliveTiKVCount := storeCount
-		allowLeaderTiKVCount := aliveTiKVCount - 1 // store 5 with evict leader
+		allowLeaderTiKVCount := aliveTiKVCount - 2 // store 5 with evict leader, store 7 is down
 		c.Assert(len(hb.Schedule(tc)) == 0, IsFalse)
 		c.Assert(nearlyAbout(
 			hb.stLoadInfos[writeLeader][1].LoadPred.Expect.ByteRate,
