@@ -348,7 +348,7 @@ func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster opt.Cluster) boo
 			zap.Bool("last-query-support", conf.lastQuerySupported),
 			zap.String("cluster-version", cluster.GetOpts().GetClusterVersion().String()),
 			zap.Reflect("config", conf),
-			zap.Reflect("valid config", conf.getValidConf()))
+			zap.Reflect("valid-config", conf.getValidConf()))
 		conf.lastQuerySupported = querySupport
 	}
 	return querySupport
