@@ -166,8 +166,6 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"zone": "zone1"})
-	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone2"})
-	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone2"})
 
 	// initial state is sync
 	c.Assert(rep.drGetState(), Equals, drStateSync)
@@ -177,6 +175,21 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 		c.Assert(rep.drAutoSync.StateID, Not(Equals), stateID)
 		stateID = rep.drAutoSync.StateID
 	}
+
+	// only one zone, sync -> async
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateAsync)
+	assertStateIDUpdate()
+
+	// add new store in dr zone.
+	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone2"})
+	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone2"})
+	// async -> sync
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
+	rep.drSwitchToSync()
+	c.Assert(rep.drGetState(), Equals, drStateSync)
+	assertStateIDUpdate()
 
 	// sync -> async
 	rep.tickDR()
