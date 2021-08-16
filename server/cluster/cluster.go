@@ -555,7 +555,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	isNew, saveKV, saveCache, needSync := regionGuide(region, origin, c.traceRegionFlow)
-	if !saveKV && !saveCache && !isNew {
+	if len(writeItems) == 0 && len(readItems) == 0 && !saveKV && !saveCache && !isNew {
 		return nil
 	}
 
