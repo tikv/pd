@@ -382,7 +382,6 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 					c.Assert(co.opController.AddWaitingOperator(ops...), Equals, len(ops))
 				}
 			}
-
 		}
 	}
 	s.checkRegion(c, tc, co, num, 0)

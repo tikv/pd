@@ -52,7 +52,7 @@ func (t *testAvgOverTimeSuite) TestChange(c *C) {
 	c.Assert(aot.Get(), LessEqual, 1010.)
 	c.Assert(aot.Get(), GreaterEqual, 990.)
 
-	//phase 2: 500
+	// phase 2: 500
 	for i := 0; i < 5; i++ {
 		aot.Add(500, time.Second)
 	}
@@ -62,7 +62,7 @@ func (t *testAvgOverTimeSuite) TestChange(c *C) {
 		aot.Add(500, time.Second)
 	}
 
-	//phase 3: 100
+	// phase 3: 100
 	for i := 0; i < 5; i++ {
 		aot.Add(100, time.Second)
 	}

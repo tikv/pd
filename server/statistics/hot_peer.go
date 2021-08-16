@@ -30,12 +30,6 @@ const (
 	DimLen
 )
 
-// IsSelectedDim return whether the dim is selected for hot scheduler
-func IsSelectedDim(dim int) bool {
-	// TODO: configure
-	return dim == ByteDim || dim == KeyDim
-}
-
 type dimStat struct {
 	typ         RegionStatKind
 	Rolling     *movingaverage.TimeMedian  // it's used to statistic hot degree and average speed.
@@ -97,7 +91,7 @@ type HotPeerStat struct {
 	needDelete bool
 	isLeader   bool
 	isNew      bool
-	//TODO: remove it when we send peer stat by store info
+	// TODO: remove it when we send peer stat by store info
 	justTransferLeader     bool
 	interval               uint64
 	thresholds             []float64

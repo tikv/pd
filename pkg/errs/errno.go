@@ -28,10 +28,6 @@ var (
 	ErrIncorrectSystemTime = errors.Normalize("incorrect system time", errors.RFCCodeText("PD:common:ErrIncorrectSystemTime"))
 )
 
-// The internal error which is generated in PD project.
-// main errors
-var ()
-
 // tso errors
 var (
 	ErrSetLocalTSOConfig  = errors.Normalize("set local tso config failed, %s", errors.RFCCodeText("PD:tso:ErrSetLocalTSOConfig"))
@@ -58,6 +54,7 @@ var (
 	ErrStoreTombstone      = errors.Normalize("store %v has been removed", errors.RFCCodeText("PD:core:ErrStoreTombstone"))
 	ErrStoreDestroyed      = errors.Normalize("store %v has been physically destroyed", errors.RFCCodeText("PD:core:ErrStoreDestroyed"))
 	ErrStoreUnhealthy      = errors.Normalize("store %v is unhealthy", errors.RFCCodeText("PD:core:ErrStoreUnhealthy"))
+	ErrSlowStoreEvicted    = errors.Normalize("store %v is evited as a slow store", errors.RFCCodeText("PD:core:ErrSlowStoreEvicted"))
 )
 
 // client errors

@@ -22,7 +22,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -872,15 +871,14 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
 				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			rule = defaultRule
-			if !(rule.Count == int(old.MaxReplicas) && reflect.DeepEqual(rule.LocationLabels, []string(old.LocationLabels))) {
+			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.StringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
-		if !(cfg.MaxReplicas == old.MaxReplicas && reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels)) {
+		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.StringsEqual(cfg.LocationLabels, old.LocationLabels)) {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
@@ -1349,6 +1347,7 @@ func (s *Server) reloadConfigFromKV() error {
 
 // ReplicateFileToAllMembers is used to synchronize state among all members.
 // Each member will write `data` to a local file named `name`.
+// For security reason, data should be in JSON format.
 func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
 	resp, err := s.GetMembers(ctx, nil)
 	if err != nil {

@@ -290,6 +290,11 @@ func (h *Handler) AddShuffleHotRegionScheduler(limit uint64) error {
 	return h.AddScheduler(schedulers.ShuffleHotRegionType, strconv.FormatUint(limit, 10))
 }
 
+// AddEvictSlowStoreScheduler adds a evict-slow-store-scheduler.
+func (h *Handler) AddEvictSlowStoreScheduler() error {
+	return h.AddScheduler(schedulers.EvictSlowStoreType)
+}
+
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
 	return h.AddScheduler(schedulers.RandomMergeType)

@@ -131,7 +131,6 @@ func (filter *storesLabelFilter) filter(stores []*metapb.Store) []*metapb.Store 
 				break
 			}
 		}
-
 	}
 	return ret
 }

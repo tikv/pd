@@ -544,8 +544,8 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestSingleRangeBalance(c *C) {
 	ops := lb.Schedule(s.tc)
 	c.Assert(ops, NotNil)
 	c.Assert(ops, HasLen, 1)
-	c.Assert(ops[0].Counters, HasLen, 3)
-	c.Assert(ops[0].FinishedCounters, HasLen, 2)
+	c.Assert(ops[0].Counters, HasLen, 2)
+	c.Assert(ops[0].FinishedCounters, HasLen, 3)
 	lb, err = schedule.CreateScheduler(BalanceLeaderType, s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"h", "n"}))
 	c.Assert(err, IsNil)
 	c.Assert(lb.Schedule(s.tc), IsNil)
@@ -650,7 +650,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	opt := config.NewTestOptions()
-	//TODO: enable placementrules
+	// TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMaxReplicas(3)
@@ -714,7 +714,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cl
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	opt := config.NewTestOptions()
-	//TODO: enable placementrules
+	// TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMaxReplicas(5)
@@ -902,7 +902,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	//TODO: enable placementrules
+	// TODO: enable placementrules
 	tc.SetEnablePlacementRules(false)
 	tc.DisableFeature(versioninfo.JointConsensus)
 	stream := hbstream.NewTestHeartbeatStreams(s.ctx, tc.ID, tc, false /* no need to run */)
@@ -1023,7 +1023,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	//TODO: enable palcementrules
+	// TODO: enable palcementrules
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMergeScheduleLimit(1)

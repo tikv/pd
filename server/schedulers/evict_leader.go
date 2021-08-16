@@ -64,7 +64,6 @@ func init() {
 			}
 			conf.StoreIDWithRanges[id] = ranges
 			return nil
-
 		}
 	})
 
@@ -235,35 +234,15 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Operator {
-	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
-	for id, ranges := range s.conf.StoreIDWithRanges {
-		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
-		if region == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
-			continue
-		}
+func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
 
-		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
-			RandomPick()
-		if target == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
-			continue
-		}
-		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
-		if err != nil {
-			log.Debug("fail to create evict leader operator", errs.ZapError(err))
-			continue
-		}
-		op.SetPriorityLevel(core.HighPriority)
-		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-		ops = append(ops, op)
-	}
-	return ops
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf.StoreIDWithRanges, EvictLeaderBatchSize)
 }
 
-func (s *evictLeaderScheduler) uniqueAppend(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
+func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
 	regionIDs := make(map[uint64]struct{})
 	for i := range dst {
 		regionIDs[dst[i].RegionID()] = struct{}{}
@@ -278,25 +257,48 @@ func (s *evictLeaderScheduler) uniqueAppend(dst []*operator.Operator, src ...*op
 	return dst
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+func scheduleEvictLeaderBatch(name string, cluster opt.Cluster, storeRanges map[uint64][]core.KeyRange, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
-
-	for i := 0; i < EvictLeaderBatchSize; i++ {
-		once := s.scheduleOnce(cluster)
+	for i := 0; i < batchSize; i++ {
+		once := scheduleEvictLeaderOnce(name, cluster, storeRanges)
 		// no more regions
 		if len(once) == 0 {
 			break
 		}
-		ops = s.uniqueAppend(ops, once...)
+		ops = uniqueAppendOperator(ops, once...)
 		// the batch has been fulfilled
-		if len(ops) > EvictLeaderBatchSize {
+		if len(ops) > batchSize {
 			break
 		}
 	}
+	return ops
+}
 
+func scheduleEvictLeaderOnce(name string, cluster opt.Cluster, storeRanges map[uint64][]core.KeyRange) []*operator.Operator {
+	ops := make([]*operator.Operator, 0, len(storeRanges))
+	for id, ranges := range storeRanges {
+		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
+		if region == nil {
+			schedulerCounter.WithLabelValues(name, "no-leader").Inc()
+			continue
+		}
+
+		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
+			FilterTarget(cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
+			RandomPick()
+		if target == nil {
+			schedulerCounter.WithLabelValues(name, "no-target-store").Inc()
+			continue
+		}
+		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		if err != nil {
+			log.Debug("fail to create evict leader operator", errs.ZapError(err))
+			continue
+		}
+		op.SetPriorityLevel(core.HighPriority)
+		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(name, "new-operator"))
+		ops = append(ops, op)
+	}
 	return ops
 }
 

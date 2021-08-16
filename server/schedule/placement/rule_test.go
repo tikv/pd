@@ -185,6 +185,6 @@ func (s *testRuleSuite) TestBuildRuleList(c *C) {
 		config := &ruleConfig{rules: testcase.rules}
 		result, err := buildRuleList(config)
 		c.Assert(err, IsNil)
-		c.Assert(result, DeepEquals, testcase.expect)
+		c.Assert(result.ranges, DeepEquals, testcase.expect.ranges)
 	}
 }

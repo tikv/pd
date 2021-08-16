@@ -15,6 +15,7 @@ package statistics
 
 import (
 	"context"
+
 	"github.com/tikv/pd/server/core"
 )
 
@@ -41,8 +42,8 @@ func NewHotCache(ctx context.Context, quit <-chan struct{}) *HotCache {
 		quit:           quit,
 		readFlowQueue:  make(chan FlowItemTask, queueCap),
 		writeFlowQueue: make(chan FlowItemTask, queueCap),
-		writeFlow:      NewHotStoresStats(WriteFlow),
-		readFlow:       NewHotStoresStats(ReadFlow),
+		writeFlow:      NewHotPeerCache(WriteFlow),
+		readFlow:       NewHotPeerCache(ReadFlow),
 	}
 	go w.updateItems(w.readFlowQueue, w.runReadTask)
 	go w.updateItems(w.writeFlowQueue, w.runWriteTask)
