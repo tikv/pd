@@ -45,9 +45,20 @@ func init() {
 	})
 	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := initHotRegionScheduleConfig()
-		if err := decoder(conf); err != nil {
+
+		var data map[string]interface{}
+		if err := decoder(&data); err != nil {
 			return nil, err
 		}
+		if len(data) != 0 {
+			// After upgrading, use compatible config.
+			// For clusters with the initial version >= v5.2, it will be overwritten by the default config.
+			conf.apply(compatibleConfig)
+			if err := decoder(conf); err != nil {
+				return nil, err
+			}
+		}
+
 		conf.storage = storage
 		return newHotScheduler(opController, conf), nil
 	})
@@ -71,7 +82,7 @@ const (
 var schedulePeerPr = 0.66
 
 // pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
-var pendingAmpFactor = 8.0
+var pendingAmpFactor = 2.0
 
 type hotScheduler struct {
 	name string
@@ -277,7 +288,6 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
 		}
-
 	} else {
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
@@ -396,7 +406,7 @@ func (bs *balanceSolver) init() {
 	// For write, they are different
 	switch bs.rwTy {
 	case read:
-		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetReadPriorities(), getReadLeaderPriorities)
+		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetReadPriorities(), getReadPriorities)
 	case write:
 		switch bs.opTy {
 		case transferLeader:

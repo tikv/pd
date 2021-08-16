@@ -59,15 +59,16 @@ func newHotWriteScheduler(opController *schedule.OperatorController, conf *hotRe
 }
 
 type testHotSchedulerSuite struct{}
+type testHotReadRegionSchedulerSuite struct{}
+type testHotWriteRegionSchedulerSuite struct{}
 type testInfluenceSerialSuite struct{}
 type testHotCacheSuite struct{}
-type testHotReadRegionSchedulerSuite struct{}
 
-var _ = Suite(&testHotWriteRegionSchedulerSuite{})
 var _ = Suite(&testHotSchedulerSuite{})
 var _ = Suite(&testHotReadRegionSchedulerSuite{})
-var _ = Suite(&testHotCacheSuite{})
+var _ = Suite(&testHotWriteRegionSchedulerSuite{})
 var _ = SerialSuites(&testInfluenceSerialSuite{})
+var _ = Suite(&testHotCacheSuite{})
 
 func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -149,8 +150,6 @@ func newTestRegion(id uint64) *core.RegionInfo {
 	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
 	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
 }
-
-type testHotWriteRegionSchedulerSuite struct{}
 
 func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -368,7 +367,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 
-	// Add TiKV stores 1, 2, 3, 4, 5, 6, 7(Down) with region counts 3, 3, 2, 2, 0, 0, 0.
+	// Add TiKV stores 1, 2, 3, 4, 5, 6, 7 (Down) with region counts 3, 3, 2, 2, 0, 0, 0.
 	// Add TiFlash stores 8, 9, 10, 11 with region counts 3, 1, 1, 0.
 	storeCount := uint64(11)
 	aliveTiKVStartID := uint64(1)
@@ -452,7 +451,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 	//|    2     |       4.5MB      |
 	//|    3     |       4.5MB      |
 	//|    4     |        6MB       |
-	//|    5     |        0MB       |
+	//|    5     |        0MB(Evict)|
 	//|    6     |        0MB       |
 	//|    7     |        n/a (Down)|
 	//|    8     |        n/a       | <- TiFlash is always 0.
@@ -465,6 +464,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 		3: 4.5 * MB * statistics.StoreHeartBeatReportInterval,
 		4: 6 * MB * statistics.StoreHeartBeatReportInterval,
 	}
+	tc.SetStoreEvictLeader(5, true)
 	tikvBytesSum, tikvKeysSum, tikvQuerySum := 0.0, 0.0, 0.0
 	for i := aliveTiKVStartID; i <= aliveTiKVLastID; i++ {
 		tikvBytesSum += float64(storesBytes[i]) / 10
@@ -478,13 +478,14 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 	}
 	{ // Check the load expect
 		aliveTiKVCount := float64(aliveTiKVLastID - aliveTiKVStartID + 1)
+		allowLeaderTiKVCount := aliveTiKVCount - 1 // store 5 with evict leader
 		aliveTiFlashCount := float64(aliveTiFlashLastID - aliveTiFlashStartID + 1)
 		tc.ObserveRegionsStats()
 		c.Assert(len(hb.Schedule(tc)) == 0, IsFalse)
 		c.Assert(
 			loadsEqual(
 				hb.stLoadInfos[writeLeader][1].LoadPred.Expect.Loads,
-				[]float64{hotRegionBytesSum / aliveTiKVCount, hotRegionKeysSum / aliveTiKVCount, tikvQuerySum / aliveTiKVCount}),
+				[]float64{hotRegionBytesSum / allowLeaderTiKVCount, hotRegionKeysSum / allowLeaderTiKVCount, tikvQuerySum / allowLeaderTiKVCount}),
 			IsTrue)
 		c.Assert(tikvQuerySum != hotRegionQuerySum, IsTrue)
 		c.Assert(
@@ -549,7 +550,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithQuery(c *C) {
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
-	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"qps", "byte"}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{QueryPriority, BytePriority}
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -1733,7 +1734,7 @@ func loadsEqual(loads1, loads2 []float64) bool {
 	return true
 }
 
-func (s *testHotSchedulerSuite) TestHotReadPeerSchedule(c *C) {
+func (s *testHotReadRegionSchedulerSuite) TestHotReadPeerSchedule(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
@@ -1848,7 +1849,7 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 	hb.(*hotScheduler).clearPendingInfluence()
 }
 
-func (s *testHotSchedulerSuite) TestHotWriteLeaderScheduleWithPriority(c *C) {
+func (s *testHotWriteRegionSchedulerSuite) TestHotWriteLeaderScheduleWithPriority(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
@@ -1905,9 +1906,9 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 	// config error value
-	hb.(*hotScheduler).conf.ReadPriorities = []string{"hahaha"}
-	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"hahaha", "byte"}
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"qps", "byte", "key"}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{"error"}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"error", BytePriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{QueryPriority, BytePriority, KeyPriority}
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.QueryDim, statistics.ByteDim},
 		{statistics.KeyDim, statistics.ByteDim},
@@ -1921,18 +1922,18 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 	// config byte and key
-	hb.(*hotScheduler).conf.ReadPriorities = []string{"key", "byte"}
-	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"byte", "key"}
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"key", "byte"}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{KeyPriority, BytePriority}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{KeyPriority, BytePriority}
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.KeyDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 		{statistics.KeyDim, statistics.ByteDim},
 	})
 	// config query in low version
-	hb.(*hotScheduler).conf.ReadPriorities = []string{"qps", "byte"}
-	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"qps", "byte"}
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"qps", "byte"}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{QueryPriority, BytePriority}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{QueryPriority, BytePriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{QueryPriority, BytePriority}
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.ByteDim, statistics.KeyDim},
 		{statistics.KeyDim, statistics.ByteDim},
@@ -1941,10 +1942,80 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 	// config error value
 	hb.(*hotScheduler).conf.ReadPriorities = []string{"error", "error"}
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{}
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{"qps", "byte", "key"}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{QueryPriority, BytePriority, KeyPriority}
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.ByteDim, statistics.KeyDim},
 		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+}
+
+func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+
+	// From new or 3.x cluster
+	hb, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("hot-region", nil))
+	c.Assert(err, IsNil)
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.QueryDim, statistics.ByteDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+
+	// Config file is not currently supported
+	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()),
+		schedule.ConfigSliceDecoder("hot-region", []string{"read-priorities=byte,query"}))
+	c.Assert(err, IsNil)
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.QueryDim, statistics.ByteDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+
+	// from 4.0 or 5.0 or 5.1 cluster
+	var data []byte
+	storage := core.NewStorage(kv.NewMemoryKV())
+	data, err = schedule.EncodeConfig(map[string]interface{}{
+		"min-hot-byte-rate":         100,
+		"min-hot-key-rate":          10,
+		"max-zombie-rounds":         3,
+		"max-peer-number":           1000,
+		"byte-rate-rank-step-ratio": 0.05,
+		"key-rate-rank-step-ratio":  0.05,
+		"count-rank-step-ratio":     0.01,
+		"great-dec-ratio":           0.95,
+		"minor-dec-ratio":           0.99,
+		"src-tolerance-ratio":       1.05,
+		"dst-tolerance-ratio":       1.05,
+	})
+	c.Assert(err, IsNil)
+	err = storage.SaveScheduleConfig(HotRegionName, data)
+	c.Assert(err, IsNil)
+	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(data))
+	c.Assert(err, IsNil)
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.ByteDim, statistics.KeyDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+
+	// From configured cluster
+	storage = core.NewStorage(kv.NewMemoryKV())
+	cfg := initHotRegionScheduleConfig()
+	cfg.ReadPriorities = []string{"key", "query"}
+	cfg.WriteLeaderPriorities = []string{"query", "key"}
+	data, err = schedule.EncodeConfig(cfg)
+	c.Assert(err, IsNil)
+	err = storage.SaveScheduleConfig(HotRegionName, data)
+	c.Assert(err, IsNil)
+	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(data))
+	c.Assert(err, IsNil)
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.KeyDim, statistics.QueryDim},
+		{statistics.QueryDim, statistics.KeyDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 }

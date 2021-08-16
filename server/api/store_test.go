@@ -137,7 +137,6 @@ func (s *testStoreSuite) TestStoresList(c *C) {
 	err = readJSON(testDialClient, url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[2:3])
-
 }
 
 func (s *testStoreSuite) TestStoreGet(c *C) {

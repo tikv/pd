@@ -60,7 +60,6 @@ func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Reque
 
 // IsServiceAllowed checks the service through the path.
 func IsServiceAllowed(s *server.Server, group server.ServiceGroup) bool {
-
 	// for core path
 	if group.IsCore {
 		return true

@@ -289,7 +289,7 @@ func (hp *indexedHeap) Get(id uint64) TopNItem {
 		return nil
 	}
 	item := hp.items[idx]
-	return item.(TopNItem)
+	return item
 }
 
 // GetAll returns all the items.
