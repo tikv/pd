@@ -168,3 +168,15 @@ groups:
       description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values:{{ $value }}'
       value: '{{ $value }}'
       summary: PD server has been restarted
+
+  - alert: PD_cluster_slow_tikv_nums
+    expr: (sum(pd_cluster_status{type="store_slow_count"}) by (instance) > 0) and (sum(etcd_server_is_leader) by (instance) > 0)
+    for: 1m
+    labels:
+      env: ENV_LABELS_ENV
+      level: critical
+      expr:  (sum(pd_cluster_status{type="store_slow_count"}) by (instance) > 0) and (sum(etcd_server_is_leader) by (instance) > 0)
+    annotations:
+      description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values:{{ $value }}'
+      value: '{{ $value }}'
+      summary: PD_cluster_slow_tikv_nums
