@@ -1948,6 +1948,17 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 		{statistics.KeyDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
+	// test version change
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version5_0))
+	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsFalse)
+	tc.EnableFeature(versioninfo.HotScheduleWithQuery)
+	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsFalse) // it will updated after scheduling
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.QueryDim, statistics.ByteDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsTrue)
 }
 
 func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
