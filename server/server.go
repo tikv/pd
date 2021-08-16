@@ -1336,6 +1336,7 @@ func (s *Server) reloadConfigFromKV() error {
 
 // ReplicateFileToAllMembers is used to synchronize state among all members.
 // Each member will write `data` to a local file named `name`.
+// For security reason, data should be in JSON format.
 func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
 	resp, err := s.GetMembers(ctx, nil)
 	if err != nil {
