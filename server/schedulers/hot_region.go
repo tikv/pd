@@ -423,7 +423,7 @@ func (bs *balanceSolver) getPriorities() []string {
 			return adjustConfig(querySupport, bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
 		}
 	}
-	log.Error("illegal rwTy or illegal operator while getting the priority", zap.String("rwTy", bs.rwTy.String()), zap.String("operator", bs.opTy.String()))
+	log.Error("illegal type or illegal operator while getting the priority", zap.String("type", bs.rwTy.String()), zap.String("operator", bs.opTy.String()))
 	return []string{}
 }
 
