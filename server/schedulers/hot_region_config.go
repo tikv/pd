@@ -24,10 +24,15 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/versioninfo"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const (
@@ -36,12 +41,29 @@ const (
 	// KeyPriority indicates hot-region-scheduler prefer key dim
 	KeyPriority = "key"
 	// QueryPriority indicates hot-region-scheduler prefer query dim
-	QueryPriority = "qps"
+	QueryPriority = "query"
+
+	// Scheduling has a bigger impact on TiFlash, so it needs to be corrected in configuration items
+	// In the default config, the TiKV difference is 1.05*1.05-1 = 0.1025, and the TiFlash difference is 1.15*1.15-1 = 0.3225
+	tiflashToleranceRatioCorrection = 0.1
 )
+
+var defaultConfig = prioritiesConfig{
+	read:        []string{QueryPriority, BytePriority},
+	writeLeader: []string{KeyPriority, BytePriority},
+	writePeer:   []string{BytePriority, KeyPriority},
+}
+
+// because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
+var compatibleConfig = prioritiesConfig{
+	read:        []string{BytePriority, KeyPriority},
+	writeLeader: []string{KeyPriority, BytePriority},
+	writePeer:   []string{BytePriority, KeyPriority},
+}
 
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
-	return &hotRegionSchedulerConfig{
+	cfg := &hotRegionSchedulerConfig{
 		MinHotByteRate:         100,
 		MinHotKeyRate:          10,
 		MinHotQueryRate:        10,
@@ -55,16 +77,40 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MinorDecRatio:          0.99,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		ReadPriorities:         []string{QueryPriority, BytePriority},
-		WriteLeaderPriorities:  []string{KeyPriority, BytePriority},
-		WritePeerPriorities:    []string{BytePriority, KeyPriority},
 		StrictPickingStore:     true,
+		EnableForTiFlash:       true,
+	}
+	cfg.apply(defaultConfig)
+	return cfg
+}
+
+func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
+	return &hotRegionSchedulerConfig{
+		MinHotByteRate:         conf.MinHotByteRate,
+		MinHotKeyRate:          conf.MinHotKeyRate,
+		MinHotQueryRate:        conf.MinHotQueryRate,
+		MaxZombieRounds:        conf.MaxZombieRounds,
+		MaxPeerNum:             conf.MaxPeerNum,
+		ByteRateRankStepRatio:  conf.ByteRateRankStepRatio,
+		KeyRateRankStepRatio:   conf.KeyRateRankStepRatio,
+		QueryRateRankStepRatio: conf.QueryRateRankStepRatio,
+		CountRankStepRatio:     conf.CountRankStepRatio,
+		GreatDecRatio:          conf.GreatDecRatio,
+		MinorDecRatio:          conf.MinorDecRatio,
+		SrcToleranceRatio:      conf.SrcToleranceRatio,
+		DstToleranceRatio:      conf.DstToleranceRatio,
+		ReadPriorities:         adjustConfig(conf.lastQuerySupported, conf.ReadPriorities, getReadPriorities),
+		WriteLeaderPriorities:  adjustConfig(conf.lastQuerySupported, conf.WriteLeaderPriorities, getWriteLeaderPriorities),
+		WritePeerPriorities:    adjustConfig(conf.lastQuerySupported, conf.WritePeerPriorities, getWritePeerPriorities),
+		StrictPickingStore:     conf.StrictPickingStore,
+		EnableForTiFlash:       conf.EnableForTiFlash,
 	}
 }
 
 type hotRegionSchedulerConfig struct {
 	sync.RWMutex
-	storage *core.Storage
+	storage            *core.Storage
+	lastQuerySupported bool
 
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
@@ -83,9 +129,14 @@ type hotRegionSchedulerConfig struct {
 	SrcToleranceRatio      float64  `json:"src-tolerance-ratio"`
 	DstToleranceRatio      float64  `json:"dst-tolerance-ratio"`
 	ReadPriorities         []string `json:"read-priorities"`
-	WriteLeaderPriorities  []string `json:"write-leader-priorities"`
-	WritePeerPriorities    []string `json:"write-peer-priorities"`
-	StrictPickingStore     bool     `json:"strict-picking-store,string"`
+
+	// For first priority of write leader, it is better to consider key rate or query rather than byte
+	WriteLeaderPriorities []string `json:"write-leader-priorities"`
+	WritePeerPriorities   []string `json:"write-peer-priorities"`
+	StrictPickingStore    bool     `json:"strict-picking-store,string"`
+
+	// Separately control whether to start hotspot scheduling for TiFlash
+	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
@@ -184,6 +235,18 @@ func (conf *hotRegionSchedulerConfig) GetMinHotByteRate() float64 {
 	return conf.MinHotByteRate
 }
 
+func (conf *hotRegionSchedulerConfig) GetEnableForTiFlash() bool {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.EnableForTiFlash
+}
+
+func (conf *hotRegionSchedulerConfig) SetEnableForTiFlash(enable bool) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.EnableForTiFlash = enable
+}
+
 func (conf *hotRegionSchedulerConfig) GetMinHotQueryRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -196,13 +259,13 @@ func (conf *hotRegionSchedulerConfig) GetReadPriorities() []string {
 	return conf.ReadPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) GetWriteLeaderPriorites() []string {
+func (conf *hotRegionSchedulerConfig) GetWriteLeaderPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.WriteLeaderPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) GetWritePeerPriorites() []string {
+func (conf *hotRegionSchedulerConfig) GetWritePeerPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.WritePeerPriorities
@@ -225,7 +288,7 @@ func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, r *
 	conf.RLock()
 	defer conf.RUnlock()
 	rd := render.New(render.Options{IndentJSON: true})
-	rd.JSON(w, http.StatusOK, conf)
+	rd.JSON(w, http.StatusOK, conf.getValidConf())
 }
 
 func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +337,68 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 	data, err := schedule.EncodeConfig(conf)
 	if err != nil {
 		return err
-
 	}
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
+}
+
+func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster opt.Cluster) bool {
+	querySupport := cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
+	if querySupport != conf.lastQuerySupported {
+		log.Info("query supported changed",
+			zap.Bool("last-query-support", conf.lastQuerySupported),
+			zap.String("cluster-version", cluster.GetOpts().GetClusterVersion().String()),
+			zap.Reflect("config", conf),
+			zap.Reflect("valid-config", conf.getValidConf()))
+		conf.lastQuerySupported = querySupport
+	}
+	return querySupport
+}
+
+type prioritiesConfig struct {
+	read        []string
+	writeLeader []string
+	writePeer   []string
+}
+
+func (conf *hotRegionSchedulerConfig) apply(p prioritiesConfig) {
+	conf.ReadPriorities = append(p.read[:0:0], p.read...)
+	conf.WriteLeaderPriorities = append(p.writeLeader[:0:0], p.writeLeader...)
+	conf.WritePeerPriorities = append(p.writePeer[:0:0], p.writePeer...)
+}
+
+func getReadPriorities(c *prioritiesConfig) []string {
+	return c.read
+}
+
+func getWriteLeaderPriorities(c *prioritiesConfig) []string {
+	return c.writeLeader
+}
+
+func getWritePeerPriorities(c *prioritiesConfig) []string {
+	return c.writePeer
+}
+
+// adjustConfig will adjust config for cluster with low version tikv
+// because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
+func adjustConfig(querySupport bool, origins []string, getPriorities func(*prioritiesConfig) []string) []string {
+	withQuery := slice.AnyOf(origins, func(i int) bool {
+		return origins[i] == QueryPriority
+	})
+	compatibles := getPriorities(&compatibleConfig)
+	if !querySupport && withQuery {
+		return compatibles
+	}
+
+	defaults := getPriorities(&defaultConfig)
+	isLegal := slice.AllOf(origins, func(i int) bool {
+		return origins[i] == BytePriority || origins[i] == KeyPriority || origins[i] == QueryPriority
+	})
+	if len(defaults) == len(origins) && isLegal && origins[0] != origins[1] {
+		return origins
+	}
+
+	if !querySupport {
+		return compatibles
+	}
+	return defaults
 }

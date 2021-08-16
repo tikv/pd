@@ -118,7 +118,6 @@ func isExpectTime(expect, layout string, isBeforeThanExpect bool) func(time.Time
 	return func(current time.Time) bool {
 		return current.Before(expectTime) == isBeforeThanExpect
 	}
-
 }
 
 func currentTime(layout string) func(content string) (time.Time, error) {

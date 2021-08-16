@@ -353,7 +353,6 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		}
 		s.deleteScheduler(createdName, c)
 	}
-
 }
 
 func (s *testScheduleSuite) TestDisable(c *C) {

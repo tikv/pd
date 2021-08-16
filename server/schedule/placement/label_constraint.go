@@ -66,7 +66,7 @@ func (c *LabelConstraint) MatchStore(store *core.StoreInfo) bool {
 }
 
 // For backward compatibility. Need to remove later.
-var legacyExclusiveLabels = []string{"engine", "exclusive"}
+var legacyExclusiveLabels = []string{core.EngineKey, "exclusive"}
 
 // If a store has exclusiveLabels, it can only be selected when the label is
 // explicitly specified in constraints.

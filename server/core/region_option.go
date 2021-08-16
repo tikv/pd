@@ -187,6 +187,26 @@ func SetReadKeys(v uint64) RegionCreateOption {
 	}
 }
 
+// SetReadQuery sets the read query for the region.
+func SetReadQuery(v uint64) RegionCreateOption {
+	q := &pdpb.QueryStats{
+		Coprocessor: v / 3,
+		Get:         v / 3,
+		Scan:        v / 3,
+	}
+	return SetQueryStats(q)
+}
+
+// SetWrittenQuery sets the write query for the region.
+func SetWrittenQuery(v uint64) RegionCreateOption {
+	q := &pdpb.QueryStats{
+		Put:         v / 3,
+		Delete:      v / 3,
+		DeleteRange: v / 3,
+	}
+	return SetQueryStats(q)
+}
+
 // SetQueryStats sets the query stats for the region.
 func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 	return func(region *RegionInfo) {

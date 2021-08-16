@@ -38,6 +38,7 @@ type CheckerController struct {
 	ruleChecker       *checker.RuleChecker
 	mergeChecker      *checker.MergeChecker
 	jointStateChecker *checker.JointStateChecker
+	priorityChecker   *checker.PriorityChecker
 	regionWaitingList cache.Cache
 }
 
@@ -54,6 +55,7 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager 
 		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager, regionWaitingList),
 		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
 		jointStateChecker: checker.NewJointStateChecker(cluster),
+		priorityChecker:   checker.NewPriorityChecker(cluster),
 		regionWaitingList: regionWaitingList,
 	}
 }
@@ -67,9 +69,10 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 	if op := c.jointStateChecker.Check(region); op != nil {
 		return []*operator.Operator{op}
 	}
+	fit := c.priorityChecker.Check(region)
 
 	if c.opts.IsPlacementRulesEnabled() {
-		if op := c.ruleChecker.Check(region); op != nil {
+		if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
 			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
 			}
@@ -121,4 +124,14 @@ func (c *CheckerController) AddWaitingRegion(region *core.RegionInfo) {
 // RemoveWaitingRegion removes the region from the waiting list.
 func (c *CheckerController) RemoveWaitingRegion(id uint64) {
 	c.regionWaitingList.Remove(id)
+}
+
+// GetPriorityRegions returns the region in priority queue
+func (c *CheckerController) GetPriorityRegions() []uint64 {
+	return c.priorityChecker.GetPriorityRegions()
+}
+
+// RemovePriorityRegions removes priority region from priority queue
+func (c *CheckerController) RemovePriorityRegions(id uint64) {
+	c.priorityChecker.RemovePriorityRegion(id)
 }

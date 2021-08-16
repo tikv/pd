@@ -687,6 +687,14 @@
           "legendFormat": "Tombstone Stores",
           "refId": "G",
           "step": 20
+        },
+        {
+          "expr": "sum(pd_cluster_status{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"store_slow_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Slow Stores",
+          "refId": "H",
+          "step": 20
         }
       ],
       "timeFrom": "1s",
@@ -1352,101 +1360,95 @@
           "type": "table"
         },
         {
-          "cacheTimeout":null,
-          "colorBackground":false,
-          "colorValue":false,
-          "colors":[
+          "cacheTimeout": null,
+          "colorBackground": false,
+          "colorValue": false,
+          "colors": [
             "#299c46",
             "rgba(237, 129, 40, 0.89)",
             "#d44a3a"
           ],
-          "datasource":"tidb-cluster",
-          "fieldConfig":{
-            "defaults":{
-              "custom":{
-                
-              }
+          "datasource": "tidb-cluster",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
             },
-            "overrides":[
-              
-            ]
+            "overrides": []
           },
-          "format":"none",
-          "gauge":{
-            "maxValue":100,
-            "minValue":0,
-            "show":false,
-            "thresholdLabels":false,
-            "thresholdMarkers":true
+          "format": "none",
+          "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
           },
-          "gridPos":{
-            "h":4,
-            "w":5,
-            "x":9,
-            "y":17
+          "gridPos": {
+            "h": 4,
+            "w": 5,
+            "x": 9,
+            "y": 17
           },
-          "hideTimeOverride":true,
-          "id":115,
-          "interval":null,
-          "links":[
-            
-          ],
-          "mappingType":1,
-          "mappingTypes":[
+          "hideTimeOverride": true,
+          "id": 115,
+          "interval": null,
+          "links": [],
+          "mappingType": 1,
+          "mappingTypes": [
             {
-              "name":"value to text",
-              "value":1
+              "name": "value to text",
+              "value": 1
             },
             {
-              "name":"range to text",
-              "value":2
+              "name": "range to text",
+              "value": 2
             }
           ],
-          "maxDataPoints":100,
-          "nullPointMode":"connected",
-          "nullText":null,
-          "postfix":"",
-          "postfixFontSize":"50%",
-          "prefix":"",
-          "prefixFontSize":"50%",
-          "rangeMaps":[
+          "maxDataPoints": 100,
+          "nullPointMode": "connected",
+          "nullText": null,
+          "postfix": "",
+          "postfixFontSize": "50%",
+          "prefix": "",
+          "prefixFontSize": "50%",
+          "rangeMaps": [
             {
-              "from":"null",
-              "text":"N/A",
-              "to":"null"
+              "from": "null",
+              "text": "N/A",
+              "to": "null"
             }
           ],
-          "sparkline":{
-            "fillColor":"rgba(31, 118, 189, 0.18)",
-            "full":false,
-            "lineColor":"rgb(31, 120, 193)",
-            "show":false
+          "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
           },
-          "tableColumn":"idalloc",
-          "targets":[
+          "tableColumn": "idalloc",
+          "targets": [
             {
-              "expr":"pd_cluster_id{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
-              "format":"time_series",
-              "hide":false,
-              "instant":true,
-              "intervalFactor":2,
-              "legendFormat":"{{type}}",
-              "refId":"A"
+              "expr": "pd_cluster_id{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
+              "format": "time_series",
+              "hide": false,
+              "instant": true,
+              "intervalFactor": 2,
+              "legendFormat": "{{type}}",
+              "refId": "A"
             }
           ],
-          "thresholds":"",
-          "timeFrom":"1s",
-          "title":"Current ID allocation",
-          "type":"singlestat",
-          "valueFontSize":"80%",
-          "valueMaps":[
+          "thresholds": "",
+          "timeFrom": "1s",
+          "title": "Current ID allocation",
+          "type": "singlestat",
+          "valueFontSize": "80%",
+          "valueMaps": [
             {
-              "op":"=",
-              "text":"N/A",
-              "value":"null"
+              "op": "=",
+              "text": "N/A",
+              "value": "null"
             }
           ],
-          "valueName":"avg"
+          "valueName": "avg"
         },
         {
           "aliasColors": {},
@@ -4406,6 +4408,15 @@
               "legendFormat": "{{address}}-store-{{store}}",
               "refId": "A",
               "step": 4
+            },
+            {
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_regions_write_rate_bytes\"}",
+              "format": "time_series",
+              "hide": true,
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}-regions",
+              "refId": "B",
+              "step": 4
             }
           ],
           "thresholds": [],
@@ -4597,6 +4608,15 @@
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
               "refId": "A",
+              "step": 4
+            },
+            {
+              "expr": "pd_scheduler_store_status{tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_regions_write_rate_keys\"}",
+              "format": "time_series",
+              "hide": true,
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}-regions",
+              "refId": "B",
               "step": 4
             }
           ],
