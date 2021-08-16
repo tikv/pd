@@ -401,15 +401,15 @@ func (bs *balanceSolver) init() {
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
 
-	querySupport := bs.sche.conf.checkQuerySupport(bs.cluster)
-	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities(querySupport))
+	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
 	return dim == bs.firstPriority || dim == bs.secondPriority
 }
 
-func (bs *balanceSolver) getPriorities(querySupport bool) []string {
+func (bs *balanceSolver) getPriorities() []string {
+	querySupport := bs.sche.conf.checkQuerySupport(bs.cluster)
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	switch bs.rwTy {
