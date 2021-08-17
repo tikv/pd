@@ -52,6 +52,8 @@ func (h *regionLabelHandler) GetAllRules(w http.ResponseWriter, r *http.Request)
 // @Summary Update region label rules in batch.
 // @Produce json
 // @Success 200 {array} labeler.LabelRulePatch
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/region-label/rules [patch]
 func (h *regionLabelHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
@@ -75,7 +77,9 @@ func (h *regionLabelHandler) Patch(w http.ResponseWriter, r *http.Request) {
 // @Param body body []string true "IDs of query rules"
 // @Produce json
 // @Success 200 {array} labeler.LabelRule
+// @Failure 400 {string} string "The input is invalid."
 // @Failure 404 {string} string "The rule does not exist."
+// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/region-label/rule/ids [get]
 func (h *regionLabelHandler) GetRulesByIDs(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
