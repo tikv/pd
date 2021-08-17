@@ -13,12 +13,6 @@
 
 package labeler
 
-import (
-	"bytes"
-
-	"github.com/tikv/pd/server/core"
-)
-
 // RegionLabel is the label of a region.
 type RegionLabel struct {
 	Key   string `json:"key"`
@@ -33,15 +27,6 @@ type LabelRule struct {
 	Rule     interface{}   `json:"rule"`
 }
 
-// IsMatch returns if the region matches the rule.
-func (r *LabelRule) IsMatch(region *core.RegionInfo) bool {
-	switch r.RuleType {
-	case KeyRange:
-		return r.Rule.(*KeyRangeRule).IsMatch(region)
-	}
-	return false
-}
-
 const (
 	// KeyRange is the rule type that labels regions by key range.
 	KeyRange = "key-range"
@@ -53,11 +38,6 @@ type KeyRangeRule struct {
 	StartKeyHex string `json:"start_key"` // hex format start key, for marshal/unmarshal
 	EndKey      []byte `json:"-"`         // range end key
 	EndKeyHex   string `json:"end_key"`   // hex format end key, for marshal/unmarshal
-}
-
-// IsMatch returns if the region matches the rule.
-func (r *KeyRangeRule) IsMatch(region *core.RegionInfo) bool {
-	return bytes.Compare(region.GetStartKey(), r.StartKey) >= 0 && bytes.Compare(region.GetEndKey(), r.EndKey) <= 0
 }
 
 // LabelRulePatch is the patch to update the label rules.
