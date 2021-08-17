@@ -733,6 +733,13 @@ func (mc *Cluster) DisableFeature(fs ...versioninfo.Feature) {
 	}
 }
 
+// EnableFeature marks that these features are supported in the cluster.
+func (mc *Cluster) EnableFeature(fs ...versioninfo.Feature) {
+	for _, f := range fs {
+		delete(mc.disabledFeatures, f)
+	}
+}
+
 // IsFeatureSupported checks if the feature is supported by current cluster.
 func (mc *Cluster) IsFeatureSupported(f versioninfo.Feature) bool {
 	_, ok := mc.disabledFeatures[f]
