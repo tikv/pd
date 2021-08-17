@@ -153,10 +153,10 @@ func (bc *BasicCluster) AttachAvailableFunc(storeID uint64, limitType storelimit
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
+func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount, regionCount, witnessCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderSize, regionSize)
+	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, witnessCount, pendingPeerCount, leaderSize, regionSize)
 }
 
 const randomRegionMaxRetry = 10
@@ -165,6 +165,14 @@ const randomRegionMaxRetry = 10
 func (bc *BasicCluster) RandFollowerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
 	bc.RLock()
 	regions := bc.Regions.RandFollowerRegions(storeID, ranges, randomRegionMaxRetry)
+	bc.RUnlock()
+	return bc.selectRegion(regions, opts...)
+}
+
+// RandWitnessRegion returns a random witness region on the store.
+func (bc *BasicCluster) RandWitnessRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
+	bc.RLock()
+	regions := bc.Regions.RandWitnessRegions(storeID, ranges, randomRegionMaxRetry)
 	bc.RUnlock()
 	return bc.selectRegion(regions, opts...)
 }
@@ -223,7 +231,7 @@ func (bc *BasicCluster) GetStoreCount() int {
 func (bc *BasicCluster) GetStoreRegionCount(storeID uint64) int {
 	bc.RLock()
 	defer bc.RUnlock()
-	return bc.Regions.GetStoreLeaderCount(storeID) + bc.Regions.GetStoreFollowerCount(storeID) + bc.Regions.GetStoreLearnerCount(storeID)
+	return bc.Regions.GetStoreLeaderCount(storeID) + bc.Regions.GetStoreFollowerCount(storeID) + bc.Regions.GetStoreWitnessCount(storeID) + bc.Regions.GetStoreLearnerCount(storeID)
 }
 
 // GetStoreLeaderCount get the total count of a store's leader RegionInfo.
@@ -231,6 +239,13 @@ func (bc *BasicCluster) GetStoreLeaderCount(storeID uint64) int {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Regions.GetStoreLeaderCount(storeID)
+}
+
+// GetStoreWitnessCount gets the total count of a store's witness RegionInfo.
+func (bc *BasicCluster) GetStoreWitnessCount(storeID uint64) int {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetStoreWitnessCount(storeID)
 }
 
 // GetStoreFollowerCount get the total count of a store's follower RegionInfo.
@@ -374,6 +389,7 @@ func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
 type RegionSetInformer interface {
 	GetRegionCount() int
 	RandFollowerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
+	RandWitnessRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	RandLeaderRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	RandLearnerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	RandPendingRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo

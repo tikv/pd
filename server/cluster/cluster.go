@@ -757,8 +757,9 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	regionCount := c.core.GetStoreRegionCount(id)
 	pendingPeerCount := c.core.GetStorePendingPeerCount(id)
 	leaderRegionSize := c.core.GetStoreLeaderRegionSize(id)
+	witnessCount := c.core.GetStoreWitnessCount(id)
 	regionSize := c.core.GetStoreRegionSize(id)
-	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
+	c.core.UpdateStoreStatus(id, leaderCount, regionCount, witnessCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
 //nolint:unused
@@ -827,6 +828,11 @@ func (c *RaftCluster) RandLeaderRegion(storeID uint64, ranges []core.KeyRange, o
 // RandFollowerRegion returns a random region that has a follower on the store.
 func (c *RaftCluster) RandFollowerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
 	return c.core.RandFollowerRegion(storeID, ranges, opts...)
+}
+
+// RandWitnessRegion returns a random region that has a follower on the store.
+func (c *RaftCluster) RandWitnessRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
+	return c.core.RandWitnessRegion(storeID, ranges, opts...)
 }
 
 // RandPendingRegion returns a random region that has a pending peer on the store.

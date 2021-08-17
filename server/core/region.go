@@ -654,6 +654,9 @@ func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) 
 			if tree, ok := r.followers[storeID]; ok {
 				tree.updateStat(origin, region)
 			}
+			if tree, ok := r.witnesses[storeID]; ok {
+				tree.updateStat(origin, region)
+			}
 		}
 	}
 	for _, peer := range region.GetLearners() {
@@ -689,6 +692,7 @@ func (r *RegionsInfo) removeRegionFromSubTree(region *RegionInfo) {
 		storeID := peer.GetStoreId()
 		r.leaders[storeID].remove(region)
 		r.followers[storeID].remove(region)
+		r.witnesses[storeID].remove(region)
 		r.learners[storeID].remove(region)
 		r.pendingPeers[storeID].remove(region)
 	}
@@ -808,6 +812,11 @@ func (r *RegionsInfo) GetStoreFollowerRegionSize(storeID uint64) int64 {
 	return r.followers[storeID].TotalSize()
 }
 
+// GetStoreWitnessRegionSize get total size of store's witness regions
+func (r *RegionsInfo) GetStoreWitnessRegionSize(storeID uint64) int64 {
+	return r.witnesses[storeID].TotalSize()
+}
+
 // GetStoreLearnerRegionSize get total size of store's learner regions
 func (r *RegionsInfo) GetStoreLearnerRegionSize(storeID uint64) int64 {
 	return r.learners[storeID].TotalSize()
@@ -815,7 +824,8 @@ func (r *RegionsInfo) GetStoreLearnerRegionSize(storeID uint64) int64 {
 
 // GetStoreRegionSize get total size of store's regions
 func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) int64 {
-	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID) + r.GetStoreLearnerRegionSize(storeID)
+	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID) +
+		r.GetStoreWitnessRegionSize(storeID) + r.GetStoreLearnerRegionSize(storeID)
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
@@ -834,7 +844,7 @@ func (r *RegionsInfo) GetRegionCount() int {
 
 // GetStoreRegionCount gets the total count of a store's leader, follower and learner RegionInfo by storeID
 func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
-	return r.GetStoreLeaderCount(storeID) + r.GetStoreFollowerCount(storeID) + r.GetStoreLearnerCount(storeID)
+	return r.GetStoreLeaderCount(storeID) + r.GetStoreFollowerCount(storeID) + r.GetStoreWitnessCount(storeID) + r.GetStoreLearnerCount(storeID)
 }
 
 // GetStorePendingPeerCount gets the total count of a store's region that includes pending peer
@@ -845,6 +855,11 @@ func (r *RegionsInfo) GetStorePendingPeerCount(storeID uint64) int {
 // GetStoreLeaderCount get the total count of a store's leader RegionInfo
 func (r *RegionsInfo) GetStoreLeaderCount(storeID uint64) int {
 	return r.leaders[storeID].length()
+}
+
+// GetStoreWitnessCount gets the count of a store's witness RegionInfo.
+func (r *RegionsInfo) GetStoreWitnessCount(storeID uint64) int {
+	return r.witnesses[storeID].length()
 }
 
 // GetStoreFollowerCount get the total count of a store's follower RegionInfo
@@ -885,6 +900,16 @@ func (r *RegionsInfo) RandFollowerRegion(storeID uint64, ranges []KeyRange) *Reg
 // RandFollowerRegions randomly gets a store's n follower regions.
 func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
 	return r.followers[storeID].RandomRegions(n, ranges)
+}
+
+// RandWitnessRegion randomly gets a store's witness region.
+func (r *RegionsInfo) RandWitnessRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
+	return r.witnesses[storeID].RandomRegion(ranges)
+}
+
+// RandWitnessRegions randomly gets a store's n follower regions.
+func (r *RegionsInfo) RandWitnessRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
+	return r.witnesses[storeID].RandomRegions(n, ranges)
 }
 
 // RandLearnerRegion randomly gets a store's learner region.

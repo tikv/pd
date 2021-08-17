@@ -16,6 +16,7 @@ package schedule
 import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
 )
@@ -52,6 +53,7 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 	leaderSize := r.subCluster.GetStoreLeaderRegionSize(id)
 	regionCount := r.subCluster.GetStoreRegionCount(id)
 	regionSize := r.subCluster.GetStoreRegionSize(id)
+	witnessCount := r.subCluster.GetStoreWitnessCount(id)
 	pendingPeerCount := r.subCluster.GetStorePendingPeerCount(id)
 	newStats := proto.Clone(s.GetStoreStats()).(*pdpb.StoreStats)
 	newStats.UsedSize = uint64(float64(regionSize)/amplification) * (1 << 20)
@@ -60,6 +62,7 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 		core.SetNewStoreStats(newStats), // it means to use instant value directly
 		core.SetLeaderCount(leaderCount),
 		core.SetRegionCount(regionCount),
+		core.SetWitnessCount(witnessCount),
 		core.SetPendingPeerCount(pendingPeerCount),
 		core.SetLeaderSize(leaderSize),
 		core.SetRegionSize(regionSize),
@@ -102,6 +105,12 @@ func (r *RangeCluster) GetTolerantSizeRatio() float64 {
 // RandFollowerRegion returns a random region that has a follower on the store.
 func (r *RangeCluster) RandFollowerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
 	return r.subCluster.RandFollowerRegion(storeID, ranges, opts...)
+}
+
+// RandWitnessRegion returns a random region that has a witness on the store.
+func (r *RangeCluster) RandWitnessRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
+	log.S().Info("range rand witness")
+	return r.subCluster.RandWitnessRegion(storeID, ranges, opts...)
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.

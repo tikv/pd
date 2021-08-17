@@ -37,6 +37,8 @@ const (
 	OpHotRegion
 	// Include peer addition or removal. This means that this operator may take a long time.
 	OpRegion
+	// Include witness peer addition or removal. This means that this operator may take a long time.
+	OpWitness
 	// Include leader transfer.
 	OpLeader
 	// Initiated by admin.
@@ -47,6 +49,7 @@ const (
 var flagToName = map[OpKind]string{
 	OpLeader:    "leader",
 	OpRegion:    "region",
+	OpWitness:   "witness",
 	OpSplit:     "split",
 	OpAdmin:     "admin",
 	OpHotRegion: "hot-region",
@@ -58,6 +61,7 @@ var flagToName = map[OpKind]string{
 var nameToFlag = map[string]OpKind{
 	"leader":     OpLeader,
 	"region":     OpRegion,
+	"witness":    OpWitness,
 	"split":      OpSplit,
 	"admin":      OpAdmin,
 	"hot-region": OpHotRegion,

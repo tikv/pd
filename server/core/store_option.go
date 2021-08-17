@@ -131,6 +131,13 @@ func SetRegionCount(regionCount int) StoreCreateOption {
 	}
 }
 
+// SetWitnessCount sets the Witness count for the store.
+func SetWitnessCount(witnessCount int) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.witnessCount = witnessCount
+	}
+}
+
 // SetPendingPeerCount sets the pending peer count for the store.
 func SetPendingPeerCount(pendingPeerCount int) StoreCreateOption {
 	return func(store *StoreInfo) {

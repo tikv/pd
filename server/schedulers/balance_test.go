@@ -1291,6 +1291,55 @@ func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 	scheduleAndApplyOperator(tc, hb, 100)
 }
 
+var _ = Suite(&testBalanceWitnessSchedulerSuite{})
+
+type testBalanceWitnessSchedulerSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testBalanceWitnessSchedulerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testBalanceWitnessSchedulerSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+func (s *testBalanceWitnessSchedulerSuite) TestWitness(c *C) {
+	opt := config.NewTestOptions()
+	// TODO: enable placementrules
+	opt.SetPlacementRuleEnabled(false)
+	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
+
+	sb, err := schedule.CreateScheduler(BalanceWitnessType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceWitnessType, []string{"", ""}))
+	c.Assert(err, IsNil)
+
+	opt.SetMaxReplicas(3)
+	opt.SetWitnessCount(1)
+
+	// Add stores 1,2,3,4.
+	tc.AddRegionStore(1, 3)
+	tc.Stores.SetLeaderCount(1, 2)
+	tc.AddRegionStore(2, 3)
+	tc.Stores.SetLeaderCount(2, 2)
+	tc.AddRegionStore(3, 3)
+	tc.Stores.SetWitnessCount(3, 2)
+	tc.AddRegionStore(4, 3)
+	tc.Stores.SetWitnessCount(4, 2)
+
+	tc.AddRegionWithWitness(1, 1, 3, 2)
+	tc.AddRegionWithWitness(2, 1, 3, 4)
+	tc.AddRegionWithWitness(3, 2, 4, 1)
+	tc.AddRegionWithWitness(4, 2, 4, 3)
+
+	ops := sb.Schedule(tc)
+	c.Assert(len(ops) > 0, IsTrue)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], operator.OpKind(0), 4, 1)
+}
+
 // scheduleAndApplyOperator will try to schedule for `count` times and apply the operator if the operator is created.
 func scheduleAndApplyOperator(tc *mockcluster.Cluster, hb schedule.Scheduler, count int) {
 	limit := 0

@@ -314,6 +314,19 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, follow
 	return region
 }
 
+// AddRegionWithWitness adds region with specified leader, witness and followers.
+func (mc *Cluster) AddRegionWithWitness(regionID uint64, leaderStoreID, witnessStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
+	origin := mc.newMockRegionInfo(regionID, leaderStoreID, append(followerStoreIDs, witnessStoreID)...)
+	for _, peer := range origin.GetPeers() {
+		if peer.StoreId == witnessStoreID {
+			peer.Witness = true
+		}
+	}
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
+	mc.PutRegion(region)
+	return region
+}
+
 // AddRegionWithLearner adds region with specified leader, followers and learners.
 func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, followerStoreIDs, learnerStoreIDs []uint64) *core.RegionInfo {
 	origin := mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)

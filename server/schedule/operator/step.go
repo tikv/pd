@@ -116,6 +116,9 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to.RegionSize += regionSize
 	to.RegionCount++
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+	if ap.Witness {
+		to.WitnessCount++
+	}
 }
 
 // CheckSafety checks if the step meets the safety properties.
@@ -178,6 +181,9 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	to.RegionSize += regionSize
 	to.RegionCount++
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+	if al.Witness {
+		to.WitnessCount++
+	}
 }
 
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
@@ -222,6 +228,7 @@ func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionI
 // RemovePeer is an OpStep that removes a region peer.
 type RemovePeer struct {
 	FromStore, PeerID uint64
+	Witness           bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -263,6 +270,9 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	from.RegionSize -= regionSize
 	from.RegionCount--
 	from.AdjustStepCost(storelimit.RemovePeer, regionSize)
+	if rp.Witness {
+		from.WitnessCount--
+	}
 }
 
 // MergeRegion is an OpStep that merge two regions.
@@ -309,6 +319,9 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 			if region.GetLeader().GetId() == peer.GetId() {
 				o.LeaderCount--
 			}
+			if peer.Witness {
+				o.WitnessCount--
+			}
 		}
 	}
 }
@@ -341,6 +354,9 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 		inf.RegionCount++
 		if region.GetLeader().GetId() == peer.GetId() {
 			inf.LeaderCount++
+		}
+		if peer.Witness {
+			inf.WitnessCount++
 		}
 	}
 }
@@ -393,6 +409,9 @@ func (ap AddLightPeer) Influence(opInfluence OpInfluence, region *core.RegionInf
 
 	to.RegionSize += region.GetApproximateSize()
 	to.RegionCount++
+	if ap.Witness {
+		to.WitnessCount++
+	}
 }
 
 // AddLightLearner is an OpStep that adds a region learner peer without considering the influence.
@@ -444,6 +463,9 @@ func (al AddLightLearner) Influence(opInfluence OpInfluence, region *core.Region
 
 	to.RegionSize += region.GetApproximateSize()
 	to.RegionCount++
+	if al.Witness {
+		to.WitnessCount++
+	}
 }
 
 // DemoteFollower is an OpStep that demotes a region follower peer to learner.

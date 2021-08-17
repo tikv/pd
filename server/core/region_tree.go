@@ -279,11 +279,12 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 	if t.length() == 0 {
 		return nil
 	}
-
+	dedup := map[uint64]bool{}
 	regions := make([]*RegionInfo, 0, n)
 
 	for i := 0; i < n; i++ {
-		if region := t.RandomRegion(ranges); region != nil {
+		if region := t.RandomRegion(ranges); region != nil && !dedup[region.GetID()] {
+			dedup[region.GetID()] = true
 			regions = append(regions, region)
 		}
 	}

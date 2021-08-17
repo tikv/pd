@@ -42,6 +42,7 @@ type StoreInfo struct {
 	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
 	leaderCount         int
 	regionCount         int
+	witnessCount        int
 	leaderSize          int64
 	regionSize          int64
 	pendingPeerCount    int
@@ -74,6 +75,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
+		witnessCount:        s.witnessCount,
 		leaderSize:          s.leaderSize,
 		regionSize:          s.regionSize,
 		pendingPeerCount:    s.pendingPeerCount,
@@ -97,6 +99,7 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
+		witnessCount:        s.witnessCount,
 		leaderSize:          s.leaderSize,
 		regionSize:          s.regionSize,
 		pendingPeerCount:    s.pendingPeerCount,
@@ -189,6 +192,11 @@ func (s *StoreInfo) GetLeaderCount() int {
 // GetRegionCount returns the Region count of the store.
 func (s *StoreInfo) GetRegionCount() int {
 	return s.regionCount
+}
+
+// GetWitnessCount returns the Wtiness count of the store.
+func (s *StoreInfo) GetWitnessCount() int {
+	return s.witnessCount
 }
 
 // GetLeaderSize returns the leader size of the store.
@@ -336,6 +344,11 @@ func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
 	return score / math.Max(s.GetRegionWeight(), minWeight)
 }
 
+// WitnessScore returns the store's witness score.
+func (s *StoreInfo) WitnessScore(delta int) float64 {
+	return float64(s.GetWitnessCount() + delta)
+}
+
 // StorageSize returns store's used storage size reported from tikv.
 func (s *StoreInfo) StorageSize() uint64 {
 	return s.GetUsedSize()
@@ -369,6 +382,8 @@ func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
 		return uint64(s.GetLeaderCount())
 	case RegionKind:
 		return uint64(s.GetRegionCount())
+	case WitnessKind:
+		return uint64(s.GetWitnessCount())
 	default:
 		return 0
 	}
@@ -381,6 +396,8 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 		return s.GetLeaderSize()
 	case RegionKind:
 		return s.GetRegionSize()
+	case WitnessKind:
+		return int64(s.GetWitnessCount())
 	default:
 		return 0
 	}
@@ -395,7 +412,7 @@ func (s *StoreInfo) ResourceWeight(kind ResourceKind) float64 {
 			return minWeight
 		}
 		return leaderWeight
-	case RegionKind:
+	case RegionKind, WitnessKind:
 		regionWeight := s.GetRegionWeight()
 		if regionWeight <= 0 {
 			return minWeight
@@ -604,6 +621,13 @@ func (s *StoresInfo) SetRegionCount(storeID uint64, regionCount int) {
 	}
 }
 
+// SetWitnessCount sets the witness count to a storeInfo.
+func (s *StoresInfo) SetWitnessCount(storeID uint64, witnessCount int) {
+	if store, ok := s.stores[storeID]; ok {
+		s.stores[storeID] = store.Clone(SetWitnessCount(witnessCount))
+	}
+}
+
 // SetPendingPeerCount sets the pending count to a storeInfo.
 func (s *StoresInfo) SetPendingPeerCount(storeID uint64, pendingPeerCount int) {
 	if store, ok := s.stores[storeID]; ok {
@@ -626,10 +650,11 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
+func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount, regionCount, witnessCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),
+			SetWitnessCount(witnessCount),
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),
 			SetRegionSize(regionSize))
