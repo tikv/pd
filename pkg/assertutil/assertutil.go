@@ -35,6 +35,7 @@ func (c *Checker) failNow() {
 func (c *Checker) AssertNil(obtained interface{}) {
 	if c.IsNil == nil {
 		c.failNow()
+		return
 	}
 	c.IsNil(obtained)
 }
