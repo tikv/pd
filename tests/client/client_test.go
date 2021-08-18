@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tikv/pd/pkg/assertutil"
+
 	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
@@ -519,9 +521,17 @@ type testClientSuite struct {
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 }
 
+func checkerWithNilAssert(c *C) *assertutil.Checker {
+	checker := assertutil.NewChecker(c.FailNow)
+	checker.IsNil = func(obtained interface{}) {
+		c.Assert(obtained, IsNil)
+	}
+	return checker
+}
+
 func (s *testClientSuite) SetUpSuite(c *C) {
 	var err error
-	s.srv, s.cleanup, err = server.NewTestServer(c)
+	s.srv, s.cleanup, err = server.NewTestServer(checkerWithNilAssert(c))
 	c.Assert(err, IsNil)
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.srv.GetAddr())
 

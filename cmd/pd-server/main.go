@@ -40,6 +40,9 @@ import (
 )
 
 func main() {
+	if flag.Lookup("check.v") != nil {
+		panic("check.v flag set")
+	}
 	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 

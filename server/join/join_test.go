@@ -16,6 +16,8 @@ package join
 import (
 	"testing"
 
+	"github.com/tikv/pd/pkg/assertutil"
+
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -29,9 +31,17 @@ var _ = Suite(&testJoinServerSuite{})
 
 type testJoinServerSuite struct{}
 
+func checkerWithNilAssert(c *C) *assertutil.Checker {
+	checker := assertutil.NewChecker(c.FailNow)
+	checker.IsNil = func(obtained interface{}) {
+		c.Assert(obtained, IsNil)
+	}
+	return checker
+}
+
 // A PD joins itself.
 func (s *testJoinServerSuite) TestPDJoinsItself(c *C) {
-	cfg := server.NewTestSingleConfig(c)
+	cfg := server.NewTestSingleConfig(checkerWithNilAssert(c))
 	defer testutil.CleanServer(cfg.DataDir)
 	cfg.Join = cfg.AdvertiseClientUrls
 	c.Assert(PrepareJoinCluster(cfg), NotNil)

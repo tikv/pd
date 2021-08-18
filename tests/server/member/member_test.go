@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tikv/pd/pkg/assertutil"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -42,6 +44,14 @@ func Test(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func checkerWithNilAssert(c *C) *assertutil.Checker {
+	checker := assertutil.NewChecker(c.FailNow)
+	checker.IsNil = func(obtained interface{}) {
+		c.Assert(obtained, IsNil)
+	}
+	return checker
 }
 
 var _ = Suite(&memberTestSuite{})
@@ -320,7 +330,7 @@ type leaderTestSuite struct {
 
 func (s *leaderTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.cfg = server.NewTestSingleConfig(c)
+	s.cfg = server.NewTestSingleConfig(checkerWithNilAssert(c))
 	s.wg.Add(1)
 	s.done = make(chan bool)
 	svr, err := server.CreateServer(s.ctx, s.cfg)
