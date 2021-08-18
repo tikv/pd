@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tikv/pd/server/schedule/opt"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
@@ -821,8 +823,9 @@ func (s *scheduleController) Stop() {
 
 func (s *scheduleController) Schedule() []*operator.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
+		cacheCluster := opt.NewCacheCluster(s.cluster)
 		// If we have schedule, reset interval to the minimal interval.
-		if op := s.Scheduler.Schedule(s.cluster); op != nil {
+		if op := s.Scheduler.Schedule(cacheCluster); op != nil {
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return op
 		}
