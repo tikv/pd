@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
@@ -520,9 +521,17 @@ type testClientSuite struct {
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 }
 
+func checkerWithNilAssert(c *C) *assertutil.Checker {
+	checker := assertutil.NewChecker(c.FailNow)
+	checker.IsNil = func(obtained interface{}) {
+		c.Assert(obtained, IsNil)
+	}
+	return checker
+}
+
 func (s *testClientSuite) SetUpSuite(c *C) {
 	var err error
-	s.srv, s.cleanup, err = server.NewTestServer(c)
+	s.srv, s.cleanup, err = server.NewTestServer(checkerWithNilAssert(c))
 	c.Assert(err, IsNil)
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.srv.GetAddr())
 
