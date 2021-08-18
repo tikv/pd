@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
@@ -114,9 +115,10 @@ type RaftCluster struct {
 	quit         chan struct{}
 	regionSyncer *syncer.RegionSyncer
 
-	ruleManager *placement.RuleManager
-	etcdClient  *clientv3.Client
-	httpClient  *http.Client
+	ruleManager   *placement.RuleManager
+	regionLabeler *labeler.RegionLabeler
+	etcdClient    *clientv3.Client
+	httpClient    *http.Client
 
 	replicationMode *replication.ModeManager
 	traceRegionFlow bool
@@ -238,6 +240,11 @@ func (c *RaftCluster) Start(s Server) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.storage)
+	if err != nil {
+		return err
 	}
 
 	c.componentManager = component.NewManager(c.storage)
@@ -1502,6 +1509,13 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 // FitRegion tries to fit the region with placement rules.
 func (c *RaftCluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
 	return c.GetRuleManager().FitRegion(c, region)
+}
+
+// GetRegionLabeler returns the region labeler.
+func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regionLabeler
 }
 
 type prepareChecker struct {
