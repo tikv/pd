@@ -50,15 +50,16 @@ func (c *SplitChecker) GetType() string {
 func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("split_checker", "check").Inc()
 
+	start, end := region.GetStartKey(), region.GetEndKey()
 	// We may consider to merge labeler split keys and rule split keys together
 	// before creating operator. It can help to reduce operator count. However,
 	// handle them separately helps to understand the reason for the split.
 	desc := "labeler-split-region"
-	keys := c.labeler.GetSplitKeys(region.GetStartKey(), region.GetEndKey())
+	keys := c.labeler.GetSplitKeys(start, end)
 
 	if len(keys) == 0 && c.cluster.GetOpts().IsPlacementRulesEnabled() {
 		desc = "rule-split-region"
-		keys = c.ruleManager.GetSplitKeys(region.GetStartKey(), region.GetEndKey())
+		keys = c.ruleManager.GetSplitKeys(start, end)
 	}
 
 	if len(keys) == 0 {
