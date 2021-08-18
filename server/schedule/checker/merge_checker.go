@@ -171,7 +171,7 @@ func AllowMerge(cluster opt.Cluster, region *core.RegionInfo, adjacent *core.Reg
 
 	// The interface probe is used here to get the rule manager and region
 	// labeler because AllowMerge is also used by the random merge scheduler,
-	// where it is not easy to get references to concret objects.
+	// where it is not easy to get references to concrete objects.
 	// We can consider using dependency injection techniques to optimize in
 	// the future.
 
