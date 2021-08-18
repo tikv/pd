@@ -70,6 +70,8 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 
 	if len(fit.RuleFits) == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "need-split").Inc()
+		// If the region matches no rules, the most possible reason is it spans across
+		// multiple rules.
 		return nil
 	}
 	op, err := c.fixOrphanPeers(region, fit)
