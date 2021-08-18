@@ -21,10 +21,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tikv/pd/pkg/assertutil"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"

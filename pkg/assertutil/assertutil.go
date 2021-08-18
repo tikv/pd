@@ -1,16 +1,28 @@
+// Copyright 2021 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package assertutil
 
-// Checker accepts the injection of check functions and context from test files
+// Checker accepts the injection of check functions and context from test files.
+// Any check function should be set before usage unless the test will fail.
 type Checker struct {
-	IsNil     func(obtained interface{})
-	Equal     func(obtained, expected interface{})
-	DeepEqual func(obtained, expected interface{})
-	FailNow   func()
+	IsNil   func(obtained interface{})
+	FailNow func()
 }
 
-func NewChecker(failnow func()) *Checker {
+func NewChecker(failNow func()) *Checker {
 	return &Checker{
-		FailNow: failnow,
+		FailNow: failNow,
 	}
 }
 
@@ -23,18 +35,4 @@ func (c *Checker) AssertNil(obtained interface{}) {
 		c.failNow()
 	}
 	c.IsNil(obtained)
-}
-
-func (c *Checker) AssertEqual(obtained, expected interface{}) {
-	if c.Equal == nil {
-		c.failNow()
-	}
-	c.Equal(obtained, expected)
-}
-
-func (c *Checker) AssertDeepEqual(obtained, expected interface{}) {
-	if c.DeepEqual == nil {
-		c.failNow()
-	}
-	c.DeepEqual(obtained, expected)
 }

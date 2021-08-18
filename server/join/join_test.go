@@ -16,9 +16,8 @@ package join
 import (
 	"testing"
 
-	"github.com/tikv/pd/pkg/assertutil"
-
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 )

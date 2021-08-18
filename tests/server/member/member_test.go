@@ -24,12 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tikv/pd/pkg/assertutil"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
