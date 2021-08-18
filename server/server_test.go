@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
@@ -53,6 +54,14 @@ func mustWaitLeader(c *C, svrs []*Server) *Server {
 	return leader
 }
 
+func checkerWithNilAssert(c *C) *assertutil.Checker {
+	checker := assertutil.NewChecker(c.FailNow)
+	checker.IsNil = func(obtained interface{}) {
+		c.Assert(obtained, IsNil)
+	}
+	return checker
+}
+
 var _ = Suite(&testLeaderServerSuite{})
 
 type testLeaderServerSuite struct {
@@ -66,7 +75,7 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.svrs = make(map[string]*Server)
 
-	cfgs := NewTestMultiConfig(c, 3)
+	cfgs := NewTestMultiConfig(checkerWithNilAssert(c), 3)
 
 	ch := make(chan *Server, 3)
 	for i := 0; i < 3; i++ {
@@ -145,7 +154,7 @@ func newTestServersWithCfgs(ctx context.Context, c *C, cfgs []*config.Config) ([
 func (s *testServerSuite) TestCheckClusterID(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cfgs := NewTestMultiConfig(c, 2)
+	cfgs := NewTestMultiConfig(checkerWithNilAssert(c), 2)
 	for i, cfg := range cfgs {
 		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_check_clusterID_%d", i)
 		// Clean up before testing.
@@ -202,7 +211,7 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 		}
 		return mux, info, nil
 	}
-	cfg := NewTestSingleConfig(c)
+	cfg := NewTestSingleConfig(checkerWithNilAssert(c))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
 	c.Assert(err, IsNil)
