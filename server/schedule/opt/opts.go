@@ -53,12 +53,12 @@ type CacheCluster struct {
 	stores []*core.StoreInfo
 }
 
-// GetStore returns store infos
+// GetStores returns store infos
 func (c *CacheCluster) GetStores() []*core.StoreInfo {
 	return c.stores
 }
 
-// NewCacheCluster
+// NewCacheCluster constructor for cache
 func NewCacheCluster(c Cluster) *CacheCluster {
 	return &CacheCluster{
 		Cluster: c,
