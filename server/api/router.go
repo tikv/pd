@@ -59,6 +59,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter := apiRouter.NewRoute().Subrouter()
 	clusterRouter.Use(newClusterMiddleware(svr).Middleware)
 
+	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
+
 	operatorHandler := newOperatorHandler(handler, rd)
 	apiRouter.HandleFunc("/operators", operatorHandler.List).Methods("GET")
 	apiRouter.HandleFunc("/operators", operatorHandler.Post).Methods("POST")
@@ -107,8 +109,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	regionLabelHandler := newRegionLabelHandler(svr, rd)
 	clusterRouter.HandleFunc("/config/region-label/rules", regionLabelHandler.GetAllRules).Methods("GET")
 	clusterRouter.HandleFunc("/config/region-label/rules/ids", regionLabelHandler.GetRulesByIDs).Methods("GET")
-	clusterRouter.HandleFunc("/config/region-label/rule/{id}", regionLabelHandler.GetRule).Methods("GET")
-	clusterRouter.HandleFunc("/config/region-label/rule/{id}", regionLabelHandler.DeleteRule).Methods("DELETE")
+	// {id} can be a string with special characters, we should enable path encode to support it.
+	escapeRouter.HandleFunc("/config/region-label/rule/{id}", regionLabelHandler.GetRule).Methods("GET")
+	escapeRouter.HandleFunc("/config/region-label/rule/{id}", regionLabelHandler.DeleteRule).Methods("DELETE")
 	clusterRouter.HandleFunc("/config/region-label/rule", regionLabelHandler.SetRule).Methods("POST")
 	clusterRouter.HandleFunc("/config/region-label/rules", regionLabelHandler.Patch).Methods("PATCH")
 
@@ -124,7 +127,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/config/placement-rule", rulesHandler.SetAllGroupBundles).Methods("POST")
 	// {group} can be a regular expression, we should enable path encode to
 	// support special characters.
-	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
 	clusterRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.GetGroupBundle).Methods("GET")
 	clusterRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.SetGroupBundle).Methods("POST")
 	escapeRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.DeleteGroupBundle).Methods("DELETE")
