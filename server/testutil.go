@@ -22,10 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/check"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/tempurl"
-	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/embed"
@@ -38,7 +37,7 @@ import (
 type CleanupFunc func()
 
 // NewTestServer creates a pd server for testing.
-func NewTestServer(c *check.C) (*Server, CleanupFunc, error) {
+func NewTestServer(c *assertutil.Checker) (*Server, CleanupFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
 	s, err := CreateServer(ctx, cfg)
@@ -54,7 +53,7 @@ func NewTestServer(c *check.C) (*Server, CleanupFunc, error) {
 	cleanup := func() {
 		cancel()
 		s.Close()
-		testutil.CleanServer(cfg.DataDir)
+		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }
@@ -63,7 +62,7 @@ var zapLogOnce sync.Once
 
 // NewTestSingleConfig is only for test to create one pd.
 // Because PD client also needs this, so export here.
-func NewTestSingleConfig(c *check.C) *config.Config {
+func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
 	cfg := &config.Config{
 		Name:       "pd",
 		ClientUrls: tempurl.Alloc(),
@@ -84,19 +83,19 @@ func NewTestSingleConfig(c *check.C) *config.Config {
 	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
 	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
 	err := cfg.SetupLogger()
-	c.Assert(err, check.IsNil)
+	c.AssertNil(err)
 	zapLogOnce.Do(func() {
 		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
 	})
 
-	c.Assert(cfg.Adjust(nil, false), check.IsNil)
+	c.AssertNil(cfg.Adjust(nil, false))
 
 	return cfg
 }
 
 // NewTestMultiConfig is only for test to create multiple pd configurations.
 // Because PD client also needs this, so export here.
-func NewTestMultiConfig(c *check.C, count int) []*config.Config {
+func NewTestMultiConfig(c *assertutil.Checker, count int) []*config.Config {
 	cfgs := make([]*config.Config, count)
 
 	clusters := []string{}
