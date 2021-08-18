@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
@@ -46,6 +47,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
+	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
 	ID               uint64
@@ -67,6 +69,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
 	}
+	clus.RegionLabeler, _ = labeler.NewRegionLabeler(core.NewStorage(kv.NewMemoryKV()))
 	return clus
 }
 
@@ -168,6 +171,11 @@ func (mc *Cluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
 // GetRuleManager returns the ruleManager of the cluster.
 func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 	return mc.RuleManager
+}
+
+// GetRegionLabeler returns the region labeler of the cluster.
+func (mc *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
+	return mc.RegionLabeler
 }
 
 // SetStoreUp sets store state to be up.
