@@ -140,6 +140,13 @@ func (l *RegionLabeler) buildRangeList() {
 	l.rangeList = builder.Build()
 }
 
+// GetSplitKeys returns all split keys in the range (start, end).
+func (l *RegionLabeler) GetSplitKeys(start, end []byte) [][]byte {
+	l.RLock()
+	defer l.RUnlock()
+	return l.rangeList.GetSplitKeys(start, end)
+}
+
 // GetAllLabelRules returns all the rules.
 func (l *RegionLabeler) GetAllLabelRules() []*LabelRule {
 	l.RLock()
