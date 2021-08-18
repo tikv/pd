@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
@@ -1085,6 +1086,7 @@ func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluste
 			panic(err)
 		}
 	}
+	rc.regionLabeler, _ = labeler.NewRegionLabeler(storage)
 
 	return &testCluster{RaftCluster: rc}
 }
