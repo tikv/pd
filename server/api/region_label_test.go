@@ -77,6 +77,7 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 	c.Assert(err, IsNil)
 	err = readJSON(testDialClient, s.urlPrefix+"rules", &resp)
 	c.Assert(err, IsNil)
+	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[0], rules[2]})
 
 	patch := labeler.LabelRulePatch{
