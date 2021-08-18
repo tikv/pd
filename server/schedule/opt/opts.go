@@ -61,7 +61,8 @@ func (c *CacheCluster) GetStore() []*core.StoreInfo {
 // NewCacheCluster
 func NewCacheCluster(c Cluster) *CacheCluster {
 	return &CacheCluster{
-		stores: c.GetStores(),
+		Cluster: c,
+		stores:  c.GetStores(),
 	}
 }
 
