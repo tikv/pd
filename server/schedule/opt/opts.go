@@ -54,7 +54,7 @@ type CacheCluster struct {
 }
 
 // GetStore returns store infos
-func (c *CacheCluster) GetStore() []*core.StoreInfo {
+func (c *CacheCluster) GetStores() []*core.StoreInfo {
 	return c.stores
 }
 
