@@ -1027,7 +1027,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	c.Assert(len(lb.Schedule(tc)), Equals, 0)
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
-	c.Assert(len(lb.Schedule(tc)), Equals, 0)
+	c.Assert(len(lb.Schedule(tc)) > 0, IsTrue)
 }
 
 var _ = Suite(&testScheduleControllerSuite{})
