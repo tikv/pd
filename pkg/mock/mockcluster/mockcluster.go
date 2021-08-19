@@ -163,11 +163,6 @@ func (mc *Cluster) initRuleManager() {
 	}
 }
 
-// FitRegion fits a region to the rules it matches.
-func (mc *Cluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
-	return mc.RuleManager.FitRegion(mc.BasicCluster, region)
-}
-
 // GetRuleManager returns the ruleManager of the cluster.
 func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 	return mc.RuleManager

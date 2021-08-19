@@ -462,14 +462,9 @@ func (f labelConstraintFilter) Target(opt *config.PersistOptions, store *core.St
 	return placement.MatchLabelConstraints(store, f.constraints)
 }
 
-// RegionFitter is the interface that can fit a region against placement rules.
-type RegionFitter interface {
-	FitRegion(*core.RegionInfo) *placement.RegionFit
-}
-
 type ruleFitFilter struct {
 	scope    string
-	fitter   RegionFitter
+	cluster  opt.Cluster
 	region   *core.RegionInfo
 	oldFit   *placement.RegionFit
 	srcStore uint64
@@ -478,12 +473,12 @@ type ruleFitFilter struct {
 // newRuleFitFilter creates a filter that ensures after replace a peer with new
 // one, the isolation level will not decrease. Its function is the same as
 // distinctScoreFilter but used when placement rules is enabled.
-func newRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldStoreID uint64) Filter {
+func newRuleFitFilter(scope string, cluster opt.Cluster, region *core.RegionInfo, oldStoreID uint64) Filter {
 	return &ruleFitFilter{
 		scope:    scope,
-		fitter:   fitter,
+		cluster:  cluster,
 		region:   region,
-		oldFit:   fitter.FitRegion(region),
+		oldFit:   opt.FitRegion(cluster, region),
 		srcStore: oldStoreID,
 	}
 }
@@ -496,15 +491,15 @@ func (f *ruleFitFilter) Type() string {
 	return "rule-fit-filter"
 }
 
-func (f *ruleFitFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *ruleFitFilter) Source(options *config.PersistOptions, store *core.StoreInfo) bool {
 	return true
 }
 
-func (f *ruleFitFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *ruleFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) bool {
 	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
 		f.region.GetPeers(), f.region.GetLeader(),
 		core.WithReplacePeerStore(f.srcStore, store.GetID()))
-	newFit := f.fitter.FitRegion(region)
+	newFit := opt.FitRegion(f.cluster, region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
@@ -515,7 +510,7 @@ func (f *ruleFitFilter) GetSourceStoreID() uint64 {
 
 type ruleLeaderFitFilter struct {
 	scope            string
-	fitter           RegionFitter
+	cluster          opt.Cluster
 	region           *core.RegionInfo
 	oldFit           *placement.RegionFit
 	srcLeaderStoreID uint64
@@ -523,12 +518,12 @@ type ruleLeaderFitFilter struct {
 
 // newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
 // the isolation level will not decrease.
-func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, srcLeaderStoreID uint64) Filter {
+func newRuleLeaderFitFilter(scope string, cluster opt.Cluster, region *core.RegionInfo, srcLeaderStoreID uint64) Filter {
 	return &ruleLeaderFitFilter{
 		scope:            scope,
-		fitter:           fitter,
+		cluster:          cluster,
 		region:           region,
-		oldFit:           fitter.FitRegion(region),
+		oldFit:           opt.FitRegion(cluster, region),
 		srcLeaderStoreID: srcLeaderStoreID,
 	}
 }
@@ -541,11 +536,11 @@ func (f *ruleLeaderFitFilter) Type() string {
 	return "rule-fit-leader-filter"
 }
 
-func (f *ruleLeaderFitFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *ruleLeaderFitFilter) Source(options *config.PersistOptions, store *core.StoreInfo) bool {
 	return true
 }
 
-func (f *ruleLeaderFitFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) bool {
 	targetPeer := f.region.GetStorePeer(store.GetID())
 	if targetPeer == nil {
 		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
@@ -554,7 +549,7 @@ func (f *ruleLeaderFitFilter) Target(opt *config.PersistOptions, store *core.Sto
 	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
 		f.region.GetPeers(), f.region.GetLeader(),
 		core.WithLeader(targetPeer))
-	newFit := f.fitter.FitRegion(copyRegion)
+	newFit := opt.FitRegion(f.cluster, copyRegion)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 

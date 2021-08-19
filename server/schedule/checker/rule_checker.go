@@ -59,7 +59,7 @@ func (c *RuleChecker) GetType() string {
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
-	fit := c.cluster.FitRegion(region)
+	fit := opt.FitRegion(c.cluster, region)
 	return c.CheckWithFit(region, fit)
 }
 
