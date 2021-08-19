@@ -15,6 +15,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -110,7 +111,11 @@ func (h *regionLabelHandler) GetRulesByIDs(w http.ResponseWriter, r *http.Reques
 // @Router /config/region-label/rule/{id} [get]
 func (h *regionLabelHandler) GetRule(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
-	id := mux.Vars(r)["id"]
+	id, err := url.PathUnescape(mux.Vars(r)["id"])
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	rule := cluster.GetRegionLabeler().GetLabelRule(id)
 	if rule == nil {
 		h.rd.JSON(w, http.StatusNotFound, nil)
@@ -129,14 +134,19 @@ func (h *regionLabelHandler) GetRule(w http.ResponseWriter, r *http.Request) {
 // @Router /config/region-label/rule/{id} [delete]
 func (h *regionLabelHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
-	id := mux.Vars(r)["id"]
-	err := cluster.GetRegionLabeler().DeleteLabelRule(id)
+	id, err := url.PathUnescape(mux.Vars(r)["id"])
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	err = cluster.GetRegionLabeler().DeleteLabelRule(id)
 	if err != nil {
 		if errs.ErrRegionRuleNotFound.Equal(err) {
 			h.rd.JSON(w, http.StatusNotFound, err.Error())
 		} else {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		}
+		return
 	}
 	h.rd.Text(w, http.StatusOK, "Delete rule successfully.")
 }
