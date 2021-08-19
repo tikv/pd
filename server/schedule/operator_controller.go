@@ -296,7 +296,7 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 				oc.buryOperator(next)
 			}
 			oc.Unlock()
-			return added
+			break
 		}
 		oc.wop.PutOperator(op)
 		if isMerge {
@@ -313,8 +313,11 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 
 	oc.Unlock()
 	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
-	for i := 0; i < len(ops); i++ {
-		oc.PromoteWaitingOperator()
+
+	for i := 0; i < added; i++ {
+		if ops[0].Kind()&operator.OpMerge != 0 {
+			oc.PromoteWaitingOperator()
+		}
 	}
 	return added
 }
