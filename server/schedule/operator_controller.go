@@ -314,8 +314,10 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 	oc.Unlock()
 	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
 
-	for i := 0; i < added; i++ {
-		if ops[0].Kind()&operator.OpMerge != 0 {
+	if ops[0].Kind()&operator.OpMerge != 0 {
+		oc.PromoteWaitingOperator()
+	} else {
+		for i := 0; i < added; i++ {
 			oc.PromoteWaitingOperator()
 		}
 	}
