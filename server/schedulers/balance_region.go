@@ -43,6 +43,7 @@ func init() {
 			}
 			conf.Ranges = ranges
 			conf.Name = BalanceRegionName
+			conf.Batch = 1
 			return nil
 		}
 	})
@@ -67,6 +68,7 @@ const (
 type balanceRegionSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
+	Batch  int             `json:"batch"`
 }
 
 type balanceRegionScheduler struct {
@@ -144,6 +146,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
 	plan := newBalancePlan(kind, cluster, opInfluence)
 
+	result := make([]*operator.Operator, 0, s.conf.Batch)
 	sort.Slice(stores, func(i, j int) bool {
 		iOp := plan.GetOpInfluence(stores[i].GetID())
 		jOp := plan.GetOpInfluence(stores[j].GetID())
@@ -189,11 +192,14 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 
 			if op := s.transferPeer(plan); op != nil {
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-				return []*operator.Operator{op}
+				result = append(result, op)
+				if len(result) >= s.conf.Batch {
+					return result
+				}
 			}
 		}
 	}
-	return nil
+	return result
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.

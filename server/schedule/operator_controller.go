@@ -313,7 +313,9 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 
 	oc.Unlock()
 	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
-	oc.PromoteWaitingOperator()
+	for i := 0; i < len(ops); i++ {
+		oc.PromoteWaitingOperator()
+	}
 	return added
 }
 
