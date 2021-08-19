@@ -996,7 +996,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	// sleep 1 seconds to make sure that the token is filled up
 	time.Sleep(1 * time.Second)
 	for i := 0; i < 100; i++ {
-		c.Assert(lb.Schedule(tc), NotNil)
+		c.Assert(len(lb.Schedule(tc)) > 0, IsTrue)
 	}
 }
 
@@ -1024,10 +1024,10 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	c.Assert(oc.AddOperator(op2), IsTrue)
 	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	c.Assert(oc.AddOperator(op3), IsFalse)
-	c.Assert(lb.Schedule(tc), IsNil)
+	c.Assert(len(lb.Schedule(tc)), Equals, 0)
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
-	c.Assert(lb.Schedule(tc), NotNil)
+	c.Assert(len(lb.Schedule(tc)), Equals, 0)
 }
 
 var _ = Suite(&testScheduleControllerSuite{})
