@@ -201,9 +201,13 @@ func SetReadQuery(v uint64) RegionCreateOption {
 // SetWrittenQuery sets the write query for the region.
 func SetWrittenQuery(v uint64) RegionCreateOption {
 	q := &pdpb.QueryStats{
-		Put:         v / 3,
-		Delete:      v / 3,
-		DeleteRange: v / 3,
+		Put:                    v / 7,
+		Delete:                 v / 7,
+		DeleteRange:            v / 7,
+		Rollback:               v / 7,
+		Prewrite:               v / 7,
+		Commit:                 v / 7,
+		AcquirePessimisticLock: v / 7,
 	}
 	return SetQueryStats(q)
 }
