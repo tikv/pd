@@ -47,20 +47,20 @@ type Cluster interface {
 	AddSuspectRegions(ids ...uint64)
 }
 
-// CacheCluster include some cluster info
-type CacheCluster struct {
+// cacheCluster include cache info
+type cacheCluster struct {
 	Cluster
 	stores []*core.StoreInfo
 }
 
-// GetStores returns store infos
-func (c *CacheCluster) GetStores() []*core.StoreInfo {
+// GetStores returns store infos from cache
+func (c *cacheCluster) GetStores() []*core.StoreInfo {
 	return c.stores
 }
 
 // NewCacheCluster constructor for cache
-func NewCacheCluster(c Cluster) *CacheCluster {
-	return &CacheCluster{
+func NewCacheCluster(c Cluster) Cluster {
+	return &cacheCluster{
 		Cluster: c,
 		stores:  c.GetStores(),
 	}
