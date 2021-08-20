@@ -693,8 +693,10 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	added := controller.AddWaitingOperator(batch...)
 	c.Assert(added, Equals, int(cluster.GetSchedulerMaxWaitingOperator()-1))
 
-	source := newRegionInfo(1, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
-	target := newRegionInfo(0, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	source := newRegionInfo(cluster.GetSchedulerMaxWaitingOperator(), "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	target := newRegionInfo(cluster.GetSchedulerMaxWaitingOperator()+1, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	cluster.PutRegion(source)
+	cluster.PutRegion(target)
 	// now there is one operator being allowed to add, if it is a merge operator
 	// both of the pair are allowed
 	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
