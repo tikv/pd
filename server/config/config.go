@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -226,11 +227,12 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage = true
-	defaultTraceRegionFlow  = true
-	defaultFlowRoundByDigit = 3
-	defaultMaxResetTSGap    = 24 * time.Hour
-	defaultKeyType          = "table"
+	defaultUseRegionStorage  = true
+	defaultTraceRegionFlow   = true
+	defaultFlowRoundByDigit  = 3 // KB
+	maxTraceFlowRoundByDigit = 5 // 0.1 MB
+	defaultMaxResetTSGap     = 24 * time.Hour
+	defaultKeyType           = "table"
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true

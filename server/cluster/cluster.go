@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -27,7 +28,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/component"
@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
@@ -114,9 +115,10 @@ type RaftCluster struct {
 	quit         chan struct{}
 	regionSyncer *syncer.RegionSyncer
 
-	ruleManager *placement.RuleManager
-	etcdClient  *clientv3.Client
-	httpClient  *http.Client
+	ruleManager   *placement.RuleManager
+	regionLabeler *labeler.RegionLabeler
+	etcdClient    *clientv3.Client
+	httpClient    *http.Client
 
 	replicationMode *replication.ModeManager
 	traceRegionFlow bool
@@ -240,6 +242,11 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.storage)
+	if err != nil {
+		return err
+	}
+
 	c.componentManager = component.NewManager(c.storage)
 	_, err = c.storage.LoadComponent(&c.componentManager)
 	if err != nil {
@@ -255,12 +262,13 @@ func (c *RaftCluster) Start(s Server) error {
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 
-	c.wg.Add(4)
+	c.wg.Add(5)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
+	go c.runStatsBackgroundJobs()
 	go c.syncRegions()
 	go c.runReplicationMode()
 	c.running = true
@@ -322,6 +330,29 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 			c.checkStores()
 			c.collectMetrics()
 			c.coordinator.opController.PruneHistory()
+		}
+	}
+}
+
+func (c *RaftCluster) runStatsBackgroundJobs() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(statistics.RegionsStatsObserveInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.quit:
+			log.Info("statistics background jobs has been stopped")
+			return
+		case <-ticker.C:
+			c.RLock()
+			storeIDs, writeBytesRates, writeKeysRates := c.core.GetStoresWriteRate()
+			c.RUnlock()
+			c.Lock()
+			c.hotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
+			c.Unlock()
 		}
 	}
 }
@@ -570,6 +601,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	return nil
 }
 
+var regionGuide = core.GenerateRegionGuideFunc(true)
+
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
@@ -594,75 +627,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
-	var saveKV, saveCache, isNew, needSync bool
-	if origin == nil {
-		log.Debug("insert new region",
-			zap.Uint64("region-id", region.GetID()),
-			logutil.ZapRedactStringer("meta-region", core.RegionToHexMeta(region.GetMeta())))
-		saveKV, saveCache, isNew = true, true, true
-	} else {
-		r := region.GetRegionEpoch()
-		o := origin.GetRegionEpoch()
-		if r.GetVersion() > o.GetVersion() {
-			log.Info("region Version changed",
-				zap.Uint64("region-id", region.GetID()),
-				logutil.ZapRedactString("detail", core.DiffRegionKeyInfo(origin, region)),
-				zap.Uint64("old-version", o.GetVersion()),
-				zap.Uint64("new-version", r.GetVersion()),
-			)
-			saveKV, saveCache = true, true
-		}
-		if r.GetConfVer() > o.GetConfVer() {
-			log.Info("region ConfVer changed",
-				zap.Uint64("region-id", region.GetID()),
-				zap.String("detail", core.DiffRegionPeersInfo(origin, region)),
-				zap.Uint64("old-confver", o.GetConfVer()),
-				zap.Uint64("new-confver", r.GetConfVer()),
-			)
-			saveKV, saveCache = true, true
-		}
-		if region.GetLeader().GetId() != origin.GetLeader().GetId() {
-			if origin.GetLeader().GetId() == 0 {
-				isNew = true
-			} else {
-				log.Info("leader changed",
-					zap.Uint64("region-id", region.GetID()),
-					zap.Uint64("from", origin.GetLeader().GetStoreId()),
-					zap.Uint64("to", region.GetLeader().GetStoreId()),
-				)
-			}
-			saveCache, needSync = true, true
-		}
-		if !core.SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
-			log.Debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
-			saveCache, needSync = true, true
-		}
-		if !core.SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
-			log.Debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
-			saveCache, needSync = true, true
-		}
-		if len(region.GetPeers()) != len(origin.GetPeers()) {
-			saveKV, saveCache = true, true
-		}
-
-		if region.GetApproximateSize() != origin.GetApproximateSize() ||
-			region.GetApproximateKeys() != origin.GetApproximateKeys() {
-			saveCache = true
-		}
-		// Once flow has changed, will update the cache.
-		// Because keys and bytes are strongly related, only bytes are judged.
-		if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
-			region.GetRoundBytesRead() != origin.GetRoundBytesRead() {
-			saveCache, needSync = true, true
-		}
-
-		if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
-			(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
-				region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
-			saveCache = true
-		}
-	}
-
+	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
 	if !saveKV && !saveCache && !isNew {
 		return nil
 	}
@@ -1128,6 +1093,17 @@ func (c *RaftCluster) ResumeLeaderTransfer(storeID uint64) {
 	c.core.ResumeLeaderTransfer(storeID)
 }
 
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
+// leader to the store
+func (c *RaftCluster) SlowStoreEvicted(storeID uint64) error {
+	return c.core.SlowStoreEvicted(storeID)
+}
+
+// SlowStoreRecovered cleans the evicted state of a store.
+func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
+	c.core.SlowStoreRecovered(storeID)
+}
+
 // AttachAvailableFunc attaches an available function to a specific store.
 func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
 	c.core.AttachAvailableFunc(storeID, limitType, f)
@@ -1533,6 +1509,13 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 // FitRegion tries to fit the region with placement rules.
 func (c *RaftCluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
 	return c.GetRuleManager().FitRegion(c, region)
+}
+
+// GetRegionLabeler returns the region labeler.
+func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regionLabeler
 }
 
 type prepareChecker struct {

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -281,9 +282,9 @@ func (l *balanceLeaderScheduler) createOperator(plan *balancePlan) []*operator.O
 	}
 	op.Counters = append(op.Counters,
 		schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
-		balanceDirectionCounter.WithLabelValues(l.GetName(), plan.SourceMetricLabel(), plan.TargetMetricLabel()),
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
+		balanceDirectionCounter.WithLabelValues(l.GetName(), plan.SourceMetricLabel(), plan.TargetMetricLabel()),
 		l.counter.WithLabelValues("move-leader", plan.SourceMetricLabel()+"-out"),
 		l.counter.WithLabelValues("move-leader", plan.TargetMetricLabel()+"-in"),
 	)

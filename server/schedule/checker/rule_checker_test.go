@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -15,7 +16,6 @@ package checker
 
 import (
 	"context"
-	"encoding/hex"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -55,27 +55,6 @@ func (s *testRuleCheckerSuite) SetUpTest(c *C) {
 	s.cluster.SetEnablePlacementRules(true)
 	s.ruleManager = s.cluster.RuleManager
 	s.rc = NewRuleChecker(s.cluster, s.ruleManager, cache.NewDefaultCache(10))
-}
-
-func (s *testRuleCheckerSuite) TestFixRange(c *C) {
-	s.cluster.AddLeaderStore(1, 1)
-	s.cluster.AddLeaderStore(2, 1)
-	s.cluster.AddLeaderStore(3, 1)
-	s.ruleManager.SetRule(&placement.Rule{
-		GroupID:     "test",
-		ID:          "test",
-		StartKeyHex: "AA",
-		EndKeyHex:   "FF",
-		Role:        placement.Voter,
-		Count:       1,
-	})
-	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
-	op := s.rc.Check(s.cluster.GetRegion(1))
-	c.Assert(op, NotNil)
-	c.Assert(op.Len(), Equals, 1)
-	splitKeys := op.Step(0).(operator.SplitRegion).SplitKeys
-	c.Assert(hex.EncodeToString(splitKeys[0]), Equals, "aa")
-	c.Assert(hex.EncodeToString(splitKeys[1]), Equals, "ff")
 }
 
 func (s *testRuleCheckerSuite) TestAddRulePeer(c *C) {

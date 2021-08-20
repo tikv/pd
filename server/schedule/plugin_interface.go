@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -42,7 +43,7 @@ func (p *PluginInterface) GetFunction(path string, funcName string) (plugin.Symb
 	p.pluginMapLock.Lock()
 	defer p.pluginMapLock.Unlock()
 	if _, ok := p.pluginMap[path]; !ok {
-		//open plugin
+		// open plugin
 		filePath, err := filepath.Abs(path)
 		if err != nil {
 			return nil, errs.ErrFilePathAbs.Wrap(err).FastGenWithCause()
@@ -54,7 +55,7 @@ func (p *PluginInterface) GetFunction(path string, funcName string) (plugin.Symb
 		}
 		p.pluginMap[path] = plugin
 	}
-	//get func from plugin
+	// get func from plugin
 	f, err := p.pluginMap[path].Lookup(funcName)
 	if err != nil {
 		return nil, errs.ErrLookupPluginFunc.Wrap(err).FastGenWithCause()

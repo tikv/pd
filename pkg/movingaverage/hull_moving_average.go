@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -64,4 +65,9 @@ func (h *HMA) Reset() {
 func (h *HMA) Set(n float64) {
 	h.Reset()
 	h.Add(n)
+}
+
+// GetInstantaneous returns the value just added.
+func (h *HMA) GetInstantaneous() float64 {
+	return h.wma[1].GetInstantaneous()
 }

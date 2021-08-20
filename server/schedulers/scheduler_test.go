@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -192,9 +193,9 @@ func (s *testShuffleHotRegionSchedulerSuite) checkBalance(c *C, tc *mockcluster.
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
 	//|     3     |       1      |        2       |       4        |      512KB    |
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.WriteReportInterval, 0, statistics.WriteReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.WriteReportInterval, 0, statistics.WriteReportInterval, []uint64{3, 4})
-	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.WriteReportInterval, 0, statistics.WriteReportInterval, []uint64{2, 4})
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{3, 4})
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 4})
 	tc.SetHotRegionCacheHitsThreshold(0)
 
 	// try to get an operator
@@ -232,9 +233,9 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	tc.UpdateStorageReadBytes(2, 4.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
 
-	tc.AddRegionWithReadInfo(1, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2})
-	tc.AddRegionWithReadInfo(2, 2, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{1, 3})
-	tc.AddRegionWithReadInfo(3, 1, 512*KB*statistics.ReadReportInterval, 0, statistics.ReadReportInterval, []uint64{2, 3})
+	tc.AddRegionWithReadInfo(1, 1, 512*KB*statistics.ReadReportInterval, 0, 0, statistics.ReadReportInterval, []uint64{2})
+	tc.AddRegionWithReadInfo(2, 2, 512*KB*statistics.ReadReportInterval, 0, 0, statistics.ReadReportInterval, []uint64{1, 3})
+	tc.AddRegionWithReadInfo(3, 1, 512*KB*statistics.ReadReportInterval, 0, 0, statistics.ReadReportInterval, []uint64{2, 3})
 	tc.SetHotRegionCacheHitsThreshold(0)
 	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
 	c.Assert(hb.IsScheduleAllowed(tc), IsFalse)
@@ -401,11 +402,11 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	tc.UpdateStorageWrittenBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(4, 0)
 	tc.UpdateStorageWrittenBytes(5, 0)
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.WriteReportInterval, 0, statistics.WriteReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.WriteReportInterval, 0, statistics.WriteReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.WriteReportInterval, 0, statistics.WriteReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(4, 2, 512*KB*statistics.WriteReportInterval, 0, statistics.WriteReportInterval, []uint64{1, 3})
-	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*KB*statistics.WriteReportInterval, 0, statistics.WriteReportInterval, []uint64{1, 2})
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(4, 2, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{1, 3})
+	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{1, 2})
 	ops = hs.Schedule(tc)
 	c.Assert(ops, HasLen, 1)
 	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 1, 4)
@@ -569,4 +570,51 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 			c.Check(s.schedule(), IsNil)
 		}
 	}
+}
+
+var _ = Suite(&testEvictSlowStoreSuite{})
+
+type testEvictSlowStoreSuite struct{}
+
+func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+
+	// Add stores 1, 2
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	// Add regions 1, 2 with leaders in stores 1, 2
+	tc.AddLeaderRegion(1, 1, 2)
+	tc.AddLeaderRegion(2, 2, 1)
+	tc.UpdateLeaderCount(2, 16)
+
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	storage := core.NewStorage(kv.NewMemoryKV())
+	es, err := schedule.CreateScheduler(EvictSlowStoreType, oc, storage, schedule.ConfigSliceDecoder(EvictSlowStoreType, []string{}))
+	c.Assert(err, IsNil)
+	bs, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(BalanceLeaderType, []string{}))
+	c.Assert(err, IsNil)
+	storeInfo := tc.GetStore(1)
+	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 100
+	})
+	tc.PutStore(newStoreInfo)
+	c.Assert(es.IsScheduleAllowed(tc), IsTrue)
+	// Add evict leader scheduler to store 1
+	op := es.Schedule(tc)
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	// Cannot balance leaders to store 1
+	op = bs.Schedule(tc)
+	c.Check(op, IsNil)
+	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 0
+	})
+	tc.PutStore(newStoreInfo)
+	// Evict leader scheduler of store 1 should be removed, then leader can be balanced to store 1
+	c.Check(es.Schedule(tc), IsNil)
+	op = bs.Schedule(tc)
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 2, 1)
 }

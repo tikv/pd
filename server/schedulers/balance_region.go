@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -229,10 +230,8 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 		}
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
-		op.Counters = append(op.Counters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
-		)
 		op.FinishedCounters = append(op.FinishedCounters,
+			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
 			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
 			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
 		)

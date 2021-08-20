@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -71,6 +72,15 @@ type Rule struct {
 func (r *Rule) String() string {
 	b, _ := json.Marshal(r)
 	return string(b)
+}
+
+// Clone returns a copy of Rule.
+func (r *Rule) Clone() *Rule {
+	var clone Rule
+	json.Unmarshal([]byte(r.String()), &clone)
+	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
+	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
+	return &clone
 }
 
 // Key returns (groupID, ID) as the global unique key of a rule.

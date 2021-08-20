@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -58,6 +59,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter := apiRouter.NewRoute().Subrouter()
 	clusterRouter.Use(newClusterMiddleware(svr).Middleware)
 
+	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
+
 	operatorHandler := newOperatorHandler(handler, rd)
 	apiRouter.HandleFunc("/operators", operatorHandler.List).Methods("GET")
 	apiRouter.HandleFunc("/operators", operatorHandler.Post).Methods("POST")
@@ -103,6 +106,18 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/config/rule", rulesHandler.Set).Methods("POST")
 	clusterRouter.HandleFunc("/config/rule/{group}/{id}", rulesHandler.Delete).Methods("DELETE")
 
+	regionLabelHandler := newRegionLabelHandler(svr, rd)
+	clusterRouter.HandleFunc("/config/region-label/rules", regionLabelHandler.GetAllRules).Methods("GET")
+	clusterRouter.HandleFunc("/config/region-label/rules/ids", regionLabelHandler.GetRulesByIDs).Methods("GET")
+	// {id} can be a string with special characters, we should enable path encode to support it.
+	escapeRouter.HandleFunc("/config/region-label/rule/{id}", regionLabelHandler.GetRule).Methods("GET")
+	escapeRouter.HandleFunc("/config/region-label/rule/{id}", regionLabelHandler.DeleteRule).Methods("DELETE")
+	clusterRouter.HandleFunc("/config/region-label/rule", regionLabelHandler.SetRule).Methods("POST")
+	clusterRouter.HandleFunc("/config/region-label/rules", regionLabelHandler.Patch).Methods("PATCH")
+
+	clusterRouter.HandleFunc("/region/id/{id}/label/{key}", regionLabelHandler.GetRegionLabel).Methods("GET")
+	clusterRouter.HandleFunc("/region/id/{id}/labels", regionLabelHandler.GetRegionLabels).Methods("GET")
+
 	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.GetGroupConfig).Methods("GET")
 	clusterRouter.HandleFunc("/config/rule_group", rulesHandler.SetGroupConfig).Methods("POST")
 	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.DeleteGroupConfig).Methods("DELETE")
@@ -112,7 +127,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/config/placement-rule", rulesHandler.SetAllGroupBundles).Methods("POST")
 	// {group} can be a regular expression, we should enable path encode to
 	// support special characters.
-	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
 	clusterRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.GetGroupBundle).Methods("GET")
 	clusterRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.SetGroupBundle).Methods("POST")
 	escapeRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.DeleteGroupBundle).Methods("DELETE")

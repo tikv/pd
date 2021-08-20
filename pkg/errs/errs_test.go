@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -15,7 +16,6 @@ package errs
 
 import (
 	"bytes"
-	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -38,7 +38,7 @@ func newTestingWriter() *testingWriter {
 func (w *testingWriter) Write(p []byte) (n int, err error) {
 	n = len(p)
 	p = bytes.TrimRight(p, "\n")
-	m := fmt.Sprintf("%s", p)
+	m := string(p)
 	w.messages = append(w.messages, m)
 	return n, nil
 }
