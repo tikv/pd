@@ -643,10 +643,10 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	// store 2 becomes the store with least regions.
 	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], operator.OpKind(0), 4, 2)
 	opt.SetMaxReplicas(3)
-	c.Assert(sb.Schedule(tc), IsNil)
+	c.Assert(len(sb.Schedule(tc)) == 0, IsTrue)
 
 	opt.SetMaxReplicas(1)
-	c.Assert(sb.Schedule(tc), NotNil)
+	c.Assert(len(sb.Schedule(tc)) > 0, IsTrue)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
@@ -675,7 +675,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cl
 
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	// This schedule try to replace peer in store 1, but we have no other stores.
-	c.Assert(sb.Schedule(tc), IsNil)
+	c.Assert(len(sb.Schedule(tc)) == 0, IsTrue)
 
 	// Store 4 has smaller region score than store 2.
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -710,7 +710,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cl
 
 	// Store 9 has different zone with other stores but larger region score than store 1.
 	tc.AddLabelsStore(9, 20, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
-	c.Assert(sb.Schedule(tc), IsNil)
+	c.Assert(len(sb.Schedule(tc)) == 0, IsTrue)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
