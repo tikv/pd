@@ -25,12 +25,11 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 // ProfHandler pprof handler
@@ -49,9 +48,7 @@ func newProfHandler(svr *server.Server, rd *render.Render) *ProfHandler {
 }
 
 // @Summary debug zip of PD servers.
-// @Produce zip
-// @Success 200 zip file
-// @Failure 500 zip create failed
+// @Produce application/octet-stream
 // @Router /debug/zip [get]
 func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="pd_debug"`+time.Now().Format("20060102_150405")+".zip"))
@@ -116,7 +113,7 @@ func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetConfig()
 	js, err := json.Marshal(config)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("marshal config info fail: %v", err))
+		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("json marshal config info fail: %v", err))
 		return
 	}
 	if _, err = fw.Write(js); err != nil {
@@ -136,14 +133,13 @@ func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Hash:      versioninfo.PDGitHash,
 	})
 	if err != nil {
-		log.Error("write config failed", zap.Error(err))
+		log.Error("json marshal version failed", zap.Error(err))
 	}
 	if _, err = fw.Write(versions); err != nil {
 		log.Error("write version failed", zap.Error(err))
 	}
 
-	err = zw.Close()
-	if _, err = fw.Write(js); err != nil {
+	if err = zw.Close(); err != nil {
 		log.Error("zip close error", zap.Error(err))
 	}
 }
