@@ -47,7 +47,7 @@ func newProfHandler(svr *server.Server, rd *render.Render) *ProfHandler {
 }
 
 func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="tidb_debug"`+time.Now().Format("20060102150405")+".zip"))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="pd_debug"`+time.Now().Format("20060102_150405")+".zip"))
 
 	// dump goroutine/heap/mutex
 	items := []struct {
@@ -59,6 +59,7 @@ func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		{name: "goroutine", debug: 2},
 		{name: "heap", gc: 1},
 		{name: "mutex"},
+		{name: "allocs"},
 	}
 	zw := zip.NewWriter(w)
 	for _, item := range items {
@@ -122,7 +123,10 @@ func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	versions, err := json.Marshal(&version{
-		Version: versioninfo.PDReleaseVersion,
+		Version:   versioninfo.PDReleaseVersion,
+		Branch:    versioninfo.PDGitBranch,
+		BuildTime: versioninfo.PDBuildTS,
+		Hash:      versioninfo.PDGitHash,
 	})
 	if err != nil {
 		log.Error("write config failed:%v", err)
