@@ -25,19 +25,21 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tikv/pd/server/versioninfo"
+	"go.uber.org/zap"
 
-	log "github.com/sirupsen/logrus"
-
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/versioninfo"
 	"github.com/unrolled/render"
 )
 
+// ProfHandler pprof handler
 type ProfHandler struct {
 	svr *server.Server
 	rd  *render.Render
 }
 
+// newProfHandler constructor for ProfHandler
 func newProfHandler(svr *server.Server, rd *render.Render) *ProfHandler {
 	return &ProfHandler{
 		svr: svr,
@@ -46,6 +48,11 @@ func newProfHandler(svr *server.Server, rd *render.Render) *ProfHandler {
 
 }
 
+// @Summary debug zip of PD servers.
+// @Produce zip
+// @Success 200 zip file
+// @Failure 500 zip create failed
+// @Router /debug/zip [get]
 func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="pd_debug"`+time.Now().Format("20060102_150405")+".zip"))
 
@@ -78,14 +85,14 @@ func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		err = p.WriteTo(fw, item.debug)
 		if err != nil {
-			log.Error("write failed:%v", err)
+			log.Error("write failed", zap.Error(err))
 		}
 	}
 
 	// dump profile
 	fw, err := zw.Create("profile")
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("create zip %s failed :%v", "profile", err.Error()))
+		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("create zip %s failed :%v", "profile", err))
 		return
 	}
 	if err := pprof.StartCPUProfile(fw); err != nil {
@@ -109,11 +116,11 @@ func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetConfig()
 	js, err := json.Marshal(config)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("marshal config info fail%v", err))
+		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("marshal config info fail: %v", err))
 		return
 	}
 	if _, err = fw.Write(js); err != nil {
-		log.Error("write config failed:%v", err)
+		log.Error("write config failed", zap.Error(err))
 	}
 
 	// dump version
@@ -129,15 +136,15 @@ func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Hash:      versioninfo.PDGitHash,
 	})
 	if err != nil {
-		log.Error("write config failed:%v", err)
+		log.Error("write config failed", zap.Error(err))
 	}
 	if _, err = fw.Write(versions); err != nil {
-		log.Error("write version failed:%v", err)
+		log.Error("write version failed", zap.Error(err))
 	}
 
 	err = zw.Close()
 	if _, err = fw.Write(js); err != nil {
-		log.Error("zip close error:%v", err)
+		log.Error("zip close error", zap.Error(err))
 	}
 }
 
