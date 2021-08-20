@@ -47,7 +47,6 @@ func (s *ProfSuite) TearDownSuite(c *C) {
 
 func (s *ProfSuite) TestGetZip(c *C) {
 	rsp, err := testDialClient.Get(s.urlPrefix + "/zip?" + "seconds=5s")
-	defer rsp.Body.Close()
 	c.Assert(err, IsNil)
 	body, err := ioutil.ReadAll(rsp.Body)
 	c.Assert(err, IsNil)
