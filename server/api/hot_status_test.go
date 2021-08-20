@@ -55,10 +55,11 @@ func (s testHotStatusSuite) TestGetHotStore(c *C) {
 	err := readJSON(testDialClient, s.urlPrefix+"/stores", &stat)
 	c.Assert(err, IsNil)
 }
+
 func (s testHotStatusSuite) TestGetHistoryHotRegionsBasic(c *C) {
 	request := statistics.HistoryHotRegionsRequest{
 		StartTime: 0,
-		EndTime:   time.Now().AddDate(0, 2, 0).Unix(),
+		EndTime:   time.Now().AddDate(0, 2, 0).UnixNano() / int64(time.Millisecond),
 	}
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
@@ -72,16 +73,16 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
 	hotRegions := []*statistics.HistoryHotRegion{
 		{
 			RegionID:   1,
-			UpdateTime: now.Unix(),
+			UpdateTime: now.UnixNano() / int64(time.Millisecond),
 		},
 		{
 			RegionID:   1,
-			UpdateTime: now.Add(10 * time.Minute).Unix(),
+			UpdateTime: now.Add(10*time.Minute).UnixNano() / int64(time.Millisecond),
 		},
 	}
 	request := statistics.HistoryHotRegionsRequest{
-		StartTime: now.Unix(),
-		EndTime:   now.Add(10 * time.Second).Unix(),
+		StartTime: now.UnixNano() / int64(time.Millisecond),
+		EndTime:   now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 	}
 	check := func(res []byte, statusCode int) {
 		c.Assert(statusCode, Equals, 200)
@@ -108,28 +109,28 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 			StoreID:       1,
 			PeerID:        1,
 			HotRegionType: "read",
-			UpdateTime:    now.Unix(),
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 		},
 		{
 			RegionID:      1,
 			StoreID:       2,
 			PeerID:        1,
 			HotRegionType: "read",
-			UpdateTime:    now.Add(10 * time.Second).Unix(),
+			UpdateTime:    now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 		},
 		{
 			RegionID:      1,
 			StoreID:       1,
 			PeerID:        2,
 			HotRegionType: "read",
-			UpdateTime:    now.Add(20 * time.Second).Unix(),
+			UpdateTime:    now.Add(20*time.Second).UnixNano() / int64(time.Millisecond),
 		},
 		{
 			RegionID:      1,
 			StoreID:       1,
 			PeerID:        1,
 			HotRegionType: "write",
-			UpdateTime:    now.Add(30 * time.Second).Unix(),
+			UpdateTime:    now.Add(30*time.Second).UnixNano() / int64(time.Millisecond),
 		},
 	}
 	request := statistics.HistoryHotRegionsRequest{
@@ -137,7 +138,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 		StoreIDs:       []uint64{1},
 		PeerIDs:        []uint64{1},
 		HotRegionTypes: []string{"read"},
-		EndTime:        now.Add(10 * time.Minute).Unix(),
+		EndTime:        now.Add(10*time.Minute).UnixNano() / int64(time.Millisecond),
 	}
 	check := func(res []byte, statusCode int) {
 		c.Assert(statusCode, Equals, 200)
@@ -165,7 +166,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 			QueryRate:     10.0,
 			StartKey:      []byte("3"),
 			EndKey:        []byte("5"),
-			UpdateTime:    now.Unix(),
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			HotRegionType: "read",
 		},
 		{
@@ -176,7 +177,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 			QueryRate:     10.0,
 			StartKey:      []byte("3"),
 			EndKey:        []byte("5"),
-			UpdateTime:    now.Unix(),
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			HotRegionType: "read",
 		},
 		{
@@ -187,7 +188,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 			QueryRate:     10.0,
 			StartKey:      []byte("3"),
 			EndKey:        []byte("5"),
-			UpdateTime:    now.Unix(),
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			HotRegionType: "read",
 		},
 		{
@@ -198,7 +199,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 			QueryRate:     10.0,
 			StartKey:      []byte("3"),
 			EndKey:        []byte("5"),
-			UpdateTime:    now.Unix(),
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			HotRegionType: "read",
 		},
 		{
@@ -209,7 +210,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 			QueryRate:     10.0,
 			StartKey:      []byte("3"),
 			EndKey:        []byte("5"),
-			UpdateTime:    now.Unix(),
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			HotRegionType: "read",
 		},
 		{
@@ -220,7 +221,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 			QueryRate:     10.0,
 			StartKey:      []byte("3"),
 			EndKey:        []byte("5"),
-			UpdateTime:    now.Unix(),
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			HotRegionType: "read",
 		},
 		{
@@ -231,7 +232,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 			QueryRate:     10.0,
 			StartKey:      []byte("3"),
 			EndKey:        []byte("5"),
-			UpdateTime:    now.Unix(),
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			HotRegionType: "read",
 		},
 		{
@@ -242,7 +243,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 			QueryRate:     20.0,
 			StartKey:      []byte("3"),
 			EndKey:        []byte("5"),
-			UpdateTime:    now.Unix(),
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			HotRegionType: "read",
 		},
 		{
@@ -253,7 +254,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 			QueryRate:     1.0,
 			StartKey:      []byte("3"),
 			EndKey:        []byte("5"),
-			UpdateTime:    now.Unix(),
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			HotRegionType: "read",
 		},
 	}
@@ -266,7 +267,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 		LowKeyRate:    10.0,
 		HighQueryRate: 11.0,
 		LowQueryRate:  10.0,
-		EndTime:       now.Unix(),
+		EndTime:       now.UnixNano() / int64(time.Millisecond),
 	}
 	check := func(res []byte, statusCode int) {
 		c.Assert(statusCode, Equals, 200)

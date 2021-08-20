@@ -392,7 +392,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
-	//initial hot_region_storage in here
+	//initial hot_region_storage in here.
 	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
 	s.hotRegionStorage, err = cluster.NewHotRegionsStorage(
 		ctx, hotRegionPath, encryptionKeyManager, s.cluster, s.member,

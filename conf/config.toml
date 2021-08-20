@@ -118,7 +118,7 @@
 # max-store-down-time = "30m"
 ## Controls the time interval between write hot regions info into leveldb
 # hot-regions-write-interval= "20m"
-## the day of  hot regions data to be reserved
+## The day of hot regions data to be reserved
 # hot-regions-reserved-days= "30"
 ## The number of Leader scheduling tasks performed at the same time.
 # leader-schedule-limit = 4

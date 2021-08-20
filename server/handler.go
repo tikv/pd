@@ -903,7 +903,7 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	}, ttl)
 }
 
-// GetAllRequestHistroyHotRegion get historyHotRegions as request
+// GetAllRequestHistroyHotRegion get historyHotRegions as request.
 func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRegionsRequest) (*statistics.HistoryHotRegions, error) {
 	var hotRegionTypes []string
 	if len(request.HotRegionTypes) != 0 {

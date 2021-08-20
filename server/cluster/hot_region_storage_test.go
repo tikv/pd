@@ -36,18 +36,18 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 	stats := statistics.StoreHotPeersStat{}
 	regions, statShows, startTime, _ :=
 		newTestHotRegionHistory(raft, time.Now(), 3, 3)
-	endTime := statShows[len(statShows)-2].LastUpdateTime.Unix()
+	endTime := statShows[len(statShows)-2].LastUpdateTime.UnixNano() / int64(time.Millisecond)
 	stats[1] = &statistics.HotPeersStat{
 		Stats: statShows,
 	}
 	c.Assert(err, IsNil)
-	regionStorage.packHotRegionInfo(stats, "read")
+	regionStorage.packHotRegionInfo(stats, "read", true)
 	regionStorage.flush()
 	iter := regionStorage.NewIterator(HotRegionTypes, startTime, endTime)
 	index := 0
 	for r, err := iter.Next(); r != nil && err == nil; r, err = iter.Next() {
 		c.Assert(r.RegionID, Equals, statShows[index].RegionID)
-		c.Assert(r.UpdateTime, Equals, statShows[index].LastUpdateTime.Unix())
+		c.Assert(r.UpdateTime, Equals, statShows[index].LastUpdateTime.UnixNano()/int64(time.Millisecond))
 		c.Assert(r.HotRegionType, Equals, "read")
 		reflect.DeepEqual(r.StartKey, regions[index].GetMeta().StartKey)
 		c.Assert(reflect.DeepEqual(r.StartKey, regions[index].GetMeta().StartKey), IsTrue)
@@ -69,12 +69,12 @@ func (t *testHotRegionStorage) TestHotRegionDelete(c *C) {
 	regions, statShows, startTime, _ :=
 		newTestHotRegionHistory(raft, next, 3, 3)
 	statShows[2].LastUpdateTime = now.Add(10 * time.Minute)
-	endTime := statShows[2].LastUpdateTime.Unix()
+	endTime := statShows[2].LastUpdateTime.UnixNano() / int64(time.Millisecond)
 	stats[1] = &statistics.HotPeersStat{
 		Stats: statShows,
 	}
 	c.Assert(err, IsNil)
-	regionStorage.packHotRegionInfo(stats, "read")
+	regionStorage.packHotRegionInfo(stats, "read", true)
 	regionStorage.flush()
 	regionStorage.delete()
 	iter := regionStorage.NewIterator(HotRegionTypes, startTime, endTime)
@@ -82,7 +82,7 @@ func (t *testHotRegionStorage) TestHotRegionDelete(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(r, NotNil)
 	c.Assert(r.RegionID, Equals, statShows[2].RegionID)
-	c.Assert(r.UpdateTime, Equals, statShows[2].LastUpdateTime.Unix())
+	c.Assert(r.UpdateTime, Equals, statShows[2].LastUpdateTime.UnixNano()/int64(time.Millisecond))
 	c.Assert(r.HotRegionType, Equals, "read")
 	c.Assert(reflect.DeepEqual(r.StartKey, regions[2].GetMeta().StartKey), IsTrue)
 	c.Assert(reflect.DeepEqual(r.EndKey, regions[2].GetMeta().EndKey), IsTrue)
@@ -104,7 +104,7 @@ func BenchmarkInsert(b *testing.B) {
 	}
 	stat := newBenchmarkHotRegoinHistory(raft, time.Now(), regions)
 	b.ResetTimer()
-	err = regionStorage.packHotRegionInfo(stat, "read")
+	err = regionStorage.packHotRegionInfo(stat, "read", true)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func BenchmarkInsertAfterMonth(b *testing.B) {
 	writeIntoDB(regionStorage, regions, 4464, endTime)
 	stat := newBenchmarkHotRegoinHistory(raft, endTime, regions)
 	b.ResetTimer()
-	err = regionStorage.packHotRegionInfo(stat, "read")
+	err = regionStorage.packHotRegionInfo(stat, "read", true)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -147,15 +147,15 @@ func BenchmarkDelete(b *testing.B) {
 	for _, region := range regions {
 		raft.putRegion(region)
 	}
-	//4464=(60*24*31)/10
+	// 4464=(60*24*31)/10
 	writeIntoDB(regionStorage, regions, 4464, endTime)
 	b.ResetTimer()
 	regionStorage.delete()
 }
 
 func BenchmarkRead(b *testing.B) {
-	//delete data in between today and tomrrow
-	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, 30)
+	// delete data in between today and tomrrow
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, defaultCompactionTime)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -167,10 +167,16 @@ func BenchmarkRead(b *testing.B) {
 	for _, region := range regions {
 		raft.putRegion(region)
 	}
-	//4320=(60*24*31)/10
+	// 4320=(60*24*31)/10
+	for i := 0; i < defaultCompactionTime-1; i++ {
+		// 144=24*60/10
+		endTime = writeIntoDB(regionStorage, regions, 144, endTime)
+		regionStorage.delete()
+		regionStorage.remianedDays--
+	}
 	endTime = writeIntoDB(regionStorage, regions, 4320, endTime)
 	b.ResetTimer()
-	iter := regionStorage.NewIterator(HotRegionTypes, startTime.Unix(), endTime.AddDate(0, 1, 0).Unix())
+	iter := regionStorage.NewIterator(HotRegionTypes, startTime.UnixNano()/int64(time.Millisecond), endTime.AddDate(0, 1, 0).UnixNano()/int64(time.Millisecond))
 	next, err := iter.Next()
 	for next != nil && err == nil {
 		next, err = iter.Next()
@@ -182,8 +188,8 @@ func BenchmarkRead(b *testing.B) {
 }
 
 func BenchmarkCompaction(b *testing.B) {
-	//delete data in between today and tomrrow
-	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, 30)
+	// delete data in between today and tomrrow
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, defaultCompactionTime)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -194,9 +200,9 @@ func BenchmarkCompaction(b *testing.B) {
 	for _, region := range regions {
 		raft.putRegion(region)
 	}
-	//leveldb will compaction after 30 times delete
+	// leveldb will compaction after 30 times delete
 	for i := 0; i < defaultCompactionTime-1; i++ {
-		//144=24*60/10
+		// 144=24*60/10
 		endTime = writeIntoDB(regionStorage, regions, 144, endTime)
 		regionStorage.delete()
 		regionStorage.remianedDays--
@@ -207,15 +213,14 @@ func BenchmarkCompaction(b *testing.B) {
 }
 
 func BenchmarkTwoTimesCompaction(b *testing.B) {
-	//delete data in between today and tomrrow
-	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, 30)
+	// delete data in between today and tomrrow
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, defaultCompactionTime)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer clear()
 	raft := regionStorage.cluster
 	endTime := time.Now()
-	//4464=(60*24*31)/10
 	regions := newTestHotRegions(1000, 3)
 	for _, region := range regions {
 		raft.putRegion(region)
@@ -233,7 +238,7 @@ func BenchmarkTwoTimesCompaction(b *testing.B) {
 }
 
 func BenchmarkDeleteAfterYear(b *testing.B) {
-	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, -1)
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, 30)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -251,6 +256,7 @@ func BenchmarkDeleteAfterYear(b *testing.B) {
 		regionStorage.delete()
 		//144=24*60/10
 		endTime = writeIntoDB(regionStorage, regions, 144, endTime)
+		regionStorage.remianedDays--
 	}
 	b.ResetTimer()
 	regionStorage.delete()
@@ -285,11 +291,8 @@ func writeIntoDB(regionStorage *HotRegionStorage,
 	endTime time.Time) time.Time {
 	raft := regionStorage.cluster
 	for i := 0; i < times; i++ {
-		if i%1000 == 0 {
-			fmt.Println(i)
-		}
 		stats := newBenchmarkHotRegoinHistory(raft, endTime, regions)
-		err := regionStorage.packHotRegionInfo(stats, HotRegionTypes[i%len(HotRegionTypes)])
+		err := regionStorage.packHotRegionInfo(stats, HotRegionTypes[i%len(HotRegionTypes)], true)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -306,7 +309,7 @@ func newTestHotRegionHistory(
 	statShows []statistics.HotPeerStatShow,
 	startTime, endTime int64) {
 	regions = newTestHotRegions(n, np)
-	startTime = start.Unix()
+	startTime = start.UnixNano() / int64(time.Millisecond)
 	for _, region := range regions {
 		raft.putRegion(region)
 		statShow := statistics.HotPeerStatShow{
@@ -316,7 +319,7 @@ func newTestHotRegionHistory(
 		statShows = append(statShows, statShow)
 		start = start.Add(10 * time.Second)
 	}
-	endTime = start.Unix()
+	endTime = start.UnixNano() / int64(time.Millisecond)
 	return
 }
 
@@ -336,7 +339,7 @@ func newBenchmarkHotRegoinHistory(
 			RegionID:       region.GetMeta().Id,
 			StoreID:        peer.StoreId,
 			LastUpdateTime: start,
-			HotDegree:      rand.Int(),
+			HotDegree:      rand.Int() % 100,
 			ByteRate:       rand.Float64() * 100,
 			KeyRate:        rand.Float64() * 100,
 			QueryRate:      rand.Float64() * 100,
@@ -382,7 +385,7 @@ func PrintDirSize(path string) {
 	fmt.Printf("file size %d\n", size)
 }
 
-//getFileSize get file size by path(B)
+// DirSizeB get file size by path(B)
 func DirSizeB(path string) (int64, error) {
 	var size int64
 	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {

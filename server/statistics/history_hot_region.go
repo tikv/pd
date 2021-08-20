@@ -22,6 +22,8 @@ type HistoryHotRegion struct {
 	QueryRate     float64 `json:"query_rate,omitempty"`
 	StartKey      []byte  `json:"start_key,omitempty"`
 	EndKey        []byte  `json:"end_key,omitempty"`
+	//true mean this peer is leader
+	IsLeader	  bool		`json:"is_leader,omitempty"`
 	// Encryption metadata for start_key and end_key. encryption_meta.iv is IV for start_key.
 	// IV for end_key is calculated from (encryption_meta.iv + len(start_key)).
 	// The field is only used by PD and should be ignored otherwise.
@@ -30,9 +32,8 @@ type HistoryHotRegion struct {
 }
 
 // HistoryHotRegionsRequest wrap request condition from tidb.
-//it is request from tidb
-//TODO
-//find a better place to put this struct
+// it is request from tidb
+// TODO:find a better place to put this struct
 type HistoryHotRegionsRequest struct {
 	StartTime      int64    `json:"start_time,omitempty"`
 	EndTime        int64    `json:"end_time,omitempty"`

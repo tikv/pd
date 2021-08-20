@@ -737,8 +737,10 @@ type ScheduleConfig struct {
 	// Default: manual
 	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
 
+	// Controls the time interval between write hot regions info into leveldb.
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
 
+	// The day of  hot regions data to be reserved.
 	HotRegionsResevervedDays int64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 }
 

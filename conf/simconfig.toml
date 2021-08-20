@@ -29,7 +29,6 @@ leader-schedule-limit = 32
 region-schedule-limit = 128
 replica-schedule-limit = 32
 merge-schedule-limit = 32
-##TODO
-##Find a better place to put this config
+## TODO:Find a better place to put this config
 hot-regions-reserved-days= "30"
 hot-regions-write-interval= "20m"
