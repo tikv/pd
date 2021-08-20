@@ -66,7 +66,8 @@ type Rule struct {
 	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically
 	IsolationLevel   string            `json:"isolation_level,omitempty"`   // used to isolate replicas explicitly and forcibly
 
-	group *RuleGroup // only set at runtime, no need to {,un}marshal or persist.
+	version uint64     // only set as runtime
+	group   *RuleGroup // only set at runtime, no need to {,un}marshal or persist.
 }
 
 func (r *Rule) String() string {
@@ -80,6 +81,7 @@ func (r *Rule) Clone() *Rule {
 	json.Unmarshal([]byte(r.String()), &clone)
 	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
 	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
+	clone.version = r.version
 	return &clone
 }
 

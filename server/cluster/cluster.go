@@ -115,10 +115,10 @@ type RaftCluster struct {
 	quit         chan struct{}
 	regionSyncer *syncer.RegionSyncer
 
-	ruleManager   *placement.RuleManager
-	regionLabeler *labeler.RegionLabeler
-	etcdClient    *clientv3.Client
-	httpClient    *http.Client
+	ruleManager               *placement.RuleManager
+	regionLabeler             *labeler.RegionLabeler
+	etcdClient                *clientv3.Client
+	httpClient                *http.Client
 
 	replicationMode *replication.ModeManager
 	traceRegionFlow bool
@@ -235,6 +235,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.ruleManager = placement.NewRuleManager(c.storage, c)
+	c.regionRuleFitCacheManager = placement.NewRegionRuleFitCacheManager()
 	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
 		if err != nil {

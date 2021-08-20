@@ -40,10 +40,12 @@ type RuleManager struct {
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
+	cacheStores []*core.StoreInfo
 
 	// used for rule validation
 	keyType          string
 	storeSetInformer core.StoreSetInformer
+	cache            *RegionRuleFitCacheManager
 }
 
 // NewRuleManager creates a RuleManager instance.
@@ -52,6 +54,7 @@ func NewRuleManager(storage *core.Storage, storeSetInformer core.StoreSetInforme
 		storage:          storage,
 		storeSetInformer: storeSetInformer,
 		ruleConfig:       newRuleConfig(),
+		cache:            NewRegionRuleFitCacheManager(),
 	}
 }
 
@@ -78,6 +81,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 			Role:           Voter,
 			Count:          maxReplica,
 			LocationLabels: locationLabels,
+			version:        1,
 		}
 		if err := m.storage.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
 			return err
@@ -307,7 +311,25 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 // FitRegion fits a region to the rules it matches.
 func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *RegionFit {
 	rules := m.GetRulesForApplyRegion(region)
-	return FitRegion(stores, region, rules)
+	isStoresUnchanged := m.CheckStores(stores.GetStores())
+	if isStoresUnchanged && m.cache.Check(region, rules) {
+		return m.cache.GetCacheRegionFit(region.GetID())
+	}
+	fit := FitRegion(stores, region, rules)
+	if fit.IsSatisfied() {
+		m.cache.SetCache(region, rules, fit)
+	}
+	return fit
+}
+
+func (m *RuleManager) CheckStores(stores []*core.StoreInfo) bool {
+	m.Lock()
+	defer m.Unlock()
+	if isEqualStoreS(m.cacheStores, stores) {
+		return true
+	}
+	m.cacheStores = stores
+	return false
 }
 
 func (m *RuleManager) beginPatch() *ruleConfigPatch {
@@ -401,7 +423,7 @@ const (
 // distinguished by the field `Action`.
 type RuleOp struct {
 	*Rule                       // information of the placement rule to add/delete
-	Action           RuleOpType `json:"action"`              // the operation type
+	Action           RuleOpType `json:"action"` // the operation type
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
@@ -676,4 +698,22 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	defer m.Unlock()
 	m.keyType = h
 	return m
+}
+
+func isEqualStoreS(a, b []*core.StoreInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, astore := range a {
+		find := false
+		for _, bstore := range b {
+			if astore.GetID() == bstore.GetID() && astore.IsEqualLabels(bstore.GetLabels()) {
+				find = true
+			}
+		}
+		if !find {
+			return false
+		}
+	}
+	return true
 }

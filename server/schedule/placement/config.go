@@ -155,7 +155,14 @@ func (p *ruleConfigPatch) commit() {
 		if rule == nil {
 			delete(p.c.rules, key)
 		} else {
+			oldRule, ok := p.c.rules[key]
+			version := uint64(1)
+			if ok {
+				version = oldRule.version + 1
+			}
+			rule.version = version
 			p.c.rules[key] = rule
+
 		}
 	}
 	for id, group := range p.mut.groups {

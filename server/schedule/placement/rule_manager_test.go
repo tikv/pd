@@ -16,7 +16,6 @@ package placement
 
 import (
 	"encoding/hex"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/codec"
@@ -302,6 +301,32 @@ func (s *testManagerSuite) TestGroupConfig(c *C) {
 	err = s.manager.DeleteRule("pd", "default")
 	c.Assert(err, IsNil)
 	c.Assert(s.manager.GetRuleGroups(), DeepEquals, []*RuleGroup{g2})
+}
+
+func (s *testManagerSuite) TestRuleVersion(c *C) {
+	rule1 := s.manager.GetRule("pd", "default")
+	c.Assert(rule1.version, Equals, uint64(1))
+	// create new rule
+	newRule := &Rule{GroupID: "g1", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}
+	err := s.manager.SetRule(newRule)
+	c.Assert(err, IsNil)
+	newRule = s.manager.GetRule("g1", "id")
+	c.Assert(newRule.version, Equals, uint64(1))
+	// update rule
+	newRule = &Rule{GroupID: "g1", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 2}
+	err = s.manager.SetRule(newRule)
+	c.Assert(err, IsNil)
+	newRule = s.manager.GetRule("g1", "id")
+	c.Assert(newRule.version, Equals, uint64(2))
+	// delete rule
+	err = s.manager.DeleteRule("g1", "id")
+	c.Assert(err, IsNil)
+	// recreate new rule
+	err = s.manager.SetRule(newRule)
+	c.Assert(err, IsNil)
+	// assert version should be 1 again
+	newRule = s.manager.GetRule("g1", "id")
+	c.Assert(newRule.version, Equals, uint64(1))
 }
 
 func (s *testManagerSuite) TestCheckApplyRules(c *C) {

@@ -703,3 +703,21 @@ func IsTiFlashStore(store *metapb.Store) bool {
 	}
 	return false
 }
+
+func (s *StoreInfo) IsEqualLabels(labels []*metapb.StoreLabel) bool {
+	if len(s.GetLabels()) != len(labels) {
+		return false
+	}
+	for _, label := range labels {
+		find := false
+		for _, slabel := range s.GetLabels() {
+			if label.Key == slabel.Key && label.Value == slabel.Value {
+				find = true
+			}
+		}
+		if find {
+			return false
+		}
+	}
+	return true
+}
