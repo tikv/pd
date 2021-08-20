@@ -54,10 +54,6 @@ else
 	BUILD_CGO_ENABLED := 1
 endif
 
-ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
-	BUILD_TAGS += dashboard_distro
-endif
-
 ifeq ("$(WITH_RACE)", "1")
 	BUILD_FLAGS += -race
 	BUILD_CGO_ENABLED := 1
@@ -102,6 +98,7 @@ ifneq ($(SWAGGER), 0)
 	PD_SERVER_DEP += swagger-spec
 endif
 ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
+	BUILD_TAGS += dashboard_distro
 	PD_SERVER_DEP += dashboard-replace-distro-info
 endif
 PD_SERVER_DEP += dashboard-ui
