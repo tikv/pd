@@ -6635,7 +6635,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-leader-scheduler\"}[5m])) by (name)",
+              "expr": "sum(rate(pd_scheduler_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-leader-scheduler\"}[5m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -6730,7 +6730,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-region-scheduler\"}[5m])) by (name)",
+              "expr": "sum(rate(pd_scheduler_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-region-scheduler\"}[5m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7000,7 +7000,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"rule_checker\"}[1m])) by (name)",
+              "expr": "sum(rate(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"rule_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7092,7 +7092,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
+              "expr": "sum(rate(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7184,7 +7184,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"merge_checker\"}[1m])) by (name)",
+              "expr": "sum(rate(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"merge_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
