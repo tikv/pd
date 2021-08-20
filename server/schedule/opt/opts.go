@@ -47,6 +47,25 @@ type Cluster interface {
 	AddSuspectRegions(ids ...uint64)
 }
 
+// cacheCluster include cache info
+type cacheCluster struct {
+	Cluster
+	stores []*core.StoreInfo
+}
+
+// GetStores returns store infos from cache
+func (c *cacheCluster) GetStores() []*core.StoreInfo {
+	return c.stores
+}
+
+// NewCacheCluster constructor for cache
+func NewCacheCluster(c Cluster) Cluster {
+	return &cacheCluster{
+		Cluster: c,
+		stores:  c.GetStores(),
+	}
+}
+
 // HeartbeatStream is an interface.
 type HeartbeatStream interface {
 	Send(*pdpb.RegionHeartbeatResponse) error
