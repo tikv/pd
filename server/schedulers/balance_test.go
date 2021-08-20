@@ -1002,7 +1002,7 @@ func (s *testBalanceRegionSchedulerSuite) TestEmptyRegion(c *C) {
 		tc.PutRegionStores(i, 1, 3, 4)
 	}
 	operators = sb.Schedule(tc)
-	c.Assert(operators, IsNil)
+	c.Assert(len(operators) == 0, IsTrue)
 }
 
 var _ = Suite(&testRandomMergeSchedulerSuite{})
