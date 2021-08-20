@@ -59,7 +59,7 @@ func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*R
 }
 
 func (cache *RegionRuleFitCache) isRulesUnchanged(rules []*Rule) bool {
-	return isRuleContains(cache.rules, rules) && isRuleContains(rules, cache.rules)
+	return isEqualRules(cache.rules, rules)
 }
 
 func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
@@ -90,7 +90,10 @@ func isPeerContains(a, b *core.RegionInfo) bool {
 	return true
 }
 
-func isRuleContains(a, b []*Rule) bool {
+func isEqualRules(a, b []*Rule) bool {
+	if len(a) != len(b) {
+		return false
+	}
 	for _, arule := range a {
 		find := false
 		for _, brule := range b {
