@@ -251,6 +251,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
 	apiRouter.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
 
+	profHandler := newProfHandler(svr, rd)
+	apiRouter.Handle("/debug/zip", profHandler)
+
 	// service GC safepoint API
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
 	apiRouter.HandleFunc("/gc/safepoint", serviceGCSafepointHandler.List).Methods("GET")
