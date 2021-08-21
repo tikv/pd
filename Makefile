@@ -99,6 +99,10 @@ PD_SERVER_DEP :=
 ifneq ($(SWAGGER), 0)
 	PD_SERVER_DEP += swagger-spec
 endif
+ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
+	BUILD_TAGS += dashboard_distro
+	PD_SERVER_DEP += dashboard-replace-distro-info
+endif
 PD_SERVER_DEP += dashboard-ui
 
 pd-server: export GO111MODULE=on
@@ -126,6 +130,10 @@ swagger-spec: install-go-tools
 dashboard-ui: export GO111MODULE=on
 dashboard-ui:
 	./scripts/embed-dashboard-ui.sh
+
+dashboard-replace-distro-info:
+	rm -f pkg/dashboard/distro/distro_info.go
+	cp $(DASHBOARD_DISTRIBUTION_DIR)/distro_info.go pkg/dashboard/distro/distro_info.go
 
 # Tools
 pd-ctl: export GO111MODULE=on
