@@ -33,12 +33,10 @@ func (s *testUtilsSuite) TestRetryQuota(c *C) {
 	c.Assert(q.GetLimit(store1), Equals, 10)
 
 	// test Attenuate
-	q.Attenuate(store1)
-	c.Assert(q.GetLimit(store1), Equals, 5)
-	for i := 0; i < 10; i++ {
+	for _, expected := range []int{5, 2, 1, 1, 1} {
 		q.Attenuate(store1)
+		c.Assert(q.GetLimit(store1), Equals, expected)
 	}
-	c.Assert(q.GetLimit(store1), Equals, 1)
 
 	// test GC
 	c.Assert(q.GetLimit(store2), Equals, 10)
