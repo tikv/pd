@@ -119,8 +119,9 @@ func (s *testLabelerSuite) TestGetSetRule(c *C) {
 	err = s.labeler.DeleteLabelRule("rule2")
 	c.Assert(err, IsNil)
 	c.Assert(s.labeler.GetLabelRule("rule2"), IsNil)
-	_, err = s.labeler.GetLabelRules([]string{"rule1", "rule2"})
-	c.Assert(err, NotNil)
+	byIDs, err = s.labeler.GetLabelRules([]string{"rule1", "rule2"})
+	c.Assert(err, IsNil)
+	c.Assert(byIDs, DeepEquals, []*LabelRule{rules[0]})
 
 	// patch
 	patch := LabelRulePatch{
