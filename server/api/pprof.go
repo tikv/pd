@@ -49,7 +49,7 @@ func newProfHandler(svr *server.Server, rd *render.Render) *ProfHandler {
 
 // @Summary debug zip of PD servers.
 // @Produce application/octet-stream
-// @Router /pprof/debug/zip [get]
+// @Router /debug/pprof/zip [get]
 func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="pd_debug"`+time.Now().Format("20060102_150405")+".zip"))
 
@@ -69,7 +69,7 @@ func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, item := range items {
 		p := pprof.Lookup(item.name)
 		if p == nil {
-			h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("pprof can not find name:%s", item.name))
+			h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("pprof can not find name: %s", item.name))
 			return
 		}
 		if item.gc > 0 {
@@ -89,7 +89,7 @@ func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// dump profile
 	fw, err := zw.Create("profile")
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("create zip %s failed :%v", "profile", err))
+		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("create zip %s failed: %v", "profile", err))
 		return
 	}
 	if err := pprof.StartCPUProfile(fw); err != nil {
