@@ -898,64 +898,12 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	}, ttl)
 }
 
-// GetAllRequestHistroyHotRegion get historyHotRegions as request.
-func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRegionsRequest) (*statistics.HistoryHotRegions, error) {
-	var hotRegionTypes []string
-	if len(request.HotRegionTypes) != 0 {
-		hotRegionTypes = request.HotRegionTypes
-	} else {
-		hotRegionTypes = cluster.HotRegionTypes
-	}
-	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, request.StartTime, request.EndTime)
-	results := make([]*statistics.HistoryHotRegion, 0)
+// GetHistoryHotRegionIter return a iter which iter all qualified item .
+func (h *Handler) GetHistoryHotRegionIter(hotRegionTypes []string,
+	StartTime, EndTime int64) cluster.HotRegionStorageIterator {
+	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, StartTime, EndTime)
+	return iter
 
-	regionSet, storeSet, peerSet, roleSet :=
-		make(map[uint64]bool), make(map[uint64]bool),
-		make(map[uint64]bool), make(map[int64]bool)
-	for _, id := range request.RegionIDs {
-		regionSet[id] = true
-	}
-	for _, id := range request.StoreIDs {
-		storeSet[id] = true
-	}
-	for _, id := range request.PeerIDs {
-		peerSet[id] = true
-	}
-	for _, id := range request.Roles {
-		roleSet[id] = true
-	}
-	var next *statistics.HistoryHotRegion
-	var err error
-	for next, err = iter.Next(); next != nil && err == nil; next, err = iter.Next() {
-		if len(regionSet) != 0 && !regionSet[next.RegionID] {
-			continue
-		}
-		if len(storeSet) != 0 && !storeSet[next.StoreID] {
-			continue
-		}
-		if len(peerSet) != 0 && !peerSet[next.PeerID] {
-			continue
-		}
-		if len(roleSet) != 0 && !roleSet[next.IsLeader] {
-			continue
-		}
-		if request.HighHotDegree < next.HotDegree || request.LowHotDegree > next.HotDegree {
-			continue
-		}
-		if request.HighFlowBytes < next.FlowBytes || request.LowFlowBytes > next.FlowBytes {
-			continue
-		}
-		if request.HighKeyRate < next.KeyRate || request.LowKeyRate > next.KeyRate {
-			continue
-		}
-		if request.HighQueryRate < next.QueryRate || request.LowQueryRate > next.QueryRate {
-			continue
-		}
-		results = append(results, next)
-	}
-	return &statistics.HistoryHotRegions{
-		HistoryHotRegion: results,
-	}, err
 }
 
 func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {
