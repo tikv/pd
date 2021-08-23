@@ -43,25 +43,3 @@ type HistoryHotRegion struct {
 	// If encryption_meta is empty (i.e. nil), it means start_key and end_key are unencrypted.
 	EncryptionMeta *encryptionpb.EncryptionMeta `json:"encryption_meta,omitempty"`
 }
-
-// HistoryHotRegionsRequest wrap request condition from tidb.
-// it is request from tidb
-// TODO:find a better place to put this struct
-type HistoryHotRegionsRequest struct {
-	StartTime int64    `json:"start_time,omitempty"`
-	EndTime   int64    `json:"end_time,omitempty"`
-	RegionIDs []uint64 `json:"region_ids,omitempty"`
-	StoreIDs  []uint64 `json:"store_ids,omitempty"`
-	PeerIDs   []uint64 `json:"peer_ids,omitempty"`
-	//0 means not leader,1 means leader
-	Roles          []int64  `json:"is_leader,omitempy"`
-	HotRegionTypes []string `json:"hot_region_type,omitempty"`
-	LowHotDegree   int64    `json:"low_hot_degree,omitempty"`
-	HighHotDegree  int64    `json:"high_hot_degree,omitempty"`
-	LowFlowBytes   float64  `json:"low_flow_bytes,omitempty"`
-	HighFlowBytes  float64  `json:"high_flow_bytes,omitempty"`
-	LowKeyRate     float64  `json:"low_key_rate,omitempty"`
-	HighKeyRate    float64  `json:"high_key_rate,omitempty"`
-	LowQueryRate   float64  `json:"low_query_rate,omitempty"`
-	HighQueryRate  float64  `json:"high_query_rate,omitempty"`
-}
