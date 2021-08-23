@@ -126,7 +126,7 @@ func NewStoreInfoWithSizeCount(id uint64, regionCount, leaderCount int, regionSi
 	return store
 }
 
-// RandomKindReadQuery returns query stat with random query kind
+// RandomKindReadQuery returns query stat with random query kind, only used for unit test.
 func RandomKindReadQuery(queryRead uint64) *pdpb.QueryStats {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	switch r.Intn(3) {
@@ -147,7 +147,7 @@ func RandomKindReadQuery(queryRead uint64) *pdpb.QueryStats {
 	}
 }
 
-// RandomKindWriteQuery returns query stat with random query kind
+// RandomKindWriteQuery returns query stat with random query kind, only used for unit test.
 func RandomKindWriteQuery(queryWrite uint64) *pdpb.QueryStats {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	switch r.Intn(7) {
