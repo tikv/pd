@@ -735,6 +735,12 @@ type ScheduleConfig struct {
 	// is overwritten, the value is fixed until it is deleted.
 	// Default: manual
 	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
+
+	// Controls the time interval between write hot regions info into leveldb.
+	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
+
+	// The day of  hot regions data to be reserved.0 means close
+	HotRegionsResevervedDays int64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -780,6 +786,8 @@ const (
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
 	defaultEnableCrossTableMerge       = true
+	defaultHotRegionsWriteInterval     = 20 * time.Minute
+	defaultHotRegionsResevervedDays    = 30
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -859,6 +867,14 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 
 	if c.StoreLimit == nil {
 		c.StoreLimit = make(map[uint64]StoreLimitConfig)
+	}
+
+	if !meta.IsDefined("hot-regions-write-interval") {
+		adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
+	}
+
+	if !meta.IsDefined("hot-regions-reserved-days") {
+		adjustInt64(&c.HotRegionsResevervedDays, defaultHotRegionsResevervedDays)
 	}
 
 	return c.Validate()
