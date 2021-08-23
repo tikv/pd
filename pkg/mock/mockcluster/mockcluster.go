@@ -579,11 +579,7 @@ func (mc *Cluster) UpdateStorageReadKeys(storeID uint64, keysRead uint64) {
 // UpdateStorageReadQuery updates store read query.
 func (mc *Cluster) UpdateStorageReadQuery(storeID uint64, queryRead uint64) {
 	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
-		newStats.QueryStats = &pdpb.QueryStats{
-			Coprocessor: queryRead / 3,
-			Scan:        queryRead / 3,
-			Get:         queryRead / 3,
-		}
+		newStats.QueryStats = core.RandomKindReadQuery(queryRead)
 		newStats.BytesRead = queryRead * 100
 	})
 }
@@ -591,15 +587,7 @@ func (mc *Cluster) UpdateStorageReadQuery(storeID uint64, queryRead uint64) {
 // UpdateStorageWriteQuery updates store write query.
 func (mc *Cluster) UpdateStorageWriteQuery(storeID uint64, queryWrite uint64) {
 	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
-		newStats.QueryStats = &pdpb.QueryStats{
-			Put:                    queryWrite / 7,
-			Delete:                 queryWrite / 7,
-			DeleteRange:            queryWrite / 7,
-			Rollback:               queryWrite / 7,
-			Prewrite:               queryWrite / 7,
-			Commit:                 queryWrite / 7,
-			AcquirePessimisticLock: queryWrite / 7,
-		}
+		newStats.QueryStats = core.RandomKindWriteQuery(queryWrite)
 		newStats.BytesWritten = queryWrite * 100
 	})
 }
