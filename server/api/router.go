@@ -241,6 +241,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/tso/allocator/transfer/{name}", tsoHandler.TransferLocalTSOAllocator).Methods("POST")
 
 	// profile API
+	profHandler := newProfHandler(svr, rd)
 	apiRouter.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	apiRouter.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	apiRouter.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
@@ -250,9 +251,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.Handle("/debug/pprof/block", pprof.Handler("block"))
 	apiRouter.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
 	apiRouter.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
-
-	profHandler := newProfHandler(svr, rd)
-	apiRouter.Handle("/debug/zip", profHandler)
+	apiRouter.Handle("/debug/pprof/zip", profHandler)
 
 	// service GC safepoint API
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)

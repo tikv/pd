@@ -49,7 +49,7 @@ func newProfHandler(svr *server.Server, rd *render.Render) *ProfHandler {
 
 // @Summary debug zip of PD servers.
 // @Produce application/octet-stream
-// @Router /debug/zip [get]
+// @Router /pprof/debug/zip [get]
 func (h *ProfHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="pd_debug"`+time.Now().Format("20060102_150405")+".zip"))
 
