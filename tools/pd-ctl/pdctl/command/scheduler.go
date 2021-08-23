@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -428,6 +429,13 @@ func newConfigHotRegionCommand() *cobra.Command {
 		Short: "list the config item",
 		Run:   listSchedulerConfigCommandFunc})
 	c.AddCommand(&cobra.Command{
+		Use:   "load",
+		Short: "load config from file",
+		Run: func(cmd *cobra.Command, args []string) {
+			loadSchedulerConfigCommandFunc(cmd, c.Name(), args)
+		},
+	})
+	c.AddCommand(&cobra.Command{
 		Use:   "set <key> <value>",
 		Short: "set the config item",
 		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) }})
@@ -524,6 +532,22 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
+}
+
+func loadSchedulerConfigCommandFunc(cmd *cobra.Command, schedulersName string, args []string) {
+	file := args[0]
+	data, err := os.ReadFile(file)
+	if err != nil {
+		cmd.Printf("file not found: %s", file)
+		return
+	}
+	input := make(map[string]interface{})
+	if err = json.Unmarshal(data, &input); err != nil {
+		cmd.Printf("json unmarshal failed err: %v", err)
+		return
+	}
+	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulersName, "config"), input)
+
 }
 
 func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, args []string) {
