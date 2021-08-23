@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -104,18 +105,21 @@ func NewHotRegionsStorage(
 func (h *HotRegionStorage) backgroundDelete() {
 	// make delete happened in defaultDeleteTime clock.
 	now := time.Now()
-	next := now.Add(time.Hour * 24)
-	next = time.Date(next.Year(), next.Month(), next.Day(), defaultDeleteTime, 0, 0, 0, next.Location())
-	t := time.NewTicker(next.Sub(now))
+	next := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
+	d := next.Sub(now)
+	if d < 0 {
+		d = d + 24*time.Hour
+	}
+	ticker := time.NewTicker(d)
 	go func() {
+		defer ticker.Stop()
 		select {
-		case <-t.C:
-
+		case <-ticker.C:
+			ticker.Reset(24 * time.Hour)
+			h.delete()
 		case <-h.hotRegionInfoCtx.Done():
 			return
 		}
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
@@ -125,7 +129,6 @@ func (h *HotRegionStorage) backgroundDelete() {
 			}
 		}
 	}()
-
 }
 
 // Write hot_region info into db in the background.
@@ -293,7 +296,7 @@ func (h *HotRegionStorage) delete() error {
 	return nil
 }
 
-// HotRegionStorageIterator iterates over a historyhotregion.
+// HotRegionStorageIterator iterates over a historyHotRegion.
 type HotRegionStorageIterator struct {
 	iters                []iterator.Iterator
 	encryptionKeyManager *encryptionkm.KeyManager
@@ -301,7 +304,7 @@ type HotRegionStorageIterator struct {
 
 // Next moves the iterator to the next key/value pair.
 // And return historyHotRegion which it is now pointing to.
-// it will return nil,nilif there is no more historyHotRegion.
+// it will return (nil,nil),if there is no more historyHotRegion.
 func (it *HotRegionStorageIterator) Next() (*statistics.HistoryHotRegion, error) {
 	iter := it.iters[0]
 	for !iter.Next() {
