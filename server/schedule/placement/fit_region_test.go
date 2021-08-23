@@ -327,4 +327,3 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 		FitRegion(storesSet, region, rules)
 	}
 }
-
