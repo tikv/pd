@@ -117,9 +117,9 @@
 ## it adds replicas at other nodes.
 # max-store-down-time = "30m"
 ## Controls the time interval between write hot regions info into leveldb
-# hot-regions-write-interval= "20m"
-## The day of hot regions data to be reserved,0 means close
-# hot-regions-reserved-days= "30"
+# hot-regions-write-interval= "10m"
+## The day of hot regions data to be reserved. 0 means close.
+# hot-regions-reserved-days= "7"
 ## The number of Leader scheduling tasks performed at the same time.
 # leader-schedule-limit = 4
 ## The number of Region scheduling tasks performed at the same time.
