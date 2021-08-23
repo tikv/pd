@@ -57,7 +57,7 @@ func (s testHotStatusSuite) TestGetHotStore(c *C) {
 }
 
 func (s testHotStatusSuite) TestGetHistoryHotRegionsBasic(c *C) {
-	request := statistics.HistoryHotRegionsRequest{
+	request := HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 2, 0).UnixNano() / int64(time.Millisecond),
 	}
@@ -80,7 +80,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
 			UpdateTime: now.Add(10*time.Minute).UnixNano() / int64(time.Millisecond),
 		},
 	}
-	request := statistics.HistoryHotRegionsRequest{
+	request := HistoryHotRegionsRequest{
 		StartTime: now.UnixNano() / int64(time.Millisecond),
 		EndTime:   now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 	}
@@ -133,7 +133,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 			UpdateTime:    now.Add(30*time.Second).UnixNano() / int64(time.Millisecond),
 		},
 	}
-	request := statistics.HistoryHotRegionsRequest{
+	request := HistoryHotRegionsRequest{
 		RegionIDs:      []uint64{1},
 		StoreIDs:       []uint64{1},
 		PeerIDs:        []uint64{1},
@@ -258,7 +258,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 			HotRegionType: "read",
 		},
 	}
-	request := statistics.HistoryHotRegionsRequest{
+	request := HistoryHotRegionsRequest{
 		HighHotDegree: 11,
 		LowHotDegree:  10,
 		HighFlowBytes: 11.0,
