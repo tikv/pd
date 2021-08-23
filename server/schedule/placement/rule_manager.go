@@ -316,9 +316,11 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 		return m.cache.GetCacheRegionFit(region.GetID())
 	}
 	fit := FitRegion(stores, region, rules)
-	if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 {
-		m.cache.SetCache(region, rules, fit)
-	}
+	// only for test
+	m.cache.SetCache(region, rules, fit)
+	//if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 {
+	//	m.cache.SetCache(region, rules, fit)
+	//}
 	return fit
 }
 
