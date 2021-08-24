@@ -326,7 +326,7 @@ func (s *testManagerSuite) TestRuleVersion(c *C) {
 	// recreate new rule
 	err = s.manager.SetRule(newRule)
 	c.Assert(err, IsNil)
-	// assert version should be 1 again
+	// assert version should be 0 again
 	newRule = s.manager.GetRule("g1", "id")
 	c.Assert(newRule.version, Equals, uint64(0))
 }
