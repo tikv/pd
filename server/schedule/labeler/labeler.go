@@ -166,8 +166,6 @@ func (l *RegionLabeler) GetLabelRules(ids []string) ([]*LabelRule, error) {
 	for _, id := range ids {
 		if rule, ok := l.labelRules[id]; ok {
 			rules = append(rules, rule)
-		} else {
-			return nil, errs.ErrRegionRuleNotFound.FastGenByArgs(id)
 		}
 	}
 	return rules, nil
