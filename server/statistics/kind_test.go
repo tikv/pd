@@ -27,12 +27,16 @@ type testRegionInfoSuite struct{}
 
 func (s *testRegionInfoSuite) TestGetLoads(c *C) {
 	queryStats := &pdpb.QueryStats{
-		Get:         5,
-		Coprocessor: 6,
-		Scan:        7,
-		Put:         8,
-		Delete:      9,
-		DeleteRange: 10,
+		Get:                    5,
+		Coprocessor:            6,
+		Scan:                   7,
+		Put:                    8,
+		Delete:                 9,
+		DeleteRange:            10,
+		AcquirePessimisticLock: 11,
+		Rollback:               12,
+		Prewrite:               13,
+		Commit:                 14,
 	}
 	regionA := core.NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{}}, nil,
 		core.SetReadBytes(1),
@@ -45,9 +49,13 @@ func (s *testRegionInfoSuite) TestGetLoads(c *C) {
 	c.Assert(float64(regionA.GetBytesRead()), Equals, loads[RegionReadBytes])
 	c.Assert(float64(regionA.GetKeysRead()), Equals, loads[RegionReadKeys])
 	c.Assert(float64(regionA.GetReadQueryNum()), Equals, loads[RegionReadQuery])
+	readQuery := float64(queryStats.Coprocessor + queryStats.Get + queryStats.Scan)
+	c.Assert(float64(regionA.GetReadQueryNum()), Equals, readQuery)
 	c.Assert(float64(regionA.GetBytesWritten()), Equals, loads[RegionWriteBytes])
 	c.Assert(float64(regionA.GetKeysWritten()), Equals, loads[RegionWriteKeys])
 	c.Assert(float64(regionA.GetWriteQueryNum()), Equals, loads[RegionWriteQuery])
+	writeQuery := float64(queryStats.Put + queryStats.Delete + queryStats.DeleteRange + queryStats.AcquirePessimisticLock + queryStats.Rollback + queryStats.Prewrite + queryStats.Commit)
+	c.Assert(float64(regionA.GetWriteQueryNum()), Equals, writeQuery)
 
 	loads = regionA.GetWriteLoads()
 	c.Assert(loads, HasLen, int(RegionStatCount))
