@@ -643,7 +643,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	// store 2 becomes the store with least regions.
 	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], operator.OpKind(0), 4, 2)
 	opt.SetMaxReplicas(3)
-	c.Assert(len(sb.Schedule(tc)), HasLen, 0)
+	c.Assert(sb.Schedule(tc), HasLen, 0)
 
 	opt.SetMaxReplicas(1)
 	c.Assert(len(sb.Schedule(tc)), Greater, 0)
