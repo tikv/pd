@@ -81,8 +81,6 @@ func (r *Rule) Clone() *Rule {
 	json.Unmarshal([]byte(r.String()), &clone)
 	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
 	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
-	clone.Version = r.Version
-	clone.CreateTimestamp = r.CreateTimestamp
 	return &clone
 }
 
