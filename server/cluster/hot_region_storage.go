@@ -1,4 +1,4 @@
-// Copyright 2016 TiKV Project Authors.
+// Copyright 2021 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -184,27 +184,27 @@ func (h *HotRegionStorage) pullHotRegionInfo() error {
 	hotReadLeaderRegion := hotReadRegion.AsLeader
 	hotReadPeerRegion := hotReadRegion.AsPeer
 	if err := h.packHotRegionInfo(hotReadLeaderRegion,
-		HotRegionTypes[0], 1); err != nil {
+		HotRegionTypes[0], false); err != nil {
 		return err
 	}
 	if err := h.packHotRegionInfo(hotReadPeerRegion,
-		HotRegionTypes[0], 0); err != nil {
+		HotRegionTypes[0], true); err != nil {
 		return err
 	}
 	hotWriteRegion := cluster.coordinator.getHotWriteRegions()
 	hotWriteLeaderInfo := hotWriteRegion.AsLeader
 	hotWritePeerInfo := hotWriteRegion.AsPeer
 	if err := h.packHotRegionInfo(hotWriteLeaderInfo,
-		HotRegionTypes[1], 1); err != nil {
+		HotRegionTypes[1], true); err != nil {
 		return err
 	}
 	err := h.packHotRegionInfo(hotWritePeerInfo,
-		HotRegionTypes[1], 0)
+		HotRegionTypes[1], false)
 	return err
 }
 
 func (h *HotRegionStorage) packHotRegionInfo(hotLeaderInfo statistics.StoreHotPeersStat,
-	hotRegionType string, isLeader int64) error {
+	hotRegionType string, isLeader bool) error {
 	cluster := h.cluster
 	batchHotInfo := h.batchHotInfo
 	for _, hotPeersStat := range hotLeaderInfo {
