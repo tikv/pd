@@ -311,7 +311,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
 		conf.persist()
-		rd.Text(w, http.StatusOK, "success")
+		rd.Text(w, http.StatusOK, "success ")
 	}
 
 	m := make(map[string]interface{})

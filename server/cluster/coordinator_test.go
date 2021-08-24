@@ -970,7 +970,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	start := time.Now()
 	{
 		op1 := lb.Schedule(tc)[0]
-		c.Assert(len(lb.Schedule(tc)) > 0, IsTrue)
+		c.Assert(len(lb.Schedule(tc)), Greater, 0)
 		c.Assert(oc.AddOperator(op1), IsTrue)
 		c.Assert(oc.RemoveOperator(op1), IsTrue)
 	}
@@ -980,7 +980,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 		if time.Since(start) > time.Second {
 			break
 		}
-		c.Assert(len(ops) == 0, IsTrue)
+		c.Assert(ops, HasLen, 0)
 	}
 
 	// reset all stores' limit
@@ -989,14 +989,14 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
 	for i := 0; i < 10; i++ {
 		op1 := lb.Schedule(tc)[0]
-		c.Assert(len(lb.Schedule(tc)) > 0, IsTrue)
+		c.Assert(len(lb.Schedule(tc)), Greater, 0)
 		c.Assert(oc.AddOperator(op1), IsTrue)
 		c.Assert(oc.RemoveOperator(op1), IsTrue)
 	}
 	// sleep 1 seconds to make sure that the token is filled up
 	time.Sleep(1 * time.Second)
 	for i := 0; i < 100; i++ {
-		c.Assert(len(lb.Schedule(tc)) > 0, IsTrue)
+		c.Assert(len(lb.Schedule(tc)), Greater, 0)
 	}
 }
 
@@ -1027,7 +1027,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	c.Assert(len(lb.Schedule(tc)), Equals, 0)
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
-	c.Assert(len(lb.Schedule(tc)) > 0, IsTrue)
+	c.Assert(len(lb.Schedule(tc)), Greater, 0)
 }
 
 var _ = Suite(&testScheduleControllerSuite{})
