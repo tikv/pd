@@ -194,18 +194,16 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 }
 
 func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*statistics.HistoryHotRegions, error) {
-	var hotRegionTypes []string
+	var hotRegionTypes = cluster.HotRegionTypes
 	if len(request.HotRegionTypes) != 0 {
 		hotRegionTypes = request.HotRegionTypes
-	} else {
-		hotRegionTypes = cluster.HotRegionTypes
 	}
 	iter := handler.GetHistoryHotRegionIter(hotRegionTypes, request.StartTime, request.EndTime)
-	results := make([]*statistics.HistoryHotRegion, 0)
+	var results []*statistics.HistoryHotRegion
 
 	regionSet, storeSet, peerSet, roleSet :=
 		make(map[uint64]bool), make(map[uint64]bool),
-		make(map[uint64]bool), make(map[int64]bool)
+		make(map[uint64]bool), make(map[bool]bool)
 	for _, id := range request.RegionIDs {
 		regionSet[id] = true
 	}
@@ -216,7 +214,9 @@ func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 		peerSet[id] = true
 	}
 	for _, id := range request.Roles {
-		roleSet[id] = true
+		if id == 1 || id == 0 {
+			roleSet[id == 1] = true
+		}
 	}
 	var next *statistics.HistoryHotRegion
 	var err error
