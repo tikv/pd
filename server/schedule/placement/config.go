@@ -17,6 +17,7 @@ package placement
 import (
 	"bytes"
 	"encoding/json"
+	"time"
 )
 
 // ruleConfig contains rule and rule group configurations.
@@ -157,10 +158,15 @@ func (p *ruleConfigPatch) commit() {
 		} else {
 			oldRule, ok := p.c.rules[key]
 			version := uint64(0)
+			createTimestamp := uint64(0)
 			if ok {
-				version = oldRule.version + 1
+				version = oldRule.Version + 1
+				createTimestamp = oldRule.CreateTimestamp
+			} else {
+				createTimestamp = uint64(time.Now().Unix())
 			}
-			rule.version = version
+			rule.Version = version
+			rule.CreateTimestamp = createTimestamp
 			p.c.rules[key] = rule
 		}
 	}

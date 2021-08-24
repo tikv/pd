@@ -65,9 +65,9 @@ type Rule struct {
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers
 	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically
 	IsolationLevel   string            `json:"isolation_level,omitempty"`   // used to isolate replicas explicitly and forcibly
-
-	version uint64     // only set at runtime, add 1 each time rules updated, begin from 0.
-	group   *RuleGroup // only set at runtime, no need to {,un}marshal or persist.
+	Version          uint64            `json:"version,omitempty"`           // only set at runtime, add 1 each time rules updated, begin from 0.
+	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"`  // only set at runtime, recorded rule create timestamp
+	group            *RuleGroup        // only set at runtime, no need to {,un}marshal or persist.
 }
 
 func (r *Rule) String() string {
@@ -81,7 +81,8 @@ func (r *Rule) Clone() *Rule {
 	json.Unmarshal([]byte(r.String()), &clone)
 	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
 	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
-	clone.version = r.version
+	clone.Version = r.Version
+	clone.CreateTimestamp = r.CreateTimestamp
 	return &clone
 }
 

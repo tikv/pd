@@ -307,19 +307,19 @@ func (s *testManagerSuite) TestGroupConfig(c *C) {
 func (s *testManagerSuite) TestRuleVersion(c *C) {
 	// default rule
 	rule1 := s.manager.GetRule("pd", "default")
-	c.Assert(rule1.version, Equals, uint64(0))
+	c.Assert(rule1.Version, Equals, uint64(0))
 	// create new rule
 	newRule := &Rule{GroupID: "g1", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}
 	err := s.manager.SetRule(newRule)
 	c.Assert(err, IsNil)
 	newRule = s.manager.GetRule("g1", "id")
-	c.Assert(newRule.version, Equals, uint64(0))
+	c.Assert(newRule.Version, Equals, uint64(0))
 	// update rule
 	newRule = &Rule{GroupID: "g1", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 2}
 	err = s.manager.SetRule(newRule)
 	c.Assert(err, IsNil)
 	newRule = s.manager.GetRule("g1", "id")
-	c.Assert(newRule.version, Equals, uint64(1))
+	c.Assert(newRule.Version, Equals, uint64(1))
 	// delete rule
 	err = s.manager.DeleteRule("g1", "id")
 	c.Assert(err, IsNil)
@@ -328,7 +328,7 @@ func (s *testManagerSuite) TestRuleVersion(c *C) {
 	c.Assert(err, IsNil)
 	// assert version should be 0 again
 	newRule = s.manager.GetRule("g1", "id")
-	c.Assert(newRule.version, Equals, uint64(0))
+	c.Assert(newRule.Version, Equals, uint64(0))
 }
 
 func (s *testManagerSuite) TestCheckApplyRules(c *C) {
