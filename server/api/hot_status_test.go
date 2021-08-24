@@ -14,12 +14,16 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"reflect"
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -63,7 +67,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBasic(c *C) {
 	}
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/regions/history", data)
+	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data)
 	c.Assert(err, IsNil)
 }
 
@@ -96,7 +100,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
 	writeToDB(c, storage.LeveldbKV, hotRegions)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
 	c.Assert(err, IsNil)
 }
 
@@ -163,7 +167,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 	writeToDB(c, storage.LeveldbKV, hotRegions)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
 	c.Assert(err, IsNil)
 }
 
@@ -292,7 +296,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBetween(c *C) {
 	writeToDB(c, storage.LeveldbKV, hotRegions)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
 	c.Assert(err, IsNil)
 }
 
@@ -305,4 +309,30 @@ func writeToDB(c *C, kv *kv.LeveldbKV, hotRegions []*statistics.HistoryHotRegion
 		batch.Put([]byte(key), value)
 	}
 	kv.Write(batch, nil)
+}
+
+func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+	body := bytes.NewBuffer([]byte(data))
+	req, err := http.NewRequest("GET", url, body)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	defer resp.Body.Close()
+	res, err := io.ReadAll(resp.Body)
+
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return errors.New(string(res))
+	}
+	for _, opt := range checkOpts {
+		opt(res, resp.StatusCode)
+	}
+	return nil
 }

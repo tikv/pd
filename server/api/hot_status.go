@@ -171,7 +171,8 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 // @Accept json
 // @Produce json
 // @Success 200 {object} statistics.HistoryHotRegions
-// @Router /hotspot/regions/history [post]
+// @Failure 400 {string} string "The input is invalid."
+// @Router /hotspot/regions/history [get]
 func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
@@ -182,7 +183,7 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 	historyHotRegionsRequest := &HistoryHotRegionsRequest{}
 	err = json.Unmarshal(data, historyHotRegionsRequest)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	results, err := GetAllRequestHistroyHotRegion(h.Handler, historyHotRegionsRequest)
