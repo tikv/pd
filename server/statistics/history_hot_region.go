@@ -29,7 +29,7 @@ type HistoryHotRegion struct {
 	PeerID     uint64 `json:"peer_id,omitempty"`
 	StoreID    uint64 `json:"store_id,omitempty"`
 	//0 means not leader,1 means leader
-	IsLeader      int64   `json:"is_leader,omitempty"`
+	IsLeader      bool    `json:"is_leader,omitempty"`
 	HotRegionType string  `json:"hot_region_type,omitempty"`
 	HotDegree     int64   `json:"hot_degree,omitempty"`
 	FlowBytes     float64 `json:"flow_bytes,omitempty"`

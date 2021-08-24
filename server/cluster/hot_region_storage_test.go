@@ -53,7 +53,7 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 	stats[1] = &statistics.HotPeersStat{
 		Stats: statShows,
 	}
-	regionStorage.packHotRegionInfo(stats, HotRegionTypes[0], 1)
+	regionStorage.packHotRegionInfo(stats, HotRegionTypes[0], true)
 	regionStorage.flush()
 	iter := regionStorage.NewIterator(HotRegionTypes, startTime, endTime)
 	index := 0
@@ -81,7 +81,7 @@ func (t *testHotRegionStorage) TestHotRegionDelete(c *C) {
 	stats[1] = &statistics.HotPeersStat{
 		Stats: statShows,
 	}
-	regionStorage.packHotRegionInfo(stats, HotRegionTypes[0], 1)
+	regionStorage.packHotRegionInfo(stats, HotRegionTypes[0], true)
 	regionStorage.flush()
 	regionStorage.delete()
 	endTime := statShows[2].LastUpdateTime.UnixNano() / int64(time.Millisecond)
@@ -112,7 +112,7 @@ func BenchmarkInsert(b *testing.B) {
 	}
 	stat := newBenchmarkHotRegoinHistory(raft, time.Now(), regions)
 	b.ResetTimer()
-	err = regionStorage.packHotRegionInfo(stat, HotRegionTypes[0], 1)
+	err = regionStorage.packHotRegionInfo(stat, HotRegionTypes[0], true)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func BenchmarkInsertAfterMonth(b *testing.B) {
 	writeIntoDB(regionStorage, regions, 4464, endTime)
 	stat := newBenchmarkHotRegoinHistory(raft, endTime, regions)
 	b.ResetTimer()
-	err = regionStorage.packHotRegionInfo(stat, HotRegionTypes[0], 1)
+	err = regionStorage.packHotRegionInfo(stat, HotRegionTypes[0], true)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func writeIntoDB(regionStorage *HotRegionStorage,
 			fmt.Println(i)
 		}
 		stats := newBenchmarkHotRegoinHistory(raft, endTime, regions)
-		err := regionStorage.packHotRegionInfo(stats, HotRegionTypes[i%len(HotRegionTypes)], 1)
+		err := regionStorage.packHotRegionInfo(stats, HotRegionTypes[i%len(HotRegionTypes)], true)
 		if err != nil {
 			log.Fatal(err)
 		}
