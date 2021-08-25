@@ -314,7 +314,6 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 	if isStoresUnchanged && m.cache.Check(region, rules) {
 		fit := m.cache.GetCacheRegionFit(region.GetID())
 		if fit != nil {
-			fit.cached = true
 			return fit
 		}
 	}
@@ -429,7 +428,7 @@ const (
 // distinguished by the field `Action`.
 type RuleOp struct {
 	*Rule                       // information of the placement rule to add/delete
-	Action           RuleOpType `json:"action"` // the operation type
+	Action           RuleOpType `json:"action"`              // the operation type
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 

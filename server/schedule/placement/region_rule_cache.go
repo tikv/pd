@@ -48,6 +48,7 @@ func (manager *RegionRuleFitCacheManager) Check(region *core.RegionInfo, rules [
 func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, rules []*Rule, fit *RegionFit) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	fit.cached = true
 	manager.caches[region.GetID()] = &RegionRuleFitCache{
 		region:  region,
 		rules:   rules,
