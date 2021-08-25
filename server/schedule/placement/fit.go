@@ -28,6 +28,12 @@ import (
 type RegionFit struct {
 	RuleFits    []*RuleFit
 	OrphanPeers []*metapb.Peer
+	cached      bool
+}
+
+// IsCached indicates whether this result is fetched from caches
+func (f *RegionFit) IsCached() bool {
+	return f.cached
 }
 
 // IsSatisfied returns if the rules are properly satisfied.
@@ -122,7 +128,7 @@ type StoreSet interface {
 }
 
 // FitRegion tries to fit peers of a region to the rules.
-func FitRegion(stores StoreSet, region *core.RegionInfo, rules []*Rule) *RegionFit {
+func FitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *RegionFit {
 	w := newFitWorker(stores, region, rules)
 	w.run()
 	return &w.bestFit
@@ -135,13 +141,20 @@ type fitWorker struct {
 	rules   []*Rule
 }
 
-func newFitWorker(stores StoreSet, region *core.RegionInfo, rules []*Rule) *fitWorker {
+func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
 	regionPeers := region.GetPeers()
 	peers := make([]*fitPeer, 0, len(regionPeers))
 	for _, p := range regionPeers {
+		var targetStore *core.StoreInfo
+		for _, store := range stores {
+			if store.GetID() == p.GetStoreId() {
+				targetStore = store
+				break
+			}
+		}
 		peers = append(peers, &fitPeer{
 			Peer:     p,
-			store:    stores.GetStore(p.GetStoreId()),
+			store:    targetStore,
 			isLeader: region.GetLeader().GetId() == p.GetId(),
 		})
 	}
@@ -149,7 +162,7 @@ func newFitWorker(stores StoreSet, region *core.RegionInfo, rules []*Rule) *fitW
 	sort.Slice(peers, func(i, j int) bool { return peers[i].GetId() < peers[j].GetId() })
 
 	return &fitWorker{
-		stores:  stores.GetStores(),
+		stores:  stores,
 		bestFit: RegionFit{RuleFits: make([]*RuleFit, len(rules))},
 		peers:   peers,
 		rules:   rules,

@@ -32,7 +32,7 @@ func (manager *RegionRuleFitCacheManager) InValid(regionID uint64) {
 func (manager *RegionRuleFitCacheManager) Check(region *core.RegionInfo, rules []*Rule) bool {
 	manager.mu.RLock()
 	defer manager.mu.RUnlock()
-	if cache, ok := manager.caches[region.GetID()]; ok {
+	if cache, ok := manager.caches[region.GetID()]; ok && cache.bestFit != nil {
 		return cache.IsUnchanged(region, rules)
 	}
 	return false
@@ -59,22 +59,24 @@ func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*R
 }
 
 func (cache *RegionRuleFitCache) isRulesUnchanged(rules []*Rule) bool {
-	return isEqualRules(cache.rules, rules)
+	return isRulesEqual(cache.rules, rules)
 }
 
 func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
 	if len(region.GetDownPeers()) > 0 {
 		return false
 	}
-	if !(isPeerContains(cache.region, region) &&
-		isPeerContains(region, cache.region) &&
+	if !(isPeersEqual(cache.region, region) &&
 		region.GetLeader().StoreId == cache.region.GetLeader().StoreId) {
 		return false
 	}
 	return true
 }
 
-func isPeerContains(a, b *core.RegionInfo) bool {
+func isPeersEqual(a, b *core.RegionInfo) bool {
+	if len(a.GetPeers()) != len(b.GetPeers()) {
+		return false
+	}
 	for _, apeer := range a.GetPeers() {
 		find := false
 		for _, bpeer := range b.GetPeers() {
@@ -90,7 +92,7 @@ func isPeerContains(a, b *core.RegionInfo) bool {
 	return true
 }
 
-func isEqualRules(a, b []*Rule) bool {
+func isRulesEqual(a, b []*Rule) bool {
 	if len(a) != len(b) {
 		return false
 	}
