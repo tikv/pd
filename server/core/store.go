@@ -704,6 +704,7 @@ func IsTiFlashStore(store *metapb.Store) bool {
 	return false
 }
 
+// IsEqualLabels returns whether have same store label
 func (s *StoreInfo) IsEqualLabels(labels []*metapb.StoreLabel) bool {
 	if len(s.GetLabels()) != len(labels) {
 		return false
