@@ -308,22 +308,27 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 }
 
 // FitRegion fits a region to the rules it matches.
-func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *RegionFit {
+func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *RegionFit {
+	stores := storeSet.GetStores()
 	rules := m.GetRulesForApplyRegion(region)
-	isStoresUnchanged := m.CheckStores(stores.GetStores())
+	isStoresUnchanged := m.CheckStores(stores)
+	if !isStoresUnchanged {
+		m.cache.InvalidAll()
+	}
 	if isStoresUnchanged && m.cache.Check(region, rules) {
 		fit := m.cache.GetCacheRegionFit(region.GetID())
 		if fit != nil {
-			fit.SetCached()
+			fit.SetCached(true)
 			return fit
 		}
 	}
-	fit := FitRegion(m.cacheStores, region, rules)
-	if fit != nil && fit.IsSatisfied() && len(region.GetDownPeers()) == 0 {
+	fit := FitRegion(stores, region, rules)
+	if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 {
 		m.cache.SetCache(region, rules, fit)
 	} else {
 		m.cache.Invalid(region.GetID())
 	}
+	fit.SetCached(false)
 	return fit
 }
 
@@ -713,8 +718,11 @@ func isEqualStores(a, b []*core.StoreInfo) bool {
 	for _, astore := range a {
 		find := false
 		for _, bstore := range b {
-			if astore.GetID() == bstore.GetID() && astore.IsEqualLabels(bstore.GetLabels()) {
+			if astore.GetID() == bstore.GetID() &&
+				astore.IsEqualLabels(bstore.GetLabels()) &&
+				astore.GetState() == bstore.GetState() {
 				find = true
+				break
 			}
 		}
 		if !find {

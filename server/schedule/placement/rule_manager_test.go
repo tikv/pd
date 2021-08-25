@@ -447,7 +447,7 @@ func (s *testManagerSuite) TestFitRegionCache(c *C) {
 			name: "region have down peers",
 			region: func() *core.RegionInfo {
 				region := mockRegion(4, 0)
-				region = region.Clone(core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 2,}))
+				region = region.Clone(core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 2}))
 				region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 					{
 						Peer:        region.GetPeer(3),
@@ -465,4 +465,30 @@ func (s *testManagerSuite) TestFitRegionCache(c *C) {
 		fit := s.manager.FitRegion(testcase.stores, testcase.region)
 		c.Assert(fit.IsCached(), Equals, testcase.isCached)
 	}
+
+	s.manager.SetRule(&Rule{
+		GroupID: "pd",
+		ID:      "extraRule",
+		Role:    Voter,
+		Count:   1,
+	})
+	region := mockRegion(4, 0)
+	stores := newMockStoresSet(20)
+	fit := s.manager.FitRegion(stores, region)
+	c.Assert(fit.IsCached(), IsFalse)
+	fit = s.manager.FitRegion(stores, region)
+	c.Assert(fit.IsCached(), IsTrue)
+	// update rule
+	s.manager.SetRule(&Rule{
+		GroupID: "pd",
+		ID:      "extraRule",
+		Role:    Follower,
+		Count:   1,
+	})
+	fit = s.manager.FitRegion(stores, region)
+	c.Assert(fit.IsCached(), IsFalse)
+	// delete rule
+	s.manager.DeleteRule("pd", "extraRule")
+	fit = s.manager.FitRegion(stores, region)
+	c.Assert(fit.IsCached(), IsFalse)
 }

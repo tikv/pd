@@ -8,6 +8,17 @@ import (
 
 // RegionRuleFitCacheManager stores each region's RegionFit Result and involving variables
 // only when the RegionFit result is satisfied with its rules
+// RegionRuleFitCacheManager caches RegionFit result for each region only when:
+// 1. region have no down peers
+// 2. RegionFit is satisfied
+// RegionRuleFitCacheManager will invalid the cache for the region only when:
+// 1. region peer topology is changed
+// 2. region have down peers
+// 3. region leader is changed
+// 4. any involved rule is changed
+// 5. stores topology is changed
+// 6. any store label is changed
+// 7. any store state is changed
 type RegionRuleFitCacheManager struct {
 	mu     sync.RWMutex
 	caches map[uint64]*RegionRuleFitCache
@@ -32,6 +43,13 @@ func (manager *RegionRuleFitCacheManager) Invalid(regionID uint64) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	delete(manager.caches, regionID)
+}
+
+// InvalidAll invalids all cache
+func (manager *RegionRuleFitCacheManager) InvalidAll() {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	manager.caches = make(map[uint64]*RegionRuleFitCache)
 }
 
 // Check checks whether the region and rules are changed for the stored cache
@@ -90,7 +108,7 @@ func isPeersEqual(a, b *core.RegionInfo) bool {
 	for _, apeer := range a.GetPeers() {
 		find := false
 		for _, bpeer := range b.GetPeers() {
-			if apeer.StoreId == bpeer.StoreId && apeer.Role == bpeer.Role {
+			if apeer.GetId() == bpeer.GetId() && apeer.StoreId == bpeer.StoreId && apeer.Role == bpeer.Role {
 				find = true
 				break
 			}

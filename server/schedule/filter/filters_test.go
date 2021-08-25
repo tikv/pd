@@ -138,6 +138,7 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 		testCluster.AddLabelsStore(tc.storeID, tc.regionCount, tc.labels)
 	}
 	for _, tc := range testCases {
+		c.Log(tc.storeID)
 		filter := newRuleFitFilter("", testCluster, region, 1)
 		c.Assert(filter.Source(testCluster.GetOpts(), testCluster.GetStore(tc.storeID)), Equals, tc.sourceRes)
 		c.Assert(filter.Target(testCluster.GetOpts(), testCluster.GetStore(tc.storeID)), Equals, tc.targetRes)

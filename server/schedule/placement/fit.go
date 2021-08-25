@@ -36,10 +36,10 @@ type RegionFit struct {
 }
 
 // SetCached indicates this RegionFit is fetch form cache
-func (f *RegionFit) SetCached() {
+func (f *RegionFit) SetCached(cached bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.mu.cached = true
+	f.mu.cached = cached
 }
 
 // IsCached indicates whether this result is fetched from caches

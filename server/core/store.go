@@ -714,9 +714,10 @@ func (s *StoreInfo) IsEqualLabels(labels []*metapb.StoreLabel) bool {
 		for _, slabel := range s.GetLabels() {
 			if label.Key == slabel.Key && label.Value == slabel.Value {
 				find = true
+				break
 			}
 		}
-		if find {
+		if !find {
 			return false
 		}
 	}
