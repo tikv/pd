@@ -314,6 +314,7 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 	if isStoresUnchanged && m.cache.Check(region, rules) {
 		fit := m.cache.GetCacheRegionFit(region.GetID())
 		if fit != nil {
+			fit.SetCached()
 			return fit
 		}
 	}

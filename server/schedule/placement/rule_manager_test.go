@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
@@ -398,4 +399,70 @@ func (s *testManagerSuite) dhex(hk string) []byte {
 		panic("decode fail")
 	}
 	return k
+}
+
+func (s *testManagerSuite) TestFitRegionCache(c *C) {
+	testcases := []struct {
+		name     string
+		region   *core.RegionInfo
+		stores   StoreSet
+		isCached bool
+	}{
+		{
+			name:     "default",
+			region:   mockRegion(3, 0),
+			stores:   newMockStoresSet(20),
+			isCached: false,
+		},
+		{
+			name:     "cached",
+			region:   mockRegion(3, 0),
+			stores:   newMockStoresSet(20),
+			isCached: true,
+		},
+		{
+			name:     "add store",
+			region:   mockRegion(3, 0),
+			stores:   newMockStoresSet(21),
+			isCached: false,
+		},
+		{
+			name:     "region topo changed",
+			region:   mockRegion(4, 0),
+			stores:   newMockStoresSet(21),
+			isCached: false,
+		},
+		{
+			name: "region leader changed",
+			region: func() *core.RegionInfo {
+				region := mockRegion(4, 0)
+				region = region.Clone(
+					core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 2}))
+				return region
+			}(),
+			stores:   newMockStoresSet(21),
+			isCached: false,
+		},
+		{
+			name: "region have down peers",
+			region: func() *core.RegionInfo {
+				region := mockRegion(4, 0)
+				region = region.Clone(core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 2,}))
+				region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+					{
+						Peer:        region.GetPeer(3),
+						DownSeconds: 42,
+					},
+				}))
+				return region
+			}(),
+			stores:   newMockStoresSet(21),
+			isCached: false,
+		},
+	}
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		fit := s.manager.FitRegion(testcase.stores, testcase.region)
+		c.Assert(fit.IsCached(), Equals, testcase.isCached)
+	}
 }

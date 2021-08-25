@@ -17,6 +17,7 @@ package placement
 import (
 	"math"
 	"sort"
+	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
@@ -26,14 +27,26 @@ import (
 // All peers are divided into corresponding rules according to the matching
 // rules, and the remaining Peers are placed in the OrphanPeers list.
 type RegionFit struct {
+	mu struct {
+		sync.RWMutex
+		cached bool
+	}
 	RuleFits    []*RuleFit
 	OrphanPeers []*metapb.Peer
-	cached      bool
+}
+
+// SetCached indicates this RegionFit is fetch form cache
+func (f *RegionFit) SetCached() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mu.cached = true
 }
 
 // IsCached indicates whether this result is fetched from caches
 func (f *RegionFit) IsCached() bool {
-	return f.cached
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.mu.cached
 }
 
 // IsSatisfied returns if the rules are properly satisfied.
