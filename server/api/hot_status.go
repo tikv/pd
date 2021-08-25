@@ -52,14 +52,6 @@ type HistoryHotRegionsRequest struct {
 	//0 means not leader,1 means leader
 	Roles          []int64  `json:"is_leader,omitempy"`
 	HotRegionTypes []string `json:"hot_region_type,omitempty"`
-	LowHotDegree   int64    `json:"low_hot_degree,omitempty"`
-	HighHotDegree  int64    `json:"high_hot_degree,omitempty"`
-	LowFlowBytes   float64  `json:"low_flow_bytes,omitempty"`
-	HighFlowBytes  float64  `json:"high_flow_bytes,omitempty"`
-	LowKeyRate     float64  `json:"low_key_rate,omitempty"`
-	HighKeyRate    float64  `json:"high_key_rate,omitempty"`
-	LowQueryRate   float64  `json:"low_query_rate,omitempty"`
-	HighQueryRate  float64  `json:"high_query_rate,omitempty"`
 }
 
 func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusHandler {
@@ -232,18 +224,6 @@ func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 			continue
 		}
 		if len(roleSet) != 0 && !roleSet[next.IsLeader] {
-			continue
-		}
-		if request.HighHotDegree < next.HotDegree || request.LowHotDegree > next.HotDegree {
-			continue
-		}
-		if request.HighFlowBytes < next.FlowBytes || request.LowFlowBytes > next.FlowBytes {
-			continue
-		}
-		if request.HighKeyRate < next.KeyRate || request.LowKeyRate > next.KeyRate {
-			continue
-		}
-		if request.HighQueryRate < next.QueryRate || request.LowQueryRate > next.QueryRate {
 			continue
 		}
 		results = append(results, next)
