@@ -6,29 +6,35 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
+// RegionRuleFitCacheManager stores each region's RegionFit Result and involving variables
+// only when the RegionFit result is satisfied with its rules
 type RegionRuleFitCacheManager struct {
 	mu     sync.RWMutex
 	caches map[uint64]*RegionRuleFitCache
 }
 
+// NewRegionRuleFitCacheManager returns RegionRuleFitCacheManager
 func NewRegionRuleFitCacheManager() *RegionRuleFitCacheManager {
 	return &RegionRuleFitCacheManager{
 		caches: map[uint64]*RegionRuleFitCache{},
 	}
 }
 
+// GetCacheRegionFit get RegionFit result by regionID
 func (manager *RegionRuleFitCacheManager) GetCacheRegionFit(regionID uint64) *RegionFit {
 	manager.mu.RLock()
 	defer manager.mu.RUnlock()
 	return manager.caches[regionID].bestFit
 }
 
-func (manager *RegionRuleFitCacheManager) InValid(regionID uint64) {
+// Invalid invalid cache by regionID
+func (manager *RegionRuleFitCacheManager) Invalid(regionID uint64) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	delete(manager.caches, regionID)
 }
 
+// Check checks whether the region and rules are changed for the stored cache
 func (manager *RegionRuleFitCacheManager) Check(region *core.RegionInfo, rules []*Rule) bool {
 	manager.mu.RLock()
 	defer manager.mu.RUnlock()
@@ -38,6 +44,7 @@ func (manager *RegionRuleFitCacheManager) Check(region *core.RegionInfo, rules [
 	return false
 }
 
+// SetCache stores RegionFit cache
 func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, rules []*Rule, fit *RegionFit) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
@@ -48,12 +55,14 @@ func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, rule
 	}
 }
 
+// RegionRuleFitCache stores regions RegionFit result and involving variables
 type RegionRuleFitCache struct {
 	region  *core.RegionInfo
 	rules   []*Rule
 	bestFit *RegionFit
 }
 
+// IsUnchanged checks whether the region and rules unchanged for the cache
 func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule) bool {
 	return cache.isRegionUnchanged(region) && cache.isRulesUnchanged(rules)
 }
@@ -63,6 +72,7 @@ func (cache *RegionRuleFitCache) isRulesUnchanged(rules []*Rule) bool {
 }
 
 func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
+	// we only cache region when it doesn't have down peers
 	if len(region.GetDownPeers()) > 0 {
 		return false
 	}
@@ -99,7 +109,10 @@ func isRulesEqual(a, b []*Rule) bool {
 	for _, arule := range a {
 		find := false
 		for _, brule := range b {
-			if arule.ID == brule.ID && arule.GroupID == brule.GroupID && arule.version == brule.version {
+			if arule.ID == brule.ID &&
+				arule.GroupID == brule.GroupID &&
+				arule.Version == brule.Version &&
+				arule.CreateTimestamp == brule.CreateTimestamp {
 				find = true
 				break
 			}

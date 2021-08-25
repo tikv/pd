@@ -81,7 +81,6 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 			Role:           Voter,
 			Count:          maxReplica,
 			LocationLabels: locationLabels,
-			version:        1,
 		}
 		if err := m.storage.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
 			return err
@@ -322,10 +321,13 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 	fit := FitRegion(m.cacheStores, region, rules)
 	if fit != nil && fit.IsSatisfied() && len(region.GetDownPeers()) == 0 {
 		m.cache.SetCache(region, rules, fit)
+	} else {
+		m.cache.Invalid(region.GetID())
 	}
 	return fit
 }
 
+// CheckStores checks whether stores topology are changed, if changed, then stores it.
 func (m *RuleManager) CheckStores(stores []*core.StoreInfo) bool {
 	m.Lock()
 	defer m.Unlock()
