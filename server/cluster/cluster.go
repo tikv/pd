@@ -115,10 +115,10 @@ type RaftCluster struct {
 	quit         chan struct{}
 	regionSyncer *syncer.RegionSyncer
 
-	ruleManager               *placement.RuleManager
-	regionLabeler             *labeler.RegionLabeler
-	etcdClient                *clientv3.Client
-	httpClient                *http.Client
+	ruleManager   *placement.RuleManager
+	regionLabeler *labeler.RegionLabeler
+	etcdClient    *clientv3.Client
+	httpClient    *http.Client
 
 	replicationMode *replication.ModeManager
 	traceRegionFlow bool

@@ -331,7 +331,7 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 func (m *RuleManager) CheckStores(stores []*core.StoreInfo) bool {
 	m.Lock()
 	defer m.Unlock()
-	if isEqualStoreS(m.cacheStores, stores) {
+	if isEqualStores(m.cacheStores, stores) {
 		return true
 	}
 	m.cacheStores = stores
@@ -706,7 +706,7 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	return m
 }
 
-func isEqualStoreS(a, b []*core.StoreInfo) bool {
+func isEqualStores(a, b []*core.StoreInfo) bool {
 	if len(a) != len(b) {
 		return false
 	}

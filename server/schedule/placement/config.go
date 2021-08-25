@@ -168,7 +168,6 @@ func (p *ruleConfigPatch) commit() {
 			rule.Version = version
 			rule.CreateTimestamp = createTimestamp
 			p.c.rules[key] = rule
-
 		}
 	}
 	for id, group := range p.mut.groups {
