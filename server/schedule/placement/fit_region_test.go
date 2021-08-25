@@ -103,7 +103,6 @@ func mockRegion(followerNums, learnerNums int) *core.RegionInfo {
 }
 
 func BenchmarkFitRegion(b *testing.B) {
-	i := 0
 	region := mockRegion(3, 0)
 	rules := []*Rule{
 		{
@@ -116,14 +115,13 @@ func BenchmarkFitRegion(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
-	for i < b.N {
+	for i := 0; i < b.N; i++ {
 		i++
 		FitRegion(storesSet, region, rules)
 	}
 }
 
 func BenchmarkFitRegionMoreStores(b *testing.B) {
-	i := 0
 	region := mockRegion(3, 0)
 	rules := []*Rule{
 		{
@@ -136,14 +134,13 @@ func BenchmarkFitRegionMoreStores(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(200)
 	b.ResetTimer()
-	for i < b.N {
+	for i := 0; i < b.N; i++ {
 		i++
 		FitRegion(storesSet, region, rules)
 	}
 }
 
 func BenchmarkFitRegionMorePeers(b *testing.B) {
-	i := 0
 	region := mockRegion(5, 0)
 	rules := []*Rule{
 		{
@@ -156,14 +153,13 @@ func BenchmarkFitRegionMorePeers(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
-	for i < b.N {
+	for i := 0; i < b.N; i++ {
 		i++
 		FitRegion(storesSet, region, rules)
 	}
 }
 
 func BenchmarkFitRegionMorePeersEquals(b *testing.B) {
-	i := 0
 	region := mockRegion(3, 0)
 	rules := []*Rule{
 		{
@@ -183,14 +179,13 @@ func BenchmarkFitRegionMorePeersEquals(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
-	for i < b.N {
+	for i := 0; i < b.N; i++ {
 		i++
 		FitRegion(storesSet, region, rules)
 	}
 }
 
 func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
-	i := 0
 	region := mockRegion(3, 0)
 	rules := []*Rule{
 		{
@@ -212,14 +207,13 @@ func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
-	for i < b.N {
+	for i := 0; i < b.N; i++ {
 		i++
 		FitRegion(storesSet, region, rules)
 	}
 }
 
 func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
-	i := 0
 	region := mockRegion(5, 0)
 	rules := []*Rule{
 		{
@@ -241,26 +235,24 @@ func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
-	for i < b.N {
+	for i := 0; i < b.N; i++ {
 		i++
 		FitRegion(storesSet, region, rules)
 	}
 }
 
 func BenchmarkFitRegionTiflash(b *testing.B) {
-	i := 0
 	region := mockRegion(3, 0)
 	rules := addExtraRules(1)
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
-	for i < b.N {
+	for i := 0; i < b.N; i++ {
 		i++
 		FitRegion(storesSet, region, rules)
 	}
 }
 
 func BenchmarkFitRegionCrossRegion(b *testing.B) {
-	i := 0
 	region := mockRegion(5, 0)
 	rules := make([]*Rule, 0)
 	rules = append(rules, &Rule{
@@ -281,7 +273,7 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
-	for i < b.N {
+	for i := 0; i < b.N; i++ {
 		i++
 		FitRegion(storesSet, region, rules)
 	}
