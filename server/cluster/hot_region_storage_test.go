@@ -293,9 +293,6 @@ func writeIntoDB(regionStorage *HotRegionStorage,
 	endTime time.Time) time.Time {
 	raft := regionStorage.cluster
 	for i := 0; i < times; i++ {
-		if i%1000 == 0 {
-			fmt.Println(i)
-		}
 		stats := newBenchmarkHotRegoinHistory(raft, endTime, regions)
 		err := regionStorage.packHotRegionInfo(stats, HotRegionTypes[i%len(HotRegionTypes)], true)
 		if err != nil {
