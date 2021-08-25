@@ -35,7 +35,6 @@ import (
 type RuleChecker struct {
 	cluster           opt.Cluster
 	ruleManager       *placement.RuleManager
-	cacheManager      *placement.RegionRuleFitCacheManager
 	name              string
 	regionWaitingList cache.Cache
 	record            *recorder
