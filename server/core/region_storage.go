@@ -72,35 +72,33 @@ func NewRegionStorage(
 		regionStorageCtx:     regionStorageCtx,
 		regionStorageCancel:  regionStorageCancel,
 	}
-	s.backgroundFlush()
+	go s.backgroundFlush()
 	return s, nil
 }
 
 func (s *RegionStorage) backgroundFlush() {
-	ticker := time.NewTicker(dirtyFlushTick)
 	var (
 		isFlush bool
 		err     error
 	)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				s.mu.RLock()
-				isFlush = s.flushTime.Before(time.Now())
-				s.mu.RUnlock()
-				if !isFlush {
-					continue
-				}
-				if err = s.FlushRegion(); err != nil {
-					log.Error("flush regions meet error", errs.ZapError(err))
-				}
-			case <-s.regionStorageCtx.Done():
-				return
+	ticker := time.NewTicker(dirtyFlushTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.mu.RLock()
+			isFlush = s.flushTime.Before(time.Now())
+			s.mu.RUnlock()
+			if !isFlush {
+				continue
 			}
+			if err = s.FlushRegion(); err != nil {
+				log.Error("flush regions meet error", errs.ZapError(err))
+			}
+		case <-s.regionStorageCtx.Done():
+			return
 		}
-	}()
+	}
 }
 
 // SaveRegion saves one region to storage.
