@@ -89,13 +89,13 @@ func main() {
 	}
 
 	if fromOldMember {
-		recoverFormOldMember(client)
+		recoverFromOldMember(client)
 		return
 	}
-	recoverFormNewPDCluster(client, clusterID, allocID)
+	recoverFromNewPDCluster(client, clusterID, allocID)
 }
 
-func recoverFormNewPDCluster(client *clientv3.Client, clusterID, allocID uint64) {
+func recoverFromNewPDCluster(client *clientv3.Client, clusterID, allocID uint64) {
 	if clusterID == 0 {
 		fmt.Println("please specify safe cluster-id")
 		return
@@ -145,7 +145,7 @@ func recoverFormNewPDCluster(client *clientv3.Client, clusterID, allocID uint64)
 	fmt.Println("recover success! please restart the PD cluster")
 }
 
-func recoverFormOldMember(client *clientv3.Client) {
+func recoverFromOldMember(client *clientv3.Client) {
 	// cluster id
 	resp, err := etcdutil.EtcdKVGet(client, pdClusterIDPath)
 	if err != nil {
