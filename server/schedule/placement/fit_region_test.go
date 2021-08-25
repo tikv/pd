@@ -200,34 +200,15 @@ func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
 			Count:          1,
 			LocationLabels: []string{},
 		},
-		{
+	}
+	for i := 0; i < 4; i++ {
+		rules = append(rules, &Rule{
 			GroupID:        "pd",
-			ID:             "default-2",
+			ID:             fmt.Sprintf("%v", i),
 			Role:           Follower,
 			Count:          1,
 			LocationLabels: []string{},
-		},
-		{
-			GroupID:        "pd",
-			ID:             "default-3",
-			Role:           Follower,
-			Count:          1,
-			LocationLabels: []string{},
-		},
-		{
-			GroupID:        "pd",
-			ID:             "default-4",
-			Role:           Follower,
-			Count:          1,
-			LocationLabels: []string{},
-		},
-		{
-			GroupID:        "pd",
-			ID:             "default-5",
-			Role:           Follower,
-			Count:          1,
-			LocationLabels: []string{},
-		},
+		})
 	}
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
@@ -248,34 +229,15 @@ func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
 			Count:          1,
 			LocationLabels: []string{},
 		},
-		{
+	}
+	for i := 0; i < 4; i++ {
+		rules = append(rules, &Rule{
 			GroupID:        "pd",
-			ID:             "default",
+			ID:             fmt.Sprintf("%v", i),
 			Role:           Voter,
 			Count:          1,
 			LocationLabels: []string{},
-		},
-		{
-			GroupID:        "pd",
-			ID:             "default",
-			Role:           Voter,
-			Count:          1,
-			LocationLabels: []string{},
-		},
-		{
-			GroupID:        "pd",
-			ID:             "default",
-			Role:           Voter,
-			Count:          1,
-			LocationLabels: []string{},
-		},
-		{
-			GroupID:        "pd",
-			ID:             "default",
-			Role:           Voter,
-			Count:          1,
-			LocationLabels: []string{},
-		},
+		})
 	}
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
@@ -307,19 +269,16 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 		Role:           Leader,
 		Count:          1,
 		LocationLabels: []string{},
-	}, &Rule{
-		GroupID:        "pd",
-		ID:             "2",
-		Role:           Follower,
-		Count:          1,
-		LocationLabels: []string{},
-	}, &Rule{
-		GroupID:        "pd",
-		ID:             "3",
-		Role:           Follower,
-		Count:          1,
-		LocationLabels: []string{},
 	})
+	for i := 0; i < 2; i++ {
+		rules = append(rules, &Rule{
+			GroupID:        "pd",
+			ID:             fmt.Sprintf("%v", i),
+			Role:           Follower,
+			Count:          1,
+			LocationLabels: []string{},
+		})
+	}
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
 	for i < b.N {
