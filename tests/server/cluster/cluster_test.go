@@ -885,6 +885,56 @@ func getClusterConfig(c *C, clusterID uint64, grpcPDClient pdpb.PDClient) *metap
 	return resp.GetCluster()
 }
 
+func addOperator(grpcPDClient pdpb.PDClient, clusterID uint64, storeID uint64, regionID uint64, kind pdpb.OperatorKind) (*pdpb.AddOperatorResponse, error) {
+	req := &pdpb.AddOperatorRequest{
+		Header:   testutil.NewRequestHeader(clusterID),
+		RegionId: regionID,
+		StoreId:  storeID,
+		Kind:     kind,
+	}
+	resp, err := grpcPDClient.AddOperator(context.Background(), req)
+	return resp, err
+}
+
+func (s *clusterTestSuite) TestAddOperator(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+	c.Assert(rc, NotNil)
+	// Get region.
+	region := getRegion(c, clusterID, grpcPDClient, []byte("abc"))
+	c.Assert(region.GetPeers(), HasLen, 1)
+	peer := region.GetPeers()[0]
+	c.Assert(peer.StoreId, Equals, uint64(1))
+	c.Assert(region.GetId(), Equals, uint64(2))
+
+	// Get region by id.
+	regionByID := getRegionByID(c, clusterID, grpcPDClient, region.GetId())
+	c.Assert(region, DeepEquals, regionByID)
+
+	// Put new store 2.
+	storeMeta := newMetaStore(2, "127.0.0.1:1", "4.0.0", metapb.StoreState_Up, getTestDeployPath(2))
+	err = rc.PutStore(storeMeta)
+	c.Assert(err, IsNil)
+	_, err = addOperator(grpcPDClient, clusterID, 2, 2, pdpb.OperatorKind_AddPeerOp)
+	c.Assert(err, IsNil)
+
+	// Get region by id.
+	regionByID = getRegionByID(c, clusterID, grpcPDClient, region.GetId())
+	c.Assert(regionByID.GetPeers(), HasLen, 2)
+
+}
+
 func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()

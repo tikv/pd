@@ -1386,6 +1386,47 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 	}, nil
 }
 
+func (s *Server) AddOperator(ctx context.Context, request *pdpb.AddOperatorRequest) (*pdpb.AddOperatorResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).AddOperator(ctx, request)
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	h := newHandler(s)
+	regionID := request.RegionId
+	storeID := request.StoreId
+
+	switch request.Kind {
+	case pdpb.OperatorKind_AddPeerOp:
+		if err := h.AddAddPeerOperator(uint64(regionID), uint64(storeID)); err != nil {
+			return nil, err
+		}
+	case pdpb.OperatorKind_RemovePeerOp:
+		if err := h.AddRemovePeerOperator(uint64(regionID), uint64(storeID)); err != nil {
+			return nil, err
+		}
+	case pdpb.OperatorKind_TransferLeaderOp:
+		if err := h.AddTransferLeaderOperator(uint64(regionID), uint64(storeID)); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, status.Errorf(codes.Unknown, "the provided operator kind %s is not supported", request.Kind)
+	}
+
+	return &pdpb.AddOperatorResponse{
+		Header: s.header(),
+	}, nil
+}
+
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
 func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
 	var err error
