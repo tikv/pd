@@ -15,7 +15,6 @@ package autoscaling
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -23,6 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 // HTTPHandler is a handler to handle the auto scaling HTTP request.
@@ -52,25 +52,29 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Debug(fmt.Sprintf("autoscale: strategy data: %s", string(data)))
+	log.Debug("autoscaling: get http body completed", zap.String("strategy", string(data)))
 
 	strategy := Strategy{}
-	if err := json.Unmarshal(data, &strategy); err != nil {
+	if err = json.Unmarshal(data, &strategy); err != nil {
+		log.Error("autoscaling: unmarshall strategy failed", errs.ZapError(err))
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	plans, err := calculate(rc, &strategy)
 	if err != nil {
+		log.Error("autoscaling: calculate plans failed", errs.ZapError(err))
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	data, err = json.Marshal(plans)
 	if err != nil {
-		log.Error("marshal plans failed.", errs.ZapError(err))
+		log.Error("autoscaling: marshal plans failed", errs.ZapError(err))
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	} else {
-		log.Debug(fmt.Sprintf("autoscaling plans: %s", string(data)))
+		log.Debug("autoscaling: marshal plans completed", zap.String("plans", string(data)))
 	}
 
 	h.rd.JSON(w, http.StatusOK, plans)

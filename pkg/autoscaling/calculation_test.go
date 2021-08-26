@@ -67,6 +67,10 @@ var (
 	querier  = &mockQuerier{}
 )
 
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
 func initMockStrategy() *Strategy {
 	tikvCPURule := &CPURule{
 		MaxThreshold:  mockMaxThreshold,
@@ -230,10 +234,6 @@ func initMockRaftCluster(c *C) (*cluster.RaftCluster, func()) {
 	}
 
 	return rc, closeEtcdFunc
-}
-
-func Test(t *testing.T) {
-	TestingT(t)
 }
 
 var _ = Suite(&calculationTestSuite{})
