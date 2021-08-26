@@ -323,7 +323,7 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *Reg
 		}
 	}
 	fit := FitRegion(stores, region, rules)
-	if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 {
+	if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 && region.GetLeader() != nil {
 		m.cache.SetCache(region, rules, fit)
 	} else {
 		m.cache.Invalid(region.GetID())

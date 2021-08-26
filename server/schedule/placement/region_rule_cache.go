@@ -1,3 +1,17 @@
+// Copyright 2021 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package placement
 
 import (
@@ -82,6 +96,9 @@ type RegionRuleFitCache struct {
 
 // IsUnchanged checks whether the region and rules unchanged for the cache
 func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule) bool {
+	if region == nil {
+		return false
+	}
 	return cache.isRegionUnchanged(region) && cache.isRulesUnchanged(rules)
 }
 
@@ -91,7 +108,7 @@ func (cache *RegionRuleFitCache) isRulesUnchanged(rules []*Rule) bool {
 
 func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
 	// we only cache region when it doesn't have down peers
-	if len(region.GetDownPeers()) > 0 {
+	if len(region.GetDownPeers()) > 0 || region.GetLeader() == nil {
 		return false
 	}
 	if !(isPeersEqual(cache.region, region) &&
