@@ -911,27 +911,50 @@ func (s *clusterTestSuite) TestAddOperator(c *C) {
 	bootstrapCluster(c, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	// Get region.
-	region := getRegion(c, clusterID, grpcPDClient, []byte("abc"))
-	c.Assert(region.GetPeers(), HasLen, 1)
-	peer := region.GetPeers()[0]
-	c.Assert(peer.StoreId, Equals, uint64(1))
-	c.Assert(region.GetId(), Equals, uint64(2))
 
-	// Get region by id.
-	regionByID := getRegionByID(c, clusterID, grpcPDClient, region.GetId())
-	c.Assert(region, DeepEquals, regionByID)
+	// Create leader in store 1
+	r := &metapb.Region{
+		Id: 5,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		StartKey: []byte{byte(6)},
+		EndKey:   []byte{byte(7)},
+		Peers:    []*metapb.Peer{{Id: 10, StoreId: 1}},
+	}
+	region_info := core.NewRegionInfo(r, r.Peers[0], core.SetApproximateSize(10))
+	err = rc.HandleRegionHeartbeat(region_info)
+	c.Assert(err, IsNil)
 
 	// Put new store 2.
 	storeMeta := newMetaStore(2, "127.0.0.1:1", "4.0.0", metapb.StoreState_Up, getTestDeployPath(2))
+	storeMeta.LastHeartbeat = time.Now().Add(time.Minute * 10).UnixNano()
 	err = rc.PutStore(storeMeta)
 	c.Assert(err, IsNil)
-	_, err = addOperator(grpcPDClient, clusterID, 2, 2, pdpb.OperatorKind_AddPeerOp)
+
+	// Put new store 3.
+	storeMeta = newMetaStore(3, "127.0.0.1:2", "4.0.0", metapb.StoreState_Up, getTestDeployPath(3))
+	storeMeta.LastHeartbeat = time.Now().Add(time.Minute * 10).UnixNano()
+	err = rc.PutStore(storeMeta)
 	c.Assert(err, IsNil)
 
-	// Get region by id.
-	regionByID = getRegionByID(c, clusterID, grpcPDClient, region.GetId())
+	// Add peer for store 2.
+	_, err = addOperator(grpcPDClient, clusterID, 3, 5, pdpb.OperatorKind_AddPeerOp)
+	c.Assert(err, IsNil)
+
+	// Check peers.
+	time.Sleep(1000 * time.Microsecond)
+	regionByID := getRegionByID(c, clusterID, grpcPDClient, 5)
 	c.Assert(regionByID.GetPeers(), HasLen, 2)
+
+	// Remove peer for store 2.
+	_, err = addOperator(grpcPDClient, clusterID, 3, 5, pdpb.OperatorKind_RemovePeerOp)
+	c.Assert(err, IsNil)
+
+	// Check peers.
+	regionByID = getRegionByID(c, clusterID, grpcPDClient, 5)
+	c.Assert(regionByID.GetPeers(), HasLen, 1)
 
 }
 
