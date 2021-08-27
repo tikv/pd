@@ -277,6 +277,10 @@ func summaryStoresLoad(
 		if !ok {
 			continue
 		}
+		if kind == core.LeaderKind && !store.AllowLeaderTransfer() {
+			continue
+		}
+
 		var byteRate, keyRate float64
 		switch rwTy {
 		case read:
