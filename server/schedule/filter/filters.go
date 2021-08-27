@@ -453,7 +453,7 @@ func (f *StoreStateFilter) Source(opts opt.Options, store *core.StoreInfo) bool 
 
 // Target returns true when the store can be selected as the schedule
 // target.
-func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
 	if store.IsTombstone() {
 		f.Reason = "tombstone"
 		return false
