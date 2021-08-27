@@ -23,6 +23,7 @@ type RegionLabel struct {
 // LabelRule is the rule to assign labels to a region.
 type LabelRule struct {
 	ID       string        `json:"id"`
+	Index    int           `json:"index"`
 	Labels   []RegionLabel `json:"labels"`
 	RuleType string        `json:"rule_type"`
 	Rule     interface{}   `json:"rule"`
