@@ -1296,7 +1296,7 @@ func BenchmarkBalanceRegionScheduler(b *testing.B) {
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	ctx := context.Background()
-	storeCount := uint64(170)
+	storeCount := uint64(100)
 	regionCount := 100
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(0, 0)
@@ -1312,7 +1312,9 @@ func BenchmarkBalanceRegionScheduler(b *testing.B) {
 	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName("balance-region")}...)
 	b.StartTimer()
-	sc.Schedule(tc)
+	for i := 0; i < 100; i++ {
+		sc.Schedule(tc)
+	}
 	b.StopTimer()
 
 }
