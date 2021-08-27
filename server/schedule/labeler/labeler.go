@@ -166,8 +166,6 @@ func (l *RegionLabeler) GetLabelRules(ids []string) ([]*LabelRule, error) {
 	for _, id := range ids {
 		if rule, ok := l.labelRules[id]; ok {
 			rules = append(rules, rule)
-		} else {
-			return nil, errs.ErrRegionRuleNotFound.FastGenByArgs(id)
 		}
 	}
 	return rules, nil
@@ -245,37 +243,56 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 }
 
 // GetRegionLabel returns the label of the region for a key.
+// If there are multiple rules that match the key, the one with max rule index will be returned.
 func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) string {
 	l.RLock()
 	defer l.RUnlock()
+	value, index := "", -1
 	// search ranges
 	if i, data := l.rangeList.GetData(region.GetStartKey(), region.GetEndKey()); i != -1 {
 		for _, rule := range data {
-			for _, l := range rule.(*LabelRule).Labels {
+			r := rule.(*LabelRule)
+			if r.Index <= index && value != "" {
+				continue
+			}
+			for _, l := range r.Labels {
 				if l.Key == key {
-					return l.Value
+					value, index = l.Value, r.Index
 				}
 			}
 		}
 	}
-	return ""
+	return value
 }
 
 // GetRegionLabels returns the labels of the region.
+// For each key, the label with max rule index will be returned.
 func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel {
 	l.RLock()
 	defer l.RUnlock()
-	var result []*RegionLabel
+	type valueIndex struct {
+		value string
+		index int
+	}
+	labels := make(map[string]valueIndex)
+
 	// search ranges
 	if i, data := l.rangeList.GetData(region.GetStartKey(), region.GetEndKey()); i != -1 {
 		for _, rule := range data {
-			for _, l := range rule.(*LabelRule).Labels {
-				result = append(result, &RegionLabel{
-					Key:   l.Key,
-					Value: l.Value,
-				})
+			r := rule.(*LabelRule)
+			for _, l := range r.Labels {
+				if old, ok := labels[l.Key]; !ok || old.index < r.Index {
+					labels[l.Key] = valueIndex{l.Value, r.Index}
+				}
 			}
 		}
+	}
+	result := make([]*RegionLabel, 0, len(labels))
+	for k, l := range labels {
+		result = append(result, &RegionLabel{
+			Key:   k,
+			Value: l.value,
+		})
 	}
 	return result
 }
