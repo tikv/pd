@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,6 +17,7 @@ package placement
 import (
 	"bytes"
 	"encoding/json"
+	"time"
 )
 
 // ruleConfig contains rule and rule group configurations.
@@ -154,6 +156,17 @@ func (p *ruleConfigPatch) commit() {
 		if rule == nil {
 			delete(p.c.rules, key)
 		} else {
+			oldRule, ok := p.c.rules[key]
+			version := uint64(0)
+			createTimestamp := uint64(0)
+			if ok {
+				version = oldRule.Version + 1
+				createTimestamp = oldRule.CreateTimestamp
+			} else {
+				createTimestamp = uint64(time.Now().Unix())
+			}
+			rule.Version = version
+			rule.CreateTimestamp = createTimestamp
 			p.c.rules[key] = rule
 		}
 	}

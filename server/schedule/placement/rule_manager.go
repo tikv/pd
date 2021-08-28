@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -216,7 +217,10 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 func (m *RuleManager) GetRule(group, id string) *Rule {
 	m.RLock()
 	defer m.RUnlock()
-	return m.ruleConfig.getRule([2]string{group, id})
+	if r := m.ruleConfig.getRule([2]string{group, id}); r != nil {
+		return r.Clone()
+	}
+	return nil
 }
 
 // SetRule inserts or updates a Rule.
@@ -252,7 +256,7 @@ func (m *RuleManager) DeleteRule(group, id string) error {
 func (m *RuleManager) GetSplitKeys(start, end []byte) [][]byte {
 	m.RLock()
 	defer m.RUnlock()
-	return m.ruleList.getSplitKeys(start, end)
+	return m.ruleList.rangeList.GetSplitKeys(start, end)
 }
 
 // GetAllRules returns sorted all rules.
@@ -261,7 +265,7 @@ func (m *RuleManager) GetAllRules() []*Rule {
 	defer m.RUnlock()
 	rules := make([]*Rule, 0, len(m.ruleConfig.rules))
 	for _, r := range m.ruleConfig.rules {
-		rules = append(rules, r)
+		rules = append(rules, r.Clone())
 	}
 	sortRules(rules)
 	return rules
@@ -274,7 +278,7 @@ func (m *RuleManager) GetRulesByGroup(group string) []*Rule {
 	var rules []*Rule
 	for _, r := range m.ruleConfig.rules {
 		if r.GroupID == group {
-			rules = append(rules, r)
+			rules = append(rules, r.Clone())
 		}
 	}
 	sortRules(rules)
@@ -285,7 +289,12 @@ func (m *RuleManager) GetRulesByGroup(group string) []*Rule {
 func (m *RuleManager) GetRulesByKey(key []byte) []*Rule {
 	m.RLock()
 	defer m.RUnlock()
-	return m.ruleList.getRulesByKey(key)
+	rules := m.ruleList.getRulesByKey(key)
+	ret := make([]*Rule, 0, len(rules))
+	for _, r := range rules {
+		ret = append(ret, r.Clone())
+	}
+	return ret
 }
 
 // GetRulesForApplyRegion returns the rules list that should be applied to a region.

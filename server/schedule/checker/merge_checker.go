@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -25,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -166,15 +168,30 @@ func AllowMerge(cluster opt.Cluster, region *core.RegionInfo, adjacent *core.Reg
 	} else {
 		return false
 	}
+
+	// The interface probe is used here to get the rule manager and region
+	// labeler because AllowMerge is also used by the random merge scheduler,
+	// where it is not easy to get references to concrete objects.
+	// We can consider using dependency injection techniques to optimize in
+	// the future.
+
 	if cluster.GetOpts().IsPlacementRulesEnabled() {
-		type withRuleManager interface {
-			GetRuleManager() *placement.RuleManager
-		}
-		cl, ok := cluster.(withRuleManager)
+		cl, ok := cluster.(interface{ GetRuleManager() *placement.RuleManager })
 		if !ok || len(cl.GetRuleManager().GetSplitKeys(start, end)) > 0 {
 			return false
 		}
 	}
+
+	if cl, ok := cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+		l := cl.GetRegionLabeler()
+		if len(l.GetSplitKeys(start, end)) > 0 {
+			return false
+		}
+		if l.GetRegionLabel(region, labeler.NoMerge) != "" || l.GetRegionLabel(adjacent, labeler.NoMerge) != "" {
+			return false
+		}
+	}
+
 	policy := cluster.GetOpts().GetKeyType()
 	switch policy {
 	case core.Table:

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -71,13 +72,13 @@ var (
 			Help:      "Current state of the cluster",
 		}, []string{"state"})
 
-	regionWaitingListGauge = prometheus.NewGauge(
+	regionListGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "checker",
-			Name:      "region_waiting_list",
+			Name:      "region_list",
 			Help:      "Number of region in waiting list",
-		})
+		}, []string{"type"})
 )
 
 func init() {
@@ -88,5 +89,5 @@ func init() {
 	prometheus.MustRegister(patrolCheckRegionsGauge)
 	prometheus.MustRegister(clusterStateCPUGauge)
 	prometheus.MustRegister(clusterStateCurrent)
-	prometheus.MustRegister(regionWaitingListGauge)
+	prometheus.MustRegister(regionListGauge)
 }

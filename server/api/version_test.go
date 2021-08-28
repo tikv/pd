@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -23,12 +24,21 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
 
 var _ = Suite(&testVersionSuite{})
+
+func checkerWithNilAssert(c *C) *assertutil.Checker {
+	checker := assertutil.NewChecker(c.FailNow)
+	checker.IsNil = func(obtained interface{}) {
+		c.Assert(obtained, IsNil)
+	}
+	return checker
+}
 
 type testVersionSuite struct{}
 
@@ -41,7 +51,7 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 	temp, _ := os.Create(fname)
 	os.Stdout = temp
 
-	cfg := server.NewTestSingleConfig(c)
+	cfg := server.NewTestSingleConfig(checkerWithNilAssert(c))
 	reqCh := make(chan struct{})
 	go func() {
 		<-reqCh

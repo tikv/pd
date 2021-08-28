@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -356,9 +357,6 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 	if count == 0 {
 		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 	}
-	failpoint.Inject("skipRetryGetTS", func() {
-		maxRetryCount = 1
-	})
 	for i := 0; i < maxRetryCount; i++ {
 		currentPhysical, currentLogical := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {

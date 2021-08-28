@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -59,21 +60,33 @@ func readJSON(client *http.Client, url string, data interface{}) error {
 	if err != nil {
 		return err
 	}
+	return extractJSON(resp, data)
+}
 
-	defer resp.Body.Close()
+func readJSONWithBody(client *http.Client, url string, body []byte, data interface{}) error {
+	req, err := http.NewRequest("GET", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	return extractJSON(resp, data)
+}
+
+func extractJSON(resp *http.Response, data interface{}) error {
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
-
 	if resp.StatusCode != http.StatusOK {
-		return errors.Errorf("http get url %s return code %d", url, resp.StatusCode)
+		return errors.Errorf("http get url %s return code %d", resp.Request.URL, resp.StatusCode)
 	}
 	err = json.Unmarshal(b, data)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-
 	return nil
 }
 
@@ -92,6 +105,26 @@ func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]b
 		return nil
 	}
 	return doJSON(client, req, url, checkOpts...)
+}
+
+func patchJSON(client *http.Client, url string, body []byte) error {
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	defer resp.Body.Close()
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return errors.New(string(res))
+	}
+	return nil
 }
 
 func doDelete(client *http.Client, url string) (*http.Response, error) {

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -185,6 +186,18 @@ func SetReadKeys(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.readKeys = v
 	}
+}
+
+// SetReadQuery sets the read query for the region, only used for unit test.
+func SetReadQuery(v uint64) RegionCreateOption {
+	q := RandomKindReadQuery(v)
+	return SetQueryStats(q)
+}
+
+// SetWrittenQuery sets the write query for the region, only used for unit test.
+func SetWrittenQuery(v uint64) RegionCreateOption {
+	q := RandomKindWriteQuery(v)
+	return SetQueryStats(q)
 }
 
 // SetQueryStats sets the query stats for the region.
