@@ -44,6 +44,7 @@ type HotRegionStorage struct {
 	*kv.LeveldbKV
 	encryptionKeyManager *encryptionkm.KeyManager
 	mu                   sync.RWMutex
+	hotRegionLoopWg      sync.WaitGroup
 	batchHotInfo         map[string]*statistics.HistoryHotRegion
 	remianedDays         int64
 	pullInterval         time.Duration
@@ -95,6 +96,7 @@ func NewHotRegionsStorage(
 		member:               member,
 	}
 	if remianedDays > 0 {
+		h.hotRegionLoopWg.Add(2)
 		h.backgroundFlush()
 		h.backgroundDelete()
 	}
@@ -110,19 +112,20 @@ func (h *HotRegionStorage) backgroundDelete() {
 	if d < 0 {
 		d = d + 24*time.Hour
 	}
-	ticker := time.NewTicker(d)
 	go func() {
-		defer ticker.Stop()
-		select {
-		case <-ticker.C:
-			ticker.Reset(24 * time.Hour)
-			h.delete()
-		case <-h.hotRegionInfoCtx.Done():
-			return
-		}
+		isFirst := true
+		ticker := time.NewTicker(d)
+		defer func() {
+			ticker.Stop()
+			h.hotRegionLoopWg.Done()
+		}()
 		for {
 			select {
 			case <-ticker.C:
+				if isFirst {
+					ticker.Reset(24 * time.Hour)
+					isFirst = false
+				}
 				h.delete()
 			case <-h.hotRegionInfoCtx.Done():
 				return
@@ -135,7 +138,10 @@ func (h *HotRegionStorage) backgroundDelete() {
 func (h *HotRegionStorage) backgroundFlush() {
 	ticker := time.NewTicker(h.pullInterval)
 	go func() {
-		defer ticker.Stop()
+		defer func() {
+			ticker.Stop()
+			h.hotRegionLoopWg.Done()
+		}()
 		for {
 			select {
 			case <-ticker.C:
@@ -172,6 +178,7 @@ func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime
 // Close closes the kv.
 func (h *HotRegionStorage) Close() error {
 	h.hotRegionInfoCancel()
+	h.hotRegionLoopWg.Wait()
 	if err := h.LeveldbKV.Close(); err != nil {
 		return errs.ErrLevelDBClose.Wrap(err).GenWithStackByArgs()
 	}
@@ -216,9 +223,11 @@ func (h *HotRegionStorage) packHotRegionInfo(hotLeaderInfo statistics.StoreHotPe
 				return err
 			}
 			var peerID uint64
+			var isLearner bool
 			for _, peer := range region.Peers {
 				if peer.StoreId == hotPeerStat.StoreID {
 					peerID = peer.Id
+					isLearner = peer.Role == metapb.PeerRole_Learner
 				}
 			}
 			stat := statistics.HistoryHotRegion{
@@ -228,6 +237,7 @@ func (h *HotRegionStorage) packHotRegionInfo(hotLeaderInfo statistics.StoreHotPe
 				StoreID:        hotPeerStat.StoreID,
 				PeerID:         peerID,
 				IsLeader:       isLeader,
+				IsLearner:      isLearner,
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
 				KeyRate:        hotPeerStat.KeyRate,
