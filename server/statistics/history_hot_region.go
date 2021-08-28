@@ -24,12 +24,12 @@ type HistoryHotRegions struct {
 // HistoryHotRegion wraps hot region info
 // it is storage format of hot_region_storage
 type HistoryHotRegion struct {
-	UpdateTime int64  `json:"update_time,omitempty"`
-	RegionID   uint64 `json:"region_id,omitempty"`
-	PeerID     uint64 `json:"peer_id,omitempty"`
-	StoreID    uint64 `json:"store_id,omitempty"`
-	//0 means not leader,1 means leader
+	UpdateTime    int64   `json:"update_time,omitempty"`
+	RegionID      uint64  `json:"region_id,omitempty"`
+	PeerID        uint64  `json:"peer_id,omitempty"`
+	StoreID       uint64  `json:"store_id,omitempty"`
 	IsLeader      bool    `json:"is_leader,omitempty"`
+	IsLearner     bool    `json:"is_learner,omitempty"`
 	HotRegionType string  `json:"hot_region_type,omitempty"`
 	HotDegree     int64   `json:"hot_degree,omitempty"`
 	FlowBytes     float64 `json:"flow_bytes,omitempty"`

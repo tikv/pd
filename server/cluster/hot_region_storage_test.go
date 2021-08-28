@@ -223,14 +223,14 @@ func BenchmarkTwoTimesCompaction(b *testing.B) {
 	defer clear()
 	raft := regionStorage.cluster
 	endTime := time.Now()
-	//4464=(60*24*31)/10
+	// 4464=(60*24*31)/10
 	regions := newTestHotRegions(1000, 3)
 	for _, region := range regions {
 		raft.putRegion(region)
 	}
-	//leveldb will compaction after 30 times delete
+	// leveldb will compaction after 30 times delete
 	for i := 0; i < 2*defaultCompactionTime-1; i++ {
-		//144=24*60/10
+		// 144=24*60/10
 		endTime = writeIntoDB(regionStorage, regions, 144, endTime)
 		regionStorage.delete()
 		regionStorage.remianedDays--
@@ -252,9 +252,9 @@ func BenchmarkDeleteAfterYear(b *testing.B) {
 		raft.putRegion(region)
 	}
 	endTime := time.Now()
-	//4464=(60*24*31)/10
+	// 4464=(60*24*31)/10
 	endTime = writeIntoDB(regionStorage, regions, 4464, endTime)
-	//334=365-31
+	// 334=365-31
 	for i := 0; i < 334; i++ {
 		regionStorage.delete()
 		//144=24*60/10
@@ -275,7 +275,7 @@ func newTestHotRegionStorage(pullInterval time.Duration, remianedDays int64) (
 		return nil, nil, err
 	}
 	raft := newTestCluster(ctx, opt).RaftCluster
-	//delete data in between today and tomrrow
+	// delete data in between today and tomrrow
 	hotRegionStorage, err = NewHotRegionsStorage(ctx,
 		writePath, nil, raft, nil, remianedDays, pullInterval)
 	if err != nil {
@@ -378,7 +378,7 @@ func newTestHotRegions(n, np uint64) []*core.RegionInfo {
 	return regions
 }
 
-//Print dir size
+// Print dir size
 func PrintDirSize(path string) {
 	size, err := DirSizeB(path)
 	if err != nil {
