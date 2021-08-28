@@ -44,13 +44,13 @@ type HotStoreStats struct {
 // HistoryHotRegionsRequest wrap request condition from tidb.
 // it is request from tidb
 type HistoryHotRegionsRequest struct {
-	StartTime int64    `json:"start_time,omitempty"`
-	EndTime   int64    `json:"end_time,omitempty"`
-	RegionIDs []uint64 `json:"region_ids,omitempty"`
-	StoreIDs  []uint64 `json:"store_ids,omitempty"`
-	PeerIDs   []uint64 `json:"peer_ids,omitempty"`
-	//0 means not leader,1 means leader
-	Roles          []int64  `json:"is_leader,omitempy"`
+	StartTime      int64    `json:"start_time,omitempty"`
+	EndTime        int64    `json:"end_time,omitempty"`
+	RegionIDs      []uint64 `json:"region_ids,omitempty"`
+	StoreIDs       []uint64 `json:"store_ids,omitempty"`
+	PeerIDs        []uint64 `json:"peer_ids,omitempty"`
+	IsLearners     []bool   `json:"is_learners,omitempty"`
+	IsLeaders      []bool   `json:"is_leaders,omitempty"`
 	HotRegionTypes []string `json:"hot_region_type,omitempty"`
 }
 
@@ -195,9 +195,9 @@ func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 	iter := handler.GetHistoryHotRegionIter(hotRegionTypes, request.StartTime, request.EndTime)
 	var results []*statistics.HistoryHotRegion
 
-	regionSet, storeSet, peerSet, roleSet :=
+	regionSet, storeSet, peerSet, learnerSet, leaderSet :=
 		make(map[uint64]bool), make(map[uint64]bool),
-		make(map[uint64]bool), make(map[bool]bool)
+		make(map[uint64]bool), make(map[bool]bool), make(map[bool]bool)
 	for _, id := range request.RegionIDs {
 		regionSet[id] = true
 	}
@@ -207,10 +207,11 @@ func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 	for _, id := range request.PeerIDs {
 		peerSet[id] = true
 	}
-	for _, id := range request.Roles {
-		if id == 1 || id == 0 {
-			roleSet[id == 1] = true
-		}
+	for _, isLearner := range request.IsLearners {
+		learnerSet[isLearner] = true
+	}
+	for _, isLeader := range request.IsLeaders {
+		leaderSet[isLeader] = true
 	}
 	var next *statistics.HistoryHotRegion
 	var err error
@@ -224,7 +225,10 @@ func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 		if len(peerSet) != 0 && !peerSet[next.PeerID] {
 			continue
 		}
-		if len(roleSet) != 0 && !roleSet[next.IsLeader] {
+		if !learnerSet[next.IsLearner] {
+			continue
+		}
+		if !leaderSet[next.IsLeader] {
 			continue
 		}
 		results = append(results, next)

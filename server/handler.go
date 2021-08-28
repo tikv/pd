@@ -903,7 +903,6 @@ func (h *Handler) GetHistoryHotRegionIter(hotRegionTypes []string,
 	StartTime, EndTime int64) cluster.HotRegionStorageIterator {
 	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, StartTime, EndTime)
 	return iter
-
 }
 
 func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {
