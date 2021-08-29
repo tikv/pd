@@ -304,10 +304,7 @@ func (f *StoreStateFilter) isTombstone(opt *config.PersistOptions, store *core.S
 
 func (f *StoreStateFilter) isDown(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	f.Reason = "down"
-	t := store.DownTime()
-	down := opt.GetMaxStoreDownTime()
-	return t > down
-	//return store.DownTime() > opt.GetMaxStoreDownTime()
+	return store.DownTime() > opt.GetMaxStoreDownTime()
 }
 
 func (f *StoreStateFilter) isOffline(opt *config.PersistOptions, store *core.StoreInfo) bool {
