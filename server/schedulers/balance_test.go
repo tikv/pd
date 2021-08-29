@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -1291,32 +1290,6 @@ func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 	c.Assert(err, IsNil)
 
 	scheduleAndApplyOperator(tc, hb, 100)
-}
-func BenchmarkBalanceRegionScheduler(b *testing.B) {
-	opt := config.NewTestOptions()
-	opt.SetPlacementRuleEnabled(false)
-	ctx := context.Background()
-	storeCount := uint64(100)
-	regionCount := 100
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(0, 0)
-	tc.AddRegionStore(1, 0)
-	tc.GetStore(0)
-	for i := uint64(2); i < storeCount; i++ {
-		tc.AddRegionStore(i, 0)
-		for j := 0; j < regionCount; j++ {
-			tc.AddRegionWithLearner(uint64(j)+i*uint64(regionCount), i, []uint64{i - 1, i - 2}, nil)
-		}
-	}
-
-	oc := schedule.NewOperatorController(ctx, nil, nil)
-	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName("balance-region")}...)
-	b.StartTimer()
-	for i := 0; i < 100; i++ {
-		sc.Schedule(tc)
-	}
-	b.StopTimer()
-
 }
 
 // scheduleAndApplyOperator will try to schedule for `count` times and apply the operator if the operator is created.
