@@ -58,8 +58,8 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			if op := c.ruleChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
 			}
-			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
 		}
+		operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
 			return false, []*operator.Operator{op}
@@ -70,6 +70,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 				return checkerIsBusy, []*operator.Operator{op}
 			}
 		}
+		operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
 	}
 
 	if c.mergeChecker != nil {
