@@ -78,7 +78,7 @@ func BenchmarkLabel(b *testing.B) {
 	tc := newStoreWithLabel(ctx)
 	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
-	b.StartTimer()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sc.Schedule(tc)
 	}
