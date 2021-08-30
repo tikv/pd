@@ -96,6 +96,10 @@ func mockRegion(votersNum, learnerNums int) *core.RegionInfo {
 			StartKey: []byte("1"),
 			EndKey:   []byte("2"),
 			Peers:    peers,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 0,
+				Version: 0,
+			},
 		},
 		&metapb.Peer{Id: 1, StoreId: 1},
 	)

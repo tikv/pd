@@ -15,9 +15,9 @@
 package placement
 
 import (
-	"github.com/tikv/pd/pkg/slice"
 	"sync"
 
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -99,7 +99,7 @@ type RegionRuleFitCache struct {
 
 // IsUnchanged checks whether the region and rules unchanged for the cache
 func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule, stores []*core.StoreInfo) bool {
-	return cache.isRegionUnchanged(region) && rulesEqual(cache.rules, rules) && storeSEqual(cache.stores, stores)
+	return cache.isRegionUnchanged(region) && rulesEqual(cache.rules, rules) && storesEqual(cache.stores, stores)
 }
 
 func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
@@ -107,22 +107,13 @@ func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool
 	if len(region.GetDownPeers()) > 0 || region.GetLeader() == nil {
 		return false
 	}
-	return region.GetLeader().StoreId == cache.region.GetLeader().StoreId && peersEqual(cache.region, region)
+	return region.GetLeader().StoreId == cache.region.GetLeader().StoreId &&
+		regionEpochEqual(cache.region, region)
 }
 
-func peersEqual(a, b *core.RegionInfo) bool {
-	if len(a.GetPeers()) != len(b.GetPeers()) {
-		return false
-	}
-	apeers := a.GetPeers()
-	bpeers := b.GetPeers()
-	return slice.AllOf(apeers, func(i int) bool {
-		return slice.AnyOf(bpeers, func(j int) bool {
-			return apeers[i].GetId() == bpeers[j].GetId() &&
-				apeers[i].GetRole() == bpeers[j].GetRole() &&
-				apeers[i].GetStoreId() == bpeers[j].GetStoreId()
-		})
-	})
+func regionEpochEqual(a, b *core.RegionInfo) bool {
+	return a.GetRegionEpoch().Version == b.GetRegionEpoch().Version &&
+		a.GetRegionEpoch().ConfVer == b.GetRegionEpoch().ConfVer
 }
 
 func rulesEqual(a, b []*Rule) bool {
@@ -136,11 +127,11 @@ func rulesEqual(a, b []*Rule) bool {
 	})
 }
 
-func storeSEqual(a, b []*core.StoreInfo) bool {
+func storesEqual(a, b []*core.StoreInfo) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	return slice.AnyOf(a, func(i int) bool {
+	return slice.AllOf(a, func(i int) bool {
 		return slice.AnyOf(b, func(j int) bool {
 			return a[i].GetID() == b[j].GetID() &&
 				a[i].IsEqualLabels(b[j].GetLabels()) &&

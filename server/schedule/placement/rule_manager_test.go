@@ -455,7 +455,6 @@ func (s *testManagerSuite) TestFitRegionCache(c *C) {
 		},
 	}
 	for _, testcase := range testcases {
-		c.Log(testcase.name)
 		fit := s.manager.FitRegion(testcase.stores, testcase.region)
 		c.Assert(fit.IsCached(), Equals, testcase.isCached)
 	}

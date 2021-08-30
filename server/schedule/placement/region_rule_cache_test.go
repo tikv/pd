@@ -62,8 +62,12 @@ func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
 			unchanged: false,
 		},
 		{
-			name:      "peers changed",
-			region:    mockRegion(3, 1),
+			name: "peers changed",
+			region: func() *core.RegionInfo {
+				region := mockRegion(3, 1)
+				region = region.Clone(core.WithIncConfVer())
+				return region
+			}(),
 			rules:     addExtraRules(0),
 			unchanged: false,
 		},
@@ -75,7 +79,7 @@ func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
 					Id:      4,
 					StoreId: 4,
 					Role:    metapb.PeerRole_Voter,
-				}), core.WithRemoveStorePeer(2))
+				}), core.WithRemoveStorePeer(2), core.WithIncConfVer(), core.WithIncConfVer())
 				return region
 			}(),
 			rules:     addExtraRules(0),
