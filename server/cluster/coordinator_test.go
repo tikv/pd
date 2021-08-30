@@ -969,7 +969,9 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	tc.putRegion(region)
 	start := time.Now()
 	{
-		op1 := lb.Schedule(tc)[0]
+		ops := lb.Schedule(tc)
+		c.Assert(ops, HasLen, 1)
+		op1 := ops[0]
 		c.Assert(op1, NotNil)
 		c.Assert(oc.AddOperator(op1), IsTrue)
 		c.Assert(oc.RemoveOperator(op1), IsTrue)
