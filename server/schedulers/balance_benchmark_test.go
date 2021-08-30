@@ -35,10 +35,10 @@ var (
 func newStoreRegion(ctx context.Context) *mockcluster.Cluster {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(0, 0)
-	tc.AddRegionStore(1, 0)
+	tc.AddRegionStore(0, regionCount)
+	tc.AddRegionStore(1, regionCount)
 	for i := uint64(2); i < uint64(storeCount); i++ {
-		tc.AddRegionStore(i, int(i))
+		tc.AddRegionStore(i, regionCount)
 		for j := 0; j < regionCount; j++ {
 			tc.AddRegionWithLearner(uint64(j)+i*uint64(regionCount), i, []uint64{i - 1, i - 2}, nil)
 		}
@@ -61,7 +61,7 @@ func newStoreWithLabel(ctx context.Context) *mockcluster.Cluster {
 				label["az"] = az
 				label["rack"] = rack
 				label["host"] = host
-				tc.AddLabelsStore(storeID, int(storeID), label)
+				tc.AddLabelsStore(storeID, regionCount, label)
 				storeID++
 			}
 			for j := 0; j < regionCount; j++ {
@@ -84,7 +84,7 @@ func BenchmarkLabel(b *testing.B) {
 	}
 }
 
-func BenchmarkNoScheduler(b *testing.B) {
+func BenchmarkNoLabel(b *testing.B) {
 	ctx := context.Background()
 	tc := newStoreRegion(ctx)
 	oc := schedule.NewOperatorController(ctx, nil, nil)
@@ -93,5 +93,4 @@ func BenchmarkNoScheduler(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		sc.Schedule(tc)
 	}
-
 }
