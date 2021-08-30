@@ -506,7 +506,6 @@ func BenchmarkRenderJSON(b *testing.B) {
 		var buffer bytes.Buffer
 		rd.JSON(&buffer, 200, regions)
 	}
-
 }
 
 func BenchmarkConvertToAPIRegions(b *testing.B) {

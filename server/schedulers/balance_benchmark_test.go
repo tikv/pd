@@ -18,13 +18,10 @@ import (
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-
-	"github.com/tikv/pd/server/schedule/placement"
-
-	"github.com/tikv/pd/server/schedule"
-
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 var (
@@ -64,8 +61,8 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 			}
 			for j := 0; j < regionCount; j++ {
 				if ruleEnable {
-					tiID := regionID%uint64(tiflashCount) + uint64(storeCount)
-					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, []uint64{tiID})
+					learnID := regionID%uint64(tiflashCount) + uint64(storeCount)
+					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, []uint64{learnID})
 				} else {
 					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, nil)
 				}
