@@ -421,12 +421,6 @@ func (s *testManagerSuite) TestFitRegionCache(c *C) {
 			isCached: true,
 		},
 		{
-			name:     "add store",
-			region:   mockRegion(3, 0),
-			stores:   newMockStoresSet(21),
-			isCached: false,
-		},
-		{
 			name:     "region topo changed",
 			region:   mockRegion(4, 0),
 			stores:   newMockStoresSet(21),
