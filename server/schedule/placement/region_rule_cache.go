@@ -112,6 +112,9 @@ func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool
 }
 
 func regionEpochEqual(a, b *core.RegionInfo) bool {
+	if a.GetRegionEpoch() == nil || b.GetRegionEpoch() == nil {
+		return false
+	}
 	return a.GetRegionEpoch().Version == b.GetRegionEpoch().Version &&
 		a.GetRegionEpoch().ConfVer == b.GetRegionEpoch().ConfVer
 }
