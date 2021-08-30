@@ -156,10 +156,28 @@ type tsoRequest struct {
 	dcLocation string
 }
 
+type tsoBatchController struct {
+	lastBatchPoint time.Time
+	batchInterval  time.Duration
+}
+
+func newTSOBatchController() *tsoBatchController {
+	return &tsoBatchController{time.Now(), defaultTSOBatchInterval}
+}
+
+func (tbc *tsoBatchController) waitForBatch() bool {
+	return time.Since(tbc.lastBatchPoint) < tbc.batchInterval
+}
+
+func (tbc *tsoBatchController) updateLastBatchPoint() {
+	tbc.lastBatchPoint = time.Now()
+}
+
 type tsoDispatcher struct {
-	dispatcherCtx    context.Context
-	dispatcherCancel context.CancelFunc
-	tsoRequestCh     chan *tsoRequest
+	dispatcherCtx      context.Context
+	dispatcherCancel   context.CancelFunc
+	tsoBatchController *tsoBatchController
+	tsoRequestCh       chan *tsoRequest
 }
 
 type lastTSO struct {
@@ -168,14 +186,15 @@ type lastTSO struct {
 }
 
 const (
-	defaultPDTimeout      = 3 * time.Second
-	dialTimeout           = 3 * time.Second
-	updateMemberTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
-	tsLoopDCCheckInterval = time.Minute
-	maxMergeTSORequests   = 10000 // should be higher if client is sending requests in burst
-	maxInitClusterRetries = 100
-	retryInterval         = 1 * time.Second
-	maxRetryTimes         = 5
+	defaultPDTimeout        = 3 * time.Second
+	dialTimeout             = 3 * time.Second
+	updateMemberTimeout     = time.Second // Use a shorter timeout to recover faster from network isolation.
+	tsLoopDCCheckInterval   = time.Minute
+	maxMergeTSORequests     = 10000 // should be higher if client is sending requests in burst
+	maxInitClusterRetries   = 100
+	retryInterval           = 1 * time.Second
+	maxRetryTimes           = 5
+	defaultTSOBatchInterval = 1 * time.Millisecond
 )
 
 // LeaderHealthCheckInterval might be chagned in the unit to shorten the testing time.
@@ -232,7 +251,7 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 }
 
 func (c *client) updateTSODispatcher() {
-	// Set up the new TSO dispatcher
+	// Set up the new TSO dispatcher and batch controller.
 	c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
 		dcLocation := dcLocationKey.(string)
 		if !c.checkTSODispatcher(dcLocation) {
@@ -240,12 +259,13 @@ func (c *client) updateTSODispatcher() {
 			c.createTSODispatcher(dcLocation)
 			dispatcher, _ := c.tsoDispatcher.Load(dcLocation)
 			dispatcherCtx := dispatcher.(*tsoDispatcher).dispatcherCtx
+			tbc := dispatcher.(*tsoDispatcher).tsoBatchController
 			tsoRequestCh := dispatcher.(*tsoDispatcher).tsoRequestCh
 			// Each goroutine is responsible for handling the tso stream request for its dc-location.
 			// The only case that will make the dispatcher goroutine exit
 			// is that the loopCtx is done, otherwise there is no circumstance
 			// this goroutine should exit.
-			go c.handleDispatcher(dispatcherCtx, dcLocation, tsoRequestCh)
+			go c.handleDispatcher(dispatcherCtx, dcLocation, tbc, tsoRequestCh)
 		}
 		return true
 	})
@@ -481,9 +501,10 @@ func (c *client) checkTSODispatcher(dcLocation string) bool {
 func (c *client) createTSODispatcher(dcLocation string) {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(c.ctx)
 	dispatcher := &tsoDispatcher{
-		dispatcherCtx:    dispatcherCtx,
-		dispatcherCancel: dispatcherCancel,
-		tsoRequestCh:     make(chan *tsoRequest, maxMergeTSORequests),
+		dispatcherCtx:      dispatcherCtx,
+		dispatcherCancel:   dispatcherCancel,
+		tsoBatchController: newTSOBatchController(),
+		tsoRequestCh:       make(chan *tsoRequest, maxMergeTSORequests),
 	}
 	c.tsoDispatcher.Store(dcLocation, dispatcher)
 }
@@ -493,7 +514,7 @@ type streamCh chan struct {
 	stream pdpb.PD_TsoClient
 }
 
-func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoDispatcher chan *tsoRequest) {
+func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tbc *tsoBatchController, tsoDispatcher chan *tsoRequest) {
 	var (
 		err           error
 		cancel        context.CancelFunc
@@ -547,9 +568,15 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				continue
 			}
 		}
+		// Block here to batch more TSO requests.
+		if tbc.waitForBatch() {
+			continue
+		}
 		select {
 		case first := <-tsoDispatcher:
 			pendingPlus1 := len(tsoDispatcher) + 1
+			// Batch size is determined, update the last batch point time.
+			tbc.updateLastBatchPoint()
 			requests[0] = first
 			for i := 1; i < pendingPlus1; i++ {
 				requests[i] = <-tsoDispatcher
