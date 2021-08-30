@@ -70,6 +70,10 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 		opt(regionInfo)
 	}
 	classifyVoterAndLearner(regionInfo)
+	region.RegionEpoch = &metapb.RegionEpoch{
+		ConfVer:              0,
+		Version:              0,
+	}
 	return regionInfo
 }
 
