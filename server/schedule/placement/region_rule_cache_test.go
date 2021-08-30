@@ -139,7 +139,7 @@ func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
 		},
 	}
 	for _, testcase := range testcases {
-		c.Assert(cache.IsUnchanged(testcase.region, testcase.rules), Equals, testcase.unchanged)
+		c.Assert(cache.IsUnchanged(testcase.region, testcase.rules, mockStores(3)), Equals, testcase.unchanged)
 	}
 }
 
@@ -148,5 +148,14 @@ func mockRegionRuleFitCache() *RegionRuleFitCache {
 		region:  mockRegion(3, 0),
 		rules:   addExtraRules(0),
 		bestFit: nil,
+		stores:  mockStores(3),
 	}
+}
+
+func mockStores(num int) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, num)
+	for i := 1; i <= num; i++ {
+		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: uint64(i)}))
+	}
+	return stores
 }

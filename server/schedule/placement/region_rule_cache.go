@@ -68,23 +68,24 @@ func (manager *RegionRuleFitCacheManager) InvalidAll() {
 }
 
 // Check checks whether the region and rules are changed for the stored cache
-func (manager *RegionRuleFitCacheManager) Check(region *core.RegionInfo, rules []*Rule) bool {
+func (manager *RegionRuleFitCacheManager) Check(region *core.RegionInfo, rules []*Rule, stores []*core.StoreInfo) bool {
 	manager.mu.RLock()
 	defer manager.mu.RUnlock()
 	if cache, ok := manager.caches[region.GetID()]; ok && cache.bestFit != nil {
-		return cache.IsUnchanged(region, rules)
+		return cache.IsUnchanged(region, rules, stores)
 	}
 	return false
 }
 
 // SetCache stores RegionFit cache
-func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, rules []*Rule, fit *RegionFit) {
+func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, rules []*Rule, fit *RegionFit, stores []*core.StoreInfo) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	manager.caches[region.GetID()] = &RegionRuleFitCache{
 		region:  region,
 		rules:   rules,
 		bestFit: fit,
+		stores:  stores,
 	}
 }
 
@@ -93,11 +94,12 @@ type RegionRuleFitCache struct {
 	bestFit *RegionFit
 	region  *core.RegionInfo
 	rules   []*Rule
+	stores  []*core.StoreInfo
 }
 
 // IsUnchanged checks whether the region and rules unchanged for the cache
-func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule) bool {
-	return cache.isRegionUnchanged(region) && rulesEqual(cache.rules, rules)
+func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule, stores []*core.StoreInfo) bool {
+	return cache.isRegionUnchanged(region) && rulesEqual(cache.rules, rules) && storeSEqual(cache.stores, stores)
 }
 
 func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
@@ -130,6 +132,19 @@ func rulesEqual(a, b []*Rule) bool {
 	return slice.AllOf(a, func(i int) bool {
 		return slice.AnyOf(b, func(j int) bool {
 			return equalRules(a[i], b[j])
+		})
+	})
+}
+
+func storeSEqual(a, b []*core.StoreInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return slice.AnyOf(a, func(i int) bool {
+		return slice.AnyOf(b, func(j int) bool {
+			return a[i].GetID() == b[j].GetID() &&
+				a[i].IsEqualLabels(b[j].GetLabels()) &&
+				a[i].GetState() == b[j].GetState()
 		})
 	})
 }

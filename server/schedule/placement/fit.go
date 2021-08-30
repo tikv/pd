@@ -158,16 +158,9 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 	regionPeers := region.GetPeers()
 	peers := make([]*fitPeer, 0, len(regionPeers))
 	for _, p := range regionPeers {
-		var targetStore *core.StoreInfo
-		for _, store := range stores {
-			if store.GetID() == p.GetStoreId() {
-				targetStore = store
-				break
-			}
-		}
 		peers = append(peers, &fitPeer{
 			Peer:     p,
-			store:    targetStore,
+			store:    getStoreByID(stores, p.GetStoreId()),
 			isLeader: region.GetLeader().GetId() == p.GetId(),
 		})
 	}

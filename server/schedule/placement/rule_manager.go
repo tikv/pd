@@ -40,7 +40,6 @@ type RuleManager struct {
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
-	cacheStores []*core.StoreInfo
 
 	// used for rule validation
 	keyType          string
@@ -311,11 +310,7 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *RegionFit {
 	stores := storeSet.GetStores()
 	rules := m.GetRulesForApplyRegion(region)
-	isStoresUnchanged := m.CheckStores(stores)
-	if !isStoresUnchanged {
-		m.cache.InvalidAll()
-	}
-	if isStoresUnchanged && m.cache.Check(region, rules) {
+	if m.cache.Check(region, rules, getStoresByRegion(stores, region)) {
 		fit := m.cache.GetCacheRegionFit(region.GetID())
 		if fit != nil {
 			fit.SetCached(true)
@@ -324,23 +319,12 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *Reg
 	}
 	fit := FitRegion(stores, region, rules)
 	if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 && region.GetLeader() != nil {
-		m.cache.SetCache(region, rules, fit)
+		m.cache.SetCache(region, rules, fit, getStoresByRegion(stores, region))
 	} else {
 		m.cache.Invalid(region.GetID())
 	}
 	fit.SetCached(false)
 	return fit
-}
-
-// CheckStores checks whether stores topology are changed, if changed, then stores it.
-func (m *RuleManager) CheckStores(stores []*core.StoreInfo) bool {
-	m.Lock()
-	defer m.Unlock()
-	if isEqualStores(m.cacheStores, stores) {
-		return true
-	}
-	m.cacheStores = stores
-	return false
 }
 
 func (m *RuleManager) beginPatch() *ruleConfigPatch {
@@ -434,7 +418,7 @@ const (
 // distinguished by the field `Action`.
 type RuleOp struct {
 	*Rule                       // information of the placement rule to add/delete
-	Action           RuleOpType `json:"action"`              // the operation type
+	Action           RuleOpType `json:"action"` // the operation type
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
@@ -711,23 +695,24 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	return m
 }
 
-func isEqualStores(a, b []*core.StoreInfo) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for _, astore := range a {
-		find := false
-		for _, bstore := range b {
-			if astore.GetID() == bstore.GetID() &&
-				astore.IsEqualLabels(bstore.GetLabels()) &&
-				astore.GetState() == bstore.GetState() {
-				find = true
+func getStoresByRegion(stores []*core.StoreInfo, region *core.RegionInfo) []*core.StoreInfo {
+	r := make([]*core.StoreInfo, 0, len(region.GetPeers()))
+	for _, peer := range region.GetPeers() {
+		for _, store := range stores {
+			if store.GetID() == peer.GetStoreId() {
+				r = append(r, store)
 				break
 			}
 		}
-		if !find {
-			return false
+	}
+	return r
+}
+
+func getStoreByID(stores []*core.StoreInfo, id uint64) *core.StoreInfo {
+	for _, store := range stores {
+		if store.GetID() == id {
+			return store
 		}
 	}
-	return true
+	return nil
 }
