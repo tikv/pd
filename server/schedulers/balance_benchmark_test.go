@@ -17,6 +17,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/tikv/pd/server/schedule/placement"
+
 	"github.com/tikv/pd/server/schedule"
 
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -28,31 +30,24 @@ var (
 	racks = []string{"rack1", "rack2", "rack3"}
 	hosts = []string{"host1", "host2", "host3", "host4", "host5", "host6", "host7", "host8", "host9"}
 
-	regionCount = 100
-	storeCount  = 100
+	regionCount  = 100
+	storeCount   = 81
+	tiflashCount = 9
 )
 
-func newStoreRegion(ctx context.Context) *mockcluster.Cluster {
+func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool) *mockcluster.Cluster {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(0, regionCount)
-	tc.AddRegionStore(1, regionCount)
-	for i := uint64(2); i < uint64(storeCount); i++ {
-		tc.AddRegionStore(i, regionCount)
-		for j := 0; j < regionCount; j++ {
-			tc.AddRegionWithLearner(uint64(j)+i*uint64(regionCount), i, []uint64{i - 1, i - 2}, nil)
-		}
-	}
-	return tc
-}
+	opt.SetPlacementRuleEnabled(ruleEnable)
 
-func newStoreWithLabel(ctx context.Context) *mockcluster.Cluster {
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	opt.SetPlacementRuleEnabled(false)
-	config := opt.GetReplicationConfig()
-	config.LocationLabels = []string{"az", "rack", "host"}
-	config.IsolationLevel = "az"
+	if labelEnable {
+		config := opt.GetReplicationConfig()
+		config.LocationLabels = []string{"az", "rack", "host"}
+		config.IsolationLevel = "az"
+	}
+	if ruleEnable {
+		addTiflash(tc)
+	}
 	storeID, regionID := uint64(0), uint64(0)
 	for _, host := range hosts {
 		for _, rack := range racks {
@@ -65,7 +60,12 @@ func newStoreWithLabel(ctx context.Context) *mockcluster.Cluster {
 				storeID++
 			}
 			for j := 0; j < regionCount; j++ {
-				tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, nil)
+				if ruleEnable {
+					tiID := regionID%uint64(tiflashCount) + uint64(storeCount)
+					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, []uint64{tiID})
+				} else {
+					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, nil)
+				}
 				regionID++
 			}
 		}
@@ -73,9 +73,41 @@ func newStoreWithLabel(ctx context.Context) *mockcluster.Cluster {
 	return tc
 }
 
+func addTiflash(tc *mockcluster.Cluster) {
+	tc.SetPlacementRuleEnabled(true)
+	for i := 0; i < tiflashCount; i++ {
+		label := make(map[string]string, 3)
+		label["engine"] = "tiflash"
+		tc.AddLabelsStore(uint64(storeCount+i), regionCount, label)
+	}
+	rule := &placement.Rule{
+		GroupID: "tiflash-override",
+		ID:      "learner-replica-table-ttt",
+		Role:    "learner",
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "engine", Op: "in", Values: []string{"tiflash"}},
+		},
+		LocationLabels: []string{"host"},
+	}
+	tc.SetRule(rule)
+}
+
+func BenchmarkPlacementRule(b *testing.B) {
+	ctx := context.Background()
+	tc := newBenchCluster(ctx, true, true)
+	addTiflash(tc)
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sc.Schedule(tc)
+	}
+}
+
 func BenchmarkLabel(b *testing.B) {
 	ctx := context.Background()
-	tc := newStoreWithLabel(ctx)
+	tc := newBenchCluster(ctx, false, true)
 	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
@@ -86,7 +118,7 @@ func BenchmarkLabel(b *testing.B) {
 
 func BenchmarkNoLabel(b *testing.B) {
 	ctx := context.Background()
-	tc := newStoreRegion(ctx)
+	tc := newBenchCluster(ctx, false, false)
 	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
