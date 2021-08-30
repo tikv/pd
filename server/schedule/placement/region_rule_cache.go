@@ -116,7 +116,9 @@ func peersEqual(a, b *core.RegionInfo) bool {
 	bpeers := b.GetPeers()
 	return slice.AllOf(apeers, func(i int) bool {
 		return slice.AnyOf(bpeers, func(j int) bool {
-			return apeers[i].GetId() == bpeers[j].GetId()
+			return apeers[i].GetId() == bpeers[j].GetId() &&
+				apeers[i].GetRole() == bpeers[j].GetRole() &&
+				apeers[i].GetStoreId() == bpeers[j].GetStoreId()
 		})
 	})
 }
