@@ -15,6 +15,7 @@
 package core
 
 import (
+	"github.com/tikv/pd/pkg/slice"
 	"math"
 	"strings"
 	"time"
@@ -706,21 +707,13 @@ func IsTiFlashStore(store *metapb.Store) bool {
 
 // IsEqualLabels returns whether have same store label
 func (s *StoreInfo) IsEqualLabels(labels []*metapb.StoreLabel) bool {
-	if len(s.GetLabels()) != len(labels) {
+	storeLabels := s.GetLabels()
+	if len(storeLabels) != len(labels) {
 		return false
 	}
-	storeLabels := s.GetLabels()
-	for _, label := range labels {
-		find := false
-		for _, slabel := range storeLabels {
-			if label.Key == slabel.Key && label.Value == slabel.Value {
-				find = true
-				break
-			}
-		}
-		if !find {
-			return false
-		}
-	}
-	return true
+	return slice.AllOf(labels, func(i int) bool {
+		return slice.AnyOf(storeLabels, func(j int) bool {
+			return labels[i].Key == storeLabels[j].Key && labels[i].Value == storeLabels[j].Value
+		})
+	})
 }

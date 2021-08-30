@@ -101,6 +101,10 @@ func (r *Rule) groupIndex() int {
 	return 0
 }
 
+func equalRules(r1, r2 *Rule) bool {
+	return r1.ID == r2.ID && r1.GroupID == r2.GroupID && r1.Version == r2.Version && r1.CreateTimestamp == r2.CreateTimestamp
+}
+
 // RuleGroup defines properties of a rule group.
 type RuleGroup struct {
 	ID       string `json:"id,omitempty"`

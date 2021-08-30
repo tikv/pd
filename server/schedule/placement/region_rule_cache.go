@@ -15,6 +15,7 @@
 package placement
 
 import (
+	"github.com/tikv/pd/pkg/slice"
 	"sync"
 
 	"github.com/tikv/pd/server/core"
@@ -96,11 +97,7 @@ type RegionRuleFitCache struct {
 
 // IsUnchanged checks whether the region and rules unchanged for the cache
 func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule) bool {
-	return cache.isRegionUnchanged(region) && cache.isRulesUnchanged(rules)
-}
-
-func (cache *RegionRuleFitCache) isRulesUnchanged(rules []*Rule) bool {
-	return isRulesEqual(cache.rules, rules)
+	return cache.isRegionUnchanged(region) && rulesEqual(cache.rules, rules)
 }
 
 func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
@@ -108,50 +105,29 @@ func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool
 	if len(region.GetDownPeers()) > 0 || region.GetLeader() == nil {
 		return false
 	}
-	if !(isPeersEqual(cache.region, region) &&
-		region.GetLeader().StoreId == cache.region.GetLeader().StoreId) {
-		return false
-	}
-	return true
+	return region.GetLeader().StoreId == cache.region.GetLeader().StoreId && peersEqual(cache.region, region)
 }
 
-func isPeersEqual(a, b *core.RegionInfo) bool {
+func peersEqual(a, b *core.RegionInfo) bool {
 	if len(a.GetPeers()) != len(b.GetPeers()) {
 		return false
 	}
-	for _, apeer := range a.GetPeers() {
-		find := false
-		for _, bpeer := range b.GetPeers() {
-			if apeer.GetId() == bpeer.GetId() && apeer.StoreId == bpeer.StoreId && apeer.Role == bpeer.Role {
-				find = true
-				break
-			}
-		}
-		if !find {
-			return false
-		}
-	}
-	return true
+	apeers := a.GetPeers()
+	bpeers := b.GetPeers()
+	return slice.AllOf(apeers, func(i int) bool {
+		return slice.AnyOf(bpeers, func(j int) bool {
+			return apeers[i].GetId() == bpeers[j].GetId()
+		})
+	})
 }
 
-func isRulesEqual(a, b []*Rule) bool {
+func rulesEqual(a, b []*Rule) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for _, arule := range a {
-		find := false
-		for _, brule := range b {
-			if arule.ID == brule.ID &&
-				arule.GroupID == brule.GroupID &&
-				arule.Version == brule.Version &&
-				arule.CreateTimestamp == brule.CreateTimestamp {
-				find = true
-				break
-			}
-		}
-		if !find {
-			return false
-		}
-	}
-	return true
+	return slice.AllOf(a, func(i int) bool {
+		return slice.AnyOf(b, func(j int) bool {
+			return equalRules(a[i], b[j])
+		})
+	})
 }
