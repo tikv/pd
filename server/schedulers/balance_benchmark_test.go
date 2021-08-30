@@ -17,6 +17,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/server/schedule/placement"
 
 	"github.com/tikv/pd/server/schedule"
@@ -35,7 +37,7 @@ var (
 	tiflashCount = 9
 )
 
-func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool) *mockcluster.Cluster {
+func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombstoneEnable bool) *mockcluster.Cluster {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	opt.SetPlacementRuleEnabled(ruleEnable)
@@ -45,6 +47,7 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool) *mockclu
 		config.LocationLabels = []string{"az", "rack", "host"}
 		config.IsolationLevel = "az"
 	}
+
 	if ruleEnable {
 		addTiflash(tc)
 	}
@@ -68,6 +71,12 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool) *mockclu
 				}
 				regionID++
 			}
+		}
+	}
+	if tombstoneEnable {
+		for i := uint64(0); i < uint64(storeCount*2/3); i++ {
+			s := tc.GetStore(i)
+			s.GetMeta().State = metapb.StoreState_Tombstone
 		}
 	}
 	return tc
@@ -95,8 +104,7 @@ func addTiflash(tc *mockcluster.Cluster) {
 
 func BenchmarkPlacementRule(b *testing.B) {
 	ctx := context.Background()
-	tc := newBenchCluster(ctx, true, true)
-	addTiflash(tc)
+	tc := newBenchCluster(ctx, true, true, false)
 	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
@@ -107,7 +115,7 @@ func BenchmarkPlacementRule(b *testing.B) {
 
 func BenchmarkLabel(b *testing.B) {
 	ctx := context.Background()
-	tc := newBenchCluster(ctx, false, true)
+	tc := newBenchCluster(ctx, false, true, false)
 	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
@@ -118,7 +126,18 @@ func BenchmarkLabel(b *testing.B) {
 
 func BenchmarkNoLabel(b *testing.B) {
 	ctx := context.Background()
-	tc := newBenchCluster(ctx, false, false)
+	tc := newBenchCluster(ctx, false, false, false)
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sc.Schedule(tc)
+	}
+}
+
+func BenchmarkTombStore(b *testing.B) {
+	ctx := context.Background()
+	tc := newBenchCluster(ctx, false, false, true)
 	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
