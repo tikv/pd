@@ -303,7 +303,7 @@ func (s *stats) merge(other *stats) {
 
 func (s *stats) Counter() string {
 	return fmt.Sprintf(
-		"count:%d, max:%.4f, min:%.4f, avg:%.4f\n<1ms: %d, >1ms:%d, >2ms:%d, >5ms:%d, >10ms:%d, >30ms:%d, >50ms:%d, >100ms:%d, >200ms:%d, >400ms:%d, >800ms:%d, >1s:%d",
+		"count: %d, max: %.4fms, min: %.4fms, avg: %.4fms\n<1ms: %d, >1ms: %d, >2ms: %d, >5ms: %d, >10ms: %d, >30ms: %d, >50ms: %d, >100ms: %d, >200ms: %d, >400ms: %d, >800ms: %d, >1s: %d",
 		s.count, float64(s.maxDur.Nanoseconds())/float64(time.Millisecond), float64(s.minDur.Nanoseconds())/float64(time.Millisecond), float64(s.totalDur.Nanoseconds())/float64(s.count)/float64(time.Millisecond),
 		s.belowMilliCnt, s.milliCnt, s.twoMilliCnt, s.fiveMilliCnt, s.tenMSCnt, s.thirtyCnt, s.fiftyCnt, s.oneHundredCnt, s.twoHundredCnt, s.fourHundredCnt,
 		s.eightHundredCnt, s.oneThousandCnt)
@@ -311,7 +311,7 @@ func (s *stats) Counter() string {
 
 func (s *stats) Percentage() string {
 	return fmt.Sprintf(
-		"count:%d, <1ms:%2.2f%%, >1ms:%2.2f%%, >2ms:%2.2f%%, >5ms:%2.2f%%, >10ms:%2.2f%%, >30ms:%2.2f%%, >50ms:%2.2f%%, >100ms:%2.2f%%, >200ms:%2.2f%%, >400ms:%2.2f%%, >800ms:%2.2f%%, >1s:%2.2f%%", s.count,
+		"count: %d, <1ms: %2.2f%%, >1ms: %2.2f%%, >2ms: %2.2f%%, >5ms: %2.2f%%, >10ms: %2.2f%%, >30ms: %2.2f%%, >50ms: %2.2f%%, >100ms: %2.2f%%, >200ms: %2.2f%%, >400ms: %2.2f%%, >800ms: %2.2f%%, >1s: %2.2f%%", s.count,
 		s.calculate(s.belowMilliCnt), s.calculate(s.milliCnt), s.calculate(s.twoMilliCnt), s.calculate(s.fiveMilliCnt), s.calculate(s.tenMSCnt), s.calculate(s.thirtyCnt), s.calculate(s.fiftyCnt),
 		s.calculate(s.oneHundredCnt), s.calculate(s.twoHundredCnt), s.calculate(s.fourHundredCnt), s.calculate(s.eightHundredCnt), s.calculate(s.oneThousandCnt))
 }
