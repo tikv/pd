@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cluster
+package core
 
 import (
 	"context"
@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -32,8 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
-	"github.com/tikv/pd/server/member"
-	"github.com/tikv/pd/server/statistics"
 )
 
 // HotRegionStorage is used to storage hot region info,
@@ -42,17 +41,54 @@ import (
 // Close must be called after use.
 type HotRegionStorage struct {
 	*kv.LeveldbKV
-	encryptionKeyManager *encryptionkm.KeyManager
-	mu                   sync.RWMutex
-	hotRegionLoopWg      sync.WaitGroup
-	batchHotInfo         map[string]*statistics.HistoryHotRegion
-	remianedDays         int64
-	pullInterval         time.Duration
-	compactionCountdown  int
-	hotRegionInfoCtx     context.Context
-	hotRegionInfoCancel  context.CancelFunc
-	cluster              *RaftCluster
-	member               *member.Member
+	encryptionKeyManager    *encryptionkm.KeyManager
+	mu                      sync.RWMutex
+	hotRegionLoopWg         sync.WaitGroup
+	batchHotInfo            map[string]*HistoryHotRegion
+	remianedDays            int64
+	pullInterval            time.Duration
+	compactionCountdown     int
+	hotRegionInfoCtx        context.Context
+	hotRegionInfoCancel     context.CancelFunc
+	cluster                 *BasicCluster
+	hotRegionStorageHandler HotRegionStorageHandler
+}
+
+// HistoryHotRegions wraps historyHotRegion
+// it will return to tidb
+type HistoryHotRegions struct {
+	HistoryHotRegion []*HistoryHotRegion `json:"history_hot_region"`
+}
+
+// HistoryHotRegion wraps hot region info
+// it is storage format of hot_region_storage
+type HistoryHotRegion struct {
+	UpdateTime    int64   `json:"update_time,omitempty"`
+	RegionID      uint64  `json:"region_id,omitempty"`
+	PeerID        uint64  `json:"peer_id,omitempty"`
+	StoreID       uint64  `json:"store_id,omitempty"`
+	IsLeader      bool    `json:"is_leader,omitempty"`
+	IsLearner     bool    `json:"is_learner,omitempty"`
+	HotRegionType string  `json:"hot_region_type,omitempty"`
+	HotDegree     int64   `json:"hot_degree,omitempty"`
+	FlowBytes     float64 `json:"flow_bytes,omitempty"`
+	KeyRate       float64 `json:"key_rate,omitempty"`
+	QueryRate     float64 `json:"query_rate,omitempty"`
+	StartKey      []byte  `json:"start_key,omitempty"`
+	EndKey        []byte  `json:"end_key,omitempty"`
+	// Encryption metadata for start_key and end_key. encryption_meta.iv is IV for start_key.
+	// IV for end_key is calculated from (encryption_meta.iv + len(start_key)).
+	// The field is only used by PD and should be ignored otherwise.
+	// If encryption_meta is empty (i.e. nil), it means start_key and end_key are unencrypted.
+	EncryptionMeta *encryptionpb.EncryptionMeta `json:"encryption_meta,omitempty"`
+}
+
+type HotRegionStorageHandler interface {
+	// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from
+	PackHistoryHotReadRegions() ([]HistoryHotRegion, error)
+	// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
+	PackHistoryHotWriteRegions() ([]HistoryHotRegion, error)
+	IsLeader() bool
 }
 
 const (
@@ -73,8 +109,7 @@ func NewHotRegionsStorage(
 	ctx context.Context,
 	path string,
 	encryptionKeyManager *encryptionkm.KeyManager,
-	cluster *RaftCluster,
-	member *member.Member,
+	hotRegionStorageHandler HotRegionStorageHandler,
 	remianedDays int64,
 	pullInterval time.Duration,
 ) (*HotRegionStorage, error) {
@@ -84,16 +119,15 @@ func NewHotRegionsStorage(
 	}
 	hotRegionInfoCtx, hotRegionInfoCancle := context.WithCancel(ctx)
 	h := HotRegionStorage{
-		LeveldbKV:            levelDB,
-		encryptionKeyManager: encryptionKeyManager,
-		batchHotInfo:         make(map[string]*statistics.HistoryHotRegion),
-		remianedDays:         remianedDays,
-		pullInterval:         pullInterval,
-		compactionCountdown:  defaultCompactionTime,
-		hotRegionInfoCtx:     hotRegionInfoCtx,
-		hotRegionInfoCancel:  hotRegionInfoCancle,
-		cluster:              cluster,
-		member:               member,
+		LeveldbKV:               levelDB,
+		encryptionKeyManager:    encryptionKeyManager,
+		batchHotInfo:            make(map[string]*HistoryHotRegion),
+		remianedDays:            remianedDays,
+		pullInterval:            pullInterval,
+		compactionCountdown:     defaultCompactionTime,
+		hotRegionInfoCtx:        hotRegionInfoCtx,
+		hotRegionInfoCancel:     hotRegionInfoCancle,
+		hotRegionStorageHandler: hotRegionStorageHandler,
 	}
 	if remianedDays > 0 {
 		h.hotRegionLoopWg.Add(2)
@@ -145,7 +179,7 @@ func (h *HotRegionStorage) backgroundFlush() {
 		for {
 			select {
 			case <-ticker.C:
-				if h.member.IsLeader() {
+				if h.hotRegionStorageHandler.IsLeader() {
 					if err := h.pullHotRegionInfo(); err != nil {
 						log.Error("get hot_region stat meet error", errs.ZapError(err))
 					}
@@ -186,73 +220,39 @@ func (h *HotRegionStorage) Close() error {
 }
 
 func (h *HotRegionStorage) pullHotRegionInfo() error {
-	cluster := h.cluster
-	hotReadRegion := cluster.coordinator.getHotReadRegions()
-	hotReadLeaderRegion := hotReadRegion.AsLeader
-	hotReadPeerRegion := hotReadRegion.AsPeer
-	if err := h.packHotRegionInfo(hotReadLeaderRegion,
-		HotRegionTypes[0], false); err != nil {
+	historyHotReadRegions, err := h.hotRegionStorageHandler.PackHistoryHotReadRegions()
+	if err != nil {
 		return err
 	}
-	if err := h.packHotRegionInfo(hotReadPeerRegion,
-		HotRegionTypes[0], true); err != nil {
+	if err := h.packHistoryHotRegions(historyHotReadRegions, HotRegionTypes[0]); err != nil {
 		return err
 	}
-	hotWriteRegion := cluster.coordinator.getHotWriteRegions()
-	hotWriteLeaderInfo := hotWriteRegion.AsLeader
-	hotWritePeerInfo := hotWriteRegion.AsPeer
-	if err := h.packHotRegionInfo(hotWriteLeaderInfo,
-		HotRegionTypes[1], true); err != nil {
+	historyHotWriteRegions, err := h.hotRegionStorageHandler.PackHistoryHotWriteRegions()
+	if err != nil {
 		return err
 	}
-	err := h.packHotRegionInfo(hotWritePeerInfo,
-		HotRegionTypes[1], false)
-	return err
+	if err := h.packHistoryHotRegions(historyHotWriteRegions, HotRegionTypes[1]); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (h *HotRegionStorage) packHotRegionInfo(hotLeaderInfo statistics.StoreHotPeersStat,
-	hotRegionType string, isLeader bool) error {
-	cluster := h.cluster
-	batchHotInfo := h.batchHotInfo
-	for _, hotPeersStat := range hotLeaderInfo {
-		stats := hotPeersStat.Stats
-		for _, hotPeerStat := range stats {
-			region := cluster.GetRegion(hotPeerStat.RegionID).GetMeta()
-			region, err := encryption.EncryptRegion(region, h.encryptionKeyManager)
-			if err != nil {
-				return err
-			}
-			var peerID uint64
-			var isLearner bool
-			for _, peer := range region.Peers {
-				if peer.StoreId == hotPeerStat.StoreID {
-					peerID = peer.Id
-					isLearner = peer.Role == metapb.PeerRole_Learner
-				}
-			}
-			stat := statistics.HistoryHotRegion{
-				// store in  ms.
-				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
-				RegionID:       hotPeerStat.RegionID,
-				StoreID:        hotPeerStat.StoreID,
-				PeerID:         peerID,
-				IsLeader:       isLeader,
-				IsLearner:      isLearner,
-				HotDegree:      int64(hotPeerStat.HotDegree),
-				FlowBytes:      hotPeerStat.ByteRate,
-				KeyRate:        hotPeerStat.KeyRate,
-				QueryRate:      hotPeerStat.QueryRate,
-				StartKey:       region.StartKey,
-				EndKey:         region.EndKey,
-				EncryptionMeta: region.EncryptionMeta,
-				HotRegionType:  hotRegionType,
-			}
-			batchHotInfo[HotRegionStorePath(
-				stat.HotRegionType,
-				// store in ms.
-				hotPeerStat.LastUpdateTime.UnixNano()/int64(time.Millisecond),
-				hotPeerStat.RegionID)] = &stat
+func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotRegion, hotRegionType string) error {
+	for i := range historyHotRegions {
+		region := &metapb.Region{
+			Id:             historyHotRegions[i].RegionID,
+			StartKey:       historyHotRegions[i].StartKey,
+			EndKey:         historyHotRegions[i].EndKey,
+			EncryptionMeta: historyHotRegions[i].EncryptionMeta,
 		}
+		region, err := encryption.EncryptRegion(region, h.encryptionKeyManager)
+		if err != nil {
+			return err
+		}
+		historyHotRegions[i].StartKey = region.StartKey
+		historyHotRegions[i].EndKey = region.EndKey
+		key := HotRegionStorePath(HotRegionTypes[0], historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
+		h.batchHotInfo[key] = &historyHotRegions[i]
 	}
 	return nil
 }
@@ -271,7 +271,7 @@ func (h *HotRegionStorage) flush() error {
 	if err := h.LeveldbKV.Write(batch, nil); err != nil {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
 	}
-	h.batchHotInfo = make(map[string]*statistics.HistoryHotRegion)
+	h.batchHotInfo = make(map[string]*HistoryHotRegion)
 	return nil
 }
 
@@ -282,7 +282,7 @@ func (h *HotRegionStorage) delete() error {
 	batch := new(leveldb.Batch)
 	for _, hotRegionType := range HotRegionTypes {
 		startKey := HotRegionStorePath(hotRegionType, 0, 0)
-		endTime := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).UnixNano() / int64(time.Millisecond)
+		endTime := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).UnixNano() / 1000
 		endKey := HotRegionStorePath(hotRegionType, endTime, math.MaxInt64)
 		iter := db.NewIterator(&util.Range{
 			Start: []byte(startKey), Limit: []byte(endKey)}, nil)
@@ -315,7 +315,7 @@ type HotRegionStorageIterator struct {
 // Next moves the iterator to the next key/value pair.
 // And return historyHotRegion which it is now pointing to.
 // it will return (nil,nil),if there is no more historyHotRegion.
-func (it *HotRegionStorageIterator) Next() (*statistics.HistoryHotRegion, error) {
+func (it *HotRegionStorageIterator) Next() (*HistoryHotRegion, error) {
 	iter := it.iters[0]
 	for !iter.Next() {
 		iter.Release()
@@ -328,7 +328,7 @@ func (it *HotRegionStorageIterator) Next() (*statistics.HistoryHotRegion, error)
 	item := iter.Value()
 	value := make([]byte, len(item))
 	copy(value, item)
-	var message statistics.HistoryHotRegion
+	var message HistoryHotRegion
 	err := json.Unmarshal(value, &message)
 	if err != nil {
 		return nil, err
