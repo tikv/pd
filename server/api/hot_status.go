@@ -21,11 +21,7 @@ import (
 	"strconv"
 
 	"github.com/tikv/pd/server"
-<<<<<<< HEAD
-	"github.com/tikv/pd/server/cluster"
-=======
 	"github.com/tikv/pd/server/core"
->>>>>>> 57090644 (move hot_region_storage to core)
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 )
@@ -197,14 +193,8 @@ func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 		hotRegionTypes = request.HotRegionTypes
 	}
 	iter := handler.GetHistoryHotRegionIter(hotRegionTypes, request.StartTime, request.EndTime)
-<<<<<<< HEAD
-	var results []*statistics.HistoryHotRegion
-
-	regionSet, storeSet, peerSet, roleSet :=
-=======
 	var results []*core.HistoryHotRegion
 	regionSet, storeSet, peerSet, learnerSet, leaderSet :=
->>>>>>> 57090644 (move hot_region_storage to core)
 		make(map[uint64]bool), make(map[uint64]bool),
 		make(map[uint64]bool), make(map[bool]bool)
 	for _, id := range request.RegionIDs {
