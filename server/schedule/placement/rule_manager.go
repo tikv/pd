@@ -418,8 +418,8 @@ const (
 // RuleOp is for batching placement rule actions. The action type is
 // distinguished by the field `Action`.
 type RuleOp struct {
-	*Rule                       // information of the placement rule to add/delete
-	Action           RuleOpType `json:"action"` // the operation type
+	*Rule                       // information of the placement rule to add/delete the operation type
+	Action           RuleOpType `json:"action"`
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
