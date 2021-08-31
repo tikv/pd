@@ -43,8 +43,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const slowThreshold = 5 * time.Millisecond
-
 // gRPC errors
 var (
 	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
@@ -166,10 +164,6 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
 
-		elapsed := time.Since(start)
-		if elapsed > slowThreshold {
-			log.Warn("get timestamp too slow", zap.Duration("cost", elapsed))
-		}
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		response := &pdpb.TsoResponse{
 			Header:    s.header(),
