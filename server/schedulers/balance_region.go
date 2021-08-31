@@ -151,13 +151,8 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp, -1)
 	})
 	for _, plan.source = range stores {
-<<<<<<< HEAD
-		for i := 0; i < balanceRegionRetryLimit; i++ {
-=======
 		retryLimit := s.retryQuota.GetLimit(plan.source)
 		for i := 0; i < retryLimit; i++ {
-			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
->>>>>>> fd3fc281e (scheduler: dynamically adjust the retry limit according to the operator (#4007))
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
 			plan.region = cluster.RandPendingRegion(plan.SourceStoreID(), s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))

@@ -166,12 +166,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			retryLimit := l.retryQuota.GetLimit(plan.source)
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("source-store", plan.SourceStoreID()))
 			l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
-<<<<<<< HEAD
-			for j := 0; j < balanceLeaderRetryLimit; j++ {
-=======
 			for j := 0; j < retryLimit; j++ {
-				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
->>>>>>> fd3fc281e (scheduler: dynamically adjust the retry limit according to the operator (#4007))
 				if ops := l.transferLeaderOut(plan); len(ops) > 0 {
 					l.retryQuota.ResetLimit(plan.source)
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", plan.SourceMetricLabel()))
@@ -186,13 +181,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			retryLimit := l.retryQuota.GetLimit(plan.target)
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("target-store", plan.TargetStoreID()))
 			l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
-<<<<<<< HEAD
-
-			for j := 0; j < balanceLeaderRetryLimit; j++ {
-=======
 			for j := 0; j < retryLimit; j++ {
-				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
->>>>>>> fd3fc281e (scheduler: dynamically adjust the retry limit according to the operator (#4007))
 				if ops := l.transferLeaderIn(plan); len(ops) > 0 {
 					l.retryQuota.ResetLimit(plan.target)
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-in", plan.TargetMetricLabel()))
