@@ -699,7 +699,10 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 func getStoresByRegion(storeSet StoreSet, region *core.RegionInfo) []*core.StoreInfo {
 	r := make([]*core.StoreInfo, 0, len(region.GetPeers()))
 	for _, peer := range region.GetPeers() {
-		r = append(r, storeSet.GetStore(peer.GetStoreId()))
+		store := storeSet.GetStore(peer.GetStoreId())
+		if store != nil {
+			r = append(r, store)
+		}
 	}
 	return r
 }
