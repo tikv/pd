@@ -22,7 +22,6 @@ import (
 	"strconv"
 
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
@@ -199,14 +198,13 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, results)
 }
 
-func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*statistics.HistoryHotRegions, error) {
-	var hotRegionTypes = cluster.HotRegionTypes
+func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*core.HistoryHotRegions, error) {
+	var hotRegionTypes = core.HotRegionTypes
 	if len(request.HotRegionTypes) != 0 {
 		hotRegionTypes = request.HotRegionTypes
 	}
 	iter := handler.GetHistoryHotRegionIter(hotRegionTypes, request.StartTime, request.EndTime)
-	var results []*statistics.HistoryHotRegion
-
+	var results []*core.HistoryHotRegion
 	regionSet, storeSet, peerSet, learnerSet, leaderSet :=
 		make(map[uint64]bool), make(map[uint64]bool),
 		make(map[uint64]bool), make(map[bool]bool), make(map[bool]bool)
@@ -225,7 +223,7 @@ func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 	for _, isLeader := range request.IsLeaders {
 		leaderSet[isLeader] = true
 	}
-	var next *statistics.HistoryHotRegion
+	var next *core.HistoryHotRegion
 	var err error
 	for next, err = iter.Next(); next != nil && err == nil; next, err = iter.Next() {
 		if len(regionSet) != 0 && !regionSet[next.RegionID] {
@@ -245,7 +243,7 @@ func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 		}
 		results = append(results, next)
 	}
-	return &statistics.HistoryHotRegions{
+	return &core.HistoryHotRegions{
 		HistoryHotRegion: results,
 	}, err
 }
