@@ -144,7 +144,7 @@ type Server struct {
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
 	//hot region history info storeage
-	hotRegionStorage *cluster.HotRegionStorage
+	hotRegionStorage *core.HotRegionStorage
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -395,8 +395,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	//initial hot_region_storage in here.
 	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
-	s.hotRegionStorage, err = cluster.NewHotRegionsStorage(
-		ctx, hotRegionPath, encryptionKeyManager, s.cluster, s.member,
+	s.hotRegionStorage, err = core.NewHotRegionsStorage(
+		ctx, hotRegionPath, encryptionKeyManager, s.handler,
 		s.cfg.Schedule.HotRegionsResevervedDays,
 		s.cfg.Schedule.HotRegionsWriteInterval.Duration)
 	if err != nil {
@@ -718,7 +718,7 @@ func (s *Server) GetStorage() *core.Storage {
 }
 
 // GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
-func (s *Server) GetHistoryHotRegionStorage() *cluster.HotRegionStorage {
+func (s *Server) GetHistoryHotRegionStorage() *core.HotRegionStorage {
 	return s.hotRegionStorage
 }
 
