@@ -130,11 +130,9 @@ func doJSON(client *http.Client, req *http.Request, url string, checkOpts ...fun
 	}
 	defer resp.Body.Close()
 	res, err := io.ReadAll(resp.Body)
-
 	if err != nil {
 		return err
 	}
-
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(string(res))
 	}
