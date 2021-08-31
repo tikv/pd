@@ -31,9 +31,11 @@ import (
 
 const (
 	// adjustRatio is used to adjust TolerantSizeRatio according to region count.
-	adjustRatio             float64 = 0.005
-	leaderTolerantSizeRatio float64 = 5.0
-	minTolerantSizeRatio    float64 = 1.0
+	adjustRatio                  float64 = 0.005
+	leaderTolerantSizeRatio      float64 = 5.0
+	minTolerantSizeRatio         float64 = 1.0
+	defaultMinRetryLimit                 = 1
+	defaultRetryQuotaAttenuation         = 2
 )
 
 func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) (shouldBalance bool, sourceScore float64, targetScore float64) {
@@ -346,5 +348,55 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 		TotalKeysRate:  math.Round(totalKeysRate),
 		Count:          len(peers),
 		Stats:          peers,
+	}
+}
+
+type retryQuota struct {
+	initialLimit int
+	minLimit     int
+	attenuation  int
+
+	limits map[uint64]int
+}
+
+func newRetryQuota(initialLimit, minLimit, attenuation int) *retryQuota {
+	return &retryQuota{
+		initialLimit: initialLimit,
+		minLimit:     minLimit,
+		attenuation:  attenuation,
+		limits:       make(map[uint64]int),
+	}
+}
+
+func (q *retryQuota) GetLimit(store *core.StoreInfo) int {
+	id := store.GetID()
+	if limit, ok := q.limits[id]; ok {
+		return limit
+	}
+	q.limits[id] = q.initialLimit
+	return q.initialLimit
+}
+
+func (q *retryQuota) ResetLimit(store *core.StoreInfo) {
+	q.limits[store.GetID()] = q.initialLimit
+}
+
+func (q *retryQuota) Attenuate(store *core.StoreInfo) {
+	newLimit := q.GetLimit(store) / q.attenuation
+	if newLimit < q.minLimit {
+		newLimit = q.minLimit
+	}
+	q.limits[store.GetID()] = newLimit
+}
+
+func (q *retryQuota) GC(keepStores []*core.StoreInfo) {
+	set := make(map[uint64]struct{}, len(keepStores))
+	for _, store := range keepStores {
+		set[store.GetID()] = struct{}{}
+	}
+	for id := range q.limits {
+		if _, ok := set[id]; !ok {
+			delete(q.limits, id)
+		}
 	}
 }

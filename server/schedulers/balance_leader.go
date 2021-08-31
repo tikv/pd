@@ -70,6 +70,7 @@ type balanceLeaderSchedulerConfig struct {
 
 type balanceLeaderScheduler struct {
 	*BaseScheduler
+	*retryQuota
 	conf         *balanceLeaderSchedulerConfig
 	opController *schedule.OperatorController
 	filters      []filter.Filter
@@ -83,6 +84,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 
 	s := &balanceLeaderScheduler{
 		BaseScheduler: base,
+		retryQuota:    newRetryQuota(balanceLeaderRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceLeaderCounter,
@@ -163,12 +165,15 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("source-store", sourceID))
 			sourceStoreLabel := strconv.FormatUint(sourceID, 10)
 			l.counter.WithLabelValues("high-score", sourceStoreLabel).Inc()
-			for j := 0; j < balanceLeaderRetryLimit; j++ {
+			retryLimit := l.retryQuota.GetLimit(source)
+			for j := 0; j < retryLimit; j++ {
 				if ops := l.transferLeaderOut(cluster, source, opInfluence); len(ops) > 0 {
+					l.retryQuota.ResetLimit(source)
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", sourceStoreLabel))
 					return ops
 				}
 			}
+			l.Attenuate(source)
 			log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64("source", sourceID))
 		}
 		if i < len(targets) {
@@ -177,16 +182,19 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("target-store", targetID))
 			targetStoreLabel := strconv.FormatUint(targetID, 10)
 			l.counter.WithLabelValues("low-score", targetStoreLabel).Inc()
-
-			for j := 0; j < balanceLeaderRetryLimit; j++ {
+			retryLimit := l.retryQuota.GetLimit(target)
+			for j := 0; j < retryLimit; j++ {
 				if ops := l.transferLeaderIn(cluster, target); len(ops) > 0 {
+					l.retryQuota.ResetLimit(target)
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-in", targetStoreLabel))
 					return ops
 				}
 			}
+			l.Attenuate(target)
 			log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64("target", targetID))
 		}
 	}
+	l.retryQuota.GC(append(sources, targets...))
 	return nil
 }
 
