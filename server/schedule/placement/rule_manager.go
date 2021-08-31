@@ -706,7 +706,7 @@ func getStoresByRegion(storeSet StoreSet, region *core.RegionInfo) []*core.Store
 
 func getStoreByID(stores []*core.StoreInfo, id uint64) *core.StoreInfo {
 	for _, store := range stores {
-		if store.GetID() == id {
+		if store != nil && store.GetID() == id {
 			return store
 		}
 	}
