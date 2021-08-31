@@ -16,9 +16,9 @@ package placement
 
 import (
 	"encoding/hex"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
@@ -399,4 +399,84 @@ func (s *testManagerSuite) dhex(hk string) []byte {
 		panic("decode fail")
 	}
 	return k
+}
+
+func (s *testManagerSuite) TestFitRegionCache(c *C) {
+	cachedRegion := mockRegion(3, 0)
+	cachedFit := mockRegionRuleFitCache().bestFit
+	testcases := []struct {
+		name        string
+		region      *core.RegionInfo
+		stores      StoreSet
+		stillCached bool
+	}{
+		{
+			name:        "default",
+			region:      mockRegion(3, 0),
+			stores:      newMockStoresSet(20),
+			stillCached: true,
+		},
+		{
+			name:        "region topo changed",
+			region:      mockRegion(4, 0),
+			stores:      newMockStoresSet(21),
+			stillCached: false,
+		},
+		{
+			name: "region leader changed",
+			region: func() *core.RegionInfo {
+				region := mockRegion(4, 0)
+				region = region.Clone(
+					core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 2}))
+				return region
+			}(),
+			stores:      newMockStoresSet(21),
+			stillCached: false,
+		},
+		{
+			name: "region have down peers",
+			region: func() *core.RegionInfo {
+				region := mockRegion(4, 0)
+				region = region.Clone(core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 2}))
+				region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+					{
+						Peer:        region.GetPeer(3),
+						DownSeconds: 42,
+					},
+				}))
+				return region
+			}(),
+			stores:      newMockStoresSet(21),
+			stillCached: false,
+		},
+	}
+	for _, testcase := range testcases {
+		s.manager.cache.SetCache(cachedRegion, cachedFit)
+		s.manager.FitRegion(testcase.stores, testcase.region)
+		c.Assert(s.manager.cache.cacheExist(testcase.region.GetID()), Equals, testcase.stillCached)
+	}
+
+	s.manager.cache.SetCache(cachedRegion, cachedFit)
+	s.manager.SetRule(&Rule{
+		GroupID: "pd",
+		ID:      "extraRule",
+		Role:    Voter,
+		Count:   1,
+	})
+	region := mockRegion(4, 0)
+	stores := newMockStoresSet(20)
+	s.manager.FitRegion(stores, region)
+	c.Assert(s.manager.cache.cacheExist(region.GetID()), IsFalse)
+
+	// update rule
+	s.manager.cache.SetCache(cachedRegion, cachedFit)
+	s.manager.SetRule(&Rule{
+		GroupID: "pd",
+		ID:      "extraRule",
+		Role:    Follower,
+		Count:   1,
+	})
+	s.manager.FitRegion(stores, region)
+	s.manager.FitRegion(stores, region)
+	c.Assert(s.manager.cache.cacheExist(region.GetID()), IsFalse)
 }
