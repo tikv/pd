@@ -308,18 +308,18 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 
 // FitRegion fits a region to the rules it matches.
 func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *RegionFit {
-	stores := storeSet.GetStores()
+	regionStores := getStoresByRegion(storeSet, region)
 	rules := m.GetRulesForApplyRegion(region)
-	if m.cache.Check(region, rules, getStoresByRegion(stores, region)) {
+	if m.cache.Check(region, rules, regionStores) {
 		fit := m.cache.GetCacheRegionFit(region.GetID())
 		if fit != nil {
 			fit.SetCached(true)
 			return fit
 		}
 	}
-	fit := FitRegion(stores, region, rules)
+	fit := FitRegion(regionStores, region, rules)
 	if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 && region.GetLeader() != nil {
-		m.cache.SetCache(region, rules, fit, getStoresByRegion(stores, region))
+		m.cache.SetCache(region, rules, fit, regionStores)
 	} else {
 		m.cache.Invalid(region.GetID())
 	}
@@ -418,7 +418,7 @@ const (
 // distinguished by the field `Action`.
 type RuleOp struct {
 	*Rule                       // information of the placement rule to add/delete
-	Action           RuleOpType `json:"action"`              // the operation type
+	Action           RuleOpType `json:"action"` // the operation type
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
@@ -695,15 +695,10 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	return m
 }
 
-func getStoresByRegion(stores []*core.StoreInfo, region *core.RegionInfo) []*core.StoreInfo {
+func getStoresByRegion(storeSet StoreSet, region *core.RegionInfo) []*core.StoreInfo {
 	r := make([]*core.StoreInfo, 0, len(region.GetPeers()))
 	for _, peer := range region.GetPeers() {
-		for _, store := range stores {
-			if store.GetID() == peer.GetStoreId() {
-				r = append(r, store)
-				break
-			}
-		}
+		r = append(r, storeSet.GetStore(peer.GetStoreId()))
 	}
 	return r
 }
