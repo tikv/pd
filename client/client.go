@@ -157,69 +157,115 @@ type tsoRequest struct {
 }
 
 type tsoBatchController struct {
+	// TODO: make these two variables configurable.
 	maxBatchWaitInterval time.Duration
-	maxBatchSize         uint64
+	maxBatchSize         int
+	// bestBatchSize is a dynamic size that changed based on the current batch effect.
+	bestBatchSize int
 
-	tsoRequestCh        chan *tsoRequest
-	pendingRequests     []*tsoRequest
-	pendingRequestCount int
+	tsoRequestCh          chan *tsoRequest
+	collectedRequests     []*tsoRequest
+	collectedRequestCount int
 
-	lastBatchStartTime time.Time
+	batchStartTime time.Time
 }
 
 func newTSOBatchController(tsoRequestCh chan *tsoRequest) *tsoBatchController {
 	return &tsoBatchController{
-		maxBatchWaitInterval: defaultMaxTSOBatchInterval,
-		maxBatchSize:         defaultMaxTSOBatchSize,
-		tsoRequestCh:         tsoRequestCh,
-		pendingRequests:      make([]*tsoRequest, maxMergeTSORequests+1),
+		maxBatchWaitInterval:  defaultMaxTSOBatchInterval,
+		maxBatchSize:          defaultMaxTSOBatchSize,
+		bestBatchSize:         defaultMaxTSOBatchSize,
+		tsoRequestCh:          tsoRequestCh,
+		collectedRequests:     make([]*tsoRequest, maxMergedTSORequests+1),
+		collectedRequestCount: 0,
 	}
 }
 
+// fetchAllPendingRequests will start a new round of the batch collecting from the channel.
+// It returns true if everything goes well, otherwise false which should stop the service.
 func (tbc *tsoBatchController) fetchAllPendingRequests(ctx context.Context) bool {
+	var firstTSORequest *tsoRequest
 	select {
-	case first := <-tbc.tsoRequestCh:
-		tbc.pendingRequestCount = len(tbc.tsoRequestCh) + 1
-		tbc.lastBatchStartTime = time.Now()
-		tbc.pendingRequests[0] = first
-		for i := 1; i < tbc.pendingRequestCount; i++ {
-			tbc.pendingRequests[i] = <-tbc.tsoRequestCh
-		}
-		return true
 	case <-ctx.Done():
 		return false
+	case firstTSORequest = <-tbc.tsoRequestCh:
 	}
+	// Start to batch when the first TSO request arrives.
+	tbc.batchStartTime = time.Now()
+	tbc.collectedRequestCount = 0
+	tbc.pushRequest(firstTSORequest)
+
+	// This loop is for trying best to collect more requests, so we use `tbc.maxBatchSize` here.
+	for tbc.collectedRequestCount < tbc.maxBatchSize {
+		select {
+		case tsoReq := <-tbc.tsoRequestCh:
+			if tsoReq == nil {
+				return true
+			}
+			tbc.pushRequest(tsoReq)
+		default:
+			return true
+		}
+	}
+	return true
 }
 
+func (tbc *tsoBatchController) pushRequest(tsoReq *tsoRequest) {
+	tbc.collectedRequests[tbc.collectedRequestCount] = tsoReq
+	tbc.collectedRequestCount++
+}
+
+// shouldFetchMorePendingRequests returns whether we should fetch more pending TSO requests from the channel.
+func (tbc *tsoBatchController) shouldFetchMorePendingRequests() bool {
+	// TODO: consider the actual load that returns through a TSO response from PD server.
+	return tbc.collectedRequestCount < tbc.maxBatchSize && tbc.maxBatchWaitInterval > 0
+}
+
+// fetchMorePendingRequests fetches more pending TSO requests from the channel.
 func (tbc *tsoBatchController) fetchMorePendingRequests() {
+	// Try to collect `tbc.bestBatchSize` requests, or wait `tbc.maxBatchWaitInterval`.
 	after := time.NewTimer(tbc.maxBatchWaitInterval)
-	oldPendingRequestCount := tbc.pendingRequestCount
-	newPendingRequestCount := len(tbc.tsoRequestCh)
-	for i := 0; i < newPendingRequestCount; i++ {
+	for tbc.collectedRequestCount < tbc.bestBatchSize {
 		select {
-		case tbc.pendingRequests[oldPendingRequestCount+i] = <-tbc.tsoRequestCh:
-			tbc.pendingRequestCount += 1
+		case tsoReq := <-tbc.tsoRequestCh:
+			if tsoReq == nil {
+				return
+			}
+			tbc.pushRequest(tsoReq)
 		case <-after.C:
 			return
 		}
 	}
 	after.Stop()
 
-	// Do an additional non-block try to collect TSO requests as many as we can.
-	oldPendingRequestCount = tbc.pendingRequestCount
-	newPendingRequestCount = len(tbc.tsoRequestCh)
-	for i := 0; i < newPendingRequestCount; i++ {
+	// Do an additional non-block try. Here we test the length with `tbc.maxBatchSize` instead
+	// of `tbc.bestBatchSize` because trying best to fetch more requests is necessary so that
+	// we can adjust the `tbc.bestBatchSize` dynamically later.
+	for tbc.collectedRequestCount < tbc.maxBatchSize {
 		select {
-		case tbc.pendingRequests[oldPendingRequestCount+i] = <-tbc.tsoRequestCh:
-			tbc.pendingRequestCount += 1
+		case tsoReq := <-tbc.tsoRequestCh:
+			if tsoReq == nil {
+				return
+			}
+			tbc.pushRequest(tsoReq)
 		default:
 			return
 		}
 	}
 }
 
+func (tbc *tsoBatchController) adjustBestBatchSize() {
+	length := tbc.collectedRequestCount
+	if length < tbc.bestBatchSize && tbc.bestBatchSize > 1 {
+		// Waits too long to collect requests, reduce the target batch size.
+		tbc.bestBatchSize--
+	} else if length > tbc.bestBatchSize+4 && tbc.bestBatchSize < tbc.maxBatchSize {
+		tbc.bestBatchSize++
+	}
+}
+
 func (tbc *tsoBatchController) observeBatchSendLatency() {
-	tsoBatchSendLatency.Observe(float64(time.Since(tbc.lastBatchStartTime)))
+	tsoBatchSendLatency.Observe(float64(time.Since(tbc.batchStartTime)))
 }
 
 type tsoDispatcher struct {
@@ -238,13 +284,12 @@ const (
 	dialTimeout                = 3 * time.Second
 	updateMemberTimeout        = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval      = time.Minute
-	maxMergeTSORequests        = 10000 // should be higher if client is sending requests in burst
+	maxMergedTSORequests       = 10000 // should be higher if client is sending requests in burst
 	maxInitClusterRetries      = 100
 	retryInterval              = 1 * time.Second
 	maxRetryTimes              = 5
 	defaultMaxTSOBatchInterval = 1 * time.Millisecond
-	// TODO: determine defaultMaxTSOBatchSize.
-	defaultMaxTSOBatchSize = 0
+	defaultMaxTSOBatchSize     = maxMergedTSORequests
 )
 
 // LeaderHealthCheckInterval might be chagned in the unit to shorten the testing time.
@@ -552,7 +597,7 @@ func (c *client) createTSODispatcher(dcLocation string) {
 	dispatcher := &tsoDispatcher{
 		dispatcherCtx:      dispatcherCtx,
 		dispatcherCancel:   dispatcherCancel,
-		tsoBatchController: newTSOBatchController(make(chan *tsoRequest, maxMergeTSORequests)),
+		tsoBatchController: newTSOBatchController(make(chan *tsoRequest, maxMergedTSORequests)),
 	}
 	c.tsoDispatcher.Store(dcLocation, dispatcher)
 }
@@ -618,9 +663,10 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tbc 
 		if !tbc.fetchAllPendingRequests(dispatcherCtx) {
 			return
 		}
-		if tbc.maxBatchWaitInterval > 0 {
+		if tbc.shouldFetchMorePendingRequests() {
 			tbc.fetchMorePendingRequests()
 		}
+		tbc.adjustBestBatchSize()
 		done := make(chan struct{})
 		dl := deadline{
 			timer:  time.After(c.timeout),
@@ -748,7 +794,7 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 }
 
 func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
-	for _, req := range tbc.pendingRequests[:tbc.pendingRequestCount] {
+	for _, req := range tbc.collectedRequests[:tbc.collectedRequestCount] {
 		if span := opentracing.SpanFromContext(req.requestCtx); span != nil {
 			opts = append(opts, opentracing.ChildOf(span.Context()))
 		}
@@ -761,7 +807,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
 		defer span.Finish()
 	}
-	requests := tbc.pendingRequests[:tbc.pendingRequestCount]
+	requests := tbc.collectedRequests[:tbc.collectedRequestCount]
 	count := int64(len(requests))
 	start := time.Now()
 	req := &pdpb.TsoRequest{
