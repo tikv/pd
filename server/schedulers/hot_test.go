@@ -67,6 +67,9 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		}
 		c.Assert(err, IsNil)
 		c.Assert(op, NotNil)
+		op.Start()
+		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-5*statistics.StoreHeartBeatReportInterval*time.Second))
+		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add((-5*statistics.StoreHeartBeatReportInterval+1)*time.Second))
 		return op
 	}
 	doneOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
@@ -76,26 +79,29 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	}
 	shouldRemoveOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
 		op := doneOp(region, ty)
-		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
+		operator.SetOperatorStatusReachTime(op, operator.CANCELED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
 		return op
 	}
 	opCreaters := [3]func(region *core.RegionInfo, ty opType) *operator.Operator{shouldRemoveOp, notDoneOp, doneOp}
 
 	typs := []opType{movePeer, transferLeader}
 
-	for i := 0; i < len(opCreaters); i++ {
+	for i, creator := range opCreaters {
 		for j, typ := range typs {
-			regionID := uint64(i*len(opCreaters) + j + 1)
+			regionID := uint64(i*len(typs) + j + 1)
 			region := newTestRegion(regionID)
-			hb.regionPendings[regionID] = opCreaters[i](region, typ)
+			op := creator(region, typ)
+			influence := newPendingInfluence(op, 2, 4, Influence{})
+			hb.pendings[writePeer][influence] = struct{}{}
+			hb.regionPendings[regionID] = op
 		}
 	}
 
-	hb.gcRegionPendings()
+	hb.summaryPendingInfluence()
 
-	for i := 0; i < len(opCreaters); i++ {
+	for i := range opCreaters {
 		for j, typ := range typs {
-			regionID := uint64(i*len(opCreaters) + j + 1)
+			regionID := uint64(i*len(typs) + j + 1)
 			if i < 1 { // shouldRemoveOp
 				c.Assert(hb.regionPendings, Not(HasKey), regionID)
 			} else { // notDoneOp, doneOp
