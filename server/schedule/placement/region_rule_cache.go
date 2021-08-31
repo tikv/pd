@@ -78,28 +78,31 @@ func (manager *RegionRuleFitCacheManager) Check(region *core.RegionInfo, rules [
 }
 
 // SetCache stores RegionFit cache
-func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, rules []*Rule, fit *RegionFit, stores []*core.StoreInfo) {
+func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit *RegionFit) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	manager.caches[region.GetID()] = &RegionRuleFitCache{
 		region:  region,
-		rules:   rules,
 		bestFit: fit,
-		stores:  stores,
 	}
+}
+
+func (manager *RegionRuleFitCacheManager) cacheExist(regionID uint64) bool {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	_, ok := manager.caches[regionID]
+	return ok
 }
 
 // RegionRuleFitCache stores regions RegionFit result and involving variables
 type RegionRuleFitCache struct {
 	bestFit *RegionFit
 	region  *core.RegionInfo
-	rules   []*Rule
-	stores  []*core.StoreInfo
 }
 
 // IsUnchanged checks whether the region and rules unchanged for the cache
 func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule, stores []*core.StoreInfo) bool {
-	return cache.isRegionUnchanged(region) && rulesEqual(cache.rules, rules) && storesEqual(cache.stores, stores)
+	return cache.isRegionUnchanged(region) && rulesEqual(cache.bestFit.rules, rules) && storesEqual(cache.bestFit.regionStores, stores)
 }
 
 func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {

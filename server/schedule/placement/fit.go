@@ -31,8 +31,10 @@ type RegionFit struct {
 		sync.RWMutex
 		cached bool
 	}
-	RuleFits    []*RuleFit
-	OrphanPeers []*metapb.Peer
+	RuleFits     []*RuleFit
+	OrphanPeers  []*metapb.Peer
+	regionStores []*core.StoreInfo
+	rules        []*Rule
 }
 
 // SetCached indicates this RegionFit is fetch form cache

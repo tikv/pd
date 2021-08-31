@@ -89,6 +89,8 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			return op
 		}
 	}
+	// If there is no need to fix, we will cache the fit
+	c.ruleManager.SetRegionFitCache(region, fit)
 	return nil
 }
 

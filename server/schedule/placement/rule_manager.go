@@ -313,18 +313,19 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *Reg
 	if m.cache.Check(region, rules, regionStores) {
 		fit := m.cache.GetCacheRegionFit(region.GetID())
 		if fit != nil {
-			fit.SetCached(true)
 			return fit
 		}
 	}
+	m.cache.Invalid(region.GetID())
 	fit := FitRegion(regionStores, region, rules)
-	if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 && region.GetLeader() != nil {
-		m.cache.SetCache(region, rules, fit, regionStores)
-	} else {
-		m.cache.Invalid(region.GetID())
-	}
-	fit.SetCached(false)
+	fit.regionStores = regionStores
+	fit.rules = rules
 	return fit
+}
+
+// SetRegionFitCache sets RegionFitCache
+func (m *RuleManager) SetRegionFitCache(region *core.RegionInfo, fit *RegionFit) {
+	m.cache.SetCache(region, fit)
 }
 
 func (m *RuleManager) beginPatch() *ruleConfigPatch {
@@ -418,7 +419,7 @@ const (
 // distinguished by the field `Action`.
 type RuleOp struct {
 	*Rule                       // information of the placement rule to add/delete
-	Action           RuleOpType `json:"action"`              // the operation type
+	Action           RuleOpType `json:"action"` // the operation type
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 

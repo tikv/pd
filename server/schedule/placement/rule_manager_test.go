@@ -402,29 +402,25 @@ func (s *testManagerSuite) dhex(hk string) []byte {
 }
 
 func (s *testManagerSuite) TestFitRegionCache(c *C) {
+	cachedRegion := mockRegion(3, 0)
+	cachedFit := mockRegionRuleFitCache().bestFit
 	testcases := []struct {
-		name     string
-		region   *core.RegionInfo
-		stores   StoreSet
-		isCached bool
+		name        string
+		region      *core.RegionInfo
+		stores      StoreSet
+		stillCached bool
 	}{
 		{
-			name:     "default",
-			region:   mockRegion(3, 0),
-			stores:   newMockStoresSet(20),
-			isCached: false,
+			name:        "default",
+			region:      mockRegion(3, 0),
+			stores:      newMockStoresSet(20),
+			stillCached: true,
 		},
 		{
-			name:     "cached",
-			region:   mockRegion(3, 0),
-			stores:   newMockStoresSet(20),
-			isCached: true,
-		},
-		{
-			name:     "region topo changed",
-			region:   mockRegion(4, 0),
-			stores:   newMockStoresSet(21),
-			isCached: false,
+			name:        "region topo changed",
+			region:      mockRegion(4, 0),
+			stores:      newMockStoresSet(21),
+			stillCached: false,
 		},
 		{
 			name: "region leader changed",
@@ -434,8 +430,8 @@ func (s *testManagerSuite) TestFitRegionCache(c *C) {
 					core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 2}))
 				return region
 			}(),
-			stores:   newMockStoresSet(21),
-			isCached: false,
+			stores:      newMockStoresSet(21),
+			stillCached: false,
 		},
 		{
 			name: "region have down peers",
@@ -450,15 +446,17 @@ func (s *testManagerSuite) TestFitRegionCache(c *C) {
 				}))
 				return region
 			}(),
-			stores:   newMockStoresSet(21),
-			isCached: false,
+			stores:      newMockStoresSet(21),
+			stillCached: false,
 		},
 	}
 	for _, testcase := range testcases {
-		fit := s.manager.FitRegion(testcase.stores, testcase.region)
-		c.Assert(fit.IsCached(), Equals, testcase.isCached)
+		s.manager.cache.SetCache(cachedRegion, cachedFit)
+		s.manager.FitRegion(testcase.stores, testcase.region)
+		c.Assert(s.manager.cache.cacheExist(testcase.region.GetID()), Equals, testcase.stillCached)
 	}
 
+	s.manager.cache.SetCache(cachedRegion, cachedFit)
 	s.manager.SetRule(&Rule{
 		GroupID: "pd",
 		ID:      "extraRule",
@@ -467,21 +465,18 @@ func (s *testManagerSuite) TestFitRegionCache(c *C) {
 	})
 	region := mockRegion(4, 0)
 	stores := newMockStoresSet(20)
-	fit := s.manager.FitRegion(stores, region)
-	c.Assert(fit.IsCached(), IsFalse)
-	fit = s.manager.FitRegion(stores, region)
-	c.Assert(fit.IsCached(), IsTrue)
+	s.manager.FitRegion(stores, region)
+	c.Assert(s.manager.cache.cacheExist(region.GetID()), IsFalse)
+
 	// update rule
+	s.manager.cache.SetCache(cachedRegion, cachedFit)
 	s.manager.SetRule(&Rule{
 		GroupID: "pd",
 		ID:      "extraRule",
 		Role:    Follower,
 		Count:   1,
 	})
-	fit = s.manager.FitRegion(stores, region)
-	c.Assert(fit.IsCached(), IsFalse)
-	// delete rule
-	s.manager.DeleteRule("pd", "extraRule")
-	fit = s.manager.FitRegion(stores, region)
-	c.Assert(fit.IsCached(), IsFalse)
+	s.manager.FitRegion(stores, region)
+	s.manager.FitRegion(stores, region)
+	c.Assert(s.manager.cache.cacheExist(region.GetID()), IsFalse)
 }
