@@ -20,7 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/ratelimit"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -29,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -78,7 +78,7 @@ type RegionSyncer struct {
 	server    Server
 	wg        sync.WaitGroup
 	history   *historyBuffer
-	limit     *ratelimit.Bucket
+	limit     *rate.Limiter
 	tlsConfig *grpcutil.TLSConfig
 }
 
@@ -91,7 +91,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 	syncer := &RegionSyncer{
 		server:    s,
 		history:   newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
-		limit:     ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
+		limit:     rate.NewLimiter(defaultBucketRate, defaultBucketCapacity),
 		tlsConfig: s.GetTLSConfig(),
 	}
 	syncer.mu.streams = make(map[string]ServerStream)
@@ -209,7 +209,7 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 					RegionStats:   stats,
 					RegionLeaders: leaders,
 				}
-				s.limit.Wait(int64(resp.Size()))
+				s.limit.WaitN(context.Background(), int(resp.Size()))
 				lastIndex += len(metas)
 				if err := stream.Send(resp); err != nil {
 					log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))

@@ -15,9 +15,11 @@
 package storelimit
 
 import (
+	"fmt"
+	"sync"
 	"time"
 
-	"github.com/juju/ratelimit"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -28,14 +30,14 @@ const (
 )
 
 // RegionInfluence represents the influence of a operator step, which is used by store limit.
-var RegionInfluence = map[Type]int64{
+var RegionInfluence = map[Type]int{
 	AddPeer:    1000,
 	RemovePeer: 1000,
 }
 
 // SmallRegionInfluence represents the influence of a operator step
 // when the region size is smaller than smallRegionThreshold, which is used by store limit.
-var SmallRegionInfluence = map[Type]int64{
+var SmallRegionInfluence = map[Type]int{
 	AddPeer:    200,
 	RemovePeer: 200,
 }
@@ -68,42 +70,70 @@ func (t Type) String() string {
 
 // StoreLimit limits the operators of a store
 type StoreLimit struct {
-	bucket          *ratelimit.Bucket
-	regionInfluence int64
+	rate            *rate.Limiter
+	regionInfluence int
 	ratePerSec      float64
+	mu              sync.RWMutex
+	releaseTime     time.Time
 }
 
 // NewStoreLimit returns a StoreLimit object
-func NewStoreLimit(ratePerSec float64, regionInfluence int64) *StoreLimit {
+func NewStoreLimit(ratePerSec float64, regionInfluence int) *StoreLimit {
 	capacity := regionInfluence
-	rate := ratePerSec
+	originRate := ratePerSec
 	// unlimited
-	if rate >= Unlimited {
-		capacity = int64(Unlimited)
+	if originRate >= Unlimited {
+		capacity = int(Unlimited)
 	} else if ratePerSec > 1 {
-		capacity = int64(ratePerSec * float64(regionInfluence))
+		capacity = int(ratePerSec * float64(regionInfluence))
 		ratePerSec *= float64(regionInfluence)
 	} else {
 		ratePerSec *= float64(regionInfluence)
 	}
+
 	return &StoreLimit{
-		bucket:          ratelimit.NewBucketWithRate(ratePerSec, capacity),
+		rate:            rate.NewLimiter(rate.Limit(ratePerSec), int(capacity)),
 		regionInfluence: regionInfluence,
-		ratePerSec:      rate,
+		ratePerSec:      originRate,
 	}
 }
 
-// Available returns the number of available tokens
-func (l *StoreLimit) Available() int64 {
-	return l.bucket.Available()
+// Available whether n events may happen at time now.
+// Use this method if you intend to drop / skip events that exceed the rate limit.
+// If true, it will takes n tokens.
+func (l *StoreLimit) Available(n int) bool {
+	now := time.Now()
+	r := l.rate.ReserveN(now, n)
+
+	if !r.OK() {
+		l.mu.Lock()
+		l.releaseTime = now.Add(r.Delay())
+		l.mu.Unlock()
+		return false
+	}
+	return true
+}
+
+func (l *StoreLimit) IsAvailable(n int) bool {
+	l.mu.RLock()
+	if time.Now().Before(l.releaseTime) {
+		fmt.Sprintln("release")
+		return false
+	}
+	l.mu.RUnlock()
+	now := time.Now()
+	r := l.rate.ReserveN(now, n)
+	fmt.Sprintln("release 1: ", r.OK())
+	if !r.OK() {
+		l.mu.Lock()
+		l.releaseTime = now.Add(r.Delay())
+		l.mu.Unlock()
+		return false
+	}
+	return false
 }
 
 // Rate returns the fill rate of the bucket, in tokens per second.
 func (l *StoreLimit) Rate() float64 {
 	return l.ratePerSec
-}
-
-// Take takes count tokens from the bucket without blocking.
-func (l *StoreLimit) Take(count int64) time.Duration {
-	return l.bucket.Take(count)
 }

@@ -17,7 +17,6 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
-	github.com/juju/ratelimit v1.0.1
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.5.0
@@ -48,8 +47,10 @@ require (
 	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
 	go.etcd.io/bbolt v1.3.5 // indirect
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
+	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/goleak v1.1.10
 	go.uber.org/zap v1.16.0
+	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
 	golang.org/x/tools v0.0.0-20210112230658-8b4aab62c064
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
