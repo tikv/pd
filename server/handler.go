@@ -905,59 +905,6 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	}, ttl)
 }
 
-<<<<<<< HEAD
-// GetAllRequestHistroyHotRegion get historyHotRegions as request.
-func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRegionsRequest) (*statistics.HistoryHotRegions, error) {
-	var hotRegionTypes []string
-	if len(request.HotRegionTypes) != 0 {
-		hotRegionTypes = request.HotRegionTypes
-	} else {
-		hotRegionTypes = cluster.HotRegionTypes
-	}
-	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, request.StartTime, request.EndTime)
-	results := make([]*statistics.HistoryHotRegion, 0)
-	regionSet := make(map[uint64]bool)
-	storeSet := make(map[uint64]bool)
-	peerSet := make(map[uint64]bool)
-	for _, id := range request.RegionIDs {
-		regionSet[id] = true
-	}
-	for _, id := range request.StoreIDs {
-		storeSet[id] = true
-	}
-	for _, id := range request.PeerIDs {
-		peerSet[id] = true
-	}
-	var next *statistics.HistoryHotRegion
-	var err error
-	for next, err = iter.Next(); next != nil && err == nil; next, err = iter.Next() {
-		if len(regionSet) != 0 && !regionSet[next.RegionID] {
-			continue
-		}
-		if len(storeSet) != 0 && !storeSet[next.StoreID] {
-			continue
-		}
-		if len(peerSet) != 0 && !peerSet[next.PeerID] {
-			continue
-		}
-		if request.HighHotDegree < next.HotDegree || request.LowHotDegree > next.HotDegree {
-			continue
-		}
-		if request.HighFlowBytes < next.FlowBytes || request.LowFlowBytes > next.FlowBytes {
-			continue
-		}
-		if request.HighKeyRate < next.KeyRate || request.LowKeyRate > next.KeyRate {
-			continue
-		}
-		if request.HighQueryRate < next.QueryRate || request.LowQueryRate > next.QueryRate {
-			continue
-		}
-		results = append(results, next)
-	}
-	return &statistics.HistoryHotRegions{
-		HistoryHotRegion: results,
-	}, err
-=======
 // IsLeader return ture if this server is leader
 func (h *Handler) IsLeader() bool {
 	return h.s.member.IsLeader()
@@ -1046,7 +993,6 @@ func (h *Handler) GetHistoryHotRegionIter(hotRegionTypes []string,
 	StartTime, EndTime int64) core.HotRegionStorageIterator {
 	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, StartTime, EndTime)
 	return iter
->>>>>>> ffe81b849e207899ca8c0a4bbd2673713a398432
 }
 
 func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {

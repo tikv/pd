@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -88,6 +89,7 @@ type HotRegionStorageHandler interface {
 	PackHistoryHotReadRegions() ([]HistoryHotRegion, error)
 	// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
 	PackHistoryHotWriteRegions() ([]HistoryHotRegion, error)
+	// IsLeader return true means this server is leader
 	IsLeader() bool
 }
 
@@ -198,6 +200,7 @@ func (h *HotRegionStorage) backgroundFlush() {
 func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime int64) HotRegionStorageIterator {
 	iters := make([]iterator.Iterator, len(requireTypes))
 	for index, requireType := range requireTypes {
+		requireType = strings.ToLower(requireType)
 		startKey := HotRegionStorePath(requireType, startTime, 0)
 		endKey := HotRegionStorePath(requireType, endTime, math.MaxInt64)
 		iter := h.LeveldbKV.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
@@ -282,7 +285,7 @@ func (h *HotRegionStorage) delete() error {
 	batch := new(leveldb.Batch)
 	for _, hotRegionType := range HotRegionTypes {
 		startKey := HotRegionStorePath(hotRegionType, 0, 0)
-		endTime := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).UnixNano() / 1000
+		endTime := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).UnixNano() / int64(time.Millisecond)
 		endKey := HotRegionStorePath(hotRegionType, endTime, math.MaxInt64)
 		iter := db.NewIterator(&util.Range{
 			Start: []byte(startKey), Limit: []byte(endKey)}, nil)

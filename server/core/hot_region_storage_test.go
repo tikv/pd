@@ -33,22 +33,26 @@ type MockPackHotRegionInfo struct {
 	historyHotWrites []HistoryHotRegion
 }
 
+// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from
 func (m *MockPackHotRegionInfo) PackHistoryHotReadRegions() ([]HistoryHotRegion, error) {
 	return m.historyHotReads, nil
 }
 
+// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
 func (m *MockPackHotRegionInfo) PackHistoryHotWriteRegions() ([]HistoryHotRegion, error) {
 	return m.historyHotWrites, nil
 }
 
+// IsLeader return isLeader
 func (m *MockPackHotRegionInfo) IsLeader() bool {
-	return m.IsLeader()
+	return m.isLeader
 }
 
+// GenHistoryHotRegions generate history hot region for test
 func (m *MockPackHotRegionInfo) GenHistoryHotRegions(num int, updateTime time.Time) {
 	for i := 0; i < num; i++ {
 		historyHotRegion := HistoryHotRegion{
-			UpdateTime:    updateTime.UnixNano() / 1000,
+			UpdateTime:    updateTime.UnixNano() / int64(time.Millisecond),
 			RegionID:      uint64(i),
 			StoreID:       uint64(i),
 			IsLeader:      i%2 == 0,
@@ -68,6 +72,8 @@ func (m *MockPackHotRegionInfo) GenHistoryHotRegions(num int, updateTime time.Ti
 		}
 	}
 }
+
+// ClearHotRegion delete all region cached.
 func (m *MockPackHotRegionInfo) ClearHotRegion() {
 	m.historyHotReads = make([]HistoryHotRegion, 0)
 	m.historyHotWrites = make([]HistoryHotRegion, 0)
@@ -92,7 +98,7 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 	now := time.Now()
 	hotRegionStorages := []HistoryHotRegion{
 		{
-			UpdateTime:    now.UnixNano() / 1000,
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			RegionID:      1,
 			StoreID:       1,
 			HotRegionType: HotRegionTypes[0],
