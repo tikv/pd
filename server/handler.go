@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -904,6 +905,7 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	}, ttl)
 }
 
+<<<<<<< HEAD
 // GetAllRequestHistroyHotRegion get historyHotRegions as request.
 func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRegionsRequest) (*statistics.HistoryHotRegions, error) {
 	var hotRegionTypes []string
@@ -955,6 +957,96 @@ func (h *Handler) GetAllRequestHistroyHotRegion(request *statistics.HistoryHotRe
 	return &statistics.HistoryHotRegions{
 		HistoryHotRegion: results,
 	}, err
+=======
+// IsLeader return ture if this server is leader
+func (h *Handler) IsLeader() bool {
+	return h.s.member.IsLeader()
+}
+
+// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from
+func (h *Handler) PackHistoryHotReadRegions() (historyHotRegions []core.HistoryHotRegion, err error) {
+	hotReadLeaderRegions := h.GetHotReadRegions().AsLeader
+	historyLeaderHotRegions, err := h.packHotRegions(hotReadLeaderRegions, true, core.HotRegionTypes[0])
+	if err != nil {
+		return
+	}
+	hotReadPeerRegions := h.GetHotReadRegions().AsPeer
+	historyPeerHotRegions, err := h.packHotRegions(hotReadPeerRegions, false, core.HotRegionTypes[0])
+	if err != nil {
+		return
+	}
+	historyHotRegions = append(historyHotRegions, historyLeaderHotRegions...)
+	historyHotRegions = append(historyHotRegions, historyPeerHotRegions...)
+	return
+}
+
+// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
+func (h *Handler) PackHistoryHotWriteRegions() (historyHotRegions []core.HistoryHotRegion, err error) {
+	hotWriteLeaderRegions := h.GetHotWriteRegions().AsLeader
+	historyLeaderHotRegions, err := h.packHotRegions(hotWriteLeaderRegions, true, core.HotRegionTypes[1])
+	if err != nil {
+		return
+	}
+	hotWritePeerRegions := h.GetHotWriteRegions().AsPeer
+	historyPeerHotRegions, err := h.packHotRegions(hotWritePeerRegions, false, core.HotRegionTypes[1])
+	if err != nil {
+		return
+	}
+	historyHotRegions = append(historyHotRegions, historyLeaderHotRegions...)
+	historyHotRegions = append(historyHotRegions, historyPeerHotRegions...)
+	return
+}
+
+func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, isLeader bool, hotRegionType string) (historyHotRegions []core.HistoryHotRegion, err error) {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	for _, hotPeersStat := range hotPeersStat {
+		stats := hotPeersStat.Stats
+		for _, hotPeerStat := range stats {
+			region := c.GetRegion(hotPeerStat.RegionID).GetMeta()
+			region, err := encryption.EncryptRegion(region, h.s.encryptionKeyManager)
+			if err != nil {
+				return nil, err
+			}
+			var peerID uint64
+			var isLearner bool
+			for _, peer := range region.Peers {
+				if peer.StoreId == hotPeerStat.StoreID {
+					peerID = peer.Id
+					isLearner = peer.Role == metapb.PeerRole_Learner
+				}
+			}
+			stat := core.HistoryHotRegion{
+				// store in  ms.
+				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
+				RegionID:       hotPeerStat.RegionID,
+				StoreID:        hotPeerStat.StoreID,
+				PeerID:         peerID,
+				IsLeader:       isLeader,
+				IsLearner:      isLearner,
+				HotDegree:      int64(hotPeerStat.HotDegree),
+				FlowBytes:      hotPeerStat.ByteRate,
+				KeyRate:        hotPeerStat.KeyRate,
+				QueryRate:      hotPeerStat.QueryRate,
+				StartKey:       region.StartKey,
+				EndKey:         region.EndKey,
+				EncryptionMeta: region.EncryptionMeta,
+				HotRegionType:  hotRegionType,
+			}
+			historyHotRegions = append(historyHotRegions, stat)
+		}
+	}
+	return
+}
+
+// GetHistoryHotRegionIter return a iter which iter all qualified item .
+func (h *Handler) GetHistoryHotRegionIter(hotRegionTypes []string,
+	StartTime, EndTime int64) core.HotRegionStorageIterator {
+	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, StartTime, EndTime)
+	return iter
+>>>>>>> ffe81b849e207899ca8c0a4bbd2673713a398432
 }
 
 func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {

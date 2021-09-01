@@ -42,6 +42,19 @@ type HotStoreStats struct {
 	QueryReadStats  map[uint64]float64 `json:"query-read-rate,omitempty"`
 }
 
+// HistoryHotRegionsRequest wrap request condition from tidb.
+// it is request from tidb
+type HistoryHotRegionsRequest struct {
+	StartTime      int64    `json:"start_time,omitempty"`
+	EndTime        int64    `json:"end_time,omitempty"`
+	RegionIDs      []uint64 `json:"region_ids,omitempty"`
+	StoreIDs       []uint64 `json:"store_ids,omitempty"`
+	PeerIDs        []uint64 `json:"peer_ids,omitempty"`
+	IsLearners     []bool   `json:"is_learners,omitempty"`
+	IsLeaders      []bool   `json:"is_leaders,omitempty"`
+	HotRegionTypes []string `json:"hot_region_type,omitempty"`
+}
+
 func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusHandler {
 	return &hotStatusHandler{
 		Handler: handler,
@@ -160,8 +173,15 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 // @Summary List the history hot regions.
 // @Accept json
 // @Produce json
+<<<<<<< HEAD
 // @Success 200 {object} statistics.HistoryHotRegions
 // @Router /hotspot/regions/history [post]
+=======
+// @Success 200 {object} core.HistoryHotRegions
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "server error:can`t get history hot region info"
+// @Router /hotspot/regions/history [get]
+>>>>>>> ffe81b849e207899ca8c0a4bbd2673713a398432
 func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
@@ -169,6 +189,7 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+<<<<<<< HEAD
 	historyHotRegionsRequest := &statistics.HistoryHotRegionsRequest{}
 	err = json.Unmarshal(data, historyHotRegionsRequest)
 	if err != nil {
@@ -176,9 +197,71 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 		return
 	}
 	results, err := h.Handler.GetAllRequestHistroyHotRegion(historyHotRegionsRequest)
+=======
+	historyHotRegionsRequest := &HistoryHotRegionsRequest{}
+	err = json.Unmarshal(data, historyHotRegionsRequest)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	results, err := GetAllRequestHistroyHotRegion(h.Handler, historyHotRegionsRequest)
+>>>>>>> ffe81b849e207899ca8c0a4bbd2673713a398432
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, results)
 }
+<<<<<<< HEAD
+=======
+
+func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*core.HistoryHotRegions, error) {
+	var hotRegionTypes = core.HotRegionTypes
+	if len(request.HotRegionTypes) != 0 {
+		hotRegionTypes = request.HotRegionTypes
+	}
+	iter := handler.GetHistoryHotRegionIter(hotRegionTypes, request.StartTime, request.EndTime)
+	var results []*core.HistoryHotRegion
+	regionSet, storeSet, peerSet, learnerSet, leaderSet :=
+		make(map[uint64]bool), make(map[uint64]bool),
+		make(map[uint64]bool), make(map[bool]bool), make(map[bool]bool)
+	for _, id := range request.RegionIDs {
+		regionSet[id] = true
+	}
+	for _, id := range request.StoreIDs {
+		storeSet[id] = true
+	}
+	for _, id := range request.PeerIDs {
+		peerSet[id] = true
+	}
+	for _, isLearner := range request.IsLearners {
+		learnerSet[isLearner] = true
+	}
+	for _, isLeader := range request.IsLeaders {
+		leaderSet[isLeader] = true
+	}
+	var next *core.HistoryHotRegion
+	var err error
+	for next, err = iter.Next(); next != nil && err == nil; next, err = iter.Next() {
+		if len(regionSet) != 0 && !regionSet[next.RegionID] {
+			continue
+		}
+		if len(storeSet) != 0 && !storeSet[next.StoreID] {
+			continue
+		}
+		if len(peerSet) != 0 && !peerSet[next.PeerID] {
+			continue
+		}
+		if !learnerSet[next.IsLearner] {
+			continue
+		}
+		if !leaderSet[next.IsLeader] {
+			continue
+		}
+		results = append(results, next)
+	}
+	return &core.HistoryHotRegions{
+		HistoryHotRegion: results,
+	}, err
+}
+>>>>>>> ffe81b849e207899ca8c0a4bbd2673713a398432
