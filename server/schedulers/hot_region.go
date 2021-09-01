@@ -334,30 +334,27 @@ func summaryStoresLoad(
 		}
 	}
 
+	expect := storeLoad{
+		ByteRate: allTiKVByteSum / float64(allTiKVCount),
+		KeyRate:  allTiKVKeySum / float64(allTiKVCount),
+		Count:    float64(allTiKVHotPeersCount) / float64(allTiKVCount),
+	}
+
 	// store expectation byte/key rate and count for each store-load detail.
 	for id, detail := range loadDetail {
-		var allByteSum = allTiKVByteSum
-		var allKeySum = allTiKVKeySum
-		var allStoreCount = float64(allTiKVCount)
-		var allHotPeersCount = float64(allTiKVHotPeersCount)
-		byteExp := allByteSum / allStoreCount
-		keyExp := allKeySum / allStoreCount
-		countExp := allHotPeersCount / allStoreCount
-		detail.LoadPred.Expect.ByteRate = byteExp
-		detail.LoadPred.Expect.KeyRate = keyExp
-		detail.LoadPred.Expect.Count = countExp
+		detail.LoadPred.Expect = expect
 		// Debug
 		{
 			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(byteExp)
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expect.ByteRate)
 		}
 		{
 			ty := "exp-key-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keyExp)
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expect.KeyRate)
 		}
 		{
 			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(countExp)
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expect.Count)
 		}
 	}
 	return loadDetail
