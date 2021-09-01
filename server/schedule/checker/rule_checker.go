@@ -68,12 +68,12 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) *operator.Operator {
 	// If the fit is fetched from cache, it seems that the region doesn't need cache
 	if fit.IsCached() {
-		checkerCounter.WithLabelValues("rule_checker", "cache").Inc()
+		checkerCounter.WithLabelValues("rule_checker", "get-cache").Inc()
 		return nil
 	}
 
 	failpoint.Inject("assertCache", func() {
-		panic("shouldn't be here")
+		panic("cached should be used")
 	})
 
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
@@ -103,6 +103,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 {
 		// If there is no need to fix, we will cache the fit
 		c.ruleManager.SetRegionFitCache(region, fit)
+		checkerCounter.WithLabelValues("rule_checker", "set-cache").Inc()
 	}
 	return nil
 }
