@@ -8,7 +8,10 @@ import (
 )
 
 type version struct {
-	Version string `json:"version"`
+	Version   string `json:"version"`
+	BuildTime string `json:"build_time"`
+	Hash      string `json:"hash"`
+	Branch    string `json:"branch"`
 }
 
 type versionHandler struct {

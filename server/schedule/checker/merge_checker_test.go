@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -25,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -195,6 +197,18 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
 	s.cluster.RuleManager.DeleteRule("pd", "test")
+
+	//  check 'nomerge' label
+	s.cluster.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
+		ID:       "test",
+		Labels:   []labeler.RegionLabel{{Key: "nomerge", Value: "true"}},
+		RuleType: labeler.KeyRange,
+		Rule:     map[string]interface{}{"start_key": hex.EncodeToString([]byte("")), "end_key": hex.EncodeToString([]byte("t"))},
+	})
+	ops = s.mc.Check(s.regions[0])
+	c.Assert(ops, HasLen, 0)
+	ops = s.mc.Check(s.regions[1])
+	c.Assert(ops, HasLen, 0)
 
 	// Skip recently split regions.
 	s.cluster.SetSplitMergeInterval(time.Hour)

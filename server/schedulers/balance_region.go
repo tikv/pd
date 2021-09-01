@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -70,6 +71,7 @@ type balanceRegionSchedulerConfig struct {
 
 type balanceRegionScheduler struct {
 	*BaseScheduler
+	*retryQuota
 	conf         *balanceRegionSchedulerConfig
 	opController *schedule.OperatorController
 	filters      []filter.Filter
@@ -82,6 +84,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 	base := NewBaseScheduler(opController)
 	scheduler := &balanceRegionScheduler{
 		BaseScheduler: base,
+		retryQuota:    newRetryQuota(balanceRegionRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceRegionCounter,
@@ -150,7 +153,8 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
 	})
 	for _, plan.source = range stores {
-		for i := 0; i < balanceRegionRetryLimit; i++ {
+		retryLimit := s.retryQuota.GetLimit(plan.source)
+		for i := 0; i < retryLimit; i++ {
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
@@ -187,11 +191,14 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			}
 
 			if op := s.transferPeer(plan); op != nil {
+				s.retryQuota.ResetLimit(plan.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}
 			}
 		}
+		s.retryQuota.Attenuate(plan.source)
 	}
+	s.retryQuota.GC(stores)
 	return nil
 }
 

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,7 +20,6 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
@@ -69,10 +69,10 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	c.record.refresh(c.cluster)
 
 	if len(fit.RuleFits) == 0 {
-		checkerCounter.WithLabelValues("rule_checker", "fix-range").Inc()
+		checkerCounter.WithLabelValues("rule_checker", "need-split").Inc()
 		// If the region matches no rules, the most possible reason is it spans across
 		// multiple rules.
-		return c.fixRange(region)
+		return nil
 	}
 	op, err := c.fixOrphanPeers(region, fit)
 	if err == nil && op != nil {
@@ -90,21 +90,6 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		}
 	}
 	return nil
-}
-
-func (c *RuleChecker) fixRange(region *core.RegionInfo) *operator.Operator {
-	keys := c.ruleManager.GetSplitKeys(region.GetStartKey(), region.GetEndKey())
-	if len(keys) == 0 {
-		return nil
-	}
-
-	op, err := operator.CreateSplitRegionOperator("rule-split-region", region, 0, pdpb.CheckPolicy_USEKEY, keys)
-	if err != nil {
-		log.Debug("create split region operator failed", errs.ZapError(err))
-		return nil
-	}
-
-	return op
 }
 
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {

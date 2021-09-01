@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -24,10 +25,15 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/versioninfo"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const (
@@ -79,9 +85,33 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	return cfg
 }
 
+func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
+	return &hotRegionSchedulerConfig{
+		MinHotByteRate:         conf.MinHotByteRate,
+		MinHotKeyRate:          conf.MinHotKeyRate,
+		MinHotQueryRate:        conf.MinHotQueryRate,
+		MaxZombieRounds:        conf.MaxZombieRounds,
+		MaxPeerNum:             conf.MaxPeerNum,
+		ByteRateRankStepRatio:  conf.ByteRateRankStepRatio,
+		KeyRateRankStepRatio:   conf.KeyRateRankStepRatio,
+		QueryRateRankStepRatio: conf.QueryRateRankStepRatio,
+		CountRankStepRatio:     conf.CountRankStepRatio,
+		GreatDecRatio:          conf.GreatDecRatio,
+		MinorDecRatio:          conf.MinorDecRatio,
+		SrcToleranceRatio:      conf.SrcToleranceRatio,
+		DstToleranceRatio:      conf.DstToleranceRatio,
+		ReadPriorities:         adjustConfig(conf.lastQuerySupported, conf.ReadPriorities, getReadPriorities),
+		WriteLeaderPriorities:  adjustConfig(conf.lastQuerySupported, conf.WriteLeaderPriorities, getWriteLeaderPriorities),
+		WritePeerPriorities:    adjustConfig(conf.lastQuerySupported, conf.WritePeerPriorities, getWritePeerPriorities),
+		StrictPickingStore:     conf.StrictPickingStore,
+		EnableForTiFlash:       conf.EnableForTiFlash,
+	}
+}
+
 type hotRegionSchedulerConfig struct {
 	sync.RWMutex
-	storage *core.Storage
+	storage            *core.Storage
+	lastQuerySupported bool
 
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
@@ -259,7 +289,7 @@ func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, r *
 	conf.RLock()
 	defer conf.RUnlock()
 	rd := render.New(render.Options{IndentJSON: true})
-	rd.JSON(w, http.StatusOK, conf)
+	rd.JSON(w, http.StatusOK, conf.getValidConf())
 }
 
 func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *http.Request) {
@@ -312,6 +342,19 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
 }
 
+func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster opt.Cluster) bool {
+	querySupport := cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
+	if querySupport != conf.lastQuerySupported {
+		log.Info("query supported changed",
+			zap.Bool("last-query-support", conf.lastQuerySupported),
+			zap.String("cluster-version", cluster.GetOpts().GetClusterVersion().String()),
+			zap.Reflect("config", conf),
+			zap.Reflect("valid-config", conf.getValidConf()))
+		conf.lastQuerySupported = querySupport
+	}
+	return querySupport
+}
+
 type prioritiesConfig struct {
 	read        []string
 	writeLeader []string
@@ -334,4 +377,29 @@ func getWriteLeaderPriorities(c *prioritiesConfig) []string {
 
 func getWritePeerPriorities(c *prioritiesConfig) []string {
 	return c.writePeer
+}
+
+// adjustConfig will adjust config for cluster with low version tikv
+// because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
+func adjustConfig(querySupport bool, origins []string, getPriorities func(*prioritiesConfig) []string) []string {
+	withQuery := slice.AnyOf(origins, func(i int) bool {
+		return origins[i] == QueryPriority
+	})
+	compatibles := getPriorities(&compatibleConfig)
+	if !querySupport && withQuery {
+		return compatibles
+	}
+
+	defaults := getPriorities(&defaultConfig)
+	isLegal := slice.AllOf(origins, func(i int) bool {
+		return origins[i] == BytePriority || origins[i] == KeyPriority || origins[i] == QueryPriority
+	})
+	if len(defaults) == len(origins) && isLegal && origins[0] != origins[1] {
+		return origins
+	}
+
+	if !querySupport {
+		return compatibles
+	}
+	return defaults
 }

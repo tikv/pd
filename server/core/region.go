@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -1043,7 +1044,8 @@ func GetWriteQueryNum(stats *pdpb.QueryStats) uint64 {
 	if stats == nil {
 		return 0
 	}
-	return stats.Put + stats.Delete + stats.DeleteRange
+	return stats.Put + stats.Delete + stats.DeleteRange + // raw
+		stats.AcquirePessimisticLock + stats.Commit + stats.Prewrite + stats.Rollback // txn
 }
 
 // GetLoads returns loads from region

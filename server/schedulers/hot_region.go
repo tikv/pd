@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -33,7 +34,6 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -402,52 +402,30 @@ func (bs *balanceSolver) init() {
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
 
-	// For read, transfer-leader and move-peer have the same priority config
-	// For write, they are different
-	switch bs.rwTy {
-	case read:
-		bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetReadPriorities(), getReadPriorities)
-	case write:
-		switch bs.opTy {
-		case transferLeader:
-			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWriteLeaderPriorities(), getWriteLeaderPriorities)
-		case movePeer:
-			bs.firstPriority, bs.secondPriority = bs.adjustConfig(bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
-		}
-	}
+	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
 	return dim == bs.firstPriority || dim == bs.secondPriority
 }
 
-// adjustConfig will adjust config for cluster with low version tikv
-// because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
-func (bs *balanceSolver) adjustConfig(origins []string, getPriorities func(*prioritiesConfig) []string) (first, second int) {
-	querySupport := bs.cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
-	withQuery := slice.AnyOf(origins, func(i int) bool {
-		return origins[i] == QueryPriority
-	})
-	compatibles := getPriorities(&compatibleConfig)
-	if !querySupport && withQuery {
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), "use-compatible-config").Inc()
-		return prioritiesToDim(compatibles)
+func (bs *balanceSolver) getPriorities() []string {
+	querySupport := bs.sche.conf.checkQuerySupport(bs.cluster)
+	// For read, transfer-leader and move-peer have the same priority config
+	// For write, they are different
+	switch bs.rwTy {
+	case read:
+		return adjustConfig(querySupport, bs.sche.conf.GetReadPriorities(), getReadPriorities)
+	case write:
+		switch bs.opTy {
+		case transferLeader:
+			return adjustConfig(querySupport, bs.sche.conf.GetWriteLeaderPriorities(), getWriteLeaderPriorities)
+		case movePeer:
+			return adjustConfig(querySupport, bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
+		}
 	}
-
-	defaults := getPriorities(&defaultConfig)
-	isLegal := slice.AllOf(origins, func(i int) bool {
-		return origins[i] == BytePriority || origins[i] == KeyPriority || origins[i] == QueryPriority
-	})
-	if len(defaults) == len(origins) && isLegal && origins[0] != origins[1] {
-		return prioritiesToDim(origins)
-	}
-
-	if !querySupport {
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), "use-compatible-config").Inc()
-		return prioritiesToDim(compatibles)
-	}
-	schedulerCounter.WithLabelValues(bs.sche.GetName(), "use-default-config").Inc()
-	return prioritiesToDim(defaults)
+	log.Error("illegal type or illegal operator while getting the priority", zap.String("type", bs.rwTy.String()), zap.String("operator", bs.opTy.String()))
+	return []string{}
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {

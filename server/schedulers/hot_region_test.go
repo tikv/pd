@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -1948,6 +1949,17 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 		{statistics.KeyDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
+	// test version change
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version5_0))
+	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsFalse)
+	tc.EnableFeature(versioninfo.HotScheduleWithQuery)
+	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsFalse) // it will updated after scheduling
+	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
+		{statistics.QueryDim, statistics.ByteDim},
+		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.ByteDim, statistics.KeyDim},
+	})
+	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsTrue)
 }
 
 func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {

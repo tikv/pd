@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -29,6 +30,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
@@ -45,6 +47,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
+	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
 	ID               uint64
@@ -66,6 +69,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
 	}
+	clus.RegionLabeler, _ = labeler.NewRegionLabeler(core.NewStorage(kv.NewMemoryKV()))
 	return clus
 }
 
@@ -167,6 +171,11 @@ func (mc *Cluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
 // GetRuleManager returns the ruleManager of the cluster.
 func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 	return mc.RuleManager
+}
+
+// GetRegionLabeler returns the region labeler of the cluster.
+func (mc *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
+	return mc.RegionLabeler
 }
 
 // SetStoreUp sets store state to be up.
@@ -579,11 +588,7 @@ func (mc *Cluster) UpdateStorageReadKeys(storeID uint64, keysRead uint64) {
 // UpdateStorageReadQuery updates store read query.
 func (mc *Cluster) UpdateStorageReadQuery(storeID uint64, queryRead uint64) {
 	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
-		newStats.QueryStats = &pdpb.QueryStats{
-			Coprocessor: queryRead / 3,
-			Scan:        queryRead / 3,
-			Get:         queryRead / 3,
-		}
+		newStats.QueryStats = core.RandomKindReadQuery(queryRead)
 		newStats.BytesRead = queryRead * 100
 	})
 }
@@ -591,11 +596,7 @@ func (mc *Cluster) UpdateStorageReadQuery(storeID uint64, queryRead uint64) {
 // UpdateStorageWriteQuery updates store write query.
 func (mc *Cluster) UpdateStorageWriteQuery(storeID uint64, queryWrite uint64) {
 	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
-		newStats.QueryStats = &pdpb.QueryStats{
-			Put:         queryWrite / 3,
-			Delete:      queryWrite / 3,
-			DeleteRange: queryWrite / 3,
-		}
+		newStats.QueryStats = core.RandomKindWriteQuery(queryWrite)
 		newStats.BytesWritten = queryWrite * 100
 	})
 }
@@ -730,6 +731,13 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 func (mc *Cluster) DisableFeature(fs ...versioninfo.Feature) {
 	for _, f := range fs {
 		mc.disabledFeatures[f] = struct{}{}
+	}
+}
+
+// EnableFeature marks that these features are supported in the cluster.
+func (mc *Cluster) EnableFeature(fs ...versioninfo.Feature) {
+	for _, f := range fs {
+		delete(mc.disabledFeatures, f)
 	}
 }
 
