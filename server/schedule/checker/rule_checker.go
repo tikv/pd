@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
@@ -65,6 +66,16 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 
 // CheckWithFit checkWithFit is similar with Checker with placement.RegionFit
 func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) *operator.Operator {
+	// If the fit is fetched from cache, it seems that the region doesn't need cache
+	if fit.IsCached() {
+		checkerCounter.WithLabelValues("rule_checker", "cache").Inc()
+		return nil
+	}
+
+	failpoint.Inject("assertCache", func() {
+		panic("shouldn't be here")
+	})
+
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
 	c.record.refresh(c.cluster)
 
