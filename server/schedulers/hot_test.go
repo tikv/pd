@@ -97,7 +97,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		}
 	}
 
-	hb.summaryPendingInfluence()
+	hb.summaryPendingInfluence() // Calling this function will GC.
 
 	for i := range opCreaters {
 		for j, typ := range typs {
