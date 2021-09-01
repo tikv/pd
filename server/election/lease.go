@@ -67,6 +67,9 @@ func (l *lease) Grant(leaseTimeout int64) error {
 
 // Close releases the lease.
 func (l *lease) Close() error {
+	if l == nil {
+		return nil
+	}
 	// Reset expire time.
 	l.expireTime.Store(time.Time{})
 	// Try to revoke lease to make subsequent elections faster.
@@ -79,6 +82,9 @@ func (l *lease) Close() error {
 // IsExpired checks if the lease is expired. If it returns true,
 // current leader should step down and try to re-elect again.
 func (l *lease) IsExpired() bool {
+	if l == nil {
+		return true
+	}
 	if l.expireTime.Load() == nil {
 		return false
 	}
