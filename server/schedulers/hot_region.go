@@ -84,10 +84,8 @@ type hotScheduler struct {
 	name string
 	*BaseScheduler
 	sync.RWMutex
-	leaderLimit uint64
-	peerLimit   uint64
-	types       []rwType
-	r           *rand.Rand
+	types []rwType
+	r     *rand.Rand
 
 	// states across multiple `Schedule` calls
 	pendings [resourceTypeLen]map[*pendingInfluence]struct{}
@@ -110,8 +108,6 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 	ret := &hotScheduler{
 		name:           HotRegionName,
 		BaseScheduler:  base,
-		leaderLimit:    1,
-		peerLimit:      1,
 		types:          []rwType{write, read},
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 		regionPendings: make(map[uint64]*operator.Operator),
@@ -524,9 +520,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	}
 	bs.cur = &solution{}
 	var (
-		best  *solution
-		ops   []*operator.Operator
-		infls []Influence
+		best *solution
+		op   *operator.Operator
+		infl Influence
 	)
 
 	for srcStoreID := range bs.filterSrcStores() {
@@ -542,9 +538,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				bs.cur.dstStoreID = dstStoreID
 				bs.calcProgressiveRank()
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
-					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
-						ops = newOps
-						infls = newInfls
+					if newOp, newInfl := bs.buildOperator(); newOp != nil {
+						op = newOp
+						infl = newInfl
 						clone := *bs.cur
 						best = &clone
 					}
@@ -553,13 +549,11 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		}
 	}
 
-	for i := 0; i < len(ops); i++ {
-		// TODO: multiple operators need to be atomic.
-		if !bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i], bs.rwTy, bs.opTy) {
-			return nil
-		}
+	if best == nil || !bs.sche.addPendingInfluence(op, best.srcStoreID, best.dstStoreID, infl, bs.rwTy, bs.opTy) {
+		return nil
 	}
-	return ops
+
+	return []*operator.Operator{op}
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if both key and byte rate is greater than
@@ -951,12 +945,11 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 	return true
 }
 
-func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
+func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl Influence) {
 	if !bs.isReadyToBuild() {
-		return nil, nil
+		return nil, Influence{}
 	}
 	var (
-		op       *operator.Operator
 		counters []prometheus.Counter
 		err      error
 	)
@@ -979,7 +972,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
 	case transferLeader:
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
-			return nil, nil
+			return nil, Influence{}
 		}
 		desc := "transfer-hot-" + bs.rwTy.String() + "-leader"
 		op, err = operator.CreateTransferLeaderOperator(
@@ -997,7 +990,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	if err != nil {
 		log.Debug("fail to create operator", zap.Stringer("rw-type", bs.rwTy), zap.Stringer("op-type", bs.opTy), errs.ZapError(err))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
-		return nil, nil
+		return nil, Influence{}
 	}
 
 	op.SetPriorityLevel(core.HighPriority)
@@ -1006,13 +999,13 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
 
-	infl := Influence{
+	infl = Influence{
 		ByteRate: bs.cur.srcPeerStat.GetByteRate(),
 		KeyRate:  bs.cur.srcPeerStat.GetKeyRate(),
 		Count:    1,
 	}
 
-	return []*operator.Operator{op}, []Influence{infl}
+	return op, infl
 }
 
 func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
