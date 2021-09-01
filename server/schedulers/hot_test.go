@@ -91,7 +91,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 			regionID := uint64(i*len(typs) + j + 1)
 			region := newTestRegion(regionID)
 			op := creator(region, typ)
-			influence := newPendingInfluence(op, 2, 4, Influence{})
+			influence := newPendingInfluence(op, 2, 4, Influence{}, hb.conf.GetStoreStatZombieDuration())
 			hb.pendings[writePeer][influence] = struct{}{}
 			hb.regionPendings[regionID] = op
 		}
@@ -1224,7 +1224,7 @@ func (s *testHotCacheSuite) checkRegionFlowTest(c *C, tc *mockcluster.Cluster, h
 	}
 
 	// try schedule
-	hb.prepareForBalance(tc)
+	hb.prepareForBalance(kind, tc)
 	leaderSolver := newBalanceSolver(hb, tc, kind, transferLeader)
 	leaderSolver.cur = &solution{srcStoreID: 2}
 	c.Check(leaderSolver.filterHotPeers(), HasLen, 0) // skip schedule
