@@ -741,11 +741,7 @@ type ScheduleConfig struct {
 	// Controls the time interval between write hot regions info into leveldb.
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
 
-<<<<<<< HEAD
-	// The day of  hot regions data to be reserved.
-=======
 	// The day of  hot regions data to be reserved.0 means close
->>>>>>> ffe81b849e207899ca8c0a4bbd2673713a398432
 	HotRegionsResevervedDays int64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 }
 
