@@ -173,15 +173,10 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 // @Summary List the history hot regions.
 // @Accept json
 // @Produce json
-<<<<<<< HEAD
-// @Success 200 {object} statistics.HistoryHotRegions
-// @Router /hotspot/regions/history [post]
-=======
 // @Success 200 {object} core.HistoryHotRegions
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "server error:can`t get history hot region info"
 // @Router /hotspot/regions/history [get]
->>>>>>> ffe81b849e207899ca8c0a4bbd2673713a398432
 func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
@@ -189,15 +184,6 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-<<<<<<< HEAD
-	historyHotRegionsRequest := &statistics.HistoryHotRegionsRequest{}
-	err = json.Unmarshal(data, historyHotRegionsRequest)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	results, err := h.Handler.GetAllRequestHistroyHotRegion(historyHotRegionsRequest)
-=======
 	historyHotRegionsRequest := &HistoryHotRegionsRequest{}
 	err = json.Unmarshal(data, historyHotRegionsRequest)
 	if err != nil {
@@ -205,15 +191,12 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 		return
 	}
 	results, err := GetAllRequestHistroyHotRegion(h.Handler, historyHotRegionsRequest)
->>>>>>> ffe81b849e207899ca8c0a4bbd2673713a398432
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, results)
 }
-<<<<<<< HEAD
-=======
 
 func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*core.HistoryHotRegions, error) {
 	var hotRegionTypes = core.HotRegionTypes
@@ -264,4 +247,3 @@ func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 		HistoryHotRegion: results,
 	}, err
 }
->>>>>>> ffe81b849e207899ca8c0a4bbd2673713a398432
