@@ -87,7 +87,7 @@ func bench(mainCtx context.Context) {
 	fmt.Printf("Create %d client(s) for benchmark\n", *clientNumber)
 	pdClients := make([]pd.Client, *clientNumber)
 	for idx := range pdClients {
-		pdCli, err := pd.NewClient([]string{*pdAddrs}, pd.SecurityOption{
+		pdCli, err := pd.NewClientWithContext(mainCtx, []string{*pdAddrs}, pd.SecurityOption{
 			CAPath:   *caPath,
 			CertPath: *certPath,
 			KeyPath:  *keyPath,
