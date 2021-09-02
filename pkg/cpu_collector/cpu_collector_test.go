@@ -35,8 +35,8 @@ type testCollectorSuite struct {
 const defaultCPUCollecttingInterval = time.Second
 
 func (s *testCollectorSuite) Test(c *C) {
-	cpu_collector := collector.NewCPUCollector(defaultCPUCollecttingInterval)
-	cpu_collector.Start(context.Background())
+	cpuCollector := collector.NewCPUCollector(defaultCPUCollecttingInterval)
+	cpuCollector.Start(context.Background())
 	time.Sleep(defaultCPUCollecttingInterval * 3)
-	c.Assert(cpu_collector.GetCPUUsage(), Greater, 0.0)
+	c.Assert(cpuCollector.GetCPUUsage(), Greater, 0.0)
 }
