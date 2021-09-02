@@ -788,8 +788,8 @@ const (
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
 	defaultEnableCrossTableMerge       = true
-	defaultHotRegionsWriteInterval     = 20 * time.Minute
-	defaultHotRegionsResevervedDays    = 30
+	defaultHotRegionsWriteInterval     = 10 * time.Minute
+	defaultHotRegionsResevervedDays    = 7
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
