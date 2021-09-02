@@ -195,7 +195,7 @@ func (w *fitWorker) fitRule(index int) bool {
 	if index >= len(w.rules) {
 		// If there is no isolation level and we already find one solution, we can early exit searching instead of
 		// searching the whole cases.
-		if w.bestFit.IsSatisfied() && !w.needIsolation {
+		if !w.needIsolation && w.bestFit.IsSatisfied() {
 			w.exit = true
 		}
 		return false
