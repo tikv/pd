@@ -81,7 +81,6 @@ func (h *regionLabelHandler) Patch(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Success 200 {array} labeler.LabelRule
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 404 {string} string "The rule does not exist."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/region-label/rule/ids [get]
 func (h *regionLabelHandler) GetRulesByIDs(w http.ResponseWriter, r *http.Request) {
@@ -92,11 +91,7 @@ func (h *regionLabelHandler) GetRulesByIDs(w http.ResponseWriter, r *http.Reques
 	}
 	rules, err := cluster.GetRegionLabeler().GetLabelRules(ids)
 	if err != nil {
-		if errs.ErrRegionRuleNotFound.Equal(err) {
-			h.rd.JSON(w, http.StatusNotFound, err.Error())
-		} else {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		}
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, rules)
