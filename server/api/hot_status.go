@@ -179,7 +179,7 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	results, err := GetAllRequestHistroyHotRegion(h.Handler, historyHotRegionsRequest)
+	results, err := getAllRequestHistroyHotRegion(h.Handler, historyHotRegionsRequest)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -187,7 +187,7 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, results)
 }
 
-func GetAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*core.HistoryHotRegions, error) {
+func getAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*core.HistoryHotRegions, error) {
 	var hotRegionTypes = core.HotRegionTypes
 	if len(request.HotRegionTypes) != 0 {
 		hotRegionTypes = request.HotRegionTypes
