@@ -52,7 +52,7 @@ func (collector *CPUCollector) Start(ctx context.Context) {
 					return
 				default:
 				}
-				usagePercent, err := cpu.Percent(collector.interval, false)
+				usagePercent, err := cpu.PercentWithContext(ctx, collector.interval, false)
 				if err != nil {
 					log.Error("get cpu usage percent meets error",
 						zap.Duration("interval", collector.interval), errs.ZapError(err))
