@@ -910,7 +910,7 @@ func (h *Handler) IsLeader() bool {
 	return h.s.member.IsLeader()
 }
 
-// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from
+// PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
 func (h *Handler) PackHistoryHotReadRegions() (historyHotRegions []core.HistoryHotRegion, err error) {
 	hotReadLeaderRegions := h.GetHotReadRegions().AsLeader
 	historyLeaderHotRegions, err := h.packHotRegions(hotReadLeaderRegions, true, core.HotRegionTypes[0])
