@@ -17,6 +17,7 @@ package placement
 import (
 	"math"
 	"sort"
+	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
@@ -26,8 +27,28 @@ import (
 // All peers are divided into corresponding rules according to the matching
 // rules, and the remaining Peers are placed in the OrphanPeers list.
 type RegionFit struct {
-	RuleFits    []*RuleFit
-	OrphanPeers []*metapb.Peer
+	mu struct {
+		sync.RWMutex
+		cached bool
+	}
+	RuleFits     []*RuleFit
+	OrphanPeers  []*metapb.Peer
+	regionStores []*core.StoreInfo
+	rules        []*Rule
+}
+
+// SetCached indicates this RegionFit is fetch form cache
+func (f *RegionFit) SetCached(cached bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mu.cached = cached
+}
+
+// IsCached indicates whether this result is fetched from caches
+func (f *RegionFit) IsCached() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.mu.cached
 }
 
 // IsSatisfied returns if the rules are properly satisfied.
@@ -122,7 +143,7 @@ type StoreSet interface {
 }
 
 // FitRegion tries to fit peers of a region to the rules.
-func FitRegion(stores StoreSet, region *core.RegionInfo, rules []*Rule) *RegionFit {
+func FitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *RegionFit {
 	w := newFitWorker(stores, region, rules)
 	w.run()
 	return &w.bestFit
@@ -135,13 +156,13 @@ type fitWorker struct {
 	rules   []*Rule
 }
 
-func newFitWorker(stores StoreSet, region *core.RegionInfo, rules []*Rule) *fitWorker {
+func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
 	regionPeers := region.GetPeers()
 	peers := make([]*fitPeer, 0, len(regionPeers))
 	for _, p := range regionPeers {
 		peers = append(peers, &fitPeer{
 			Peer:     p,
-			store:    stores.GetStore(p.GetStoreId()),
+			store:    getStoreByID(stores, p.GetStoreId()),
 			isLeader: region.GetLeader().GetId() == p.GetId(),
 		})
 	}
@@ -149,7 +170,7 @@ func newFitWorker(stores StoreSet, region *core.RegionInfo, rules []*Rule) *fitW
 	sort.Slice(peers, func(i, j int) bool { return peers[i].GetId() < peers[j].GetId() })
 
 	return &fitWorker{
-		stores:  stores.GetStores(),
+		stores:  stores,
 		bestFit: RegionFit{RuleFits: make([]*RuleFit, len(rules))},
 		peers:   peers,
 		rules:   rules,

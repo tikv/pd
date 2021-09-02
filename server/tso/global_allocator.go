@@ -104,10 +104,6 @@ func (gta *GlobalTSOAllocator) getSyncRTT() int64 {
 func (gta *GlobalTSOAllocator) estimateMaxTS(count uint32, suffixBits int) (*pdpb.Timestamp, bool, error) {
 	physical, logical, lastUpdateTime := gta.timestampOracle.generateTSO(int64(count), 0)
 	if physical == 0 {
-		log.Error("invalid global tso in memory, unable to estimate maxTSO",
-			zap.Any("timestamp-physical", physical),
-			zap.Any("timestamp-logical", logical),
-			errs.ZapError(errs.ErrInvalidTimestamp))
 		return &pdpb.Timestamp{}, false, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 	}
 	estimatedMaxTSO := &pdpb.Timestamp{
