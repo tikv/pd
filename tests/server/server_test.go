@@ -143,6 +143,6 @@ func (s *serverTestSuite) TestLeader(c *C) {
 		curLeader := cluster.GetLeader()
 		return curLeader != leader
 	})
-	// Incidentally test the CPU usage collectting.
+	// Incidentally test the CPU usage collecting.
 	c.Assert(leaderServer.GetCPUUsage(), Greater, 0.0)
 }

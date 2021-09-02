@@ -35,14 +35,14 @@ type CPUCollector struct {
 }
 
 // NewCPUCollector returns a new CPUCollector which will collect CPU usage info at the given interval.
-// `(*CPUCollector).Start()` should be called later to start a daemon to do the collectting work.
+// `(*CPUCollector).Start()` should be called later to start a daemon to do the collecting work.
 func NewCPUCollector(interval time.Duration) *CPUCollector {
 	return &CPUCollector{
 		interval: interval,
 	}
 }
 
-// Start will run a daemon to do the collectting work. This method is singleton.
+// Start will run a daemon to do the collecting work. This method is singleton.
 func (collector *CPUCollector) Start(ctx context.Context) {
 	collector.once.Do(func() {
 		go func() {

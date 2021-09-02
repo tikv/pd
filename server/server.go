@@ -68,10 +68,10 @@ import (
 )
 
 const (
-	etcdTimeout            = time.Second * 3
-	serverMetricsInterval  = time.Minute
-	leaderTickInterval     = 50 * time.Millisecond
-	cpuCollecttingInterval = time.Second
+	etcdTimeout           = time.Second * 3
+	serverMetricsInterval = time.Minute
+	leaderTickInterval    = 50 * time.Millisecond
+	cpuCollectingInterval = time.Second
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
@@ -361,7 +361,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.cpuCollector = collector.NewCPUCollector(cpuCollecttingInterval)
+	s.cpuCollector = collector.NewCPUCollector(cpuCollectingInterval)
 	s.cpuCollector.Start(ctx)
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
