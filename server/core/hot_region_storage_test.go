@@ -55,6 +55,7 @@ func (m *MockPackHotRegionInfo) GenHistoryHotRegions(num int, updateTime time.Ti
 			UpdateTime:    updateTime.UnixNano() / int64(time.Millisecond),
 			RegionID:      uint64(i),
 			StoreID:       uint64(i),
+			PeerID:        rand.Uint64(),
 			IsLeader:      i%2 == 0,
 			IsLearner:     i%2 == 0,
 			HotRegionType: HotRegionTypes[i%2],
@@ -258,8 +259,8 @@ func BenchmarkCompaction(b *testing.B) {
 	b.StopTimer()
 }
 
-func newTestHotRegions(storage *HotRegionStorage, mock MockPackHotRegionInfo, cicleTimes, num int, updateTime time.Time) time.Time {
-	for i := 0; i < cicleTimes; i++ {
+func newTestHotRegions(storage *HotRegionStorage, mock MockPackHotRegionInfo, cycleTimes, num int, updateTime time.Time) time.Time {
+	for i := 0; i < cycleTimes; i++ {
 		mock.GenHistoryHotRegions(num, updateTime)
 		storage.pullHotRegionInfo()
 		storage.flush()
