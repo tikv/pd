@@ -133,8 +133,8 @@ func NewHotRegionsStorage(
 	}
 	if remianedDays > 0 {
 		h.hotRegionLoopWg.Add(2)
-		h.backgroundFlush()
-		h.backgroundDelete()
+		go h.backgroundFlush()
+		go h.backgroundDelete()
 	}
 	return &h, nil
 }
@@ -143,57 +143,53 @@ func NewHotRegionsStorage(
 func (h *HotRegionStorage) backgroundDelete() {
 	// make delete happened in defaultDeleteTime clock.
 	now := time.Now()
-	next := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
+	next := time.Date(now.Year(), now.Month(), now.Day(), defaultDeleteTime, 0, 0, 0, now.Location())
 	d := next.Sub(now)
 	if d < 0 {
 		d = d + 24*time.Hour
 	}
-	go func() {
-		isFirst := true
-		ticker := time.NewTicker(d)
-		defer func() {
-			ticker.Stop()
-			h.hotRegionLoopWg.Done()
-		}()
-		for {
-			select {
-			case <-ticker.C:
-				if isFirst {
-					ticker.Reset(24 * time.Hour)
-					isFirst = false
-				}
-				h.delete()
-			case <-h.hotRegionInfoCtx.Done():
-				return
-			}
-		}
+	isFirst := true
+	ticker := time.NewTicker(d)
+	defer func() {
+		ticker.Stop()
+		h.hotRegionLoopWg.Done()
 	}()
+	for {
+		select {
+		case <-ticker.C:
+			if isFirst {
+				ticker.Reset(24 * time.Hour)
+				isFirst = false
+			}
+			h.delete()
+		case <-h.hotRegionInfoCtx.Done():
+			return
+		}
+	}
 }
 
 // Write hot_region info into db in the background.
 func (h *HotRegionStorage) backgroundFlush() {
 	ticker := time.NewTicker(h.pullInterval)
-	go func() {
-		defer func() {
-			ticker.Stop()
-			h.hotRegionLoopWg.Done()
-		}()
-		for {
-			select {
-			case <-ticker.C:
-				if h.hotRegionStorageHandler.IsLeader() {
-					if err := h.pullHotRegionInfo(); err != nil {
-						log.Error("get hot_region stat meet error", errs.ZapError(err))
-					}
-					if err := h.flush(); err != nil {
-						log.Error("get hot_region stat meet error", errs.ZapError(err))
-					}
-				}
-			case <-h.hotRegionInfoCtx.Done():
-				return
-			}
-		}
+	defer func() {
+		ticker.Stop()
+		h.hotRegionLoopWg.Done()
 	}()
+	for {
+		select {
+		case <-ticker.C:
+			if h.hotRegionStorageHandler.IsLeader() {
+				if err := h.pullHotRegionInfo(); err != nil {
+					log.Error("get hot_region stat meet error", errs.ZapError(err))
+				}
+				if err := h.flush(); err != nil {
+					log.Error("get hot_region stat meet error", errs.ZapError(err))
+				}
+			}
+		case <-h.hotRegionInfoCtx.Done():
+			return
+		}
+	}
 }
 
 // NewIterator return a iterator which can traverse all data as reqeust.
