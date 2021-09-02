@@ -104,13 +104,13 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 			HotRegionType: HotRegionTypes[0],
 		},
 		{
-			UpdateTime:    now.Add(10*time.Second).UnixNano() / 1000,
+			UpdateTime:    now.Add(10*time.Second).UnixNano() /int64(time.Millisecond),
 			RegionID:      2,
 			StoreID:       1,
 			HotRegionType: HotRegionTypes[0],
 		},
 		{
-			UpdateTime:    now.Add(20*time.Second).UnixNano() / 1000,
+			UpdateTime:    now.Add(20*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      3,
 			StoreID:       1,
 			HotRegionType: HotRegionTypes[0],
@@ -120,8 +120,8 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 	store.pullHotRegionInfo()
 	store.flush()
 	iter := store.NewIterator(HotRegionTypes,
-		now.UnixNano()/1000,
-		now.Add(40*time.Second).UnixNano()/1000)
+		now.UnixNano()/int64(time.Millisecond),
+		now.Add(40*time.Second).UnixNano()/int64(time.Millisecond))
 	index := 0
 	for next, err := iter.Next(); next != nil && err == nil; next, err = iter.Next() {
 		c.Assert(reflect.DeepEqual(&hotRegionStorages[index], next), IsTrue)
@@ -139,19 +139,19 @@ func (t *testHotRegionStorage) TestHotRegionDelete(c *C) {
 	defer clean()
 	hotRegionStorages := []HistoryHotRegion{
 		{
-			UpdateTime:    deleteDate.UnixNano() / 1000,
+			UpdateTime:    deleteDate.UnixNano() / int64(time.Millisecond),
 			RegionID:      1,
 			StoreID:       1,
 			HotRegionType: HotRegionTypes[0],
 		},
 		{
-			UpdateTime:    deleteDate.Add(10*time.Second).UnixNano() / 1000,
+			UpdateTime:    deleteDate.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      2,
 			StoreID:       1,
 			HotRegionType: HotRegionTypes[0],
 		},
 		{
-			UpdateTime:    time.Now().UnixNano() / 1000,
+			UpdateTime:    time.Now().UnixNano() / int64(time.Millisecond),
 			RegionID:      3,
 			StoreID:       1,
 			HotRegionType: HotRegionTypes[0],
@@ -162,8 +162,8 @@ func (t *testHotRegionStorage) TestHotRegionDelete(c *C) {
 	store.flush()
 	store.delete()
 	iter := store.NewIterator(HotRegionTypes,
-		deleteDate.UnixNano()/1000,
-		time.Now().UnixNano()/1000)
+		deleteDate.UnixNano()/int64(time.Millisecond),
+		time.Now().UnixNano()/int64(time.Millisecond))
 	next, err := iter.Next()
 	c.Assert(err, IsNil)
 	c.Assert(reflect.DeepEqual(&hotRegionStorages[2], next), IsTrue)
