@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	collector "github.com/tikv/pd/pkg/cpu_collector"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
@@ -103,6 +104,8 @@ type Server struct {
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
+
+	cpuCollector *collector.CPUCollector
 
 	// for PD leader election.
 	member *member.Member
@@ -357,6 +360,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
+	s.cpuCollector = collector.NewCPUCollector(time.Second)
+	s.cpuCollector.Start(ctx)
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
 	s.member.SetMemberDeployPath(s.member.ID())
