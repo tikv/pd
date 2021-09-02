@@ -34,9 +34,13 @@ var (
 	tiflashCount = 9
 )
 
+// newBenchCluster store region count is same with storeID and
+// the tolerate define storeCount that store can elect candidate but not should balance
+// so the case  bench the worst scene
 func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombstoneEnable bool) *mockcluster.Cluster {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
+	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
 	opt.SetPlacementRuleEnabled(ruleEnable)
 
 	if labelEnable {
@@ -56,7 +60,7 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 				label["az"] = az
 				label["rack"] = rack
 				label["host"] = host
-				tc.AddLabelsStore(storeID, regionCount, label)
+				tc.AddLabelsStore(storeID, int(storeID), label)
 				storeID++
 			}
 			for j := 0; j < regionCount; j++ {
