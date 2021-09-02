@@ -68,9 +68,10 @@ import (
 )
 
 const (
-	etcdTimeout           = time.Second * 3
-	serverMetricsInterval = time.Minute
-	leaderTickInterval    = 50 * time.Millisecond
+	etcdTimeout            = time.Second * 3
+	serverMetricsInterval  = time.Minute
+	leaderTickInterval     = 50 * time.Millisecond
+	cpuCollecttingInterval = time.Second
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
@@ -360,7 +361,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.cpuCollector = collector.NewCPUCollector(time.Second)
+	s.cpuCollector = collector.NewCPUCollector(cpuCollecttingInterval)
 	s.cpuCollector.Start(ctx)
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
@@ -756,6 +757,11 @@ func (s *Server) GetAllocator() id.Allocator {
 // GetTSOAllocatorManager returns the manager of TSO Allocator.
 func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
 	return s.tsoAllocatorManager
+}
+
+// GetCPUCollector returns the CPU collector.
+func (s *Server) GetCPUCollector() *collector.CPUCollector {
+	return s.cpuCollector
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.

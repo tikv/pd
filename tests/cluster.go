@@ -380,6 +380,11 @@ func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
 	return s.server.GetTSOAllocatorManager()
 }
 
+// GetCPUUsage returns the server's CPU usage.
+func (s *TestServer) GetCPUUsage() float64 {
+	return s.server.GetCPUCollector().GetCPUUsage()
+}
+
 // TestCluster is only for test.
 type TestCluster struct {
 	config  *clusterConfig

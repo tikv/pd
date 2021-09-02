@@ -133,13 +133,16 @@ func (s *serverTestSuite) TestLeader(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	leader1 := cluster.WaitLeader()
-	c.Assert(leader1, Not(Equals), "")
+	leader := cluster.WaitLeader()
+	c.Assert(leader, Not(Equals), "")
 
-	err = cluster.GetServer(leader1).Stop()
+	leaderServer := cluster.GetServer(leader)
+	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
 	testutil.WaitUntil(c, func(c *C) bool {
-		leader := cluster.GetLeader()
-		return leader != leader1
+		curLeader := cluster.GetLeader()
+		return curLeader != leader
 	})
+	// Incidentally test the CPU usage collectting.
+	c.Assert(leaderServer.GetCPUUsage(), Greater, 0.0)
 }
