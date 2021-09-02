@@ -70,6 +70,7 @@ type balanceRegionSchedulerConfig struct {
 
 type balanceRegionScheduler struct {
 	*BaseScheduler
+	*retryQuota
 	conf         *balanceRegionSchedulerConfig
 	opController *schedule.OperatorController
 	filters      []filter.Filter
@@ -82,6 +83,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 	base := NewBaseScheduler(opController)
 	scheduler := &balanceRegionScheduler{
 		BaseScheduler: base,
+		retryQuota:    newRetryQuota(balanceRegionRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceRegionCounter,
@@ -148,8 +150,8 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	})
 	for _, source := range stores {
 		sourceID := source.GetID()
-
-		for i := 0; i < balanceRegionRetryLimit; i++ {
+		retryLimit := s.retryQuota.GetLimit(source)
+		for i := 0; i < retryLimit; i++ {
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
 			region := cluster.RandPendingRegion(sourceID, s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster), opt.AllowBalanceEmptyRegion(cluster))
@@ -186,11 +188,14 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 
 			oldPeer := region.GetStorePeer(sourceID)
 			if op := s.transferPeer(cluster, region, oldPeer); op != nil {
+				s.retryQuota.ResetLimit(source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}
 			}
 		}
+		s.retryQuota.Attenuate(source)
 	}
+	s.retryQuota.GC(stores)
 	return nil
 }
 
