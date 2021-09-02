@@ -150,11 +150,12 @@ func FitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule)
 }
 
 type fitWorker struct {
-	stores  []*core.StoreInfo
-	bestFit RegionFit  // update during execution
-	peers   []*fitPeer // p.selected is updated during execution.
-	rules   []*Rule
-	exit    bool
+	stores        []*core.StoreInfo
+	bestFit       RegionFit  // update during execution
+	peers         []*fitPeer // p.selected is updated during execution.
+	rules         []*Rule
+	needIsolation bool
+	exit          bool
 }
 
 func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
@@ -171,10 +172,11 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 	sort.Slice(peers, func(i, j int) bool { return peers[i].GetId() < peers[j].GetId() })
 
 	return &fitWorker{
-		stores:  stores,
-		bestFit: RegionFit{RuleFits: make([]*RuleFit, len(rules))},
-		peers:   peers,
-		rules:   rules,
+		stores:        stores,
+		bestFit:       RegionFit{RuleFits: make([]*RuleFit, len(rules))},
+		peers:         peers,
+		needIsolation: needIsolation(rules),
+		rules:         rules,
 	}
 }
 
@@ -193,7 +195,7 @@ func (w *fitWorker) fitRule(index int) bool {
 	if index >= len(w.rules) {
 		// If there is no isolation level and we already find one solution, we can early exit searching instead of
 		// searching the whole cases.
-		if w.bestFit.IsSatisfied() && !needIsolation(w.rules) {
+		if w.bestFit.IsSatisfied() && !w.needIsolation {
 			w.exit = true
 		}
 		return false
