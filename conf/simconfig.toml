@@ -28,11 +28,4 @@ max-store-down-time = "30s"
 leader-schedule-limit = 32
 region-schedule-limit = 128
 replica-schedule-limit = 32
-<<<<<<< HEAD
 merge-schedule-limit = 32
-## TODO:Find a better place to put this config
-hot-regions-reserved-days= "30"
-hot-regions-write-interval= "20m"
-=======
-merge-schedule-limit = 32
->>>>>>> ffe81b849e207899ca8c0a4bbd2673713a398432
