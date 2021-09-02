@@ -347,7 +347,7 @@ func isolationScore(peers []*fitPeer, labels []string) float64 {
 
 func needIsolation(rules []*Rule) bool {
 	for _, rule := range rules {
-		if len(rule.IsolationLevel) > 0 {
+		if len(rule.LocationLabels) > 0 {
 			return true
 		}
 	}
