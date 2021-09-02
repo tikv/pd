@@ -46,6 +46,8 @@ func NewCPUCollector(interval time.Duration) *CPUCollector {
 func (collector *CPUCollector) Start(ctx context.Context) {
 	collector.once.Do(func() {
 		go func() {
+			// Clear the usage when exit.
+			defer collector.usage.Store(0.0)
 			for {
 				select {
 				case <-ctx.Done():
@@ -56,10 +58,12 @@ func (collector *CPUCollector) Start(ctx context.Context) {
 				if err != nil {
 					log.Error("get cpu usage percent meets error",
 						zap.Duration("interval", collector.interval), errs.ZapError(err))
+					return
 				}
 				if len(usagePercent) <= 0 {
 					log.Warn("get empty cpu usage percent result",
 						zap.Duration("interval", collector.interval))
+					continue
 				}
 				collector.usage.Store(usagePercent[0])
 			}
