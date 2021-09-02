@@ -154,6 +154,7 @@ type fitWorker struct {
 	bestFit RegionFit  // update during execution
 	peers   []*fitPeer // p.selected is updated during execution.
 	rules   []*Rule
+	exit    bool
 }
 
 func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
@@ -186,7 +187,15 @@ func (w *fitWorker) run() {
 // Index specifies the position of the rule.
 // returns true if it replaces `bestFit` with a better alternative.
 func (w *fitWorker) fitRule(index int) bool {
+	if w.exit {
+		return false
+	}
 	if index >= len(w.rules) {
+		// If there is no isolation level and we already find one solution, we can early exit searching instead of
+		// searching the whole cases.
+		if w.bestFit.IsSatisfied() && !needIsolation(w.rules) {
+			w.exit = true
+		}
 		return false
 	}
 
@@ -227,6 +236,9 @@ func (w *fitWorker) enumPeers(candidates, selected []*fitPeer, index int, count 
 		p.selected = true
 		better = w.enumPeers(candidates[i+1:], append(selected, p), index, count) || better
 		p.selected = false
+		if w.exit {
+			break
+		}
 	}
 	return better
 }
@@ -331,4 +343,13 @@ func isolationScore(peers []*fitPeer, labels []string) float64 {
 		}
 	}
 	return score
+}
+
+func needIsolation(rules []*Rule) bool {
+	for _, rule := range rules {
+		if len(rule.IsolationLevel) > 0 {
+			return true
+		}
+	}
+	return false
 }
