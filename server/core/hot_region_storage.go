@@ -51,7 +51,6 @@ type HotRegionStorage struct {
 	compactionCountdown     int
 	hotRegionInfoCtx        context.Context
 	hotRegionInfoCancel     context.CancelFunc
-	cluster                 *BasicCluster
 	hotRegionStorageHandler HotRegionStorageHandler
 }
 
@@ -84,12 +83,13 @@ type HistoryHotRegion struct {
 	EncryptionMeta *encryptionpb.EncryptionMeta `json:"encryption_meta,omitempty"`
 }
 
+// HotRegionStorageHandler help hot region storage get hot region info.
 type HotRegionStorageHandler interface {
-	// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from
+	// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion form.
 	PackHistoryHotReadRegions() ([]HistoryHotRegion, error)
-	// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
+	// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion form.
 	PackHistoryHotWriteRegions() ([]HistoryHotRegion, error)
-	// IsLeader return true means this server is leader
+	// IsLeader return true means this server is leader.
 	IsLeader() bool
 }
 
@@ -230,10 +230,8 @@ func (h *HotRegionStorage) pullHotRegionInfo() error {
 	if err != nil {
 		return err
 	}
-	if err := h.packHistoryHotRegions(historyHotWriteRegions, HotRegionTypes[1]); err != nil {
-		return err
-	}
-	return nil
+	err = h.packHistoryHotRegions(historyHotWriteRegions, HotRegionTypes[1])
+	return err
 }
 
 func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotRegion, hotRegionType string) error {

@@ -33,22 +33,22 @@ type MockPackHotRegionInfo struct {
 	historyHotWrites []HistoryHotRegion
 }
 
-// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from
+// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from.
 func (m *MockPackHotRegionInfo) PackHistoryHotReadRegions() ([]HistoryHotRegion, error) {
 	return m.historyHotReads, nil
 }
 
-// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
+// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion form.
 func (m *MockPackHotRegionInfo) PackHistoryHotWriteRegions() ([]HistoryHotRegion, error) {
 	return m.historyHotWrites, nil
 }
 
-// IsLeader return isLeader
+// IsLeader return isLeader.
 func (m *MockPackHotRegionInfo) IsLeader() bool {
 	return m.isLeader
 }
 
-// GenHistoryHotRegions generate history hot region for test
+// GenHistoryHotRegions generate history hot region for test.
 func (m *MockPackHotRegionInfo) GenHistoryHotRegions(num int, updateTime time.Time) {
 	for i := 0; i < num; i++ {
 		historyHotRegion := HistoryHotRegion{
@@ -104,7 +104,7 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 			HotRegionType: HotRegionTypes[0],
 		},
 		{
-			UpdateTime:    now.Add(10*time.Second).UnixNano() /int64(time.Millisecond),
+			UpdateTime:    now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      2,
 			StoreID:       1,
 			HotRegionType: HotRegionTypes[0],
@@ -251,7 +251,7 @@ func BenchmarkCompaction(b *testing.B) {
 		regionStorage.flush()
 		regionStorage.delete()
 	}
-	endTime = newTestHotRegions(regionStorage, *packHotRegionInfo, 144, 1000, endTime)
+	newTestHotRegions(regionStorage, *packHotRegionInfo, 144, 1000, endTime)
 	regionStorage.flush()
 	b.ResetTimer()
 	regionStorage.delete()
