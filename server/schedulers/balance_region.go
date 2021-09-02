@@ -44,6 +44,12 @@ func init() {
 			conf.Ranges = ranges
 			conf.Name = BalanceRegionName
 			conf.Batch = 1
+			if len(args) >= 3 {
+				conf.Batch, err = strconv.Atoi(args[2])
+				if err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 	})
@@ -52,6 +58,7 @@ func init() {
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
+		log.Info("conf", zap.Any("config", conf))
 		return newBalanceRegionScheduler(opController, conf), nil
 	})
 }
@@ -194,8 +201,12 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				result = append(result, op)
 				if len(result) >= s.conf.Batch {
+					log.Info("result", zap.Int("batch", s.conf.Batch))
 					return result
 				}
+				schedule.AddOpInfluence(op, plan.opInfluence, cluster)
+				// change source to pass  remove peer limit
+				break
 			}
 		}
 	}

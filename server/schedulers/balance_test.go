@@ -909,6 +909,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	stream := hbstream.NewTestHeartbeatStreams(s.ctx, tc.ID, tc, false /* no need to run */)
 	oc := schedule.NewOperatorController(s.ctx, tc, stream)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+
 	c.Assert(err, IsNil)
 	opt.SetMaxReplicas(1)
 	// Add stores 1,2,3,4.
@@ -966,6 +967,25 @@ func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
 	} else {
 		c.Assert(operators, IsNil)
 	}
+}
+
+func (s *testBalanceRegionSchedulerSuite) TestBatchScheduler(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(s.ctx, opt)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
+	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", "", "2"}))
+	c.Assert(err, IsNil)
+	// scheduler should 2 ops
+	tc.AddRegionStoreWithLeader(1, 10)
+	tc.AddRegionStoreWithLeader(2, 10)
+	tc.AddRegionStoreWithLeader(3, 10)
+	tc.AddRegionStoreWithLeader(4, 1)
+	tc.AddRegionStoreWithLeader(5, 1)
+	for i := 0; i < 100; i++ {
+		tc.AddRegionWithLearner(uint64(i), 3, []uint64{1, 2}, nil)
+	}
+	ops := sb.Schedule(tc)
+	c.Assert(len(ops), Equals, 2)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestEmptyRegion(c *C) {

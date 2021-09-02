@@ -832,11 +832,14 @@ func (oc *OperatorController) GetFastOpInfluence(cluster opt.Cluster, influence 
 		if !ok {
 			continue
 		}
-		region := cluster.GetRegion(op.RegionID())
-		if region != nil {
-			log.Debug("op influence less than 10s", zap.Uint64("region-id", op.RegionID()))
-			op.TotalInfluence(influence, region)
-		}
+		AddOpInfluence(op, influence, cluster)
+	}
+}
+
+func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster opt.Cluster) {
+	region := cluster.GetRegion(op.RegionID())
+	if region != nil {
+		op.TotalInfluence(influence, region)
 	}
 }
 
@@ -847,10 +850,7 @@ func NewTotalOpInfluence(operators []*operator.Operator, cluster opt.Cluster) op
 	}
 
 	for _, op := range operators {
-		region := cluster.GetRegion(op.RegionID())
-		if region != nil {
-			op.TotalInfluence(influence, region)
-		}
+		AddOpInfluence(op, influence, cluster)
 	}
 
 	return influence
