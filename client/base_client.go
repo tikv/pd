@@ -33,6 +33,12 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	globalDCLocation           = "global"
+	defaultMaxTSOBatchSize     = 10000 // should be higher if client is sending requests in burst
+	defaultMaxTSOBatchInterval = time.Millisecond
+)
+
 // baseClient is a basic client for all other complex client.
 type baseClient struct {
 	urls      []string
@@ -55,10 +61,12 @@ type baseClient struct {
 
 	security SecurityOption
 
-	gRPCDialOptions  []grpc.DialOption
-	timeout          time.Duration
-	maxRetryTimes    int
-	enableForwarding bool
+	gRPCDialOptions         []grpc.DialOption
+	timeout                 time.Duration
+	maxRetryTimes           int
+	enableForwarding        bool
+	maxTSOBatchSize         int
+	maxTSOBatchWaitInterval time.Duration
 }
 
 // SecurityOption records options about tls
@@ -99,18 +107,34 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
+// WithMaxTSOBatchSize configures the client max TSO batch size.
+func WithMaxTSOBatchSize(maxTSOBatchSize int) ClientOption {
+	return func(c *baseClient) {
+		c.maxTSOBatchSize = maxTSOBatchSize
+	}
+}
+
+// WithMaxTSOBatchWaitInterval configures the client max TSO batch wait interval.
+func WithMaxTSOBatchWaitInterval(maxTSOBatchWaitInterval time.Duration) ClientOption {
+	return func(c *baseClient) {
+		c.maxTSOBatchWaitInterval = maxTSOBatchWaitInterval
+	}
+}
+
 // newBaseClient returns a new baseClient.
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption, opts ...ClientOption) (*baseClient, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	c := &baseClient{
-		urls:                 urls,
-		checkLeaderCh:        make(chan struct{}, 1),
-		checkTSODispatcherCh: make(chan struct{}, 1),
-		ctx:                  ctx1,
-		cancel:               cancel,
-		security:             security,
-		timeout:              defaultPDTimeout,
-		maxRetryTimes:        maxInitClusterRetries,
+		urls:                    urls,
+		checkLeaderCh:           make(chan struct{}, 1),
+		checkTSODispatcherCh:    make(chan struct{}, 1),
+		ctx:                     ctx1,
+		cancel:                  cancel,
+		security:                security,
+		timeout:                 defaultPDTimeout,
+		maxRetryTimes:           maxInitClusterRetries,
+		maxTSOBatchSize:         defaultMaxTSOBatchSize,
+		maxTSOBatchWaitInterval: defaultMaxTSOBatchInterval,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -241,8 +265,6 @@ func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grp
 	}
 	return cc.(*grpc.ClientConn), url.(string)
 }
-
-const globalDCLocation = "global"
 
 func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
 	// Clean up the old TSO allocators
