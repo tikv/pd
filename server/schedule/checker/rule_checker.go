@@ -65,16 +65,22 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 }
 
 // CheckWithFit checkWithFit is similar with Checker with placement.RegionFit
-func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) *operator.Operator {
+func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) (op *operator.Operator) {
 	// If the fit is fetched from cache, it seems that the region doesn't need cache
 	if fit.IsCached() {
+		failpoint.Inject("assertShouldNotCache", func() {
+			panic("cached shouldn't be used")
+		})
 		checkerCounter.WithLabelValues("rule_checker", "get-cache").Inc()
 		return nil
 	}
-
-	failpoint.Inject("assertCache", func() {
+	failpoint.Inject("assertShouldCache", func() {
 		panic("cached should be used")
 	})
+
+	// If the fit is calculated by FitRegion, which means we get a new fit result, thus we should
+	// invalid the cache if it exists
+	c.ruleManager.InvalidCache(region.GetID())
 
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
 	c.record.refresh(c.cluster)
