@@ -500,12 +500,12 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 	s.tc.UpdateLeaderCount(1, 16)
 	testcases := []struct {
 		name     string
-		rule     placement.Rule
+		rule     *placement.Rule
 		schedule bool
 	}{
 		{
 			name: "default Rule",
-			rule: placement.Rule{
+			rule: &placement.Rule{
 				GroupID:        "pd",
 				ID:             "default",
 				Index:          1,
@@ -519,7 +519,7 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 		},
 		{
 			name: "single store allowed to be placed leader",
-			rule: placement.Rule{
+			rule: &placement.Rule{
 				GroupID:  "pd",
 				ID:       "default",
 				Index:    1,
@@ -540,7 +540,7 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 		},
 		{
 			name: "2 store allowed to be placed leader",
-			rule: placement.Rule{
+			rule: &placement.Rule{
 				GroupID:  "pd",
 				ID:       "default",
 				Index:    1,
@@ -563,7 +563,7 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 
 	for _, testcase := range testcases {
 		c.Logf(testcase.name)
-		c.Check(s.tc.SetRule(&testcase.rule), IsNil)
+		c.Check(s.tc.SetRule(testcase.rule), IsNil)
 		if testcase.schedule {
 			c.Check(len(s.schedule()), Equals, 1)
 		} else {
