@@ -85,13 +85,6 @@ func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit 
 	}
 }
 
-func (manager *RegionRuleFitCacheManager) cacheExist(regionID uint64) bool {
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	_, ok := manager.caches[regionID]
-	return ok
-}
-
 // RegionRuleFitCache stores regions RegionFit result and involving variables
 type RegionRuleFitCache struct {
 	bestFit *RegionFit

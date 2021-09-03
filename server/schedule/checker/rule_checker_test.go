@@ -624,6 +624,7 @@ func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
 	}
 	s.ruleManager.SetRule(rule)
 	region := s.cluster.GetRegion(1)
+	region = region.Clone(core.WithIncConfVer(), core.WithIncVersion())
 	c.Assert(s.rc.Check(region), IsNil)
 
 	testcases := []struct {
@@ -643,7 +644,7 @@ func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
 					Id:      999,
 					StoreId: 999,
 					Role:    metapb.PeerRole_Voter,
-				}))
+				}), core.WithIncConfVer())
 			}(),
 			stillCached: false,
 		},
@@ -660,18 +661,19 @@ func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
 					Peer:        region.GetPeer(3),
 					DownSeconds: 42,
 				},
-			})),
+			}), ),
 			stillCached: false,
 		},
 	}
 	for _, testcase := range testcases {
+		c.Log(testcase.name)
 		if testcase.stillCached {
 			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldCache", "return(true)"), IsNil)
-			c.Assert(s.rc.Check(testcase.region), IsNil)
+			s.rc.Check(testcase.region)
 			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldCache"), IsNil)
 		} else {
 			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache", "return(true)"), IsNil)
-			c.Assert(s.rc.Check(region), IsNil)
+			s.rc.Check(testcase.region)
 			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache"), IsNil)
 		}
 	}
