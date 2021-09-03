@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -15,6 +16,7 @@ package statistics
 
 import (
 	"context"
+
 	"github.com/tikv/pd/server/core"
 )
 
@@ -41,8 +43,8 @@ func NewHotCache(ctx context.Context, quit <-chan struct{}) *HotCache {
 		quit:           quit,
 		readFlowQueue:  make(chan FlowItemTask, queueCap),
 		writeFlowQueue: make(chan FlowItemTask, queueCap),
-		writeFlow:      NewHotStoresStats(WriteFlow),
-		readFlow:       NewHotStoresStats(ReadFlow),
+		writeFlow:      NewHotPeerCache(WriteFlow),
+		readFlow:       NewHotPeerCache(ReadFlow),
 	}
 	go w.updateItems(w.readFlowQueue, w.runReadTask)
 	go w.updateItems(w.writeFlowQueue, w.runWriteTask)

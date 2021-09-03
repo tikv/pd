@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -66,6 +67,9 @@ func (l *lease) Grant(leaseTimeout int64) error {
 
 // Close releases the lease.
 func (l *lease) Close() error {
+	if l == nil {
+		return nil
+	}
 	// Reset expire time.
 	l.expireTime.Store(time.Time{})
 	// Try to revoke lease to make subsequent elections faster.
@@ -78,6 +82,9 @@ func (l *lease) Close() error {
 // IsExpired checks if the lease is expired. If it returns true,
 // current leader should step down and try to re-elect again.
 func (l *lease) IsExpired() bool {
+	if l == nil {
+		return true
+	}
 	if l.expireTime.Load() == nil {
 		return false
 	}

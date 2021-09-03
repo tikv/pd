@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -78,7 +79,7 @@ var zapLogOnce sync.Once
 func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, cleanUpFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svrs := make([]*server.Server, 0, num)
-	cfgs := server.NewTestMultiConfig(c, num)
+	cfgs := server.NewTestMultiConfig(checkerWithNilAssert(c), num)
 
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {

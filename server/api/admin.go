@@ -8,12 +8,14 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package api
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
@@ -95,7 +97,7 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 }
 
 // Intentionally no swagger mark as it is supposed to be only used in
-// server-to-server.
+// server-to-server. For security reason, it only accepts JSON formatted data.
 func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -103,6 +105,10 @@ func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
+	if !json.Valid(data) {
+		h.rd.Text(w, http.StatusBadRequest, "body should be json format")
+		return
+	}
 	err = h.svr.PersistFile(mux.Vars(r)["file_name"], data)
 	if err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, err.Error())

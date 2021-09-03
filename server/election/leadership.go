@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -52,6 +53,9 @@ type Leadership struct {
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
 	leaderValue string
+
+	keepAliveCtx        context.Context
+	keepAliceCancelFunc context.CancelFunc
 }
 
 // NewLeadership creates a new Leadership.
@@ -123,10 +127,11 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 
 // Keep will keep the leadership available by update the lease's expired time continuously
 func (ls *Leadership) Keep(ctx context.Context) {
-	ls.getLease().KeepAlive(ctx)
+	ls.keepAliveCtx, ls.keepAliceCancelFunc = context.WithCancel(ctx)
+	ls.getLease().KeepAlive(ls.keepAliveCtx)
 }
 
-// Check returns whether the leadership is still available
+// Check returns whether the leadership is still available.
 func (ls *Leadership) Check() bool {
 	return ls != nil && ls.getLease() != nil && !ls.getLease().IsExpired()
 }
@@ -207,10 +212,14 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 	}
 }
 
-// Reset does some defer job such as closing lease, resetting lease etc.
+// Reset does some defer jobs such as closing lease, resetting lease etc.
 func (ls *Leadership) Reset() {
 	if ls == nil || ls.getLease() == nil {
 		return
 	}
+	if ls.keepAliceCancelFunc != nil {
+		ls.keepAliceCancelFunc()
+	}
 	ls.getLease().Close()
+	ls.setLease(nil)
 }

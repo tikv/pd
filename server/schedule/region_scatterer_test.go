@@ -1,3 +1,17 @@
+// Copyright 2021 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package schedule
 
 import (
@@ -125,7 +139,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 		}
 	}
 
-	//Each store should have the same number of peers.
+	// Each store should have the same number of peers.
 	for _, count := range countPeers {
 		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numStores))
 		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numStores))
@@ -299,6 +313,8 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
 	}
 
 	testcases := []struct {

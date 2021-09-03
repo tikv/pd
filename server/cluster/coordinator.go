@@ -4,10 +4,11 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -33,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
@@ -77,7 +79,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
-		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, opController),
+		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:      make(map[string]*scheduleController),
@@ -108,6 +110,8 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
+		// Check priority regions first.
+		c.checkPriorityRegions()
 		// Check suspect regions first.
 		c.checkSuspectRegions()
 		// Check suspect key ranges
@@ -152,6 +156,31 @@ func (c *coordinator) patrolRegions() {
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()
 		})
+	}
+}
+
+// checkPriorityRegions checks priority regions
+func (c *coordinator) checkPriorityRegions() {
+	items := c.checkers.GetPriorityRegions()
+	removes := make([]uint64, 0)
+	regionListGauge.WithLabelValues("priority_list").Set(float64(len(items)))
+	for _, id := range items {
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			removes = append(removes, id)
+			continue
+		}
+		ops := c.checkers.CheckRegion(region)
+		// it should skip if region needs to merge
+		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
+			continue
+		}
+		if !c.opController.ExceedStoreLimit(ops...) {
+			c.opController.AddWaitingOperator(ops...)
+		}
+	}
+	for _, v := range removes {
+		c.checkers.RemovePriorityRegions(v)
 	}
 }
 
@@ -207,7 +236,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 
 func (c *coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
-	regionWaitingListGauge.Set(float64(len(items)))
+	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
 	for _, item := range items {
 		id := item.Key
 		region := c.cluster.GetRegion(id)
@@ -538,7 +567,6 @@ func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ stri
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(0)
-
 		}
 
 		stat, ok = status.AsPeer[storeID]
@@ -552,7 +580,6 @@ func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ stri
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(0)
-
 		}
 	}
 }
@@ -795,8 +822,9 @@ func (s *scheduleController) Stop() {
 
 func (s *scheduleController) Schedule() []*operator.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
+		cacheCluster := opt.NewCacheCluster(s.cluster)
 		// If we have schedule, reset interval to the minimal interval.
-		if op := s.Scheduler.Schedule(s.cluster); op != nil {
+		if op := s.Scheduler.Schedule(cacheCluster); op != nil {
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return op
 		}

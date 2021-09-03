@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -132,20 +133,25 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 }
 
 func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
+	storeInfos := summaryStoreInfos(cluster)
 	storesLoads := cluster.GetStoresLoads()
+	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
+
 	switch typ {
 	case read:
 		s.stLoadInfos[readLeader] = summaryStoresLoad(
+			storeInfos,
 			storesLoads,
-			map[uint64]*Influence{},
 			cluster.RegionReadStats(),
+			isTraceRegionFlow,
 			read, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos[readLeader])
 	case write:
 		s.stLoadInfos[writeLeader] = summaryStoresLoad(
+			storeInfos,
 			storesLoads,
-			map[uint64]*Influence{},
 			cluster.RegionWriteStats(),
+			isTraceRegionFlow,
 			write, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos[writeLeader])
 	}

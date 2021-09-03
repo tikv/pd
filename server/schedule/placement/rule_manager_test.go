@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -15,9 +16,9 @@ package placement
 
 import (
 	"encoding/hex"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
@@ -107,16 +108,29 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 		{GroupID: "foo", ID: "bar", Role: "learner", Count: 1},
 	}
 	for _, r := range rules {
-		c.Assert(s.manager.SetRule(r), IsNil)
+		c.Assert(s.manager.SetRule(r.Clone()), IsNil)
 	}
 
 	m2 := NewRuleManager(s.store, nil)
 	err := m2.Initialize(3, []string{"no", "labels"})
 	c.Assert(err, IsNil)
 	c.Assert(m2.GetAllRules(), HasLen, 3)
-	c.Assert(m2.GetRule("pd", "default"), DeepEquals, rules[0])
-	c.Assert(m2.GetRule("foo", "baz"), DeepEquals, rules[1])
-	c.Assert(m2.GetRule("foo", "bar"), DeepEquals, rules[2])
+	c.Assert(m2.GetRule("pd", "default").String(), Equals, rules[0].String())
+	c.Assert(m2.GetRule("foo", "baz").String(), Equals, rules[1].String())
+	c.Assert(m2.GetRule("foo", "bar").String(), Equals, rules[2].String())
+}
+
+// https://github.com/tikv/pd/issues/3886
+func (s *testManagerSuite) TestSetAfterGet(c *C) {
+	rule := s.manager.GetRule("pd", "default")
+	rule.Count = 1
+	s.manager.SetRule(rule)
+
+	m2 := NewRuleManager(s.store, nil)
+	err := m2.Initialize(100, []string{})
+	c.Assert(err, IsNil)
+	rule = m2.GetRule("pd", "default")
+	c.Assert(rule.Count, Equals, 1)
 }
 
 func (s *testManagerSuite) checkRules(c *C, rules []*Rule, expect [][2]string) {
@@ -290,6 +304,33 @@ func (s *testManagerSuite) TestGroupConfig(c *C) {
 	c.Assert(s.manager.GetRuleGroups(), DeepEquals, []*RuleGroup{g2})
 }
 
+func (s *testManagerSuite) TestRuleVersion(c *C) {
+	// default rule
+	rule1 := s.manager.GetRule("pd", "default")
+	c.Assert(rule1.Version, Equals, uint64(0))
+	// create new rule
+	newRule := &Rule{GroupID: "g1", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}
+	err := s.manager.SetRule(newRule)
+	c.Assert(err, IsNil)
+	newRule = s.manager.GetRule("g1", "id")
+	c.Assert(newRule.Version, Equals, uint64(0))
+	// update rule
+	newRule = &Rule{GroupID: "g1", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 2}
+	err = s.manager.SetRule(newRule)
+	c.Assert(err, IsNil)
+	newRule = s.manager.GetRule("g1", "id")
+	c.Assert(newRule.Version, Equals, uint64(1))
+	// delete rule
+	err = s.manager.DeleteRule("g1", "id")
+	c.Assert(err, IsNil)
+	// recreate new rule
+	err = s.manager.SetRule(newRule)
+	c.Assert(err, IsNil)
+	// assert version should be 0 again
+	newRule = s.manager.GetRule("g1", "id")
+	c.Assert(newRule.Version, Equals, uint64(0))
+}
+
 func (s *testManagerSuite) TestCheckApplyRules(c *C) {
 	err := checkApplyRules([]*Rule{
 		{
@@ -358,4 +399,84 @@ func (s *testManagerSuite) dhex(hk string) []byte {
 		panic("decode fail")
 	}
 	return k
+}
+
+func (s *testManagerSuite) TestFitRegionCache(c *C) {
+	cachedRegion := mockRegion(3, 0)
+	cachedFit := mockRegionRuleFitCache().bestFit
+	testcases := []struct {
+		name        string
+		region      *core.RegionInfo
+		stores      StoreSet
+		stillCached bool
+	}{
+		{
+			name:        "default",
+			region:      mockRegion(3, 0),
+			stores:      newMockStoresSet(20),
+			stillCached: true,
+		},
+		{
+			name:        "region topo changed",
+			region:      mockRegion(4, 0),
+			stores:      newMockStoresSet(21),
+			stillCached: false,
+		},
+		{
+			name: "region leader changed",
+			region: func() *core.RegionInfo {
+				region := mockRegion(4, 0)
+				region = region.Clone(
+					core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 2}))
+				return region
+			}(),
+			stores:      newMockStoresSet(21),
+			stillCached: false,
+		},
+		{
+			name: "region have down peers",
+			region: func() *core.RegionInfo {
+				region := mockRegion(4, 0)
+				region = region.Clone(core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 2}))
+				region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+					{
+						Peer:        region.GetPeer(3),
+						DownSeconds: 42,
+					},
+				}))
+				return region
+			}(),
+			stores:      newMockStoresSet(21),
+			stillCached: false,
+		},
+	}
+	for _, testcase := range testcases {
+		s.manager.cache.SetCache(cachedRegion, cachedFit)
+		s.manager.FitRegion(testcase.stores, testcase.region)
+		c.Assert(s.manager.cache.cacheExist(testcase.region.GetID()), Equals, testcase.stillCached)
+	}
+
+	s.manager.cache.SetCache(cachedRegion, cachedFit)
+	s.manager.SetRule(&Rule{
+		GroupID: "pd",
+		ID:      "extraRule",
+		Role:    Voter,
+		Count:   1,
+	})
+	region := mockRegion(4, 0)
+	stores := newMockStoresSet(20)
+	s.manager.FitRegion(stores, region)
+	c.Assert(s.manager.cache.cacheExist(region.GetID()), IsFalse)
+
+	// update rule
+	s.manager.cache.SetCache(cachedRegion, cachedFit)
+	s.manager.SetRule(&Rule{
+		GroupID: "pd",
+		ID:      "extraRule",
+		Role:    Follower,
+		Count:   1,
+	})
+	s.manager.FitRegion(stores, region)
+	s.manager.FitRegion(stores, region)
+	c.Assert(s.manager.cache.cacheExist(region.GetID()), IsFalse)
 }

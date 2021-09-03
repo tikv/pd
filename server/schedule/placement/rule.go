@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -64,13 +65,23 @@ type Rule struct {
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers
 	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically
 	IsolationLevel   string            `json:"isolation_level,omitempty"`   // used to isolate replicas explicitly and forcibly
-
-	group *RuleGroup // only set at runtime, no need to {,un}marshal or persist.
+	Version          uint64            `json:"version,omitempty"`           // only set at runtime, add 1 each time rules updated, begin from 0.
+	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"`  // only set at runtime, recorded rule create timestamp
+	group            *RuleGroup        // only set at runtime, no need to {,un}marshal or persist.
 }
 
 func (r *Rule) String() string {
 	b, _ := json.Marshal(r)
 	return string(b)
+}
+
+// Clone returns a copy of Rule.
+func (r *Rule) Clone() *Rule {
+	var clone Rule
+	json.Unmarshal([]byte(r.String()), &clone)
+	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
+	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
+	return &clone
 }
 
 // Key returns (groupID, ID) as the global unique key of a rule.
@@ -88,6 +99,10 @@ func (r *Rule) groupIndex() int {
 		return r.group.Index
 	}
 	return 0
+}
+
+func equalRules(r1, r2 *Rule) bool {
+	return r1.ID == r2.ID && r1.GroupID == r2.GroupID && r1.Version == r2.Version && r1.CreateTimestamp == r2.CreateTimestamp
 }
 
 // RuleGroup defines properties of a rule group.
