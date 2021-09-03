@@ -887,13 +887,13 @@ func BenchmarkPatrolRegion(b *testing.B) {
 		for {
 			if oc.OperatorCount(operator.OpMerge) == mergeLimit {
 				co.cancel()
-				co.wg.Add(1)
 				return
 			}
 		}
 	}()
 	<-listen
 
+	co.wg.Add(1)
 	b.ResetTimer()
 	co.patrolRegions()
 }
