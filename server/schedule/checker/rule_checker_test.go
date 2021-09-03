@@ -18,6 +18,7 @@ import (
 	"context"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/cache"
@@ -31,6 +32,32 @@ import (
 )
 
 var _ = Suite(&testRuleCheckerSuite{})
+var _ = SerialSuites(&testRuleCheckerSerialSuite{})
+
+type testRuleCheckerSerialSuite struct {
+	cluster     *mockcluster.Cluster
+	ruleManager *placement.RuleManager
+	rc          *RuleChecker
+	ctx         context.Context
+	cancel      context.CancelFunc
+}
+
+func (s *testRuleCheckerSerialSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testRuleCheckerSerialSuite) TearDownTest(c *C) {
+	s.cancel()
+}
+
+func (s *testRuleCheckerSerialSuite) SetUpTest(c *C) {
+	cfg := config.NewTestOptions()
+	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
+	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	s.cluster.SetEnablePlacementRules(true)
+	s.ruleManager = s.cluster.RuleManager
+	s.rc = NewRuleChecker(s.cluster, s.ruleManager, cache.NewDefaultCache(10))
+}
 
 type testRuleCheckerSuite struct {
 	cluster     *mockcluster.Cluster
@@ -578,4 +605,29 @@ func (s *testRuleCheckerSuite) TestFixOfflinePeer(c *C) {
 	rule.IsolationLevel = "zone"
 	s.ruleManager.SetRule(rule)
 	c.Assert(s.rc.Check(region), IsNil)
+}
+
+func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddLeaderRegion(1, 1, 3, 4)
+	rule := &placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone"},
+	}
+	s.ruleManager.SetRule(rule)
+	region := s.cluster.GetRegion(1)
+	c.Assert(s.rc.Check(region), IsNil)
+
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertCache", ""), IsNil)
+	c.Assert(s.rc.Check(region), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertCache"), IsNil)
 }
