@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -114,6 +115,21 @@ func PauseLeaderTransfer() StoreCreateOption {
 func ResumeLeaderTransfer() StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.pauseLeaderTransfer = false
+	}
+}
+
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
+// leader to the store
+func SlowStoreEvicted() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.slowStoreEvicted = true
+	}
+}
+
+// SlowStoreRecovered cleans the evicted state of a store.
+func SlowStoreRecovered() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.slowStoreEvicted = false
 	}
 }
 

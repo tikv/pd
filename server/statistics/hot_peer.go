@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -29,12 +30,6 @@ const (
 	QueryDim
 	DimLen
 )
-
-// IsSelectedDim return whether the dim is selected for hot scheduler
-func IsSelectedDim(dim int) bool {
-	// TODO: configure
-	return dim == ByteDim || dim == KeyDim
-}
 
 type dimStat struct {
 	typ         RegionStatKind
@@ -97,7 +92,7 @@ type HotPeerStat struct {
 	needDelete bool
 	isLeader   bool
 	isNew      bool
-	//TODO: remove it when we send peer stat by store info
+	// TODO: remove it when we send peer stat by store info
 	justTransferLeader     bool
 	interval               uint64
 	thresholds             []float64

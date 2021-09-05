@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -167,7 +168,6 @@ func (s *testRuleSuite) TestSet(c *C) {
 				_, ok := testcase.popKeyRange[k]
 				c.Assert(ok, Equals, true)
 			}
-
 		} else {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)
@@ -239,7 +239,9 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 	rule6 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 3}
 
 	s.svr.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
-	s.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default").LocationLabels = []string{"host"}
+	defaultRule := s.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
+	defaultRule.LocationLabels = []string{"host"}
+	s.svr.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
 
 	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
 	c.Assert(err, IsNil)
@@ -795,7 +797,6 @@ func (s *testRuleSuite) TestBundle(c *C) {
 	compareBundle(c, bundles[0], b1)
 	compareBundle(c, bundles[1], b4)
 	compareBundle(c, bundles[2], b5)
-
 }
 
 func (s *testRuleSuite) TestBundleBadRequest(c *C) {

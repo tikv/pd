@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -457,6 +458,21 @@ wait-store-timeout = "120s"
 	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
+}
+
+func (s *testConfigSuite) TestHotRegionConfig(c *C) {
+	cfgData := `
+[schedule]
+hot-regions-reserved-days= 30
+hot-regions-write-interval= "30m"
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta, false)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, time.Minute*30)
+	c.Assert(cfg.Schedule.HotRegionsResevervedDays, Equals, int64(30))
 }
 
 func (s *testConfigSuite) TestConfigClone(c *C) {
