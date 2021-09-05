@@ -142,6 +142,7 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 	defer cancel()
 
 	ticker := time.NewTicker(*interval)
+	defer ticker.Stop()
 
 	s := newStats()
 	total := newStats()
