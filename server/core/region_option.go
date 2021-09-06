@@ -113,6 +113,11 @@ func WithIncVersion() RegionCreateOption {
 		e := region.meta.GetRegionEpoch()
 		if e != nil {
 			e.Version++
+		} else {
+			region.meta.RegionEpoch = &metapb.RegionEpoch{
+				ConfVer: 0,
+				Version: 1,
+			}
 		}
 	}
 }
@@ -133,6 +138,11 @@ func WithIncConfVer() RegionCreateOption {
 		e := region.meta.GetRegionEpoch()
 		if e != nil {
 			e.ConfVer++
+		} else {
+			region.meta.RegionEpoch = &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 0,
+			}
 		}
 	}
 }
