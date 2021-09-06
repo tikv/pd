@@ -317,9 +317,6 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
 			continue
 		}
-		if stats.GetDownSeconds() < uint64(c.cluster.GetOpts().GetMaxStoreDownTime().Seconds()) {
-			continue
-		}
 		return true
 	}
 	return false

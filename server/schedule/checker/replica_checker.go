@@ -110,10 +110,6 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operat
 		if store.DownTime() < r.opts.GetMaxStoreDownTime() {
 			continue
 		}
-		if stats.GetDownSeconds() < uint64(r.opts.GetMaxStoreDownTime().Seconds()) {
-			continue
-		}
-
 		return r.fixPeer(region, storeID, downStatus)
 	}
 	return nil
