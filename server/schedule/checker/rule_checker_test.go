@@ -600,3 +600,73 @@ func (s *testRuleCheckerSuite) TestFixOfflinePeer(c *C) {
 	s.ruleManager.SetRule(rule)
 	c.Assert(s.rc.Check(region), IsNil)
 }
+<<<<<<< HEAD
+=======
+
+func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddLeaderRegion(1, 1, 3, 4)
+	rule := &placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone"},
+	}
+	s.ruleManager.SetRule(rule)
+	region := s.cluster.GetRegion(1)
+	c.Assert(s.rc.Check(region), IsNil)
+
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertCache", ""), IsNil)
+	c.Assert(s.rc.Check(region), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertCache"), IsNil)
+}
+
+// Ref https://github.com/tikv/pd/issues/4045
+func (s *testRuleCheckerSuite) TestSkipFixOrphanPeerIfSelectedPeerisPendingOrDown(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+
+	// set peer3 and peer4 to pending
+	r1 := s.cluster.GetRegion(1)
+	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetStorePeer(3), r1.GetStorePeer(4)}))
+	s.cluster.PutRegion(r1)
+
+	// should not remove extra peer
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+
+	// set peer3 to down-peer
+	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetStorePeer(4)}))
+	r1 = r1.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{
+			Peer:        r1.GetStorePeer(3),
+			DownSeconds: 42,
+		},
+	}))
+	s.cluster.PutRegion(r1)
+
+	// should not remove extra peer
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+
+	// set peer3 to normal
+	r1 = r1.Clone(core.WithDownPeers(nil))
+	s.cluster.PutRegion(r1)
+
+	// should remove extra peer now
+	var remove operator.RemovePeer
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op.Step(0), FitsTypeOf, remove)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+}
+>>>>>>> 53530bf84 (placement: do not delete orphan peers if some peers selected by RuleFit is down or pending (#4067))
