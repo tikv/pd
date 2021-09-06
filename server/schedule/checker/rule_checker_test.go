@@ -661,7 +661,7 @@ func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
 					Peer:        region.GetPeer(3),
 					DownSeconds: 42,
 				},
-			}), ),
+			})),
 			stillCached: false,
 		},
 	}
