@@ -60,7 +60,8 @@ func (manager *RegionRuleFitCacheManager) InvalidAll() {
 	manager.caches = make(map[uint64]*RegionRuleFitCache)
 }
 
-// Check checks whether the region and rules are changed for the stored cache
+// CheckAndGetCache checks whether the region and rules are changed for the stored cache
+// If the check pass, it will return the cache
 func (manager *RegionRuleFitCacheManager) CheckAndGetCache(region *core.RegionInfo,
 	rules []*Rule,
 	stores []*core.StoreInfo) (bool, *RegionFit) {
