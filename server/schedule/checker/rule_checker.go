@@ -64,7 +64,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	return c.CheckWithFit(region, fit)
 }
 
-// CheckWithFit checkWithFit is similar with Checker with placement.RegionFit
+// CheckWithFit is similar with Checker with placement.RegionFit
 func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) (op *operator.Operator) {
 	// If the fit is fetched from cache, it seems that the region doesn't need cache
 	if fit.IsCached() {

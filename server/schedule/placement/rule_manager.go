@@ -324,7 +324,7 @@ func (m *RuleManager) SetRegionFitCache(region *core.RegionInfo, fit *RegionFit)
 	m.cache.SetCache(region, fit)
 }
 
-// InvalidCache invalid cache
+// InvalidCache invalids the cache.
 func (m *RuleManager) InvalidCache(regionID uint64) {
 	m.cache.Invalid(regionID)
 }
