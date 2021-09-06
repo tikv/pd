@@ -23,7 +23,7 @@ NC='\033[0m'
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 BASE_DIR="$(dirname "$DIR")"
 ASSET_FILE_NAME=embedded_assets_handler.go
-ASSET_DEST_PATH=${BASE_DIR}/pkg/dashboard/uiserver/${ASSET_FILE_NAME}
+ASSET_DEST_PATH=${BASE_DIR}/cmd/dashboard/uiserver/${ASSET_FILE_NAME}
 
 
 echo '+ Clean up existing asset file'

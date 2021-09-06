@@ -20,7 +20,7 @@ import (
 
 	. "github.com/pingcap/check"
 
-	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/cmd/dashboard"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 

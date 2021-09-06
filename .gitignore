@@ -14,8 +14,9 @@ default*
 /.dashboard_asset_cache
 /.dashboard_build_temp
 /.tools/bin
-docs/swagger/*
-!docs/swagger/placeholder.go
 *.before
 covprofile
 coverage.tmp
+# Ignore the history code folder
+/pkg/dashboard/*
+/docs/swagger/*

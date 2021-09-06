@@ -12,29 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package swaggerserver
+//go:build swagger_server
+// +build swagger_server
+
+package server
 
 import (
-	"context"
 	"net/http"
 
-	"github.com/tikv/pd/server"
+	httpSwagger "github.com/swaggo/http-swagger"
+	_ "github.com/tikv/pd/cmd/swagger/docs" // nolint: swagger docs
 )
 
-const swaggerPrefix = "/swagger/"
-
-var (
-	swaggerServiceGroup = server.ServiceGroup{
-		Name:       "swagger",
-		Version:    "v1",
-		IsCore:     false,
-		PathPrefix: swaggerPrefix,
-	}
-)
-
-// NewHandler creates a HTTP handler for Swagger.
-func NewHandler(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
-	swaggerHandler := http.NewServeMux()
-	swaggerHandler.Handle(swaggerPrefix, handler())
-	return swaggerHandler, swaggerServiceGroup, nil
+func handler() http.Handler {
+	return httpSwagger.Handler()
 }

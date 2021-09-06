@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build swagger_server
-// +build swagger_server
+//go:build !swagger_server
+// +build !swagger_server
 
-package swaggerserver
+package server
 
 import (
+	"io"
 	"net/http"
-
-	httpSwagger "github.com/swaggo/http-swagger"
-	_ "github.com/tikv/pd/docs/swagger" // nolint: swagger docs
 )
 
 func handler() http.Handler {
-	return httpSwagger.Handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "Swagger UI is not built. Try `make` without `SWAGGER=0`.\n")
+	})
 }

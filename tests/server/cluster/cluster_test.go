@@ -28,7 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
-	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/cmd/dashboard"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"

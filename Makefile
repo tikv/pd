@@ -123,7 +123,7 @@ install-go-tools:
 swagger-spec: export GO111MODULE=on
 swagger-spec: install-go-tools
 	go mod vendor
-	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap/tidb-dashboard --output docs/swagger
+	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap/tidb-dashboard --output cmd/swagger/docs
 	go mod tidy
 	rm -rf vendor
 
@@ -132,8 +132,8 @@ dashboard-ui:
 	./scripts/embed-dashboard-ui.sh
 
 dashboard-replace-distro-info:
-	rm -f pkg/dashboard/distro/distro_info.go
-	cp $(DASHBOARD_DISTRIBUTION_DIR)/distro_info.go pkg/dashboard/distro/distro_info.go
+	rm -f cmd/dashboard/distro/distro_info.go
+	cp $(DASHBOARD_DISTRIBUTION_DIR)/distro_info.go cmd/dashboard/distro/distro_info.go
 
 # Tools
 pd-ctl: export GO111MODULE=on

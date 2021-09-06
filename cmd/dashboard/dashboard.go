@@ -26,11 +26,11 @@ import (
 	"github.com/pingcap/tidb-dashboard/pkg/config"
 	"github.com/pingcap/tidb-dashboard/pkg/uiserver"
 
-	"github.com/tikv/pd/pkg/dashboard/adapter"
+	"github.com/tikv/pd/cmd/dashboard/adapter"
 	// inject distro information to dashboard
-	_ "github.com/tikv/pd/pkg/dashboard/distro"
-	"github.com/tikv/pd/pkg/dashboard/keyvisual"
-	ui "github.com/tikv/pd/pkg/dashboard/uiserver"
+	_ "github.com/tikv/pd/cmd/dashboard/distro"
+	"github.com/tikv/pd/cmd/dashboard/keyvisual"
+	ui "github.com/tikv/pd/cmd/dashboard/uiserver"
 	"github.com/tikv/pd/server"
 )
 

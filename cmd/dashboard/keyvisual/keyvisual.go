@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !swagger_server
-// +build !swagger_server
-
-package swaggerserver
+package keyvisual
 
 import (
-	"io"
-	"net/http"
+	"github.com/pingcap/tidb-dashboard/pkg/keyvisual/region"
+
+	"github.com/tikv/pd/cmd/dashboard/keyvisual/input"
+	"github.com/tikv/pd/server"
 )
 
-func handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "Swagger UI is not built. Try `make` without `SWAGGER=0`.\n")
-	})
+// GenCustomDataProvider generates a custom DataProvider for the dashboard `keyvisual` package.
+func GenCustomDataProvider(srv *server.Server) *region.DataProvider {
+	return &region.DataProvider{
+		PeriodicGetter: input.NewCorePeriodicGetter(srv),
+	}
 }

@@ -12,18 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package keyvisual
+package server
 
 import (
-	"github.com/pingcap/tidb-dashboard/pkg/keyvisual/region"
+	"context"
+	"net/http"
 
-	"github.com/tikv/pd/pkg/dashboard/keyvisual/input"
 	"github.com/tikv/pd/server"
 )
 
-// GenCustomDataProvider generates a custom DataProvider for the dashboard `keyvisual` package.
-func GenCustomDataProvider(srv *server.Server) *region.DataProvider {
-	return &region.DataProvider{
-		PeriodicGetter: input.NewCorePeriodicGetter(srv),
+const swaggerPrefix = "/swagger/"
+
+var (
+	swaggerServiceGroup = server.ServiceGroup{
+		Name:       "swagger",
+		Version:    "v1",
+		IsCore:     false,
+		PathPrefix: swaggerPrefix,
 	}
+)
+
+// NewHandler creates a HTTP handler for Swagger.
+func NewHandler(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
+	swaggerHandler := http.NewServeMux()
+	swaggerHandler.Handle(swaggerPrefix, handler())
+	return swaggerHandler, swaggerServiceGroup, nil
 }
