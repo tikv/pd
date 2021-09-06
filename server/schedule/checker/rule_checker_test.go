@@ -16,7 +16,6 @@ package checker
 
 import (
 	"context"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -625,11 +624,59 @@ func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
 	}
 	s.ruleManager.SetRule(rule)
 	region := s.cluster.GetRegion(1)
+	region = region.Clone(core.WithIncConfVer(), core.WithIncVersion())
 	c.Assert(s.rc.Check(region), IsNil)
 
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertCache", ""), IsNil)
-	c.Assert(s.rc.Check(region), IsNil)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertCache"), IsNil)
+	testcases := []struct {
+		name        string
+		region      *core.RegionInfo
+		stillCached bool
+	}{
+		{
+			name:        "default",
+			region:      region,
+			stillCached: true,
+		},
+		{
+			name: "region topo changed",
+			region: func() *core.RegionInfo {
+				return region.Clone(core.WithAddPeer(&metapb.Peer{
+					Id:      999,
+					StoreId: 999,
+					Role:    metapb.PeerRole_Voter,
+				}), core.WithIncConfVer())
+			}(),
+			stillCached: false,
+		},
+		{
+			name: "region leader changed",
+			region: region.Clone(
+				core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 3})),
+			stillCached: false,
+		},
+		{
+			name: "region have down peers",
+			region: region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+				{
+					Peer:        region.GetPeer(3),
+					DownSeconds: 42,
+				},
+			})),
+			stillCached: false,
+		},
+	}
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		if testcase.stillCached {
+			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldCache", "return(true)"), IsNil)
+			s.rc.Check(testcase.region)
+			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldCache"), IsNil)
+		} else {
+			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache", "return(true)"), IsNil)
+			s.rc.Check(testcase.region)
+			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache"), IsNil)
+		}
+	}
 }
 
 // Ref https://github.com/tikv/pd/issues/4045
