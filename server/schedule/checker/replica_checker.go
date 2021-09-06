@@ -188,6 +188,7 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operat
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return nil
 		}
+<<<<<<< HEAD
 		if store.DownTime() < r.cluster.GetMaxStoreDownTime() {
 			continue
 		}
@@ -196,6 +197,13 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operat
 		}
 
 		return r.fixPeer(region, peer, downStatus)
+=======
+		// Only consider the state of the Store, not `stats.DownSeconds`.
+		if store.DownTime() < r.opts.GetMaxStoreDownTime() {
+			continue
+		}
+		return r.fixPeer(region, storeID, downStatus)
+>>>>>>> 63abda935 (checker: judging that the peer is down is no longer based on DownSeconds (#4078))
 	}
 	return nil
 }
