@@ -317,6 +317,9 @@ func summaryStoresLoad(
 		if !ok {
 			continue
 		}
+		if kind == core.LeaderKind && store.IsBlocked() {
+			continue
+		}
 		keyRate := storeKeyRate[id]
 
 		// Find all hot peers first
