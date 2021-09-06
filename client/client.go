@@ -237,6 +237,8 @@ type client struct {
 
 	// Client options.
 	enableForwarding bool
+	// TODO: configure it with ClientOption.
+	enableFollowerTSOBacth bool
 }
 
 // NewClient creates a PD client.
@@ -548,6 +550,10 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 			cancel()
 		}
 	}()
+	createTSOConnection := c.tryConnect
+	if c.enableFollowerTSOBacth {
+		createTSOConnection = c.tryConnectToBatchProxy
+	}
 	for {
 		// If the tso stream for the corresponding dc-location has not been created yet or needs to be re-created,
 		// we will try to create the stream first.
@@ -565,7 +571,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				needUpdate = false
 			}
 
-			connectionCtx, err = c.tryConnect(dispatcherCtx, dc)
+			connectionCtx, err = createTSOConnection(dispatcherCtx, dc)
 			stream, cancel, streamCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh
 
 			if err != nil || stream == nil {
@@ -651,6 +657,10 @@ type connectionContext struct {
 	streamCh streamCh
 }
 
+// tryConnect will try to connect to the TSO allocator leader. If the connection becomes unreachable
+// and enableForwarding is true, it will create a new connection to a follower to do the forwarding,
+// while a new daemon will be created also to switch back to a normal leader connection ASAP the
+// connection comes back to normal.
 func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectionContext, error) {
 	var (
 		url           string
@@ -719,6 +729,32 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 		}
 	}
 	return connectionContext{}, err
+}
+
+// tryConnectToBatchProxy will create a stream to the TSO allocator follower to do the TSO requests batch to reduce
+// the pressure of its leader.
+func (c *client) tryConnectToBatchProxy(dispatcherCtx context.Context, dc string) (connectionContext, error) {
+	if followerClient, addr := c.followerClient(); followerClient != nil {
+		log.Info("use follower to forward tso stream to do the batch proxy", zap.String("dc", dc), zap.String("addr", addr))
+		forwardedHost, ok := c.getAllocatorLeaderAddrByDCLocation(dc)
+		if !ok {
+			return connectionContext{}, errors.Errorf("cannot find the allocator leader in %s", dc)
+		}
+
+		// create the follower stream
+		cctx, cancel := context.WithCancel(dispatcherCtx)
+		cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
+		stream, err := c.createTsoStream(cctx, cancel, followerClient)
+		if err == nil {
+			forwardedHostTrim := trimHTTPPrefix(forwardedHost)
+			addrTrim := trimHTTPPrefix(addr)
+			requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
+			return connectionContext{stream, cancel, nil}, nil
+		}
+		cancel()
+		return connectionContext{}, err
+	}
+	return connectionContext{}, errors.Errorf("cannot find the follower client in %s", dc)
 }
 
 func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {

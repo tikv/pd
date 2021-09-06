@@ -93,19 +93,10 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 	}, nil
 }
 
+const maxMergeTSORequests = 10000
+
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
-	var (
-		forwardStream     pdpb.PD_TsoClient
-		cancel            context.CancelFunc
-		lastForwardedHost string
-	)
-	defer func() {
-		// cancel the forward stream
-		if cancel != nil {
-			cancel()
-		}
-	}()
 	for {
 		request, err := stream.Recv()
 		if err == io.EOF {
@@ -115,39 +106,29 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 
-		forwardedHost := getForwardedHost(stream.Context())
+		streamCtx := stream.Context()
+		forwardedHost := getForwardedHost(streamCtx)
 		if !s.isLocalRequest(forwardedHost) {
-			if forwardStream == nil || lastForwardedHost != forwardedHost {
-				if cancel != nil {
-					cancel()
-				}
-				client, err := s.getDelegateClient(s.ctx, forwardedHost)
-				if err != nil {
-					return err
-				}
-				// TODO: change it to the info level once the TiKV doesn't use it in a unary way.
-				log.Debug("create TSO forward stream", zap.String("forwarded-host", forwardedHost))
-				forwardStream, cancel, err = s.createTsoForwardStream(client)
-				if err != nil {
-					return err
-				}
-				lastForwardedHost = forwardedHost
-			}
+			s.dispatchTSORequest(&tsoRequest{
+				forwardedHost,
+				request,
+				stream,
+			}, forwardedHost)
+			continue
 
 			// In order to avoid the forwarding stream being canceled, we are not going to handle the EOF before the
 			// forwarding stream responds.
-			// TODO: we should change this part of logic once the TiKV uses this RPC call in the streaming way.
-			if err := forwardStream.Send(request); err != nil {
-				return errors.WithStack(err)
-			}
-			resp, err := forwardStream.Recv()
-			if err != nil {
-				return errors.WithStack(err)
-			}
-			if err := stream.Send(resp); err != nil {
-				return errors.WithStack(err)
-			}
-			continue
+			// if err := forwardStream.Send(request); err != nil {
+			// 	return errors.WithStack(err)
+			// }
+			// resp, err := forwardStream.Recv()
+			// if err != nil {
+			// 	return errors.WithStack(err)
+			// }
+			// if err := stream.Send(resp); err != nil {
+			// 	return errors.WithStack(err)
+			// }
+			// continue
 		}
 
 		start := time.Now()
@@ -163,7 +144,6 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
-
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		response := &pdpb.TsoResponse{
 			Header:    s.header(),
@@ -174,6 +154,84 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 	}
+}
+
+type tsoRequest struct {
+	forwardedHost string
+	request       *pdpb.TsoRequest
+	stream        pdpb.PD_TsoServer
+}
+
+func (s *Server) dispatchTSORequest(request *tsoRequest, forwardedHost string) {
+	tsoRequestChInterface, loaded := s.tsoDispatcher.LoadOrStore(forwardedHost, make(chan *tsoRequest, maxMergeTSORequests))
+	tsoRequestCh := tsoRequestChInterface.(chan *tsoRequest)
+	if !loaded {
+		go s.handleDispatcher(forwardedHost, tsoRequestCh)
+	}
+	tsoRequestCh <- request
+}
+
+func (s *Server) handleDispatcher(forwardedHost string, tsoRequestCh <-chan *tsoRequest) {
+	var (
+		err           error
+		forwardStream pdpb.PD_TsoClient
+		cancel        context.CancelFunc
+		requests      = make([]*tsoRequest, maxMergeTSORequests+1)
+	)
+	for {
+		if forwardStream == nil {
+			client, err := s.getDelegateClient(s.ctx, forwardedHost)
+			if err != nil {
+				goto errHandling
+			}
+			log.Info("create tso forward stream", zap.String("forwarded-host", forwardedHost))
+			forwardStream, cancel, err = s.createTsoForwardStream(client)
+
+		errHandling:
+			if err != nil || forwardStream == nil {
+				select {
+				case <-s.ctx.Done():
+					return
+				default:
+				}
+				log.Error("create tso forwarding stream error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCCreateStream, err))
+				// TODO: stop the whole stream
+				select {
+				case <-time.After(time.Second):
+				case <-s.ctx.Done():
+					return
+				}
+				continue
+			}
+		}
+		select {
+		case first := <-tsoRequestCh:
+			pendingPlus1 := len(tsoRequestCh) + 1
+			requests[0] = first
+			for i := 1; i < pendingPlus1; i++ {
+				requests[i] = <-tsoRequestCh
+			}
+			err = s.processTSORequests(forwardStream, requests[:pendingPlus1])
+		case <-s.ctx.Done():
+			return
+		}
+		// If error happens during tso stream handling, reset stream and run the next trial.
+		if err != nil {
+			select {
+			case <-s.ctx.Done():
+				return
+			default:
+			}
+			log.Error("batch and forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
+			cancel()
+			forwardStream = nil
+		}
+	}
+}
+
+func (s *Server) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []*tsoRequest) error {
+	// TODO: merge the TSO requests and dispatch the response.
+	return nil
 }
 
 // Bootstrap implements gRPC PDServer.
