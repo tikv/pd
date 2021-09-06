@@ -678,3 +678,45 @@ func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
 		}
 	}
 }
+
+// Ref https://github.com/tikv/pd/issues/4045
+func (s *testRuleCheckerSuite) TestSkipFixOrphanPeerIfSelectedPeerisPendingOrDown(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+
+	// set peer3 and peer4 to pending
+	r1 := s.cluster.GetRegion(1)
+	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetStorePeer(3), r1.GetStorePeer(4)}))
+	s.cluster.PutRegion(r1)
+
+	// should not remove extra peer
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+
+	// set peer3 to down-peer
+	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetStorePeer(4)}))
+	r1 = r1.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{
+			Peer:        r1.GetStorePeer(3),
+			DownSeconds: 42,
+		},
+	}))
+	s.cluster.PutRegion(r1)
+
+	// should not remove extra peer
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+
+	// set peer3 to normal
+	r1 = r1.Clone(core.WithDownPeers(nil))
+	s.cluster.PutRegion(r1)
+
+	// should remove extra peer now
+	var remove operator.RemovePeer
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op.Step(0), FitsTypeOf, remove)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+}
