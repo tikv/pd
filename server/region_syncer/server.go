@@ -106,6 +106,7 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 	var stats []*pdpb.RegionStat
 	var leaders []*metapb.Peer
 	ticker := time.NewTicker(syncerKeepAliveInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-quit:
