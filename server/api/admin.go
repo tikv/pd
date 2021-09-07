@@ -14,12 +14,8 @@
 package api
 
 import (
-<<<<<<< HEAD
-	"io/ioutil"
-=======
 	"encoding/json"
-	"io"
->>>>>>> bf3973498 (api: restrict persist-file to only accept JSON data (#3969))
+	"io/ioutil"
 	"net/http"
 	"strconv"
 
