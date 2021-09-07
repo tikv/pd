@@ -35,7 +35,7 @@ import (
 const maxTargetRegionSize = 500
 
 // When a region has label `merge_option=deny`, skip merging the region.
-// If label value is `allow` or other values, it will be treated as `allow`.
+// If label value is `allow` or other value, it will be treated as `allow`.
 const (
 	mergeOptionLabel     = "merge_option"
 	mergeOptionValueDeny = "deny"
