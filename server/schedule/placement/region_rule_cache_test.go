@@ -149,7 +149,9 @@ func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
 
 func mockRegionRuleFitCache() *RegionRuleFitCache {
 	return &RegionRuleFitCache{
-		region: mockRegion(3, 0),
+		region:       toRegionCache(mockRegion(3, 0)),
+		regionStores: toStoreCacheList(mockStores(3)),
+		rules:        toRuleCacheList(addExtraRules(0)),
 		bestFit: &RegionFit{
 			regionStores: mockStores(3),
 			rules:        addExtraRules(0),
