@@ -13,6 +13,7 @@ require (
 	github.com/spf13/cobra v1.0.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/cmd v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/tools v0.0.0-00010101000000-000000000000
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.uber.org/goleak v1.1.10
 	google.golang.org/grpc v1.26.0
@@ -21,4 +22,5 @@ require (
 replace (
 	github.com/tikv/pd => ../
 	github.com/tikv/pd/cmd => ../cmd
+	github.com/tikv/pd/tools => ../tools
 )
