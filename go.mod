@@ -4,10 +4,11 @@ go 1.16
 
 require (
 	github.com/BurntSushi/toml v0.3.1
-	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/aws/aws-sdk-go v1.35.3
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
+	github.com/chzyer/logex v1.1.10 // indirect
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
+	github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1 // indirect
 	github.com/coreos/go-semver v0.3.0
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f
 	github.com/docker/go-units v0.4.0
@@ -16,7 +17,6 @@ require (
 	github.com/golang/protobuf v1.3.4
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
-	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/juju/ratelimit v1.0.1
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/mgechev/revive v1.0.2
@@ -31,7 +31,6 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20210819164333-bd5706b9d9f2
 	github.com/pingcap/log v0.0.0-20210625125904-98ed8e2eb1c7
 	github.com/pingcap/sysutil v0.0.0-20210730114356-fcd8a63f68c5
-	github.com/pingcap/tidb-dashboard v0.0.0-20210903143224-ee42b1db0c90
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.6.0
@@ -40,7 +39,6 @@ require (
 	github.com/sirupsen/logrus v1.2.0
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
-	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
 	github.com/swaggo/swag v1.6.6-0.20200529100950-7c765ddd0476
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
 	github.com/unrolled/render v1.0.1
@@ -50,6 +48,8 @@ require (
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.uber.org/goleak v1.1.10
 	go.uber.org/zap v1.16.0
+	golang.org/x/lint v0.0.0-20201208152925-83fdc39ff7b5 // indirect
+	golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4 // indirect
 	golang.org/x/sys v0.0.0-20210831042530-f4d43177bf5e // indirect
 	golang.org/x/tools v0.0.0-20210112230658-8b4aab62c064
 	google.golang.org/grpc v1.26.0
