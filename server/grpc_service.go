@@ -98,7 +98,6 @@ const maxMergeTSORequests = 10000
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 	errCh := make(chan error)
-	defer close(errCh)
 	doneCh := make(chan struct{})
 	defer close(doneCh)
 	ctx, cancel := context.WithCancel(stream.Context())
@@ -197,6 +196,7 @@ func (s *Server) handleDispatcher(ctx context.Context, forwardedHost string, tso
 						return
 					}
 				case errCh <- err:
+					close(errCh)
 					return
 				}
 			}
@@ -220,6 +220,7 @@ func (s *Server) handleDispatcher(ctx context.Context, forwardedHost string, tso
 						return
 					}
 				case errCh <- err:
+					close(errCh)
 					return
 				}
 			}
