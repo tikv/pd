@@ -221,6 +221,13 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
+// WithTSOBatchProxy configures the client with follower TSO batch proxy.
+func WithTSOBatchProxy(enableFollowerTSOBacth bool) ClientOption {
+	return func(c *client) {
+		c.enableFollowerTSOBacth = enableFollowerTSOBacth
+	}
+}
+
 type client struct {
 	*baseClient
 	// tsoDispatcher is used to dispatch different TSO requests to

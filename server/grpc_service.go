@@ -97,7 +97,18 @@ const maxMergeTSORequests = 10000
 
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
+	errCh := make(chan error)
+	defer close(errCh)
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
 	for {
+		select {
+		case err := <-errCh:
+			return errors.WithStack(err)
+		default:
+		}
 		request, err := stream.Recv()
 		if err == io.EOF {
 			return nil
@@ -109,26 +120,12 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		streamCtx := stream.Context()
 		forwardedHost := getForwardedHost(streamCtx)
 		if !s.isLocalRequest(forwardedHost) {
-			s.dispatchTSORequest(&tsoRequest{
+			s.dispatchTSORequest(ctx, &tsoRequest{
 				forwardedHost,
 				request,
 				stream,
-			}, forwardedHost)
+			}, forwardedHost, doneCh, errCh)
 			continue
-
-			// In order to avoid the forwarding stream being canceled, we are not going to handle the EOF before the
-			// forwarding stream responds.
-			// if err := forwardStream.Send(request); err != nil {
-			// 	return errors.WithStack(err)
-			// }
-			// resp, err := forwardStream.Recv()
-			// if err != nil {
-			// 	return errors.WithStack(err)
-			// }
-			// if err := stream.Send(resp); err != nil {
-			// 	return errors.WithStack(err)
-			// }
-			// continue
 		}
 
 		start := time.Now()
@@ -162,16 +159,18 @@ type tsoRequest struct {
 	stream        pdpb.PD_TsoServer
 }
 
-func (s *Server) dispatchTSORequest(request *tsoRequest, forwardedHost string) {
+func (s *Server) dispatchTSORequest(ctx context.Context, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error) {
 	tsoRequestChInterface, loaded := s.tsoDispatcher.LoadOrStore(forwardedHost, make(chan *tsoRequest, maxMergeTSORequests))
 	tsoRequestCh := tsoRequestChInterface.(chan *tsoRequest)
 	if !loaded {
-		go s.handleDispatcher(forwardedHost, tsoRequestCh)
+		go s.handleDispatcher(ctx, forwardedHost, tsoRequestCh, doneCh, errCh)
 	}
 	tsoRequestCh <- request
 }
 
-func (s *Server) handleDispatcher(forwardedHost string, tsoRequestCh <-chan *tsoRequest) {
+func (s *Server) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, doneCh <-chan struct{}, errCh chan<- error) {
+	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
+	defer ctxCancel()
 	var (
 		err           error
 		forwardStream pdpb.PD_TsoClient
@@ -180,7 +179,7 @@ func (s *Server) handleDispatcher(forwardedHost string, tsoRequestCh <-chan *tso
 	)
 	for {
 		if forwardStream == nil {
-			client, err := s.getDelegateClient(s.ctx, forwardedHost)
+			client, err := s.getDelegateClient(ctx, forwardedHost)
 			if err != nil {
 				goto errHandling
 			}
@@ -189,21 +188,21 @@ func (s *Server) handleDispatcher(forwardedHost string, tsoRequestCh <-chan *tso
 
 		errHandling:
 			if err != nil || forwardStream == nil {
-				select {
-				case <-s.ctx.Done():
-					return
-				default:
-				}
 				log.Error("create tso forwarding stream error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCCreateStream, err))
-				// TODO: stop the whole stream
 				select {
-				case <-time.After(time.Second):
-				case <-s.ctx.Done():
+				case <-dispatcherCtx.Done():
+					return
+				case _, ok := <-doneCh:
+					if !ok {
+						return
+					}
+				case errCh <- err:
 					return
 				}
-				continue
 			}
+			defer cancel()
 		}
+
 		select {
 		case first := <-tsoRequestCh:
 			pendingPlus1 := len(tsoRequestCh) + 1
@@ -211,26 +210,77 @@ func (s *Server) handleDispatcher(forwardedHost string, tsoRequestCh <-chan *tso
 			for i := 1; i < pendingPlus1; i++ {
 				requests[i] = <-tsoRequestCh
 			}
-			err = s.processTSORequests(forwardStream, requests[:pendingPlus1])
-		case <-s.ctx.Done():
-			return
-		}
-		// If error happens during tso stream handling, reset stream and run the next trial.
-		if err != nil {
-			select {
-			case <-s.ctx.Done():
-				return
-			default:
+			if err = s.processTSORequests(forwardStream, requests[:pendingPlus1]); err != nil {
+				log.Error("batch and forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
+				select {
+				case <-dispatcherCtx.Done():
+					return
+				case _, ok := <-doneCh:
+					if !ok {
+						return
+					}
+				case errCh <- err:
+					return
+				}
 			}
-			log.Error("batch and forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
-			cancel()
-			forwardStream = nil
+		case <-dispatcherCtx.Done():
+			return
 		}
 	}
 }
 
 func (s *Server) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []*tsoRequest) error {
-	// TODO: merge the TSO requests and dispatch the response.
+	// Merge the requests
+	count := uint32(0)
+	for _, request := range requests {
+		count += request.request.GetCount()
+	}
+	req := &pdpb.TsoRequest{
+		Header: requests[0].request.GetHeader(),
+		Count:  count,
+		// Every request in the same stream will have the same dc-location,
+		// so we don't need to consider the different dc-locations here.
+		DcLocation: requests[0].request.GetDcLocation(),
+	}
+	// Send to the leader stream.
+	if err := forwardStream.Send(req); err != nil {
+		return err
+	}
+	resp, err := forwardStream.Recv()
+	if err != nil {
+		return err
+	}
+	// Split the response
+	physical, logical, suffixBits := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
+	// logical is the highest ts here, we need to do the subtracting before we finish each TSO request.
+	firstLogical := addLogical(logical, -int64(count)+1, suffixBits)
+	return s.finishTSORequest(requests, physical, firstLogical, suffixBits)
+}
+
+// Because of the suffix, we need to shift the count before we add it to the logical part.
+func addLogical(logical, count int64, suffixBits uint32) int64 {
+	return logical + count<<suffixBits
+}
+
+func (s *Server) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32) error {
+	countSum := int64(0)
+	for i := 0; i < len(requests); i++ {
+		count := requests[i].request.GetCount()
+		countSum += int64(count)
+		response := &pdpb.TsoResponse{
+			Header: s.header(),
+			Count:  count,
+			Timestamp: &pdpb.Timestamp{
+				Physical:   physical,
+				Logical:    addLogical(firstLogical, countSum, suffixBits),
+				SuffixBits: suffixBits,
+			},
+		}
+		// Send back to the client.
+		if err := requests[i].stream.Send(response); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
