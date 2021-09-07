@@ -4,10 +4,13 @@ go 1.16
 
 require (
 	github.com/BurntSushi/toml v0.3.1
+	github.com/chzyer/logex v1.1.10 // indirect
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
+	github.com/chzyer/test v0.0.0-20210722231415-061457976a23 // indirect
 	github.com/go-echarts/go-echarts v1.0.0
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/mgechev/revive v1.0.2
+	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
 	github.com/pingcap/errors v0.11.5-0.20201126102027-b0a155152ca3
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
