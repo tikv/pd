@@ -196,6 +196,9 @@ func (tbc *tsoBatchController) fetchAllPendingRequests(ctx context.Context) bool
 
 	// This loop is for trying best to collect more requests, so we use `tbc.maxBatchSize` here.
 	for tbc.collectedRequestCount < tbc.maxBatchSize {
+		if len(tbc.tsoRequestCh) == 0 {
+			return true
+		}
 		select {
 		case tsoReq := <-tbc.tsoRequestCh:
 			// No more pending TSO requests, just return.
@@ -203,6 +206,8 @@ func (tbc *tsoBatchController) fetchAllPendingRequests(ctx context.Context) bool
 				return true
 			}
 			tbc.pushRequest(tsoReq)
+		case <-ctx.Done():
+			return false
 		default:
 			return true
 		}
@@ -222,22 +227,28 @@ func (tbc *tsoBatchController) shouldFetchMorePendingRequests() bool {
 }
 
 // fetchMorePendingRequests fetches more pending TSO requests from the channel.
-func (tbc *tsoBatchController) fetchMorePendingRequests() {
-	// Try to collect `tbc.bestBatchSize` requests, or wait `tbc.maxBatchWaitInterval`.
-	after := time.NewTimer(tbc.maxBatchWaitInterval)
-	for tbc.collectedRequestCount < tbc.bestBatchSize {
-		select {
-		case tsoReq := <-tbc.tsoRequestCh:
-			// No more pending TSO requests, just return.
-			if tsoReq == nil {
-				return
+// It returns true if everything goes well, otherwise false which should stop the service.
+func (tbc *tsoBatchController) fetchMorePendingRequests(ctx context.Context) bool {
+	// Try to collect `tbc.bestBatchSize` requests, or wait `tbc.maxBatchWaitInterval`
+	// when `tbc.collectedRequestCount` is less than the `tbc.bestBatchSize`.
+	if tbc.collectedRequestCount < tbc.bestBatchSize {
+		after := time.NewTimer(tbc.maxBatchWaitInterval)
+		defer after.Stop()
+		for tbc.collectedRequestCount < tbc.bestBatchSize {
+			select {
+			case tsoReq := <-tbc.tsoRequestCh:
+				// No more pending TSO requests, just return.
+				if tsoReq == nil {
+					return true
+				}
+				tbc.pushRequest(tsoReq)
+			case <-ctx.Done():
+				return false
+			case <-after.C:
+				return true
 			}
-			tbc.pushRequest(tsoReq)
-		case <-after.C:
-			return
 		}
 	}
-	after.Stop()
 
 	// Do an additional non-block try. Here we test the length with `tbc.maxBatchSize` instead
 	// of `tbc.bestBatchSize` because trying best to fetch more requests is necessary so that
@@ -246,13 +257,16 @@ func (tbc *tsoBatchController) fetchMorePendingRequests() {
 		select {
 		case tsoReq := <-tbc.tsoRequestCh:
 			if tsoReq == nil {
-				return
+				return true
 			}
 			tbc.pushRequest(tsoReq)
+		case <-ctx.Done():
+			return false
 		default:
-			return
+			return true
 		}
 	}
+	return true
 }
 
 func (tbc *tsoBatchController) adjustBestBatchSize() {
@@ -662,7 +676,9 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tbc 
 			return
 		}
 		if tbc.shouldFetchMorePendingRequests() {
-			tbc.fetchMorePendingRequests()
+			if !tbc.fetchMorePendingRequests(dispatcherCtx) {
+				return
+			}
 		}
 		tbc.adjustBestBatchSize()
 		done := make(chan struct{})
