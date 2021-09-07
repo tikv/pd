@@ -324,6 +324,33 @@ func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request)
 	h.r.JSON(w, http.StatusOK, "Pause or resume the scheduler successfully.")
 }
 
+// @Tags merge
+// @Summary Pause or resume region merge.
+// @Accept json
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "Pause or resume the scheduler successfully."
+// @Failure 400 {string} string "Bad format request."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /merge [post]
+func (h *schedulerHandler) PauseOrResumeMerge(w http.ResponseWriter, r *http.Request) {
+	var input map[string]int
+	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
+		return
+	}
+
+	t, ok := input["delay"]
+	if !ok {
+		h.r.JSON(w, http.StatusBadRequest, "missing pause time")
+		return
+	}
+	if err := h.PauseOrResumeMergeHandler(int64(t)); err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.r.JSON(w, http.StatusOK, "Pause or resume merge successfully.")
+}
+
 type schedulerConfigHandler struct {
 	svr *server.Server
 	rd  *render.Render

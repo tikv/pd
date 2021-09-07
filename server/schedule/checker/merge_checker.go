@@ -17,6 +17,7 @@ package checker
 import (
 	"bytes"
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/log"
@@ -47,17 +48,20 @@ type MergeChecker struct {
 	opts       *config.PersistOptions
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
+	delayUntil int64
 }
 
 // NewMergeChecker creates a merge checker.
 func NewMergeChecker(ctx context.Context, cluster opt.Cluster) *MergeChecker {
 	opts := cluster.GetOpts()
 	splitCache := cache.NewIDTTL(ctx, time.Minute, opts.GetSplitMergeInterval())
+	now := time.Now()
 	return &MergeChecker{
 		cluster:    cluster,
 		opts:       opts,
 		splitCache: splitCache,
-		startTime:  time.Now(),
+		startTime:  now,
+		delayUntil: now.Unix(),
 	}
 }
 
@@ -77,6 +81,13 @@ func (m *MergeChecker) RecordRegionSplit(regionIDs []uint64) {
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
+
+	delayUntil := atomic.LoadInt64(&m.delayUntil)
+	if time.Now().Unix() < delayUntil {
+		checkerCounter.WithLabelValues("merge_checker", "paused").Inc()
+		return nil
+	}
+
 	expireTime := m.startTime.Add(m.opts.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
 		checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
@@ -157,6 +168,11 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		checkerCounter.WithLabelValues("merge_checker", "larger-source").Inc()
 	}
 	return ops
+}
+
+func (m *MergeChecker) PauseOrResume(t int64) {
+	delayUntil := time.Now().Unix() + t
+	atomic.StoreInt64(&m.delayUntil, delayUntil)
 }
 
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {

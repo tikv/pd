@@ -242,6 +242,24 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 	return err
 }
 
+// PauseOrResumeMergeHandler pauses merge for delay seconds or resume merge
+// t == 0 : resume merge.
+// t > 0 : merge delays t seconds.
+func (h *Handler) PauseOrResumeMergeHandler(t int64) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	if err = c.PauseOrResumeMerge(t); err != nil {
+		if t == 0 {
+			log.Error("can not resume merge", errs.ZapError(err))
+		} else {
+			log.Error("can not pause merge", errs.ZapError(err))
+		}
+	}
+	return err
+}
+
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler(schedulers.BalanceLeaderType)
