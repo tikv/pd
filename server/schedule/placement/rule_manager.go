@@ -310,13 +310,9 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *RegionFit {
 	regionStores := getStoresByRegion(storeSet, region)
 	rules := m.GetRulesForApplyRegion(region)
-	if m.cache.Check(region, rules, regionStores) {
-		fit := m.cache.GetCacheRegionFit(region.GetID())
-		if fit != nil {
-			return fit
-		}
+	if ok, fit := m.cache.CheckAndGetCache(region, rules, regionStores); fit != nil && ok {
+		return fit
 	}
-	m.cache.Invalid(region.GetID())
 	fit := FitRegion(regionStores, region, rules)
 	fit.regionStores = regionStores
 	fit.rules = rules
@@ -326,6 +322,11 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *Reg
 // SetRegionFitCache sets RegionFitCache
 func (m *RuleManager) SetRegionFitCache(region *core.RegionInfo, fit *RegionFit) {
 	m.cache.SetCache(region, fit)
+}
+
+// InvalidCache invalids the cache.
+func (m *RuleManager) InvalidCache(regionID uint64) {
+	m.cache.Invalid(regionID)
 }
 
 func (m *RuleManager) beginPatch() *ruleConfigPatch {
