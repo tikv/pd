@@ -174,7 +174,7 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 	h.Lock()
 	defer h.Unlock()
 
-	h.prepareForBalance(cluster)
+	h.prepareForBalance(typ, cluster)
 
 	switch typ {
 	case read:
@@ -185,13 +185,18 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 	return nil
 }
 
-func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
+// prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
+// each store
+func (h *hotScheduler) prepareForBalance(typ rwType, cluster opt.Cluster) {
 	h.summaryPendingInfluence()
 
 	stores := cluster.GetStores()
 	storesStat := cluster.GetStoresStats()
 	minHotDegree := cluster.GetHotRegionCacheHitsThreshold()
-	{ // update read statistics
+
+	switch typ {
+	case read:
+		// update read statistics
 		regionRead := cluster.RegionReadStats()
 		storeByte := storesStat.GetStoresBytesReadStat()
 		storeKey := storesStat.GetStoresKeysReadStat()
@@ -205,9 +210,8 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			minHotDegree,
 			hotRegionThreshold,
 			read, core.LeaderKind, mixed)
-	}
-
-	{ // update write statistics
+	case write:
+		// update write statistics
 		regionWrite := cluster.RegionWriteStats()
 		storeByte := storesStat.GetStoresBytesWriteStat()
 		storeKey := storesStat.GetStoresKeysWriteStat()
@@ -266,11 +270,11 @@ func getHotRegionThreshold(stats *statistics.StoresStats, typ rwType) [2]uint64 
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
 func (h *hotScheduler) summaryPendingInfluence() {
-	maxZombieDur := h.conf.GetMaxZombieDuration()
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret := make(map[uint64]Influence)
 		pendings := h.pendings[ty]
 		for p := range pendings {
+			maxZombieDur := p.maxZombieDuration
 			weight, needGC := h.calcPendingInfluence(p.op, maxZombieDur)
 			if needGC {
 				id := p.op.RegionID()
@@ -305,9 +309,10 @@ func summaryStoresLoad(
 	hotPeerFilterTy hotPeerFilterType,
 ) map[uint64]*storeLoadDetail {
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
-	allByteSum := 0.0
-	allKeySum := 0.0
-	allCount := 0.0
+	allTiKVByteSum := 0.0
+	allTiKVKeySum := 0.0
+	allTiKVCount := 0
+	allTiKVHotPeersCount := 0
 
 	// Stores without byte rate statistics is not available to schedule.
 	for _, store := range stores {
@@ -320,6 +325,7 @@ func summaryStoresLoad(
 			continue
 		}
 		keyRate := storeKeyRate[id]
+		isTiFlash := core.IsTiFlashStore(store.GetMeta())
 
 		// Find all hot peers first
 		hotPeers := make([]*statistics.HotPeerStat, 0)
@@ -347,9 +353,13 @@ func summaryStoresLoad(
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keySum)
 			}
 		}
-		allByteSum += byteRate
-		allKeySum += keyRate
-		allCount += float64(len(hotPeers))
+
+		if !isTiFlash {
+			allTiKVByteSum += byteRate
+			allTiKVKeySum += keyRate
+			allTiKVCount += 1
+			allTiKVHotPeersCount += len(hotPeers)
+		}
 
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
@@ -365,12 +375,13 @@ func summaryStoresLoad(
 			HotPeers: hotPeers,
 		}
 	}
-	storeLen := float64(len(storeByteRate))
 
+	byteExp := allTiKVByteSum / float64(allTiKVCount)
+	keyExp := allTiKVKeySum / float64(allTiKVCount)
+	countExp := float64(allTiKVHotPeersCount) / float64(allTiKVCount)
+
+	// store expectation byte/key rate and count for each store-load detail.
 	for id, detail := range loadDetail {
-		byteExp := allByteSum / storeLen
-		keyExp := allKeySum / storeLen
-		countExp := allCount / storeLen
 		detail.LoadPred.Future.ExpByteRate = byteExp
 		detail.LoadPred.Future.ExpKeyRate = keyExp
 		detail.LoadPred.Future.ExpCount = countExp
@@ -426,7 +437,7 @@ func isHotPeerFiltered(peer *statistics.HotPeerStat, hotRegionThreshold [2]uint6
 	return isFiltered
 }
 
-func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, rwTy rwType, opTy opType) bool {
+func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, rwTy rwType, opTy opType, maxZombieDur time.Duration) bool {
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
 	if ok {
@@ -434,7 +445,7 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 		return false
 	}
 
-	influence := newPendingInfluence(op, srcStore, dstStore, infl)
+	influence := newPendingInfluence(op, srcStore, dstStore, infl, maxZombieDur)
 	rcTy := toResourceType(rwTy, opTy)
 	h.pendings[rcTy][influence] = struct{}{}
 	h.regionPendings[regionID] = op
@@ -605,7 +616,21 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		}
 	}
 
-	if best == nil || !bs.sche.addPendingInfluence(op, best.srcStoreID, best.dstStoreID, infl, bs.rwTy, bs.opTy) {
+	if best == nil {
+		return nil
+	}
+
+	// Depending on the source of the statistics used, a different ZombieDuration will be used.
+	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
+	var maxZombieDur time.Duration
+	switch {
+	case bs.rwTy == write && bs.opTy == transferLeader:
+		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
+	default:
+		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
+	}
+
+	if !bs.sche.addPendingInfluence(op, best.srcStoreID, best.dstStoreID, infl, bs.rwTy, bs.opTy, maxZombieDur) {
 		return nil
 	}
 
@@ -813,7 +838,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	rank := int64(0)
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
-		// Only consider about key rate.
+		// Only consider key rate.
 		if srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
 			rank = -1
 		}
