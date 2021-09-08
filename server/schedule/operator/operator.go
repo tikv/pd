@@ -149,6 +149,18 @@ func (o *Operator) Status() OpStatus {
 	return o.status.Status()
 }
 
+// CheckAndGetStatus returns operator status after `CheckExpired` and `CheckTimeout`.
+func (o *Operator) CheckAndGetStatus() OpStatus {
+	switch {
+	case o.CheckExpired():
+		return EXPIRED
+	case o.CheckTimeout():
+		return TIMEOUT
+	default:
+		return o.Status()
+	}
+}
+
 // GetReachTimeOf returns the time when operator reaches the given status.
 func (o *Operator) GetReachTimeOf(st OpStatus) time.Time {
 	return o.status.ReachTimeOf(st)

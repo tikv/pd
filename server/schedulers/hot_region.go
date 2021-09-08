@@ -266,22 +266,32 @@ func getHotRegionThreshold(stats *statistics.StoresStats, typ rwType) [2]uint64 
 	}
 }
 
+// summaryPendingInfluence calculate the summary of pending Influence for each store
+// and clean the region from regionInfluence if they have ended operator.
+// It makes each dim rate or count become `weight` times to the origin value.
 func (h *hotScheduler) summaryPendingInfluence() {
+	maxZombieDur := h.conf.GetMaxZombieDuration()
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
-		h.pendingSums[ty] = summaryPendingInfluence(h.pendings[ty], h.calcPendingWeight)
-	}
-	h.gcRegionPendings()
-}
-
-func (h *hotScheduler) gcRegionPendings() {
-	for regionID, op := range h.regionPendings {
-		if op != nil && op.IsEnd() {
-			if time.Now().After(op.GetCreateTime().Add(h.conf.GetMaxZombieDuration())) {
-				log.Debug("gc pending influence in hot region scheduler", zap.Uint64("region-id", regionID), zap.Time("create", op.GetCreateTime()), zap.Time("now", time.Now()), zap.Duration("zombie", h.conf.GetMaxZombieDuration()))
+		ret := make(map[uint64]Influence)
+		pendings := h.pendings[ty]
+		for p := range pendings {
+			weight, needGC := h.calcPendingInfluence(p.op, maxZombieDur)
+			if needGC {
+				id := p.op.RegionID()
+				delete(h.regionPendings, id)
+				delete(pendings, p)
 				schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
-				delete(h.regionPendings, regionID)
+				log.Debug("gc pending influence in hot region scheduler",
+					zap.Uint64("region-id", id),
+					zap.Time("create", p.op.GetCreateTime()),
+					zap.Time("now", time.Now()),
+					zap.Duration("zombie", maxZombieDur))
+				continue
 			}
+			ret[p.to] = ret[p.to].add(&p.origin, weight)
+			ret[p.from] = ret[p.from].add(&p.origin, -weight)
 		}
+		h.pendingSums[ty] = ret
 	}
 }
 
@@ -1104,26 +1114,28 @@ func (h *hotScheduler) copyPendingInfluence(ty resourceType) map[uint64]Influenc
 	return ret
 }
 
-func (h *hotScheduler) calcPendingWeight(op *operator.Operator) float64 {
-	if op.CheckExpired() || op.CheckTimeout() {
-		return 0
-	}
-	status := op.Status()
+// calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]
+func (h *hotScheduler) calcPendingInfluence(op *operator.Operator, maxZombieDur time.Duration) (weight float64, needGC bool) {
+	status := op.CheckAndGetStatus()
 	if !operator.IsEndStatus(status) {
-		return 1
+		return 1, false
 	}
-	switch status {
-	case operator.SUCCESS:
-		zombieDur := time.Since(op.GetReachTimeOf(status))
-		maxZombieDur := h.conf.GetMaxZombieDuration()
-		if zombieDur >= maxZombieDur {
-			return 0
-		}
-		// TODO: use store statistics update time to make a more accurate estimation
-		return float64(maxZombieDur-zombieDur) / float64(maxZombieDur)
-	default:
-		return 0
+
+	// TODO: use store statistics update time to make a more accurate estimation
+	zombieDur := time.Since(op.GetReachTimeOf(status))
+	if zombieDur >= maxZombieDur {
+		weight = 0
+	} else {
+		weight = 1
 	}
+
+	needGC = weight == 0
+	if status != operator.SUCCESS {
+		// CANCELED, REPLACED, TIMEOUT, EXPIRED, etc.
+		// The actual weight is 0, but there is still a delay in GC.
+		weight = 0
+	}
+	return
 }
 
 func (h *hotScheduler) clearPendingInfluence() {

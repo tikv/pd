@@ -190,19 +190,6 @@ func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence)
 	}
 }
 
-func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]Influence {
-	ret := map[uint64]Influence{}
-	for p := range pendings {
-		w := f(p.op)
-		if w == 0 {
-			delete(pendings, p)
-		}
-		ret[p.to] = ret[p.to].add(&p.origin, w)
-		ret[p.from] = ret[p.from].add(&p.origin, -w)
-	}
-	return ret
-}
-
 type storeLoad struct {
 	ByteRate float64
 	KeyRate  float64
