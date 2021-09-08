@@ -194,7 +194,7 @@ func AllowMerge(cluster opt.Cluster, region *core.RegionInfo, adjacent *core.Reg
 		if len(l.GetSplitKeys(start, end)) > 0 {
 			return false
 		}
-		if l.GetRegionLabel(region, mergeOptionLabel) == mergeOptionValueDeny {
+		if l.GetRegionLabel(region, mergeOptionLabel) == mergeOptionValueDeny || l.GetRegionLabel(adjacent, mergeOptionLabel) == mergeOptionValueDeny {
 			return false
 		}
 	}
