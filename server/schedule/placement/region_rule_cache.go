@@ -46,13 +46,6 @@ func NewRegionRuleFitCacheManager() *RegionRuleFitCacheManager {
 	}
 }
 
-// GetCacheRegionFit get RegionFit result by regionID
-func (manager *RegionRuleFitCacheManager) GetCacheRegionFit(regionID uint64) *RegionFit {
-	manager.mu.RLock()
-	defer manager.mu.RUnlock()
-	return manager.caches[regionID].bestFit
-}
-
 // Invalid invalid cache by regionID
 func (manager *RegionRuleFitCacheManager) Invalid(regionID uint64) {
 	manager.mu.Lock()
@@ -67,14 +60,19 @@ func (manager *RegionRuleFitCacheManager) InvalidAll() {
 	manager.caches = make(map[uint64]*RegionRuleFitCache)
 }
 
-// Check checks whether the region and rules are changed for the stored cache
-func (manager *RegionRuleFitCacheManager) Check(region *core.RegionInfo, rules []*Rule, stores []*core.StoreInfo) bool {
+// CheckAndGetCache checks whether the region and rules are changed for the stored cache
+// If the check pass, it will return the cache
+func (manager *RegionRuleFitCacheManager) CheckAndGetCache(region *core.RegionInfo,
+	rules []*Rule,
+	stores []*core.StoreInfo) (bool, *RegionFit) {
 	manager.mu.RLock()
 	defer manager.mu.RUnlock()
 	if cache, ok := manager.caches[region.GetID()]; ok && cache.bestFit != nil {
-		return cache.IsUnchanged(region, rules, stores)
+		if cache.IsUnchanged(region, rules, stores) {
+			return true, cache.bestFit
+		}
 	}
-	return false
+	return false, nil
 }
 
 // SetCache stores RegionFit cache
@@ -86,13 +84,6 @@ func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit 
 		region:  region,
 		bestFit: fit,
 	}
-}
-
-func (manager *RegionRuleFitCacheManager) cacheExist(regionID uint64) bool {
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	_, ok := manager.caches[regionID]
-	return ok
 }
 
 // RegionRuleFitCache stores regions RegionFit result and involving variables
