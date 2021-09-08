@@ -116,6 +116,8 @@ func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 	return syncStream, nil
 }
 
+var regionGuide = core.GenerateRegionGuideFunc(false)
+
 // StartSyncWithLeader starts to sync with leader.
 func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	s.wg.Add(1)
@@ -125,7 +127,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	go func() {
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.
-		err := s.server.GetStorage().LoadRegionsOnce(s.server.GetBasicCluster().CheckAndPutRegion)
+		bc := s.server.GetBasicCluster()
+		storage := s.server.GetStorage()
+		err := storage.LoadRegionsOnce(bc.CheckAndPutRegion)
 		if err != nil {
 			log.Warn("failed to load regions.", errs.ZapError(err))
 		}
@@ -142,9 +146,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				log.Error("cannot establish connection with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
 				continue
 			}
-			defer conn.Close()
 			break
 		}
+		defer conn.Close()
 
 		// Start syncing data.
 		for {
@@ -165,6 +169,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				time.Sleep(time.Second)
 				continue
 			}
+
 			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.GetNextIndex()))
 			for {
 				resp, err := stream.Recv()
@@ -194,7 +199,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						region       *core.RegionInfo
 						regionLeader *metapb.Peer
 					)
-					if len(regionLeaders) > i && regionLeaders[i].Id != 0 {
+					if len(regionLeaders) > i && regionLeaders[i].GetId() != 0 {
 						regionLeader = regionLeaders[i]
 					}
 					if hasStats {
@@ -208,10 +213,22 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						region = core.NewRegionInfo(r, regionLeader)
 					}
 
-					s.server.GetBasicCluster().CheckAndPutRegion(region)
-					err = s.server.GetStorage().SaveRegion(r)
+					origin, err := bc.PreCheckPutRegion(region)
+					if err != nil {
+						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
+						continue
+					}
+					_, saveKV, _, _ := regionGuide(region, origin, true)
+					overlaps := bc.PutRegion(region)
+
+					if saveKV {
+						err = storage.SaveRegion(r)
+					}
 					if err == nil {
 						s.history.Record(region)
+					}
+					for _, old := range overlaps {
+						_ = storage.DeleteRegion(old.GetMeta())
 					}
 				}
 			}
