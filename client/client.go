@@ -237,10 +237,6 @@ func (tbc *tsoBatchController) fetchMorePendingRequests(ctx context.Context) boo
 		for tbc.collectedRequestCount < tbc.bestBatchSize {
 			select {
 			case tsoReq := <-tbc.tsoRequestCh:
-				// No more pending TSO requests, just return.
-				if tsoReq == nil {
-					return true
-				}
 				tbc.pushRequest(tsoReq)
 			case <-ctx.Done():
 				return false
@@ -254,11 +250,11 @@ func (tbc *tsoBatchController) fetchMorePendingRequests(ctx context.Context) boo
 	// of `tbc.bestBatchSize` because trying best to fetch more requests is necessary so that
 	// we can adjust the `tbc.bestBatchSize` dynamically later.
 	for tbc.collectedRequestCount < tbc.maxBatchSize {
+		if len(tbc.tsoRequestCh) == 0 {
+			return true
+		}
 		select {
 		case tsoReq := <-tbc.tsoRequestCh:
-			if tsoReq == nil {
-				return true
-			}
 			tbc.pushRequest(tsoReq)
 		case <-ctx.Done():
 			return false
@@ -269,12 +265,14 @@ func (tbc *tsoBatchController) fetchMorePendingRequests(ctx context.Context) boo
 	return true
 }
 
+// adjustBestBatchSize stabilizes the latency with the AIAD algorithm.
 func (tbc *tsoBatchController) adjustBestBatchSize() {
 	length := tbc.collectedRequestCount
 	if length < tbc.bestBatchSize && tbc.bestBatchSize > 1 {
 		// Waits too long to collect requests, reduce the target batch size.
 		tbc.bestBatchSize--
-	} else if length > tbc.bestBatchSize+4 && tbc.bestBatchSize < tbc.maxBatchSize {
+	} else if length > tbc.bestBatchSize+4 /* Hard-coded number, in order to make `tbc.bestBatchSize` stable */ &&
+		tbc.bestBatchSize < tbc.maxBatchSize {
 		tbc.bestBatchSize++
 	}
 }
