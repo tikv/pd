@@ -58,6 +58,15 @@ var (
 			Help:      "Etcd raft states.",
 		}, []string{"type"})
 
+	tsoProxyBatchSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_tso_proxy_batch_size",
+			Help:      "Bucketed histogram of the batch size of handled requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
+		})
+
 	tsoHandleDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -100,6 +109,7 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatLatency)
 	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
+	prometheus.MustRegister(tsoProxyBatchSize)
 	prometheus.MustRegister(tsoHandleDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)

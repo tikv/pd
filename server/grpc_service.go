@@ -168,42 +168,39 @@ func (s *Server) dispatchTSORequest(ctx context.Context, request *tsoRequest, fo
 }
 
 func (s *Server) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, doneCh <-chan struct{}, errCh chan<- error) {
-	defer s.tsoDispatcher.Delete(forwardedHost)
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
 	defer ctxCancel()
+	defer s.tsoDispatcher.Delete(forwardedHost)
+
 	var (
-		err           error
 		forwardStream pdpb.PD_TsoClient
 		cancel        context.CancelFunc
-		requests      = make([]*tsoRequest, maxMergeTSORequests+1)
 	)
-	for {
-		if forwardStream == nil {
-			client, err := s.getDelegateClient(ctx, forwardedHost)
-			if err != nil {
-				goto errHandling
+	client, err := s.getDelegateClient(ctx, forwardedHost)
+	if err != nil {
+		goto errHandling
+	}
+	log.Info("create tso forward stream", zap.String("forwarded-host", forwardedHost))
+	forwardStream, cancel, err = s.createTsoForwardStream(client)
+errHandling:
+	if err != nil || forwardStream == nil {
+		log.Error("create tso forwarding stream error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCCreateStream, err))
+		select {
+		case <-dispatcherCtx.Done():
+			return
+		case _, ok := <-doneCh:
+			if !ok {
+				return
 			}
-			log.Info("create tso forward stream", zap.String("forwarded-host", forwardedHost))
-			forwardStream, cancel, err = s.createTsoForwardStream(client)
-
-		errHandling:
-			if err != nil || forwardStream == nil {
-				log.Error("create tso forwarding stream error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCCreateStream, err))
-				select {
-				case <-dispatcherCtx.Done():
-					return
-				case _, ok := <-doneCh:
-					if !ok {
-						return
-					}
-				case errCh <- err:
-					close(errCh)
-					return
-				}
-			}
-			defer cancel()
+		case errCh <- err:
+			close(errCh)
+			return
 		}
+	}
+	defer cancel()
 
+	requests := make([]*tsoRequest, maxMergeTSORequests+1)
+	for {
 		select {
 		case first := <-tsoRequestCh:
 			pendingPlus1 := len(tsoRequestCh) + 1
@@ -251,6 +248,7 @@ func (s *Server) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []
 	if err != nil {
 		return err
 	}
+	tsoProxyBatchSize.Observe(float64(count))
 	// Split the response
 	physical, logical, suffixBits := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
 	// logical is the highest ts here, we need to do the subtracting before we finish each TSO request.
