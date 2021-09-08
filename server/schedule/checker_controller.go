@@ -58,6 +58,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			if op := c.ruleChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
 			}
+		} else {
 			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
 		}
 	} else {
@@ -69,19 +70,20 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			if op := c.replicaChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
 			}
+		} else {
+			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
 		}
 	}
 
 	if c.mergeChecker != nil {
-		allowed := opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit()
-		if !allowed {
-			operator.OperatorLimitCounter.WithLabelValues(c.mergeChecker.GetType(), operator.OpMerge.String()).Inc()
-		} else {
+		if opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 			checkerIsBusy = false
 			if ops := c.mergeChecker.Check(region); ops != nil {
 				// It makes sure that two operators can be added successfully altogether.
 				return checkerIsBusy, ops
 			}
+		} else {
+			operator.OperatorLimitCounter.WithLabelValues(c.mergeChecker.GetType(), operator.OpMerge.String()).Inc()
 		}
 	}
 	return checkerIsBusy, nil

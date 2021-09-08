@@ -75,6 +75,7 @@ func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 
 // GetStoresStats gets stores statistics.
 func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
+	mc.StoresStats.FilterUnhealthyStore(mc)
 	return mc.StoresStats
 }
 
@@ -513,6 +514,16 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 		core.SetRegionSize(regionSize),
 	)
 	mc.PutStore(newStore)
+}
+
+// SetStoreEvictLeader set store whether evict leader.
+func (mc *Cluster) SetStoreEvictLeader(storeID uint64, enableEvictLeader bool) {
+	store := mc.GetStore(storeID)
+	if enableEvictLeader {
+		mc.PutStore(store.Clone(core.SetStoreBlock()))
+	} else {
+		mc.PutStore(store.Clone(core.SetStoreUnBlock()))
+	}
 }
 
 func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
