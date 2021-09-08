@@ -243,8 +243,7 @@ type client struct {
 	leaderNetworkFailure int32
 
 	// Client options.
-	enableForwarding bool
-	// TODO: configure it with ClientOption.
+	enableForwarding       bool
 	enableFollowerTSOBacth bool
 }
 
