@@ -168,6 +168,7 @@ func (s *Server) dispatchTSORequest(ctx context.Context, request *tsoRequest, fo
 }
 
 func (s *Server) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, doneCh <-chan struct{}, errCh chan<- error) {
+	defer s.tsoDispatcher.Delete(forwardedHost)
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
 	defer ctxCancel()
 	var (
@@ -239,8 +240,7 @@ func (s *Server) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []
 	req := &pdpb.TsoRequest{
 		Header: requests[0].request.GetHeader(),
 		Count:  count,
-		// Every request in the same stream will have the same dc-location,
-		// so we don't need to consider the different dc-locations here.
+		// TODO: support Local TSO batch proxy forwarding.
 		DcLocation: requests[0].request.GetDcLocation(),
 	}
 	// Send to the leader stream.

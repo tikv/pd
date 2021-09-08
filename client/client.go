@@ -558,7 +558,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 		}
 	}()
 	createTSOConnection := c.tryConnect
-	if c.enableFollowerTSOBacth {
+	if c.enableFollowerTSOBacth && dc == globalDCLocation /* only support Global TSO batch proxy now */ {
 		createTSOConnection = c.tryConnectToBatchProxy
 	}
 	for {
