@@ -286,17 +286,16 @@ func scheduleEvictLeaderOnce(name string, cluster opt.Cluster, storeRanges map[u
 			if region == nil {
 				schedulerCounter.WithLabelValues(name, "no-leader").Inc()
 				continue
-			} else {
-				schedulerCounter.WithLabelValues(name, "pick-unhealthy-region").Inc()
-				unhealthyPeerStores := make(map[uint64]struct{})
-				for _, peer := range region.GetDownPeers() {
-					unhealthyPeerStores[peer.GetPeer().GetStoreId()] = struct{}{}
-				}
-				for _, peer := range region.GetPendingPeers() {
-					unhealthyPeerStores[peer.GetStoreId()] = struct{}{}
-				}
-				filters = append(filters, filter.NewExcludedFilter(EvictLeaderName, nil, unhealthyPeerStores))
 			}
+			schedulerCounter.WithLabelValues(name, "pick-unhealthy-region").Inc()
+			unhealthyPeerStores := make(map[uint64]struct{})
+			for _, peer := range region.GetDownPeers() {
+				unhealthyPeerStores[peer.GetPeer().GetStoreId()] = struct{}{}
+			}
+			for _, peer := range region.GetPendingPeers() {
+				unhealthyPeerStores[peer.GetStoreId()] = struct{}{}
+			}
+			filters = append(filters, filter.NewExcludedFilter(EvictLeaderName, nil, unhealthyPeerStores))
 		}
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true})
