@@ -249,19 +249,10 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return false
 		}
-<<<<<<< HEAD
+		// Only consider the state of the Store, not `stats.DownSeconds`.
 		if store.DownTime() < c.cluster.GetMaxStoreDownTime() {
 			continue
 		}
-		if stats.GetDownSeconds() < uint64(c.cluster.GetMaxStoreDownTime().Seconds()) {
-			continue
-		}
-=======
-		// Only consider the state of the Store, not `stats.DownSeconds`.
-		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
-			continue
-		}
->>>>>>> 63abda935 (checker: judging that the peer is down is no longer based on DownSeconds (#4078))
 		return true
 	}
 	return false
