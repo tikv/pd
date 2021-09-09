@@ -367,7 +367,7 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
-	id := getStoreID(cmd, args)
+	id := getStoreID(cmd, args, false)
 	if id == 0 {
 		return
 	}
@@ -390,8 +390,33 @@ func revokeDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println("store_id should be a number")
 		return
 	}
-	prefix := fmt.Sprintf(storeUpStatePrefix, args[0])
-	_, err := doRequest(cmd, prefix, http.MethodPost)
+
+	prefix := fmt.Sprintf(storePrefix, args[0])
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get store: %s\n", err)
+		return
+	}
+
+	storeInfo := struct {
+		Store struct {
+			ID      int    `json:"id"`
+			Address string `json:"address"`
+			State   int32  `json:"state"`
+		} `json:"store"`
+	}{}
+	if err = json.Unmarshal([]byte(r), &storeInfo); err != nil {
+		cmd.Printf("Failed to parse store info: %s\n", err)
+		return
+	}
+
+	if storeInfo.Store.State != 1 {
+		cmd.Printf("store %v is not offline\n", args[0])
+		return
+	}
+
+	prefix = fmt.Sprintf(storeUpStatePrefix, args[0])
+	_, err = doRequest(cmd, prefix, http.MethodPost)
 	if err != nil {
 		cmd.Printf("Failed to revoke delete store %s: %s\n", args[0], err)
 		return
@@ -400,7 +425,7 @@ func revokeDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func revokeDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
-	id := getStoreID(cmd, args)
+	id := getStoreID(cmd, args, true)
 	if id == 0 {
 		return
 	}
@@ -414,7 +439,7 @@ func revokeDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("Success!")
 }
 
-func getStoreID(cmd *cobra.Command, args []string) int {
+func getStoreID(cmd *cobra.Command, args []string, isRevoke bool) int {
 	if len(args) != 1 {
 		cmd.Usage()
 		return 0
@@ -433,6 +458,7 @@ func getStoreID(cmd *cobra.Command, args []string) int {
 			Store struct {
 				ID      int    `json:"id"`
 				Address string `json:"address"`
+				State   int32  `json:"state"`
 			} `json:"store"`
 		} `json:"stores"`
 	}{}
@@ -445,6 +471,10 @@ func getStoreID(cmd *cobra.Command, args []string) int {
 	id := -1
 	for _, store := range storeInfo.Stores {
 		if store.Store.Address == addr {
+			if isRevoke && store.Store.State != 1 {
+				cmd.Printf("store is not offline: %s\n", addr)
+				return 0
+			}
 			id = store.Store.ID
 			break
 		}
