@@ -283,6 +283,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	args = []string{"-u", pdAddr, "store", "1"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
+	storeInfo = new(api.StoreInfo)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
@@ -305,6 +306,17 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Unknown state: Invalid_state"), IsTrue)
 
+	// store undelete <store_id> command
+	args = []string{"-u", pdAddr, "store", "undelete", "1"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "store", "1"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	storeInfo = new(api.StoreInfo)
+	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
+
 	// store delete addr <address>
 	args = []string{"-u", pdAddr, "store", "delete", "addr", "tikv3"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
@@ -314,9 +326,21 @@ func (s *storeTestSuite) TestStore(c *C) {
 	args = []string{"-u", pdAddr, "store", "3"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
+	storeInfo = new(api.StoreInfo)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
+
+	args = []string{"-u", pdAddr, "store", "undelete", "addr", "tikv3"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(string(output), Equals, "Success!\n")
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "store", "3"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	storeInfo = new(api.StoreInfo)
+	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
 
 	// store remove-tombstone
 	args = []string{"-u", pdAddr, "store", "remove-tombstone"}

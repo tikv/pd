@@ -28,10 +28,11 @@ import (
 )
 
 var (
-	storesPrefix      = "pd/api/v1/stores"
-	storesLimitPrefix = "pd/api/v1/stores/limit"
-	storePrefix       = "pd/api/v1/store/%v"
-	maxStoreLimit     = float64(200)
+	storesPrefix       = "pd/api/v1/stores"
+	storesLimitPrefix  = "pd/api/v1/stores/limit"
+	storePrefix        = "pd/api/v1/store/%v"
+	storeUpStatePrefix = "pd/api/v1/store/%v/state?state=Up"
+	maxStoreLimit      = float64(200)
 )
 
 // NewStoreCommand return a stores subcommand of rootCmd
@@ -42,6 +43,7 @@ func NewStoreCommand() *cobra.Command {
 		Run:   showStoreCommandFunc,
 	}
 	s.AddCommand(NewDeleteStoreCommand())
+	s.AddCommand(NewUnDeleteStoreCommand())
 	s.AddCommand(NewLabelStoreCommand())
 	s.AddCommand(NewSetStoreWeightCommand())
 	s.AddCommand(NewStoreLimitCommand())
@@ -63,7 +65,7 @@ func NewDeleteStoreByAddrCommand() *cobra.Command {
 	return d
 }
 
-// NewDeleteStoreCommand return a  delete subcommand of storeCmd
+// NewDeleteStoreCommand return a delete subcommand of storeCmd
 func NewDeleteStoreCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "delete <store_id>",
@@ -71,6 +73,27 @@ func NewDeleteStoreCommand() *cobra.Command {
 		Run:   deleteStoreCommandFunc,
 	}
 	d.AddCommand(NewDeleteStoreByAddrCommand())
+	return d
+}
+
+// NewUnDeleteStoreByAddrCommand returns a subcommand of undelete
+func NewUnDeleteStoreByAddrCommand() *cobra.Command {
+	d := &cobra.Command{
+		Use:   "addr <address>",
+		Short: "undelete store by its address",
+		Run:   unDeleteStoreCommandByAddrFunc,
+	}
+	return d
+}
+
+// NewUnDeleteStoreCommand return a undelete subcommand of storeCmd
+func NewUnDeleteStoreCommand() *cobra.Command {
+	d := &cobra.Command{
+		Use:   "undelete <store_id>",
+		Short: "undelete the store",
+		Run:   unDeleteStoreCommandFunc,
+	}
+	d.AddCommand(NewUnDeleteStoreByAddrCommand())
 	return d
 }
 
@@ -344,9 +367,57 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
+	id := getStoreID(cmd, args)
+	if id == 0 {
+		return
+	}
+	// delete store by its ID
+	prefix := fmt.Sprintf(storePrefix, id)
+	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to delete store %s: %s\n", args[0], err)
+		return
+	}
+	cmd.Println("Success!")
+}
+
+func unDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Usage()
 		return
+	}
+	if _, err := strconv.Atoi(args[0]); err != nil {
+		cmd.Println("store_id should be a number")
+		return
+	}
+	prefix := fmt.Sprintf(storeUpStatePrefix, args[0])
+	_, err := doRequest(cmd, prefix, http.MethodPost)
+	if err != nil {
+		cmd.Printf("Failed to undelete store %s: %s\n", args[0], err)
+		return
+	}
+	cmd.Println("Success!")
+}
+
+func unDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
+	id := getStoreID(cmd, args)
+	if id == 0 {
+		return
+	}
+	// undelete store by its ID
+	prefix := fmt.Sprintf(storeUpStatePrefix, id)
+	_, err := doRequest(cmd, prefix, http.MethodPost)
+	if err != nil {
+		cmd.Printf("Failed to undelete store %s: %s\n", args[0], err)
+		return
+	}
+	cmd.Println("Success!")
+}
+
+func getStoreID(cmd *cobra.Command, args []string) int {
+	if len(args) != 1 {
+		cmd.Usage()
+		return 0
 	}
 	addr := args[0]
 
@@ -354,7 +425,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, storesPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store: %s\n", err)
-		return
+		return 0
 	}
 
 	storeInfo := struct {
@@ -367,7 +438,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	}{}
 	if err = json.Unmarshal([]byte(r), &storeInfo); err != nil {
 		cmd.Printf("Failed to parse store info: %s\n", err)
-		return
+		return 0
 	}
 
 	// filter by the addr
@@ -381,17 +452,9 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 
 	if id == -1 {
 		cmd.Printf("address not found: %s\n", addr)
-		return
+		return 0
 	}
-
-	// delete store by its ID
-	prefix := fmt.Sprintf(storePrefix, id)
-	_, err = doRequest(cmd, prefix, http.MethodDelete, http.Header{})
-	if err != nil {
-		cmd.Printf("Failed to delete store %s: %s\n", args[0], err)
-		return
-	}
-	cmd.Println("Success!")
+	return id
 }
 
 func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
