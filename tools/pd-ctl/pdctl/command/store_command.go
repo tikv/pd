@@ -43,7 +43,7 @@ func NewStoreCommand() *cobra.Command {
 		Run:   showStoreCommandFunc,
 	}
 	s.AddCommand(NewDeleteStoreCommand())
-	s.AddCommand(NewUnDeleteStoreCommand())
+	s.AddCommand(NewRevokeDeleteStoreCommand())
 	s.AddCommand(NewLabelStoreCommand())
 	s.AddCommand(NewSetStoreWeightCommand())
 	s.AddCommand(NewStoreLimitCommand())
@@ -76,24 +76,24 @@ func NewDeleteStoreCommand() *cobra.Command {
 	return d
 }
 
-// NewUnDeleteStoreByAddrCommand returns a subcommand of undelete
-func NewUnDeleteStoreByAddrCommand() *cobra.Command {
+// NewRevokeDeleteStoreByAddrCommand returns a subcommand of revoke delete
+func NewRevokeDeleteStoreByAddrCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "addr <address>",
-		Short: "undelete store by its address",
-		Run:   unDeleteStoreCommandByAddrFunc,
+		Short: "revoke delete store by its address",
+		Run:   revokeDeleteStoreCommandByAddrFunc,
 	}
 	return d
 }
 
-// NewUnDeleteStoreCommand return a undelete subcommand of storeCmd
-func NewUnDeleteStoreCommand() *cobra.Command {
+// NewRevokeDeleteStoreCommand return a revoke delete subcommand of storeCmd
+func NewRevokeDeleteStoreCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "undelete <store_id>",
-		Short: "undelete the store",
-		Run:   unDeleteStoreCommandFunc,
+		Use:   "revoke-delete <store_id>",
+		Short: "revoke delete the store",
+		Run:   revokeDeleteStoreCommandFunc,
 	}
-	d.AddCommand(NewUnDeleteStoreByAddrCommand())
+	d.AddCommand(NewRevokeDeleteStoreByAddrCommand())
 	return d
 }
 
@@ -381,7 +381,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("Success!")
 }
 
-func unDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
+func revokeDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Usage()
 		return
@@ -393,22 +393,22 @@ func unDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := fmt.Sprintf(storeUpStatePrefix, args[0])
 	_, err := doRequest(cmd, prefix, http.MethodPost)
 	if err != nil {
-		cmd.Printf("Failed to undelete store %s: %s\n", args[0], err)
+		cmd.Printf("Failed to revoke delete store %s: %s\n", args[0], err)
 		return
 	}
 	cmd.Println("Success!")
 }
 
-func unDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
+func revokeDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	id := getStoreID(cmd, args)
 	if id == 0 {
 		return
 	}
-	// undelete store by its ID
+	// revoke delete store by its ID
 	prefix := fmt.Sprintf(storeUpStatePrefix, id)
 	_, err := doRequest(cmd, prefix, http.MethodPost)
 	if err != nil {
-		cmd.Printf("Failed to undelete store %s: %s\n", args[0], err)
+		cmd.Printf("Failed to revoke delete store %s: %s\n", args[0], err)
 		return
 	}
 	cmd.Println("Success!")
