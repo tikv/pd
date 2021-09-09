@@ -198,10 +198,10 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
 	s.cluster.RuleManager.DeleteRule("pd", "test")
 
-	//  check 'nomerge' label
+	//  check 'merge_option' label
 	s.cluster.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
 		ID:       "test",
-		Labels:   []labeler.RegionLabel{{Key: "nomerge", Value: "true"}},
+		Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
 		RuleType: labeler.KeyRange,
 		Rule:     map[string]interface{}{"start_key": hex.EncodeToString([]byte("")), "end_key": hex.EncodeToString([]byte("t"))},
 	})

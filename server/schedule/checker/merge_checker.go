@@ -34,6 +34,13 @@ import (
 
 const maxTargetRegionSize = 500
 
+// When a region has label `merge_option=deny`, skip merging the region.
+// If label value is `allow` or other value, it will be treated as `allow`.
+const (
+	mergeOptionLabel     = "merge_option"
+	mergeOptionValueDeny = "deny"
+)
+
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	cluster    opt.Cluster
@@ -187,7 +194,7 @@ func AllowMerge(cluster opt.Cluster, region *core.RegionInfo, adjacent *core.Reg
 		if len(l.GetSplitKeys(start, end)) > 0 {
 			return false
 		}
-		if l.GetRegionLabel(region, labeler.NoMerge) != "" || l.GetRegionLabel(adjacent, labeler.NoMerge) != "" {
+		if l.GetRegionLabel(region, mergeOptionLabel) == mergeOptionValueDeny || l.GetRegionLabel(adjacent, mergeOptionLabel) == mergeOptionValueDeny {
 			return false
 		}
 	}

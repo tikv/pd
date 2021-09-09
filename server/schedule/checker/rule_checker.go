@@ -64,17 +64,23 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	return c.CheckWithFit(region, fit)
 }
 
-// CheckWithFit checkWithFit is similar with Checker with placement.RegionFit
-func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) *operator.Operator {
+// CheckWithFit is similar with Checker with placement.RegionFit
+func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) (op *operator.Operator) {
 	// If the fit is fetched from cache, it seems that the region doesn't need cache
 	if fit.IsCached() {
+		failpoint.Inject("assertShouldNotCache", func() {
+			panic("cached shouldn't be used")
+		})
 		checkerCounter.WithLabelValues("rule_checker", "get-cache").Inc()
 		return nil
 	}
-
-	failpoint.Inject("assertCache", func() {
+	failpoint.Inject("assertShouldCache", func() {
 		panic("cached should be used")
 	})
+
+	// If the fit is calculated by FitRegion, which means we get a new fit result, thus we should
+	// invalid the cache if it exists
+	c.ruleManager.InvalidCache(region.GetID())
 
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
 	c.record.refresh(c.cluster)
@@ -314,10 +320,8 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return false
 		}
+		// Only consider the state of the Store, not `stats.DownSeconds`.
 		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
-			continue
-		}
-		if stats.GetDownSeconds() < uint64(c.cluster.GetOpts().GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
 		return true
