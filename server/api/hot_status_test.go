@@ -135,6 +135,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 			StoreID:       1,
 			PeerID:        1,
 			IsLeader:      false,
+			IsLearner:     false,
 			HotRegionType: "write",
 			UpdateTime:    now.Add(30*time.Second).UnixNano() / int64(time.Millisecond),
 		},
@@ -143,8 +144,18 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 			StoreID:       1,
 			PeerID:        1,
 			IsLeader:      true,
+			IsLearner:     false,
 			HotRegionType: "read",
 			UpdateTime:    now.Add(40*time.Second).UnixNano() / int64(time.Millisecond),
+		},
+		{
+			RegionID:      1,
+			StoreID:       1,
+			PeerID:        1,
+			IsLeader:      false,
+			IsLearner:     true,
+			HotRegionType: "read",
+			UpdateTime:    now.Add(50*time.Second).UnixNano() / int64(time.Millisecond),
 		},
 	}
 	request := HistoryHotRegionsRequest{
@@ -152,7 +163,8 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 		StoreIDs:       []uint64{1},
 		PeerIDs:        []uint64{1},
 		HotRegionTypes: []string{"read"},
-		Roles:          []int64{0},
+		IsLeaders:      []bool{false},
+		IsLearners:     []bool{false},
 		EndTime:        now.Add(10*time.Minute).UnixNano() / int64(time.Millisecond),
 	}
 	check := func(res []byte, statusCode int) {
