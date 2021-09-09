@@ -713,14 +713,15 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	return err
 }
 
-func (c *coordinator) pauseOrResumeMerge(t int64) error {
+func (c *coordinator) pauseOrResumeChecker(name string, t int64) error {
 	c.Lock()
 	defer c.Unlock()
 	if c.cluster == nil {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	m := c.checkers.GetMergeChecker()
-	m.PauseOrResume(t)
+	if err := c.checkers.PauseOrResume(name, t); err != nil {
+		return err
+	}
 	return nil
 }
 

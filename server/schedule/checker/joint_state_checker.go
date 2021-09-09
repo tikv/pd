@@ -24,6 +24,7 @@ import (
 
 // JointStateChecker ensures region is in joint state will leave.
 type JointStateChecker struct {
+	CheckerPause
 	cluster opt.Cluster
 }
 
@@ -37,6 +38,10 @@ func NewJointStateChecker(cluster opt.Cluster) *JointStateChecker {
 // Check verifies a region's role, creating an Operator if need.
 func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("joint_state_checker", "check").Inc()
+	if c.IsPaused() {
+		checkerCounter.WithLabelValues("joint_state_checker", "skipped").Inc()
+		return nil
+	}
 	if !core.IsInJointState(region.GetPeers()...) {
 		return nil
 	}

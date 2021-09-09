@@ -29,6 +29,7 @@ const defaultPriorityQueueSize = 1280
 
 // PriorityChecker ensures high priority region should run first
 type PriorityChecker struct {
+	CheckerPause
 	cluster opt.Cluster
 	opts    *config.PersistOptions
 	queue   *cache.PriorityQueue
@@ -67,6 +68,10 @@ func NewRegionEntry(regionID uint64) *RegionPriorityEntry {
 
 // Check check region's replicas, it will put into priority queue if the region lack of replicas.
 func (p *PriorityChecker) Check(region *core.RegionInfo) (fit *placement.RegionFit) {
+	if p.IsPaused() {
+		checkerCounter.WithLabelValues("priority_checker", "skipped").Inc()
+		return nil
+	}
 	var makeupCount int
 	if p.opts.IsPlacementRulesEnabled() {
 		makeupCount, fit = p.checkRegionInPlacementRule(region)

@@ -27,6 +27,7 @@ import (
 
 // SplitChecker splits regions when the key range spans across rule/label boundary.
 type SplitChecker struct {
+	CheckerPause
 	cluster     opt.Cluster
 	ruleManager *placement.RuleManager
 	labeler     *labeler.RegionLabeler
@@ -49,6 +50,11 @@ func (c *SplitChecker) GetType() string {
 // Check checks whether the region need to split and returns Operator to fix.
 func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("split_checker", "check").Inc()
+
+	if c.IsPaused() {
+		checkerCounter.WithLabelValues("split_checker", "skipped").Inc()
+		return nil
+	}
 
 	start, end := region.GetStartKey(), region.GetEndKey()
 	// We may consider to merge labeler split keys and rule split keys together

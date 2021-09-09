@@ -24,6 +24,7 @@ import (
 
 // LearnerChecker ensures region has a learner will be promoted.
 type LearnerChecker struct {
+	CheckerPause
 	cluster opt.Cluster
 }
 
@@ -36,6 +37,10 @@ func NewLearnerChecker(cluster opt.Cluster) *LearnerChecker {
 
 // Check verifies a region's role, creating an Operator if need.
 func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
+	if l.IsPaused() {
+		checkerCounter.WithLabelValues("learner_checker", "skipped").Inc()
+		return nil
+	}
 	for _, p := range region.GetLearners() {
 		op, err := operator.CreatePromoteLearnerOperator("promote-learner", l.cluster, region, p)
 		if err != nil {

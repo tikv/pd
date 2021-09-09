@@ -1629,11 +1629,11 @@ func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 	return c.coordinator.pauseOrResumeScheduler(name, t)
 }
 
-// PauseOrResumeMerge pauses or resumes merge.
-func (c *RaftCluster) PauseOrResumeMerge(t int64) error {
+// PauseOrResumeChecker pauses or resumes checker.
+func (c *RaftCluster) PauseOrResumeChecker(name string, t int64) error {
 	c.RLock()
 	defer c.RUnlock()
-	return c.coordinator.pauseOrResumeMerge(t)
+	return c.coordinator.pauseOrResumeChecker(name, t)
 }
 
 // IsSchedulerPaused checks if a scheduler is paused.

@@ -18,6 +18,7 @@ import (
 	"context"
 
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/checker"
@@ -80,6 +81,10 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 
 	if c.opts.IsPlacementRulesEnabled() {
 		fit := c.priorityChecker.Check(region)
+		if fit == nil {
+			// priority checker is paused
+			return nil
+		}
 		if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
 			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
@@ -148,3 +153,27 @@ func (c *CheckerController) GetPriorityRegions() []uint64 {
 func (c *CheckerController) RemovePriorityRegions(id uint64) {
 	c.priorityChecker.RemovePriorityRegion(id)
 }
+
+// PauseOrResume pause or resume a specific checker
+func (c *CheckerController) PauseOrResume(name string, t int64) error {
+	switch name {
+	case "learner":
+		c.learnerChecker.PauseOrResume(t)
+	case "replica":
+		c.replicaChecker.PauseOrResume(t)
+	case "rule":
+		c.ruleChecker.PauseOrResume(t)
+	case "split":
+		c.splitChecker.PauseOrResume(t)
+	case "merge":
+		c.mergeChecker.PauseOrResume(t)
+	case "joint-state":
+		c.jointStateChecker.PauseOrResume(t)
+	case "priority":
+		c.priorityChecker.PauseOrResume(t)
+	default:
+		return errs.ErrCheckerNotFound.FastGenByArgs()
+	}
+	return nil
+}
+

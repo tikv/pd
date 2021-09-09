@@ -43,6 +43,7 @@ const (
 // Unhealthy replica management, mainly used for disaster recovery of TiKV.
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
+	CheckerPause
 	cluster           opt.Cluster
 	opts              *config.PersistOptions
 	regionWaitingList cache.Cache
@@ -65,6 +66,10 @@ func (r *ReplicaChecker) GetType() string {
 // Check verifies a region's replicas, creating an operator.Operator if need.
 func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("replica_checker", "check").Inc()
+	if r.IsPaused() {
+		checkerCounter.WithLabelValues("replica_checker", "skipped").Inc()
+		return nil
+	}
 	if op := r.checkDownPeer(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
 		op.SetPriorityLevel(core.HighPriority)
