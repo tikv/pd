@@ -271,10 +271,6 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
-func (tbc *tsoBatchController) observeBatchSendLatency() {
-	tsoBatchSendLatency.Observe(float64(time.Since(tbc.batchStartTime)))
-}
-
 type tsoDispatcher struct {
 	dispatcherCtx      context.Context
 	dispatcherCancel   context.CancelFunc
@@ -822,7 +818,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err
 	}
-	tbc.observeBatchSendLatency()
+	tsoBatchSendLatency.Observe(float64(time.Since(tbc.batchStartTime)))
 	resp, err := stream.Recv()
 	if err != nil {
 		err = errors.WithStack(err)
