@@ -108,10 +108,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 			StoreID:       1,
 			PeerID:        1,
 			IsLeader:      false,
-<<<<<<< HEAD
-=======
 			IsLearner:     false,
->>>>>>> 4de33b17... api:merge from remote
 			HotRegionType: "read",
 			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 		},
@@ -120,10 +117,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 			StoreID:       2,
 			PeerID:        1,
 			IsLeader:      false,
-<<<<<<< HEAD
-=======
 			IsLearner:     false,
->>>>>>> 4de33b17... api:merge from remote
 			HotRegionType: "read",
 			UpdateTime:    now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 		},
@@ -132,10 +126,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 			StoreID:       1,
 			PeerID:        2,
 			IsLeader:      false,
-<<<<<<< HEAD
-=======
 			IsLearner:     false,
->>>>>>> 4de33b17... api:merge from remote
 			HotRegionType: "read",
 			UpdateTime:    now.Add(20*time.Second).UnixNano() / int64(time.Millisecond),
 		},
