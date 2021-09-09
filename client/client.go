@@ -267,6 +267,7 @@ func (tbc *tsoBatchController) fetchMorePendingRequests(ctx context.Context) boo
 
 // adjustBestBatchSize stabilizes the latency with the AIAD algorithm.
 func (tbc *tsoBatchController) adjustBestBatchSize() {
+	tsoBestBatchSize.Observe(float64(tbc.bestBatchSize))
 	length := tbc.collectedRequestCount
 	if length < tbc.bestBatchSize && tbc.bestBatchSize > 1 {
 		// Waits too long to collect requests, reduce the target batch size.

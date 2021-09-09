@@ -44,6 +44,15 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"type"})
 
+	tsoBestBatchSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd_client",
+			Subsystem: "request",
+			Name:      "handle_tso_best_batch_size",
+			Help:      "Bucketed histogram of the best batch size of handled requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
+		})
+
 	tsoBatchSize = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd_client",
@@ -107,6 +116,7 @@ func init() {
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
 	prometheus.MustRegister(requestDuration)
+	prometheus.MustRegister(tsoBestBatchSize)
 	prometheus.MustRegister(tsoBatchSize)
 	prometheus.MustRegister(tsoBatchSendLatency)
 	prometheus.MustRegister(requestForwarded)
