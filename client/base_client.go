@@ -65,7 +65,6 @@ type baseClient struct {
 	timeout                 time.Duration
 	maxRetryTimes           int
 	enableForwarding        bool
-	maxTSOBatchSize         int
 	maxTSOBatchWaitInterval time.Duration
 }
 
@@ -107,13 +106,6 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
-// WithMaxTSOBatchSize configures the client max TSO batch size.
-func WithMaxTSOBatchSize(maxTSOBatchSize int) ClientOption {
-	return func(c *baseClient) {
-		c.maxTSOBatchSize = maxTSOBatchSize
-	}
-}
-
 // WithMaxTSOBatchWaitInterval configures the client max TSO batch wait interval.
 func WithMaxTSOBatchWaitInterval(maxTSOBatchWaitInterval time.Duration) ClientOption {
 	return func(c *baseClient) {
@@ -133,7 +125,6 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption, 
 		security:                security,
 		timeout:                 defaultPDTimeout,
 		maxRetryTimes:           maxInitClusterRetries,
-		maxTSOBatchSize:         defaultMaxTSOBatchSize,
 		maxTSOBatchWaitInterval: defaultMaxTSOBatchInterval,
 	}
 	for _, opt := range opts {

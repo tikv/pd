@@ -182,11 +182,11 @@ func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int, maxB
 
 // fetchPendingRequests will start a new round of the batch collecting from the channel.
 // It returns true if everything goes well, otherwise false which means we should stop the service.
-func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context) bool {
+func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context) error {
 	var firstTSORequest *tsoRequest
 	select {
 	case <-ctx.Done():
-		return false
+		return ctx.Err()
 	case firstTSORequest = <-tbc.tsoRequestCh:
 	}
 	// Start to batch when the first TSO request arrives.
@@ -196,21 +196,22 @@ func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context) bool {
 
 	// This loop is for trying best to collect more requests, so we use `tbc.maxBatchSize` here.
 	for tbc.collectedRequestCount < tbc.maxBatchSize {
-		if len(tbc.tsoRequestCh) == 0 {
-			break
-		}
 		select {
 		case tsoReq := <-tbc.tsoRequestCh:
 			tbc.pushRequest(tsoReq)
 		case <-ctx.Done():
-			return false
+			return ctx.Err()
+		default:
+			// break here can only break the select statement.
+			goto fetchMorePendingRequests
 		}
 	}
 
+fetchMorePendingRequests:
 	// Check whether we should fetch more pending TSO requests from the channel.
 	// TODO: maybe consider the actual load that returns through a TSO response from PD server.
 	if tbc.collectedRequestCount >= tbc.maxBatchSize || tbc.maxBatchWaitInterval <= 0 {
-		return true
+		return nil
 	}
 
 	// Fetches more pending TSO requests from the channel.
@@ -224,9 +225,9 @@ func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context) bool {
 			case tsoReq := <-tbc.tsoRequestCh:
 				tbc.pushRequest(tsoReq)
 			case <-ctx.Done():
-				return false
+				return ctx.Err()
 			case <-after.C:
-				return true
+				return nil
 			}
 		}
 	}
@@ -235,17 +236,16 @@ func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context) bool {
 	// of `tbc.bestBatchSize` because trying best to fetch more requests is necessary so that
 	// we can adjust the `tbc.bestBatchSize` dynamically later.
 	for tbc.collectedRequestCount < tbc.maxBatchSize {
-		if len(tbc.tsoRequestCh) == 0 {
-			return true
-		}
 		select {
 		case tsoReq := <-tbc.tsoRequestCh:
 			tbc.pushRequest(tsoReq)
 		case <-ctx.Done():
-			return false
+			return ctx.Err()
+		default:
+			return nil
 		}
 	}
-	return true
+	return nil
 }
 
 func (tbc *tsoBatchController) pushRequest(tsoReq *tsoRequest) {
@@ -345,16 +345,7 @@ func (c *client) updateTSODispatcher() {
 	c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
 		dcLocation := dcLocationKey.(string)
 		if !c.checkTSODispatcher(dcLocation) {
-			log.Info("[pd] create tso dispatcher", zap.String("dc-location", dcLocation))
 			c.createTSODispatcher(dcLocation)
-			dispatcher, _ := c.tsoDispatcher.Load(dcLocation)
-			dispatcherCtx := dispatcher.(*tsoDispatcher).dispatcherCtx
-			tbc := dispatcher.(*tsoDispatcher).tsoBatchController
-			// Each goroutine is responsible for handling the tso stream request for its dc-location.
-			// The only case that will make the dispatcher goroutine exit
-			// is that the loopCtx is done, otherwise there is no circumstance
-			// this goroutine should exit.
-			go c.handleDispatcher(dispatcherCtx, dcLocation, tbc)
 		}
 		return true
 	})
@@ -592,9 +583,15 @@ func (c *client) createTSODispatcher(dcLocation string) {
 	dispatcher := &tsoDispatcher{
 		dispatcherCtx:      dispatcherCtx,
 		dispatcherCancel:   dispatcherCancel,
-		tsoBatchController: newTSOBatchController(make(chan *tsoRequest, c.maxTSOBatchSize*2), c.maxTSOBatchSize, c.maxTSOBatchWaitInterval),
+		tsoBatchController: newTSOBatchController(make(chan *tsoRequest, defaultMaxTSOBatchSize*2), defaultMaxTSOBatchSize, c.maxTSOBatchWaitInterval),
 	}
+	// Each goroutine is responsible for handling the tso stream request for its dc-location.
+	// The only case that will make the dispatcher goroutine exit
+	// is that the loopCtx is done, otherwise there is no circumstance
+	// this goroutine should exit.
+	go c.handleDispatcher(dispatcherCtx, dcLocation, dispatcher.tsoBatchController)
 	c.tsoDispatcher.Store(dcLocation, dispatcher)
+	log.Info("[pd] tso dispatcher created", zap.String("dc-location", dcLocation))
 }
 
 type streamCh chan struct {
@@ -655,7 +652,8 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tbc 
 				continue
 			}
 		}
-		if !tbc.fetchPendingRequests(dispatcherCtx) {
+		if err = tbc.fetchPendingRequests(dispatcherCtx); err != nil {
+			log.Error("[pd] fetch pending tso requests error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
 			return
 		}
 		tbc.adjustBestBatchSize()
