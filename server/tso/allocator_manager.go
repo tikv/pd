@@ -933,7 +933,10 @@ func (am *AllocatorManager) ResetAllocatorGroup(dcLocation string) {
 	defer am.mu.Unlock()
 	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
-		allocatorGroup.leadership.Reset()
+		// Reset if it still has the leadership.
+		if allocatorGroup.leadership.Check() {
+			allocatorGroup.leadership.Reset()
+		}
 	}
 }
 

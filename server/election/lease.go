@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -71,7 +72,7 @@ func (l *lease) Close() error {
 		return nil
 	}
 	// Reset expire time.
-	l.expireTime.Store(time.Time{})
+	l.expireTime.Store(typeutil.ZeroTime)
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
@@ -85,7 +86,8 @@ func (l *lease) IsExpired() bool {
 	if l == nil {
 		return true
 	}
-	if l.expireTime.Load() == nil {
+	expireTime := l.expireTime.Load()
+	if expireTime == nil || expireTime == typeutil.ZeroTime {
 		return false
 	}
 	return time.Now().After(l.expireTime.Load().(time.Time))
