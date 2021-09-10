@@ -242,10 +242,10 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 	return err
 }
 
-// PauseOrResumeCheckerHandler pauses checker for delay seconds or resume checker
+// PauseOrResumeChecker pauses checker for delay seconds or resume checker
 // t == 0 : resume checker.
 // t > 0 : checker delays t seconds.
-func (h *Handler) PauseOrResumeCheckerHandler(name string, t int64) error {
+func (h *Handler) PauseOrResumeChecker(name string, t int64) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
