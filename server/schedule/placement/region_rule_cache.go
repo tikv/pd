@@ -125,11 +125,11 @@ func storesEqual(a []storeCache, b []*core.StoreInfo) bool {
 }
 
 func validateRegion(region *core.RegionInfo) bool {
-	return !(region == nil || region.GetLeader() == nil || len(region.GetDownPeers()) > 0 || region.GetRegionEpoch() == nil)
+	return region != nil && region.GetLeader() != nil && len(region.GetDownPeers()) == 0 && region.GetRegionEpoch() != nil
 }
 
 func validateFit(fit *RegionFit) bool {
-	return !(fit == nil || fit.rules == nil || len(fit.rules) < 1 || fit.regionStores == nil || len(fit.regionStores) < 1)
+	return fit != nil && fit.rules != nil && len(fit.rules) > 0 && fit.regionStores != nil && len(fit.regionStores) > 0
 }
 
 func toRegionRuleFitCache(region *core.RegionInfo, fit *RegionFit) *RegionRuleFitCache {

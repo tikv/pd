@@ -174,9 +174,9 @@ func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
 	for _, testcase := range testcases {
 		c.Assert(cache.IsUnchanged(testcase.region, testcase.rules, mockStores(3)), Equals, testcase.unchanged)
 	}
-	// Invalid Input3
-	c.Assert(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), nil), IsFalse)
 	// Invalid Input4
+	c.Assert(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), nil), IsFalse)
+	// Invalid Input5
 	c.Assert(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), []*core.StoreInfo{}), IsFalse)
 	// origin rules changed, assert whether cache is changed
 	originRules[0].Version++
