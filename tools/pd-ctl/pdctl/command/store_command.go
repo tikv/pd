@@ -43,7 +43,7 @@ func NewStoreCommand() *cobra.Command {
 		Run:   showStoreCommandFunc,
 	}
 	s.AddCommand(NewDeleteStoreCommand())
-	s.AddCommand(NewRevokeDeleteStoreCommand())
+	s.AddCommand(NewCancelDeleteStoreCommand())
 	s.AddCommand(NewLabelStoreCommand())
 	s.AddCommand(NewSetStoreWeightCommand())
 	s.AddCommand(NewStoreLimitCommand())
@@ -76,24 +76,24 @@ func NewDeleteStoreCommand() *cobra.Command {
 	return d
 }
 
-// NewRevokeDeleteStoreByAddrCommand returns a subcommand of revoke delete
-func NewRevokeDeleteStoreByAddrCommand() *cobra.Command {
+// NewCancelDeleteStoreByAddrCommand returns a subcommand of cancel delete
+func NewCancelDeleteStoreByAddrCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "addr <address>",
-		Short: "revoke delete store by its address",
-		Run:   revokeDeleteStoreCommandByAddrFunc,
+		Short: "cancel delete store by its address",
+		Run:   cancelDeleteStoreCommandByAddrFunc,
 	}
 	return d
 }
 
-// NewRevokeDeleteStoreCommand return a revoke delete subcommand of storeCmd
-func NewRevokeDeleteStoreCommand() *cobra.Command {
+// NewCancelDeleteStoreCommand return a cancel delete subcommand of storeCmd
+func NewCancelDeleteStoreCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "revoke-delete <store_id>",
-		Short: "revoke delete the store",
-		Run:   revokeDeleteStoreCommandFunc,
+		Use:   "cancel-delete <store_id>",
+		Short: "cancel delete the store",
+		Run:   cancelDeleteStoreCommandFunc,
 	}
-	d.AddCommand(NewRevokeDeleteStoreByAddrCommand())
+	d.AddCommand(NewCancelDeleteStoreByAddrCommand())
 	return d
 }
 
@@ -381,7 +381,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("Success!")
 }
 
-func revokeDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
+func cancelDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Usage()
 		return
@@ -418,28 +418,28 @@ func revokeDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	prefix = fmt.Sprintf(storeUpStatePrefix, args[0])
 	_, err = doRequest(cmd, prefix, http.MethodPost)
 	if err != nil {
-		cmd.Printf("Failed to revoke delete store %s: %s\n", args[0], err)
+		cmd.Printf("Failed to cancel delete store %s: %s\n", args[0], err)
 		return
 	}
 	cmd.Println("Success!")
 }
 
-func revokeDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
+func cancelDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	id := getStoreID(cmd, args, true)
 	if id == 0 {
 		return
 	}
-	// revoke delete store by its ID
+	// cancel delete store by its ID
 	prefix := fmt.Sprintf(storeUpStatePrefix, id)
 	_, err := doRequest(cmd, prefix, http.MethodPost)
 	if err != nil {
-		cmd.Printf("Failed to revoke delete store %s: %s\n", args[0], err)
+		cmd.Printf("Failed to cancel delete store %s: %s\n", args[0], err)
 		return
 	}
 	cmd.Println("Success!")
 }
 
-func getStoreID(cmd *cobra.Command, args []string, isRevoke bool) int {
+func getStoreID(cmd *cobra.Command, args []string, isCancel bool) int {
 	if len(args) != 1 {
 		cmd.Usage()
 		return 0
@@ -471,7 +471,7 @@ func getStoreID(cmd *cobra.Command, args []string, isRevoke bool) int {
 	id := -1
 	for _, store := range storeInfo.Stores {
 		if store.Store.Address == addr {
-			if isRevoke && store.Store.State != 1 {
+			if isCancel && store.Store.State != 1 {
 				cmd.Printf("store is not offline: %s\n", addr)
 				return 0
 			}
