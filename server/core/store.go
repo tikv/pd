@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
@@ -703,17 +702,4 @@ func IsTiFlashStore(store *metapb.Store) bool {
 		}
 	}
 	return false
-}
-
-// IsEqualLabels returns whether have same store label
-func (s *StoreInfo) IsEqualLabels(labels []*metapb.StoreLabel) bool {
-	storeLabels := s.GetLabels()
-	if len(storeLabels) != len(labels) {
-		return false
-	}
-	return slice.AllOf(labels, func(i int) bool {
-		return slice.AnyOf(storeLabels, func(j int) bool {
-			return labels[i].Key == storeLabels[j].Key && labels[i].Value == storeLabels[j].Value
-		})
-	})
 }
