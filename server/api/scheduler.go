@@ -335,7 +335,7 @@ func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request)
 // @Failure 400 {string} string "Bad format request."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /checker/{name} [post]
-func (h *schedulerHandler) PauseOrResumeChecker(w http.ResponseWriter, r *http.Request) {
+func (h *schedulerHandler) CheckerHandler(w http.ResponseWriter, r *http.Request) {
 	var input map[string]int
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
