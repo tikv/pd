@@ -262,6 +262,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	from.RegionSize -= regionSize
 	from.RegionCount--
 	if rp.IsDownStore {
+		from.AdjustStepCost(storelimit.RemovePeer, storelimit.SmallRegionThreshold)
 		return
 	}
 	from.AdjustStepCost(storelimit.RemovePeer, regionSize)

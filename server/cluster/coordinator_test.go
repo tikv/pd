@@ -1051,7 +1051,7 @@ func (s *testOperatorControllerSuite) TestDownStoreLimit(c *C) {
 		},
 	}))
 
-	for i := uint64(1); i <= 100; i++ {
+	for i := uint64(1); i <= 5; i++ {
 		tc.addRegionStore(i+3, 100)
 		op := rc.Check(region)
 		c.Assert(op, NotNil)
