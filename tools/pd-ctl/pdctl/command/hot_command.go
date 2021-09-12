@@ -115,7 +115,9 @@ func showHotStoresCommandFunc(cmd *cobra.Command, args []string) {
 // NewHotRegionsHistoryCommand return a hot history regions subcommand of hotSpotCmd
 func NewHotRegionsHistoryCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "hot-history-regions <start_time> <end_time> <key> <value>",
+		// TODO
+		// Need a better description.
+		Use:   "history <start_time> <end_time> [<key> <value>]",
 		Short: "show the hot history regions",
 		Run:   showHotRegionsHistoryCommandFunc,
 	}
