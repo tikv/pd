@@ -118,13 +118,21 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 		},
 	}
 	packHotRegionInfo.historyHotReads = hotRegionStorages
+	packHotRegionInfo.historyHotWrites = []HistoryHotRegion{
+		{
+			UpdateTime:    now.Add(30*time.Second).UnixNano() / int64(time.Millisecond),
+			RegionID:      4,
+			StoreID:       1,
+			HotRegionType: HotRegionTypes[1],
+		},
+	}
 	store.pullHotRegionInfo()
 	store.flush()
-	iter := store.NewIterator(HotRegionTypes,
+	iter := store.NewIterator([]string{HotRegionTypes[0]},
 		now.UnixNano()/int64(time.Millisecond),
 		now.Add(40*time.Second).UnixNano()/int64(time.Millisecond))
 	index := 0
-	for next, err := iter.Next(); next != nil && err == nil; next, err = iter.Next() {
+	for next, err := iter.Next(); next != nil && err == nil && index < 3; next, err = iter.Next() {
 		c.Assert(reflect.DeepEqual(&hotRegionStorages[index], next), IsTrue)
 		index++
 	}
