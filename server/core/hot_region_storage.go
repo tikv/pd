@@ -202,6 +202,8 @@ func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime
 		iter := h.LeveldbKV.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
 		iters[index] = iter
 	}
+	// iter := h.LeveldbKV.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
+	// iters[0] = i
 	return HotRegionStorageIterator{
 		iters:                iters,
 		encryptionKeyManager: h.encryptionKeyManager,
@@ -248,7 +250,7 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 		}
 		historyHotRegions[i].StartKey = region.StartKey
 		historyHotRegions[i].EndKey = region.EndKey
-		key := HotRegionStorePath(HotRegionTypes[0], historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
+		key := HotRegionStorePath(historyHotRegions[i].HotRegionType, historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
 		h.batchHotInfo[key] = &historyHotRegions[i]
 	}
 	return nil
