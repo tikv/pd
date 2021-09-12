@@ -250,7 +250,7 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 		}
 		historyHotRegions[i].StartKey = region.StartKey
 		historyHotRegions[i].EndKey = region.EndKey
-		key := HotRegionStorePath(historyHotRegions[i].HotRegionType, historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
+		key := HotRegionStorePath(hotRegionType, historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
 		h.batchHotInfo[key] = &historyHotRegions[i]
 	}
 	return nil
