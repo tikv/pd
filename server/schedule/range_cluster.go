@@ -41,6 +41,7 @@ func GenRangeCluster(cluster opt.Cluster, startKey, endKey []byte) *RangeCluster
 	}
 }
 
+// GetClusterType returns the cluster type
 func (r *RangeCluster) GetClusterType() core.ClusterType {
 	return core.RangeCluster
 }
