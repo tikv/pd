@@ -100,7 +100,7 @@ func (p *PriorityChecker) checkRegionInReplica(region *core.RegionInfo) (makeupC
 	return p.opts.GetMaxReplicas() - len(region.GetPeers())
 }
 
-// addOrRemoveRegion add or remove region from  queue
+// addOrRemoveRegion add or remove region from queue
 // it will remove if region's priority equal 0
 // it's Attempt will increase if region's priority equal last
 func (p *PriorityChecker) addOrRemoveRegion(priority int, regionID uint64) {

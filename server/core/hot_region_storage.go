@@ -311,7 +311,7 @@ type HotRegionStorageIterator struct {
 
 // Next moves the iterator to the next key/value pair.
 // And return historyHotRegion which it is now pointing to.
-// it will return (nil,nil),if there is no more historyHotRegion.
+// it will return (nil, nil), if there is no more historyHotRegion.
 func (it *HotRegionStorageIterator) Next() (*HistoryHotRegion, error) {
 	iter := it.iters[0]
 	for !iter.Next() {
