@@ -9274,7 +9274,7 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The count of TiDB requests",
+          "description": "The count of TiDB TSO grpc requests",
           "editable": true,
           "error": false,
           "fill": 1,
@@ -9317,7 +9317,7 @@
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "tso rps",
+              "legendFormat": "tso request/secs",
               "refId": "A",
               "step": 2
             }
@@ -9414,7 +9414,7 @@
               "hide": false,
               "interval": "",
               "intervalFactor": 1,
-              "legendFormat": "0.99-batch-size",
+              "legendFormat": "0.99 batch size",
               "refId": "A"
             },
             {
@@ -9423,7 +9423,7 @@
               "hide": false,
               "interval": "",
               "intervalFactor": 1,
-              "legendFormat": "0.90-batch-size",
+              "legendFormat": "0.90 batch size",
               "refId": "C"
             },
             {
@@ -9432,7 +9432,7 @@
               "hide": false,
               "interval": "",
               "intervalFactor": 1,
-              "legendFormat": "avg-batch-size",
+              "legendFormat": "avg batch size",
               "refId": "D"
             }
           ],
