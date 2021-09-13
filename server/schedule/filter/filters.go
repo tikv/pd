@@ -16,6 +16,7 @@ package filter
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -36,7 +37,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			if !filters[i].Source(opt, s) {
-				sourceID := fmt.Sprintf("%d", s.GetID())
+				sourceID := strconv.FormatUint(s.GetID(), 10)
 				targetID := ""
 				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
 					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
@@ -54,10 +55,10 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 			filter := filters[i]
 			if !filter.Target(opt, s) {
 				cfilter, ok := filter.(comparingFilter)
-				targetID := fmt.Sprintf("%d", s.GetID())
+				targetID := strconv.FormatUint(s.GetID(), 10)
 				sourceID := ""
 				if ok {
-					sourceID = fmt.Sprintf("%d", cfilter.GetSourceStoreID())
+					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
 				}
 				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
 					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
@@ -98,7 +99,7 @@ type comparingFilter interface {
 // Source checks if store can pass all Filters as source store.
 func Source(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter) bool {
 	storeAddress := store.GetAddress()
-	storeID := fmt.Sprintf("%d", store.GetID())
+	storeID := strconv.FormatUint(store.GetID(), 10)
 	for _, filter := range filters {
 		if !filter.Source(opt, store) {
 			sourceID := storeID
@@ -114,14 +115,14 @@ func Source(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 // Target checks if store can pass all Filters as target store.
 func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter) bool {
 	storeAddress := store.GetAddress()
-	storeID := fmt.Sprintf("%d", store.GetID())
+	storeID := strconv.FormatUint(store.GetID(), 10)
 	for _, filter := range filters {
 		if !filter.Target(opt, store) {
 			cfilter, ok := filter.(comparingFilter)
 			targetID := storeID
 			sourceID := ""
 			if ok {
-				sourceID = fmt.Sprintf("%d", cfilter.GetSourceStoreID())
+				sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
 			}
 			filterCounter.WithLabelValues("filter-target", storeAddress,
 				targetID, filter.Scope(), filter.Type(), sourceID, targetID).Inc()

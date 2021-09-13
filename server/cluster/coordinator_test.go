@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -887,13 +887,13 @@ func BenchmarkPatrolRegion(b *testing.B) {
 		for {
 			if oc.OperatorCount(operator.OpMerge) == mergeLimit {
 				co.cancel()
-				co.wg.Add(1)
 				return
 			}
 		}
 	}()
 	<-listen
 
+	co.wg.Add(1)
 	b.ResetTimer()
 	co.patrolRegions()
 }
@@ -969,7 +969,9 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	tc.putRegion(region)
 	start := time.Now()
 	{
-		op1 := lb.Schedule(tc)[0]
+		ops := lb.Schedule(tc)
+		c.Assert(ops, HasLen, 1)
+		op1 := ops[0]
 		c.Assert(op1, NotNil)
 		c.Assert(oc.AddOperator(op1), IsTrue)
 		c.Assert(oc.RemoveOperator(op1), IsTrue)

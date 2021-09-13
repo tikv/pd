@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !without_dashboard
 // +build !without_dashboard
 
 package dashboard
@@ -26,6 +27,8 @@ import (
 	"github.com/pingcap/tidb-dashboard/pkg/uiserver"
 
 	"github.com/tikv/pd/pkg/dashboard/adapter"
+	// inject distro information to dashboard
+	_ "github.com/tikv/pd/pkg/dashboard/distro"
 	"github.com/tikv/pd/pkg/dashboard/keyvisual"
 	ui "github.com/tikv/pd/pkg/dashboard/uiserver"
 	"github.com/tikv/pd/server"

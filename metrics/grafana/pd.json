@@ -4417,6 +4417,14 @@
               "legendFormat": "{{address}}-store-{{store}}-regions",
               "refId": "B",
               "step": 4
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-byte-rate-write-region\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "exp-byte-rate-write-leader-{{store}}",
+              "refId": "C"
             }
           ],
           "thresholds": [],
@@ -4514,6 +4522,14 @@
               "metric": "pd_hotspot_status",
               "refId": "A",
               "step": 4
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-key-rate-write-leader\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "exp-key-rate-write-leader-{{store}}",
+              "refId": "B"
             }
           ],
           "thresholds": [],
@@ -4618,6 +4634,14 @@
               "legendFormat": "{{address}}-store-{{store}}-regions",
               "refId": "B",
               "step": 4
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-key-rate-write-region\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "exp-key-rate-write-region-{{store}}",
+              "refId": "C"
             }
           ],
           "thresholds": [],
@@ -4714,6 +4738,14 @@
               "legendFormat": "{{address}}-store-{{store}}",
               "refId": "A",
               "step": 4
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-query-rate-write-leader\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "exp-key-rate-write-region-{{store}}",
+              "refId": "B"
             }
           ],
           "thresholds": [],
@@ -5443,6 +5475,22 @@
               "legendFormat": "{{address}}-store-{{store}}",
               "refId": "A",
               "step": 4
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-byte-rate-read-leader\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "exp-byte-rate-read-leader-{{store}}",
+              "refId": "B"
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-byte-rate-read-region\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "exp-byte-rate-read-region-{{store}}",
+              "refId": "C"
             }
           ],
           "thresholds": [],
@@ -5537,6 +5585,22 @@
               "legendFormat": "{{address}}-store-{{store}}",
               "refId": "A",
               "step": 4
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-key-rate-read-leader\"}",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "exp-key-rate-read-leader-{{store}}",
+              "refId": "B"
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-key-rate-read-region\"}",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "exp-key-rate-read-region-{{store}}",
+              "refId": "C"
             }
           ],
           "thresholds": [],
@@ -5633,6 +5697,22 @@
               "legendFormat": "{{address}}-store-{{store}}",
               "refId": "A",
               "step": 4
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-query-rate-read-leader\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "exp-query-rate-read-leader-{{store}}",
+              "refId": "B"
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-query-rate-read-region\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "exp-query-rate-read-region-{{store}}",
+              "refId": "C"
             }
           ],
           "thresholds": [],
@@ -6635,7 +6715,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-leader-scheduler\"}[5m])) by (name)",
+              "expr": "sum(rate(pd_scheduler_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-leader-scheduler\"}[5m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -6730,7 +6810,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-region-scheduler\"}[5m])) by (name)",
+              "expr": "sum(rate(pd_scheduler_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-region-scheduler\"}[5m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7000,7 +7080,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"rule_checker\"}[1m])) by (name)",
+              "expr": "sum(rate(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"rule_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7092,7 +7172,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
+              "expr": "sum(rate(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7184,7 +7264,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"merge_checker\"}[1m])) by (name)",
+              "expr": "sum(rate(pd_checker_event_count{tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"merge_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -9044,7 +9124,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "PD server TSO handle time + Client revc time",
+          "title": "PD server TSO handle time",
           "tooltip": {
             "msResolution": false,
             "shared": true,

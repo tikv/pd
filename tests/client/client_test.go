@@ -621,6 +621,29 @@ func (s *testClientSuite) TestNormalTSO(c *C) {
 	wg.Wait()
 }
 
+func (s *testClientSuite) TestGetTSAsync(c *C) {
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber)
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		go func() {
+			tsFutures := make([]pd.TSFuture, tsoRequestRound)
+			for i := range tsFutures {
+				tsFutures[i] = s.client.GetTSAsync(context.Background())
+			}
+			var lastTS uint64 = math.MaxUint64
+			for i := len(tsFutures) - 1; i >= 0; i-- {
+				physical, logical, err := tsFutures[i].Wait()
+				c.Assert(err, IsNil)
+				ts := tsoutil.ComposeTS(physical, logical)
+				c.Assert(lastTS, Greater, ts)
+				lastTS = ts
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
 func (s *testClientSuite) TestGetRegion(c *C) {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{

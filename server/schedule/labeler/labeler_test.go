@@ -36,7 +36,7 @@ type testLabelerSuite struct {
 	labeler *RegionLabeler
 }
 
-func (s *testLabelerSuite) SetUpSuite(c *C) {
+func (s *testLabelerSuite) SetUpTest(c *C) {
 	s.store = core.NewStorage(kv.NewMemoryKV())
 	var err error
 	s.labeler, err = NewRegionLabeler(s.store)
@@ -119,8 +119,9 @@ func (s *testLabelerSuite) TestGetSetRule(c *C) {
 	err = s.labeler.DeleteLabelRule("rule2")
 	c.Assert(err, IsNil)
 	c.Assert(s.labeler.GetLabelRule("rule2"), IsNil)
-	_, err = s.labeler.GetLabelRules([]string{"rule1", "rule2"})
-	c.Assert(err, NotNil)
+	byIDs, err = s.labeler.GetLabelRules([]string{"rule1", "rule2"})
+	c.Assert(err, IsNil)
+	c.Assert(byIDs, DeepEquals, []*LabelRule{rules[0]})
 
 	// patch
 	patch := LabelRulePatch{
@@ -134,6 +135,44 @@ func (s *testLabelerSuite) TestGetSetRule(c *C) {
 	allRules = s.labeler.GetAllLabelRules()
 	sort.Slice(allRules, func(i, j int) bool { return allRules[i].ID < allRules[j].ID })
 	c.Assert(allRules, DeepEquals, rules[1:])
+}
+
+func (s *testLabelerSuite) TestIndex(c *C) {
+	rules := []*LabelRule{
+		{ID: "rule0", Labels: []RegionLabel{{Key: "k1", Value: "v0"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "", "end_key": ""}},
+		{ID: "rule1", Index: 1, Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "1234", "end_key": "5678"}},
+		{ID: "rule2", Index: 2, Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "ab12", "end_key": "cd12"}},
+		{ID: "rule3", Index: 1, Labels: []RegionLabel{{Key: "k2", Value: "v3"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "abcd", "end_key": "efef"}},
+	}
+	for _, r := range rules {
+		err := s.labeler.SetLabelRule(r)
+		c.Assert(err, IsNil)
+	}
+
+	type testCase struct {
+		start, end string
+		labels     map[string]string
+	}
+	testCases := []testCase{
+		{"", "1234", map[string]string{"k1": "v0"}},
+		{"1234", "5678", map[string]string{"k1": "v1"}},
+		{"ab12", "abcd", map[string]string{"k1": "v0", "k2": "v2"}},
+		{"abcd", "cd12", map[string]string{"k1": "v0", "k2": "v2"}},
+		{"cdef", "efef", map[string]string{"k1": "v0", "k2": "v3"}},
+	}
+	for _, tc := range testCases {
+		start, _ := hex.DecodeString(tc.start)
+		end, _ := hex.DecodeString(tc.end)
+		region := core.NewTestRegionInfo(start, end)
+		labels := s.labeler.GetRegionLabels(region)
+		c.Assert(labels, HasLen, len(tc.labels))
+		for _, l := range labels {
+			c.Assert(l.Value, Equals, tc.labels[l.Key])
+		}
+		for _, k := range []string{"k1", "k2"} {
+			c.Assert(s.labeler.GetRegionLabel(region, k), Equals, tc.labels[k])
+		}
+	}
 }
 
 func (s *testLabelerSuite) TestSaveLoadRule(c *C) {

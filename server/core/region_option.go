@@ -113,6 +113,11 @@ func WithIncVersion() RegionCreateOption {
 		e := region.meta.GetRegionEpoch()
 		if e != nil {
 			e.Version++
+		} else {
+			region.meta.RegionEpoch = &metapb.RegionEpoch{
+				ConfVer: 0,
+				Version: 1,
+			}
 		}
 	}
 }
@@ -133,6 +138,11 @@ func WithIncConfVer() RegionCreateOption {
 		e := region.meta.GetRegionEpoch()
 		if e != nil {
 			e.ConfVer++
+		} else {
+			region.meta.RegionEpoch = &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 0,
+			}
 		}
 	}
 }
@@ -188,23 +198,15 @@ func SetReadKeys(v uint64) RegionCreateOption {
 	}
 }
 
-// SetReadQuery sets the read query for the region.
+// SetReadQuery sets the read query for the region, only used for unit test.
 func SetReadQuery(v uint64) RegionCreateOption {
-	q := &pdpb.QueryStats{
-		Coprocessor: v / 3,
-		Get:         v / 3,
-		Scan:        v / 3,
-	}
+	q := RandomKindReadQuery(v)
 	return SetQueryStats(q)
 }
 
-// SetWrittenQuery sets the write query for the region.
+// SetWrittenQuery sets the write query for the region, only used for unit test.
 func SetWrittenQuery(v uint64) RegionCreateOption {
-	q := &pdpb.QueryStats{
-		Put:         v / 3,
-		Delete:      v / 3,
-		DeleteRange: v / 3,
-	}
+	q := RandomKindWriteQuery(v)
 	return SetQueryStats(q)
 }
 

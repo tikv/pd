@@ -84,12 +84,12 @@ func (s *testErrorSuite) TestError(c *C) {
 	lg := newZapTestLogger(conf)
 	log.ReplaceGlobals(lg.Logger, nil)
 
-	rfc := `[error="[PD:tso:ErrInvalidTimestamp]invalid timestamp"]`
-	log.Error("test", zap.Error(ErrInvalidTimestamp.FastGenByArgs()))
+	rfc := `[error="[PD:member:ErrEtcdLeaderNotFound]etcd leader not found`
+	log.Error("test", zap.Error(ErrEtcdLeaderNotFound.FastGenByArgs()))
 	c.Assert(strings.Contains(lg.Message(), rfc), IsTrue)
 	err := errors.New("test error")
-	log.Error("test", ZapError(ErrInvalidTimestamp, err))
-	rfc = `[error="[PD:tso:ErrInvalidTimestamp]test error"]`
+	log.Error("test", ZapError(ErrEtcdLeaderNotFound, err))
+	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]test error"]`
 	c.Assert(strings.Contains(lg.Message(), rfc), IsTrue)
 }
 
