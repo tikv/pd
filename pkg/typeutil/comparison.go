@@ -38,3 +38,16 @@ func MinDuration(a, b time.Duration) time.Duration {
 	}
 	return b
 }
+
+// StringsEqual checks if two string slices are equal. Empyt slice and nil are considered equal.
+func StringsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

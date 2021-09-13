@@ -269,11 +269,26 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
 	}
-	// remove orphan peers only when all rules are satisfied (count+role)
+	// remove orphan peers only when all rules are satisfied (count+role) and all peers selected
+	// by RuleFits is not pending or down.
 	for _, rf := range fit.RuleFits {
 		if !rf.IsSatisfied() {
 			checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
 			return nil, nil
+		}
+		for _, p := range rf.Peers {
+			for _, pendingPeer := range region.GetPendingPeers() {
+				if pendingPeer.Id == p.Id {
+					checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
+					return nil, nil
+				}
+			}
+			for _, downPeer := range region.GetDownPeers() {
+				if downPeer.Peer.Id == p.Id {
+					checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
+					return nil, nil
+				}
+			}
 		}
 	}
 	checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
@@ -292,10 +307,8 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return false
 		}
+		// Only consider the state of the Store, not `stats.DownSeconds`.
 		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
-			continue
-		}
-		if stats.GetDownSeconds() < uint64(c.cluster.GetOpts().GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
 		return true
