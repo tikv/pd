@@ -41,11 +41,6 @@ func GenRangeCluster(cluster opt.Cluster, startKey, endKey []byte) *RangeCluster
 	}
 }
 
-// GetClusterType returns the cluster type
-func (r *RangeCluster) GetClusterType() core.ClusterType {
-	return core.RangeCluster
-}
-
 func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 	id := s.GetID()
 

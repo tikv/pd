@@ -468,11 +468,6 @@ func (c *RaftCluster) SetStorage(s *core.Storage) {
 	c.storage = s
 }
 
-// GetClusterType returns the cluster type
-func (c *RaftCluster) GetClusterType() core.ClusterType {
-	return core.RaftCluster
-}
-
 // GetOpts returns cluster's configuration.
 func (c *RaftCluster) GetOpts() *config.PersistOptions {
 	return c.opt
