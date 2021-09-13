@@ -195,6 +195,7 @@ func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context) error {
 	tbc.pushRequest(firstTSORequest)
 
 	// This loop is for trying best to collect more requests, so we use `tbc.maxBatchSize` here.
+fetchPendingRequestsLoop:
 	for tbc.collectedRequestCount < tbc.maxBatchSize {
 		select {
 		case tsoReq := <-tbc.tsoRequestCh:
@@ -202,12 +203,10 @@ func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			// break here can only break the select statement.
-			goto fetchMorePendingRequests
+			break fetchPendingRequestsLoop
 		}
 	}
 
-fetchMorePendingRequests:
 	// Check whether we should fetch more pending TSO requests from the channel.
 	// TODO: maybe consider the actual load that returns through a TSO response from PD server.
 	if tbc.collectedRequestCount >= tbc.maxBatchSize || tbc.maxBatchWaitInterval <= 0 {
