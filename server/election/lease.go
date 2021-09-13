@@ -86,8 +86,7 @@ func (l *lease) IsExpired() bool {
 	if l == nil {
 		return true
 	}
-	expireTime := l.expireTime.Load()
-	if expireTime == nil || expireTime == typeutil.ZeroTime {
+	if l.expireTime.Load() == nil {
 		return false
 	}
 	return time.Now().After(l.expireTime.Load().(time.Time))
