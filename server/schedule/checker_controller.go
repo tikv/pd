@@ -108,6 +108,11 @@ func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 	return c.mergeChecker
 }
 
+// GetRuleChecker returns the rule checker.
+func (c *CheckerController) GetRuleChecker() *checker.RuleChecker {
+	return c.ruleChecker
+}
+
 // GetWaitingRegions returns the regions in the waiting list.
 func (c *CheckerController) GetWaitingRegions() []*cache.Item {
 	return c.regionWaitingList.Elems()

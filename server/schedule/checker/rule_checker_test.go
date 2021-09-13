@@ -14,7 +14,11 @@
 package checker
 
 import (
+<<<<<<< HEAD
 	"encoding/hex"
+=======
+	"context"
+>>>>>>> 1a7caa95c (schedule: not limit remove peer of the down store (#4097))
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -572,6 +576,83 @@ func (s *testRuleCheckerSuite) TestFixOfflinePeer(c *C) {
 	c.Assert(s.rc.Check(region), IsNil)
 }
 
+<<<<<<< HEAD
+=======
+func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddRegionStore(999, 1)
+	s.cluster.AddLeaderRegion(1, 1, 3, 4)
+	rule := &placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone"},
+	}
+	s.ruleManager.SetRule(rule)
+	region := s.cluster.GetRegion(1)
+	region = region.Clone(core.WithIncConfVer(), core.WithIncVersion())
+	c.Assert(s.rc.Check(region), IsNil)
+
+	testcases := []struct {
+		name        string
+		region      *core.RegionInfo
+		stillCached bool
+	}{
+		{
+			name:        "default",
+			region:      region,
+			stillCached: true,
+		},
+		{
+			name: "region topo changed",
+			region: func() *core.RegionInfo {
+				return region.Clone(core.WithAddPeer(&metapb.Peer{
+					Id:      999,
+					StoreId: 999,
+					Role:    metapb.PeerRole_Voter,
+				}), core.WithIncConfVer())
+			}(),
+			stillCached: false,
+		},
+		{
+			name: "region leader changed",
+			region: region.Clone(
+				core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 3})),
+			stillCached: false,
+		},
+		{
+			name: "region have down peers",
+			region: region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+				{
+					Peer:        region.GetPeer(3),
+					DownSeconds: 42,
+				},
+			})),
+			stillCached: false,
+		},
+	}
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		if testcase.stillCached {
+			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldCache", "return(true)"), IsNil)
+			s.rc.Check(testcase.region)
+			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldCache"), IsNil)
+		} else {
+			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache", "return(true)"), IsNil)
+			s.rc.Check(testcase.region)
+			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache"), IsNil)
+		}
+	}
+}
+
+>>>>>>> 1a7caa95c (schedule: not limit remove peer of the down store (#4097))
 // Ref https://github.com/tikv/pd/issues/4045
 func (s *testRuleCheckerSuite) TestSkipFixOrphanPeerIfSelectedPeerisPendingOrDown(c *C) {
 	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
