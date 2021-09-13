@@ -130,10 +130,14 @@ func StringToKeyType(input string) KeyType {
 	}
 }
 
+// ClusterType means the type of cluster
 type ClusterType int
 
 const (
+	// RaftCluster means the ClusterType of RaftCluster
 	RaftCluster ClusterType = iota
+	// RangeCluster means the ClusterType of RangeCluster
 	RangeCluster
+	// MockCluster means the ClusterType of MockCluster
 	MockCluster
 )

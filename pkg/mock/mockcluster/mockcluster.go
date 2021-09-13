@@ -69,6 +69,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	return clus
 }
 
+// GetClusterType returns the cluster type
 func (mc *Cluster) GetClusterType() core.ClusterType {
 	return core.MockCluster
 }
