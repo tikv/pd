@@ -14,7 +14,11 @@
 package checker
 
 import (
+<<<<<<< HEAD
 	"encoding/hex"
+=======
+	"context"
+>>>>>>> 1a7caa95c (schedule: not limit remove peer of the down store (#4097))
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -333,3 +337,321 @@ func (s *testRuleCheckerSuite) TestIssue3521_PriorityFixOrphanPeer(c *C) {
 	c.Assert(op.Step(0), FitsTypeOf, remove)
 	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
 }
+<<<<<<< HEAD
+=======
+
+func (s *testRuleCheckerSuite) TestIssue3293(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	err := s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "TiDB_DDL_51",
+		ID:      "0",
+		Role:    placement.Follower,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key: "host",
+				Values: []string{
+					"host5",
+				},
+				Op: placement.In,
+			},
+		},
+	})
+	c.Assert(err, IsNil)
+	s.cluster.DeleteStore(s.cluster.GetStore(5))
+	err = s.ruleManager.SetRule(&placement.Rule{
+		GroupID: "TiDB_DDL_51",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	c.Assert(err, IsNil)
+	err = s.ruleManager.DeleteRule("pd", "default")
+	c.Assert(err, IsNil)
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "add-rule-peer")
+}
+
+func (s *testRuleCheckerSuite) TestIssue3299(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"dc": "sh"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+
+	testCases := []struct {
+		constraints []placement.LabelConstraint
+		err         string
+	}{
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host5"},
+					Op:     placement.In,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "ho",
+					Values: []string{"sh"},
+					Op:     placement.In,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.NotIn,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+				{
+					Key:    "host",
+					Values: []string{"host3"},
+					Op:     placement.In,
+				},
+			},
+			err: ".*can not match any store",
+		},
+		{
+			constraints: []placement.LabelConstraint{
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+				{
+					Key:    "host",
+					Values: []string{"host1"},
+					Op:     placement.In,
+				},
+			},
+			err: "",
+		},
+	}
+
+	for _, t := range testCases {
+		err := s.ruleManager.SetRule(&placement.Rule{
+			GroupID:          "p",
+			ID:               "0",
+			Role:             placement.Follower,
+			Count:            1,
+			LabelConstraints: t.constraints,
+		})
+		if t.err != "" {
+			c.Assert(err, ErrorMatches, t.err)
+		} else {
+			c.Assert(err, IsNil)
+		}
+	}
+}
+
+// See issue: https://github.com/tikv/pd/issues/3705
+func (s *testRuleCheckerSuite) TestFixDownPeer(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddLeaderRegion(1, 1, 3, 4)
+	rule := &placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone"},
+	}
+	s.ruleManager.SetRule(rule)
+
+	region := s.cluster.GetRegion(1)
+	c.Assert(s.rc.Check(region), IsNil)
+
+	s.cluster.SetStoreDown(4)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{Peer: region.GetStorePeer(4), DownSeconds: 6000},
+	}))
+	testutil.CheckTransferPeer(c, s.rc.Check(region), operator.OpRegion, 4, 5)
+
+	s.cluster.SetStoreDown(5)
+	testutil.CheckTransferPeer(c, s.rc.Check(region), operator.OpRegion, 4, 2)
+
+	rule.IsolationLevel = "zone"
+	s.ruleManager.SetRule(rule)
+	c.Assert(s.rc.Check(region), IsNil)
+}
+
+// See issue: https://github.com/tikv/pd/issues/3705
+func (s *testRuleCheckerSuite) TestFixOfflinePeer(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddLeaderRegion(1, 1, 3, 4)
+	rule := &placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone"},
+	}
+	s.ruleManager.SetRule(rule)
+
+	region := s.cluster.GetRegion(1)
+	c.Assert(s.rc.Check(region), IsNil)
+
+	s.cluster.SetStoreOffline(4)
+	testutil.CheckTransferPeer(c, s.rc.Check(region), operator.OpRegion, 4, 5)
+
+	s.cluster.SetStoreOffline(5)
+	testutil.CheckTransferPeer(c, s.rc.Check(region), operator.OpRegion, 4, 2)
+
+	rule.IsolationLevel = "zone"
+	s.ruleManager.SetRule(rule)
+	c.Assert(s.rc.Check(region), IsNil)
+}
+
+func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddRegionStore(999, 1)
+	s.cluster.AddLeaderRegion(1, 1, 3, 4)
+	rule := &placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone"},
+	}
+	s.ruleManager.SetRule(rule)
+	region := s.cluster.GetRegion(1)
+	region = region.Clone(core.WithIncConfVer(), core.WithIncVersion())
+	c.Assert(s.rc.Check(region), IsNil)
+
+	testcases := []struct {
+		name        string
+		region      *core.RegionInfo
+		stillCached bool
+	}{
+		{
+			name:        "default",
+			region:      region,
+			stillCached: true,
+		},
+		{
+			name: "region topo changed",
+			region: func() *core.RegionInfo {
+				return region.Clone(core.WithAddPeer(&metapb.Peer{
+					Id:      999,
+					StoreId: 999,
+					Role:    metapb.PeerRole_Voter,
+				}), core.WithIncConfVer())
+			}(),
+			stillCached: false,
+		},
+		{
+			name: "region leader changed",
+			region: region.Clone(
+				core.WithLeader(&metapb.Peer{Role: metapb.PeerRole_Voter, Id: 2, StoreId: 3})),
+			stillCached: false,
+		},
+		{
+			name: "region have down peers",
+			region: region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+				{
+					Peer:        region.GetPeer(3),
+					DownSeconds: 42,
+				},
+			})),
+			stillCached: false,
+		},
+	}
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		if testcase.stillCached {
+			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldCache", "return(true)"), IsNil)
+			s.rc.Check(testcase.region)
+			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldCache"), IsNil)
+		} else {
+			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache", "return(true)"), IsNil)
+			s.rc.Check(testcase.region)
+			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache"), IsNil)
+		}
+	}
+}
+
+// Ref https://github.com/tikv/pd/issues/4045
+func (s *testRuleCheckerSuite) TestSkipFixOrphanPeerIfSelectedPeerisPendingOrDown(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+
+	// set peer3 and peer4 to pending
+	r1 := s.cluster.GetRegion(1)
+	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetStorePeer(3), r1.GetStorePeer(4)}))
+	s.cluster.PutRegion(r1)
+
+	// should not remove extra peer
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+
+	// set peer3 to down-peer
+	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetStorePeer(4)}))
+	r1 = r1.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{
+			Peer:        r1.GetStorePeer(3),
+			DownSeconds: 42,
+		},
+	}))
+	s.cluster.PutRegion(r1)
+
+	// should not remove extra peer
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+
+	// set peer3 to normal
+	r1 = r1.Clone(core.WithDownPeers(nil))
+	s.cluster.PutRegion(r1)
+
+	// should remove extra peer now
+	var remove operator.RemovePeer
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op.Step(0), FitsTypeOf, remove)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+}
+>>>>>>> 1a7caa95c (schedule: not limit remove peer of the down store (#4097))

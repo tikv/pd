@@ -987,6 +987,36 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	c.Assert(lb.Schedule(tc), NotNil)
 }
 
+func (s *testOperatorControllerSuite) TestDownStoreLimit(c *C) {
+	tc, co, cleanup := prepare(nil, nil, nil, c)
+	defer cleanup()
+	oc := co.opController
+	rc := co.checkers.GetRuleChecker()
+
+	tc.addRegionStore(1, 100)
+	tc.addRegionStore(2, 100)
+	tc.addRegionStore(3, 100)
+	tc.addLeaderRegion(1, 1, 2, 3)
+
+	region := tc.GetRegion(1)
+	tc.setStoreDown(1)
+	tc.SetStoreLimit(1, storelimit.RemovePeer, 1)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{
+			Peer:        region.GetStorePeer(1),
+			DownSeconds: 24 * 60 * 60,
+		},
+	}))
+
+	for i := uint64(1); i <= 5; i++ {
+		tc.addRegionStore(i+3, 100)
+		op := rc.Check(region)
+		c.Assert(op, NotNil)
+		c.Assert(oc.AddOperator(op), IsTrue)
+		oc.RemoveOperator(op)
+	}
+}
+
 var _ = Suite(&testScheduleControllerSuite{})
 
 type testScheduleControllerSuite struct {
