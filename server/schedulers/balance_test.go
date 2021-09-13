@@ -17,7 +17,6 @@ package schedulers
 import (
 	"context"
 	"fmt"
-	"math"
 	"math/rand"
 
 	. "github.com/pingcap/check"
@@ -144,21 +143,6 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 			c.Assert(plan.shouldBalance(""), Equals, t.expectedResult)
 		}
 	}
-}
-
-func (s *testBalanceSuite) TestBalanceLimit(c *C) {
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.AddLeaderStore(1, 10)
-	tc.AddLeaderStore(2, 20)
-	tc.AddLeaderStore(3, 30)
-
-	// StandDeviation is sqrt((10^2+0+10^2)/3).
-	c.Assert(adjustBalanceLimit(tc, core.LeaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
-
-	tc.SetStoreOffline(1)
-	// StandDeviation is sqrt((5^2+5^2)/2).
-	c.Assert(adjustBalanceLimit(tc, core.LeaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
 }
 
 func (s *testBalanceSuite) TestTolerantRatio(c *C) {
