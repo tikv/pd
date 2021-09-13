@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
@@ -79,7 +80,19 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	return shouldBalance, sourceScore, targetScore
 }
 
+<<<<<<< HEAD
 func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
+=======
+func adjustTolerantRatio(cluster opt.Cluster, kind core.ScheduleKind) float64 {
+	var tolerantSizeRatio float64
+	switch c := cluster.(type) {
+	case *schedule.RangeCluster:
+		// range cluster use a separate configuration
+		tolerantSizeRatio = c.GetTolerantSizeRatio()
+	default:
+		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
+	}
+>>>>>>> e9b4f7949 (scheduler: allow empty region to be scheduled and use a sperate tolerance config in scatter range scheduler (#4106))
 	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
 		tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
