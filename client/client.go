@@ -655,7 +655,9 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tbc 
 			log.Error("[pd] fetch pending tso requests error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
 			return
 		}
-		tbc.adjustBestBatchSize()
+		if tbc.maxBatchWaitInterval >= 0 {
+			tbc.adjustBestBatchSize()
+		}
 		done := make(chan struct{})
 		dl := deadline{
 			timer:  time.After(c.timeout),

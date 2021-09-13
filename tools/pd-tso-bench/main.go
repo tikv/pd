@@ -35,18 +35,19 @@ import (
 )
 
 var (
-	pdAddrs      = flag.String("pd", "127.0.0.1:2379", "pd address")
-	clientNumber = flag.Int("client", 1, "the number of pd clients involved in each benchmark")
-	concurrency  = flag.Int("c", 1000, "concurrency")
-	count        = flag.Int("count", 1, "the count number that the test will run")
-	duration     = flag.Duration("duration", 60*time.Second, "how many seconds the test will last")
-	dcLocation   = flag.String("dc", "global", "which dc-location this bench will request")
-	verbose      = flag.Bool("v", false, "output statistics info every interval and output metrics info at the end")
-	interval     = flag.Duration("interval", time.Second, "interval to output the statistics")
-	caPath       = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
-	certPath     = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
-	keyPath      = flag.String("key", "", "path of file that contains X509 key in PEM format")
-	wg           sync.WaitGroup
+	pdAddrs              = flag.String("pd", "127.0.0.1:2379", "pd address")
+	clientNumber         = flag.Int("client", 1, "the number of pd clients involved in each benchmark")
+	concurrency          = flag.Int("c", 1000, "concurrency")
+	count                = flag.Int("count", 1, "the count number that the test will run")
+	duration             = flag.Duration("duration", 60*time.Second, "how many seconds the test will last")
+	dcLocation           = flag.String("dc", "global", "which dc-location this bench will request")
+	verbose              = flag.Bool("v", false, "output statistics info every interval and output metrics info at the end")
+	interval             = flag.Duration("interval", time.Second, "interval to output the statistics")
+	caPath               = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
+	certPath             = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
+	keyPath              = flag.String("key", "", "path of file that contains X509 key in PEM format")
+	maxBatchWaitInterval = flag.Duration("batch-interval", 0, "the max batch wait interval")
+	wg                   sync.WaitGroup
 )
 
 var promServer *httptest.Server
@@ -91,7 +92,7 @@ func bench(mainCtx context.Context) {
 			CAPath:   *caPath,
 			CertPath: *certPath,
 			KeyPath:  *keyPath,
-		})
+		}, pd.WithMaxTSOBatchWaitInterval(*maxBatchWaitInterval))
 		if err != nil {
 			log.Fatal(fmt.Sprintf("create pd client #%d failed: %v", idx, err))
 		}

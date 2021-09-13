@@ -34,9 +34,8 @@ import (
 )
 
 const (
-	globalDCLocation           = "global"
-	defaultMaxTSOBatchSize     = 10000 // should be higher if client is sending requests in burst
-	defaultMaxTSOBatchInterval = time.Millisecond
+	globalDCLocation       = "global"
+	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
 )
 
 // baseClient is a basic client for all other complex client.
@@ -117,15 +116,14 @@ func WithMaxTSOBatchWaitInterval(maxTSOBatchWaitInterval time.Duration) ClientOp
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption, opts ...ClientOption) (*baseClient, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	c := &baseClient{
-		urls:                    urls,
-		checkLeaderCh:           make(chan struct{}, 1),
-		checkTSODispatcherCh:    make(chan struct{}, 1),
-		ctx:                     ctx1,
-		cancel:                  cancel,
-		security:                security,
-		timeout:                 defaultPDTimeout,
-		maxRetryTimes:           maxInitClusterRetries,
-		maxTSOBatchWaitInterval: defaultMaxTSOBatchInterval,
+		urls:                 urls,
+		checkLeaderCh:        make(chan struct{}, 1),
+		checkTSODispatcherCh: make(chan struct{}, 1),
+		ctx:                  ctx1,
+		cancel:               cancel,
+		security:             security,
+		timeout:              defaultPDTimeout,
+		maxRetryTimes:        maxInitClusterRetries,
 	}
 	for _, opt := range opts {
 		opt(c)
