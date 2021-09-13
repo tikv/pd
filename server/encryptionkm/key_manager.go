@@ -207,7 +207,6 @@ func (m *KeyManager) keysRevision() int64 {
 func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 	// Setup key dictionary watcher
 	watcher := clientv3.NewWatcher(m.etcdClient)
-	watchChan := watcher.Watch(ctx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision()))
 	defer watcher.Close()
 	// Check data key rotation every min(dataKeyRotationPeriod, keyRotationCheckPeriod).
 	checkPeriod := m.dataKeyRotationPeriod
@@ -216,33 +215,58 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 	}
 	ticker := time.NewTicker(checkPeriod)
 	defer ticker.Stop()
-	// Loop
+
 	for {
+		var (
+			resp clientv3.WatchResponse
+			ok   bool
+		)
+		rch := watcher.Watch(ctx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision()))
+
+	keyWatchLoop:
+		for {
+			select {
+			case resp, ok = <-rch:
+				if !ok || resp.CompactRevision != 0 || resp.Canceled {
+					break keyWatchLoop
+				}
+				for _, event := range resp.Events {
+					if event.Type != mvccpb.PUT {
+						log.Warn("encryption keys is deleted unexpectedly")
+						continue
+					}
+					_, err := m.loadKeysFromKV(event.Kv)
+					if err != nil {
+						log.Warn("fail to get encryption keys from watcher result", errs.ZapError(err))
+					}
+				}
+				m.helper.eventAfterReloadByWatcher()
+			case <-m.helper.tick(ticker):
+				m.checkOnTick()
+				m.helper.eventAfterTicker()
+			}
+		}
+
 		select {
-		// Reload encryption keys updated by PD leader (could be ourselves).
-		case resp := <-watchChan:
-			if resp.Canceled {
-				// If the watcher failed, we fallback to reload every 10 minutes.
-				log.Warn("encryption key watcher canceled")
-				continue
-			}
-			for _, event := range resp.Events {
-				if event.Type != mvccpb.PUT {
-					log.Warn("encryption keys is deleted unexpectedly")
-					continue
-				}
-				_, err := m.loadKeysFromKV(event.Kv)
-				if err != nil {
-					log.Warn("fail to get encryption keys from watcher result", errs.ZapError(err))
-				}
-			}
-			m.helper.eventAfterReloadByWatcher()
-		case <-m.helper.tick(ticker):
-			m.checkOnTick()
-			m.helper.eventAfterTicker()
 		case <-ctx.Done():
 			// Server shutdown.
 			return
+		default:
+		}
+
+		if resp.CompactRevision != 0 {
+			// meet compacted error
+			log.Warn("revision has been compacted, use the compact revision",
+				zap.Int64("revision", m.keysRevision()),
+				zap.Int64("compact-revision", resp.CompactRevision))
+		} else {
+			// other error
+			log.Error("encryption key watcher canceled",
+				errs.ZapError(errs.ErrEncryptionKeysWatcher, resp.Err()))
+		}
+
+		if _, err := m.loadKeys(); err != nil {
+			log.Error("encryption key reload failed", errs.ZapError(err))
 		}
 	}
 }
