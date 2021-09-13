@@ -80,7 +80,7 @@ func (p *PriorityChecker) Check(region *core.RegionInfo) (fit *placement.RegionF
 
 // checkRegionInPlacementRule check region in placement rule mode
 func (p *PriorityChecker) checkRegionInPlacementRule(region *core.RegionInfo) (makeupCount int, fit *placement.RegionFit) {
-	fit = p.cluster.FitRegion(region)
+	fit = opt.FitRegion(p.cluster, region)
 	if len(fit.RuleFits) == 0 {
 		return
 	}

@@ -1506,11 +1506,6 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 	return c.ruleManager
 }
 
-// FitRegion tries to fit the region with placement rules.
-func (c *RaftCluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
-	return c.GetRuleManager().FitRegion(c, region)
-}
-
 // GetRegionLabeler returns the region labeler.
 func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
 	c.RLock()
