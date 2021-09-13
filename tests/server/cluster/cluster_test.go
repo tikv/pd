@@ -702,7 +702,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	c.Assert(raftCluster, NotNil)
 
 	// Check meta, stores, and regions.
-	c.Assert(raftCluster.GetConfig(), DeepEquals, meta)
+	c.Assert(raftCluster.GetMetaCluster(), DeepEquals, meta)
 	c.Assert(raftCluster.GetStoreCount(), Equals, n)
 	for _, store := range raftCluster.GetMetaStores() {
 		c.Assert(store, DeepEquals, stores[store.GetId()])

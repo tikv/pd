@@ -21,10 +21,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/montanaflynn/stats"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -182,18 +180,6 @@ func adjustTolerantRatio(cluster opt.Cluster, kind core.ScheduleKind) float64 {
 		}
 	}
 	return tolerantSizeRatio
-}
-
-func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
-	stores := cluster.GetStores()
-	counts := make([]float64, 0, len(stores))
-	for _, s := range stores {
-		if s.IsUp() {
-			counts = append(counts, float64(s.ResourceCount(kind)))
-		}
-	}
-	limit, _ := stats.StandardDeviation(counts)
-	return typeutil.MaxUint64(1, uint64(limit))
 }
 
 func getKeyRanges(args []string) ([]core.KeyRange, error) {
