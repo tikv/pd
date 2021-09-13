@@ -208,7 +208,6 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 	// Setup key dictionary watcher
 	watcher := clientv3.NewWatcher(m.etcdClient)
 	watchChan := watcher.Watch(ctx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision()))
-	watcherEnabled := true
 	defer watcher.Close()
 	// Check data key rotation every min(dataKeyRotationPeriod, keyRotationCheckPeriod).
 	checkPeriod := m.dataKeyRotationPeriod
@@ -225,7 +224,6 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 			if resp.Canceled {
 				// If the watcher failed, we fallback to reload every 10 minutes.
 				log.Warn("encryption key watcher canceled")
-				watcherEnabled = false
 				continue
 			}
 			for _, event := range resp.Events {
@@ -240,7 +238,7 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 			}
 			m.helper.eventAfterReloadByWatcher()
 		case <-m.helper.tick(ticker):
-			m.checkOnTick(watcherEnabled)
+			m.checkOnTick()
 			m.helper.eventAfterTicker()
 		case <-ctx.Done():
 			// Server shutdown.
@@ -250,20 +248,13 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 }
 
 // checkOnTick perform key rotation and key reload on timer tick, if necessary.
-func (m *KeyManager) checkOnTick(watcherEnabled bool) {
+func (m *KeyManager) checkOnTick() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Check data key rotation in case we are the PD leader.
 	err := m.rotateKeyIfNeeded(false /*forceUpdate*/)
 	if err != nil {
 		log.Warn("fail to rotate data encryption key", errs.ZapError(err))
-	}
-	// Fallback mechanism to reload keys if watcher failed.
-	if !watcherEnabled {
-		_, err = m.loadKeysImpl()
-		if err != nil {
-			log.Warn("fail to reload keys after watcher failed", errs.ZapError(err))
-		}
 	}
 }
 
