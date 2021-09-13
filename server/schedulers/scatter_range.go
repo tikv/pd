@@ -217,7 +217,7 @@ func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operat
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	// isolate a new cluster according to the key range
 	c := schedule.GenRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())
-	c.SetTolerantSizeRatio(2)
+	c.SetTolerantSizeRatio(1)
 	if l.allowBalanceLeader(cluster) {
 		ops := l.balanceLeader.Schedule(c)
 		if len(ops) > 0 {

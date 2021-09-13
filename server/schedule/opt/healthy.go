@@ -54,7 +54,13 @@ func HealthAllowPending(cluster Cluster) func(*core.RegionInfo) bool {
 
 // AllowBalanceEmptyRegion returns a function that checks if a region is an empty region and can be balanced.
 func AllowBalanceEmptyRegion(cluster Cluster) func(*core.RegionInfo) bool {
-	return func(region *core.RegionInfo) bool { return IsEmptyRegionAllowBalance(cluster, region) }
+	switch cluster.GetClusterType() {
+	case core.RangeCluster:
+		// allow empty region to be scheduled in range cluster
+		return func(region *core.RegionInfo) bool { return true }
+	default:
+		return func(region *core.RegionInfo) bool { return IsEmptyRegionAllowBalance(cluster, region) }
+	}
 }
 
 // IsRegionReplicated checks if a region is fully replicated. When placement

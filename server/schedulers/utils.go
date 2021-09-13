@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
@@ -151,7 +152,14 @@ func (p *balancePlan) getTolerantResource() int64 {
 }
 
 func adjustTolerantRatio(cluster opt.Cluster, kind core.ScheduleKind) float64 {
-	tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
+	var tolerantSizeRatio float64
+	switch cluster.GetClusterType() {
+	case core.RangeCluster:
+		// range cluster use a separate configuration
+		tolerantSizeRatio = cluster.(*schedule.RangeCluster).GetTolerantSizeRatio()
+	default:
+		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
+	}
 	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
 		if tolerantSizeRatio == 0 {
 			return leaderTolerantSizeRatio
