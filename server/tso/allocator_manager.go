@@ -933,7 +933,7 @@ func (am *AllocatorManager) ResetAllocatorGroup(dcLocation string) {
 	defer am.mu.Unlock()
 	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
-		// Reset if it still has the leadership.
+		// Reset if it still has the leadership. Otherwise the data race may occur because of the re-campaigning.
 		if allocatorGroup.leadership.Check() {
 			allocatorGroup.leadership.Reset()
 		}
