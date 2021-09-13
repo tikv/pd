@@ -150,10 +150,10 @@ func (p *balancePlan) getTolerantResource() int64 {
 
 func adjustTolerantRatio(cluster opt.Cluster, kind core.ScheduleKind) float64 {
 	var tolerantSizeRatio float64
-	switch cluster.GetClusterType() {
-	case core.RangeCluster:
+	switch c := cluster.(type) {
+	case *schedule.RangeCluster:
 		// range cluster use a separate configuration
-		tolerantSizeRatio = cluster.(*schedule.RangeCluster).GetTolerantSizeRatio()
+		tolerantSizeRatio = c.GetTolerantSizeRatio()
 	default:
 		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
 	}
