@@ -129,4 +129,3 @@ func StringToKeyType(input string) KeyType {
 		panic("invalid key type: " + input)
 	}
 }
-
