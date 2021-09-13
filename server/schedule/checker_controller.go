@@ -176,4 +176,3 @@ func (c *CheckerController) PauseOrResume(name string, t int64) error {
 	}
 	return nil
 }
-

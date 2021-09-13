@@ -15,11 +15,12 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
-	"net/http"
 )
 
 type checkerHandler struct {
