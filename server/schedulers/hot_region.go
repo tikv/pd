@@ -270,6 +270,9 @@ func summaryStoresLoad(
 		if !ok {
 			continue
 		}
+		if kind == core.LeaderKind && !store.AllowLeaderTransfer() {
+			continue
+		}
 		loads := make([]float64, statistics.DimLen)
 		switch rwTy {
 		case read:
