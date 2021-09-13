@@ -62,5 +62,9 @@ func (c *checkerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
 		c.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.r.JSON(w, http.StatusOK, "Pause or resume merge successfully.")
+	if t == 0 {
+		c.r.JSON(w, http.StatusOK, "Resume the checker successfully.")
+	} else {
+		c.r.JSON(w, http.StatusOK, "Pause the checker successfully.")
+	}
 }

@@ -252,9 +252,9 @@ func (h *Handler) PauseOrResumeChecker(name string, t int64) error {
 	}
 	if err = c.PauseOrResumeChecker(name, t); err != nil {
 		if t == 0 {
-			log.Error("can not resume merge", errs.ZapError(err))
+			log.Error("can not resume checker", zap.String("checker-name", name), errs.ZapError(err))
 		} else {
-			log.Error("can not pause merge", errs.ZapError(err))
+			log.Error("can not pause checker", zap.String("checker-name", name), errs.ZapError(err))
 		}
 	}
 	return err
