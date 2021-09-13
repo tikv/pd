@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -67,7 +68,7 @@ func (l *lease) Grant(leaseTimeout int64) error {
 // Close releases the lease.
 func (l *lease) Close() error {
 	// Reset expire time.
-	l.expireTime.Store(time.Time{})
+	l.expireTime.Store(typeutil.ZeroTime)
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
