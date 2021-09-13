@@ -1038,28 +1038,29 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	c.Assert(mb.IsScheduleAllowed(tc), IsFalse)
 }
 
-var _ = Suite(&testScatterRangeLeaderSuite{})
+var _ = Suite(&testScatterRangeSuite{})
 
-type testScatterRangeLeaderSuite struct {
+type testScatterRangeSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func (s *testScatterRangeLeaderSuite) SetUpSuite(c *C) {
+func (s *testScatterRangeSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 }
 
-func (s *testScatterRangeLeaderSuite) TearDownSuite(c *C) {
+func (s *testScatterRangeSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
 
-func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
+func (s *testScatterRangeSuite) TestBalance(c *C) {
 	opt := config.NewTestOptions()
 	// TODO: enable palcementrules
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
-	tc.SetTolerantSizeRatio(2.5)
+	// range cluster use a special tolerant ratio, cluster opt take no impact
+	tc.SetTolerantSizeRatio(10000)
 	// Add stores 1,2,3,4,5.
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 0)
@@ -1084,17 +1085,16 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		})
 		id += 4
 	}
-	// empty case
+	// empty region case
 	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
 		leader := rand.Intn(4) % 3
 		regionInfo := core.NewRegionInfo(
 			meta,
 			meta.Peers[leader],
-			core.SetApproximateKeys(96),
-			core.SetApproximateSize(96),
+			core.SetApproximateKeys(1),
+			core.SetApproximateSize(1),
 		)
-
 		tc.Regions.SetRegion(regionInfo)
 	}
 	for i := 0; i < 100; i++ {
@@ -1118,7 +1118,7 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	}
 }
 
-func (s *testScatterRangeLeaderSuite) TestBalanceLeaderLimit(c *C) {
+func (s *testScatterRangeSuite) TestBalanceLeaderLimit(c *C) {
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(s.ctx, opt)
@@ -1149,7 +1149,6 @@ func (s *testScatterRangeLeaderSuite) TestBalanceLeaderLimit(c *C) {
 		id += 4
 	}
 
-	// empty case
 	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
 		leader := rand.Intn(4) % 3
@@ -1194,7 +1193,7 @@ func (s *testScatterRangeLeaderSuite) TestBalanceLeaderLimit(c *C) {
 	c.Check(maxLeaderCount-minLeaderCount, Greater, 10)
 }
 
-func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
+func (s *testScatterRangeSuite) TestConcurrencyUpdateConfig(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
@@ -1220,7 +1219,7 @@ func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
 	ch <- struct{}{}
 }
 
-func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
+func (s *testScatterRangeSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	// Add stores 1,2,3.
