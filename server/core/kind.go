@@ -129,3 +129,11 @@ func StringToKeyType(input string) KeyType {
 		panic("invalid key type: " + input)
 	}
 }
+
+type ClusterType int
+
+const (
+	RaftCluster ClusterType = iota
+	RangeCluster
+	MockCluster
+)
