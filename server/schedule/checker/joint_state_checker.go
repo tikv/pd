@@ -24,7 +24,7 @@ import (
 
 // JointStateChecker ensures region is in joint state will leave.
 type JointStateChecker struct {
-	CheckerPause
+	Pause
 	cluster opt.Cluster
 }
 

@@ -19,17 +19,19 @@ import (
 	"time"
 )
 
-// CheckerPause sets and stores delay time in checkers.
-type CheckerPause struct {
+// Pause sets and stores delay time in checkers.
+type Pause struct {
 	delayUntil int64
 }
 
-func (c *CheckerPause) IsPaused() bool {
+// IsPaused check if checker is paused
+func (c *Pause) IsPaused() bool {
 	delayUntil := atomic.LoadInt64(&c.delayUntil)
 	return time.Now().Unix() < delayUntil
 }
 
-func (c *CheckerPause) PauseOrResume(t int64) {
+// PauseOrResume pause or resume the checker
+func (c *Pause) PauseOrResume(t int64) {
 	delayUntil := time.Now().Unix() + t
 	atomic.StoreInt64(&c.delayUntil, delayUntil)
 }

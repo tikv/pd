@@ -24,7 +24,7 @@ import (
 
 // LearnerChecker ensures region has a learner will be promoted.
 type LearnerChecker struct {
-	CheckerPause
+	Pause
 	cluster opt.Cluster
 }
 

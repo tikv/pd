@@ -719,10 +719,7 @@ func (c *coordinator) pauseOrResumeChecker(name string, t int64) error {
 	if c.cluster == nil {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	if err := c.checkers.PauseOrResume(name, t); err != nil {
-		return err
-	}
-	return nil
+	return c.checkers.PauseOrResume(name, t)
 }
 
 func (c *coordinator) isSchedulerPaused(name string) (bool, error) {

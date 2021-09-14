@@ -34,7 +34,7 @@ import (
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
-	CheckerPause
+	Pause
 	cluster           opt.Cluster
 	ruleManager       *placement.RuleManager
 	name              string
