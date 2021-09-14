@@ -95,7 +95,8 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
 			c.Assert(region.UpdateTime, LessEqual, request.EndTime)
 		}
 	}
-	writeToDB(c, storage.LeveldbKV, hotRegions)
+	err := writeToDB(storage.LeveldbKV, hotRegions)
+	c.Assert(err, IsNil)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
 	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
@@ -177,20 +178,24 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 		c.Assert(len(historyHotRegions.HistoryHotRegion), Equals, 1)
 		c.Assert(reflect.DeepEqual(historyHotRegions.HistoryHotRegion[0], hotRegions[0]), IsTrue)
 	}
-	writeToDB(c, storage.LeveldbKV, hotRegions)
+	err := writeToDB(storage.LeveldbKV, hotRegions)
+	c.Assert(err, IsNil)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
 	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
 	c.Assert(err, IsNil)
 }
 
-func writeToDB(c *C, kv *kv.LeveldbKV, hotRegions []*core.HistoryHotRegion) {
+func writeToDB(kv *kv.LeveldbKV, hotRegions []*core.HistoryHotRegion) error {
 	batch := new(leveldb.Batch)
 	for _, region := range hotRegions {
 		key := core.HotRegionStorePath(region.HotRegionType, region.UpdateTime, region.RegionID)
 		value, err := json.Marshal(region)
-		c.Assert(err, IsNil)
+		if err != nil {
+			return err
+		}
 		batch.Put([]byte(key), value)
 	}
 	kv.Write(batch, nil)
+	return nil
 }

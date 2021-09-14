@@ -80,7 +80,7 @@ func readJSON(client *http.Client, url string, data interface{}) error {
 func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
 	if err != nil {
-		return nil
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	return doJSON(client, req, url, checkOpts...)
@@ -89,7 +89,7 @@ func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]
 func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	req, err := http.NewRequest("GET", url, bytes.NewBuffer(data))
 	if err != nil {
-		return nil
+		return err
 	}
 	return doJSON(client, req, url, checkOpts...)
 }
