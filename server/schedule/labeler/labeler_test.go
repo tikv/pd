@@ -59,6 +59,31 @@ func (s *testLabelerSuite) TestAdjustRule(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(rule.Rule.(*KeyRangeRule).StartKey, BytesEquals, []byte{0x12, 0xab, 0xcd})
 	c.Assert(rule.Rule.(*KeyRangeRule).EndKey, BytesEquals, []byte{0x34, 0xcd, 0xef})
+
+	rule = LabelRule{
+		ID: "foo",
+		Labels: []RegionLabel{
+			{Key: "k1", Value: "v1"},
+		},
+		RuleType: "key-ranges",
+		Rule: []map[string]interface{}{
+			{
+				"start_key": "12abcd",
+				"end_key":   "34cdef",
+			},
+			{
+				"start_key": "56abcd",
+				"end_key":   "78cdef",
+			},
+		},
+	}
+	err = s.labeler.adjustRule(&rule)
+	c.Assert(err, IsNil)
+	c.Assert(rule.Rule.([]*KeyRangeRule), HasLen, 2)
+	c.Assert(rule.Rule.([]*KeyRangeRule)[0].StartKey, BytesEquals, []byte{0x12, 0xab, 0xcd})
+	c.Assert(rule.Rule.([]*KeyRangeRule)[0].EndKey, BytesEquals, []byte{0x34, 0xcd, 0xef})
+	c.Assert(rule.Rule.([]*KeyRangeRule)[1].StartKey, BytesEquals, []byte{0x56, 0xab, 0xcd})
+	c.Assert(rule.Rule.([]*KeyRangeRule)[1].EndKey, BytesEquals, []byte{0x78, 0xcd, 0xef})
 }
 
 func (s *testLabelerSuite) TestAdjustRule2(c *C) {
@@ -87,6 +112,8 @@ func (s *testLabelerSuite) TestAdjustRule2(c *C) {
 		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": {"start_key":"123", "end_key":"abcd"}}`,
 		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": {"start_key":"abcd", "end_key":"123"}}`,
 		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": {"start_key":"abcd", "end_key":"1234"}}`,
+		// type = key-ranges, wrong type for rule.
+		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-ranges", "rule": {"start_key":"", "end_key":""}}`,
 	}
 	for i, str := range badRuleData {
 		var rule LabelRule
