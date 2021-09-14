@@ -9428,7 +9428,7 @@
             },
             {
               "exemplar": true,
-              "expr": "delta(pd_client_request_handle_tso_batch_size_sum{tidb_cluster=\"$tidb_cluster\"}[1m]) / delta(pd_client_request_handle_tso_batch_size_count{tidb_cluster=\"$tidb_cluster\"}[1m])",
+              "expr": "sum(delta(pd_client_request_handle_tso_batch_size_sum{tidb_cluster=\"$tidb_cluster\"}[1m])) / sum(delta(pd_client_request_handle_tso_batch_size_count{tidb_cluster=\"$tidb_cluster\"}[1m]))",
               "hide": false,
               "interval": "",
               "intervalFactor": 1,
