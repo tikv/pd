@@ -202,8 +202,6 @@ func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime
 		iter := h.LeveldbKV.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
 		iters[index] = iter
 	}
-	// iter := h.LeveldbKV.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
-	// iters[0] = i
 	return HotRegionStorageIterator{
 		iters:                iters,
 		encryptionKeyManager: h.encryptionKeyManager,
@@ -313,7 +311,7 @@ type HotRegionStorageIterator struct {
 
 // Next moves the iterator to the next key/value pair.
 // And return historyHotRegion which it is now pointing to.
-// it will return (nil,nil),if there is no more historyHotRegion.
+// it will return (nil, nil), if there is no more historyHotRegion.
 func (it *HotRegionStorageIterator) Next() (*HistoryHotRegion, error) {
 	iter := it.iters[0]
 	for !iter.Next() {
