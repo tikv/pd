@@ -102,12 +102,13 @@ func (ls *Leadership) GetLeaderKey() string {
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
-	ls.setLease(&lease{
+	newLease := &lease{
 		Purpose: ls.purpose,
 		client:  ls.client,
 		lease:   clientv3.NewLease(ls.client),
-	})
-	if err := ls.getLease().Grant(leaseTimeout); err != nil {
+	}
+	ls.setLease(newLease)
+	if err := newLease.Grant(leaseTimeout); err != nil {
 		return err
 	}
 	finalCmps := make([]clientv3.Cmp, 0, len(cmps)+1)
@@ -116,15 +117,15 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	finalCmps = append(finalCmps, clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
 	resp, err := kv.NewSlowLogTxn(ls.client).
 		If(finalCmps...).
-		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(ls.getLease().ID))).
+		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(newLease.ID))).
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
-		ls.getLease().Close()
+		newLease.Close()
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		ls.getLease().Close()
+		newLease.Close()
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	log.Info("write leaderData to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
