@@ -22,7 +22,10 @@ import (
 )
 
 func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
-	cache := mockRegionRuleFitCache()
+	originRegion := mockRegion(3, 0)
+	originRules := addExtraRules(0)
+	originStores := mockStores(3)
+	cache := mockRegionRuleFitCache(originRegion, originRules, originStores)
 	testcases := []struct {
 		name      string
 		region    *core.RegionInfo
@@ -141,18 +144,53 @@ func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
 			},
 			unchanged: false,
 		},
+		{
+			name:   "invalid input1",
+			region: nil,
+			rules: []*Rule{
+				{
+					GroupID:        "pd",
+					ID:             "default-2",
+					Role:           Voter,
+					Count:          3,
+					LocationLabels: []string{},
+				},
+			},
+			unchanged: false,
+		},
+		{
+			name:      "invalid input2",
+			region:    mockRegion(3, 0),
+			rules:     []*Rule{},
+			unchanged: false,
+		},
+		{
+			name:      "invalid input3",
+			region:    mockRegion(3, 0),
+			rules:     nil,
+			unchanged: false,
+		},
 	}
 	for _, testcase := range testcases {
 		c.Assert(cache.IsUnchanged(testcase.region, testcase.rules, mockStores(3)), Equals, testcase.unchanged)
 	}
+	// Invalid Input4
+	c.Assert(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), nil), IsFalse)
+	// Invalid Input5
+	c.Assert(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), []*core.StoreInfo{}), IsFalse)
+	// origin rules changed, assert whether cache is changed
+	originRules[0].Version++
+	c.Assert(cache.IsUnchanged(originRegion, originRules, originStores), IsFalse)
 }
 
-func mockRegionRuleFitCache() *RegionRuleFitCache {
+func mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *RegionRuleFitCache {
 	return &RegionRuleFitCache{
-		region: mockRegion(3, 0),
+		region:       toRegionCache(region),
+		regionStores: toStoreCacheList(regionStores),
+		rules:        toRuleCacheList(rules),
 		bestFit: &RegionFit{
-			regionStores: mockStores(3),
-			rules:        addExtraRules(0),
+			regionStores: regionStores,
+			rules:        rules,
 		},
 	}
 }

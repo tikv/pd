@@ -150,10 +150,12 @@ func FitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule)
 }
 
 type fitWorker struct {
-	stores  []*core.StoreInfo
-	bestFit RegionFit  // update during execution
-	peers   []*fitPeer // p.selected is updated during execution.
-	rules   []*Rule
+	stores        []*core.StoreInfo
+	bestFit       RegionFit  // update during execution
+	peers         []*fitPeer // p.selected is updated during execution.
+	rules         []*Rule
+	needIsolation bool
+	exit          bool
 }
 
 func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
@@ -170,10 +172,11 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 	sort.Slice(peers, func(i, j int) bool { return peers[i].GetId() < peers[j].GetId() })
 
 	return &fitWorker{
-		stores:  stores,
-		bestFit: RegionFit{RuleFits: make([]*RuleFit, len(rules))},
-		peers:   peers,
-		rules:   rules,
+		stores:        stores,
+		bestFit:       RegionFit{RuleFits: make([]*RuleFit, len(rules))},
+		peers:         peers,
+		needIsolation: needIsolation(rules),
+		rules:         rules,
 	}
 }
 
@@ -186,7 +189,15 @@ func (w *fitWorker) run() {
 // Index specifies the position of the rule.
 // returns true if it replaces `bestFit` with a better alternative.
 func (w *fitWorker) fitRule(index int) bool {
+	if w.exit {
+		return false
+	}
 	if index >= len(w.rules) {
+		// If there is no isolation level and we already find one solution, we can early exit searching instead of
+		// searching the whole cases.
+		if !w.needIsolation && w.bestFit.IsSatisfied() {
+			w.exit = true
+		}
 		return false
 	}
 
@@ -227,6 +238,9 @@ func (w *fitWorker) enumPeers(candidates, selected []*fitPeer, index int, count 
 		p.selected = true
 		better = w.enumPeers(candidates[i+1:], append(selected, p), index, count) || better
 		p.selected = false
+		if w.exit {
+			break
+		}
 	}
 	return better
 }
@@ -331,4 +345,13 @@ func isolationScore(peers []*fitPeer, labels []string) float64 {
 		}
 	}
 	return score
+}
+
+func needIsolation(rules []*Rule) bool {
+	for _, rule := range rules {
+		if len(rule.LocationLabels) > 0 {
+			return true
+		}
+	}
+	return false
 }

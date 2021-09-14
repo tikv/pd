@@ -78,11 +78,12 @@ const (
 	maxHotScheduleInterval = 20 * time.Second
 )
 
-// schedulePeerPr the probability of schedule the hot peer.
-var schedulePeerPr = 0.66
-
-// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
-var pendingAmpFactor = 2.0
+var (
+	// schedulePeerPr the probability of schedule the hot peer.
+	schedulePeerPr = 0.66
+	// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
+	pendingAmpFactor = 2.0
+)
 
 type hotScheduler struct {
 	name string

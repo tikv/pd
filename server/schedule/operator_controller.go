@@ -957,11 +957,3 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 	}
 	return oc.storesLimit[storeID][limitType]
 }
-
-// GetLeaderSchedulePolicy is to get leader schedule policy.
-func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
-	if oc.cluster == nil {
-		return core.ByCount
-	}
-	return oc.cluster.GetOpts().GetLeaderSchedulePolicy()
-}
