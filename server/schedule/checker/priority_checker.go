@@ -29,7 +29,7 @@ const defaultPriorityQueueSize = 1280
 
 // PriorityChecker ensures high priority region should run first
 type PriorityChecker struct {
-	Pause
+	PauseController
 	cluster opt.Cluster
 	opts    *config.PersistOptions
 	queue   *cache.PriorityQueue

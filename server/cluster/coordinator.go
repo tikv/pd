@@ -713,15 +713,6 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	return err
 }
 
-func (c *coordinator) pauseOrResumeChecker(name string, t int64) error {
-	c.Lock()
-	defer c.Unlock()
-	if c.cluster == nil {
-		return errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.checkers.PauseOrResume(name, t)
-}
-
 func (c *coordinator) isSchedulerPaused(name string) (bool, error) {
 	c.RLock()
 	defer c.RUnlock()
@@ -795,6 +786,33 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			return
 		}
 	}
+}
+
+func (c *coordinator) pauseOrResumeChecker(name string, t int64) error {
+	c.Lock()
+	defer c.Unlock()
+	if c.cluster == nil {
+		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	p, err := c.checkers.GetPauseController(name)
+	if err != nil {
+		return err
+	}
+	p.PauseOrResume(t)
+	return nil
+}
+
+func (c *coordinator) isCheckerPaused(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return false, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	p, err := c.checkers.GetPauseController(name)
+	if err != nil {
+		return false, err
+	}
+	return p.IsPaused(), nil
 }
 
 // scheduleController is used to manage a scheduler to schedule.

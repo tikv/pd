@@ -154,25 +154,25 @@ func (c *CheckerController) RemovePriorityRegions(id uint64) {
 	c.priorityChecker.RemovePriorityRegion(id)
 }
 
-// PauseOrResume pause or resume a specific checker
-func (c *CheckerController) PauseOrResume(name string, t int64) error {
+// GetPauseController returns pause controller of the checker
+func (c *CheckerController) GetPauseController(name string) (*checker.PauseController, error) {
 	switch name {
 	case "learner":
-		c.learnerChecker.PauseOrResume(t)
+		return &c.learnerChecker.PauseController, nil
 	case "replica":
-		c.replicaChecker.PauseOrResume(t)
+		return &c.replicaChecker.PauseController, nil
 	case "rule":
-		c.ruleChecker.PauseOrResume(t)
+		return &c.ruleChecker.PauseController, nil
 	case "split":
-		c.splitChecker.PauseOrResume(t)
+		return &c.splitChecker.PauseController, nil
 	case "merge":
-		c.mergeChecker.PauseOrResume(t)
+		return &c.mergeChecker.PauseController, nil
 	case "joint-state":
-		c.jointStateChecker.PauseOrResume(t)
+		return &c.jointStateChecker.PauseController, nil
 	case "priority":
-		c.priorityChecker.PauseOrResume(t)
+		return &c.priorityChecker.PauseController, nil
 	default:
-		return errs.ErrCheckerNotFound.FastGenByArgs()
+		return nil, errs.ErrCheckerNotFound.FastGenByArgs()
 	}
-	return nil
 }
+

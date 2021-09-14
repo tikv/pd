@@ -43,7 +43,7 @@ const (
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
-	Pause
+	PauseController
 	cluster    opt.Cluster
 	opts       *config.PersistOptions
 	splitCache *cache.TTLUint64

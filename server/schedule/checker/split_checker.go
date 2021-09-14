@@ -27,7 +27,7 @@ import (
 
 // SplitChecker splits regions when the key range spans across rule/label boundary.
 type SplitChecker struct {
-	Pause
+	PauseController
 	cluster     opt.Cluster
 	ruleManager *placement.RuleManager
 	labeler     *labeler.RegionLabeler

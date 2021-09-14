@@ -146,6 +146,15 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 	return c.GetSchedulers(), nil
 }
 
+// IsCheckerPaused returns if checker is paused
+func (h *Handler) IsCheckerPaused(name string) (bool, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return false, err
+	}
+	return rc.IsCheckerPaused(name)
+}
+
 // GetStores returns all stores in the cluster.
 func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 	rc := h.s.GetRaftCluster()

@@ -80,7 +80,7 @@ func (s *testCheckerSuite) TestAPI(c *C) {
 }
 
 func (s *testCheckerSuite) testPauseOrResume(name string, body []byte, extraTest func(string, *C), c *C) {
-	//handler := s.svr.GetHandler()
+	handler := s.svr.GetHandler()
 
 	// test pause.
 	input := make(map[string]interface{})
@@ -89,18 +89,18 @@ func (s *testCheckerSuite) testPauseOrResume(name string, body []byte, extraTest
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
 	c.Assert(err, IsNil)
-	//isPaused, err := handler.IsCheckerPaused(createdName)
-	//c.Assert(err, IsNil)
-	//c.Assert(isPaused, Equals, true)
+	isPaused, err := handler.IsCheckerPaused(name)
+	c.Assert(err, IsNil)
+	c.Assert(isPaused, Equals, true)
 	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
 	c.Assert(err, IsNil)
 	time.Sleep(time.Second)
-	//isPaused, err = handler.IsCheckerPaused(createdName)
-	//c.Assert(err, IsNil)
-	//c.Assert(isPaused, Equals, false)
+	isPaused, err = handler.IsCheckerPaused(name)
+	c.Assert(err, IsNil)
+	c.Assert(isPaused, Equals, false)
 
 	// test resume.
 	input = make(map[string]interface{})
@@ -114,9 +114,9 @@ func (s *testCheckerSuite) testPauseOrResume(name string, body []byte, extraTest
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
 	c.Assert(err, IsNil)
-	//isPaused, err = handler.IsCheckerPaused(createdName)
-	//c.Assert(err, IsNil)
-	//c.Assert(isPaused, Equals, false)
+	isPaused, err = handler.IsCheckerPaused(name)
+	c.Assert(err, IsNil)
+	c.Assert(isPaused, Equals, false)
 
 	if extraTest != nil {
 		extraTest(name, c)

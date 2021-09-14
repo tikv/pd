@@ -43,7 +43,7 @@ const (
 // Unhealthy replica management, mainly used for disaster recovery of TiKV.
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
-	Pause
+	PauseController
 	cluster           opt.Cluster
 	opts              *config.PersistOptions
 	regionWaitingList cache.Cache
