@@ -118,15 +118,15 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 
 // Keep will keep the leadership available by update the lease's expired time continuously
 func (ls *Leadership) Keep(ctx context.Context) {
-	ls.leaseMutex.RLock()
-	if ls.leaseMutex.lease == nil {
-		ls.leaseMutex.RUnlock()
+	ls.leaseMutex.Lock()
+	lease := ls.leaseMutex.lease
+	if lease == nil {
+		ls.leaseMutex.Unlock()
 		return
 	}
-	lease := ls.leaseMutex.lease
-	ls.leaseMutex.RUnlock()
-
 	ls.keepAliveCtx, ls.keepAliceCancelFunc = context.WithCancel(ctx)
+	ls.leaseMutex.Unlock()
+	// Release the lock before we keep alive the lease because this function won't return in general.
 	lease.KeepAlive(ls.keepAliveCtx)
 }
 
