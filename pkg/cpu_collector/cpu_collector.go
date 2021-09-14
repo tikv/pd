@@ -89,7 +89,7 @@ func (collector *CPUCollector) Start(ctx context.Context) {
 				newTotalCPUTimes := cpuTimes.User + cpuTimes.System
 				oldTotalCPUTimes := collector.totalCPUTimes.Load().(float64)
 				collector.totalCPUTimes.Store(newTotalCPUTimes)
-				collector.totalCPUTimesRate.Store((newTotalCPUTimes - oldTotalCPUTimes) / timeDelta)
+				collector.totalCPUTimesRate.Store((newTotalCPUTimes - oldTotalCPUTimes) * 100 / timeDelta)
 				collector.lastUpdateTime.Store(time.Now())
 			}
 		}()
