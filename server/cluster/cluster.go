@@ -1422,15 +1422,15 @@ func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
 	return versioninfo.IsCompatible(minSupportVersion, clusterVersion)
 }
 
-// GetConfig gets config from cluster.
-func (c *RaftCluster) GetConfig() *metapb.Cluster {
+// GetMetaCluster gets meta cluster.
+func (c *RaftCluster) GetMetaCluster() *metapb.Cluster {
 	c.RLock()
 	defer c.RUnlock()
 	return proto.Clone(c.meta).(*metapb.Cluster)
 }
 
-// PutConfig puts config into cluster.
-func (c *RaftCluster) PutConfig(meta *metapb.Cluster) error {
+// PutMetaCluster puts meta cluster.
+func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	c.Lock()
 	defer c.Unlock()
 	if meta.GetId() != c.clusterID {
@@ -1504,11 +1504,6 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 	c.RLock()
 	defer c.RUnlock()
 	return c.ruleManager
-}
-
-// FitRegion tries to fit the region with placement rules.
-func (c *RaftCluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
-	return c.GetRuleManager().FitRegion(c, region)
 }
 
 // GetRegionLabeler returns the region labeler.

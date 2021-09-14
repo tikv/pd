@@ -104,4 +104,10 @@ func (s *testLeadershipSuite) TestLeadership(c *C) {
 
 	c.Assert(leadership1.Check(), IsFalse)
 	c.Assert(leadership2.Check(), IsTrue)
+
+	// Test resetting the leadership.
+	leadership1.Reset()
+	leadership2.Reset()
+	c.Assert(leadership1.Check(), IsFalse)
+	c.Assert(leadership2.Check(), IsFalse)
 }
