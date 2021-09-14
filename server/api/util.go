@@ -83,7 +83,7 @@ func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return doJSON(client, req, url, checkOpts...)
+	return doJSON(client, req, checkOpts...)
 }
 
 func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
@@ -91,7 +91,7 @@ func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]b
 	if err != nil {
 		return err
 	}
-	return doJSON(client, req, url, checkOpts...)
+	return doJSON(client, req, checkOpts...)
 }
 
 func doDelete(client *http.Client, url string) (*http.Response, error) {
@@ -123,7 +123,7 @@ func parseKey(name string, input map[string]interface{}) ([]byte, string, error)
 	return returned, rawKey, nil
 }
 
-func doJSON(client *http.Client, req *http.Request, url string, checkOpts ...func([]byte, int)) error {
+func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, int)) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		return errors.WithStack(err)
