@@ -925,7 +925,7 @@ func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb.GetClusterC
 	}
 	return &pdpb.GetClusterConfigResponse{
 		Header:  s.header(),
-		Cluster: rc.GetConfig(),
+		Cluster: rc.GetMetaCluster(),
 	}, nil
 }
 
@@ -950,7 +950,7 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 		return &pdpb.PutClusterConfigResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	conf := request.GetCluster()
-	if err := rc.PutConfig(conf); err != nil {
+	if err := rc.PutMetaCluster(conf); err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 

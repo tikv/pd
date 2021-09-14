@@ -298,6 +298,44 @@ var (
 	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
 )
 
+// ClientOption configures client.
+type ClientOption func(c *client)
+
+// WithGRPCDialOptions configures the client with gRPC dial options.
+func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
+	return func(c *client) {
+		c.gRPCDialOptions = append(c.gRPCDialOptions, opts...)
+	}
+}
+
+// WithCustomTimeoutOption configures the client with timeout option.
+func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
+	return func(c *client) {
+		c.timeout = timeout
+	}
+}
+
+// WithForwardingOption configures the client with forwarding option.
+func WithForwardingOption(enableForwarding bool) ClientOption {
+	return func(c *client) {
+		c.enableForwarding = enableForwarding
+	}
+}
+
+// WithMaxErrorRetry configures the client max retry times when connect meets error.
+func WithMaxErrorRetry(count int) ClientOption {
+	return func(c *client) {
+		c.maxRetryTimes = count
+	}
+}
+
+// WithMaxTSOBatchWaitInterval configures the client max TSO batch wait interval.
+func WithMaxTSOBatchWaitInterval(maxTSOBatchWaitInterval time.Duration) ClientOption {
+	return func(c *client) {
+		c.maxTSOBatchWaitInterval = maxTSOBatchWaitInterval
+	}
+}
+
 type client struct {
 	*baseClient
 	// tsoDispatcher is used to dispatch different TSO requests to
@@ -308,9 +346,13 @@ type client struct {
 	// dc-location -> *lastTSO
 	lastTSMap sync.Map // Same as map[string]*lastTSO
 
-	checkTSDeadlineCh chan struct{}
-
+	// For internal usage.
+	checkTSDeadlineCh    chan struct{}
 	leaderNetworkFailure int32
+
+	// Client options.
+	enableForwarding        bool
+	maxTSOBatchWaitInterval time.Duration
 }
 
 // NewClient creates a PD client.
@@ -321,15 +363,19 @@ func NewClient(pdAddrs []string, security SecurityOption, opts ...ClientOption) 
 // NewClientWithContext creates a PD client with context.
 func NewClientWithContext(ctx context.Context, pdAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", pdAddrs))
-	base, err := newBaseClient(ctx, addrsToUrls(pdAddrs), security, opts...)
-	if err != nil {
-		return nil, err
-	}
 	c := &client{
-		baseClient:        base,
+		baseClient:        newBaseClient(ctx, addrsToUrls(pdAddrs), security),
 		checkTSDeadlineCh: make(chan struct{}),
 	}
-
+	// Inject the client options.
+	for _, opt := range opts {
+		opt(c)
+	}
+	// Init the client base.
+	if err := c.init(); err != nil {
+		return nil, err
+	}
+	// Start the daemons.
 	c.updateTSODispatcher()
 	c.wg.Add(3)
 	go c.tsLoop()
