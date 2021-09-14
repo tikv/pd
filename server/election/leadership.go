@@ -16,7 +16,7 @@ package election
 
 import (
 	"context"
-	"sync/atomic"
+	"sync"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -48,7 +48,10 @@ type Leadership struct {
 	// purpose is used to show what this election for
 	purpose string
 	// The lease which is used to get this leadership
-	lease  atomic.Value // stored as *lease
+	leaseMutex struct {
+		sync.RWMutex
+		lease *lease
+	}
 	client *clientv3.Client
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
@@ -68,20 +71,6 @@ func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadersh
 	return leadership
 }
 
-// getLease gets the lease of leadership, only if leadership is valid,
-// i.e the owner is a true leader, the lease is not nil.
-func (ls *Leadership) getLease() *lease {
-	l := ls.lease.Load()
-	if l == nil {
-		return nil
-	}
-	return l.(*lease)
-}
-
-func (ls *Leadership) setLease(lease *lease) {
-	ls.lease.Store(lease)
-}
-
 // GetClient is used to get the etcd client.
 func (ls *Leadership) GetClient() *clientv3.Client {
 	return ls.client
@@ -94,14 +83,16 @@ func (ls *Leadership) GetLeaderKey() string {
 
 // Campaign is used to campaign the leader with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
+	ls.leaseMutex.Lock()
+	defer ls.leaseMutex.Unlock()
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
-	ls.setLease(&lease{
+	ls.leaseMutex.lease = &lease{
 		Purpose: ls.purpose,
 		client:  ls.client,
 		lease:   clientv3.NewLease(ls.client),
-	})
-	if err := ls.getLease().Grant(leaseTimeout); err != nil {
+	}
+	if err := ls.leaseMutex.lease.Grant(leaseTimeout); err != nil {
 		return err
 	}
 	finalCmps := make([]clientv3.Cmp, 0, len(cmps)+1)
@@ -110,15 +101,15 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	finalCmps = append(finalCmps, clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
 	resp, err := kv.NewSlowLogTxn(ls.client).
 		If(finalCmps...).
-		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(ls.getLease().ID))).
+		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(ls.leaseMutex.lease.ID))).
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
-		ls.getLease().Close()
+		ls.leaseMutex.lease.Close()
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		ls.getLease().Close()
+		ls.leaseMutex.lease.Close()
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	log.Info("write leaderData to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
@@ -127,13 +118,26 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 
 // Keep will keep the leadership available by update the lease's expired time continuously
 func (ls *Leadership) Keep(ctx context.Context) {
+	ls.leaseMutex.RLock()
+	if ls.leaseMutex.lease == nil {
+		ls.leaseMutex.RUnlock()
+		return
+	}
+	lease := ls.leaseMutex.lease
+	ls.leaseMutex.RUnlock()
+
 	ls.keepAliveCtx, ls.keepAliceCancelFunc = context.WithCancel(ctx)
-	ls.getLease().KeepAlive(ls.keepAliveCtx)
+	lease.KeepAlive(ls.keepAliveCtx)
 }
 
 // Check returns whether the leadership is still available.
 func (ls *Leadership) Check() bool {
-	return ls != nil && ls.getLease() != nil && !ls.getLease().IsExpired()
+	if ls == nil {
+		return false
+	}
+	ls.leaseMutex.RLock()
+	defer ls.leaseMutex.RUnlock()
+	return ls.leaseMutex.lease != nil && !ls.leaseMutex.lease.IsExpired()
 }
 
 // LeaderTxn returns txn() with a leader comparison to guarantee that
@@ -214,12 +218,16 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 // Reset does some defer jobs such as closing lease, resetting lease etc.
 func (ls *Leadership) Reset() {
-	if ls == nil || ls.getLease() == nil {
+	if ls == nil {
+		return
+	}
+	ls.leaseMutex.Lock()
+	defer ls.leaseMutex.Unlock()
+	if ls.leaseMutex.lease == nil {
 		return
 	}
 	if ls.keepAliceCancelFunc != nil {
 		ls.keepAliceCancelFunc()
 	}
-	ls.getLease().Close()
-	ls.setLease(nil)
+	ls.leaseMutex.lease.Close()
 }

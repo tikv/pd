@@ -49,6 +49,9 @@ type lease struct {
 
 // Grant uses `lease.Grant` to initialize the lease and expireTime.
 func (l *lease) Grant(leaseTimeout int64) error {
+	if l == nil {
+		return errs.ErrEtcdGrantLease.GenWithStackByCause("lease is nil")
+	}
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), requestTimeout)
 	leaseResp, err := l.lease.Grant(ctx, leaseTimeout)
@@ -94,6 +97,9 @@ func (l *lease) IsExpired() bool {
 
 // KeepAlive auto renews the lease and update expireTime.
 func (l *lease) KeepAlive(ctx context.Context) {
+	if l == nil {
+		return
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
