@@ -277,13 +277,14 @@ type lastTSO struct {
 }
 
 const (
-	defaultPDTimeout      = 3 * time.Second
-	dialTimeout           = 3 * time.Second
-	updateMemberTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
-	tsLoopDCCheckInterval = time.Minute
-	maxInitClusterRetries = 100
-	retryInterval         = 1 * time.Second
-	maxRetryTimes         = 5
+	defaultPDTimeout       = 3 * time.Second
+	dialTimeout            = 3 * time.Second
+	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
+	tsLoopDCCheckInterval  = time.Minute
+	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
+	maxInitClusterRetries  = 100
+	retryInterval          = 1 * time.Second
+	maxRetryTimes          = 5
 )
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.

@@ -33,11 +33,6 @@ import (
 	"google.golang.org/grpc"
 )
 
-const (
-	globalDCLocation       = "global"
-	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-)
-
 // baseClient is a basic client for all other complex client.
 type baseClient struct {
 	urls      []string
@@ -213,6 +208,8 @@ func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grp
 	}
 	return cc.(*grpc.ClientConn), url.(string)
 }
+
+const globalDCLocation = "global"
 
 func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
 	// Clean up the old TSO allocators
