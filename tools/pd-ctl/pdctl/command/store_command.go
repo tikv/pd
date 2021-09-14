@@ -368,7 +368,7 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 
 func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	id := getStoreID(cmd, args, false)
-	if id == 0 {
+	if id == -1 {
 		return
 	}
 	// delete store by its ID
@@ -400,9 +400,7 @@ func cancelDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 
 	storeInfo := struct {
 		Store struct {
-			ID      int    `json:"id"`
-			Address string `json:"address"`
-			State   int32  `json:"state"`
+			State metapb.StoreState `json:"state"`
 		} `json:"store"`
 	}{}
 	if err = json.Unmarshal([]byte(r), &storeInfo); err != nil {
@@ -410,7 +408,7 @@ func cancelDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	if storeInfo.Store.State != 1 {
+	if storeInfo.Store.State != metapb.StoreState_Offline {
 		cmd.Printf("store %v is not offline\n", args[0])
 		return
 	}
@@ -439,10 +437,11 @@ func cancelDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("Success!")
 }
 
-func getStoreID(cmd *cobra.Command, args []string, isCancel bool) int {
+func getStoreID(cmd *cobra.Command, args []string, isCancel bool) (id int) {
+	id = -1
 	if len(args) != 1 {
 		cmd.Usage()
-		return 0
+		return
 	}
 	addr := args[0]
 
@@ -450,30 +449,29 @@ func getStoreID(cmd *cobra.Command, args []string, isCancel bool) int {
 	r, err := doRequest(cmd, storesPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store: %s\n", err)
-		return 0
+		return
 	}
 
 	storeInfo := struct {
 		Stores []struct {
 			Store struct {
-				ID      int    `json:"id"`
-				Address string `json:"address"`
-				State   int32  `json:"state"`
+				ID      int               `json:"id"`
+				Address string            `json:"address"`
+				State   metapb.StoreState `json:"state"`
 			} `json:"store"`
 		} `json:"stores"`
 	}{}
 	if err = json.Unmarshal([]byte(r), &storeInfo); err != nil {
 		cmd.Printf("Failed to parse store info: %s\n", err)
-		return 0
+		return
 	}
 
 	// filter by the addr
-	id := -1
 	for _, store := range storeInfo.Stores {
 		if store.Store.Address == addr {
-			if isCancel && store.Store.State != 1 {
+			if isCancel && store.Store.State != metapb.StoreState_Offline {
 				cmd.Printf("store is not offline: %s\n", addr)
-				return 0
+				return
 			}
 			id = store.Store.ID
 			break
@@ -482,9 +480,8 @@ func getStoreID(cmd *cobra.Command, args []string, isCancel bool) int {
 
 	if id == -1 {
 		cmd.Printf("address not found: %s\n", addr)
-		return 0
 	}
-	return id
+	return
 }
 
 func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
