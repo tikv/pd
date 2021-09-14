@@ -80,7 +80,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
 
 	if m.IsPaused() {
-		checkerCounter.WithLabelValues("merge_checker", "skipped").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "paused").Inc()
 		return nil
 	}
 

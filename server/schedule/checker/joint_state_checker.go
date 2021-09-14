@@ -39,7 +39,7 @@ func NewJointStateChecker(cluster opt.Cluster) *JointStateChecker {
 func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("joint_state_checker", "check").Inc()
 	if c.IsPaused() {
-		checkerCounter.WithLabelValues("joint_state_checker", "skipped").Inc()
+		checkerCounter.WithLabelValues("joint_state_checker", "paused").Inc()
 		return nil
 	}
 	if !core.IsInJointState(region.GetPeers()...) {

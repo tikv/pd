@@ -52,7 +52,7 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("split_checker", "check").Inc()
 
 	if c.IsPaused() {
-		checkerCounter.WithLabelValues("split_checker", "skipped").Inc()
+		checkerCounter.WithLabelValues("split_checker", "paused").Inc()
 		return nil
 	}
 

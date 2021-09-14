@@ -68,7 +68,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 // CheckWithFit is similar with Checker with placement.RegionFit
 func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) (op *operator.Operator) {
 	if c.IsPaused() {
-		checkerCounter.WithLabelValues("rule_checker", "skipped").Inc()
+		checkerCounter.WithLabelValues("rule_checker", "paused").Inc()
 		return nil
 	}
 	// If the fit is fetched from cache, it seems that the region doesn't need cache

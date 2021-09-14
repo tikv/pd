@@ -67,7 +67,7 @@ func (r *ReplicaChecker) GetType() string {
 func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("replica_checker", "check").Inc()
 	if r.IsPaused() {
-		checkerCounter.WithLabelValues("replica_checker", "skipped").Inc()
+		checkerCounter.WithLabelValues("replica_checker", "paused").Inc()
 		return nil
 	}
 	if op := r.checkDownPeer(region); op != nil {

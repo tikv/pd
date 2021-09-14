@@ -69,7 +69,7 @@ func NewRegionEntry(regionID uint64) *RegionPriorityEntry {
 // Check check region's replicas, it will put into priority queue if the region lack of replicas.
 func (p *PriorityChecker) Check(region *core.RegionInfo) (fit *placement.RegionFit) {
 	if p.IsPaused() {
-		checkerCounter.WithLabelValues("priority_checker", "skipped").Inc()
+		checkerCounter.WithLabelValues("priority_checker", "paused").Inc()
 		return nil
 	}
 	var makeupCount int

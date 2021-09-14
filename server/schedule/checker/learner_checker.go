@@ -38,7 +38,7 @@ func NewLearnerChecker(cluster opt.Cluster) *LearnerChecker {
 // Check verifies a region's role, creating an Operator if need.
 func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
 	if l.IsPaused() {
-		checkerCounter.WithLabelValues("learner_checker", "skipped").Inc()
+		checkerCounter.WithLabelValues("learner_checker", "paused").Inc()
 		return nil
 	}
 	for _, p := range region.GetLearners() {
