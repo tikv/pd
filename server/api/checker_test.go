@@ -50,14 +50,8 @@ func (s *testCheckerSuite) TearDownSuite(c *C) {
 }
 
 func (s *testCheckerSuite) TestAPI(c *C) {
-	type arg struct {
-		opt   string
-		value interface{}
-	}
 	cases := []struct {
-		name          string
-		args          []arg
-		extraTestFunc func(name string, c *C)
+		name string
 	}{
 		{name: "learner"},
 		{name: "replica"},
@@ -68,18 +62,36 @@ func (s *testCheckerSuite) TestAPI(c *C) {
 		{name: "priority"},
 	}
 	for _, ca := range cases {
-		input := make(map[string]interface{})
-		input["name"] = ca.name
-		for _, a := range ca.args {
-			input[a.opt] = a.value
-		}
-		body, err := json.Marshal(input)
-		c.Assert(err, IsNil)
-		s.testPauseOrResume(ca.name, body, ca.extraTestFunc, c)
+		s.testGetStatus(ca.name, c)
+		s.testPauseOrResume(ca.name, c)
 	}
 }
 
-func (s *testCheckerSuite) testPauseOrResume(name string, body []byte, extraTest func(string, *C), c *C) {
+func (s *testCheckerSuite) testGetStatus(name string, c *C) {
+	handler := s.svr.GetHandler()
+
+	// normal run
+	resp := make(map[string]interface{})
+	err := readJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
+	c.Assert(err, IsNil)
+	c.Assert(resp["paused"], Equals, false)
+	// paused
+	err = handler.PauseOrResumeChecker(name, 30)
+	c.Assert(err, IsNil)
+	resp = make(map[string]interface{})
+	err = readJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
+	c.Assert(err, IsNil)
+	c.Assert(resp["paused"], Equals, true)
+	// resumed
+	err = handler.PauseOrResumeChecker(name, 1)
+	time.Sleep(time.Second)
+	resp = make(map[string]interface{})
+	err = readJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
+	c.Assert(err, IsNil)
+	c.Assert(resp["paused"], Equals, false)
+}
+
+func (s *testCheckerSuite) testPauseOrResume(name string, c *C) {
 	handler := s.svr.GetHandler()
 
 	// test pause.
@@ -117,8 +129,4 @@ func (s *testCheckerSuite) testPauseOrResume(name string, body []byte, extraTest
 	isPaused, err = handler.IsCheckerPaused(name)
 	c.Assert(err, IsNil)
 	c.Assert(isPaused, Equals, false)
-
-	if extraTest != nil {
-		extraTest(name, c)
-	}
 }

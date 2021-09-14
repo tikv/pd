@@ -39,7 +39,7 @@ func newCheckerHandler(svr *server.Server, r *render.Render) *checkerHandler {
 // @Tags checker
 // @Summary Pause or resume region merge.
 // @Accept json
-// @Param name path string true "The name of the scheduler."
+// @Param name path string true "The name of the checker."
 // @Param body body object true "json params"
 // @Produce json
 // @Success 200 {string} string "Pause or resume the scheduler successfully."
@@ -67,4 +67,31 @@ func (c *checkerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
 	} else {
 		c.r.JSON(w, http.StatusOK, "Pause the checker successfully.")
 	}
+}
+
+// FIXME: details of input json body params
+// @Tags checker
+// @Summary Get if checker is paused
+// @Param name path string true "The name of the scheduler."
+// @Produce json
+// @Success 200 {string} string "Pause or resume the scheduler successfully."
+// @Failure 400 {string} string "Bad format request."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /checker/{name} [get]
+func (c *checkerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+	var input map[string]int
+	if err := apiutil.ReadJSONRespondError(c.r, w, r.Body, &input); err != nil {
+		return
+	}
+
+	name := mux.Vars(r)["name"]
+	isPaused, err := c.IsCheckerPaused(name)
+	if err != nil {
+		c.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	output := map[string]bool{
+		"paused": isPaused,
+	}
+	c.r.JSON(w, http.StatusOK, output)
 }
