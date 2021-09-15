@@ -125,7 +125,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	// placement rules
 	var rules []*placement.Rule
 	if err == nil && cluster.GetOpts().IsPlacementRulesEnabled() {
-		fit := cluster.FitRegion(region)
+		fit := opt.FitRegion(cluster, region)
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
 		}
@@ -664,9 +664,15 @@ func (b *Builder) execAddPeer(peer *metapb.Peer) {
 }
 
 func (b *Builder) execRemovePeer(peer *metapb.Peer) {
-	b.steps = append(b.steps, RemovePeer{FromStore: peer.GetStoreId(), PeerID: peer.GetId()})
-	delete(b.currentPeers, peer.GetStoreId())
-	delete(b.toRemove, peer.GetStoreId())
+	removeStoreID := peer.GetStoreId()
+	var isDownStore bool
+	store := b.cluster.GetStore(removeStoreID)
+	if store != nil {
+		isDownStore = store.DownTime() > b.cluster.GetOpts().GetMaxStoreDownTime()
+	}
+	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore})
+	delete(b.currentPeers, removeStoreID)
+	delete(b.toRemove, removeStoreID)
 }
 
 func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {

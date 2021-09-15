@@ -140,7 +140,7 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
-	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
+	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
 	opInfluence := l.opController.GetOpInfluence(cluster)
 	kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
 	plan := newBalancePlan(kind, cluster, opInfluence)
@@ -215,7 +215,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) []*operato
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, plan.cluster.GetOpts())
-	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
+	leaderSchedulePolicy := plan.cluster.GetOpts().GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := plan.GetOpInfluence(targets[i].GetID())
 		jOp := plan.GetOpInfluence(targets[j].GetID())

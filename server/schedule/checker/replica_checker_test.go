@@ -340,7 +340,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	// Transfer peer to store 4.
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 4)
 
-	// Store 5 has a same label score with store 4,but the region score smaller than store 4, we will choose store 5.
+	// Store 5 has a same label score with store 4, but the region score smaller than store 4, we will choose store 5.
 	tc.AddLabelsStore(5, 3, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 5)
 	// Store 5 has too many snapshots, choose store 4
