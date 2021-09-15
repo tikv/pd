@@ -340,18 +340,18 @@ func summaryStoresLoad(
 		}
 	}
 
+	expectLoads := make([]float64, len(allTiKVLoadSum))
+	for i := range expectLoads {
+		expectLoads[i] = allTiKVLoadSum[i] / float64(allTiKVCount)
+	}
+	expect := storeLoad{
+		Loads: expectLoads,
+		Count: float64(allTiKVHotPeersCount) / float64(allTiKVCount),
+	}
+
 	// store expectation byte/key rate and count for each store-load detail.
 	for id, detail := range loadDetail {
-		var allLoadSum = allTiKVLoadSum
-		var allStoreCount = float64(allTiKVCount)
-		var allHotPeersCount = float64(allTiKVHotPeersCount)
-		expectLoads := make([]float64, len(allLoadSum))
-		for i := range expectLoads {
-			expectLoads[i] = allLoadSum[i] / allStoreCount
-		}
-		expectCount := allHotPeersCount / allStoreCount
-		detail.LoadPred.Expect.Loads = expectLoads
-		detail.LoadPred.Expect.Count = expectCount
+		detail.LoadPred.Expect = expect
 		// Debug
 		{
 			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
@@ -363,7 +363,7 @@ func summaryStoresLoad(
 		}
 		{
 			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectCount)
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expect.Count)
 		}
 	}
 	return loadDetail
