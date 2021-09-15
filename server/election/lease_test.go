@@ -62,24 +62,24 @@ func (s *testLeaseSuite) TestLease(c *C) {
 	c.Check(lease2.Close(), IsNil)
 
 	// Grant the two leases with the same timeout.
-	c.Check(lease1.Grant(defaultTestLeaderLeaseTimeout), IsNil)
-	c.Check(lease2.Grant(defaultTestLeaderLeaseTimeout), IsNil)
+	c.Check(lease1.Grant(defaultLeaseTimeout), IsNil)
+	c.Check(lease2.Grant(defaultLeaseTimeout), IsNil)
 	c.Check(lease1.IsExpired(), IsFalse)
 	c.Check(lease2.IsExpired(), IsFalse)
 
 	// Wait for a while to make both two leases timeout.
-	time.Sleep((defaultTestLeaderLeaseTimeout + 1) * time.Second)
+	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
 	c.Check(lease1.IsExpired(), IsTrue)
 	c.Check(lease2.IsExpired(), IsTrue)
 
 	// Grant the two leases with different timeouts.
-	c.Check(lease1.Grant(defaultTestLeaderLeaseTimeout), IsNil)
-	c.Check(lease2.Grant(defaultTestLeaderLeaseTimeout*4), IsNil)
+	c.Check(lease1.Grant(defaultLeaseTimeout), IsNil)
+	c.Check(lease2.Grant(defaultLeaseTimeout*4), IsNil)
 	c.Check(lease1.IsExpired(), IsFalse)
 	c.Check(lease2.IsExpired(), IsFalse)
 
 	// Wait for a while to make one of the lease timeout.
-	time.Sleep((defaultTestLeaderLeaseTimeout + 1) * time.Second)
+	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
 	c.Check(lease1.IsExpired(), IsTrue)
 	c.Check(lease2.IsExpired(), IsFalse)
 
@@ -90,17 +90,17 @@ func (s *testLeaseSuite) TestLease(c *C) {
 	c.Check(lease2.IsExpired(), IsTrue)
 
 	// Grant the lease1 and keep it alive.
-	c.Check(lease1.Grant(defaultTestLeaderLeaseTimeout), IsNil)
+	c.Check(lease1.Grant(defaultLeaseTimeout), IsNil)
 	c.Check(lease1.IsExpired(), IsFalse)
 	ctx, cancel := context.WithCancel(context.Background())
 	go lease1.KeepAlive(ctx)
 	defer cancel()
 
 	// Wait for a timeout.
-	time.Sleep((defaultTestLeaderLeaseTimeout + 1) * time.Second)
+	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
 	c.Check(lease1.IsExpired(), IsFalse)
 	// Close and wait for a timeout.
 	c.Check(lease1.Close(), IsNil)
-	time.Sleep((defaultTestLeaderLeaseTimeout + 1) * time.Second)
+	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
 	c.Check(lease1.IsExpired(), IsTrue)
 }

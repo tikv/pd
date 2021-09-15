@@ -33,7 +33,7 @@ var _ = Suite(&testLeadershipSuite{})
 
 type testLeadershipSuite struct{}
 
-const defaultTestLeaderLeaseTimeout = 1
+const defaultLeaseTimeout = 1
 
 func (s *testLeadershipSuite) TestLeadership(c *C) {
 	cfg := etcdutil.NewTestSingleConfig()
@@ -57,18 +57,18 @@ func (s *testLeadershipSuite) TestLeadership(c *C) {
 	leadership2 := NewLeadership(client, "/test_leader", "test_leader_2")
 
 	// leadership1 starts first and get the leadership
-	err = leadership1.Campaign(defaultTestLeaderLeaseTimeout, "test_leader_1")
+	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	c.Assert(err, IsNil)
 	// leadership2 starts then and can not get the leadership
-	err = leadership2.Campaign(defaultTestLeaderLeaseTimeout, "test_leader_2")
+	err = leadership2.Campaign(defaultLeaseTimeout, "test_leader_2")
 	c.Assert(err, NotNil)
 
 	c.Assert(leadership1.Check(), IsTrue)
 	// leadership2 failed, so the check should return false
 	c.Assert(leadership2.Check(), IsFalse)
 
-	// Sleep longer than the defaultTestLeaderLeaseTimeout to wait for the lease expires
-	time.Sleep((defaultTestLeaderLeaseTimeout + 1) * time.Second)
+	// Sleep longer than the defaultLeaseTimeout to wait for the lease expires
+	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
 
 	c.Assert(leadership1.Check(), IsFalse)
 	c.Assert(leadership2.Check(), IsFalse)
@@ -76,15 +76,15 @@ func (s *testLeadershipSuite) TestLeadership(c *C) {
 	// Delete the leader key and campaign for leadership1
 	err = leadership1.DeleteLeaderKey()
 	c.Assert(err, IsNil)
-	err = leadership1.Campaign(defaultTestLeaderLeaseTimeout, "test_leader_1")
+	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	c.Assert(err, IsNil)
 	c.Assert(leadership1.Check(), IsTrue)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go leadership1.Keep(ctx)
 
-	// Sleep longer than the defaultTestLeaderLeaseTimeout
-	time.Sleep((defaultTestLeaderLeaseTimeout + 1) * time.Second)
+	// Sleep longer than the defaultLeaseTimeout
+	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
 
 	c.Assert(leadership1.Check(), IsTrue)
 	c.Assert(leadership2.Check(), IsFalse)
@@ -92,15 +92,15 @@ func (s *testLeadershipSuite) TestLeadership(c *C) {
 	// Delete the leader key and re-campaign for leadership2
 	err = leadership1.DeleteLeaderKey()
 	c.Assert(err, IsNil)
-	err = leadership2.Campaign(defaultTestLeaderLeaseTimeout, "test_leader_2")
+	err = leadership2.Campaign(defaultLeaseTimeout, "test_leader_2")
 	c.Assert(err, IsNil)
 	c.Assert(leadership2.Check(), IsTrue)
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 	go leadership2.Keep(ctx)
 
-	// Sleep longer than the defaultTestLeaderLeaseTimeout
-	time.Sleep((defaultTestLeaderLeaseTimeout + 1) * time.Second)
+	// Sleep longer than the defaultLeaseTimeout
+	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
 
 	c.Assert(leadership1.Check(), IsFalse)
 	c.Assert(leadership2.Check(), IsTrue)
