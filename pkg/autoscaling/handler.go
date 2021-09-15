@@ -56,7 +56,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	strategy := Strategy{}
 	if err = json.Unmarshal(data, &strategy); err != nil {
-		log.Error("autoscaling: unmarshall strategy failed", errs.ZapError(err))
+		log.Error("unmarshall strategy failed", errs.ZapError(err))
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
