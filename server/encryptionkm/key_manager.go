@@ -256,12 +256,12 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 
 		if resp.CompactRevision != 0 {
 			// meet compacted error
-			log.Warn("revision has been compacted, use the compact revision",
+			log.Warn("revision has been compacted, the watcher will watch again",
 				zap.Int64("revision", m.keysRevision()),
 				zap.Int64("compact-revision", resp.CompactRevision))
 		} else {
 			// other error
-			log.Error("encryption key watcher canceled",
+			log.Error("encryption key watcher canceled, the watcher will watch again",
 				errs.ZapError(errs.ErrEncryptionKeysWatcher, resp.Err()))
 		}
 
