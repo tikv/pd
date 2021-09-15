@@ -77,7 +77,7 @@ func (s *testSplitCheckerSuite) TestSplit(c *C) {
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: "test", Value: "test"}},
 		RuleType: labeler.KeyRange,
-		Rule:     []map[string]interface{}{{"start_key": "bb", "end_key": "dd"}},
+		Rule:     makeKeyRanges("bb", "dd"),
 	})
 	op = s.sc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
