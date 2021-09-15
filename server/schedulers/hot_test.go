@@ -76,7 +76,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		op.Start()
 		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-5*statistics.StoreHeartBeatReportInterval*time.Second))
 		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add((-5*statistics.StoreHeartBeatReportInterval+1)*time.Second))
-		return newPendingInfluence(op, 2, 4, Influence{})
+		return newPendingInfluence(op, 2, 4, Influence{}, hb.conf.GetStoreStatZombieDuration())
 	}
 	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		infl := notDoneOpInfluence(region, ty)
@@ -1306,7 +1306,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 
 		if testcase.DegreeAfterTransferLeader >= 3 {
 			// try schedule
-			hb.prepareForBalance(tc)
+			hb.prepareForBalance(testcase.kind, tc)
 			leaderSolver := newBalanceSolver(hb, tc, testcase.kind, transferLeader)
 			leaderSolver.cur = &solution{srcStoreID: 2}
 			c.Check(leaderSolver.filterHotPeers(), HasLen, 0) // skip schedule
