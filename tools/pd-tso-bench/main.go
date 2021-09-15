@@ -19,10 +19,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -147,6 +149,7 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 	s := newStats()
 	total := newStats()
 
+	fmt.Println()
 	for {
 		select {
 		case <-ticker.C:
@@ -162,6 +165,8 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 			fmt.Println("\nTotal:")
 			fmt.Println(total.Counter())
 			fmt.Println(total.Percentage())
+			fmt.Println(total.Percentiles())
+			fmt.Println()
 			if *verbose {
 				fmt.Println(collectMetrics(promServer))
 			}
@@ -200,6 +205,7 @@ type stats struct {
 	fourHundredCnt  int
 	eightHundredCnt int
 	oneThousandCnt  int
+	latencyList     []int64
 }
 
 func newStats() *stats {
@@ -212,6 +218,7 @@ func newStats() *stats {
 func (s *stats) update(dur time.Duration) {
 	s.count++
 	s.totalDur += dur
+	s.latencyList = append(s.latencyList, dur.Milliseconds())
 
 	if dur > s.maxDur {
 		s.maxDur = dur
@@ -279,6 +286,7 @@ func (s *stats) update(dur time.Duration) {
 }
 
 func (s *stats) merge(other *stats) {
+	s.latencyList = append(s.latencyList, other.latencyList...)
 	if s.maxDur < other.maxDur {
 		s.maxDur = other.maxDur
 	}
@@ -319,6 +327,38 @@ func (s *stats) Percentage() string {
 
 func (s *stats) calculate(count int) float64 {
 	return float64(count) * 100 / float64(s.count)
+}
+
+func (s *stats) Percentiles() string {
+	scores := samplePercentiles(s.latencyList, []float64{0.5, 0.8, 0.9, 0.99})
+	return fmt.Sprintf("P0.5: %2.2fms, P0.8: %2.2fms, P0.9: %2.2fms, P0.99: %2.2fms", scores[0], scores[1], scores[2], scores[3])
+}
+
+type int64Slice []int64
+
+func (p int64Slice) Len() int           { return len(p) }
+func (p int64Slice) Less(i, j int) bool { return p[i] < p[j] }
+func (p int64Slice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+
+func samplePercentiles(values int64Slice, percentiles []float64) []float64 {
+	scores := make([]float64, len(percentiles))
+	size := len(values)
+	if size > 0 {
+		sort.Sort(values)
+		for i, p := range percentiles {
+			pos := p * float64(size+1) //ALTERNATIVELY, DROP THE +1
+			if pos < 1.0 {
+				scores[i] = float64(values[0])
+			} else if pos >= float64(size) {
+				scores[i] = float64(values[size-1])
+			} else {
+				lower := float64(values[int(pos)-1])
+				upper := float64(values[int(pos)])
+				scores[i] = lower + (pos-math.Floor(pos))*(upper-lower)
+			}
+		}
+	}
+	return scores
 }
 
 func reqWorker(ctx context.Context, pdCli pd.Client, durCh chan time.Duration) {
