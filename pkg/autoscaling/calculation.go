@@ -50,12 +50,21 @@ var (
 )
 
 func calculate(rc *cluster.RaftCluster, strategy *Strategy) ([]*Plan, error) {
-	var (
-		plans       []*Plan
-		groups      []*Plan
-		instances   []instance
-		resourceMap map[string]uint64
-	)
+	for _, rule := range strategy.Rules {
+		switch rule.Component {
+		case TiKV.String():
+			return getPlansByComponent(rc, strategy, TiKV)
+		case TiDB.String():
+			return getPlansByComponent(rc, strategy, TiDB)
+		default:
+			return nil, errors.Errorf("unknown component type %s", rule.Component)
+		}
+	}
+
+	return nil, nil
+}
+
+func getPlansByComponent(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType) ([]*Plan, error) {
 	// init prometheus client
 	address, err := getPrometheusAddress(rc)
 	if err != nil {
@@ -69,58 +78,38 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) ([]*Plan, error) {
 		return nil, err
 	}
 	querier := NewPrometheusQuerier(client)
+	// get heterogeneous groups
+	instances, err := getInstancesByComponent(rc, component)
+	if err != nil {
+		return nil, err
+	}
+	resourceMap, err := getResourceMapByComponent(rc, instances, component)
+	if err != nil {
+		return nil, err
+	}
+	groups := getHeterogeneousGroupsByComponent(resourceMap, component)
+	log.Debug("get heterogeneous groups completed", zap.String("component", component.String()), zap.Any("groups", groups))
 
-	for _, rule := range strategy.Rules {
-		switch rule.Component {
-		case TiKV.String():
-			// get heterogeneous groups
-			instances, err = getInstancesByComponent(rc, TiKV)
-			if err != nil {
-				return nil, err
-			}
-			resourceMap, err = getResourceMapByComponent(rc, instances, TiKV)
-			if err != nil {
-				return nil, err
-			}
-			groups = getHeterogeneousGroupsByComponent(resourceMap, TiKV)
-			log.Debug("get heterogeneous tikv groups completed", zap.Any("groups", groups))
+	var plans []*Plan
 
-			// get tikv plans
-			tikvPlans, err := getTiKVPlans(rc, querier, instances, strategy, resourceMap)
-			if err != nil {
-				return nil, err
-			}
-			if tikvPlans != nil {
-				log.Info("get autoscaling tikv plans completed", zap.Any("plans", tikvPlans))
-			}
-			// merge plans
-			plans = mergePlans(tikvPlans, groups)
-		case TiDB.String():
-			// get heterogeneous groups
-			instances, err = getInstancesByComponent(rc, TiDB)
-			if err != nil {
-				return nil, err
-			}
-			resourceMap, err = getResourceMapByComponent(rc, instances, TiDB)
-			if err != nil {
-				return nil, err
-			}
-			groups = getHeterogeneousGroupsByComponent(resourceMap, TiDB)
-			log.Debug("get heterogeneous tidb groups completed", zap.Any("groups", groups))
-			// get tidb plans
-			tidbPlans, err := getTiDBPlans(querier, instances, strategy, resourceMap)
-			if err != nil {
-				return nil, err
-			}
-			if tidbPlans != nil {
-				log.Info("get autoscaling tidb plans completed", zap.Any("plans", tidbPlans))
-			}
-			// merge plans
-			plans = mergePlans(tidbPlans, groups)
-		}
+	switch component {
+	case TiKV:
+		// get tikv plans
+		plans, err = getTiKVPlans(rc, querier, instances, strategy, resourceMap)
+	case TiDB:
+		// get tidb plans
+		plans, err = getTiDBPlans(querier, instances, strategy, resourceMap)
+	default:
+		return nil, errors.Errorf("unknown component type %s", component.String())
+	}
+	if err != nil {
+		return nil, err
+	}
+	if plans != nil {
+		log.Info("get autoscaling tikv plans completed", zap.Any("plans", plans))
 	}
 
-	return plans, nil
+	return mergePlans(plans, groups), nil
 }
 
 func getTiKVPlans(rc *cluster.RaftCluster, querier Querier, instances []instance, strategy *Strategy, resourceMap map[string]uint64) ([]*Plan, error) {
