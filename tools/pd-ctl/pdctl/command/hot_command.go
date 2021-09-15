@@ -222,5 +222,17 @@ func parseHotRegionsHistoryArgs(args []string) (map[string]interface{}, error) {
 			return nil, errors.Errorf("key should be one of hot_region_type,region_ids,store_ids,peer_ids,is_leaders,is_learners")
 		}
 	}
+	if _, ok := input["is_leaders"]; !ok {
+		input["is_leaders"] = []bool{
+			true,
+			false,
+		}
+	}
+	if _, ok := input["is_learners"]; !ok {
+		input["is_learners"] = []bool{
+			true,
+			false,
+		}
+	}
 	return input, nil
 }
