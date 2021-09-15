@@ -52,7 +52,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Debug("autoscaling: get http body completed", zap.String("strategy", string(data)))
+	log.Debug("get http body completed", zap.String("strategy", string(data)))
 
 	strategy := Strategy{}
 	if err = json.Unmarshal(data, &strategy); err != nil {
