@@ -30,10 +30,8 @@ type LabelRule struct {
 }
 
 const (
-	// KeyRange is the rule type that labels regions by key range.
+	// KeyRange is the rule type that specifies a list of key ranges.
 	KeyRange = "key-range"
-	// KeyRanges is the rule type that specifies a list of key ranges.
-	KeyRanges = "key-ranges"
 )
 
 // KeyRangeRule contains the start key and end key of the LabelRule.

@@ -54,9 +54,9 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 	c.Assert(resp, HasLen, 0)
 
 	rules := []*labeler.LabelRule{
-		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "1234", "end_key": "5678"}},
-		{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "ab12", "end_key": "cd12"}},
-		{ID: "rule3", Labels: []labeler.RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "abcd", "end_key": "efef"}},
+		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Rule: []map[string]interface{}{{"start_key": "1234", "end_key": "5678"}}},
+		{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: []map[string]interface{}{{"start_key": "ab12", "end_key": "cd12"}}},
+		{ID: "rule3", Labels: []labeler.RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Rule: []map[string]interface{}{{"start_key": "abcd", "end_key": "efef"}}},
 	}
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
@@ -84,7 +84,7 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 
 	patch := labeler.LabelRulePatch{
 		SetRules: []*labeler.LabelRule{
-			{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "ab12", "end_key": "cd12"}},
+			{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: []map[string]interface{}{{"start_key": "ab12", "end_key": "cd12"}}},
 		},
 		DeleteRules: []string{"rule1"},
 	}
