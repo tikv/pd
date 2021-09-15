@@ -36,12 +36,12 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MinHotByteRate:        100,
 		MinHotKeyRate:         10,
 		MaxZombieRounds:       3,
+		MaxPeerNum:            1000,
 		ByteRateRankStepRatio: 0.05,
 		KeyRateRankStepRatio:  0.05,
 		CountRankStepRatio:    0.01,
 		GreatDecRatio:         0.95,
 		MinorDecRatio:         0.99,
-		MaxPeerNum:            1000,
 		SrcToleranceRatio:     1.05, // Tolerate 5% difference
 		DstToleranceRatio:     1.05, // Tolerate 5% difference
 	}
@@ -73,10 +73,16 @@ func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(conf)
 }
 
-func (conf *hotRegionSchedulerConfig) GetMaxZombieDuration() time.Duration {
+func (conf *hotRegionSchedulerConfig) GetStoreStatZombieDuration() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return time.Duration(conf.MaxZombieRounds) * statistics.StoreHeartBeatReportInterval * time.Second
+}
+
+func (conf *hotRegionSchedulerConfig) GetRegionsStatZombieDuration() time.Duration {
+	conf.RLock()
+	defer conf.RUnlock()
+	return time.Duration(conf.MaxZombieRounds) * statistics.RegionHeartBeatReportInterval * time.Second
 }
 
 func (conf *hotRegionSchedulerConfig) GetMaxPeerNumber() int {
@@ -214,5 +220,4 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 
 	}
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
-
 }
