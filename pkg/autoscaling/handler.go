@@ -63,18 +63,18 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	plans, err := calculate(rc, &strategy)
 	if err != nil {
-		log.Error("autoscaling: calculate plans failed", errs.ZapError(err))
+		log.Error("calculate plans failed", errs.ZapError(err))
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	data, err = json.Marshal(plans)
 	if err != nil {
-		log.Error("autoscaling: marshal plans failed", errs.ZapError(err))
+		log.Error("marshal plans failed", errs.ZapError(err))
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	} else {
-		log.Debug("autoscaling: marshal plans completed", zap.String("plans", string(data)))
+		log.Debug("marshal plans completed", zap.String("plans", string(data)))
 	}
 
 	h.rd.JSON(w, http.StatusOK, plans)

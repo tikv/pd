@@ -62,7 +62,7 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) ([]*Plan, error) {
 		return nil, err
 	}
 
-	log.Debug("autoscaling: get prometheus address completed", zap.String("address", address))
+	log.Debug("get prometheus address completed", zap.String("address", address))
 
 	client, err := promClient.NewClient(promClient.Config{Address: address})
 	if err != nil {
@@ -83,7 +83,7 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) ([]*Plan, error) {
 				return nil, err
 			}
 			groups = getHeterogeneousGroupsByComponent(resourceMap, TiKV)
-			log.Debug("autoscaling: get heterogeneous tikv groups completed", zap.Any("groups", groups))
+			log.Debug("get heterogeneous tikv groups completed", zap.Any("groups", groups))
 
 			// get tikv plans
 			tikvPlans, err := getTiKVPlans(rc, querier, instances, strategy, resourceMap)
@@ -91,7 +91,7 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) ([]*Plan, error) {
 				return nil, err
 			}
 			if tikvPlans != nil {
-				log.Info("autoscaling: get autoscaling tikv plans completed", zap.Any("plans", tikvPlans))
+				log.Info("get autoscaling tikv plans completed", zap.Any("plans", tikvPlans))
 			}
 			// merge plans
 			plans = mergePlans(tikvPlans, groups)
@@ -106,14 +106,14 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) ([]*Plan, error) {
 				return nil, err
 			}
 			groups = getHeterogeneousGroupsByComponent(resourceMap, TiDB)
-			log.Debug("autoscaling: get heterogeneous tidb groups completed", zap.Any("groups", groups))
+			log.Debug("get heterogeneous tidb groups completed", zap.Any("groups", groups))
 			// get tidb plans
 			tidbPlans, err := getTiDBPlans(querier, instances, strategy, resourceMap)
 			if err != nil {
 				return nil, err
 			}
 			if tidbPlans != nil {
-				log.Info("autoscaling: get autoscaling tidb plans completed", zap.Any("plans", tidbPlans))
+				log.Info("get autoscaling tidb plans completed", zap.Any("plans", tidbPlans))
 			}
 			// merge plans
 			plans = mergePlans(tidbPlans, groups)
@@ -156,7 +156,7 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 	storageMaxThreshold, storageMinThreshold := getStorageThresholdByComponent(strategy, TiKV)
 	storageUsageTarget := (storageMaxThreshold + storageMinThreshold) / 2
 
-	log.Debug("autoscaling: get storage usage information completed",
+	log.Debug("get storage usage information completed",
 		zap.Float64("totalStorageUsedSize", totalStorageUsedSize),
 		zap.Float64("totalStorageUsedSize", totalStorageCapacity),
 		zap.Float64("totalStorageCapacity", totalStorageCapacity),
@@ -172,7 +172,7 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 		if resourceMap[homogeneousTiKVResourceType] == strategy.NodeCount || (homogeneousTiKVCount != nil && resourceMap[homogeneousTiKVResourceType] > *homogeneousTiKVCount) {
 			// homogeneous instance number reaches k8s node number or the resource limit,
 			// can not scale out homogeneous instance anymore
-			log.Warn("autoscaling: can not scale out homogeneous instance",
+			log.Warn("can not scale out homogeneous instance",
 				zap.Uint64("homogeneous instance number", resourceMap[homogeneousTiKVResourceType]),
 				zap.Uint64("k8s node number", strategy.NodeCount),
 				zap.Uint64p("resource limit", homogeneousTiKVCount),
@@ -232,7 +232,7 @@ func getCPUPlans(querier Querier, instances []instance, strategy *Strategy, reso
 		return nil, err
 	}
 
-	log.Debug("autoscaling: get cpu usage information completed",
+	log.Debug("get cpu usage information completed",
 		zap.String("component", component.String()),
 		zap.Any("cpuUsedTimes", cpuUsedTimes),
 		zap.Any("cpuQuotas", cpuQuotas),
@@ -274,7 +274,7 @@ func getCPUPlans(querier Querier, instances []instance, strategy *Strategy, reso
 	cpuUsageTarget := (cpuMaxThreshold + cpuMinThreshold) / 2
 	resources := getCPUResourcesByComponent(strategy, component)
 
-	log.Debug("autoscaling: calculate total cpu usage information completed",
+	log.Debug("calculate total cpu usage information completed",
 		zap.String("component", component.String()),
 		zap.Uint64("totalInstanceCount", totalInstanceCount),
 		zap.Float64("totalCPUUsage", totalCPUUsage),
@@ -290,7 +290,7 @@ func getCPUPlans(querier Querier, instances []instance, strategy *Strategy, reso
 		if resourceMap[homogeneousResourceType] >= strategy.NodeCount || (homogeneousCount != nil && resourceMap[homogeneousResourceType] >= *homogeneousCount) {
 			// homogeneous instance number reaches k8s node number or the resource limit,
 			// can not scale out homogeneous instance any more
-			log.Warn("autoscaling: can not scale out homogeneous instance",
+			log.Warn("can not scale out homogeneous instance",
 				zap.String("component", component.String()),
 				zap.Uint64("homogeneous instance number", resourceMap[homogeneousResourceType]),
 				zap.Uint64("k8s node number", strategy.NodeCount),
@@ -350,7 +350,7 @@ func getHeterogeneousScaleOutPlans(cpuScaleOutSize float64, cpuUsageTarget float
 				if resource.Count == nil || count <= *resource.Count {
 					// unlimited resource count or enough resource count left
 					plans = append(plans, NewPlan(component, scaleOutCount, resource.ResourceType))
-					log.Debug("autoscaling: get heterogeneous scale out plans completed",
+					log.Debug("get heterogeneous scale out plans completed",
 						zap.String("component", component.String()),
 						zap.Any("plans", plans),
 					)
@@ -372,7 +372,7 @@ func getHeterogeneousScaleOutPlans(cpuScaleOutSize float64, cpuUsageTarget float
 			if resource.Count == nil || scaleOutCount <= *resource.Count {
 				// unlimited resource count or enough resource count left
 				plans = append(plans, NewPlan(component, scaleOutCount, resource.ResourceType))
-				log.Debug("autoscaling: get heterogeneous scale out plans completed",
+				log.Debug("get heterogeneous scale out plans completed",
 					zap.String("component", component.String()),
 					zap.Any("plans", plans),
 				)
@@ -389,7 +389,7 @@ func getHeterogeneousScaleOutPlans(cpuScaleOutSize float64, cpuUsageTarget float
 			}
 		}
 	}
-	log.Debug("autoscaling: get heterogeneous scale out plans completed",
+	log.Debug("get heterogeneous scale out plans completed",
 		zap.String("component", component.String()),
 		zap.Any("plans", plans),
 	)
@@ -403,7 +403,7 @@ func getHeterogeneousScaleInPlans(resourceMap map[string]uint64, component Compo
 	for resourceType, resourceCount := range resourceMap {
 		if resourceType != homogeneousTiKVResourceType && resourceType != homogeneousTiDBResourceType {
 			plans = append(plans, NewPlan(component, resourceCount-1, resourceType))
-			log.Debug("autoscaling: get heterogeneous scale in plans completed",
+			log.Debug("get heterogeneous scale in plans completed",
 				zap.String("component", component.String()),
 				zap.Any("plans", plans),
 			)
@@ -412,7 +412,7 @@ func getHeterogeneousScaleInPlans(resourceMap map[string]uint64, component Compo
 		}
 	}
 
-	log.Debug("autoscaling: get heterogeneous scale in plans completed",
+	log.Debug("get heterogeneous scale in plans completed",
 		zap.String("component", component.String()),
 		zap.Any("plans", plans),
 	)
@@ -485,7 +485,7 @@ func getTotalStorageInfo(rc *cluster.RaftCluster, healthyInstances []instance) (
 	for _, healthyInstance := range healthyInstances {
 		store := rc.GetStore(healthyInstance.id)
 		if store == nil {
-			log.Warn("autoscaling: inconsistency between health instances and store status, exit auto-scaling calculation",
+			log.Warn("inconsistency between health instances and store status, exit auto-scaling calculation",
 				zap.Uint64("store-id", healthyInstance.id))
 			return 0, 0, errors.New(fmt.Sprintf("inconsistent healthy instance, instance id: %d", healthyInstance.id))
 		}
@@ -673,7 +673,7 @@ func getTiKVResourceMap(rc *cluster.RaftCluster, healthyInstances []instance) (m
 	for _, healthyInstance := range healthyInstances {
 		store := rc.GetStore(healthyInstance.id)
 		if store == nil {
-			log.Warn("autoscaling: inconsistency between health instances and store status, exit auto-scaling calculation",
+			log.Warn("inconsistency between health instances and store status, exit auto-scaling calculation",
 				zap.Uint64("store-id", healthyInstance.id))
 			return nil, errors.New(fmt.Sprintf("inconsistent healthy instance, instance id: %d", healthyInstance.id))
 		}
@@ -745,7 +745,7 @@ func getHomogeneousScaleOutPlans(scaleOutCount, totalInstanceCount, nodeCount ui
 
 	if totalInstanceCount+scaleOutCount > nodeCount {
 		scaleInCount := totalInstanceCount + scaleOutCount - nodeCount
-		log.Debug("autoscaling: there are not enough k8s nodes to scale out, need to scale in some heterogeneous instances",
+		log.Debug("there are not enough k8s nodes to scale out, need to scale in some heterogeneous instances",
 			zap.Uint64("scaleOutCount", scaleOutCount),
 			zap.Uint64("totalInstanceCount", totalInstanceCount),
 			zap.Uint64("nodeCount", nodeCount),
@@ -760,7 +760,7 @@ func getHomogeneousScaleOutPlans(scaleOutCount, totalInstanceCount, nodeCount ui
 		}
 	}
 
-	log.Debug("autoscaling: get homogeneous plans competed",
+	log.Debug("get homogeneous plans competed",
 		zap.String("component", component.String()),
 		zap.Uint64p("homogeneousCount", homogeneousCount),
 		zap.Uint64("scaleOutCount", scaleOutCount),
