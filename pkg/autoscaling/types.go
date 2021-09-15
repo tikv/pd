@@ -166,9 +166,9 @@ const (
 	CPUUsage MetricType = iota
 	// CPUQuota is cpu cores quota for each instance
 	CPUQuota
-	// StorageUsage is used storage usage in the duration
+	// StorageUsage is storage usage in the duration
 	StorageUsage
-	// StorageQuota is cpu storage quota for each instance
+	// StorageQuota is storage quota for each instance
 	StorageQuota
 )
 
