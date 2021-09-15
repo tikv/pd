@@ -235,10 +235,10 @@ func getAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 		if len(peerSet) != 0 && !peerSet[next.PeerID] {
 			continue
 		}
-		if len(learnerSet) != 0 && !learnerSet[next.IsLearner] {
+		if !learnerSet[next.IsLearner] {
 			continue
 		}
-		if len(leaderSet) != 0 && !leaderSet[next.IsLeader] {
+		if !leaderSet[next.IsLeader] {
 			continue
 		}
 		results = append(results, next)
