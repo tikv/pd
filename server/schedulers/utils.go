@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
@@ -39,9 +40,10 @@ const (
 )
 
 type balancePlan struct {
-	kind        core.ScheduleKind
-	cluster     opt.Cluster
-	opInfluence operator.OpInfluence
+	kind              core.ScheduleKind
+	cluster           opt.Cluster
+	opInfluence       operator.OpInfluence
+	tolerantSizeRatio float64
 
 	source *core.StoreInfo
 	target *core.StoreInfo
@@ -53,9 +55,10 @@ type balancePlan struct {
 
 func newBalancePlan(kind core.ScheduleKind, cluster opt.Cluster, opInfluence operator.OpInfluence) *balancePlan {
 	return &balancePlan{
-		kind:        kind,
-		cluster:     cluster,
-		opInfluence: opInfluence,
+		kind:              kind,
+		cluster:           cluster,
+		opInfluence:       opInfluence,
+		tolerantSizeRatio: adjustTolerantRatio(cluster, kind),
 	}
 }
 
@@ -121,24 +124,31 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 
 func (p *balancePlan) getTolerantResource() int64 {
 	if p.kind.Resource == core.LeaderKind && p.kind.Policy == core.ByCount {
-		tolerantSizeRatio := p.cluster.GetOpts().GetTolerantSizeRatio()
-		if tolerantSizeRatio == 0 {
-			tolerantSizeRatio = leaderTolerantSizeRatio
-		}
-		leaderCount := int64(1.0 * tolerantSizeRatio)
-		return leaderCount
+		return int64(p.tolerantSizeRatio)
 	}
-
 	regionSize := p.region.GetApproximateSize()
 	if regionSize < p.cluster.GetAverageRegionSize() {
 		regionSize = p.cluster.GetAverageRegionSize()
 	}
-	regionSize = int64(float64(regionSize) * adjustTolerantRatio(p.cluster))
-	return regionSize
+	return int64(float64(regionSize) * p.tolerantSizeRatio)
 }
 
-func adjustTolerantRatio(cluster opt.Cluster) float64 {
-	tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
+func adjustTolerantRatio(cluster opt.Cluster, kind core.ScheduleKind) float64 {
+	var tolerantSizeRatio float64
+	switch c := cluster.(type) {
+	case *schedule.RangeCluster:
+		// range cluster use a separate configuration
+		tolerantSizeRatio = c.GetTolerantSizeRatio()
+	default:
+		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
+	}
+	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
+		if tolerantSizeRatio == 0 {
+			return leaderTolerantSizeRatio
+		}
+		return tolerantSizeRatio
+	}
+
 	if tolerantSizeRatio == 0 {
 		var maxRegionCount float64
 		stores := cluster.GetStores()
@@ -217,27 +227,6 @@ func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence)
 		to:     to,
 		origin: infl,
 	}
-}
-
-// summaryPendingInfluence calculate the summary pending Influence for each store and return storeID -> Influence
-// It makes each key/byte rate or count become (1+w) times to the origin value while f is the function to provide w(weight)
-func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]*Influence {
-	ret := make(map[uint64]*Influence)
-	for p := range pendings {
-		w := f(p.op)
-		if w == 0 {
-			delete(pendings, p)
-		}
-		if _, ok := ret[p.to]; !ok {
-			ret[p.to] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
-		}
-		ret[p.to] = ret[p.to].add(&p.origin, w)
-		if _, ok := ret[p.from]; !ok {
-			ret[p.from] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
-		}
-		ret[p.from] = ret[p.from].add(&p.origin, -w)
-	}
-	return ret
 }
 
 type storeLoad struct {
