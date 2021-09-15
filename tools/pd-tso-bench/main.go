@@ -205,7 +205,7 @@ type stats struct {
 	fourHundredCnt  int
 	eightHundredCnt int
 	oneThousandCnt  int
-	latencyList     []int64
+	latencyList     []float64
 }
 
 func newStats() *stats {
@@ -218,7 +218,7 @@ func newStats() *stats {
 func (s *stats) update(dur time.Duration) {
 	s.count++
 	s.totalDur += dur
-	s.latencyList = append(s.latencyList, dur.Milliseconds())
+	s.latencyList = append(s.latencyList, float64(dur.Nanoseconds())/1e6)
 
 	if dur > s.maxDur {
 		s.maxDur = dur
@@ -286,7 +286,6 @@ func (s *stats) update(dur time.Duration) {
 }
 
 func (s *stats) merge(other *stats) {
-	s.latencyList = append(s.latencyList, other.latencyList...)
 	if s.maxDur < other.maxDur {
 		s.maxDur = other.maxDur
 	}
@@ -308,6 +307,8 @@ func (s *stats) merge(other *stats) {
 	s.fourHundredCnt += other.fourHundredCnt
 	s.eightHundredCnt += other.eightHundredCnt
 	s.oneThousandCnt += other.oneThousandCnt
+
+	s.latencyList = append(s.latencyList, other.latencyList...)
 }
 
 func (s *stats) Counter() string {
@@ -331,16 +332,16 @@ func (s *stats) calculate(count int) float64 {
 
 func (s *stats) Percentiles() string {
 	scores := samplePercentiles(s.latencyList, []float64{0.5, 0.8, 0.9, 0.99})
-	return fmt.Sprintf("P0.5: %2.2fms, P0.8: %2.2fms, P0.9: %2.2fms, P0.99: %2.2fms", scores[0], scores[1], scores[2], scores[3])
+	return fmt.Sprintf("P0.5: %.4fms, P0.8: %.4fms, P0.9: %.4fms, P0.99: %.4fms", scores[0], scores[1], scores[2], scores[3])
 }
 
-type int64Slice []int64
+type float64Slice []float64
 
-func (p int64Slice) Len() int           { return len(p) }
-func (p int64Slice) Less(i, j int) bool { return p[i] < p[j] }
-func (p int64Slice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+func (p float64Slice) Len() int           { return len(p) }
+func (p float64Slice) Less(i, j int) bool { return p[i] < p[j] }
+func (p float64Slice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 
-func samplePercentiles(values int64Slice, percentiles []float64) []float64 {
+func samplePercentiles(values float64Slice, percentiles []float64) []float64 {
 	scores := make([]float64, len(percentiles))
 	size := len(values)
 	if size > 0 {
