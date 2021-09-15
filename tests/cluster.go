@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/tso"
+	"github.com/tikv/pd/tests/prometheus"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -79,7 +80,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, swaggerserver.NewHandler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, swaggerserver.NewHandler, autoscaling.NewHandler, prometheus.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
