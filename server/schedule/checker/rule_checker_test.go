@@ -16,6 +16,7 @@ package checker
 
 import (
 	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -612,6 +613,7 @@ func (s *testRuleCheckerSerialSuite) TestRuleCache(c *C) {
 	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
 	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
 	s.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	s.cluster.AddRegionStore(999, 1)
 	s.cluster.AddLeaderRegion(1, 1, 3, 4)
 	rule := &placement.Rule{
 		GroupID:        "pd",

@@ -41,10 +41,15 @@ type Cluster interface {
 
 	GetOpts() *config.PersistOptions
 	AllocID() (uint64, error)
-	FitRegion(*core.RegionInfo) *placement.RegionFit
+	GetRuleManager() *placement.RuleManager
 	RemoveScheduler(name string) error
 	IsFeatureSupported(f versioninfo.Feature) bool
 	AddSuspectRegions(ids ...uint64)
+}
+
+// FitRegion tries to fit the region with placement rules.
+func FitRegion(c Cluster, region *core.RegionInfo) *placement.RegionFit {
+	return c.GetRuleManager().FitRegion(c, region)
 }
 
 // cacheCluster include cache info
