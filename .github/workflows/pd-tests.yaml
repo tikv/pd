@@ -44,7 +44,7 @@ jobs:
         # github.com/tikv/pd/tests/server/tso is the integration test of TSO, which will take a long time,
         # will be run independently in the TSO Function Test.
         run: |
-          go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list
+          go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/server/tso" > packages.list
           total=$(expr ${{ strategy.job-total }} - 1)
           echo  "Dispatched ${total} normal chunks"
           split packages.list -n r/${total} packages_unit_ -a 1 --numeric-suffixes=1
