@@ -16,7 +16,6 @@ package autoscaling
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -188,7 +187,7 @@ func getPrometheusAddress(rc *cluster.RaftCluster) (string, error) {
 		return "", err
 	}
 	if len(resp.Kvs) == 0 {
-		return "", errors.New(fmt.Sprintf("length of the response values of the key %s is 0", prometheusAddressKey))
+		return "", errors.Errorf("length of the response values of the key %s is 0", prometheusAddressKey)
 	}
 
 	address := &Address{}
@@ -476,7 +475,7 @@ func getTotalStorageInfo(rc *cluster.RaftCluster, healthyInstances []instance) (
 		if store == nil {
 			log.Warn("inconsistency between health instances and store status, exit auto-scaling calculation",
 				zap.Uint64("store-id", healthyInstance.id))
-			return 0, 0, errors.New(fmt.Sprintf("inconsistent healthy instance, instance id: %d", healthyInstance.id))
+			return 0, 0, errors.Errorf("inconsistent healthy instance, instance id: %d", healthyInstance.id)
 		}
 
 		groupName := store.GetLabelValue(groupLabelKey)
@@ -664,7 +663,7 @@ func getTiKVResourceMap(rc *cluster.RaftCluster, healthyInstances []instance) (m
 		if store == nil {
 			log.Warn("inconsistency between health instances and store status, exit auto-scaling calculation",
 				zap.Uint64("store-id", healthyInstance.id))
-			return nil, errors.New(fmt.Sprintf("inconsistent healthy instance, instance id: %d", healthyInstance.id))
+			return nil, errors.Errorf("inconsistent healthy instance, instance id: %d", healthyInstance.id)
 		}
 
 		groupName := store.GetLabelValue(groupLabelKey)
