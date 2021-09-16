@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -145,6 +146,21 @@ func (bc *BasicCluster) ResumeLeaderTransfer(storeID uint64) {
 	bc.Stores.ResumeLeaderTransfer(storeID)
 }
 
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
+// leader to the store
+func (bc *BasicCluster) SlowStoreEvicted(storeID uint64) error {
+	bc.Lock()
+	defer bc.Unlock()
+	return bc.Stores.SlowStoreEvicted(storeID)
+}
+
+// SlowStoreRecovered cleans the evicted state of a store.
+func (bc *BasicCluster) SlowStoreRecovered(storeID uint64) {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Stores.SlowStoreRecovered(storeID)
+}
+
 // AttachAvailableFunc attaches an available function to a specific store.
 func (bc *BasicCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
 	bc.Lock()
@@ -258,7 +274,7 @@ func (bc *BasicCluster) GetStoreLeaderRegionSize(storeID uint64) int64 {
 func (bc *BasicCluster) GetStoreRegionSize(storeID uint64) int64 {
 	bc.RLock()
 	defer bc.RUnlock()
-	return bc.Regions.GetStoreLeaderRegionSize(storeID) + bc.Regions.GetStoreFollowerRegionSize(storeID) + bc.Regions.GetStoreLearnerRegionSize(storeID)
+	return bc.Regions.GetStoreRegionSize(storeID)
 }
 
 // GetAverageRegionSize returns the average region approximate size.
@@ -266,6 +282,35 @@ func (bc *BasicCluster) GetAverageRegionSize() int64 {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Regions.GetAverageRegionSize()
+}
+
+func (bc *BasicCluster) getWriteRate(
+	f func(storeID uint64) (bytesRate, keysRate float64),
+) (storeIDs []uint64, bytesRates, keysRates []float64) {
+	bc.RLock()
+	defer bc.RUnlock()
+	count := len(bc.Stores.stores)
+	storeIDs = make([]uint64, 0, count)
+	bytesRates = make([]float64, 0, count)
+	keysRates = make([]float64, 0, count)
+	for _, store := range bc.Stores.stores {
+		id := store.GetID()
+		bytesRate, keysRate := f(id)
+		storeIDs = append(storeIDs, id)
+		bytesRates = append(bytesRates, bytesRate)
+		keysRates = append(keysRates, keysRate)
+	}
+	return
+}
+
+// GetStoresLeaderWriteRate get total write rate of each store's leaders.
+func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
+	return bc.getWriteRate(bc.Regions.GetStoreLeaderWriteRate)
+}
+
+// GetStoresWriteRate get total write rate of each store's regions.
+func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
+	return bc.getWriteRate(bc.Regions.GetStoreWriteRate)
 }
 
 // PutStore put a store.
@@ -323,7 +368,7 @@ func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	return bc.Regions.SetRegion(region)
 }
 
-// CheckAndPutRegion checks if the region is valid to put,if valid then put.
+// CheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	origin, err := bc.PreCheckPutRegion(region)
 	if err != nil {
@@ -399,6 +444,9 @@ type StoreSetInformer interface {
 type StoreSetController interface {
 	PauseLeaderTransfer(id uint64) error
 	ResumeLeaderTransfer(id uint64)
+
+	SlowStoreEvicted(id uint64) error
+	SlowStoreRecovered(id uint64)
 
 	AttachAvailableFunc(id uint64, limitType storelimit.Type, f func() bool)
 }

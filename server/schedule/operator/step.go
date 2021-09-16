@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -219,6 +220,7 @@ func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionI
 // RemovePeer is an OpStep that removes a region peer.
 type RemovePeer struct {
 	FromStore, PeerID uint64
+	IsDownStore       bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -259,6 +261,10 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	regionSize := region.GetApproximateSize()
 	from.RegionSize -= regionSize
 	from.RegionCount--
+	if rp.IsDownStore {
+		from.AdjustStepCost(storelimit.RemovePeer, storelimit.SmallRegionThreshold)
+		return
+	}
 	from.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
 

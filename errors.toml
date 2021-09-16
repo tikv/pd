@@ -91,6 +91,11 @@ error = '''
 store %v is paused for leader transfer
 '''
 
+["PD:core:ErrSlowStoreEvicted"]
+error = '''
+store %v is evited as a slow store
+'''
+
 ["PD:core:ErrStoreDestroyed"]
 error = '''
 store %v has been physically destroyed
@@ -471,6 +476,16 @@ error = '''
 failed to unmarshal proto
 '''
 
+["PD:region:ErrRegionRuleContent"]
+error = '''
+invalid region rule content, %s
+'''
+
+["PD:region:ErrRegionRuleNotFound"]
+error = '''
+region label rule not found for id %s
+'''
+
 ["PD:schedule:ErrCreateOperator"]
 error = '''
 unable to create operator, %s
@@ -594,11 +609,6 @@ get allocator failed, %s
 ["PD:tso:ErrGetLocalAllocator"]
 error = '''
 get local allocator failed, %s
-'''
-
-["PD:tso:ErrInvalidTimestamp"]
-error = '''
-invalid timestamp
 '''
 
 ["PD:tso:ErrLogicOverflow"]

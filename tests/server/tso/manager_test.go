@@ -8,8 +8,12 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+//go:build tso_full_test || tso_function_test
+// +build tso_full_test tso_function_test
 
 package tso_test
 
@@ -151,23 +155,7 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 	}
 }
 
-var _ = SerialSuites(&testLocalTSOSerialSuite{})
-
-type testLocalTSOSerialSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testLocalTSOSerialSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
-}
-
-func (s *testLocalTSOSerialSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
-func (s *testLocalTSOSerialSuite) TestNextLeaderKey(c *C) {
+func (s *testManagerSuite) TestNextLeaderKey(c *C) {
 	tso.PriorityCheck = 5 * time.Second
 	defer func() {
 		tso.PriorityCheck = 1 * time.Minute

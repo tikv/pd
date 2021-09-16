@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -22,7 +23,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -143,6 +143,8 @@ type Server struct {
 
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
+	//hot region history info storeage
+	hotRegionStorage *core.HotRegionStorage
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -391,7 +393,15 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
-
+	//initial hot_region_storage in here.
+	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
+	s.hotRegionStorage, err = core.NewHotRegionsStorage(
+		ctx, hotRegionPath, encryptionKeyManager, s.handler,
+		s.cfg.Schedule.HotRegionsResevervedDays,
+		s.cfg.Schedule.HotRegionsWriteInterval.Duration)
+	if err != nil {
+		return err
+	}
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
 		cb()
@@ -453,6 +463,10 @@ func (s *Server) Close() {
 	}
 	if err := s.storage.Close(); err != nil {
 		log.Error("close storage meet error", errs.ZapError(err))
+	}
+
+	if err := s.hotRegionStorage.Close(); err != nil {
+		log.Error("close hot region storage meet error", errs.ZapError(err))
 	}
 
 	// Run callbacks
@@ -703,6 +717,11 @@ func (s *Server) GetStorage() *core.Storage {
 	return s.storage
 }
 
+// GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
+func (s *Server) GetHistoryHotRegionStorage() *core.HotRegionStorage {
+	return s.hotRegionStorage
+}
+
 // SetStorage changes the storage only for test purpose.
 // When we use it, we should prevent calling GetStorage, otherwise, it may cause a data race problem.
 func (s *Server) SetStorage(storage *core.Storage) {
@@ -853,15 +872,14 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
 				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			rule = defaultRule
-			if !(rule.Count == int(old.MaxReplicas) && reflect.DeepEqual(rule.LocationLabels, []string(old.LocationLabels))) {
+			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.StringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
-		if !(cfg.MaxReplicas == old.MaxReplicas && reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels)) {
+		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.StringsEqual(cfg.LocationLabels, old.LocationLabels)) {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
@@ -1330,6 +1348,7 @@ func (s *Server) reloadConfigFromKV() error {
 
 // ReplicateFileToAllMembers is used to synchronize state among all members.
 // Each member will write `data` to a local file named `name`.
+// For security reason, data should be in JSON format.
 func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
 	resp, err := s.GetMembers(ctx, nil)
 	if err != nil {
