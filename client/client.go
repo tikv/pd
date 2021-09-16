@@ -352,7 +352,8 @@ type client struct {
 	leaderNetworkFailure int32
 
 	// Client options.
-	enableForwarding        bool
+	enableForwarding bool
+	// TODO: make `maxTSOBatchWaitInterval` can be changed manually online.
 	maxTSOBatchWaitInterval time.Duration
 }
 
