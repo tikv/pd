@@ -26,11 +26,17 @@ import (
 )
 
 const (
+	tikvCPUUsageString = "tikv_thread_cpu_seconds_total"
+	tikvCPUQuotaString = "tikv_server_cpu_cores_quota"
+	tidbCPUUsageString = "process_cpu_seconds_total"
+	tidbCPUQuotaString = "tidb_server_maxprocs"
+
 	mockDuration                = 60 * time.Second
 	mockClusterName             = "mock"
 	mockTiDBInstanceNamePattern = "%s-tidb-%d"
 	mockTiKVInstanceNamePattern = "%s-tikv-%d"
-	mockResultValue             = 1.0
+	mockCPUUsageValue           = 200
+	mockCPUQuotaValue           = 4.0
 	mockKubernetesNamespace     = "mock"
 
 	instanceCount = 3
@@ -59,6 +65,18 @@ type metric struct {
 	KubernetesNamespace string `json:"kubernetes_namespace"`
 }
 
+func getMetricType(query string) autoscaling.MetricType {
+	switch {
+	case strings.Contains(query, tikvCPUUsageString), strings.Contains(query, tidbCPUUsageString):
+		return autoscaling.CPUUsage
+	case strings.Contains(query, tikvCPUQuotaString), strings.Contains(query, tidbCPUQuotaString):
+		return autoscaling.CPUQuota
+
+	}
+
+	return -1
+}
+
 func getComponentType(query string) autoscaling.ComponentType {
 	if strings.Contains(query, autoscaling.TiKV.String()) {
 		return autoscaling.TiKV
@@ -71,13 +89,18 @@ func getComponentType(query string) autoscaling.ComponentType {
 	return 2
 }
 
-func buildCPUMockData(component autoscaling.ComponentType) response {
+func buildCPUMockData(component autoscaling.ComponentType, metricType autoscaling.MetricType) response {
+	mockValue := mockCPUQuotaValue
+	if metricType == autoscaling.CPUUsage {
+		mockValue = mockCPUUsageValue
+	}
+
 	pods := podNames[component]
 
 	var results []result
 	for i := 0; i < instanceCount; i++ {
 		results = append(results, result{
-			Value: []interface{}{time.Now().Unix(), fmt.Sprintf("%f", mockResultValue)},
+			Value: []interface{}{time.Now().Unix(), fmt.Sprintf("%f", mockValue)},
 			Metric: metric{
 				Instance:            pods[i],
 				Cluster:             mockClusterName,

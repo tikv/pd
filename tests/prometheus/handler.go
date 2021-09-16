@@ -51,8 +51,13 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("unkown component type: %d", component))
 		return
 	}
+	metricType := getMetricType(query)
+	if metricType != autoscaling.CPUUsage && metricType != autoscaling.CPUQuota {
+		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("unkown metric type: %d", metricType))
+		return
+	}
 
-	resp := buildCPUMockData(component)
+	resp := buildCPUMockData(component, metricType)
 
 	h.rd.JSON(w, http.StatusOK, resp)
 }

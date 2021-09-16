@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/autoscaling"
@@ -57,21 +56,14 @@ func (s *apiTestSuite) TestAPI(c *C) {
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-	leader := cluster.WaitLeader()
-	fmt.Printf("leader: %s\n", leader)
-
-	leaderServer := cluster.GetServer(leader)
+	leaderServer := cluster.GetServer(cluster.WaitLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-
-	time.Sleep(10 * time.Second)
 
 	serverAddr := strings.Split(leaderServer.GetAddr(), "//")[1]
 	serverAddrList := strings.Split(serverAddr, ":")
 	prometheusAddress := fmt.Sprintf(`{"ip": "%s", "port": %s, "path": "%s"}`, serverAddrList[0], serverAddrList[1], "/prometheus")
 	_, err = cluster.GetEtcdClient().Put(ctx, prometheusAddressKey, prometheusAddress)
 	c.Assert(err, IsNil)
-
-	time.Sleep(1 * time.Second)
 
 	var jsonStr = map[autoscaling.ComponentType][]byte{
 		autoscaling.TiKV: []byte(`
@@ -168,5 +160,5 @@ func (s *apiTestSuite) TestAPI(c *C) {
 }
 
 func setLeaderLease(conf *config.Config, serverName string) {
-	conf.LeaderLease = 30
+	conf.LeaderLease = 60
 }
