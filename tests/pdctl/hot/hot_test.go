@@ -235,7 +235,7 @@ func (s *hotTestSuite) TestHotWithStoreID(c *C) {
 	c.Assert(hotRegion.AsLeader[2].TotalBytesRate, Equals, float64(100000000))
 }
 
-func (s *hotTestSuite) TestHotWithHistoryRegions(c *C) {
+func (s *hotTestSuite) TestHistoryHotRegions(c *C) {
 	statistics.Denoising = false
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
