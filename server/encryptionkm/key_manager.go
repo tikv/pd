@@ -227,6 +227,8 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 			select {
 			case resp, ok = <-rch:
 				if !ok || resp.CompactRevision != 0 || resp.Canceled {
+					// If chan is closed or canceled
+					// Ref https://etcd.io/docs/v3.4/learning/api/#watch-streams
 					break keyWatchLoop
 				}
 				for _, event := range resp.Events {
