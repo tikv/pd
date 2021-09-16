@@ -19,16 +19,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/signal"
-	"sort"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/influxdata/tdigest"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -137,6 +136,8 @@ func bench(mainCtx context.Context) {
 	}
 }
 
+var latencyTDigest *tdigest.TDigest = tdigest.New()
+
 func showStats(ctx context.Context, durCh chan time.Duration) {
 	defer wg.Done()
 
@@ -165,7 +166,8 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 			fmt.Println("\nTotal:")
 			fmt.Println(total.Counter())
 			fmt.Println(total.Percentage())
-			fmt.Println(total.Percentiles())
+			// Calculate the percentiles by using the tDigest algorithm.
+			fmt.Printf("P0.5: %.4fms, P0.8: %.4fms, P0.9: %.4fms, P0.99: %.4fms", latencyTDigest.Quantile(0.5), latencyTDigest.Quantile(0.8), latencyTDigest.Quantile(0.9), latencyTDigest.Quantile(0.99))
 			fmt.Println()
 			if *verbose {
 				fmt.Println(collectMetrics(promServer))
@@ -205,7 +207,6 @@ type stats struct {
 	fourHundredCnt  int
 	eightHundredCnt int
 	oneThousandCnt  int
-	latencyList     []float64
 }
 
 func newStats() *stats {
@@ -218,7 +219,7 @@ func newStats() *stats {
 func (s *stats) update(dur time.Duration) {
 	s.count++
 	s.totalDur += dur
-	s.latencyList = append(s.latencyList, float64(dur.Nanoseconds())/1e6)
+	latencyTDigest.Add(float64(dur.Nanoseconds())/1e6, 1)
 
 	if dur > s.maxDur {
 		s.maxDur = dur
@@ -307,8 +308,6 @@ func (s *stats) merge(other *stats) {
 	s.fourHundredCnt += other.fourHundredCnt
 	s.eightHundredCnt += other.eightHundredCnt
 	s.oneThousandCnt += other.oneThousandCnt
-
-	s.latencyList = append(s.latencyList, other.latencyList...)
 }
 
 func (s *stats) Counter() string {
@@ -328,38 +327,6 @@ func (s *stats) Percentage() string {
 
 func (s *stats) calculate(count int) float64 {
 	return float64(count) * 100 / float64(s.count)
-}
-
-func (s *stats) Percentiles() string {
-	scores := samplePercentiles(s.latencyList, []float64{0.5, 0.8, 0.9, 0.99})
-	return fmt.Sprintf("P0.5: %.4fms, P0.8: %.4fms, P0.9: %.4fms, P0.99: %.4fms", scores[0], scores[1], scores[2], scores[3])
-}
-
-type float64Slice []float64
-
-func (p float64Slice) Len() int           { return len(p) }
-func (p float64Slice) Less(i, j int) bool { return p[i] < p[j] }
-func (p float64Slice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
-
-func samplePercentiles(values float64Slice, percentiles []float64) []float64 {
-	scores := make([]float64, len(percentiles))
-	size := len(values)
-	if size > 0 {
-		sort.Sort(values)
-		for i, p := range percentiles {
-			pos := p * float64(size+1) //ALTERNATIVELY, DROP THE +1
-			if pos < 1.0 {
-				scores[i] = float64(values[0])
-			} else if pos >= float64(size) {
-				scores[i] = float64(values[size-1])
-			} else {
-				lower := float64(values[int(pos)-1])
-				upper := float64(values[int(pos)])
-				scores[i] = lower + (pos-math.Floor(pos))*(upper-lower)
-			}
-		}
-	}
-	return scores
 }
 
 func reqWorker(ctx context.Context, pdCli pd.Client, durCh chan time.Duration) {
