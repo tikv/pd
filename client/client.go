@@ -173,7 +173,7 @@ func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int, maxB
 	return &tsoBatchController{
 		maxBatchSize:          maxBatchSize,
 		maxBatchWaitInterval:  maxBatchWaitInterval,
-		bestBatchSize:         maxBatchSize,
+		bestBatchSize:         8, /* Starting from a low value is necessary because we need to make sure it will be converged to (current_batch_size - 4) */
 		tsoRequestCh:          tsoRequestCh,
 		collectedRequests:     make([]*tsoRequest, maxBatchSize+1),
 		collectedRequestCount: 0,
