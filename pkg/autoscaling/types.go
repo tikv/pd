@@ -107,7 +107,7 @@ func (p *Plan) String() string {
 	return fmt.Sprintf("{Component: %s, Count: %d, ResourceType: %s, Labels: %v}", p.Component, p.Count, p.ResourceType, p.Labels)
 }
 
-func (p *Plan) Clone() *Plan {
+func (p *Plan) CloneWithoutLabel() *Plan {
 	var component ComponentType
 
 	switch p.Component {

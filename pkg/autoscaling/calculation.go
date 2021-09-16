@@ -792,13 +792,13 @@ func mergePlans(plans, groups []*Plan) []*Plan {
 		}
 
 		if !groupExists && plan.Count > 0 {
-			mergedPlans = append(mergedPlans, plan.Clone())
+			mergedPlans = append(mergedPlans, plan.CloneWithoutLabel())
 		}
 	}
 
 	// merge heterogeneous plans
 	for _, group := range groups {
-		cloned := group.Clone()
+		cloned := group.CloneWithoutLabel()
 
 		for _, plan := range plans {
 			if group.ResourceType == plan.ResourceType {
