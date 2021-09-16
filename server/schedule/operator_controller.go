@@ -651,19 +651,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			return
 		}
 		cmd = addNode(st.PeerID, st.ToStore)
-	case operator.AddLightPeer:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.AddLearner:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
-	case operator.AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
