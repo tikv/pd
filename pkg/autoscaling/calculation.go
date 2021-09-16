@@ -427,21 +427,14 @@ func getHeterogeneousScaleInPlans(resourceMap map[string]uint64, component Compo
 }
 
 func getInstancesByComponent(rc *cluster.RaftCluster, component ComponentType) ([]instance, error) {
-	var (
-		err       error
-		instances []instance
-	)
-
 	switch component {
 	case TiKV:
-		instances = getTiKVInstances(rc)
+		return getTiKVInstances(rc), nil
 	case TiDB:
-		instances, err = getTiDBInstances(rc)
+		return getTiDBInstances(rc)
 	default:
 		return nil, errors.Errorf("unknown component type %s", component.String())
 	}
-
-	return instances, err
 }
 
 func getTiKVInstances(rc *cluster.RaftCluster) []instance {
