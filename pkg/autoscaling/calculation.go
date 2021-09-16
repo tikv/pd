@@ -307,7 +307,7 @@ func getCPUPlans(querier Querier, instances []instance, strategy *Strategy, reso
 
 		homogeneousCPUSize := getCPUByResourceType(resources, homogeneousResourceType)
 		cpuScaleOutSize := totalCPUUsedTime/cpuUsageTarget - totalCPUQuota
-		scaleOutCount := uint64(cpuScaleOutSize/float64(homogeneousCPUSize)) + 1
+		scaleOutCount := uint64(cpuScaleOutSize/homogeneousCPUSize) + 1
 
 		return getHomogeneousScaleOutPlans(scaleOutCount, totalInstanceCount, strategy.NodeCount, resources, resourceMap, component), nil
 	}
@@ -547,10 +547,10 @@ func getResourceByResourceType(strategy *Strategy, resourceType string) *Resourc
 	return nil
 }
 
-func getCPUByResourceType(resources []*Resource, resourceType string) uint64 {
+func getCPUByResourceType(resources []*Resource, resourceType string) float64 {
 	for _, resource := range resources {
 		if resource.ResourceType == resourceType {
-			return resource.CPU
+			return float64(resource.CPU) / milliCores
 		}
 	}
 
