@@ -33,10 +33,11 @@ const (
 type Address struct {
 	IP   string `json:"ip"`
 	Port int    `json:"port"`
+	Path string `json:"path"`
 }
 
 func (address *Address) String() string {
-	return fmt.Sprintf("%s%s:%d", httpPrefix, address.IP, address.Port)
+	return fmt.Sprintf("%s%s:%d%s", httpPrefix, address.IP, address.Port, address.Path)
 }
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.

@@ -49,21 +49,23 @@ var (
 )
 
 func calculate(rc *cluster.RaftCluster, strategy *Strategy) ([]*Plan, error) {
+	var result []*Plan
+
 	for _, rule := range strategy.Rules {
-		switch rule.Component {
-		case TiKV.String():
-			return getPlansByComponent(rc, strategy, TiKV)
-		case TiDB.String():
-			return getPlansByComponent(rc, strategy, TiDB)
-		default:
-			return nil, errors.Errorf("unknown component type %s", rule.Component)
+		plans, err := getPlansByRule(rc, strategy, rule)
+		if err != nil {
+			return nil, err
 		}
+		if plans != nil {
+			result = mergePlans(result, plans)
+		}
+
 	}
 
-	return nil, nil
+	return result, nil
 }
 
-func getPlansByComponent(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType) ([]*Plan, error) {
+func getPlansByRule(rc *cluster.RaftCluster, strategy *Strategy, rule *Rule) ([]*Plan, error) {
 	// init prometheus client
 	address, err := getPrometheusAddress(rc)
 	if err != nil {
@@ -77,6 +79,11 @@ func getPlansByComponent(rc *cluster.RaftCluster, strategy *Strategy, component 
 		return nil, err
 	}
 	querier := NewPrometheusQuerier(client)
+
+	component, err := getComponentByRule(rule)
+	if err != nil {
+		return nil, err
+	}
 	// get heterogeneous groups
 	instances, err := getInstancesByComponent(rc, component)
 	if err != nil {
@@ -176,6 +183,17 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 	}
 
 	return nil, nil
+}
+
+func getComponentByRule(rule *Rule) (ComponentType, error) {
+	switch rule.Component {
+	case TiKV.String():
+		return TiKV, nil
+	case TiDB.String():
+		return TiDB, nil
+	default:
+		return -1, errors.Errorf("unknown component type %s", rule.Component)
+	}
 }
 
 func getPrometheusAddress(rc *cluster.RaftCluster) (string, error) {
@@ -632,27 +650,14 @@ func sortResourcesByCPUDesc(resources []*Resource) {
 }
 
 func getResourceMapByComponent(rc *cluster.RaftCluster, healthyInstances []instance, component ComponentType) (map[string]uint64, error) {
-	var (
-		err         error
-		resourceMap map[string]uint64
-	)
-
 	switch component {
 	case TiKV:
-		resourceMap, err = getTiKVResourceMap(rc, healthyInstances)
-		if err != nil {
-			return nil, err
-		}
+		return getTiKVResourceMap(rc, healthyInstances)
 	case TiDB:
-		resourceMap, err = getTiDBResourceMap(rc, healthyInstances)
-		if err != nil {
-			return nil, err
-		}
+		return getTiDBResourceMap(rc, healthyInstances)
 	default:
 		return nil, errors.Errorf("unknown component type %s", component.String())
 	}
-
-	return resourceMap, nil
 }
 
 func getTiKVResourceMap(rc *cluster.RaftCluster, healthyInstances []instance) (map[string]uint64, error) {

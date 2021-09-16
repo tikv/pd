@@ -25,7 +25,9 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+
 	"go.uber.org/goleak"
 )
 
@@ -49,7 +51,7 @@ func (s *apiTestSuite) TestAPI(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestCluster(ctx, 1, setLeaderLease)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -58,19 +60,21 @@ func (s *apiTestSuite) TestAPI(c *C) {
 	leader := cluster.WaitLeader()
 	fmt.Printf("leader: %s\n", leader)
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetServer(leader)
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+
+	time.Sleep(10 * time.Second)
 
 	serverAddr := strings.Split(leaderServer.GetAddr(), "//")[1]
 	serverAddrList := strings.Split(serverAddr, ":")
-	prometheusAddress := fmt.Sprintf(`{"ip": "%s", "port": %s, "path": "%s"}`, serverAddrList[0], serverAddrList[1], "prometheus")
+	prometheusAddress := fmt.Sprintf(`{"ip": "%s", "port": %s, "path": "%s"}`, serverAddrList[0], serverAddrList[1], "/prometheus")
 	_, err = cluster.GetEtcdClient().Put(ctx, prometheusAddressKey, prometheusAddress)
 	c.Assert(err, IsNil)
 
 	time.Sleep(1 * time.Second)
 
 	var jsonStr = map[autoscaling.ComponentType][]byte{
-		0: []byte(`
+		autoscaling.TiKV: []byte(`
 {
     "rules":[
         {
@@ -110,7 +114,7 @@ func (s *apiTestSuite) TestAPI(c *C) {
     ],
 	"node_count": 5
 }`),
-		1: []byte(`
+		autoscaling.TiDB: []byte(`
 {
     "rules":[
         {
@@ -161,4 +165,8 @@ func (s *apiTestSuite) TestAPI(c *C) {
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, 200)
+}
+
+func setLeaderLease(conf *config.Config, serverName string) {
+	conf.LeaderLease = 30
 }
