@@ -651,7 +651,7 @@ func (b *Builder) execDemoteFollower(peer *metapb.Peer) {
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
 	if b.lightWeight {
-		b.steps = append(b.steps, AddLightLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
+		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightWeight})
 	} else {
 		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
 	}

@@ -439,14 +439,10 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				c.Assert(step.ToStore, Equals, tc.steps[i].(TransferLeader).ToStore)
 			case AddPeer:
 				c.Assert(step.ToStore, Equals, tc.steps[i].(AddPeer).ToStore)
-			case AddLightPeer:
-				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLightPeer).ToStore)
 			case RemovePeer:
 				c.Assert(step.FromStore, Equals, tc.steps[i].(RemovePeer).FromStore)
 			case AddLearner:
 				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLearner).ToStore)
-			case AddLightLearner:
-				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLightLearner).ToStore)
 			case PromoteLearner:
 				c.Assert(step.ToStore, Equals, tc.steps[i].(PromoteLearner).ToStore)
 			case DemoteFollower:
