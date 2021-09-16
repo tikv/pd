@@ -17,6 +17,7 @@ package placement
 import (
 	"sync"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 )
@@ -53,13 +54,6 @@ func (manager *RegionRuleFitCacheManager) Invalid(regionID uint64) {
 	delete(manager.caches, regionID)
 }
 
-// InvalidAll invalids all cache
-func (manager *RegionRuleFitCacheManager) InvalidAll() {
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	manager.caches = make(map[uint64]*RegionRuleFitCache)
-}
-
 // CheckAndGetCache checks whether the region and rules are changed for the stored cache
 // If the check pass, it will return the cache
 func (manager *RegionRuleFitCacheManager) CheckAndGetCache(region *core.RegionInfo,
@@ -77,63 +71,163 @@ func (manager *RegionRuleFitCacheManager) CheckAndGetCache(region *core.RegionIn
 
 // SetCache stores RegionFit cache
 func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit *RegionFit) {
+	if !validateRegion(region) || !validateFit(fit) {
+		return
+	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	fit.SetCached(true)
-	manager.caches[region.GetID()] = &RegionRuleFitCache{
-		region:  region,
-		bestFit: fit,
-	}
+	manager.caches[region.GetID()] = toRegionRuleFitCache(region, fit)
 }
 
 // RegionRuleFitCache stores regions RegionFit result and involving variables
 type RegionRuleFitCache struct {
-	bestFit *RegionFit
-	region  *core.RegionInfo
+	region       regionCache
+	regionStores []storeCache
+	rules        []ruleCache
+	bestFit      *RegionFit
 }
 
 // IsUnchanged checks whether the region and rules unchanged for the cache
 func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule, stores []*core.StoreInfo) bool {
-	return cache.isRegionUnchanged(region) && rulesEqual(cache.bestFit.rules, rules) && storesEqual(cache.bestFit.regionStores, stores)
+	return cache.isRegionUnchanged(region) && rulesEqual(cache.rules, rules) && storesEqual(cache.regionStores, stores)
 }
 
 func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
-	// we only cache region when it doesn't have down peers
-	if len(region.GetDownPeers()) > 0 || region.GetLeader() == nil {
+	// we only cache region when it is valid
+	if !validateRegion(region) {
 		return false
 	}
-	return region.GetLeader().StoreId == cache.region.GetLeader().StoreId &&
-		regionEpochEqual(cache.region, region)
+	return region.GetLeader().StoreId == cache.region.leaderStoreID &&
+		cache.region.epochEqual(region)
 }
 
-func regionEpochEqual(a, b *core.RegionInfo) bool {
-	if a.GetRegionEpoch() == nil || b.GetRegionEpoch() == nil {
+func rulesEqual(ruleCaches []ruleCache, rules []*Rule) bool {
+	if len(ruleCaches) != len(rules) {
 		return false
 	}
-	return a.GetRegionEpoch().Version == b.GetRegionEpoch().Version &&
-		a.GetRegionEpoch().ConfVer == b.GetRegionEpoch().ConfVer
+	return slice.AllOf(ruleCaches, func(i int) bool {
+		return slice.AnyOf(rules, func(j int) bool {
+			return ruleCaches[i].ruleEqual(rules[j])
+		})
+	})
 }
 
-func rulesEqual(a, b []*Rule) bool {
+func storesEqual(a []storeCache, b []*core.StoreInfo) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	return slice.AllOf(a, func(i int) bool {
 		return slice.AnyOf(b, func(j int) bool {
-			return equalRules(a[i], b[j])
+			return a[i].storeEqual(b[j])
 		})
 	})
 }
 
-func storesEqual(a, b []*core.StoreInfo) bool {
-	if len(a) != len(b) {
+func validateRegion(region *core.RegionInfo) bool {
+	return region != nil && region.GetLeader() != nil && len(region.GetDownPeers()) == 0 && region.GetRegionEpoch() != nil
+}
+
+func validateFit(fit *RegionFit) bool {
+	return fit != nil && fit.rules != nil && len(fit.rules) > 0 && fit.regionStores != nil && len(fit.regionStores) > 0
+}
+
+func toRegionRuleFitCache(region *core.RegionInfo, fit *RegionFit) *RegionRuleFitCache {
+	return &RegionRuleFitCache{
+		region:       toRegionCache(region),
+		regionStores: toStoreCacheList(fit.regionStores),
+		rules:        toRuleCacheList(fit.rules),
+		bestFit:      fit,
+	}
+}
+
+type ruleCache struct {
+	id       string
+	group    string
+	version  uint64
+	createTS uint64
+}
+
+func (r ruleCache) ruleEqual(rule *Rule) bool {
+	if rule == nil {
 		return false
 	}
-	return slice.AllOf(a, func(i int) bool {
-		return slice.AnyOf(b, func(j int) bool {
-			return a[i].GetID() == b[j].GetID() &&
-				a[i].IsEqualLabels(b[j].GetLabels()) &&
-				a[i].GetState() == b[j].GetState()
+	return r.id == rule.ID && r.group == rule.GroupID && r.version == rule.Version && r.createTS == rule.CreateTimestamp
+}
+
+func toRuleCacheList(rules []*Rule) (c []ruleCache) {
+	for _, rule := range rules {
+		c = append(c, ruleCache{
+			id:       rule.ID,
+			group:    rule.GroupID,
+			version:  rule.Version,
+			createTS: rule.CreateTimestamp,
 		})
+	}
+	return c
+}
+
+type storeCache struct {
+	storeID uint64
+	labels  map[string]string
+	state   metapb.StoreState
+}
+
+func (s storeCache) storeEqual(store *core.StoreInfo) bool {
+	if store == nil {
+		return false
+	}
+	return s.storeID == store.GetID() &&
+		s.state == store.GetState() &&
+		labelEqual(s.labels, store.GetLabels())
+}
+
+func toStoreCacheList(stores []*core.StoreInfo) (c []storeCache) {
+	for _, s := range stores {
+		m := make(map[string]string)
+		for _, label := range s.GetLabels() {
+			m[label.GetKey()] = label.GetValue()
+		}
+		c = append(c, storeCache{
+			storeID: s.GetID(),
+			labels:  m,
+			state:   s.GetState(),
+		})
+	}
+	return c
+}
+
+func labelEqual(label1 map[string]string, label2 []*metapb.StoreLabel) bool {
+	if len(label1) != len(label2) {
+		return false
+	}
+	return slice.AllOf(label2, func(i int) bool {
+		k, v := label2[i].Key, label2[i].Value
+		v1, ok := label1[k]
+		return ok && v == v1
 	})
+}
+
+type regionCache struct {
+	regionID      uint64
+	leaderStoreID uint64
+	confVer       uint64
+	version       uint64
+}
+
+func (r regionCache) epochEqual(region *core.RegionInfo) bool {
+	v := region.GetRegionEpoch()
+	if v == nil {
+		return false
+	}
+	return r.confVer == v.ConfVer && r.version == v.Version
+}
+
+func toRegionCache(r *core.RegionInfo) regionCache {
+	return regionCache{
+		regionID:      r.GetID(),
+		leaderStoreID: r.GetLeader().StoreId,
+		confVer:       r.GetRegionEpoch().ConfVer,
+		version:       r.GetRegionEpoch().Version,
+	}
 }
