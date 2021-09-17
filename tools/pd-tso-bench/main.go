@@ -167,8 +167,7 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 			fmt.Println(total.Counter())
 			fmt.Println(total.Percentage())
 			// Calculate the percentiles by using the tDigest algorithm.
-			fmt.Printf("P0.5: %.4fms, P0.8: %.4fms, P0.9: %.4fms, P0.99: %.4fms", latencyTDigest.Quantile(0.5), latencyTDigest.Quantile(0.8), latencyTDigest.Quantile(0.9), latencyTDigest.Quantile(0.99))
-			fmt.Println()
+			fmt.Printf("P0.5: %.4fms, P0.8: %.4fms, P0.9: %.4fms, P0.99: %.4fms\n\n", latencyTDigest.Quantile(0.5), latencyTDigest.Quantile(0.8), latencyTDigest.Quantile(0.9), latencyTDigest.Quantile(0.99))
 			if *verbose {
 				fmt.Println(collectMetrics(promServer))
 			}
