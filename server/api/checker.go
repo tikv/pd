@@ -79,11 +79,6 @@ func (c *checkerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /checker/{name} [get]
 func (c *checkerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
-	var input map[string]int
-	if err := apiutil.ReadJSONRespondError(c.r, w, r.Body, &input); err != nil {
-		return
-	}
-
 	name := mux.Vars(r)["name"]
 	isPaused, err := c.IsCheckerPaused(name)
 	if err != nil {
