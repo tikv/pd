@@ -22,7 +22,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server"
-	_ "github.com/tikv/pd/server/schedulers"
 )
 
 var _ = Suite(&testCheckerSuite{})
