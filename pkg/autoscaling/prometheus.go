@@ -35,7 +35,6 @@ const (
 	tidbCPUQuotaMetricsPattern    = `tidb_server_maxprocs`
 	instanceLabelKey              = "instance"
 	namespaceLabelKey             = "kubernetes_namespace"
-	addressFormat                 = "pod-name.peer-svc.namespace.svc:port"
 
 	httpRequestTimeout = 5 * time.Second
 )

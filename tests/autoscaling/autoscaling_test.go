@@ -66,7 +66,7 @@ func (s *apiTestSuite) TestAPI(c *C) {
 	_, err = cluster.GetEtcdClient().Put(ctx, prometheusAddressKey, prometheusAddress)
 	c.Assert(err, IsNil)
 
-	var jsonStr = map[autoscaling.ComponentType][]byte{
+	strategies := map[autoscaling.ComponentType][]byte{
 		autoscaling.TiKV: []byte(`
 {
     "rules":[
@@ -149,14 +149,13 @@ func (s *apiTestSuite) TestAPI(c *C) {
 }`),
 	}
 
-	resp, err := http.Post(leaderServer.GetAddr()+"/autoscaling", "application/json", bytes.NewBuffer(jsonStr[autoscaling.TiKV]))
+	resp, err := http.Post(leaderServer.GetAddr()+"/autoscaling", "application/json", bytes.NewBuffer(strategies[autoscaling.TiKV]))
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, 200)
 
-	resp, err = http.Post(leaderServer.GetAddr()+"/autoscaling", "application/json", bytes.NewBuffer(jsonStr[autoscaling.TiDB]))
+	resp, err = http.Post(leaderServer.GetAddr()+"/autoscaling", "application/json", bytes.NewBuffer(strategies[autoscaling.TiDB]))
 	c.Assert(err, IsNil)
-	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, 200)
 }
 

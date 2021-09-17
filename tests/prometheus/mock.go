@@ -14,11 +14,7 @@
 package prometheus
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -31,7 +27,6 @@ const (
 	tidbCPUUsageString = "process_cpu_seconds_total"
 	tidbCPUQuotaString = "tidb_server_maxprocs"
 
-	mockDuration                = 60 * time.Second
 	mockClusterName             = "mock"
 	mockTiDBInstanceNamePattern = "%s-tidb-%d"
 	mockTiKVInstanceNamePattern = "%s-tikv-%d"
@@ -137,25 +132,4 @@ func generatePodNames(component autoscaling.ComponentType) []string {
 var podNames = map[autoscaling.ComponentType][]string{
 	autoscaling.TiDB: generatePodNames(autoscaling.TiDB),
 	autoscaling.TiKV: generatePodNames(autoscaling.TiKV),
-}
-
-func makeJSONResponse(promResp *response) (*http.Response, []byte, error) {
-	body, err := json.Marshal(promResp)
-	if err != nil {
-		return nil, []byte{}, err
-	}
-
-	resp := &http.Response{
-		Status:        "200 OK",
-		StatusCode:    200,
-		Proto:         "HTTP/1.1",
-		ProtoMajor:    1,
-		ProtoMinor:    1,
-		Body:          io.NopCloser(bytes.NewBufferString(string(body))),
-		ContentLength: int64(len(body)),
-		Header:        make(http.Header),
-	}
-	resp.Header.Add("Content-Type", "application/json")
-
-	return resp, body, nil
 }

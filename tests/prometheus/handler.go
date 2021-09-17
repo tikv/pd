@@ -48,12 +48,12 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	query := strings.Split(strings.Split(string(body), "&")[0], "=")[1]
 	component := getComponentType(query)
 	if component != autoscaling.TiKV && component != autoscaling.TiDB {
-		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("unkown component type: %d", component))
+		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("unknown component type: %d", component))
 		return
 	}
 	metricType := getMetricType(query)
 	if metricType != autoscaling.CPUUsage && metricType != autoscaling.CPUQuota {
-		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("unkown metric type: %d", metricType))
+		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("unknown metric type: %d", metricType))
 		return
 	}
 
