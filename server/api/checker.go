@@ -58,6 +58,10 @@ func (c *checkerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
 		c.r.JSON(w, http.StatusBadRequest, "missing pause time")
 		return
 	}
+	if t < 0 {
+		c.r.JSON(w, http.StatusBadRequest, "delay cannot be negative")
+		return
+	}
 	if err := c.PauseOrResumeChecker(name, int64(t)); err != nil {
 		c.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return

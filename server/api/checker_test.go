@@ -83,6 +83,7 @@ func (s *testCheckerSuite) testGetStatus(name string, c *C) {
 	c.Assert(resp["paused"], Equals, true)
 	// resumed
 	err = handler.PauseOrResumeChecker(name, 1)
+	c.Assert(err, IsNil)
 	time.Sleep(time.Second)
 	resp = make(map[string]interface{})
 	err = readJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
@@ -95,8 +96,13 @@ func (s *testCheckerSuite) testPauseOrResume(name string, c *C) {
 
 	// test pause.
 	input := make(map[string]interface{})
-	input["delay"] = 30
+	input["delay"] = -10
 	pauseArgs, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
+	c.Assert(err, NotNil)
+	input["delay"] = 30
+	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
 	c.Assert(err, IsNil)
