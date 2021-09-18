@@ -102,19 +102,19 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			RegionID:      1,
 			StoreID:       1,
-			HotRegionType: HotRegionTypes[0],
+			HotRegionType: ReadType.String(),
 		},
 		{
 			UpdateTime:    now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      2,
 			StoreID:       1,
-			HotRegionType: HotRegionTypes[0],
+			HotRegionType: ReadType.String(),
 		},
 		{
 			UpdateTime:    now.Add(20*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      3,
 			StoreID:       1,
-			HotRegionType: HotRegionTypes[0],
+			HotRegionType: ReadType.String(),
 		},
 	}
 	packHotRegionInfo.historyHotReads = hotRegionStorages
@@ -123,16 +123,16 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 			UpdateTime:    now.Add(30*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      4,
 			StoreID:       1,
-			HotRegionType: HotRegionTypes[1],
+			HotRegionType: WriteType.String(),
 		},
 	}
 	store.pullHotRegionInfo()
 	store.flush()
-	iter := store.NewIterator([]string{HotRegionTypes[0]},
+	iter := store.NewIterator([]string{ReadType.String()},
 		now.UnixNano()/int64(time.Millisecond),
 		now.Add(40*time.Second).UnixNano()/int64(time.Millisecond))
 	index := 0
-	for next, err := iter.Next(); next != nil && err == nil && index < 3; next, err = iter.Next() {
+	for next, err := iter.Next(); next != nil && err == nil; next, err = iter.Next() {
 		c.Assert(reflect.DeepEqual(&hotRegionStorages[index], next), IsTrue)
 		index++
 	}
@@ -151,19 +151,19 @@ func (t *testHotRegionStorage) TestHotRegionDelete(c *C) {
 			UpdateTime:    deleteDate.UnixNano() / int64(time.Millisecond),
 			RegionID:      1,
 			StoreID:       1,
-			HotRegionType: HotRegionTypes[0],
+			HotRegionType: ReadType.String(),
 		},
 		{
 			UpdateTime:    deleteDate.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      2,
 			StoreID:       1,
-			HotRegionType: HotRegionTypes[0],
+			HotRegionType: ReadType.String(),
 		},
 		{
 			UpdateTime:    time.Now().UnixNano() / int64(time.Millisecond),
 			RegionID:      3,
 			StoreID:       1,
-			HotRegionType: HotRegionTypes[0],
+			HotRegionType: ReadType.String(),
 		},
 	}
 	packHotRegionInfo.historyHotReads = hotRegionStorages
