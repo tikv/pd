@@ -76,7 +76,6 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	} else {
 		log.Debug("marshal plans completed", zap.String("plans", string(data)))
+		h.rd.JSON(w, http.StatusOK, plans)
 	}
-
-	h.rd.JSON(w, http.StatusOK, plans)
 }

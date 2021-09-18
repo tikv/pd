@@ -141,21 +141,20 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 		return nil, nil
 	}
 
-	// get total storage used size and total storage capacity
-	totalStorageUsedSize, totalStorageCapacity, err := getTotalStorageInfo(rc, instances)
+	// get total storage info
+	totalStorage, err := getTotalStorageInfo(rc, instances)
 	if err != nil {
 		return nil, err
 	}
 
 	// calculate storage usage
-	storageUsage := totalStorageUsedSize / totalStorageCapacity
+	storageUsage := totalStorage.usedSize / totalStorage.capacity
 	storageMaxThreshold, storageMinThreshold := getStorageThresholdByComponent(strategy, TiKV)
 	storageUsageTarget := (storageMaxThreshold + storageMinThreshold) / 2
 
 	log.Debug("get storage usage information completed",
-		zap.Float64("totalStorageUsedSize", totalStorageUsedSize),
-		zap.Float64("totalStorageUsedSize", totalStorageCapacity),
-		zap.Float64("totalStorageCapacity", totalStorageCapacity),
+		zap.Float64("totalStorageUsedSize", totalStorage.usedSize),
+		zap.Float64("totalStorageCapacity", totalStorage.capacity),
 		zap.Float64("storageUsage", storageUsage),
 		zap.Float64("storageMaxThreshold", storageMaxThreshold),
 		zap.Float64("storageMinThreshold", storageMinThreshold))
@@ -176,7 +175,7 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 			return nil, nil
 		}
 
-		storageScaleSize := totalStorageUsedSize/storageUsageTarget - totalStorageCapacity
+		storageScaleSize := totalStorage.usedSize/storageUsageTarget - totalStorage.capacity
 		storeStorageSize := getStorageByResourceType(resources, homogeneousTiKVResourceType)
 		scaleOutCount := uint64(storageScaleSize)/storeStorageSize + 1
 
@@ -471,7 +470,7 @@ func getHeterogeneousGroupsByComponent(resourceMap map[string]uint64, component 
 	return groups
 }
 
-func getTotalStorageInfo(rc *cluster.RaftCluster, healthyInstances []instance) (float64, float64, error) {
+func getTotalStorageInfo(rc *cluster.RaftCluster, healthyInstances []instance) (*storage, error) {
 	var (
 		totalStorageUsedSize uint64
 		totalStorageCapacity uint64
@@ -482,7 +481,7 @@ func getTotalStorageInfo(rc *cluster.RaftCluster, healthyInstances []instance) (
 		if store == nil {
 			log.Warn("inconsistency between health instances and store status, exit auto-scaling calculation",
 				zap.Uint64("store-id", healthyInstance.id))
-			return 0, 0, errors.Errorf("inconsistent healthy instance, instance id: %d", healthyInstance.id)
+			return nil, errors.Errorf("inconsistent healthy instance, instance id: %d", healthyInstance.id)
 		}
 
 		groupName := store.GetLabelValue(groupLabelKey)
@@ -492,7 +491,10 @@ func getTotalStorageInfo(rc *cluster.RaftCluster, healthyInstances []instance) (
 		}
 	}
 
-	return float64(totalStorageUsedSize), float64(totalStorageCapacity), nil
+	return &storage{
+		capacity: float64(totalStorageCapacity),
+		usedSize: float64(totalStorageUsedSize),
+	}, nil
 }
 
 func getCPUResourcesByComponent(strategy *Strategy, component ComponentType) []*Resource {

@@ -31,6 +31,7 @@ const (
 	homogeneousTiDBResourceType = "default_homogeneous_tidb"
 )
 
+// Address presents https or https url
 type Address struct {
 	IP   string `json:"ip"`
 	Port int    `json:"port"`
@@ -93,6 +94,7 @@ type Plan struct {
 	Labels       map[string]string `json:"labels"`
 }
 
+// NewPlan returns a new *Plan
 func NewPlan(component ComponentType, count uint64, resourceType string) *Plan {
 	labels := getLabelsByResourceType(resourceType, component)
 
@@ -108,6 +110,7 @@ func (p *Plan) String() string {
 	return fmt.Sprintf("{Component: %s, Count: %d, ResourceType: %s, Labels: %v}", p.Component, p.Count, p.ResourceType, p.Labels)
 }
 
+// CloneWithoutLabel clones *Plan without the label
 func (p *Plan) CloneWithoutLabel() *Plan {
 	var component ComponentType
 
@@ -137,24 +140,6 @@ func (c ComponentType) String() string {
 		return "tikv"
 	case TiDB:
 		return "tidb"
-	default:
-		return "unknown"
-	}
-}
-
-type RuleType int
-
-const (
-	CPU RuleType = iota
-	Storage
-)
-
-func (r RuleType) String() string {
-	switch r {
-	case CPU:
-		return "cpu"
-	case Storage:
-		return "storage"
 	default:
 		return "unknown"
 	}
@@ -192,6 +177,11 @@ func (c MetricType) String() string {
 type instance struct {
 	id      uint64
 	address string
+}
+
+type storage struct {
+	capacity float64
+	usedSize float64
 }
 
 // TiDBInfo record the detail tidb info
