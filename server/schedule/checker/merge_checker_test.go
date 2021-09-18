@@ -203,7 +203,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
 		RuleType: labeler.KeyRange,
-		Rule:     makeKeyRanges("", "74"),
+		Data:     makeKeyRanges("", "74"),
 	})
 	ops = s.mc.Check(s.regions[0])
 	c.Assert(ops, HasLen, 0)

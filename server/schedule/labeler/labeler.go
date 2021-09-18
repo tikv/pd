@@ -96,9 +96,9 @@ func (l *RegionLabeler) adjustRule(rule *LabelRule) error {
 
 	switch rule.RuleType {
 	case KeyRange:
-		rules, ok := rule.Rule.([]interface{})
+		rules, ok := rule.Data.([]interface{})
 		if !ok {
-			return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %T", rule.Rule))
+			return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %T", rule.Data))
 		}
 		if len(rules) == 0 {
 			return errs.ErrRegionRuleContent.FastGenByArgs("no key ranges")
@@ -111,7 +111,7 @@ func (l *RegionLabeler) adjustRule(rule *LabelRule) error {
 			}
 			rs = append(rs, rr)
 		}
-		rule.Rule = rs
+		rule.Data = rs
 		return nil
 	}
 	log.Error("invalid rule type", zap.String("rule-type", rule.RuleType))
@@ -152,7 +152,7 @@ func (l *RegionLabeler) buildRangeList() {
 	builder := rangelist.NewBuilder()
 	for _, rule := range l.labelRules {
 		if rule.RuleType == KeyRange {
-			rs := rule.Rule.([]*KeyRangeRule)
+			rs := rule.Data.([]*KeyRangeRule)
 			for _, r := range rs {
 				builder.AddItem(r.StartKey, r.EndKey, rule)
 			}

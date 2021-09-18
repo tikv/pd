@@ -50,19 +50,19 @@ func (s *testLabelerSuite) TestAdjustRule(c *C) {
 			{Key: "k1", Value: "v1"},
 		},
 		RuleType: "key-range",
-		Rule:     makeKeyRanges("12abcd", "34cdef", "56abcd", "78cdef"),
+		Data:     makeKeyRanges("12abcd", "34cdef", "56abcd", "78cdef"),
 	}
 	err := s.labeler.adjustRule(&rule)
 	c.Assert(err, IsNil)
-	c.Assert(rule.Rule.([]*KeyRangeRule), HasLen, 2)
-	c.Assert(rule.Rule.([]*KeyRangeRule)[0].StartKey, BytesEquals, []byte{0x12, 0xab, 0xcd})
-	c.Assert(rule.Rule.([]*KeyRangeRule)[0].EndKey, BytesEquals, []byte{0x34, 0xcd, 0xef})
-	c.Assert(rule.Rule.([]*KeyRangeRule)[1].StartKey, BytesEquals, []byte{0x56, 0xab, 0xcd})
-	c.Assert(rule.Rule.([]*KeyRangeRule)[1].EndKey, BytesEquals, []byte{0x78, 0xcd, 0xef})
+	c.Assert(rule.Data.([]*KeyRangeRule), HasLen, 2)
+	c.Assert(rule.Data.([]*KeyRangeRule)[0].StartKey, BytesEquals, []byte{0x12, 0xab, 0xcd})
+	c.Assert(rule.Data.([]*KeyRangeRule)[0].EndKey, BytesEquals, []byte{0x34, 0xcd, 0xef})
+	c.Assert(rule.Data.([]*KeyRangeRule)[1].StartKey, BytesEquals, []byte{0x56, 0xab, 0xcd})
+	c.Assert(rule.Data.([]*KeyRangeRule)[1].EndKey, BytesEquals, []byte{0x78, 0xcd, 0xef})
 }
 
 func (s *testLabelerSuite) TestAdjustRule2(c *C) {
-	ruleData := `{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": [{"start_key":"", "end_key":""}]}`
+	ruleData := `{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "data": [{"start_key":"", "end_key":""}]}`
 	var rule LabelRule
 	err := json.Unmarshal([]byte(ruleData), &rule)
 	c.Assert(err, IsNil)
@@ -71,24 +71,24 @@ func (s *testLabelerSuite) TestAdjustRule2(c *C) {
 
 	badRuleData := []string{
 		// no id
-		`{"id":"", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": [{"start_key":"", "end_key":""}]}`,
+		`{"id":"", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "data": [{"start_key":"", "end_key":""}]}`,
 		// no labels
-		`{"id":"id", "labels": [], "rule_type":"key-range", "rule": [{"start_key":"", "end_key":""}]}`,
+		`{"id":"id", "labels": [], "rule_type":"key-range", "data": [{"start_key":"", "end_key":""}]}`,
 		// empty label key
-		`{"id":"id", "labels": [{"key": "", "value": "v1"}], "rule_type":"key-range", "rule": [{"start_key":"", "end_key":""}]}`,
+		`{"id":"id", "labels": [{"key": "", "value": "v1"}], "rule_type":"key-range", "data": [{"start_key":"", "end_key":""}]}`,
 		// empty label value
-		`{"id":"id", "labels": [{"key": "k1", "value": ""}], "rule_type":"key-range", "rule": [{"start_key":"", "end_key":""}]}`,
+		`{"id":"id", "labels": [{"key": "k1", "value": ""}], "rule_type":"key-range", "data": [{"start_key":"", "end_key":""}]}`,
 		// unknown rule type
-		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"unknown", "rule": [{"start_key":"", "end_key":""}]}`,
+		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"unknown", "data": [{"start_key":"", "end_key":""}]}`,
 		// wrong rule content
-		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule":123}`,
-		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-ranges", "rule": {"start_key":"", "end_key":""}}`,
-		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": []}`,
-		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": [{"start_key":123, "end_key":""}]}`,
-		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": [{"start_key":"", "end_key":123}]}`,
-		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": [{"start_key":"123", "end_key":"abcd"}]}`,
-		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": [{"start_key":"abcd", "end_key":"123"}]}`,
-		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "rule": [{"start_key":"abcd", "end_key":"1234"}]}`,
+		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "data": 123}`,
+		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "data": {"start_key":"", "end_key":""}}`,
+		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "data": []}`,
+		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "data": [{"start_key":123, "end_key":""}]}`,
+		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "data": [{"start_key":"", "end_key":123}]}`,
+		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "data": [{"start_key":"123", "end_key":"abcd"}]}`,
+		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "data": [{"start_key":"abcd", "end_key":"123"}]}`,
+		`{"id":"id", "labels": [{"key": "k1", "value": "v1"}], "rule_type":"key-range", "data": [{"start_key":"abcd", "end_key":"1234"}]}`,
 	}
 	for i, str := range badRuleData {
 		var rule LabelRule
@@ -101,9 +101,9 @@ func (s *testLabelerSuite) TestAdjustRule2(c *C) {
 
 func (s *testLabelerSuite) TestGetSetRule(c *C) {
 	rules := []*LabelRule{
-		{ID: "rule1", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Rule: makeKeyRanges("1234", "5678")},
-		{ID: "rule2", Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: makeKeyRanges("ab12", "cd12")},
-		{ID: "rule3", Labels: []RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Rule: makeKeyRanges("abcd", "efef")},
+		{ID: "rule1", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},
+		{ID: "rule2", Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
+		{ID: "rule3", Labels: []RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: makeKeyRanges("abcd", "efef")},
 	}
 	for _, r := range rules {
 		err := s.labeler.SetLabelRule(r)
@@ -128,7 +128,7 @@ func (s *testLabelerSuite) TestGetSetRule(c *C) {
 	// patch
 	patch := LabelRulePatch{
 		SetRules: []*LabelRule{
-			{ID: "rule2", Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: makeKeyRanges("ab12", "cd12")},
+			{ID: "rule2", Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
 		},
 		DeleteRules: []string{"rule1"},
 	}
@@ -141,10 +141,10 @@ func (s *testLabelerSuite) TestGetSetRule(c *C) {
 
 func (s *testLabelerSuite) TestIndex(c *C) {
 	rules := []*LabelRule{
-		{ID: "rule0", Labels: []RegionLabel{{Key: "k1", Value: "v0"}}, RuleType: "key-range", Rule: makeKeyRanges("", "")},
-		{ID: "rule1", Index: 1, Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Rule: makeKeyRanges("1234", "5678")},
-		{ID: "rule2", Index: 2, Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: makeKeyRanges("ab12", "cd12")},
-		{ID: "rule3", Index: 1, Labels: []RegionLabel{{Key: "k2", Value: "v3"}}, RuleType: "key-range", Rule: makeKeyRanges("abcd", "efef")},
+		{ID: "rule0", Labels: []RegionLabel{{Key: "k1", Value: "v0"}}, RuleType: "key-range", Data: makeKeyRanges("", "")},
+		{ID: "rule1", Index: 1, Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},
+		{ID: "rule2", Index: 2, Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
+		{ID: "rule3", Index: 1, Labels: []RegionLabel{{Key: "k2", Value: "v3"}}, RuleType: "key-range", Data: makeKeyRanges("abcd", "efef")},
 	}
 	for _, r := range rules {
 		err := s.labeler.SetLabelRule(r)
@@ -179,9 +179,9 @@ func (s *testLabelerSuite) TestIndex(c *C) {
 
 func (s *testLabelerSuite) TestSaveLoadRule(c *C) {
 	rules := []*LabelRule{
-		{ID: "rule1", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Rule: makeKeyRanges("1234", "5678")},
-		{ID: "rule2", Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: makeKeyRanges("ab12", "cd12")},
-		{ID: "rule3", Labels: []RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Rule: makeKeyRanges("abcd", "efef")},
+		{ID: "rule1", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},
+		{ID: "rule2", Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
+		{ID: "rule3", Labels: []RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: makeKeyRanges("abcd", "efef")},
 	}
 	for _, r := range rules {
 		err := s.labeler.SetLabelRule(r)
@@ -198,9 +198,9 @@ func (s *testLabelerSuite) TestSaveLoadRule(c *C) {
 
 func (s *testLabelerSuite) TestKeyRange(c *C) {
 	rules := []*LabelRule{
-		{ID: "rule1", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Rule: makeKeyRanges("1234", "5678")},
-		{ID: "rule2", Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: makeKeyRanges("ab12", "cd12")},
-		{ID: "rule3", Labels: []RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Rule: makeKeyRanges("abcd", "efef")},
+		{ID: "rule1", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},
+		{ID: "rule2", Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
+		{ID: "rule3", Labels: []RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: makeKeyRanges("abcd", "efef")},
 	}
 	for _, r := range rules {
 		err := s.labeler.SetLabelRule(r)
