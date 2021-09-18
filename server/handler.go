@@ -911,7 +911,7 @@ func (h *Handler) PackHistoryHotReadRegions() (historyHotRegions []core.HistoryH
 		return
 	}
 	hotReadPeerRegions := hotReadRegions.AsPeer
-	historyPeerHotRegions, err := h.packHotRegions(hotReadPeerRegions, core.HotRegionTypes[0])
+	historyPeerHotRegions, err := h.packHotRegions(hotReadPeerRegions, core.ReadType.String())
 	if err != nil {
 		return
 	}
@@ -926,7 +926,7 @@ func (h *Handler) PackHistoryHotWriteRegions() (historyHotRegions []core.History
 		return
 	}
 	hotWritePeerRegions := hotWriteRegions.AsPeer
-	historyPeerHotRegions, err := h.packHotRegions(hotWritePeerRegions, core.HotRegionTypes[1])
+	historyPeerHotRegions, err := h.packHotRegions(hotWritePeerRegions, core.WriteType.String())
 	if err != nil {
 		return
 	}
