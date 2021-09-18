@@ -26,7 +26,7 @@ type LabelRule struct {
 	Index    int           `json:"index"`
 	Labels   []RegionLabel `json:"labels"`
 	RuleType string        `json:"rule_type"`
-	Data     interface{}   `json:"Data"`
+	Data     interface{}   `json:"data"`
 }
 
 const (
