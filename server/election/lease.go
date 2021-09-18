@@ -49,6 +49,9 @@ type lease struct {
 
 // Grant uses `lease.Grant` to initialize the lease and expireTime.
 func (l *lease) Grant(leaseTimeout int64) error {
+	if l == nil {
+		return errs.ErrEtcdGrantLease.GenWithStackByCause("lease is nil")
+	}
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), requestTimeout)
 	leaseResp, err := l.lease.Grant(ctx, leaseTimeout)
@@ -83,17 +86,17 @@ func (l *lease) Close() error {
 // IsExpired checks if the lease is expired. If it returns true,
 // current leader should step down and try to re-elect again.
 func (l *lease) IsExpired() bool {
-	if l == nil {
+	if l == nil || l.expireTime.Load() == nil {
 		return true
-	}
-	if l.expireTime.Load() == nil {
-		return false
 	}
 	return time.Now().After(l.expireTime.Load().(time.Time))
 }
 
 // KeepAlive auto renews the lease and update expireTime.
 func (l *lease) KeepAlive(ctx context.Context) {
+	if l == nil {
+		return
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)

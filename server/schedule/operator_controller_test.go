@@ -489,7 +489,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 			operator.RemovePeer{FromStore: 1},
 		},
 		{
-			operator.AddLightLearner{ToStore: 3, PeerID: 3},
+			operator.AddLearner{ToStore: 3, PeerID: 3, IsLightWeight: true},
 			operator.PromoteLearner{ToStore: 3, PeerID: 3},
 			operator.TransferLeader{ToStore: 3},
 			operator.RemovePeer{FromStore: 1},

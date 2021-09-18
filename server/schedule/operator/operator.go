@@ -334,11 +334,7 @@ func (o *Operator) History() []OpHistory {
 			})
 		case AddPeer:
 			addPeerStores = append(addPeerStores, s.ToStore)
-		case AddLightPeer:
-			addPeerStores = append(addPeerStores, s.ToStore)
 		case AddLearner:
-			addPeerStores = append(addPeerStores, s.ToStore)
-		case AddLightLearner:
 			addPeerStores = append(addPeerStores, s.ToStore)
 		case RemovePeer:
 			removePeerStores = append(removePeerStores, s.FromStore)
