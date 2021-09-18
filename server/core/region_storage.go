@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -72,35 +72,33 @@ func NewRegionStorage(
 		regionStorageCtx:     regionStorageCtx,
 		regionStorageCancel:  regionStorageCancel,
 	}
-	s.backgroundFlush()
+	go s.backgroundFlush()
 	return s, nil
 }
 
 func (s *RegionStorage) backgroundFlush() {
-	ticker := time.NewTicker(dirtyFlushTick)
 	var (
 		isFlush bool
 		err     error
 	)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				s.mu.RLock()
-				isFlush = s.flushTime.Before(time.Now())
-				s.mu.RUnlock()
-				if !isFlush {
-					continue
-				}
-				if err = s.FlushRegion(); err != nil {
-					log.Error("flush regions meet error", errs.ZapError(err))
-				}
-			case <-s.regionStorageCtx.Done():
-				return
+	ticker := time.NewTicker(dirtyFlushTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.mu.RLock()
+			isFlush = s.flushTime.Before(time.Now())
+			s.mu.RUnlock()
+			if !isFlush {
+				continue
 			}
+			if err = s.FlushRegion(); err != nil {
+				log.Error("flush regions meet error", errs.ZapError(err))
+			}
+		case <-s.regionStorageCtx.Done():
+			return
 		}
-	}()
+	}
 }
 
 // SaveRegion saves one region to storage.

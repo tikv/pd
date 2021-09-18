@@ -16,7 +16,6 @@ package placement
 
 import (
 	"encoding/hex"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/codec"

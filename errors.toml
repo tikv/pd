@@ -611,11 +611,6 @@ error = '''
 get local allocator failed, %s
 '''
 
-["PD:tso:ErrInvalidTimestamp"]
-error = '''
-invalid timestamp
-'''
-
 ["PD:tso:ErrLogicOverflow"]
 error = '''
 logic part overflow

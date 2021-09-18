@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -887,13 +887,13 @@ func BenchmarkPatrolRegion(b *testing.B) {
 		for {
 			if oc.OperatorCount(operator.OpMerge) == mergeLimit {
 				co.cancel()
-				co.wg.Add(1)
 				return
 			}
 		}
 	}()
 	<-listen
 
+	co.wg.Add(1)
 	b.ResetTimer()
 	co.patrolRegions()
 }
@@ -969,7 +969,9 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	tc.putRegion(region)
 	start := time.Now()
 	{
-		op1 := lb.Schedule(tc)[0]
+		ops := lb.Schedule(tc)
+		c.Assert(ops, HasLen, 1)
+		op1 := ops[0]
 		c.Assert(op1, NotNil)
 		c.Assert(oc.AddOperator(op1), IsTrue)
 		c.Assert(oc.RemoveOperator(op1), IsTrue)
@@ -1028,6 +1030,36 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
 	c.Assert(lb.Schedule(tc), NotNil)
+}
+
+func (s *testOperatorControllerSuite) TestDownStoreLimit(c *C) {
+	tc, co, cleanup := prepare(nil, nil, nil, c)
+	defer cleanup()
+	oc := co.opController
+	rc := co.checkers.GetRuleChecker()
+
+	tc.addRegionStore(1, 100)
+	tc.addRegionStore(2, 100)
+	tc.addRegionStore(3, 100)
+	tc.addLeaderRegion(1, 1, 2, 3)
+
+	region := tc.GetRegion(1)
+	tc.setStoreDown(1)
+	tc.SetStoreLimit(1, storelimit.RemovePeer, 1)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{
+			Peer:        region.GetStorePeer(1),
+			DownSeconds: 24 * 60 * 60,
+		},
+	}))
+
+	for i := uint64(1); i <= 5; i++ {
+		tc.addRegionStore(i+3, 100)
+		op := rc.Check(region)
+		c.Assert(op, NotNil)
+		c.Assert(oc.AddOperator(op), IsTrue)
+		oc.RemoveOperator(op)
+	}
 }
 
 var _ = Suite(&testScheduleControllerSuite{})

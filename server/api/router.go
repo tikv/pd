@@ -155,6 +155,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/hotspot/regions/read", hotStatusHandler.GetHotReadRegions).Methods("GET")
 	apiRouter.HandleFunc("/hotspot/regions/history", hotStatusHandler.GetHistoryHotRegions).Methods("GET")
 	apiRouter.HandleFunc("/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
+	apiRouter.HandleFunc("/hotspot/regions/history", hotStatusHandler.GetHistoryHotRegions).Methods("GET")
 
 	regionHandler := newRegionHandler(svr, rd)
 	clusterRouter.HandleFunc("/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")

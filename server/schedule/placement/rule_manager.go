@@ -44,6 +44,7 @@ type RuleManager struct {
 	// used for rule validation
 	keyType          string
 	storeSetInformer core.StoreSetInformer
+	cache            *RegionRuleFitCacheManager
 }
 
 // NewRuleManager creates a RuleManager instance.
@@ -52,6 +53,7 @@ func NewRuleManager(storage *core.Storage, storeSetInformer core.StoreSetInforme
 		storage:          storage,
 		storeSetInformer: storeSetInformer,
 		ruleConfig:       newRuleConfig(),
+		cache:            NewRegionRuleFitCacheManager(),
 	}
 }
 
@@ -305,9 +307,26 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 }
 
 // FitRegion fits a region to the rules it matches.
-func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *RegionFit {
+func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *RegionFit {
+	regionStores := getStoresByRegion(storeSet, region)
 	rules := m.GetRulesForApplyRegion(region)
-	return FitRegion(stores, region, rules)
+	if ok, fit := m.cache.CheckAndGetCache(region, rules, regionStores); fit != nil && ok {
+		return fit
+	}
+	fit := FitRegion(regionStores, region, rules)
+	fit.regionStores = regionStores
+	fit.rules = rules
+	return fit
+}
+
+// SetRegionFitCache sets RegionFitCache
+func (m *RuleManager) SetRegionFitCache(region *core.RegionInfo, fit *RegionFit) {
+	m.cache.SetCache(region, fit)
+}
+
+// InvalidCache invalids the cache.
+func (m *RuleManager) InvalidCache(regionID uint64) {
+	m.cache.Invalid(regionID)
 }
 
 func (m *RuleManager) beginPatch() *ruleConfigPatch {
@@ -400,8 +419,8 @@ const (
 // RuleOp is for batching placement rule actions. The action type is
 // distinguished by the field `Action`.
 type RuleOp struct {
-	*Rule                       // information of the placement rule to add/delete
-	Action           RuleOpType `json:"action"`              // the operation type
+	*Rule                       // information of the placement rule to add/delete the operation type
+	Action           RuleOpType `json:"action"`
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
@@ -676,4 +695,24 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	defer m.Unlock()
 	m.keyType = h
 	return m
+}
+
+func getStoresByRegion(storeSet StoreSet, region *core.RegionInfo) []*core.StoreInfo {
+	r := make([]*core.StoreInfo, 0, len(region.GetPeers()))
+	for _, peer := range region.GetPeers() {
+		store := storeSet.GetStore(peer.GetStoreId())
+		if store != nil {
+			r = append(r, store)
+		}
+	}
+	return r
+}
+
+func getStoreByID(stores []*core.StoreInfo, id uint64) *core.StoreInfo {
+	for _, store := range stores {
+		if store != nil && store.GetID() == id {
+			return store
+		}
+	}
+	return nil
 }
