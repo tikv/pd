@@ -49,8 +49,8 @@ jobs:
           echo  "Dispatched ${total} normal chunks"
           split packages.list -n r/${total} packages_unit_ -a 1 --numeric-suffixes=1
           echo  "Dispatched 2 special task to the last chunk (the special tests take a long time)"
-          echo github.com/tikv/pd/server/api > packages_unit_${{ strategy.job-total }}
-          echo github.com/tikv/pd/tests/client >> packages_unit_${{ strategy.job-total }}
+#          echo github.com/tikv/pd/server/api > packages_unit_${{ strategy.job-total }}
+#          echo github.com/tikv/pd/tests/client >> packages_unit_${{ strategy.job-total }}
           packages="{$(cat packages_unit_${WORKER_ID} |tr "\n" ",")}"
           echo "This worker will test the chunk - ${packages}"
           echo "::set-output name=list::${packages}"
