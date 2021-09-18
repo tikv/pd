@@ -15,10 +15,16 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
+	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
 	_ "github.com/tikv/pd/server/schedulers"
 )
 
@@ -48,4 +54,149 @@ func (s testHotStatusSuite) TestGetHotStore(c *C) {
 	stat := HotStoreStats{}
 	err := readJSON(testDialClient, s.urlPrefix+"/stores", &stat)
 	c.Assert(err, IsNil)
+}
+
+func (s testHotStatusSuite) TestGetHistoryHotRegionsBasic(c *C) {
+	request := HistoryHotRegionsRequest{
+		StartTime: 0,
+		EndTime:   time.Now().AddDate(0, 2, 0).UnixNano() / int64(time.Millisecond),
+	}
+	data, err := json.Marshal(request)
+	c.Assert(err, IsNil)
+	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data)
+	c.Assert(err, IsNil)
+	errRequest := "{\"start_time\":\"err\"}"
+	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", []byte(errRequest))
+	c.Assert(err, NotNil)
+}
+
+func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
+	storage := s.svr.GetHistoryHotRegionStorage()
+	now := time.Now()
+	hotRegions := []*core.HistoryHotRegion{
+		{
+			RegionID:   1,
+			UpdateTime: now.UnixNano() / int64(time.Millisecond),
+		},
+		{
+			RegionID:   1,
+			UpdateTime: now.Add(10*time.Minute).UnixNano() / int64(time.Millisecond),
+		},
+	}
+	request := HistoryHotRegionsRequest{
+		StartTime: now.UnixNano() / int64(time.Millisecond),
+		EndTime:   now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
+	}
+	check := func(res []byte, statusCode int) {
+		c.Assert(statusCode, Equals, 200)
+		historyHotRegions := &core.HistoryHotRegions{}
+		json.Unmarshal(res, historyHotRegions)
+		for _, region := range historyHotRegions.HistoryHotRegion {
+			c.Assert(region.UpdateTime, GreaterEqual, request.StartTime)
+			c.Assert(region.UpdateTime, LessEqual, request.EndTime)
+		}
+	}
+	err := writeToDB(storage.LeveldbKV, hotRegions)
+	c.Assert(err, IsNil)
+	data, err := json.Marshal(request)
+	c.Assert(err, IsNil)
+	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	c.Assert(err, IsNil)
+}
+
+func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
+	storage := s.svr.GetHistoryHotRegionStorage()
+	now := time.Now()
+	hotRegions := []*core.HistoryHotRegion{
+		{
+			RegionID:      1,
+			StoreID:       1,
+			PeerID:        1,
+			IsLeader:      false,
+			IsLearner:     false,
+			HotRegionType: "read",
+			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
+		},
+		{
+			RegionID:      1,
+			StoreID:       2,
+			PeerID:        1,
+			IsLeader:      false,
+			IsLearner:     false,
+			HotRegionType: "read",
+			UpdateTime:    now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
+		},
+		{
+			RegionID:      1,
+			StoreID:       1,
+			PeerID:        2,
+			IsLeader:      false,
+			IsLearner:     false,
+			HotRegionType: "read",
+			UpdateTime:    now.Add(20*time.Second).UnixNano() / int64(time.Millisecond),
+		},
+		{
+			RegionID:      1,
+			StoreID:       1,
+			PeerID:        1,
+			IsLeader:      false,
+			IsLearner:     false,
+			HotRegionType: "write",
+			UpdateTime:    now.Add(30*time.Second).UnixNano() / int64(time.Millisecond),
+		},
+		{
+			RegionID:      1,
+			StoreID:       1,
+			PeerID:        1,
+			IsLeader:      true,
+			IsLearner:     false,
+			HotRegionType: "read",
+			UpdateTime:    now.Add(40*time.Second).UnixNano() / int64(time.Millisecond),
+		},
+		{
+			RegionID:      1,
+			StoreID:       1,
+			PeerID:        1,
+			IsLeader:      false,
+			IsLearner:     true,
+			HotRegionType: "read",
+			UpdateTime:    now.Add(50*time.Second).UnixNano() / int64(time.Millisecond),
+		},
+	}
+	request := HistoryHotRegionsRequest{
+		RegionIDs:      []uint64{1},
+		StoreIDs:       []uint64{1},
+		PeerIDs:        []uint64{1},
+		HotRegionTypes: []string{"read"},
+		IsLeaders:      []bool{false},
+		IsLearners:     []bool{false},
+		EndTime:        now.Add(10*time.Minute).UnixNano() / int64(time.Millisecond),
+	}
+	check := func(res []byte, statusCode int) {
+		c.Assert(statusCode, Equals, 200)
+		historyHotRegions := &core.HistoryHotRegions{}
+		json.Unmarshal(res, historyHotRegions)
+		c.Assert(len(historyHotRegions.HistoryHotRegion), Equals, 1)
+		c.Assert(reflect.DeepEqual(historyHotRegions.HistoryHotRegion[0], hotRegions[0]), IsTrue)
+	}
+	err := writeToDB(storage.LeveldbKV, hotRegions)
+	c.Assert(err, IsNil)
+	data, err := json.Marshal(request)
+	c.Assert(err, IsNil)
+	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	c.Assert(err, IsNil)
+}
+
+func writeToDB(kv *kv.LeveldbKV, hotRegions []*core.HistoryHotRegion) error {
+	batch := new(leveldb.Batch)
+	for _, region := range hotRegions {
+		key := core.HotRegionStorePath(region.HotRegionType, region.UpdateTime, region.RegionID)
+		value, err := json.Marshal(region)
+		if err != nil {
+			return err
+		}
+		batch.Put([]byte(key), value)
+	}
+	kv.Write(batch, nil)
+	return nil
 }
