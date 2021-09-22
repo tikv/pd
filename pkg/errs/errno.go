@@ -86,6 +86,11 @@ var (
 	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func of %v is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
 )
 
+// checker errors
+var (
+	ErrCheckerNotFound = errors.Normalize("checker not found", errors.RFCCodeText("PD:checker:ErrCheckerNotFound"))
+)
+
 // placement errors
 var (
 	ErrRuleContent   = errors.Normalize("invalid rule content, %s", errors.RFCCodeText("PD:placement:ErrRuleContent"))
