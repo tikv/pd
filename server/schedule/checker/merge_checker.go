@@ -34,8 +34,16 @@ import (
 
 const maxTargetRegionSize = 500
 
+// When a region has label `merge_option=deny`, skip merging the region.
+// If label value is `allow` or other value, it will be treated as `allow`.
+const (
+	mergeOptionLabel     = "merge_option"
+	mergeOptionValueDeny = "deny"
+)
+
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
+	PauseController
 	cluster    opt.Cluster
 	opts       *config.PersistOptions
 	splitCache *cache.TTLUint64
@@ -70,6 +78,12 @@ func (m *MergeChecker) RecordRegionSplit(regionIDs []uint64) {
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
+
+	if m.IsPaused() {
+		checkerCounter.WithLabelValues("merge_checker", "paused").Inc()
+		return nil
+	}
+
 	expireTime := m.startTime.Add(m.opts.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
 		checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
@@ -187,7 +201,7 @@ func AllowMerge(cluster opt.Cluster, region *core.RegionInfo, adjacent *core.Reg
 		if len(l.GetSplitKeys(start, end)) > 0 {
 			return false
 		}
-		if l.GetRegionLabel(region, labeler.NoMerge) != "" || l.GetRegionLabel(adjacent, labeler.NoMerge) != "" {
+		if l.GetRegionLabel(region, mergeOptionLabel) == mergeOptionValueDeny || l.GetRegionLabel(adjacent, mergeOptionLabel) == mergeOptionValueDeny {
 			return false
 		}
 	}

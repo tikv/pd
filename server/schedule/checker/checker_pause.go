@@ -11,11 +11,27 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// +build !dashboard_distro
 
-package distro
+package checker
 
-import "github.com/pingcap/tidb-dashboard/pkg/utils/distro"
+import (
+	"sync/atomic"
+	"time"
+)
 
-// Resource declared the distro brand information
-var Resource = distro.Resource
+// PauseController sets and stores delay time in checkers.
+type PauseController struct {
+	delayUntil int64
+}
+
+// IsPaused check if checker is paused
+func (c *PauseController) IsPaused() bool {
+	delayUntil := atomic.LoadInt64(&c.delayUntil)
+	return time.Now().Unix() < delayUntil
+}
+
+// PauseOrResume pause or resume the checker
+func (c *PauseController) PauseOrResume(t int64) {
+	delayUntil := time.Now().Unix() + t
+	atomic.StoreInt64(&c.delayUntil, delayUntil)
+}

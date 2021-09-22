@@ -29,6 +29,7 @@ const defaultPriorityQueueSize = 1280
 
 // PriorityChecker ensures high priority region should run first
 type PriorityChecker struct {
+	PauseController
 	cluster opt.Cluster
 	opts    *config.PersistOptions
 	queue   *cache.PriorityQueue
@@ -67,6 +68,10 @@ func NewRegionEntry(regionID uint64) *RegionPriorityEntry {
 
 // Check check region's replicas, it will put into priority queue if the region lack of replicas.
 func (p *PriorityChecker) Check(region *core.RegionInfo) (fit *placement.RegionFit) {
+	if p.IsPaused() {
+		checkerCounter.WithLabelValues("priority_checker", "paused").Inc()
+		return nil
+	}
 	var makeupCount int
 	if p.opts.IsPlacementRulesEnabled() {
 		makeupCount, fit = p.checkRegionInPlacementRule(region)
@@ -80,7 +85,7 @@ func (p *PriorityChecker) Check(region *core.RegionInfo) (fit *placement.RegionF
 
 // checkRegionInPlacementRule check region in placement rule mode
 func (p *PriorityChecker) checkRegionInPlacementRule(region *core.RegionInfo) (makeupCount int, fit *placement.RegionFit) {
-	fit = p.cluster.FitRegion(region)
+	fit = opt.FitRegion(p.cluster, region)
 	if len(fit.RuleFits) == 0 {
 		return
 	}
@@ -100,7 +105,7 @@ func (p *PriorityChecker) checkRegionInReplica(region *core.RegionInfo) (makeupC
 	return p.opts.GetMaxReplicas() - len(region.GetPeers())
 }
 
-// addOrRemoveRegion add or remove region from  queue
+// addOrRemoveRegion add or remove region from queue
 // it will remove if region's priority equal 0
 // it's Attempt will increase if region's priority equal last
 func (p *PriorityChecker) addOrRemoveRegion(priority int, regionID uint64) {
