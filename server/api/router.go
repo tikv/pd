@@ -67,6 +67,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/operators/{region_id}", operatorHandler.Get).Methods("GET")
 	apiRouter.HandleFunc("/operators/{region_id}", operatorHandler.Delete).Methods("DELETE")
 
+	checkerHandler := newCheckerHandler(svr, rd)
+	apiRouter.HandleFunc("/checker/{name}", checkerHandler.PauseOrResume).Methods("POST")
+	apiRouter.HandleFunc("/checker/{name}", checkerHandler.GetStatus).Methods("GET")
+
 	schedulerHandler := newSchedulerHandler(svr, rd)
 	apiRouter.HandleFunc("/schedulers", schedulerHandler.List).Methods("GET")
 	apiRouter.HandleFunc("/schedulers", schedulerHandler.Post).Methods("POST")
@@ -154,6 +158,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/hotspot/regions/write", hotStatusHandler.GetHotWriteRegions).Methods("GET")
 	apiRouter.HandleFunc("/hotspot/regions/read", hotStatusHandler.GetHotReadRegions).Methods("GET")
 	apiRouter.HandleFunc("/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
+	apiRouter.HandleFunc("/hotspot/regions/history", hotStatusHandler.GetHistoryHotRegions).Methods("GET")
 
 	regionHandler := newRegionHandler(svr, rd)
 	clusterRouter.HandleFunc("/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")

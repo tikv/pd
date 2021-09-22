@@ -18,6 +18,7 @@ import (
 	"context"
 
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/checker"
@@ -80,12 +81,14 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 
 	if c.opts.IsPlacementRulesEnabled() {
 		fit := c.priorityChecker.Check(region)
-		if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
-			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-				return []*operator.Operator{op}
+		if fit != nil { // priority checker is not paused
+			if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
+				if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+					return []*operator.Operator{op}
+				}
+				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
+				c.regionWaitingList.Put(region.GetID(), nil)
 			}
-			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
-			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
@@ -147,4 +150,26 @@ func (c *CheckerController) GetPriorityRegions() []uint64 {
 // RemovePriorityRegions removes priority region from priority queue
 func (c *CheckerController) RemovePriorityRegions(id uint64) {
 	c.priorityChecker.RemovePriorityRegion(id)
+}
+
+// GetPauseController returns pause controller of the checker
+func (c *CheckerController) GetPauseController(name string) (*checker.PauseController, error) {
+	switch name {
+	case "learner":
+		return &c.learnerChecker.PauseController, nil
+	case "replica":
+		return &c.replicaChecker.PauseController, nil
+	case "rule":
+		return &c.ruleChecker.PauseController, nil
+	case "split":
+		return &c.splitChecker.PauseController, nil
+	case "merge":
+		return &c.mergeChecker.PauseController, nil
+	case "joint-state":
+		return &c.jointStateChecker.PauseController, nil
+	case "priority":
+		return &c.priorityChecker.PauseController, nil
+	default:
+		return nil, errs.ErrCheckerNotFound.FastGenByArgs()
+	}
 }
