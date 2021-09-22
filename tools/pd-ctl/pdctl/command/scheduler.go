@@ -429,8 +429,8 @@ func newConfigHotRegionCommand() *cobra.Command {
 		Short: "list the config item",
 		Run:   listSchedulerConfigCommandFunc})
 	c.AddCommand(&cobra.Command{
-		Use:   "load",
-		Short: "load config from file",
+		Use:   "save",
+		Short: "save config from file",
 		Run: func(cmd *cobra.Command, args []string) {
 			loadSchedulerConfigCommandFunc(cmd, c.Name(), args)
 		},
