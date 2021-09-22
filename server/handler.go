@@ -146,6 +146,15 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 	return c.GetSchedulers(), nil
 }
 
+// IsCheckerPaused returns if checker is paused
+func (h *Handler) IsCheckerPaused(name string) (bool, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return false, err
+	}
+	return rc.IsCheckerPaused(name)
+}
+
 // GetStores returns all stores in the cluster.
 func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 	rc := h.s.GetRaftCluster()
@@ -237,6 +246,24 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 			log.Error("can not resume scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {
 			log.Error("can not pause scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
+		}
+	}
+	return err
+}
+
+// PauseOrResumeChecker pauses checker for delay seconds or resume checker
+// t == 0 : resume checker.
+// t > 0 : checker delays t seconds.
+func (h *Handler) PauseOrResumeChecker(name string, t int64) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	if err = c.PauseOrResumeChecker(name, t); err != nil {
+		if t == 0 {
+			log.Error("can not resume checker", zap.String("checker-name", name), errs.ZapError(err))
+		} else {
+			log.Error("can not pause checker", zap.String("checker-name", name), errs.ZapError(err))
 		}
 	}
 	return err
