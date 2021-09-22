@@ -55,7 +55,7 @@ func addOperators(wop WaitingOperator) {
 func (s *testWaitingOperatorSuite) TestListOperator(c *C) {
 	rb := NewRandBuckets()
 	addOperators(rb)
-	c.Assert(len(rb.ListOperator()), Equals, 3)
+	c.Assert(rb.ListOperator(), HasLen, 3)
 }
 
 func (s *testWaitingOperatorSuite) TestRandomBucketsWithMergeRegion(c *C) {

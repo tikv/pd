@@ -159,14 +159,14 @@ func (s *testRuleSuite) TestSet(c *C) {
 			popKeyRangeMap := map[string]struct{}{}
 			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
 				v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
-				c.Assert(got, Equals, true)
+				c.Assert(got, IsTrue)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
 			c.Assert(len(popKeyRangeMap), Equals, len(testcase.popKeyRange))
 			for k := range popKeyRangeMap {
 				_, ok := testcase.popKeyRange[k]
-				c.Assert(ok, Equals, true)
+				c.Assert(ok, IsTrue)
 			}
 		} else {
 			c.Assert(err, NotNil)
@@ -211,7 +211,7 @@ func (s *testRuleSuite) TestGet(c *C) {
 			compareRule(c, &resp, &testcase.rule)
 		} else {
 			c.Assert(err, NotNil)
-			c.Assert(strings.HasSuffix(err.Error(), testcase.code), Equals, true)
+			c.Assert(strings.HasSuffix(err.Error(), testcase.code), IsTrue)
 		}
 	}
 }
@@ -372,7 +372,7 @@ func (s *testRuleSuite) TestGetAllByGroup(c *C) {
 		url := fmt.Sprintf("%s/rules/group/%s", s.urlPrefix, testcase.groupID)
 		err = readJSON(testDialClient, url, &resp)
 		c.Assert(err, IsNil)
-		c.Assert(len(resp), Equals, testcase.count)
+		c.Assert(resp, HasLen, testcase.count)
 		if testcase.count == 2 {
 			compareRule(c, resp[0], &rule)
 			compareRule(c, resp[1], &rule1)
@@ -428,7 +428,7 @@ func (s *testRuleSuite) TestGetAllByRegion(c *C) {
 			}
 		} else {
 			c.Assert(err, NotNil)
-			c.Assert(strings.HasSuffix(err.Error(), testcase.code), Equals, true)
+			c.Assert(strings.HasSuffix(err.Error(), testcase.code), IsTrue)
 		}
 	}
 }
@@ -475,10 +475,10 @@ func (s *testRuleSuite) TestGetAllByKey(c *C) {
 		err = readJSON(testDialClient, url, &resp)
 		if testcase.success {
 			c.Assert(err, IsNil)
-			c.Assert(len(resp), Equals, testcase.respSize)
+			c.Assert(resp, HasLen, testcase.respSize)
 		} else {
 			c.Assert(err, NotNil)
-			c.Assert(strings.HasSuffix(err.Error(), testcase.code), Equals, true)
+			c.Assert(strings.HasSuffix(err.Error(), testcase.code), IsTrue)
 		}
 	}
 }
@@ -528,14 +528,14 @@ func (s *testRuleSuite) TestDelete(c *C) {
 			popKeyRangeMap := map[string]struct{}{}
 			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
 				v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
-				c.Assert(got, Equals, true)
+				c.Assert(got, IsTrue)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
 			c.Assert(len(popKeyRangeMap), Equals, len(testcase.popKeyRange))
 			for k := range popKeyRangeMap {
 				_, ok := testcase.popKeyRange[k]
-				c.Assert(ok, Equals, true)
+				c.Assert(ok, IsTrue)
 			}
 		}
 	}

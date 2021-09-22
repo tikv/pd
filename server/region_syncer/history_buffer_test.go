@@ -87,9 +87,9 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	c.Assert(s, Equals, "106")
 
 	histories := h2.RecordsFrom(uint64(1))
-	c.Assert(len(histories), Equals, 0)
+	c.Assert(histories, HasLen, 0)
 	histories = h2.RecordsFrom(h2.firstIndex())
-	c.Assert(len(histories), Equals, 100)
+	c.Assert(histories, HasLen, 100)
 	c.Assert(h2.firstIndex(), Equals, uint64(7))
 	c.Assert(histories, DeepEquals, regions[1:])
 }

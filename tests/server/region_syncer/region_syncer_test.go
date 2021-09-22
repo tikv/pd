@@ -145,7 +145,7 @@ func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
 	leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer, NotNil)
 	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
-	c.Assert(len(loadRegions), Equals, regionLen)
+	c.Assert(loadRegions, HasLen, regionLen)
 	for _, region := range regions {
 		r := leaderServer.GetRegionInfoByID(region.GetID())
 		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
@@ -193,7 +193,7 @@ func (s *regionSyncerTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd2")
 	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
-	c.Assert(len(loadRegions), Equals, regionLen)
+	c.Assert(loadRegions, HasLen, regionLen)
 }
 
 func initRegions(regionLen int) []*core.RegionInfo {
