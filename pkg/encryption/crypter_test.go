@@ -58,10 +58,10 @@ func (s *testCrypterSuite) TestKeyLength(c *C) {
 func (s *testCrypterSuite) TestNewIv(c *C) {
 	ivCtr, err := NewIvCTR()
 	c.Assert(err, IsNil)
-	c.Assert(len([]byte(ivCtr)), Equals, ivLengthCTR)
+	c.Assert([]byte(ivCtr), HasLen, ivLengthCTR)
 	ivGcm, err := NewIvGCM()
 	c.Assert(err, IsNil)
-	c.Assert(len([]byte(ivGcm)), Equals, ivLengthGCM)
+	c.Assert([]byte(ivGcm), HasLen, ivLengthGCM)
 }
 
 func testNewDataKey(c *C, method encryptionpb.EncryptionMethod) {
@@ -93,7 +93,7 @@ func (s *testCrypterSuite) TestAesGcmCrypter(c *C) {
 	iv := IvGCM(ivBytes)
 	ciphertext, err := aesGcmEncryptImpl(key, plaintext, iv)
 	c.Assert(err, IsNil)
-	c.Assert(len([]byte(iv)), Equals, ivLengthGCM)
+	c.Assert([]byte(iv), HasLen, ivLengthGCM)
 	c.Assert(
 		hex.EncodeToString(ciphertext),
 		Equals,
