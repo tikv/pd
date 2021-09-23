@@ -280,7 +280,7 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 	}
 	c.Check(newItem.HotDegree, Less, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
-	c.Check(newItem.needDelete, Equals, true)
+	c.Check(newItem.needDelete, IsTrue)
 }
 
 func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {

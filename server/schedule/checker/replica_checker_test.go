@@ -202,7 +202,7 @@ func (s *testReplicaCheckerSuite) downPeerAndCheck(c *C, aliveRole metapb.PeerRo
 		DownSeconds: 24 * 60 * 60,
 	}
 	r = r.Clone(core.WithDownPeers(append(r.GetDownPeers(), downPeer)))
-	c.Assert(len(r.GetDownPeers()), Equals, 1)
+	c.Assert(r.GetDownPeers(), HasLen, 1)
 	return s.rc.Check(r)
 }
 
