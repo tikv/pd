@@ -165,12 +165,13 @@ var (
 
 // grpc errors
 var (
-	ErrGRPCDial         = errors.Normalize("dial error", errors.RFCCodeText("PD:grpc:ErrGRPCDial"))
-	ErrCloseGRPCConn    = errors.Normalize("close gRPC connection failed", errors.RFCCodeText("PD:grpc:ErrCloseGRPCConn"))
-	ErrGRPCSend         = errors.Normalize("send request error", errors.RFCCodeText("PD:grpc:ErrGRPCSend"))
-	ErrGRPCRecv         = errors.Normalize("receive response error", errors.RFCCodeText("PD:grpc:ErrGRPCRecv"))
-	ErrGRPCCloseSend    = errors.Normalize("close send error", errors.RFCCodeText("PD:grpc:ErrGRPCCloseSend"))
-	ErrGRPCCreateStream = errors.Normalize("create stream error", errors.RFCCodeText("PD:grpc:ErrGRPCCreateStream"))
+	ErrGRPCDial            = errors.Normalize("dial error", errors.RFCCodeText("PD:grpc:ErrGRPCDial"))
+	ErrCloseGRPCConn       = errors.Normalize("close gRPC connection failed", errors.RFCCodeText("PD:grpc:ErrCloseGRPCConn"))
+	ErrGRPCSend            = errors.Normalize("send request error", errors.RFCCodeText("PD:grpc:ErrGRPCSend"))
+	ErrGRPCRecv            = errors.Normalize("receive response error", errors.RFCCodeText("PD:grpc:ErrGRPCRecv"))
+	ErrGRPCCloseSend       = errors.Normalize("close send error", errors.RFCCodeText("PD:grpc:ErrGRPCCloseSend"))
+	ErrGRPCCreateStream    = errors.Normalize("create stream error", errors.RFCCodeText("PD:grpc:ErrGRPCCreateStream"))
+	ErrGRPCProxyTSOTimeout = errors.Normalize("proxy tso timeout", errors.RFCCodeText("PD:grpc:ErrGRPCProxyTSOTimeout"))
 )
 
 // proto errors

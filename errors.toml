@@ -331,6 +331,11 @@ error = '''
 dial error
 '''
 
+["PD:grpc:ErrGRPCProxyTSOTimeout"]
+error = '''
+proxy tso timeout
+'''
+
 ["PD:grpc:ErrGRPCRecv"]
 error = '''
 receive response error

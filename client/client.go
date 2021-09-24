@@ -221,10 +221,10 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
-// WithTSOBatchProxy configures the client with follower TSO batch proxy.
-func WithTSOBatchProxy(enableFollowerTSOBacth bool) ClientOption {
+// WithTSOFollowerProxy configures the client with follower TSO batch proxy.
+func WithTSOFollowerProxy(enableFollowerTSOBacth bool) ClientOption {
 	return func(c *client) {
-		c.enableFollowerTSOBacth = enableFollowerTSOBacth
+		c.enableTSOFollowerProxy = enableFollowerTSOBacth
 	}
 }
 
@@ -244,7 +244,7 @@ type client struct {
 
 	// Client options.
 	enableForwarding       bool
-	enableFollowerTSOBacth bool
+	enableTSOFollowerProxy bool
 }
 
 // NewClient creates a PD client.
@@ -557,7 +557,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 		}
 	}()
 	createTSOConnection := c.tryConnect
-	if c.enableFollowerTSOBacth && dc == globalDCLocation /* only support Global TSO batch proxy now */ {
+	if c.enableTSOFollowerProxy && dc == globalDCLocation /* only support Global TSO batch proxy now */ {
 		createTSOConnection = c.tryConnectToBatchProxy
 	}
 	for {
@@ -599,9 +599,9 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 		}
 		select {
 		case first := <-tsoDispatcher:
-			pendingPlus1 := len(tsoDispatcher) + 1
+			pendingTSOReqCount := len(tsoDispatcher) + 1
 			requests[0] = first
-			for i := 1; i < pendingPlus1; i++ {
+			for i := 1; i < pendingTSOReqCount; i++ {
 				requests[i] = <-tsoDispatcher
 			}
 			done := make(chan struct{})
@@ -621,7 +621,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 			case <-dispatcherCtx.Done():
 				return
 			}
-			opts = extractSpanReference(requests[:pendingPlus1], opts[:0])
+			opts = extractSpanReference(requests[:pendingTSOReqCount], opts[:0])
 			select {
 			// The connection should be switched to the new stream.
 			case newStream, ok := <-streamCh:
@@ -632,7 +632,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				}
 			default:
 			}
-			err = c.processTSORequests(stream, dc, requests[:pendingPlus1], opts)
+			err = c.processTSORequests(stream, dc, requests[:pendingTSOReqCount], opts)
 			close(done)
 		case <-dispatcherCtx.Done():
 			return
@@ -893,7 +893,7 @@ func (c *client) leaderClient() pdpb.PDClient {
 	return nil
 }
 
-// followerClient gets the client of current PD follower.
+// followerClient gets a client of the current reachable and healthy PD follower randomly.
 func (c *client) followerClient() (pdpb.PDClient, string) {
 	addrs := c.GetFollowerAddr()
 	var cc *grpc.ClientConn

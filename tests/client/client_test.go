@@ -250,12 +250,13 @@ func (s *clientTestSuite) TestTSOBatchProxy(c *C) {
 	defer cluster.Destroy()
 
 	endpoints := s.runServer(c, cluster)
-	cli := setupCli(c, s.ctx, endpoints, pd.WithTSOBatchProxy(true))
+	cli := setupCli(c, s.ctx, endpoints, pd.WithTSOFollowerProxy(true))
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
+			defer wg.Done()
 			var lastTS uint64
 			for i := 0; i < tsoRequestRound; i++ {
 				physical, logical, err := cli.GetTS(context.Background())
@@ -264,7 +265,6 @@ func (s *clientTestSuite) TestTSOBatchProxy(c *C) {
 				c.Assert(lastTS, Less, ts)
 				lastTS = ts
 			}
-			wg.Done()
 		}()
 	}
 	wg.Wait()
@@ -630,6 +630,7 @@ func (s *testClientSuite) TestNormalTSO(c *C) {
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
+			defer wg.Done()
 			var lastTS uint64
 			for i := 0; i < tsoRequestRound; i++ {
 				physical, logical, err := s.client.GetTS(context.Background())
@@ -638,7 +639,6 @@ func (s *testClientSuite) TestNormalTSO(c *C) {
 				c.Assert(lastTS, Less, ts)
 				lastTS = ts
 			}
-			wg.Done()
 		}()
 	}
 	wg.Wait()
@@ -649,6 +649,7 @@ func (s *testClientSuite) TestGetTSAsync(c *C) {
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
+			defer wg.Done()
 			tsFutures := make([]pd.TSFuture, tsoRequestRound)
 			for i := range tsFutures {
 				tsFutures[i] = s.client.GetTSAsync(context.Background())
@@ -661,7 +662,6 @@ func (s *testClientSuite) TestGetTSAsync(c *C) {
 				c.Assert(lastTS, Greater, ts)
 				lastTS = ts
 			}
-			wg.Done()
 		}()
 	}
 	wg.Wait()

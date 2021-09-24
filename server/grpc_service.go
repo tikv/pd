@@ -171,12 +171,16 @@ func (s *Server) dispatchTSORequest(ctx context.Context, request *tsoRequest, fo
 	tsoRequestChInterface, loaded := s.tsoDispatcher.LoadOrStore(forwardedHost, make(chan *tsoRequest, maxMergeTSORequests))
 	tsoRequestCh := tsoRequestChInterface.(chan *tsoRequest)
 	if !loaded {
-		go s.handleDispatcher(ctx, forwardedHost, tsoRequestCh, doneCh, errCh)
+		tsDeadlineCh := make(chan deadline, 1)
+		go s.handleDispatcher(ctx, forwardedHost, tsoRequestCh, tsDeadlineCh, doneCh, errCh)
+		go watchTSDeadline(ctx, tsDeadlineCh)
 	}
 	tsoRequestCh <- request
 }
 
-func (s *Server) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, doneCh <-chan struct{}, errCh chan<- error) {
+const defaultTSOProxyTimeout = 3 * time.Second
+
+func (s *Server) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error) {
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
 	defer ctxCancel()
 	defer s.tsoDispatcher.Delete(forwardedHost)
@@ -212,12 +216,25 @@ errHandling:
 	for {
 		select {
 		case first := <-tsoRequestCh:
-			pendingPlus1 := len(tsoRequestCh) + 1
+			pendingTSOReqCount := len(tsoRequestCh) + 1
 			requests[0] = first
-			for i := 1; i < pendingPlus1; i++ {
+			for i := 1; i < pendingTSOReqCount; i++ {
 				requests[i] = <-tsoRequestCh
 			}
-			if err = s.processTSORequests(forwardStream, requests[:pendingPlus1]); err != nil {
+			done := make(chan struct{})
+			dl := deadline{
+				timer:  time.After(defaultTSOProxyTimeout),
+				done:   done,
+				cancel: cancel,
+			}
+			select {
+			case tsDeadlineCh <- dl:
+			case <-dispatcherCtx.Done():
+				return
+			}
+			err = s.processTSORequests(forwardStream, requests[:pendingTSOReqCount])
+			close(done)
+			if err != nil {
 				log.Error("batch and forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
 				select {
 				case <-dispatcherCtx.Done():
@@ -290,6 +307,32 @@ func (s *Server) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 		}
 	}
 	return nil
+}
+
+type deadline struct {
+	timer  <-chan time.Time
+	done   chan struct{}
+	cancel context.CancelFunc
+}
+
+func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan deadline) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	for {
+		select {
+		case d := <-tsDeadlineCh:
+			select {
+			case <-d.timer:
+				log.Error("tso proxy request processing is canceled due to timeout", errs.ZapError(errs.ErrGRPCProxyTSOTimeout))
+				d.cancel()
+			case <-d.done:
+			case <-ctx.Done():
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // Bootstrap implements gRPC PDServer.
