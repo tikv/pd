@@ -466,7 +466,7 @@ func (c *coordinator) stop() {
 // TODO: remove it.
 type hasHotStatus interface {
 	GetHotStatus(statistics.RWType) *statistics.StoreHotPeersInfos
-	GetPendingInfluence() map[uint64]*schedulers.Influence
+	GetPendingInfluence() map[uint64]*statistics.Influence
 }
 
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {

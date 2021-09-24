@@ -98,7 +98,7 @@ func (k StoreStatKind) String() string {
 }
 
 // RWType is a identify hot region types.
-type RWType uint32
+type RWType int
 
 // Flags for r/w type.
 const (
