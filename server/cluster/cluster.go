@@ -553,6 +553,20 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
 		}
 	}
+	if newStore.HasDamagedRegion() {
+		// origin, err := coreCluster.PreCheckPutRegion(region)
+		// if err != nil {
+		// 	return err
+		// }
+		// hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
+		// hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
+		// reportInterval := region.GetInterval()
+		// interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+		// for _, peer := range region.GetPeers() {
+		// 	peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
+		// 	hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
+		// }
+	}
 	if store := c.core.GetStore(newStore.GetID()); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
 	}

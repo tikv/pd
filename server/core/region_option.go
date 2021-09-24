@@ -37,6 +37,14 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	}
 }
 
+// WithDownPeers sets the down peers for the region.
+func WithDamagedPeers(damagedPeers []*pdpb.PeerStats) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.damagedPeers = append(damagedPeers[:0:0], damagedPeers...)
+		sort.Sort(peerStatsSlice(region.damagedPeers))
+	}
+}
+
 // WithFlowRoundByDigit set the digit, which use to round to the nearest number
 func WithFlowRoundByDigit(digit int) RegionCreateOption {
 	return func(region *RegionInfo) {
