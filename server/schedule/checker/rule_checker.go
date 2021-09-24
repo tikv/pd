@@ -126,6 +126,10 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	}
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
+		if c.isDamagedPeer(region, peer) {
+			checkerCounter.WithLabelValues("rule_checker", "replace-damaged").Inc()
+			return c.replaceUnexpectRulePeer(region, rf, fit, peer, damagedStatus)
+		}
 		if c.isDownPeer(region, peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
 			return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
@@ -134,6 +138,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
 			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
 		}
+
 	}
 	// fix loose matched peers.
 	for _, peer := range rf.PeersWithDifferentRole {
@@ -312,6 +317,21 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 	peer := fit.OrphanPeers[0]
 	return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, peer.StoreId)
+}
+
+func (c *RuleChecker) isDamagedPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
+	for _, stats := range region.GetDownPeers() {
+		if stats.GetPeer().GetId() != peer.GetId() {
+			continue
+		}
+		store := c.cluster.GetStore(peer.GetStoreId())
+		if store == nil {
+			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", peer.StoreId))
+			return false
+		}
+		return true
+	}
+	return false
 }
 
 func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) bool {

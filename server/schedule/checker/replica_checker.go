@@ -35,6 +35,7 @@ const (
 const (
 	offlineStatus = "offline"
 	downStatus    = "down"
+	damagedStatus = "damaged"
 )
 
 // ReplicaChecker ensures region has the best replicas.
@@ -91,6 +92,11 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 	if op := r.checkLocationReplacement(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
+		return op
+	}
+	if op := r.checkDamagedPeer(region); op != nil {
+		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
+		op.SetPriorityLevel(core.HighPriority)
 		return op
 	}
 	return nil
@@ -257,6 +263,27 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 		return nil
 	}
 	return op
+}
+
+func (r *ReplicaChecker) checkDamagedPeer(region *core.RegionInfo) *operator.Operator {
+	if !r.opts.IsRemoveDamagedReplicaEnabled() {
+		return nil
+	}
+
+	for _, stats := range region.GetDamagedPeers() {
+		peer := stats.GetPeer()
+		if peer == nil {
+			continue
+		}
+		storeID := peer.GetStoreId()
+		store := r.cluster.GetStore(storeID)
+		if store == nil {
+			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
+			return nil
+		}
+		return r.fixPeer(region, storeID, downStatus)
+	}
+	return nil
 }
 
 func (r *ReplicaChecker) strategy(region *core.RegionInfo) *ReplicaStrategy {

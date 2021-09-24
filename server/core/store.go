@@ -59,6 +59,7 @@ type StoreInfo struct {
 	leaderWeight        float64
 	regionWeight        float64
 	available           map[storelimit.Type]func() bool
+	damagedRegionsId    []uint64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -92,6 +93,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		leaderWeight:        s.leaderWeight,
 		regionWeight:        s.regionWeight,
 		available:           s.available,
+		damagedRegionsId:    s.damagedRegionsId,
 	}
 
 	for _, opt := range opts {
@@ -116,6 +118,7 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 		leaderWeight:        s.leaderWeight,
 		regionWeight:        s.regionWeight,
 		available:           s.available,
+		damagedRegionsId:    s.damagedRegionsId,
 	}
 
 	for _, opt := range opts {
@@ -255,6 +258,10 @@ func (s *StoreInfo) GetLastHeartbeatTS() time.Time {
 // NeedPersist returns if it needs to save to etcd.
 func (s *StoreInfo) NeedPersist() bool {
 	return s.GetLastHeartbeatTS().Sub(s.lastPersistTime) > storePersistInterval
+}
+
+func (s *StoreInfo) HasDamagedRegion() bool {
+	return len(s.damagedRegionsId) > 0
 }
 
 const minWeight = 1e-6

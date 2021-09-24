@@ -708,7 +708,8 @@ type ScheduleConfig struct {
 	// moving replica to a better location.
 	// WARN: DisableLocationReplacement is deprecated.
 	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string,omitempty"`
-
+	// EnableRemoveDamagedReplica is the option to enable replica checker to remove damaged replica.
+	EnableRemoveDamagedReplica bool `toml:"enable-remove-damaged-replica" json:"enable-remove-damaged-replica,string"`
 	// EnableRemoveDownReplica is the option to enable replica checker to remove down replica.
 	EnableRemoveDownReplica bool `toml:"enable-remove-down-replica" json:"enable-remove-down-replica,string"`
 	// EnableReplaceOfflineReplica is the option to enable replica checker to replace offline replica.

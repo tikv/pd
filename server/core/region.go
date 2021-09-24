@@ -47,6 +47,7 @@ type RegionInfo struct {
 	voters            []*metapb.Peer
 	leader            *metapb.Peer
 	downPeers         []*pdpb.PeerStats
+	damagedPeers      []*pdpb.PeerStats
 	pendingPeers      []*metapb.Peer
 	writtenBytes      uint64
 	writtenKeys       uint64
@@ -389,6 +390,10 @@ func (r *RegionInfo) GetApproximateKeys() int64 {
 // GetInterval returns the interval information of the region.
 func (r *RegionInfo) GetInterval() *pdpb.TimeInterval {
 	return r.interval
+}
+
+func (r *RegionInfo) GetDamagedPeers() []*pdpb.PeerStats {
+	return r.damagedPeers
 }
 
 // GetDownPeers returns the down peers of the region.

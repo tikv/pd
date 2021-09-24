@@ -451,6 +451,11 @@ func (o *PersistOptions) IsUseRegionStorage() bool {
 	return o.GetPDServerConfig().UseRegionStorage
 }
 
+// IsRemoveDamagedReplicaEnabled returns if remove down replica is enabled.
+func (o *PersistOptions) IsRemoveDamagedReplicaEnabled() bool {
+	return o.GetScheduleConfig().EnableRemoveDownReplica
+}
+
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (o *PersistOptions) IsRemoveDownReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveDownReplica
