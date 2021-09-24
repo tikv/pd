@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -28,10 +29,6 @@ var (
 	ErrIncorrectSystemTime = errors.Normalize("incorrect system time", errors.RFCCodeText("PD:common:ErrIncorrectSystemTime"))
 )
 
-// The internal error which is generated in PD project.
-// main errors
-var ()
-
 // tso errors
 var (
 	ErrSetLocalTSOConfig  = errors.Normalize("set local tso config failed, %s", errors.RFCCodeText("PD:tso:ErrSetLocalTSOConfig"))
@@ -40,7 +37,6 @@ var (
 	ErrSyncMaxTS          = errors.Normalize("sync max ts failed, %s", errors.RFCCodeText("PD:tso:ErrSyncMaxTS"))
 	ErrResetUserTimestamp = errors.Normalize("reset user timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrResetUserTimestamp"))
 	ErrGenerateTimestamp  = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
-	ErrInvalidTimestamp   = errors.Normalize("invalid timestamp", errors.RFCCodeText("PD:tso:ErrInvalidTimestamp"))
 	ErrLogicOverflow      = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
 )
 
@@ -58,6 +54,7 @@ var (
 	ErrStoreTombstone      = errors.Normalize("store %v has been removed", errors.RFCCodeText("PD:core:ErrStoreTombstone"))
 	ErrStoreDestroyed      = errors.Normalize("store %v has been physically destroyed", errors.RFCCodeText("PD:core:ErrStoreDestroyed"))
 	ErrStoreUnhealthy      = errors.Normalize("store %v is unhealthy", errors.RFCCodeText("PD:core:ErrStoreUnhealthy"))
+	ErrSlowStoreEvicted    = errors.Normalize("store %v is evited as a slow store", errors.RFCCodeText("PD:core:ErrSlowStoreEvicted"))
 )
 
 // client errors
@@ -89,12 +86,23 @@ var (
 	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func of %v is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
 )
 
+// checker errors
+var (
+	ErrCheckerNotFound = errors.Normalize("checker not found", errors.RFCCodeText("PD:checker:ErrCheckerNotFound"))
+)
+
 // placement errors
 var (
 	ErrRuleContent   = errors.Normalize("invalid rule content, %s", errors.RFCCodeText("PD:placement:ErrRuleContent"))
 	ErrLoadRule      = errors.Normalize("load rule failed", errors.RFCCodeText("PD:placement:ErrLoadRule"))
 	ErrLoadRuleGroup = errors.Normalize("load rule group failed", errors.RFCCodeText("PD:placement:ErrLoadRuleGroup"))
 	ErrBuildRuleList = errors.Normalize("build rule list failed, %s", errors.RFCCodeText("PD:placement:ErrBuildRuleList"))
+)
+
+// region label errors
+var (
+	ErrRegionRuleContent  = errors.Normalize("invalid region rule content, %s", errors.RFCCodeText("PD:region:ErrRegionRuleContent"))
+	ErrRegionRuleNotFound = errors.Normalize("region label rule not found for id %s", errors.RFCCodeText("PD:region:ErrRegionRuleNotFound"))
 )
 
 // cluster errors

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -41,8 +42,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
-
-const slowThreshold = 5 * time.Millisecond
 
 // gRPC errors
 var (
@@ -165,10 +164,6 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
 
-		elapsed := time.Since(start)
-		if elapsed > slowThreshold {
-			log.Warn("get timestamp too slow", zap.Duration("cost", elapsed))
-		}
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		response := &pdpb.TsoResponse{
 			Header:    s.header(),
@@ -930,7 +925,7 @@ func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb.GetClusterC
 	}
 	return &pdpb.GetClusterConfigResponse{
 		Header:  s.header(),
-		Cluster: rc.GetConfig(),
+		Cluster: rc.GetMetaCluster(),
 	}, nil
 }
 
@@ -955,7 +950,7 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 		return &pdpb.PutClusterConfigResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	conf := request.GetCluster()
-	if err := rc.PutConfig(conf); err != nil {
+	if err := rc.PutMetaCluster(conf); err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,9 +18,11 @@ import (
 	"context"
 
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/checker"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -36,14 +39,16 @@ type CheckerController struct {
 	learnerChecker    *checker.LearnerChecker
 	replicaChecker    *checker.ReplicaChecker
 	ruleChecker       *checker.RuleChecker
+	splitChecker      *checker.SplitChecker
 	mergeChecker      *checker.MergeChecker
 	jointStateChecker *checker.JointStateChecker
+	priorityChecker   *checker.PriorityChecker
 	regionWaitingList cache.Cache
 }
 
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
-func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, opController *OperatorController) *CheckerController {
+func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *OperatorController) *CheckerController {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &CheckerController{
 		cluster:           cluster,
@@ -52,8 +57,10 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager 
 		learnerChecker:    checker.NewLearnerChecker(cluster),
 		replicaChecker:    checker.NewReplicaChecker(cluster, regionWaitingList),
 		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager, regionWaitingList),
+		splitChecker:      checker.NewSplitChecker(cluster, ruleManager, labeler),
 		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
 		jointStateChecker: checker.NewJointStateChecker(cluster),
+		priorityChecker:   checker.NewPriorityChecker(cluster),
 		regionWaitingList: regionWaitingList,
 	}
 }
@@ -68,13 +75,20 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 		return []*operator.Operator{op}
 	}
 
+	if op := c.splitChecker.Check(region); op != nil {
+		return []*operator.Operator{op}
+	}
+
 	if c.opts.IsPlacementRulesEnabled() {
-		if op := c.ruleChecker.Check(region); op != nil {
-			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-				return []*operator.Operator{op}
+		fit := c.priorityChecker.Check(region)
+		if fit != nil { // priority checker is not paused
+			if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
+				if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+					return []*operator.Operator{op}
+				}
+				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
+				c.regionWaitingList.Put(region.GetID(), nil)
 			}
-			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
-			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
@@ -108,6 +122,11 @@ func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 	return c.mergeChecker
 }
 
+// GetRuleChecker returns the rule checker.
+func (c *CheckerController) GetRuleChecker() *checker.RuleChecker {
+	return c.ruleChecker
+}
+
 // GetWaitingRegions returns the regions in the waiting list.
 func (c *CheckerController) GetWaitingRegions() []*cache.Item {
 	return c.regionWaitingList.Elems()
@@ -121,4 +140,36 @@ func (c *CheckerController) AddWaitingRegion(region *core.RegionInfo) {
 // RemoveWaitingRegion removes the region from the waiting list.
 func (c *CheckerController) RemoveWaitingRegion(id uint64) {
 	c.regionWaitingList.Remove(id)
+}
+
+// GetPriorityRegions returns the region in priority queue
+func (c *CheckerController) GetPriorityRegions() []uint64 {
+	return c.priorityChecker.GetPriorityRegions()
+}
+
+// RemovePriorityRegions removes priority region from priority queue
+func (c *CheckerController) RemovePriorityRegions(id uint64) {
+	c.priorityChecker.RemovePriorityRegion(id)
+}
+
+// GetPauseController returns pause controller of the checker
+func (c *CheckerController) GetPauseController(name string) (*checker.PauseController, error) {
+	switch name {
+	case "learner":
+		return &c.learnerChecker.PauseController, nil
+	case "replica":
+		return &c.replicaChecker.PauseController, nil
+	case "rule":
+		return &c.ruleChecker.PauseController, nil
+	case "split":
+		return &c.splitChecker.PauseController, nil
+	case "merge":
+		return &c.mergeChecker.PauseController, nil
+	case "joint-state":
+		return &c.jointStateChecker.PauseController, nil
+	case "priority":
+		return &c.priorityChecker.PauseController, nil
+	default:
+		return nil, errs.ErrCheckerNotFound.FastGenByArgs()
+	}
 }

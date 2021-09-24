@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -137,7 +138,6 @@ func (s *testStoreSuite) TestStoresList(c *C) {
 	err = readJSON(testDialClient, url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[2:3])
-
 }
 
 func (s *testStoreSuite) TestStoreGet(c *C) {
@@ -259,7 +259,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	store := new(StoreInfo)
 	err := readJSON(testDialClient, url, store)
 	c.Assert(err, IsNil)
-	c.Assert(store.Store.PhysicallyDestroyed, Equals, false)
+	c.Assert(store.Store.PhysicallyDestroyed, IsFalse)
 	c.Assert(store.Store.State, Equals, metapb.StoreState_Offline)
 
 	// up store success because it is offline but not physically destroyed
@@ -272,7 +272,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	err = readJSON(testDialClient, url, store)
 	c.Assert(err, IsNil)
 	c.Assert(store.Store.State, Equals, metapb.StoreState_Up)
-	c.Assert(store.Store.PhysicallyDestroyed, Equals, false)
+	c.Assert(store.Store.PhysicallyDestroyed, IsFalse)
 
 	// offline store with physically destroyed
 	status = requestStatusBody(c, testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
@@ -280,7 +280,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	err = readJSON(testDialClient, url, store)
 	c.Assert(err, IsNil)
 	c.Assert(store.Store.State, Equals, metapb.StoreState_Offline)
-	c.Assert(store.Store.PhysicallyDestroyed, Equals, true)
+	c.Assert(store.Store.PhysicallyDestroyed, IsTrue)
 
 	// try to up store again failed because it is physically destroyed
 	status = requestStatusBody(c, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
@@ -436,7 +436,7 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 		c.Assert(len(info), Equals, len(testcase.expectedStores))
 		for id := range testcase.expectedStores {
 			_, ok := info[id]
-			c.Assert(ok, Equals, true)
+			c.Assert(ok, IsTrue)
 		}
 	}
 }

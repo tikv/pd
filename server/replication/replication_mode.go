@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -369,21 +370,22 @@ func (m *ModeManager) tickDR() {
 
 	drTickCounter.Inc()
 
-	totalPrimary, totalDr := m.config.DRAutoSync.PrimaryReplicas, m.config.DRAutoSync.DRReplicas
-	downPrimary, downDr := m.checkStoreStatus()
+	totalPrimaryPeers, totalDrPeers := m.config.DRAutoSync.PrimaryReplicas, m.config.DRAutoSync.DRReplicas
+	downPrimaryStores, downDrStores, upPrimayStores, upDrStores := m.checkStoreStatus()
 
 	// canSync is true when every region has at least 1 replica in each DC.
-	canSync := downPrimary < totalPrimary && downDr < totalDr
+	canSync := downPrimaryStores < totalPrimaryPeers && downDrStores < totalDrPeers &&
+		upPrimayStores > 0 && upDrStores > 0
 
 	// hasMajority is true when every region has majority peer online.
 	var upPeers int
-	if downPrimary < totalPrimary {
-		upPeers += totalPrimary - downPrimary
+	if downPrimaryStores < totalPrimaryPeers {
+		upPeers += totalPrimaryPeers - downPrimaryStores
 	}
-	if downDr < totalDr {
-		upPeers += totalDr - downDr
+	if downDrStores < totalDrPeers {
+		upPeers += totalDrPeers - downDrStores
 	}
-	hasMajority := upPeers*2 > totalPrimary+totalDr
+	hasMajority := upPeers*2 > totalPrimaryPeers+totalDrPeers
 
 	// If hasMajority is false, the cluster is always unavailable. Switch to async won't help.
 	if !canSync && hasMajority && m.drGetState() != drStateAsync && m.drCheckAsyncTimeout() {
@@ -407,17 +409,25 @@ func (m *ModeManager) tickDR() {
 	}
 }
 
-func (m *ModeManager) checkStoreStatus() (primaryFailCount, drFailCount int) {
+func (m *ModeManager) checkStoreStatus() (primaryDownCount, drDownCount, primaryUpCount, drUpCount int) {
 	m.RLock()
 	defer m.RUnlock()
 	for _, s := range m.cluster.GetStores() {
-		if !s.IsTombstone() && s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration {
-			labelValue := s.GetLabelValue(m.config.DRAutoSync.LabelKey)
-			if labelValue == m.config.DRAutoSync.Primary {
-				primaryFailCount++
+		down := !s.IsTombstone() && s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration
+		labelValue := s.GetLabelValue(m.config.DRAutoSync.LabelKey)
+		if labelValue == m.config.DRAutoSync.Primary {
+			if down {
+				primaryDownCount++
+			} else {
+				primaryUpCount++
 			}
-			if labelValue == m.config.DRAutoSync.DR {
-				drFailCount++
+
+		}
+		if labelValue == m.config.DRAutoSync.DR {
+			if down {
+				drDownCount++
+			} else {
+				drUpCount++
 			}
 		}
 	}
@@ -487,10 +497,11 @@ func (m *ModeManager) estimateProgress() float32 {
 }
 
 func (m *ModeManager) checkRegionRecover(region *core.RegionInfo, startKey []byte) bool {
-	if !bytes.Equal(startKey, region.GetStartKey()) {
+	// if the region not contains the key, log it and return false
+	if bytes.Compare(startKey, region.GetStartKey()) < 0 {
 		log.Warn("found region gap",
-			logutil.ZapRedactByteString("key", startKey),
-			logutil.ZapRedactByteString("region-start-key", region.GetStartKey()),
+			logutil.ZapRedactByteString("key", core.HexRegionKey(startKey)),
+			logutil.ZapRedactStringer("region", core.RegionToHexMeta(region.GetMeta())),
 			zap.Uint64("region-id", region.GetID()))
 		return false
 	}

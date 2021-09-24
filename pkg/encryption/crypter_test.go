@@ -4,10 +4,11 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -57,10 +58,10 @@ func (s *testCrypterSuite) TestKeyLength(c *C) {
 func (s *testCrypterSuite) TestNewIv(c *C) {
 	ivCtr, err := NewIvCTR()
 	c.Assert(err, IsNil)
-	c.Assert(len([]byte(ivCtr)), Equals, ivLengthCTR)
+	c.Assert([]byte(ivCtr), HasLen, ivLengthCTR)
 	ivGcm, err := NewIvGCM()
 	c.Assert(err, IsNil)
-	c.Assert(len([]byte(ivGcm)), Equals, ivLengthGCM)
+	c.Assert([]byte(ivGcm), HasLen, ivLengthGCM)
 }
 
 func testNewDataKey(c *C, method encryptionpb.EncryptionMethod) {
@@ -92,7 +93,7 @@ func (s *testCrypterSuite) TestAesGcmCrypter(c *C) {
 	iv := IvGCM(ivBytes)
 	ciphertext, err := aesGcmEncryptImpl(key, plaintext, iv)
 	c.Assert(err, IsNil)
-	c.Assert(len([]byte(iv)), Equals, ivLengthGCM)
+	c.Assert([]byte(iv), HasLen, ivLengthGCM)
 	c.Assert(
 		hex.EncodeToString(ciphertext),
 		Equals,

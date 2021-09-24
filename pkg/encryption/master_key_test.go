@@ -4,10 +4,11 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -34,12 +35,12 @@ func (s *testMasterKeySuite) TestPlaintextMasterKey(c *C) {
 	masterKey, err := NewMasterKey(config, nil)
 	c.Assert(err, IsNil)
 	c.Assert(masterKey, Not(IsNil))
-	c.Assert(len(masterKey.key), Equals, 0)
+	c.Assert(masterKey.key, HasLen, 0)
 
 	plaintext := "this is a plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
 	c.Assert(err, IsNil)
-	c.Assert(len(iv), Equals, 0)
+	c.Assert(iv, HasLen, 0)
 	c.Assert(string(ciphertext), Equals, plaintext)
 
 	plaintext2, err := masterKey.Decrypt(ciphertext, iv)
@@ -57,7 +58,7 @@ func (s *testMasterKeySuite) TestEncrypt(c *C) {
 	plaintext := "this-is-a-plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
 	c.Assert(err, IsNil)
-	c.Assert(len(iv), Equals, ivLengthGCM)
+	c.Assert(iv, HasLen, ivLengthGCM)
 	plaintext2, err := AesGcmDecrypt(key, ciphertext, iv)
 	c.Assert(err, IsNil)
 	c.Assert(string(plaintext2), Equals, plaintext)

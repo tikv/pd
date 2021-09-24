@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -144,7 +145,7 @@ func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
 	leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer, NotNil)
 	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
-	c.Assert(len(loadRegions), Equals, regionLen)
+	c.Assert(loadRegions, HasLen, regionLen)
 	for _, region := range regions {
 		r := leaderServer.GetRegionInfoByID(region.GetID())
 		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
@@ -192,7 +193,7 @@ func (s *regionSyncerTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd2")
 	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
-	c.Assert(len(loadRegions), Equals, regionLen)
+	c.Assert(loadRegions, HasLen, regionLen)
 }
 
 func initRegions(regionLen int) []*core.RegionInfo {

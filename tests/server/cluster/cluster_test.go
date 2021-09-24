@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -413,7 +414,7 @@ func (s *clusterTestSuite) TestGetPDMembers(c *C) {
 	resp, err := grpcPDClient.GetMembers(context.Background(), req)
 	c.Assert(err, IsNil)
 	// A more strict test can be found at api/member_test.go
-	c.Assert(len(resp.GetMembers()), Not(Equals), 0)
+	c.Assert(resp.GetMembers(), Not(HasLen), 0)
 }
 
 func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
@@ -605,13 +606,13 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 
 	c.Assert(persistOptions.GetMaxReplicas(), Equals, 5)
 	c.Assert(persistOptions.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(persistOptions.IsUseRegionStorage(), Equals, true)
+	c.Assert(persistOptions.IsUseRegionStorage(), IsTrue)
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
 
 	c.Assert(svr.DeleteLabelProperty(typ, labelKey, labelValue), IsNil)
 
-	c.Assert(len(persistOptions.GetLabelPropertyConfig()[typ]), Equals, 0)
+	c.Assert(persistOptions.GetLabelPropertyConfig()[typ], HasLen, 0)
 
 	// PUT GET failed
 	oldStorage := svr.GetStorage()
@@ -627,8 +628,8 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 
 	c.Assert(persistOptions.GetMaxReplicas(), Equals, 5)
 	c.Assert(persistOptions.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(persistOptions.GetPDServerConfig().UseRegionStorage, Equals, true)
-	c.Assert(len(persistOptions.GetLabelPropertyConfig()[typ]), Equals, 0)
+	c.Assert(persistOptions.GetPDServerConfig().UseRegionStorage, IsTrue)
+	c.Assert(persistOptions.GetLabelPropertyConfig()[typ], HasLen, 0)
 
 	// DELETE failed
 	svr.SetStorage(oldStorage)
@@ -701,7 +702,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	c.Assert(raftCluster, NotNil)
 
 	// Check meta, stores, and regions.
-	c.Assert(raftCluster.GetConfig(), DeepEquals, meta)
+	c.Assert(raftCluster.GetMetaCluster(), DeepEquals, meta)
 	c.Assert(raftCluster.GetStoreCount(), Equals, n)
 	for _, store := range raftCluster.GetMetaStores() {
 		c.Assert(store, DeepEquals, stores[store.GetId()])

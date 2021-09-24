@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -189,6 +190,37 @@ var (
 	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
 )
 
+// ClientOption configures client.
+type ClientOption func(c *client)
+
+// WithGRPCDialOptions configures the client with gRPC dial options.
+func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
+	return func(c *client) {
+		c.gRPCDialOptions = append(c.gRPCDialOptions, opts...)
+	}
+}
+
+// WithCustomTimeoutOption configures the client with timeout option.
+func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
+	return func(c *client) {
+		c.timeout = timeout
+	}
+}
+
+// WithForwardingOption configures the client with forwarding option.
+func WithForwardingOption(enableForwarding bool) ClientOption {
+	return func(c *client) {
+		c.enableForwarding = enableForwarding
+	}
+}
+
+// WithMaxErrorRetry configures the client max retry times when connect meets error.
+func WithMaxErrorRetry(count int) ClientOption {
+	return func(c *client) {
+		c.maxRetryTimes = count
+	}
+}
+
 type client struct {
 	*baseClient
 	// tsoDispatcher is used to dispatch different TSO requests to
@@ -199,9 +231,12 @@ type client struct {
 	// dc-location -> *lastTSO
 	lastTSMap sync.Map // Same as map[string]*lastTSO
 
-	checkTSDeadlineCh chan struct{}
-
+	// For internal usage.
+	checkTSDeadlineCh    chan struct{}
 	leaderNetworkFailure int32
+
+	// Client options.
+	enableForwarding bool
 }
 
 // NewClient creates a PD client.
@@ -212,15 +247,19 @@ func NewClient(pdAddrs []string, security SecurityOption, opts ...ClientOption) 
 // NewClientWithContext creates a PD client with context.
 func NewClientWithContext(ctx context.Context, pdAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", pdAddrs))
-	base, err := newBaseClient(ctx, addrsToUrls(pdAddrs), security, opts...)
-	if err != nil {
-		return nil, err
-	}
 	c := &client{
-		baseClient:        base,
+		baseClient:        newBaseClient(ctx, addrsToUrls(pdAddrs), security),
 		checkTSDeadlineCh: make(chan struct{}),
 	}
-
+	// Inject the client options.
+	for _, opt := range opts {
+		opt(c)
+	}
+	// Init the client base.
+	if err := c.init(); err != nil {
+		return nil, err
+	}
+	// Start the daemons.
 	c.updateTSODispatcher()
 	c.wg.Add(3)
 	go c.tsLoop()
@@ -420,12 +459,11 @@ func (c *client) createTsoStream(ctx context.Context, cancel context.CancelFunc,
 	return stream, err
 }
 
-func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel context.CancelFunc, dc, forwardedHostTrim, addrTrim, url string, streamCh streamCh, changedCh chan bool) {
+func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel context.CancelFunc, dc, forwardedHostTrim, addrTrim, url string, streamCh streamCh) {
 	defer func() {
 		// cancel the forward stream
 		forwardCancel()
 		close(streamCh)
-		close(changedCh)
 		requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(0)
 	}()
 	cc, u := c.getAllocatorClientConnByDCLocation(dc)
@@ -454,7 +492,6 @@ func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel con
 					cancel: cancel,
 					stream: stream,
 				}
-				<-changedCh
 				healthCancel()
 				return
 			}
@@ -503,7 +540,6 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 		requests      = make([]*tsoRequest, maxMergeTSORequests+1)
 		needUpdate    = false
 		streamCh      streamCh
-		changedCh     chan bool
 		connectionCtx connectionContext
 	)
 	defer func() {
@@ -530,7 +566,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 			}
 
 			connectionCtx, err = c.tryConnect(dispatcherCtx, dc)
-			stream, cancel, streamCh, changedCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh, connectionCtx.changeCh
+			stream, cancel, streamCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh
 
 			if err != nil || stream == nil {
 				select {
@@ -575,11 +611,11 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 			}
 			opts = extractSpanReference(requests[:pendingPlus1], opts[:0])
 			select {
-			case s, ok := <-streamCh:
+			// The connection should be switched to the new stream.
+			case newStream, ok := <-streamCh:
 				if ok {
-					stream = s.stream
-					changedCh <- true
-					cancel = s.cancel
+					stream = newStream.stream
+					cancel = newStream.cancel
 					log.Info("tso stream has changed back to pd or tso allocator leader")
 				}
 			default:
@@ -608,10 +644,11 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 }
 
 type connectionContext struct {
-	stream   pdpb.PD_TsoClient
-	cancel   context.CancelFunc
+	// Current stream to send gRPC requests, maybe a leader or a follower.
+	stream pdpb.PD_TsoClient
+	cancel context.CancelFunc
+	// streamCh is used to pass the new stream connection, e.g, the connection of a leader is recovered.
 	streamCh streamCh
-	changeCh chan bool
 }
 
 func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectionContext, error) {
@@ -632,7 +669,7 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 			err = status.New(codes.Unavailable, "unavailable").Err()
 		})
 		if stream != nil && err == nil {
-			return connectionContext{stream, cancel, nil, nil}, nil
+			return connectionContext{stream, cancel, nil}, nil
 		}
 
 		if err != nil && c.enableForwarding {
@@ -667,19 +704,18 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 			// create the follower stream
 			cctx, cancel := context.WithCancel(dispatcherCtx)
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
-			stream, err1 := c.createTsoStream(cctx, cancel, followerClient)
-			if err1 == nil {
+			stream, err = c.createTsoStream(cctx, cancel, followerClient)
+			if err == nil {
 				streamCh := make(streamCh)
-				changedCh := make(chan bool)
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
 				addrTrim := trimHTTPPrefix(addr)
 				// the goroutine is used to check the network and change back to the original stream
-				go c.checkAllocator(dispatcherCtx, cancel, dc, forwardedHostTrim, addrTrim, url, streamCh, changedCh)
+				go c.checkAllocator(dispatcherCtx, cancel, dc, forwardedHostTrim, addrTrim, url, streamCh)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
-				return connectionContext{stream, cancel, streamCh, changedCh}, nil
+				return connectionContext{stream, cancel, streamCh}, nil
 			}
 			cancel()
-			return connectionContext{}, err1
+			return connectionContext{}, err
 		}
 	}
 	return connectionContext{}, err

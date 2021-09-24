@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -29,10 +30,10 @@ func checkDiagnoseResponse(c *C, body []byte) {
 	got := []Recommendation{}
 	c.Assert(json.Unmarshal(body, &got), IsNil)
 	for _, r := range got {
-		c.Assert(len(r.Module) != 0, IsTrue)
-		c.Assert(len(r.Level) != 0, IsTrue)
-		c.Assert(len(r.Description) != 0, IsTrue)
-		c.Assert(len(r.Instruction) != 0, IsTrue)
+		c.Assert(r.Module, Not(HasLen), 0)
+		c.Assert(r.Level, Not(HasLen), 0)
+		c.Assert(r.Description, Not(HasLen), 0)
+		c.Assert(r.Instruction, Not(HasLen), 0)
 	}
 }
 

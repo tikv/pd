@@ -4,10 +4,11 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -145,6 +146,15 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 	return c.GetSchedulers(), nil
 }
 
+// IsCheckerPaused returns if checker is paused
+func (h *Handler) IsCheckerPaused(name string) (bool, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return false, err
+	}
+	return rc.IsCheckerPaused(name)
+}
+
 // GetStores returns all stores in the cluster.
 func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 	rc := h.s.GetRaftCluster()
@@ -241,6 +251,24 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 	return err
 }
 
+// PauseOrResumeChecker pauses checker for delay seconds or resume checker
+// t == 0 : resume checker.
+// t > 0 : checker delays t seconds.
+func (h *Handler) PauseOrResumeChecker(name string, t int64) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	if err = c.PauseOrResumeChecker(name, t); err != nil {
+		if t == 0 {
+			log.Error("can not resume checker", zap.String("checker-name", name), errs.ZapError(err))
+		} else {
+			log.Error("can not pause checker", zap.String("checker-name", name), errs.ZapError(err))
+		}
+	}
+	return err
+}
+
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler(schedulers.BalanceLeaderType)
@@ -289,6 +317,11 @@ func (h *Handler) AddShuffleRegionScheduler() error {
 // AddShuffleHotRegionScheduler adds a shuffle-hot-region-scheduler.
 func (h *Handler) AddShuffleHotRegionScheduler(limit uint64) error {
 	return h.AddScheduler(schedulers.ShuffleHotRegionType, strconv.FormatUint(limit, 10))
+}
+
+// AddEvictSlowStoreScheduler adds a evict-slow-store-scheduler.
+func (h *Handler) AddEvictSlowStoreScheduler() error {
+	return h.AddScheduler(schedulers.EvictSlowStoreType)
 }
 
 // AddRandomMergeScheduler adds a random-merge-scheduler.
@@ -930,6 +963,7 @@ func (h *Handler) PackHistoryHotWriteRegions() (historyHotRegions []core.History
 	if err != nil {
 		return
 	}
+
 	historyHotRegions = append(historyHotRegions, historyPeerHotRegions...)
 	return
 }

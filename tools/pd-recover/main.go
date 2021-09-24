@@ -1,3 +1,17 @@
+// Copyright 2021 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -11,6 +25,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"go.etcd.io/etcd/clientv3"
@@ -18,21 +33,23 @@ import (
 )
 
 var (
-	v         bool
-	endpoints string
-	allocID   uint64
-	clusterID uint64
-	caPath    string
-	certPath  string
-	keyPath   string
+	v             bool
+	endpoints     string
+	allocID       uint64
+	clusterID     uint64
+	caPath        string
+	certPath      string
+	keyPath       string
+	fromOldMember bool
 )
 
 const (
 	requestTimeout = 10 * time.Second
 	etcdTimeout    = 3 * time.Second
 
-	pdRootPath      = "/pd"
-	pdClusterIDPath = "/pd/cluster_id"
+	pdRootPath       = "/pd"
+	pdClusterIDPath  = "/pd/cluster_id"
+	allocIDSafeGuard = 100000000
 )
 
 func exitErr(err error) {
@@ -43,6 +60,7 @@ func exitErr(err error) {
 func main() {
 	fs := flag.NewFlagSet("pd-recover", flag.ExitOnError)
 	fs.BoolVar(&v, "V", false, "print version information")
+	fs.BoolVar(&fromOldMember, "from-old-member", false, "recover from a member of an existing cluster")
 	fs.StringVar(&endpoints, "endpoints", "http://127.0.0.1:2379", "endpoints urls")
 	fs.Uint64Var(&allocID, "alloc-id", 0, "please make sure alloced ID is safe")
 	fs.Uint64Var(&clusterID, "cluster-id", 0, "please make cluster ID match with tikv")
@@ -61,18 +79,6 @@ func main() {
 		server.PrintPDInfo()
 		return
 	}
-	if clusterID == 0 {
-		fmt.Println("please specify safe cluster-id")
-		return
-	}
-	if allocID == 0 {
-		fmt.Println("please specify safe alloc-id")
-		return
-	}
-
-	rootPath := path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
-	clusterRootPath := path.Join(rootPath, "raft")
-	raftBootstrapTimeKey := path.Join(clusterRootPath, "status", "raft_bootstrap_time")
 
 	urls := strings.Split(endpoints, ",")
 
@@ -95,6 +101,27 @@ func main() {
 	if err != nil {
 		exitErr(err)
 	}
+
+	if fromOldMember {
+		recoverFromOldMember(client)
+		return
+	}
+	recoverFromNewPDCluster(client, clusterID, allocID)
+}
+
+func recoverFromNewPDCluster(client *clientv3.Client, clusterID, allocID uint64) {
+	if clusterID == 0 {
+		fmt.Println("please specify safe cluster-id")
+		return
+	}
+	if allocID == 0 {
+		fmt.Println("please specify safe alloc-id")
+		return
+	}
+	rootPath := path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
+	clusterRootPath := path.Join(rootPath, "raft")
+	raftBootstrapTimeKey := path.Join(clusterRootPath, "status", "raft_bootstrap_time")
+
 	ctx, cancel := context.WithTimeout(client.Ctx(), requestTimeout)
 	defer cancel()
 
@@ -126,6 +153,54 @@ func main() {
 		exitErr(err)
 	}
 	if !resp.Succeeded {
+		fmt.Println("failed to recover: the cluster is already bootstrapped")
+		return
+	}
+	fmt.Println("recover success! please restart the PD cluster")
+}
+
+func recoverFromOldMember(client *clientv3.Client) {
+	// cluster id
+	resp, err := etcdutil.EtcdKVGet(client, pdClusterIDPath)
+	if err != nil {
+		exitErr(err)
+	}
+	clusterID, err := typeutil.BytesToUint64(resp.Kvs[0].Value)
+	if err != nil {
+		exitErr(err)
+	}
+	rootPath := path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
+	clusterRootPath := path.Join(rootPath, "raft")
+
+	// alloc id
+	allocIDPath := path.Join(rootPath, "alloc_id")
+	resp, err = etcdutil.EtcdKVGet(client, allocIDPath)
+	if err != nil {
+		exitErr(err)
+	}
+	var allocID uint64 = 0
+	if resp.Count > 0 {
+		allocID, err = typeutil.BytesToUint64(resp.Kvs[0].Value)
+		if err != nil {
+			exitErr(err)
+		}
+	}
+	allocID += allocIDSafeGuard
+	var ops []clientv3.Op
+	// recover alloc_id
+	ops = append(ops, clientv3.OpPut(allocIDPath, string(typeutil.Uint64ToBytes(allocID))))
+	// delete stores
+	storePath := path.Join(clusterRootPath, "s/")
+	ops = append(ops, clientv3.OpDelete(storePath, clientv3.WithPrefix()))
+	// the old pd cluster should bootstrapped by tikv
+	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "!=", 0)
+	ctx, cancel := context.WithTimeout(client.Ctx(), requestTimeout)
+	defer cancel()
+	resp1, err := client.Txn(ctx).If(bootstrapCmp).Then(ops...).Commit()
+	if err != nil {
+		exitErr(err)
+	}
+	if !resp1.Succeeded {
 		fmt.Println("failed to recover: the cluster is already bootstrapped")
 		return
 	}

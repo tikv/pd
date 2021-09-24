@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -650,19 +651,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			return
 		}
 		cmd = addNode(st.PeerID, st.ToStore)
-	case operator.AddLightPeer:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.AddLearner:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
-	case operator.AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
@@ -955,12 +944,4 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 		oc.newStoreLimit(storeID, ratePerSec, limitType)
 	}
 	return oc.storesLimit[storeID][limitType]
-}
-
-// GetLeaderSchedulePolicy is to get leader schedule policy.
-func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
-	if oc.cluster == nil {
-		return core.ByCount
-	}
-	return oc.cluster.GetOpts().GetLeaderSchedulePolicy()
 }

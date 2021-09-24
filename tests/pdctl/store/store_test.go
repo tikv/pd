@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -142,7 +143,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	label0 = storeInfo.Store.Labels[0]
 	c.Assert(label0.Key, Equals, "zone")
 	c.Assert(label0.Value, Equals, "uk")
-	c.Assert(len(storeInfo.Store.Labels), Equals, 1)
+	c.Assert(storeInfo.Store.Labels, HasLen, 1)
 
 	// store weight <store_id> <leader_weight> <region_weight> command
 	c.Assert(storeInfo.Status.LeaderWeight, Equals, float64(1))
@@ -233,7 +234,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(allAddPeerLimit["1"]["add-peer"].(float64), Equals, float64(20))
 	c.Assert(allAddPeerLimit["3"]["add-peer"].(float64), Equals, float64(20))
 	_, ok := allAddPeerLimit["2"]["add-peer"]
-	c.Assert(ok, Equals, false)
+	c.Assert(ok, IsFalse)
 
 	args = []string{"-u", pdAddr, "store", "limit", "remove-peer"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
@@ -244,7 +245,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(allRemovePeerLimit["1"]["remove-peer"].(float64), Equals, float64(20))
 	c.Assert(allRemovePeerLimit["3"]["remove-peer"].(float64), Equals, float64(25))
 	_, ok = allRemovePeerLimit["2"]["add-peer"]
-	c.Assert(ok, Equals, false)
+	c.Assert(ok, IsFalse)
 
 	// store delete <store_id> command
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
@@ -295,7 +296,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 	storesInfo = new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
-	c.Assert(len([]*api.StoreInfo{storeInfo}), Equals, 1)
+	c.Assert([]*api.StoreInfo{storeInfo}, HasLen, 1)
 
 	// It should be called after stores remove-tombstone.
 	args = []string{"-u", pdAddr, "stores", "show", "limit"}
