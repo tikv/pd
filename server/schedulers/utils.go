@@ -337,7 +337,7 @@ func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy statisti
 		switch kind {
 		case core.LeaderKind:
 			// Use sum of hot peers to estimate leader-only byte rate.
-			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time,
+			// For statistics.Write requests, Write{Bytes, Keys} is applied to all Peers at the same time,
 			// while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
 			// Write{QPS} does not require such processing.
 			loads[statistics.ByteDim] = peerLoadSum[statistics.ByteDim]
@@ -346,7 +346,7 @@ func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy statisti
 		case core.RegionKind:
 			loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
 			loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
-			// The `write-peer` does not have `QueryDim`
+			// The `statistics.Write-peer` does not have `QueryDim`
 		}
 	}
 	return
