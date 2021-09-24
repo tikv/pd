@@ -556,9 +556,10 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 			cancel()
 		}
 	}()
+	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnect
 	if c.enableTSOFollowerProxy && dc == globalDCLocation /* only support Global TSO batch proxy now */ {
-		createTSOConnection = c.tryConnectToBatchProxy
+		createTSOConnection = c.tryConnectToFollowerProxy
 	}
 	for {
 		// If the tso stream for the corresponding dc-location has not been created yet or needs to be re-created,
@@ -737,9 +738,9 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 	return connectionContext{}, err
 }
 
-// tryConnectToBatchProxy will create a stream to the TSO allocator follower to do the TSO requests batch to reduce
+// tryConnectToFollowerProxy will create a stream to the PD follower to do the TSO requests batch proxy to reduce
 // the pressure of its leader.
-func (c *client) tryConnectToBatchProxy(dispatcherCtx context.Context, dc string) (connectionContext, error) {
+func (c *client) tryConnectToFollowerProxy(dispatcherCtx context.Context, dc string) (connectionContext, error) {
 	if followerClient, addr := c.followerClient(); followerClient != nil {
 		log.Info("use follower to forward tso stream to do the batch proxy", zap.String("dc", dc), zap.String("addr", addr))
 		forwardedHost, ok := c.getAllocatorLeaderAddrByDCLocation(dc)

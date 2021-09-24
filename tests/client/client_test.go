@@ -244,7 +244,7 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	}
 }
 
-func (s *clientTestSuite) TestTSOBatchProxy(c *C) {
+func (s *clientTestSuite) TestTSOFollowerProxy(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
