@@ -255,6 +255,7 @@ errHandling:
 }
 
 func (s *Server) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []*tsoRequest) error {
+	start := time.Now()
 	// Merge the requests
 	count := uint32(0)
 	for _, request := range requests {
@@ -274,6 +275,7 @@ func (s *Server) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []
 	if err != nil {
 		return err
 	}
+	tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
 	tsoProxyBatchSize.Observe(float64(count))
 	// Split the response
 	physical, logical, suffixBits := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
