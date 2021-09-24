@@ -281,7 +281,7 @@ func (r *ReplicaChecker) checkDamagedPeer(region *core.RegionInfo) *operator.Ope
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return nil
 		}
-		return r.fixPeer(region, storeID, downStatus)
+		return r.removePeer(region, storeID, downStatus)
 	}
 	return nil
 }
@@ -294,4 +294,37 @@ func (r *ReplicaChecker) strategy(region *core.RegionInfo) *ReplicaStrategy {
 		isolationLevel: r.opts.GetIsolationLevel(),
 		region:         region,
 	}
+}
+
+func (r *ReplicaChecker) removePeer(region *core.RegionInfo, storeID uint64, status string) *operator.Operator {
+	// Check the number of replicas first.
+	if len(region.GetVoters()) > r.opts.GetMaxReplicas() {
+		removeExtra := fmt.Sprintf("remove-extra-%s-replica", status)
+		op, err := operator.CreateRemovePeerOperator(removeExtra, r.cluster, operator.OpReplica, region, storeID)
+		if err != nil {
+			reason := fmt.Sprintf("%s-fail", removeExtra)
+			checkerCounter.WithLabelValues("replica_checker", reason).Inc()
+			return nil
+		}
+		return op
+	}
+
+	regionStores := r.cluster.GetRegionStores(region)
+	target := r.strategy(region).SelectStoreToFix(regionStores, storeID)
+	if target == 0 {
+		reason := fmt.Sprintf("no-store-%s", status)
+		checkerCounter.WithLabelValues("replica_checker", reason).Inc()
+		r.regionWaitingList.Put(region.GetID(), nil)
+		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
+		return nil
+	}
+	newPeer := &metapb.Peer{StoreId: target}
+	replace := fmt.Sprintf("replace-%s-replica", status)
+	op, err := operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, storeID, newPeer)
+	if err != nil {
+		reason := fmt.Sprintf("%s-fail", replace)
+		checkerCounter.WithLabelValues("replica_checker", reason).Inc()
+		return nil
+	}
+	return op
 }
