@@ -60,7 +60,6 @@ func (s *testCheckerSuite) TestAPI(c *C) {
 		{name: "split"},
 		{name: "merge"},
 		{name: "joint-state"},
-		{name: "priority"},
 	}
 	for _, ca := range cases {
 		s.testGetStatus(ca.name, c)
