@@ -325,7 +325,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 97)
-	c.Assert(len(regions.GetRegions()), Equals, 97)
+	c.Assert(regions.GetRegions(), HasLen, 97)
 
 	regions.SetRegion(region)
 	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
@@ -342,7 +342,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 97)
-	c.Assert(len(regions.GetRegions()), Equals, 97)
+	c.Assert(regions.GetRegions(), HasLen, 97)
 
 	// Test remove overlaps.
 	region = region.Clone(WithStartKey([]byte(fmt.Sprintf("%20d", 175))), WithNewRegionID(201))
@@ -351,7 +351,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 96)
-	c.Assert(len(regions.GetRegions()), Equals, 96)
+	c.Assert(regions.GetRegions(), HasLen, 96)
 	c.Assert(regions.GetRegion(201), NotNil)
 	c.Assert(regions.GetRegion(21), IsNil)
 	c.Assert(regions.GetRegion(18), IsNil)
@@ -366,7 +366,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 96)
-	c.Assert(len(regions.GetRegions()), Equals, 96)
+	c.Assert(regions.GetRegions(), HasLen, 96)
 	c.Assert(regions.GetRegion(201), NotNil)
 	c.Assert(regions.tree.TotalSize(), Equals, int64(30))
 	bytesRate, keysRate := regions.tree.TotalWriteRate()
@@ -393,25 +393,25 @@ func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
 		StartKey: []byte(fmt.Sprintf("%20d", 10)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
 	}, peer1)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsFalse)
 
 	region.leader = peer2
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 
 	region.leader = peer1
 	region.pendingPeers = append(region.pendingPeers, peer4)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 
 	region.pendingPeers = nil
 	region.learners = append(region.learners, peer2)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 
 	origin.learners = append(origin.learners, peer2, peer3)
 	region.learners = append(region.learners, peer4)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsFalse)
 
 	region.voters[2].StoreId = 4
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 }
 
 func checkRegions(c *C, regions *RegionsInfo) {

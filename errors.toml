@@ -41,6 +41,11 @@ error = '''
 unsupported metrics type %v
 '''
 
+["PD:checker:ErrCheckerNotFound"]
+error = '''
+checker not found
+'''
+
 ["PD:client:ErrClientCreateTSOStream"]
 error = '''
 create TSO stream failed

@@ -100,7 +100,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		var schedulers []string
 		mustExec([]string{"-u", pdAddr, "scheduler", "show"}, &schedulers)
 		for _, scheduler := range schedulers {
-			c.Assert(expected[scheduler], Equals, true)
+			c.Assert(expected[scheduler], IsTrue)
 		}
 	}
 
