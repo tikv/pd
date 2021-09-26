@@ -764,12 +764,12 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 
 const (
 	defaultMaxReplicas               = 3
-	defaultMaxSnapshotCount          = 3
-	defaultMaxPendingPeerCount       = 16
+	defaultMaxSnapshotCount          = 64
+	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
 	defaultMaxMergeRegionKeys        = 200000
 	defaultSplitMergeInterval        = 1 * time.Hour
-	defaultPatrolRegionInterval      = 100 * time.Millisecond
+	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
 	defaultRegionScheduleLimit       = 2048

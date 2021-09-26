@@ -48,7 +48,7 @@ func (s *testConfigSuite) SetUpSuite(c *C) {
 
 func (s *testConfigSuite) TestSecurity(c *C) {
 	cfg := NewConfig()
-	c.Assert(cfg.Security.RedactInfoLog, Equals, false)
+	c.Assert(cfg.Security.RedactInfoLog, IsFalse)
 }
 
 func (s *testConfigSuite) TestTLS(c *C) {
@@ -186,7 +186,7 @@ leader-schedule-limit = 0
 	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
 	// When defined, use values from config file.
 	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
-	c.Assert(cfg.Schedule.EnableOneWayMerge, Equals, true)
+	c.Assert(cfg.Schedule.EnableOneWayMerge, IsTrue)
 	c.Assert(cfg.Schedule.LeaderScheduleLimit, Equals, uint64(0))
 	// When undefined, use default values.
 	c.Assert(cfg.PreVote, IsTrue)

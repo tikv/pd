@@ -203,7 +203,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
 		RuleType: labeler.KeyRange,
-		Rule:     map[string]interface{}{"start_key": hex.EncodeToString([]byte("")), "end_key": hex.EncodeToString([]byte("t"))},
+		Data:     makeKeyRanges("", "74"),
 	})
 	ops = s.mc.Check(s.regions[0])
 	c.Assert(ops, HasLen, 0)
@@ -507,4 +507,12 @@ func (s *testMergeCheckerSuite) TestCache(c *C) {
 	time.Sleep(time.Second)
 	ops = s.mc.Check(s.regions[1])
 	c.Assert(ops, NotNil)
+}
+
+func makeKeyRanges(keys ...string) []interface{} {
+	var res []interface{}
+	for i := 0; i < len(keys); i += 2 {
+		res = append(res, map[string]interface{}{"start_key": keys[i], "end_key": keys[i+1]})
+	}
+	return res
 }

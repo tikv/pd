@@ -259,7 +259,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	store := new(StoreInfo)
 	err := readJSON(testDialClient, url, store)
 	c.Assert(err, IsNil)
-	c.Assert(store.Store.PhysicallyDestroyed, Equals, false)
+	c.Assert(store.Store.PhysicallyDestroyed, IsFalse)
 	c.Assert(store.Store.State, Equals, metapb.StoreState_Offline)
 
 	// up store success because it is offline but not physically destroyed
@@ -272,7 +272,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	err = readJSON(testDialClient, url, store)
 	c.Assert(err, IsNil)
 	c.Assert(store.Store.State, Equals, metapb.StoreState_Up)
-	c.Assert(store.Store.PhysicallyDestroyed, Equals, false)
+	c.Assert(store.Store.PhysicallyDestroyed, IsFalse)
 
 	// offline store with physically destroyed
 	status = requestStatusBody(c, testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
@@ -280,7 +280,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	err = readJSON(testDialClient, url, store)
 	c.Assert(err, IsNil)
 	c.Assert(store.Store.State, Equals, metapb.StoreState_Offline)
-	c.Assert(store.Store.PhysicallyDestroyed, Equals, true)
+	c.Assert(store.Store.PhysicallyDestroyed, IsTrue)
 
 	// try to up store again failed because it is physically destroyed
 	status = requestStatusBody(c, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
@@ -436,7 +436,7 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 		c.Assert(len(info), Equals, len(testcase.expectedStores))
 		for id := range testcase.expectedStores {
 			_, ok := info[id]
-			c.Assert(ok, Equals, true)
+			c.Assert(ok, IsTrue)
 		}
 	}
 }

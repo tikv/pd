@@ -465,7 +465,7 @@ func (s *testCoordinatorSuite) TestCheckCache(c *C) {
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 1)
 
 	// cancel the replica-schedule-limit restriction
 	opt := tc.GetOpts()
@@ -475,22 +475,23 @@ func (s *testCoordinatorSuite) TestCheckCache(c *C) {
 	co.wg.Add(1)
 	co.patrolRegions()
 	oc := co.opController
-	c.Assert(len(oc.GetOperators()), Equals, 1)
-	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 0)
+	c.Assert(oc.GetOperators(), HasLen, 1)
+	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 0)
 
 	// case 2: operator cannot be created due to store limit restriction
 	oc.RemoveOperator(oc.GetOperator(1))
 	tc.SetStoreLimit(1, storelimit.AddPeer, 0)
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 1)
 
 	// cancel the store limit restriction
 	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
+	time.Sleep(1 * time.Second)
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(len(oc.GetOperators()), Equals, 1)
-	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 0)
+	c.Assert(oc.GetOperators(), HasLen, 1)
+	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 0)
 
 	co.wg.Wait()
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"), IsNil)
@@ -989,14 +990,16 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	// scheduling one time needs 1/10 seconds
 	opt.SetAllStoresLimit(storelimit.AddPeer, 600)
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
+	time.Sleep(time.Second)
 	for i := 0; i < 10; i++ {
-		op1 := lb.Schedule(tc)[0]
-		c.Assert(op1, NotNil)
-		c.Assert(oc.AddOperator(op1), IsTrue)
-		c.Assert(oc.RemoveOperator(op1), IsTrue)
+		ops := lb.Schedule(tc)
+		c.Assert(ops, HasLen, 1)
+		op := ops[0]
+		c.Assert(oc.AddOperator(op), IsTrue)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
 	// sleep 1 seconds to make sure that the token is filled up
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
 		c.Assert(lb.Schedule(tc), NotNil)
 	}

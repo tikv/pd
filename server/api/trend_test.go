@@ -81,7 +81,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	// Check store states.
 	expectLeaderCount := map[uint64]int{1: 1, 2: 2, 3: 0}
 	expectRegionCount := map[uint64]int{1: 2, 2: 2, 3: 2}
-	c.Assert(len(trend.Stores), Equals, 3)
+	c.Assert(trend.Stores, HasLen, 3)
 	for _, store := range trend.Stores {
 		c.Assert(store.LeaderCount, Equals, expectLeaderCount[store.ID])
 		c.Assert(store.RegionCount, Equals, expectRegionCount[store.ID])
@@ -93,7 +93,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 		{From: 1, To: 3, Kind: "region"}: 1,
 		{From: 2, To: 3, Kind: "region"}: 1,
 	}
-	c.Assert(len(trend.History.Entries), Equals, 3)
+	c.Assert(trend.History.Entries, HasLen, 3)
 	for _, history := range trend.History.Entries {
 		c.Assert(history.Count, Equals, expectHistory[trendHistoryEntry{From: history.From, To: history.To, Kind: history.Kind}])
 	}

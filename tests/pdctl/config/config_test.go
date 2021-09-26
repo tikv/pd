@@ -110,7 +110,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
-	c.Assert(svr.GetPDServerConfig().TraceRegionFlow, Equals, false)
+	c.Assert(svr.GetPDServerConfig().TraceRegionFlow, IsFalse)
 
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "10"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
@@ -621,7 +621,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 		c.Assert(err, IsNil)
 		replicationCfg := config.ReplicationConfig{}
 		c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
-		c.Assert(len(replicationCfg.LocationLabels), Equals, expect)
+		c.Assert(replicationCfg.LocationLabels, HasLen, expect)
 	}
 
 	checkRuleCount := func(expect int) {
@@ -639,7 +639,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 		c.Assert(err, IsNil)
 		rule := placement.Rule{}
 		c.Assert(json.Unmarshal(output, &rule), IsNil)
-		c.Assert(len(rule.LocationLabels), Equals, expect)
+		c.Assert(rule.LocationLabels, HasLen, expect)
 	}
 
 	// update successfully when placement rules is not enabled.
@@ -724,8 +724,8 @@ func assertRule(a, b *placement.Rule, c *C) {
 	c.Assert(a.ID, Equals, b.ID)
 	c.Assert(a.Index, Equals, b.Index)
 	c.Assert(a.Override, Equals, b.Override)
-	c.Assert(bytes.Equal(a.StartKey, b.StartKey), Equals, true)
-	c.Assert(bytes.Equal(a.EndKey, b.EndKey), Equals, true)
+	c.Assert(bytes.Equal(a.StartKey, b.StartKey), IsTrue)
+	c.Assert(bytes.Equal(a.EndKey, b.EndKey), IsTrue)
 	c.Assert(a.Role, Equals, b.Role)
 	c.Assert(a.Count, Equals, b.Count)
 	c.Assert(a.LabelConstraints, DeepEquals, b.LabelConstraints)
