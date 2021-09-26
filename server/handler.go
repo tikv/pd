@@ -977,6 +977,9 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 		stats := hotPeersStat.Stats
 		for _, hotPeerStat := range stats {
 			region := c.GetRegion(hotPeerStat.RegionID)
+			if region == nil {
+				continue
+			}
 			meta := region.GetMeta()
 			meta, err := encryption.EncryptRegion(meta, h.s.encryptionKeyManager)
 			if err != nil {
