@@ -849,6 +849,11 @@ func (s *scheduleController) Stop() {
 
 func (s *scheduleController) Schedule() []*operator.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
+		select {
+		case <-s.ctx.Done():
+			return nil
+		default:
+		}
 		cacheCluster := opt.NewCacheCluster(s.cluster)
 		// If we have schedule, reset interval to the minimal interval.
 		if op := s.Scheduler.Schedule(cacheCluster); op != nil {
