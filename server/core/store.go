@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -33,6 +34,14 @@ const (
 	gb                     = 1 << 30 // 1GB size
 	initialMaxRegionCounts = 30      // exclude storage Threshold Filter when region less than 30
 	initialMinSpace        = 1 << 33 // 2^33=8GB
+	slowStoreThreshold     = 80
+
+	// EngineKey is the label key used to indicate engine.
+	EngineKey = "engine"
+	// EngineTiFlash is the tiflash value of the engine label.
+	EngineTiFlash = "tiflash"
+	// EngineTiKV indicates the tikv engine in metrics
+	EngineTiKV = "tikv"
 )
 
 // StoreInfo contains information about a store.
@@ -40,6 +49,7 @@ type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
 	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
+	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
 	leaderCount         int
 	regionCount         int
 	leaderSize          int64
@@ -72,6 +82,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		meta:                meta,
 		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
+		slowStoreEvicted:    s.slowStoreEvicted,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
 		leaderSize:          s.leaderSize,
@@ -95,6 +106,7 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 		meta:                s.meta,
 		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
+		slowStoreEvicted:    s.slowStoreEvicted,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
 		leaderSize:          s.leaderSize,
@@ -118,6 +130,11 @@ func (s *StoreInfo) AllowLeaderTransfer() bool {
 	return !s.pauseLeaderTransfer
 }
 
+// EvictedAsSlowStore returns if the store should be evicted as a slow store.
+func (s *StoreInfo) EvictedAsSlowStore() bool {
+	return s.slowStoreEvicted
+}
+
 // IsAvailable returns if the store bucket of limitation is available
 func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	if s.available != nil && s.available[limitType] != nil {
@@ -139,6 +156,20 @@ func (s *StoreInfo) IsOffline() bool {
 // IsTombstone checks if the store's state is Tombstone.
 func (s *StoreInfo) IsTombstone() bool {
 	return s.GetState() == metapb.StoreState_Tombstone
+}
+
+// GetSlowScore returns the slow score of the store.
+func (s *StoreInfo) GetSlowScore() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rawStats.GetSlowScore()
+}
+
+// IsSlow checks if the slow score reaches the threshold.
+func (s *StoreInfo) IsSlow() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rawStats.GetSlowScore() >= slowStoreThreshold
 }
 
 // IsPhysicallyDestroyed checks if the store's physically destroyed.
@@ -245,10 +276,10 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 // Deviation It is used to control the direction of the deviation considered
 // when calculating the region score. It is set to -1 when it is the source
 // store of balance, 1 when it is the target, and 0 in the rest of cases.
-func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64, deviation int) float64 {
+func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	switch version {
 	case "v2":
-		return s.regionScoreV2(delta, deviation, lowSpaceRatio)
+		return s.regionScoreV2(delta, lowSpaceRatio)
 	case "v1":
 		fallthrough
 	default:
@@ -301,10 +332,20 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 	return score / math.Max(s.GetRegionWeight(), minWeight)
 }
 
-func (s *StoreInfo) regionScoreV2(delta int64, deviation int, lowSpaceRatio float64) float64 {
-	A := float64(float64(s.GetAvgAvailable())-float64(deviation)*float64(s.GetAvailableDeviation())) / gb
+func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
+	A := float64(s.GetAvgAvailable())
 	C := float64(s.GetCapacity()) / gb
 	R := float64(s.GetRegionSize() + delta)
+	if R < 0 {
+		R = float64(s.GetRegionSize())
+	}
+	U := C - A
+	if s.GetRegionSize() != 0 {
+		U = U + U*(float64(delta))/float64(s.GetRegionSize())
+		if U < C && U > 0 {
+			A = C - U
+		}
+	}
 	var (
 		K, M float64 = 1, 256 // Experience value to control the weight of the available influence on score
 		F    float64 = 50     // Experience value to prevent some nodes from running out of disk space prematurely.
@@ -545,6 +586,31 @@ func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
 }
 
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
+// leader to the store
+func (s *StoresInfo) SlowStoreEvicted(storeID uint64) error {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if store.EvictedAsSlowStore() {
+		return errs.ErrSlowStoreEvicted.FastGenByArgs(storeID)
+	}
+	s.stores[storeID] = store.Clone(SlowStoreEvicted())
+	return nil
+}
+
+// SlowStoreRecovered cleans the evicted state of a store.
+func (s *StoresInfo) SlowStoreRecovered(storeID uint64) {
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Warn("try to clean a store's evicted as a slow store state, but it is not found. It may be cleanup",
+			zap.Uint64("store-id", storeID))
+		return
+	}
+	s.stores[storeID] = store.Clone(SlowStoreRecovered())
+}
+
 // AttachAvailableFunc attaches f to a specific store.
 func (s *StoresInfo) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
 	if store, ok := s.stores[storeID]; ok {
@@ -631,7 +697,7 @@ func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCo
 // FIXME: remove the hack way
 func IsTiFlashStore(store *metapb.Store) bool {
 	for _, l := range store.GetLabels() {
-		if l.GetKey() == "engine" && l.GetValue() == "tiflash" {
+		if l.GetKey() == EngineKey && l.GetValue() == EngineTiFlash {
 			return true
 		}
 	}

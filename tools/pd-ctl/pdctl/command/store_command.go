@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -44,6 +45,7 @@ func NewStoreCommand() *cobra.Command {
 	s.AddCommand(NewStoreLimitCommand())
 	s.AddCommand(NewRemoveTombStoneCommand())
 	s.AddCommand(NewStoreLimitSceneCommand())
+	s.AddCommand(NewStoreCheckCommand())
 	s.Flags().String("jq", "", "jq query")
 	s.Flags().StringSlice("state", nil, "state filter")
 	return s
@@ -99,6 +101,16 @@ func NewStoreLimitCommand() *cobra.Command {
 		Run:   storeLimitCommandFunc,
 	}
 	return c
+}
+
+// NewStoreCheckCommand return a check subcommand of storeCmd
+func NewStoreCheckCommand() *cobra.Command {
+	d := &cobra.Command{
+		Use:   "check [up|offline|tombstone]",
+		Short: "Check all the stores with specified status",
+		Run:   storeCheckCommandFunc,
+	}
+	return d
 }
 
 // NewStoresCommand returns a store subcommand of rootCmd
@@ -445,6 +457,28 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			postJSON(cmd, prefix, postInput)
 		}
 	}
+}
+
+func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
+		return
+	}
+
+	state := strings.Title(strings.ToLower(args[0]))
+	stateValue, ok := metapb.StoreState_value[state]
+	if !ok {
+		cmd.Println("Unknown state: " + state)
+		return
+	}
+
+	prefix := fmt.Sprintf("%s?state=%d", storesPrefix, stateValue)
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get store: %s\n", err)
+		return
+	}
+	cmd.Println(r)
 }
 
 func showStoresCommandFunc(cmd *cobra.Command, args []string) {

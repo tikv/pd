@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -47,7 +48,7 @@ func newComponentHandler(svr *server.Server, rd *render.Render) *componentHandle
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /component [post]
 func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	input := make(map[string]string)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -76,7 +77,7 @@ func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Router /component [delete]
 func (h *componentHandler) UnRegister(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	vars := mux.Vars(r)
 	component := vars["component"]
 	addr := vars["addr"]
@@ -93,7 +94,7 @@ func (h *componentHandler) UnRegister(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} Addresses
 // @Router /component [get]
 func (h *componentHandler) GetAllAddress(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	addrs := rc.GetComponentManager().GetAllComponentAddrs()
 	h.rd.JSON(w, http.StatusOK, addrs)
 }
@@ -105,7 +106,7 @@ func (h *componentHandler) GetAllAddress(w http.ResponseWriter, r *http.Request)
 // @Failure 404 {string} string "The component does not exist."
 // @Router /component/{type} [get]
 func (h *componentHandler) GetAddress(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	vars := mux.Vars(r)
 	component := vars["type"]
 	addrs := rc.GetComponentManager().GetComponentAddrs(component)

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -26,6 +27,7 @@ import (
 const (
 	ByteDim int = iota
 	KeyDim
+	QueryDim
 	DimLen
 )
 
@@ -90,12 +92,15 @@ type HotPeerStat struct {
 	needDelete bool
 	isLeader   bool
 	isNew      bool
-	//TODO: remove it when we send peer stat by store info
+	// TODO: remove it when we send peer stat by store info
 	justTransferLeader     bool
 	interval               uint64
 	thresholds             []float64
 	peers                  []uint64
 	lastTransferLeaderTime time.Time
+	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
+	// we will handle it as cold peer and mark the inCold flag
+	inCold bool
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -182,7 +187,7 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 
 func (stat *HotPeerStat) isFullAndHot() bool {
 	return slice.AnyOf(stat.rollingLoads, func(i int) bool {
-		return (stat.rollingLoads[i].isFull() && stat.rollingLoads[i].isLastAverageHot(stat.thresholds[i]))
+		return stat.rollingLoads[i].isFull() && stat.rollingLoads[i].isLastAverageHot(stat.thresholds[i])
 	})
 }
 

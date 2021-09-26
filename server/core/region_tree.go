@@ -7,6 +7,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -49,15 +50,25 @@ const (
 
 type regionTree struct {
 	tree *btree.BTree
+	// Statistics
+	totalSize           int64
+	totalWriteBytesRate float64
+	totalWriteKeysRate  float64
 }
 
 func newRegionTree() *regionTree {
 	return &regionTree{
-		tree: btree.New(defaultBTreeDegree),
+		tree:                btree.New(defaultBTreeDegree),
+		totalSize:           0,
+		totalWriteBytesRate: 0,
+		totalWriteKeysRate:  0,
 	}
 }
 
 func (t *regionTree) length() int {
+	if t == nil {
+		return 0
+	}
 	return t.tree.Len()
 }
 
@@ -91,19 +102,41 @@ func (t *regionTree) getOverlaps(region *RegionInfo) []*RegionInfo {
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
-func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
+func (t *regionTree) update(item *regionItem) []*RegionInfo {
+	region := item.region
+	t.totalSize += region.approximateSize
+	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
+	t.totalWriteBytesRate += regionWriteBytesRate
+	t.totalWriteKeysRate += regionWriteKeysRate
+
 	overlaps := t.getOverlaps(region)
-	for _, item := range overlaps {
+	for _, old := range overlaps {
 		log.Debug("overlapping region",
-			zap.Uint64("region-id", item.GetID()),
-			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(item.GetMeta())),
+			zap.Uint64("region-id", old.GetID()),
+			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(old.GetMeta())),
 			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
-		t.tree.Delete(&regionItem{item})
+		t.tree.Delete(&regionItem{old})
+		t.totalSize -= old.approximateSize
+		regionWriteBytesRate, regionWriteKeysRate = old.GetWriteRate()
+		t.totalWriteBytesRate -= regionWriteBytesRate
+		t.totalWriteKeysRate -= regionWriteKeysRate
 	}
 
-	t.tree.ReplaceOrInsert(&regionItem{region: region})
-
+	t.tree.ReplaceOrInsert(item)
 	return overlaps
+}
+
+// updateStat is used to update statistics when regionItem.region is directly replaced.
+func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
+	t.totalSize += region.approximateSize
+	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
+	t.totalWriteBytesRate += regionWriteBytesRate
+	t.totalWriteKeysRate += regionWriteKeysRate
+
+	t.totalSize -= origin.approximateSize
+	regionWriteBytesRate, regionWriteKeysRate = origin.GetWriteRate()
+	t.totalWriteBytesRate -= regionWriteBytesRate
+	t.totalWriteKeysRate -= regionWriteKeysRate
 }
 
 // remove removes a region if the region is in the tree.
@@ -117,6 +150,11 @@ func (t *regionTree) remove(region *RegionInfo) btree.Item {
 	if result == nil || result.region.GetID() != region.GetID() {
 		return nil
 	}
+
+	t.totalSize -= region.approximateSize
+	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
+	t.totalWriteBytesRate -= regionWriteBytesRate
+	t.totalWriteKeysRate -= regionWriteKeysRate
 
 	return t.tree.Delete(result)
 }
@@ -178,6 +216,18 @@ func (t *regionTree) scanRange(startKey []byte, f func(*RegionInfo) bool) {
 	t.tree.AscendGreaterOrEqual(startItem, func(item btree.Item) bool {
 		return f(item.(*regionItem).region)
 	})
+}
+
+func (t *regionTree) scanRanges() []*RegionInfo {
+	if t.length() == 0 {
+		return nil
+	}
+	var res []*RegionInfo
+	t.scanRange([]byte(""), func(region *RegionInfo) bool {
+		res = append(res, region)
+		return true
+	})
+	return res
 }
 
 func (t *regionTree) getAdjacentRegions(region *RegionInfo) (*regionItem, *regionItem) {
@@ -244,6 +294,35 @@ func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 	}
 
 	return nil
+}
+
+func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
+	if t.length() == 0 {
+		return nil
+	}
+
+	regions := make([]*RegionInfo, 0, n)
+
+	for i := 0; i < n; i++ {
+		if region := t.RandomRegion(ranges); region != nil {
+			regions = append(regions, region)
+		}
+	}
+	return regions
+}
+
+func (t *regionTree) TotalSize() int64 {
+	if t.length() == 0 {
+		return 0
+	}
+	return t.totalSize
+}
+
+func (t *regionTree) TotalWriteRate() (bytesRate, keysRate float64) {
+	if t.length() == 0 {
+		return 0, 0
+	}
+	return t.totalWriteBytesRate, t.totalWriteKeysRate
 }
 
 func init() {

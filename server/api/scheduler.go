@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -21,11 +22,13 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const schedulerConfigPrefix = "pd/api/v1/scheduler-config"
@@ -162,39 +165,9 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case schedulers.GrantLeaderName:
-		storeID, ok := input["store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing store id")
-			return
-		}
-		err := h.AddGrantLeaderScheduler(uint64(storeID))
-		if errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			if err := h.redirectSchedulerUpdate(schedulers.GrantLeaderName, storeID); err != nil {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-		}
-		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		h.addEvictOrGrant(w, input, schedulers.GrantLeaderName)
 	case schedulers.EvictLeaderName:
-		storeID, ok := input["store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing store id")
-			return
-		}
-		err := h.AddEvictLeaderScheduler(uint64(storeID))
-		if errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			if err := h.redirectSchedulerUpdate(schedulers.EvictLeaderName, storeID); err != nil {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-		}
-		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		h.addEvictOrGrant(w, input, schedulers.EvictLeaderName)
 	case schedulers.ShuffleLeaderName:
 		if err := h.AddShuffleLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -220,6 +193,11 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case schedulers.EvictSlowStoreName:
+		if err := h.AddEvictSlowStoreScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	default:
 		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
 		return
@@ -240,6 +218,36 @@ func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64)
 	return postJSON(h.svr.GetHTTPClient(), updateURL, body)
 }
 
+func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[string]interface{}, name string) {
+	storeID, ok := input["store_id"].(float64)
+	if !ok {
+		h.r.JSON(w, http.StatusBadRequest, "missing store id")
+		return
+	}
+	if exist, err := h.Handler.IsSchedulerExisted(name); !exist {
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		switch name {
+		case schedulers.EvictLeaderName:
+			err = h.AddEvictLeaderScheduler(uint64(storeID))
+		case schedulers.GrantLeaderName:
+			err = h.AddGrantLeaderScheduler(uint64(storeID))
+		}
+		if err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		if err := h.redirectSchedulerUpdate(name, storeID); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+	}
+}
+
 // @Tags scheduler
 // @Summary Delete a scheduler.
 // @Param name path string true "The name of the scheduler."
@@ -252,15 +260,11 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	switch {
 	case strings.HasPrefix(name, schedulers.EvictLeaderName) && name != schedulers.EvictLeaderName:
-		if err := h.redirectSchedulerDelete(name, schedulers.EvictLeaderName); err != nil {
-			h.handleErr(w, err)
-			return
-		}
+		h.redirectSchedulerDelete(w, name, schedulers.EvictLeaderName)
+		return
 	case strings.HasPrefix(name, schedulers.GrantLeaderName) && name != schedulers.GrantLeaderName:
-		if err := h.redirectSchedulerDelete(name, schedulers.GrantLeaderName); err != nil {
-			h.handleErr(w, err)
-			return
-		}
+		h.redirectSchedulerDelete(w, name, schedulers.GrantLeaderName)
+		return
 	default:
 		if err := h.RemoveScheduler(name); err != nil {
 			h.handleErr(w, err)
@@ -278,18 +282,16 @@ func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
 	}
 }
 
-func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) error {
+func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, schedulerName string) {
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
 	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
 	resp, err := doDelete(h.svr.GetHTTPClient(), url)
 	if err != nil {
-		return err
+		h.r.JSON(w, resp.StatusCode, err.Error())
+		return
 	}
-	if resp.StatusCode != http.StatusOK {
-		return errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-	return nil
+	h.r.JSON(w, resp.StatusCode, nil)
 }
 
 // FIXME: details of input json body params

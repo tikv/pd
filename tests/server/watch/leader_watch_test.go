@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -35,23 +36,23 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-var _ = Suite(&serverTestSuite{})
+var _ = Suite(&watchTestSuite{})
 
-type serverTestSuite struct {
+type watchTestSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func (s *serverTestSuite) SetUpSuite(c *C) {
+func (s *watchTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
 }
 
-func (s *serverTestSuite) TearDownSuite(c *C) {
+func (s *watchTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
 
-func (s *serverTestSuite) TestWatcher(c *C) {
+func (s *watchTestSuite) TestWatcher(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -87,7 +88,7 @@ func (s *serverTestSuite) TestWatcher(c *C) {
 	c.Succeed()
 }
 
-func (s *serverTestSuite) TestWatcherCompacted(c *C) {
+func (s *watchTestSuite) TestWatcherCompacted(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)

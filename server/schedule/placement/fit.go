@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,6 +17,7 @@ package placement
 import (
 	"math"
 	"sort"
+	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
@@ -25,8 +27,28 @@ import (
 // All peers are divided into corresponding rules according to the matching
 // rules, and the remaining Peers are placed in the OrphanPeers list.
 type RegionFit struct {
-	RuleFits    []*RuleFit
-	OrphanPeers []*metapb.Peer
+	mu struct {
+		sync.RWMutex
+		cached bool
+	}
+	RuleFits     []*RuleFit
+	OrphanPeers  []*metapb.Peer
+	regionStores []*core.StoreInfo
+	rules        []*Rule
+}
+
+// SetCached indicates this RegionFit is fetch form cache
+func (f *RegionFit) SetCached(cached bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mu.cached = cached
+}
+
+// IsCached indicates whether this result is fetched from caches
+func (f *RegionFit) IsCached() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.mu.cached
 }
 
 // IsSatisfied returns if the rules are properly satisfied.
@@ -121,26 +143,28 @@ type StoreSet interface {
 }
 
 // FitRegion tries to fit peers of a region to the rules.
-func FitRegion(stores StoreSet, region *core.RegionInfo, rules []*Rule) *RegionFit {
+func FitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *RegionFit {
 	w := newFitWorker(stores, region, rules)
 	w.run()
 	return &w.bestFit
 }
 
 type fitWorker struct {
-	stores  []*core.StoreInfo
-	bestFit RegionFit  // update during execution
-	peers   []*fitPeer // p.selected is updated during execution.
-	rules   []*Rule
+	stores        []*core.StoreInfo
+	bestFit       RegionFit  // update during execution
+	peers         []*fitPeer // p.selected is updated during execution.
+	rules         []*Rule
+	needIsolation bool
+	exit          bool
 }
 
-func newFitWorker(stores StoreSet, region *core.RegionInfo, rules []*Rule) *fitWorker {
+func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
 	regionPeers := region.GetPeers()
 	peers := make([]*fitPeer, 0, len(regionPeers))
 	for _, p := range regionPeers {
 		peers = append(peers, &fitPeer{
 			Peer:     p,
-			store:    stores.GetStore(p.GetStoreId()),
+			store:    getStoreByID(stores, p.GetStoreId()),
 			isLeader: region.GetLeader().GetId() == p.GetId(),
 		})
 	}
@@ -148,10 +172,11 @@ func newFitWorker(stores StoreSet, region *core.RegionInfo, rules []*Rule) *fitW
 	sort.Slice(peers, func(i, j int) bool { return peers[i].GetId() < peers[j].GetId() })
 
 	return &fitWorker{
-		stores:  stores.GetStores(),
-		bestFit: RegionFit{RuleFits: make([]*RuleFit, len(rules))},
-		peers:   peers,
-		rules:   rules,
+		stores:        stores,
+		bestFit:       RegionFit{RuleFits: make([]*RuleFit, len(rules))},
+		peers:         peers,
+		needIsolation: needIsolation(rules),
+		rules:         rules,
 	}
 }
 
@@ -164,7 +189,15 @@ func (w *fitWorker) run() {
 // Index specifies the position of the rule.
 // returns true if it replaces `bestFit` with a better alternative.
 func (w *fitWorker) fitRule(index int) bool {
+	if w.exit {
+		return false
+	}
 	if index >= len(w.rules) {
+		// If there is no isolation level and we already find one solution, we can early exit searching instead of
+		// searching the whole cases.
+		if !w.needIsolation && w.bestFit.IsSatisfied() {
+			w.exit = true
+		}
 		return false
 	}
 
@@ -205,6 +238,9 @@ func (w *fitWorker) enumPeers(candidates, selected []*fitPeer, index int, count 
 		p.selected = true
 		better = w.enumPeers(candidates[i+1:], append(selected, p), index, count) || better
 		p.selected = false
+		if w.exit {
+			break
+		}
 	}
 	return better
 }
@@ -309,4 +345,13 @@ func isolationScore(peers []*fitPeer, labels []string) float64 {
 		}
 	}
 	return score
+}
+
+func needIsolation(rules []*Rule) bool {
+	for _, rule := range rules {
+		if len(rule.LocationLabels) > 0 {
+			return true
+		}
+	}
+	return false
 }

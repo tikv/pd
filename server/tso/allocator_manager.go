@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -932,7 +933,10 @@ func (am *AllocatorManager) ResetAllocatorGroup(dcLocation string) {
 	defer am.mu.Unlock()
 	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
-		allocatorGroup.leadership.Reset()
+		// Reset if it still has the leadership. Otherwise the data race may occur because of the re-campaigning.
+		if allocatorGroup.leadership.Check() {
+			allocatorGroup.leadership.Reset()
+		}
 	}
 }
 
@@ -1084,7 +1088,7 @@ func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp
 	if err != nil {
 		return nil, err
 	}
-	if err := globalAllocator.(*GlobalTSOAllocator).SyncMaxTS(ctx, clusterDCLocations, maxTSO); err != nil {
+	if err := globalAllocator.(*GlobalTSOAllocator).SyncMaxTS(ctx, clusterDCLocations, maxTSO, false); err != nil {
 		return nil, err
 	}
 	return maxTSO, nil

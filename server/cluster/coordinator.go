@@ -4,10 +4,11 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -33,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
@@ -77,7 +79,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
-		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, opController),
+		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:      make(map[string]*scheduleController),
@@ -108,6 +110,8 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
+		// Check priority regions first.
+		c.checkPriorityRegions()
 		// Check suspect regions first.
 		c.checkSuspectRegions()
 		// Check suspect key ranges
@@ -152,6 +156,31 @@ func (c *coordinator) patrolRegions() {
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()
 		})
+	}
+}
+
+// checkPriorityRegions checks priority regions
+func (c *coordinator) checkPriorityRegions() {
+	items := c.checkers.GetPriorityRegions()
+	removes := make([]uint64, 0)
+	regionListGauge.WithLabelValues("priority_list").Set(float64(len(items)))
+	for _, id := range items {
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			removes = append(removes, id)
+			continue
+		}
+		ops := c.checkers.CheckRegion(region)
+		// it should skip if region needs to merge
+		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
+			continue
+		}
+		if !c.opController.ExceedStoreLimit(ops...) {
+			c.opController.AddWaitingOperator(ops...)
+		}
+	}
+	for _, v := range removes {
+		c.checkers.RemovePriorityRegions(v)
 	}
 }
 
@@ -207,7 +236,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 
 func (c *coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
-	regionWaitingListGauge.Set(float64(len(items)))
+	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
 	for _, item := range items {
 		id := item.Key
 		region := c.cluster.GetRegion(id)
@@ -424,8 +453,7 @@ func (c *coordinator) stop() {
 // Hack to retrieve info from scheduler.
 // TODO: remove it.
 type hasHotStatus interface {
-	GetHotReadStatus() *statistics.StoreHotPeersInfos
-	GetHotWriteStatus() *statistics.StoreHotPeersInfos
+	GetHotStatus(typ string) *statistics.StoreHotPeersInfos
 	GetPendingInfluence() map[uint64]*schedulers.Influence
 }
 
@@ -437,7 +465,7 @@ func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
 		return nil
 	}
 	if h, ok := s.Scheduler.(hasHotStatus); ok {
-		return h.GetHotWriteStatus()
+		return h.GetHotStatus(schedulers.HotWriteRegionType)
 	}
 	return nil
 }
@@ -450,7 +478,7 @@ func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
 		return nil
 	}
 	if h, ok := s.Scheduler.(hasHotStatus); ok {
-		return h.GetHotReadStatus()
+		return h.GetHotStatus(schedulers.HotReadRegionType)
 	}
 	return nil
 }
@@ -503,63 +531,70 @@ func (c *coordinator) collectHotSpotMetrics() {
 	}
 	c.RUnlock()
 	stores := c.cluster.GetStores()
-	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
-	pendings := s.Scheduler.(hasHotStatus).GetPendingInfluence()
-	for _, s := range stores {
-		storeAddress := s.GetAddress()
-		storeID := s.GetID()
-		storeLabel := fmt.Sprintf("%d", storeID)
-		stat, ok := status.AsPeer[storeID]
-		if ok {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(stat.TotalLoads[statistics.RegionWriteBytes])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_keys_as_peer").Set(stat.TotalLoads[statistics.RegionWriteKeys])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(float64(stat.Count))
-		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_keys_as_peer").Set(0)
-		}
-
-		stat, ok = status.AsLeader[storeID]
-		if ok {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(stat.TotalLoads[statistics.RegionWriteBytes])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_keys_as_leader").Set(stat.TotalLoads[statistics.RegionWriteKeys])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(float64(stat.Count))
-		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_keys_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(0)
-		}
-
-		// TODO: add to tidb-ansible after merging pending influence into operator influence.
-		if infl := pendings[storeID]; infl != nil {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_count").Set(infl.Count)
-		}
-	}
-
+	// Collects hot write region metrics.
+	collectHotMetrics(s, stores, schedulers.HotWriteRegionType)
 	// Collects hot read region metrics.
-	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
+	collectHotMetrics(s, stores, schedulers.HotReadRegionType)
+	// Collects pending influence.
+	collectPendingInfluence(s, stores)
+}
+
+func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ string) {
+	status := s.Scheduler.(hasHotStatus).GetHotStatus(typ)
+	var (
+		kind                      string
+		byteTyp, keyTyp, queryTyp statistics.RegionStatKind
+	)
+
+	switch typ {
+	case schedulers.HotReadRegionType:
+		kind, byteTyp, keyTyp, queryTyp = "read", statistics.RegionReadBytes, statistics.RegionReadKeys, statistics.RegionReadQuery
+	case schedulers.HotWriteRegionType:
+		kind, byteTyp, keyTyp, queryTyp = "write", statistics.RegionWriteBytes, statistics.RegionWriteKeys, statistics.RegionWriteQuery
+	}
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := fmt.Sprintf("%d", storeID)
 		stat, ok := status.AsLeader[storeID]
 		if ok {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(stat.TotalLoads[statistics.RegionReadBytes])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_keys_as_leader").Set(stat.TotalLoads[statistics.RegionReadKeys])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(float64(stat.Count))
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalLoads[byteTyp])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalLoads[keyTyp])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalLoads[queryTyp])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(float64(stat.Count))
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_keys_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(0)
 		}
 
+		stat, ok = status.AsPeer[storeID]
+		if ok {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalLoads[byteTyp])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalLoads[keyTyp])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalLoads[queryTyp])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(float64(stat.Count))
+		} else {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(0)
+		}
+	}
+}
+
+func collectPendingInfluence(s *scheduleController, stores []*core.StoreInfo) {
+	pendings := s.Scheduler.(hasHotStatus).GetPendingInfluence()
+	for _, s := range stores {
+		storeAddress := s.GetAddress()
+		storeID := s.GetID()
+		storeLabel := fmt.Sprintf("%d", storeID)
 		if infl := pendings[storeID]; infl != nil {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_count").Set(infl.Count)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_query_rate").Set(infl.Loads[statistics.QueryDim])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_count").Set(infl.Count)
 		}
 	}
 }
@@ -603,27 +638,25 @@ func (c *coordinator) removeScheduler(name string) error {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 
-	s.Stop()
-	schedulerStatusGauge.WithLabelValues(name, "allow").Set(0)
-	delete(c.schedulers, name)
-
-	var err error
 	opt := c.cluster.opt
-
-	if err = c.removeOptScheduler(opt, name); err != nil {
+	if err := c.removeOptScheduler(opt, name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		return err
 	}
 
-	if err = opt.Persist(c.cluster.storage); err != nil {
+	if err := opt.Persist(c.cluster.storage); err != nil {
 		log.Error("the option can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
 
-	if err = c.cluster.storage.RemoveScheduleConfig(name); err != nil {
+	if err := c.cluster.storage.RemoveScheduleConfig(name); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
 	}
+
+	s.Stop()
+	schedulerStatusGauge.WithLabelValues(name, "allow").Set(0)
+	delete(c.schedulers, name)
 
 	return nil
 }
@@ -713,6 +746,19 @@ func (c *coordinator) isSchedulerDisabled(name string) (bool, error) {
 	return false, nil
 }
 
+func (c *coordinator) isSchedulerExisted(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return false, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	_, ok := c.schedulers[name]
+	if !ok {
+		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return true, nil
+}
+
 func (c *coordinator) runScheduler(s *scheduleController) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
@@ -740,6 +786,33 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			return
 		}
 	}
+}
+
+func (c *coordinator) pauseOrResumeChecker(name string, t int64) error {
+	c.Lock()
+	defer c.Unlock()
+	if c.cluster == nil {
+		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	p, err := c.checkers.GetPauseController(name)
+	if err != nil {
+		return err
+	}
+	p.PauseOrResume(t)
+	return nil
+}
+
+func (c *coordinator) isCheckerPaused(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return false, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	p, err := c.checkers.GetPauseController(name)
+	if err != nil {
+		return false, err
+	}
+	return p.IsPaused(), nil
 }
 
 // scheduleController is used to manage a scheduler to schedule.
@@ -776,8 +849,9 @@ func (s *scheduleController) Stop() {
 
 func (s *scheduleController) Schedule() []*operator.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
+		cacheCluster := opt.NewCacheCluster(s.cluster)
 		// If we have schedule, reset interval to the minimal interval.
-		if op := s.Scheduler.Schedule(s.cluster); op != nil {
+		if op := s.Scheduler.Schedule(cacheCluster); op != nil {
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return op
 		}

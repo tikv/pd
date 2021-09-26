@@ -8,12 +8,15 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package statistics
 
-import "context"
+import (
+	"context"
+)
 
 // HotStat contains cluster's hotspot statistics.
 type HotStat struct {
@@ -22,9 +25,9 @@ type HotStat struct {
 }
 
 // NewHotStat creates the container to hold cluster's hotspot statistics.
-func NewHotStat(ctx context.Context) *HotStat {
+func NewHotStat(ctx context.Context, quit <-chan struct{}) *HotStat {
 	return &HotStat{
-		HotCache:    NewHotCache(ctx),
+		HotCache:    NewHotCache(ctx, quit),
 		StoresStats: NewStoresStats(),
 	}
 }

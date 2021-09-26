@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -15,7 +16,7 @@ package tests
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 
 	"github.com/tikv/pd/pkg/tempurl"
@@ -34,7 +35,7 @@ type serverConfig struct {
 }
 
 func newServerConfig(name string, cc *clusterConfig, join bool) *serverConfig {
-	tempDir, _ := ioutil.TempDir("/tmp", "pd-tests")
+	tempDir, _ := os.MkdirTemp("/tmp", "pd-tests")
 	return &serverConfig{
 		Name:          name,
 		DataDir:       tempDir,

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -15,7 +16,7 @@ package api_test
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -77,7 +78,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	err = cluster.GetServer(leader).Stop()
 	c.Assert(err, IsNil)
 	newLeader := cluster.WaitLeader()
-	c.Assert(len(newLeader), Not(Equals), 0)
+	c.Assert(newLeader, Not(HasLen), 0)
 
 	// Make sure they proxy requests to the new leader.
 	for name, s := range cluster.GetServers() {
@@ -123,7 +124,7 @@ func (s *testRedirectorSuite) SetUpSuite(c *C) {
 	})
 	c.Assert(err, IsNil)
 	c.Assert(cluster.RunInitialServers(), IsNil)
-	c.Assert(len(cluster.WaitLeader()), Not(Equals), 0)
+	c.Assert(cluster.WaitLeader(), Not(HasLen), 0)
 	s.cluster = cluster
 }
 
@@ -166,7 +167,7 @@ func (s *testRedirectorSuite) TestAllowFollowerHandle(c *C) {
 	c.Assert(resp.Header.Get(serverapi.FollowerHandle), Equals, "true")
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	_, err = ioutil.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 }
 
@@ -189,7 +190,7 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	_, err = ioutil.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 
 	// Request to follower with redirectorHeader will fail.
@@ -199,7 +200,7 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 	c.Assert(err, IsNil)
 	defer resp1.Body.Close()
 	c.Assert(resp1.StatusCode, Not(Equals), http.StatusOK)
-	_, err = ioutil.ReadAll(resp1.Body)
+	_, err = io.ReadAll(resp1.Body)
 	c.Assert(err, IsNil)
 }
 
@@ -207,7 +208,7 @@ func mustRequestSuccess(c *C, s *server.Server) http.Header {
 	resp, err := dialClient.Get(s.GetAddr() + "/pd/api/v1/version")
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
-	_, err = ioutil.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	return resp.Header

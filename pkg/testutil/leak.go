@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -28,6 +29,7 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*Server).handleRawConn"),
 	goleak.IgnoreTopFunction("go.etcd.io/etcd/pkg/logutil.(*MergeLogger).outputLoop"),
+	goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),
 	// TODO: remove the below options once we fixed the http connection leak problems
 	goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 	goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),

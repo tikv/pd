@@ -8,16 +8,18 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package cluster
 
 import (
+	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
@@ -26,12 +28,23 @@ import (
 
 var _ = Suite(&testClusterWorkerSuite{})
 
-type testClusterWorkerSuite struct{}
+type testClusterWorkerSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testClusterWorkerSuite) TearDownTest(c *C) {
+	s.cancel()
+}
+
+func (s *testClusterWorkerSuite) SetUpTest(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
 
 func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	left := &metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("b")}
 	right := &metapb.Region{Id: 2, StartKey: []byte("b"), EndKey: []byte("c")}
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: left, Right: right})
@@ -43,7 +56,7 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	regions := []*metapb.Region{
 		{Id: 1, StartKey: []byte(""), EndKey: []byte("a")},
 		{Id: 2, StartKey: []byte("a"), EndKey: []byte("b")},

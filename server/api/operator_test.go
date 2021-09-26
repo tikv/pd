@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,7 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"strings"
 
 	. "github.com/pingcap/check"
@@ -404,7 +405,7 @@ func mustReadURL(c *C, url string) string {
 	res, err := testDialClient.Get(url)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()
-	data, err := ioutil.ReadAll(res.Body)
+	data, err := io.ReadAll(res.Body)
 	c.Assert(err, IsNil)
 	return string(data)
 }

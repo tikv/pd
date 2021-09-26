@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -184,7 +185,6 @@ type testStrictlyLabelsStoreSuite struct {
 }
 
 func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
-	// TODO: enable placementrules
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.LocationLabels = []string{"zone", "disk"}
 		cfg.Replication.StrictlyMatchLabel = true
@@ -291,7 +291,11 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 				Version: t.store.Version,
 			},
 		})
-		c.Assert(err, IsNil)
+		if t.valid {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(strings.Contains(err.Error(), t.expectError), IsTrue)
+		}
 	}
 }
 

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -54,6 +55,7 @@ type StoreStatus struct {
 	RegionWeight       float64            `json:"region_weight"`
 	RegionScore        float64            `json:"region_score"`
 	RegionSize         int64              `json:"region_size"`
+	SlowScore          uint64             `json:"slow_score"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	IsBusy             bool               `json:"is_busy,omitempty"`
@@ -89,8 +91,9 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			LeaderSize:         store.GetLeaderSize(),
 			RegionCount:        store.GetRegionCount(),
 			RegionWeight:       store.GetRegionWeight(),
-			RegionScore:        store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0, 0),
+			RegionScore:        store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
 			RegionSize:         store.GetRegionSize(),
+			SlowScore:          store.GetSlowScore(),
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
 			IsBusy:             store.IsBusy(),
@@ -147,7 +150,7 @@ func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id} [get]
 func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -177,7 +180,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id} [delete]
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -207,7 +210,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/state [post]
 func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -260,7 +263,7 @@ func (h *storeHandler) responseStoreErr(w http.ResponseWriter, err error, storeI
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/label [post]
 func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -306,7 +309,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/weight [post]
 func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -360,7 +363,7 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/limit [post]
 func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -440,8 +443,7 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/remove-tombstone [delete]
 func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
-	err := rc.RemoveTombStoneRecords()
+	err := getCluster(r).RemoveTombStoneRecords()
 	if err != nil {
 		apiutil.ErrorResp(h.rd, w, err)
 		return
@@ -554,7 +556,7 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	}
 	if !includeTombstone {
 		returned := make(map[uint64]config.StoreLimitConfig, len(limits))
-		rc, _ := h.GetRaftCluster()
+		rc := getCluster(r)
 		for storeID, v := range limits {
 			store := rc.GetStore(storeID)
 			if store == nil || store.IsTombstone() {
@@ -616,7 +618,7 @@ func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores [get]
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc := getCluster(r)
 	stores := rc.GetMetaStores()
 	StoresInfo := &StoresInfo{
 		Stores: make([]*StoreInfo, 0, len(stores)),

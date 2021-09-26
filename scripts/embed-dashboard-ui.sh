@@ -2,6 +2,12 @@
 set -euo pipefail
 
 
+DISTRIBUTION_DIR=${DASHBOARD_DISTRIBUTION_DIR-}
+
+if [ -n "${DISTRIBUTION_DIR}" ]; then
+  DASHBOARD=COMPILE
+fi
+
 if [ "${DASHBOARD-}" == "0" ] || [ "${DASHBOARD-}" = "SKIP" ]; then
   # DASHBOARD=0 will completely exclude TiDB Dashboard in building when calling from Makefile
   # while DASHBOARD=SKIP will keep current asset file unchanged and include it in building
@@ -25,6 +31,7 @@ rm -f ASSET_DEST_PATH
 
 echo '+ Fetch TiDB Dashboard Go module'
 go mod download
+go mod tidy
 DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
 echo "  - TiDB Dashboard directory: ${DASHBOARD_DIR}"
 
@@ -101,7 +108,13 @@ function compile_asset {
 
   echo '+ Build UI'
   cd "${BUILD_DIR}"
-  make ui
+
+  if [ -n "${DISTRIBUTION_DIR}" ]; then
+    DISTRIBUTION_DIR=${DISTRIBUTION_DIR} scripts/replace_distro_resource.sh
+    DISTRO_BUILD_TAG=1 make ui
+  else
+    make ui
+  fi
 
   echo '+ Generating UI assets'
   echo '  - Generating...'

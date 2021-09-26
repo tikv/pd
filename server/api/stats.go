@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -40,7 +41,7 @@ func newStatsHandler(svr *server.Server, rd *render.Render) *statsHandler {
 // @Success 200 {object} statistics.RegionStats
 // @Router /stats/region [get]
 func (h *statsHandler) Region(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	startKey, endKey := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key")
 	stats := rc.GetRegionStats([]byte(startKey), []byte(endKey))
 	h.rd.JSON(w, http.StatusOK, stats)

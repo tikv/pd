@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -84,6 +85,15 @@ func CreateMovePeerOperator(desc string, cluster opt.Cluster, region *core.Regio
 	return NewBuilder(desc, cluster, region).
 		RemovePeer(oldStore).
 		AddPeer(peer).
+		Build(kind)
+}
+
+// CreateReplaceLeaderPeerOperator creates an operator that replaces an old peer with a new peer, and move leader from old store firstly.
+func CreateReplaceLeaderPeerOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer, leader *metapb.Peer) (*Operator, error) {
+	return NewBuilder(desc, cluster, region).
+		RemovePeer(oldStore).
+		AddPeer(peer).
+		SetLeader(leader.GetStoreId()).
 		Build(kind)
 }
 

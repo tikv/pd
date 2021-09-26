@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -128,7 +129,7 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		return nil
 	}
 
-	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpAdmin)
+	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpMerge)
 	if err != nil {
 		log.Debug("fail to create merge region operator", errs.ZapError(err))
 		return nil

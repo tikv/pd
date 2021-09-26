@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -36,9 +37,9 @@ func (k FlowKind) String() string {
 func (k FlowKind) RegionStats() []RegionStatKind {
 	switch k {
 	case WriteFlow:
-		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys}
+		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
 	case ReadFlow:
-		return []RegionStatKind{RegionReadBytes, RegionReadKeys}
+		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
 	}
 	return nil
 }

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -50,13 +51,13 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	output := make(map[string][]string)
 	err := readJSON(testDialClient, addr, &output)
 	c.Assert(err, IsNil)
-	c.Assert(len(output), Equals, 0)
+	c.Assert(output, HasLen, 0)
 
 	addr1 := fmt.Sprintf("%s/component/c1", urlPrefix)
 	var output1 []string
 	err = readJSON(testDialClient, addr1, &output)
 	c.Assert(strings.Contains(err.Error(), "404"), IsTrue)
-	c.Assert(len(output1), Equals, 0)
+	c.Assert(output1, HasLen, 0)
 
 	// register 2 c1, 1 c2, and 1 c3
 	reqs := []map[string]string{

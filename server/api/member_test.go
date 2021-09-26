@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -18,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"sort"
@@ -85,7 +85,7 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/members"
 		resp, err := testDialClient.Get(addr)
 		c.Assert(err, IsNil)
-		buf, err := ioutil.ReadAll(resp.Body)
+		buf, err := io.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
 		resp.Body.Close()
 		checkListResponse(c, buf, s.cfgs)
@@ -98,7 +98,7 @@ func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	resp, err := testDialClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
-	buf, err := ioutil.ReadAll(resp.Body)
+	buf, err := io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 
 	var got pdpb.Member
@@ -113,7 +113,7 @@ func (s *testMemberAPISuite) TestChangeLeaderPeerUrls(c *C) {
 	resp, err := testDialClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
-	buf, err := ioutil.ReadAll(resp.Body)
+	buf, err := io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 
 	var got pdpb.Member
@@ -126,7 +126,7 @@ func (s *testMemberAPISuite) TestChangeLeaderPeerUrls(c *C) {
 	addr = s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/members"
 	resp, err = testDialClient.Get(addr)
 	c.Assert(err, IsNil)
-	buf, err = ioutil.ReadAll(resp.Body)
+	buf, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
 	got1 := make(map[string]*pdpb.Member)
@@ -170,6 +170,6 @@ func (s *testResignAPISuite) TestResignMyself(c *C) {
 	resp, err := testDialClient.Post(addr, "", nil)
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	_, _ = io.Copy(ioutil.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 }

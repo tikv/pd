@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -128,12 +129,4 @@ func StringToKeyType(input string) KeyType {
 	default:
 		panic("invalid key type: " + input)
 	}
-}
-
-// FlowStat indicates the stats of the flow
-type FlowStat interface {
-	GetKeysWritten() uint64
-	GetBytesWritten() uint64
-	GetBytesRead() uint64
-	GetKeysRead() uint64
 }

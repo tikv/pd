@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -37,19 +38,19 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-var _ = Suite(&serverTestSuite{})
+var _ = Suite(&regionSyncerTestSuite{})
 
-type serverTestSuite struct {
+type regionSyncerTestSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func (s *serverTestSuite) SetUpSuite(c *C) {
+func (s *regionSyncerTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
 }
 
-func (s *serverTestSuite) TearDownSuite(c *C) {
+func (s *regionSyncerTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
 
@@ -62,7 +63,7 @@ func (i *idAllocator) alloc() uint64 {
 	return v
 }
 
-func (s *serverTestSuite) TestRegionSyncer(c *C) {
+func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -75,24 +76,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	c.Assert(rc, NotNil)
 	regionLen := 110
-	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
-	regions := make([]*core.RegionInfo, 0, regionLen)
-	for i := 0; i < regionLen; i++ {
-		r := &metapb.Region{
-			Id: allocator.alloc(),
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
-				Version: 1,
-			},
-			StartKey: []byte{byte(i)},
-			EndKey:   []byte{byte(i + 1)},
-			Peers: []*metapb.Peer{
-				{Id: allocator.alloc(), StoreId: uint64(0)},
-				{Id: allocator.alloc(), StoreId: uint64(0)},
-			},
-		}
-		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
-	}
+	regions := initRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		c.Assert(err, IsNil)
@@ -161,7 +145,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer, NotNil)
 	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
-	c.Assert(len(loadRegions), Equals, regionLen)
+	c.Assert(loadRegions, HasLen, regionLen)
 	for _, region := range regions {
 		r := leaderServer.GetRegionInfoByID(region.GetID())
 		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
@@ -170,7 +154,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	}
 }
 
-func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
+func (s *regionSyncerTestSuite) TestFullSyncWithAddMember(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -183,21 +167,7 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	c.Assert(rc, NotNil)
 	regionLen := 110
-	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
-	regions := make([]*core.RegionInfo, 0, regionLen)
-	for i := 0; i < regionLen; i++ {
-		r := &metapb.Region{
-			Id: allocator.alloc(),
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
-				Version: 1,
-			},
-			StartKey: []byte{byte(i)},
-			EndKey:   []byte{byte(i + 1)},
-			Peers:    []*metapb.Peer{{Id: allocator.alloc(), StoreId: uint64(0)}},
-		}
-		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
-	}
+	regions := initRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		c.Assert(err, IsNil)
@@ -223,5 +193,27 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd2")
 	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
-	c.Assert(len(loadRegions), Equals, regionLen)
+	c.Assert(loadRegions, HasLen, regionLen)
+}
+
+func initRegions(regionLen int) []*core.RegionInfo {
+	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
+	regions := make([]*core.RegionInfo, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		r := &metapb.Region{
+			Id: allocator.alloc(),
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers: []*metapb.Peer{
+				{Id: allocator.alloc(), StoreId: uint64(0)},
+				{Id: allocator.alloc(), StoreId: uint64(0)},
+			},
+		}
+		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
+	}
+	return regions
 }

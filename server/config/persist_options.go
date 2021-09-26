@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -24,6 +25,8 @@ import (
 	"unsafe"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
@@ -490,6 +493,12 @@ func (o *PersistOptions) IsUseJointConsensus() bool {
 	return o.GetScheduleConfig().EnableJointConsensus
 }
 
+// IsTraceRegionFlow returns if the region flow is tracing.
+// If the accuracy cannot reach 0.1 MB, it is considered not.
+func (o *PersistOptions) IsTraceRegionFlow() bool {
+	return o.GetPDServerConfig().FlowRoundByDigit <= maxTraceFlowRoundByDigit
+}
+
 // GetHotRegionCacheHitsThreshold is a threshold to decide if a region is hot.
 func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
@@ -566,7 +575,11 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 		LabelProperty:   o.GetLabelPropertyConfig(),
 		ClusterVersion:  *o.GetClusterVersion(),
 	}
-	return storage.SaveConfig(cfg)
+	err := storage.SaveConfig(cfg)
+	failpoint.Inject("persistFail", func() {
+		err = errors.New("fail to persist")
+	})
+	return err
 }
 
 // Reload reloads the configuration from the storage.
@@ -580,6 +593,7 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 		return err
 	}
 	o.adjustScheduleCfg(&cfg.Schedule)
+	cfg.PDServerCfg.MigrateDeprecatedFlags()
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)

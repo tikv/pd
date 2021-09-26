@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -32,7 +33,7 @@ type RangeCluster struct {
 func GenRangeCluster(cluster opt.Cluster, startKey, endKey []byte) *RangeCluster {
 	subCluster := core.NewBasicCluster()
 	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
-		subCluster.Regions.AddRegion(r)
+		subCluster.Regions.SetRegion(r)
 	}
 	return &RangeCluster{
 		Cluster:    cluster,

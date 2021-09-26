@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -80,13 +81,12 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	return target.GetID()
 }
 
-// SelectStoreToReplace returns a store to replace oldStore. The location
-// placement after scheduling should be not worse than original.
-func (s *ReplicaStrategy) SelectStoreToReplace(coLocationStores []*core.StoreInfo, old uint64) uint64 {
+// SelectStoreToFix returns a store to replace down/offline old peer. The location
+// placement after scheduling is allowed to be worse than original.
+func (s *ReplicaStrategy) SelectStoreToFix(coLocationStores []*core.StoreInfo, old uint64) uint64 {
 	// trick to avoid creating a slice with `old` removed.
 	s.swapStoreToFirst(coLocationStores, old)
-	safeGuard := filter.NewLocationSafeguard(s.checkerName, s.locationLabels, coLocationStores, s.cluster.GetStore(old))
-	return s.SelectStoreToAdd(coLocationStores[1:], safeGuard)
+	return s.SelectStoreToAdd(coLocationStores[1:])
 }
 
 // SelectStoreToImprove returns a store to replace oldStore. The location

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -52,6 +53,8 @@ var (
 	PushOperatorTickInterval = 500 * time.Millisecond
 	// StoreBalanceBaseTime represents the base time of balance rate.
 	StoreBalanceBaseTime float64 = 60
+	// FastOperatorFinishTime min finish time, if finish duration less than it,op will be pushed to fast operator queue
+	FastOperatorFinishTime = 10 * time.Second
 )
 
 // OperatorController is used to limit the speed of scheduling.
@@ -61,6 +64,7 @@ type OperatorController struct {
 	cluster         opt.Cluster
 	operators       map[uint64]*operator.Operator
 	hbStreams       *hbstream.HeartbeatStreams
+	fastOperators   *cache.TTLUint64
 	histories       *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
@@ -78,6 +82,7 @@ func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams *
 		operators:       make(map[uint64]*operator.Operator),
 		hbStreams:       hbStreams,
 		histories:       list.New(),
+		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
 		storesLimit:     make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit),
@@ -125,6 +130,10 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
+			}
+			if time.Since(op.GetStartTime()) < FastOperatorFinishTime {
+				log.Debug("op finish duration less than 10s", zap.Uint64("region-id", op.RegionID()))
+				oc.pushFastOperator(op)
 			}
 		case operator.TIMEOUT:
 			if oc.RemoveOperator(op) {
@@ -642,19 +651,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			return
 		}
 		cmd = addNode(st.PeerID, st.ToStore)
-	case operator.AddLightPeer:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.AddLearner:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
-	case operator.AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
@@ -736,6 +733,10 @@ func (oc *OperatorController) pushHistory(op *operator.Operator) {
 	}
 }
 
+func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
+	oc.fastOperators.Put(op.RegionID(), op)
+}
+
 // PruneHistory prunes a part of operators' history.
 func (oc *OperatorController) PruneHistory() {
 	oc.Lock()
@@ -769,21 +770,16 @@ func (oc *OperatorController) updateCounts(operators map[uint64]*operator.Operat
 		delete(oc.counts, k)
 	}
 	for _, op := range operators {
-		oc.counts[op.Kind()]++
+		oc.counts[op.SchedulerKind()]++
 	}
 }
 
-// OperatorCount gets the count of operators filtered by mask.
-func (oc *OperatorController) OperatorCount(mask operator.OpKind) uint64 {
+// OperatorCount gets the count of operators filtered by kind.
+// kind only has one OpKind.
+func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
 	oc.RLock()
 	defer oc.RUnlock()
-	var total uint64
-	for k, count := range oc.counts {
-		if k&mask != 0 {
-			total += count
-		}
-	}
-	return total
+	return oc.counts[kind]
 }
 
 // GetOpInfluence gets OpInfluence.
@@ -802,6 +798,25 @@ func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInf
 		}
 	}
 	return influence
+}
+
+// GetFastOpInfluence get fast finish operator influence
+func (oc *OperatorController) GetFastOpInfluence(cluster opt.Cluster, influence operator.OpInfluence) {
+	for _, id := range oc.fastOperators.GetAllID() {
+		value, ok := oc.fastOperators.Get(id)
+		if !ok {
+			continue
+		}
+		op, ok := value.(*operator.Operator)
+		if !ok {
+			continue
+		}
+		region := cluster.GetRegion(op.RegionID())
+		if region != nil {
+			log.Debug("op influence less than 10s", zap.Uint64("region-id", op.RegionID()))
+			op.TotalInfluence(influence, region)
+		}
+	}
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
@@ -912,29 +927,17 @@ func (oc *OperatorController) newStoreLimit(storeID uint64, ratePerSec float64, 
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
+	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	if oc.storesLimit[storeID][limitType] == nil {
-		ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 		oc.newStoreLimit(storeID, ratePerSec, limitType)
 		oc.cluster.AttachAvailableFunc(storeID, limitType, func() bool {
 			oc.RLock()
 			defer oc.RUnlock()
-			if oc.storesLimit[storeID][limitType] == nil {
-				return true
-			}
-			return oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
+			return oc.storesLimit[storeID][limitType] == nil || oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
 		})
 	}
-	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	if ratePerSec != oc.storesLimit[storeID][limitType].Rate() {
 		oc.newStoreLimit(storeID, ratePerSec, limitType)
 	}
 	return oc.storesLimit[storeID][limitType]
-}
-
-// GetLeaderSchedulePolicy is to get leader schedule policy.
-func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
-	if oc.cluster == nil {
-		return core.ByCount
-	}
-	return oc.cluster.GetOpts().GetLeaderSchedulePolicy()
 }

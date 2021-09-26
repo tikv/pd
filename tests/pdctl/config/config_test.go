@@ -8,15 +8,16 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package config_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"reflect"
 	"strings"
@@ -32,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -69,16 +71,16 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
-	store := metapb.Store{
+	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	// config show
@@ -108,7 +110,16 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
-	c.Assert(svr.GetPDServerConfig().TraceRegionFlow, Equals, false)
+	c.Assert(svr.GetPDServerConfig().TraceRegionFlow, IsFalse)
+
+	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "10"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(svr.GetPDServerConfig().FlowRoundByDigit, Equals, 10)
+
+	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "-10"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, NotNil)
 
 	// config show schedule
 	args = []string{"-u", pdAddr, "config", "show", "schedule"}
@@ -237,16 +248,17 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -262,14 +274,14 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	c.Assert(rules, HasLen, 1)
 	c.Assert(rules[0].Key(), Equals, [2]string{"pd", "default"})
 
-	f, _ := ioutil.TempFile("/tmp", "pd_tests")
+	f, _ := os.CreateTemp("/tmp", "pd_tests")
 	fname := f.Name()
 	f.Close()
 
 	// test load
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
 	c.Assert(err, IsNil)
-	b, _ := ioutil.ReadFile(fname)
+	b, _ := os.ReadFile(fname)
 	c.Assert(json.Unmarshal(b, &rules), IsNil)
 	c.Assert(rules, HasLen, 1)
 	c.Assert(rules[0].Key(), Equals, [2]string{"pd", "default"})
@@ -287,7 +299,7 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 		Count:   2,
 	})
 	b, _ = json.Marshal(rules)
-	ioutil.WriteFile(fname, b, 0644)
+	os.WriteFile(fname, b, 0644)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	c.Assert(err, IsNil)
 
@@ -304,7 +316,7 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	// test delete
 	rules[0].Count = 0
 	b, _ = json.Marshal(rules)
-	ioutil.WriteFile(fname, b, 0644)
+	os.WriteFile(fname, b, 0644)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	c.Assert(err, IsNil)
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "show", "--group=pd")
@@ -324,16 +336,17 @@ func (s *configTestSuite) TestPlacementRuleGroups(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -387,16 +400,17 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -411,7 +425,7 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bundle, DeepEquals, placement.GroupBundle{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}})
 
-	f, err := ioutil.TempFile("/tmp", "pd_tests")
+	f, err := os.CreateTemp("/tmp", "pd_tests")
 	c.Assert(err, IsNil)
 	fname := f.Name()
 	f.Close()
@@ -423,7 +437,7 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	var bundles []placement.GroupBundle
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
-	b, _ := ioutil.ReadFile(fname)
+	b, _ := os.ReadFile(fname)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
 	c.Assert(bundles, HasLen, 1)
 	c.Assert(bundles[0], DeepEquals, placement.GroupBundle{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}})
@@ -433,18 +447,18 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	bundle.Rules[0].GroupID = "pe"
 	b, err = json.Marshal(bundle)
 	c.Assert(err, IsNil)
-	c.Assert(ioutil.WriteFile(fname, b, 0644), IsNil)
+	c.Assert(os.WriteFile(fname, b, 0644), IsNil)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	c.Assert(err, IsNil)
 
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
-	b, _ = ioutil.ReadFile(fname)
+	b, _ = os.ReadFile(fname)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+	assertBundles(bundles, []placement.GroupBundle{
 		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}},
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}, c)
 
 	// test delete
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "pd")
@@ -452,18 +466,18 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
-	b, _ = ioutil.ReadFile(fname)
+	b, _ = os.ReadFile(fname)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+	assertBundles(bundles, []placement.GroupBundle{
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}, c)
 
 	// test delete regexp
 	bundle.ID = "pf"
 	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}
 	b, err = json.Marshal(bundle)
 	c.Assert(err, IsNil)
-	c.Assert(ioutil.WriteFile(fname, b, 0644), IsNil)
+	c.Assert(os.WriteFile(fname, b, 0644), IsNil)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	c.Assert(err, IsNil)
 
@@ -472,47 +486,47 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
-	b, _ = ioutil.ReadFile(fname)
+	b, _ = os.ReadFile(fname)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+	assertBundles(bundles, []placement.GroupBundle{
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}, c)
 
 	// test save
 	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}
 	bundles = append(bundles, bundle)
 	b, err = json.Marshal(bundles)
 	c.Assert(err, IsNil)
-	c.Assert(ioutil.WriteFile(fname, b, 0644), IsNil)
+	c.Assert(os.WriteFile(fname, b, 0644), IsNil)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname)
 	c.Assert(err, IsNil)
 
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
-	b, err = ioutil.ReadFile(fname)
+	b, err = os.ReadFile(fname)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+	assertBundles(bundles, []placement.GroupBundle{
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
 		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}, c)
 
 	// partial update, so still one group is left, no error
 	bundles = []placement.GroupBundle{{ID: "pe", Rules: []*placement.Rule{}}}
 	b, err = json.Marshal(bundles)
 	c.Assert(err, IsNil)
-	c.Assert(ioutil.WriteFile(fname, b, 0644), IsNil)
+	c.Assert(os.WriteFile(fname, b, 0644), IsNil)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname, "--partial")
 	c.Assert(err, IsNil)
 
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 	c.Assert(err, IsNil)
-	b, err = ioutil.ReadFile(fname)
+	b, err = os.ReadFile(fname)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+	assertBundles(bundles, []placement.GroupBundle{
 		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}, c)
 }
 
 func (s *configTestSuite) TestReplicationMode(c *C) {
@@ -524,16 +538,17 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	conf := config.ReplicationModeConfig{
@@ -579,16 +594,16 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
-	store := metapb.Store{
+	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	pdctl.MustPutStore(c, svr, store)
 	defer cluster.Destroy()
 
 	checkMaxReplicas := func(expect uint64) {
@@ -606,7 +621,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 		c.Assert(err, IsNil)
 		replicationCfg := config.ReplicationConfig{}
 		c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
-		c.Assert(len(replicationCfg.LocationLabels), Equals, expect)
+		c.Assert(replicationCfg.LocationLabels, HasLen, expect)
 	}
 
 	checkRuleCount := func(expect int) {
@@ -624,7 +639,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 		c.Assert(err, IsNil)
 		rule := placement.Rule{}
 		c.Assert(json.Unmarshal(output, &rule), IsNil)
-		c.Assert(len(rule.LocationLabels), Equals, expect)
+		c.Assert(rule.LocationLabels, HasLen, expect)
 	}
 
 	// update successfully when placement rules is not enabled.
@@ -656,7 +671,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	checkRuleLocationLabels(1)
 
 	// update unsuccessfully when many rule exists.
-	f, _ := ioutil.TempFile("/tmp", "pd_tests")
+	f, _ := os.CreateTemp("/tmp", "pd_tests")
 	fname := f.Name()
 	f.Close()
 	defer func() {
@@ -673,7 +688,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	}
 	b, err := json.Marshal(rules)
 	c.Assert(err, IsNil)
-	ioutil.WriteFile(fname, b, 0644)
+	os.WriteFile(fname, b, 0644)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	c.Assert(err, IsNil)
 	checkMaxReplicas(3)
@@ -685,4 +700,35 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	checkRuleCount(4)
 	checkLocaltionLabels(1)
 	checkRuleLocationLabels(1)
+}
+
+func assertBundles(a, b []placement.GroupBundle, c *C) {
+	c.Assert(len(a), Equals, len(b))
+	for i := 0; i < len(a); i++ {
+		assertBundle(a[i], b[i], c)
+	}
+}
+
+func assertBundle(a, b placement.GroupBundle, c *C) {
+	c.Assert(a.ID, Equals, b.ID)
+	c.Assert(a.Index, Equals, b.Index)
+	c.Assert(a.Override, Equals, b.Override)
+	c.Assert(len(a.Rules), Equals, len(b.Rules))
+	for i := 0; i < len(a.Rules); i++ {
+		assertRule(a.Rules[i], b.Rules[i], c)
+	}
+}
+
+func assertRule(a, b *placement.Rule, c *C) {
+	c.Assert(a.GroupID, Equals, b.GroupID)
+	c.Assert(a.ID, Equals, b.ID)
+	c.Assert(a.Index, Equals, b.Index)
+	c.Assert(a.Override, Equals, b.Override)
+	c.Assert(bytes.Equal(a.StartKey, b.StartKey), IsTrue)
+	c.Assert(bytes.Equal(a.EndKey, b.EndKey), IsTrue)
+	c.Assert(a.Role, Equals, b.Role)
+	c.Assert(a.Count, Equals, b.Count)
+	c.Assert(a.LabelConstraints, DeepEquals, b.LabelConstraints)
+	c.Assert(a.LocationLabels, DeepEquals, b.LocationLabels)
+	c.Assert(a.IsolationLevel, Equals, b.IsolationLevel)
 }

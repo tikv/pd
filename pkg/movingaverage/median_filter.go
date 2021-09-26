@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,9 +20,10 @@ import "github.com/montanaflynn/stats"
 // There are at most `size` data points for calculating.
 // References: https://en.wikipedia.org/wiki/Median_filter.
 type MedianFilter struct {
-	records []float64
-	size    uint64
-	count   uint64
+	records       []float64
+	size          uint64
+	count         uint64
+	instantaneous float64
 }
 
 // NewMedianFilter returns a MedianFilter.
@@ -34,6 +36,7 @@ func NewMedianFilter(size int) *MedianFilter {
 
 // Add adds a data point.
 func (r *MedianFilter) Add(n float64) {
+	r.instantaneous = n
 	r.records[r.count%r.size] = n
 	r.count++
 }
@@ -53,11 +56,18 @@ func (r *MedianFilter) Get() float64 {
 
 // Reset cleans the data set.
 func (r *MedianFilter) Reset() {
+	r.instantaneous = 0
 	r.count = 0
 }
 
 // Set = Reset + Add.
 func (r *MedianFilter) Set(n float64) {
+	r.instantaneous = n
 	r.records[0] = n
 	r.count = 1
+}
+
+// GetInstantaneous returns the value just added.
+func (r *MedianFilter) GetInstantaneous() float64 {
+	return r.instantaneous
 }

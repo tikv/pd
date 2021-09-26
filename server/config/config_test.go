@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,6 +17,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"strings"
@@ -46,7 +48,7 @@ func (s *testConfigSuite) SetUpSuite(c *C) {
 
 func (s *testConfigSuite) TestSecurity(c *C) {
 	cfg := NewConfig()
-	c.Assert(cfg.Security.RedactInfoLog, Equals, false)
+	c.Assert(cfg.Security.RedactInfoLog, IsFalse)
 }
 
 func (s *testConfigSuite) TestTLS(c *C) {
@@ -82,7 +84,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(newOpt.Reload(storage), IsNil)
 	schedulers := newOpt.GetSchedulers()
-	c.Assert(schedulers, HasLen, 5)
+	c.Assert(schedulers, HasLen, 4)
 	c.Assert(newOpt.IsUseRegionStorage(), IsTrue)
 	for i, s := range schedulers {
 		c.Assert(s.Type, Equals, DefaultSchedulers[i].Type)
@@ -184,7 +186,7 @@ leader-schedule-limit = 0
 	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
 	// When defined, use values from config file.
 	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
-	c.Assert(cfg.Schedule.EnableOneWayMerge, Equals, true)
+	c.Assert(cfg.Schedule.EnableOneWayMerge, IsTrue)
 	c.Assert(cfg.Schedule.LeaderScheduleLimit, Equals, uint64(0))
 	// When undefined, use default values.
 	c.Assert(cfg.PreVote, IsTrue)
@@ -284,6 +286,8 @@ func (s *testConfigSuite) TestMigrateFlags(c *C) {
 		return cfg, err
 	}
 	cfg, err := load(`
+[pd-server]
+trace-region-flow = false
 [schedule]
 disable-remove-down-replica = true
 enable-make-up-replica = false
@@ -291,6 +295,7 @@ disable-remove-extra-replica = true
 enable-remove-extra-replica = false
 `)
 	c.Assert(err, IsNil)
+	c.Assert(cfg.PDServerCfg.FlowRoundByDigit, Equals, math.MaxInt8)
 	c.Assert(cfg.Schedule.EnableReplaceOfflineReplica, IsTrue)
 	c.Assert(cfg.Schedule.EnableRemoveDownReplica, IsFalse)
 	c.Assert(cfg.Schedule.EnableMakeUpReplica, IsFalse)
@@ -453,6 +458,21 @@ wait-store-timeout = "120s"
 	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
+}
+
+func (s *testConfigSuite) TestHotRegionConfig(c *C) {
+	cfgData := `
+[schedule]
+hot-regions-reserved-days= 30
+hot-regions-write-interval= "30m"
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta, false)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, time.Minute*30)
+	c.Assert(cfg.Schedule.HotRegionsResevervedDays, Equals, int64(30))
 }
 
 func (s *testConfigSuite) TestConfigClone(c *C) {
