@@ -231,11 +231,6 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 					// Ref https://etcd.io/docs/v3.4/learning/api/#watch-streams
 					break keyWatchLoop
 				}
-<<<<<<< HEAD
-				_, err := m.loadKeysFromKV(event.Kv)
-				if err != nil {
-					log.Warn("fail to get encryption keys from watcher result", zap.Error(err))
-=======
 				for _, event := range resp.Events {
 					if event.Type != mvccpb.PUT {
 						log.Warn("encryption keys is deleted unexpectedly")
@@ -245,7 +240,6 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 					if err != nil {
 						log.Warn("fail to get encryption keys from watcher result", errs.ZapError(err))
 					}
->>>>>>> bab909260 (encryption: refine key manager watcher loop (#4111))
 				}
 				m.helper.eventAfterReloadByWatcher()
 			case <-m.helper.tick(ticker):
@@ -287,16 +281,6 @@ func (m *KeyManager) checkOnTick() {
 	if err != nil {
 		log.Warn("fail to rotate data encryption key", zap.Error(err))
 	}
-<<<<<<< HEAD
-	// Fallback mechanism to reload keys if watcher failed.
-	if !watcherEnabled {
-		_, err = m.loadKeysImpl()
-		if err != nil {
-			log.Warn("fail to reload keys after watcher failed", zap.Error(err))
-		}
-	}
-=======
->>>>>>> bab909260 (encryption: refine key manager watcher loop (#4111))
 }
 
 // loadKeysFromKVImpl reload keys from etcd result.
