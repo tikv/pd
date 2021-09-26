@@ -487,6 +487,7 @@ func (s *testCoordinatorSuite) TestCheckCache(c *C) {
 
 	// cancel the store limit restriction
 	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
+	time.Sleep(1 * time.Second)
 	co.wg.Add(1)
 	co.patrolRegions()
 	c.Assert(oc.GetOperators(), HasLen, 1)
@@ -989,6 +990,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	// scheduling one time needs 1/10 seconds
 	opt.SetAllStoresLimit(storelimit.AddPeer, 600)
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
+	time.Sleep(time.Second)
 	for i := 0; i < 10; i++ {
 		ops := lb.Schedule(tc)
 		c.Assert(ops, HasLen, 1)
@@ -997,7 +999,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
 	// sleep 1 seconds to make sure that the token is filled up
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
 		c.Assert(lb.Schedule(tc), NotNil)
 	}
