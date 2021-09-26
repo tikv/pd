@@ -221,7 +221,7 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
-// WithTSOFollowerProxy configures the client with follower TSO batch proxy.
+// WithTSOFollowerProxy configures the client with follower TSO proxy.
 func WithTSOFollowerProxy(enableFollowerTSOBacth bool) ClientOption {
 	return func(c *client) {
 		c.enableTSOFollowerProxy = enableFollowerTSOBacth
@@ -393,6 +393,7 @@ func (c *client) watchTSDeadline(ctx context.Context, dcLocation string) {
 						log.Error("tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
 						d.cancel()
 					case <-d.done:
+						continue
 					case <-ctx.Done():
 						return
 					}
@@ -558,7 +559,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 	}()
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnect
-	if c.enableTSOFollowerProxy && dc == globalDCLocation /* only support Global TSO batch proxy now */ {
+	if c.enableTSOFollowerProxy && dc == globalDCLocation /* only support Global TSO proxy now */ {
 		createTSOConnection = c.tryConnectToFollowerProxy
 	}
 	for {
@@ -738,11 +739,11 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 	return connectionContext{}, err
 }
 
-// tryConnectToFollowerProxy will create a stream to the PD follower to do the TSO requests batch proxy to reduce
+// tryConnectToFollowerProxy will create a stream to the PD follower to do the TSO requests proxy to reduce
 // the pressure of its leader.
 func (c *client) tryConnectToFollowerProxy(dispatcherCtx context.Context, dc string) (connectionContext, error) {
 	if followerClient, addr := c.followerClient(); followerClient != nil {
-		log.Info("use follower to forward tso stream to do the batch proxy", zap.String("dc", dc), zap.String("addr", addr))
+		log.Info("use follower to forward tso stream to do the proxy", zap.String("dc", dc), zap.String("addr", addr))
 		forwardedHost, ok := c.getAllocatorLeaderAddrByDCLocation(dc)
 		if !ok {
 			return connectionContext{}, errors.Errorf("cannot find the allocator leader in %s", dc)

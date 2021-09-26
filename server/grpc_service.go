@@ -169,13 +169,12 @@ type tsoRequest struct {
 
 func (s *Server) dispatchTSORequest(ctx context.Context, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error) {
 	tsoRequestChInterface, loaded := s.tsoDispatcher.LoadOrStore(forwardedHost, make(chan *tsoRequest, maxMergeTSORequests))
-	tsoRequestCh := tsoRequestChInterface.(chan *tsoRequest)
 	if !loaded {
 		tsDeadlineCh := make(chan deadline, 1)
-		go s.handleDispatcher(ctx, forwardedHost, tsoRequestCh, tsDeadlineCh, doneCh, errCh)
+		go s.handleDispatcher(ctx, forwardedHost, tsoRequestChInterface.(chan *tsoRequest), tsDeadlineCh, doneCh, errCh)
 		go watchTSDeadline(ctx, tsDeadlineCh)
 	}
-	tsoRequestCh <- request
+	tsoRequestChInterface.(chan *tsoRequest) <- request
 }
 
 const defaultTSOProxyTimeout = 3 * time.Second
@@ -235,7 +234,7 @@ errHandling:
 			err = s.processTSORequests(forwardStream, requests[:pendingTSOReqCount])
 			close(done)
 			if err != nil {
-				log.Error("batch and forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
+				log.Error("proxy forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
 				select {
 				case <-dispatcherCtx.Done():
 					return
@@ -264,7 +263,7 @@ func (s *Server) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []
 	req := &pdpb.TsoRequest{
 		Header: requests[0].request.GetHeader(),
 		Count:  count,
-		// TODO: support Local TSO batch proxy forwarding.
+		// TODO: support Local TSO proxy forwarding.
 		DcLocation: requests[0].request.GetDcLocation(),
 	}
 	// Send to the leader stream.
@@ -328,6 +327,7 @@ func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan deadline) {
 				log.Error("tso proxy request processing is canceled due to timeout", errs.ZapError(errs.ErrGRPCProxyTSOTimeout))
 				d.cancel()
 			case <-d.done:
+				continue
 			case <-ctx.Done():
 				return
 			}
