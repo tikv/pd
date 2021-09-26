@@ -487,6 +487,7 @@ func (s *testCoordinatorSuite) TestCheckCache(c *C) {
 
 	// cancel the store limit restriction
 	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
+	time.Sleep(1 * time.Second)
 	co.wg.Add(1)
 	co.patrolRegions()
 	c.Assert(oc.GetOperators(), HasLen, 1)
