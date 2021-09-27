@@ -238,6 +238,10 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		checkerCounter.WithLabelValues("rule_checker", "no-new-leader").Inc()
 		return nil, errors.New("no new leader")
 	}
+	if core.IsVoter(peer) && rf.Rule.Role == placement.Learner {
+		checkerCounter.WithLabelValues("rule_checker", "demote-voter-role").Inc()
+		return operator.CreateDemoteVoterOperator("fix-demote-voter", c.cluster, region, peer)
+	}
 	return nil, nil
 }
 
