@@ -309,7 +309,7 @@ func (s *testRegionSuite) TestAccelerateRegionsScheduleInRange(c *C) {
 	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", s.urlPrefix), []byte(body))
 	c.Assert(err, IsNil)
 	idList := s.svr.GetRaftCluster().GetSuspectRegions()
-	c.Assert(len(idList), Equals, 2)
+	c.Assert(idList, HasLen, 2)
 }
 
 func (s *testRegionSuite) TestScatterRegions(c *C) {
@@ -386,7 +386,7 @@ func (s *testRegionSuite) TestTopN(c *C) {
 		if n > len(writtenBytes) {
 			c.Assert(len(topN), Equals, len(writtenBytes))
 		} else {
-			c.Assert(len(topN), Equals, n)
+			c.Assert(topN, HasLen, n)
 		}
 		for i := range topN {
 			c.Assert(topN[i].GetBytesWritten(), Equals, writtenBytes[i])
@@ -443,7 +443,7 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	regions := &RegionsInfo{}
 	err := readJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(len(regionIds), Equals, regions.Count)
+	c.Assert(regionIds, HasLen, regions.Count)
 	for i, v := range regionIds {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
@@ -452,7 +452,7 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	regions = &RegionsInfo{}
 	err = readJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(len(regionIds), Equals, regions.Count)
+	c.Assert(regionIds, HasLen, regions.Count)
 	for i, v := range regionIds {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
@@ -461,7 +461,7 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	regions = &RegionsInfo{}
 	err = readJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(len(regionIds), Equals, regions.Count)
+	c.Assert(regionIds, HasLen, regions.Count)
 	for i, v := range regionIds {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}

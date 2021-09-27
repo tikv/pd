@@ -55,7 +55,7 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 	// Test ListEtcdMembers
 	listResp1, err := ListEtcdMembers(client1)
 	c.Assert(err, IsNil)
-	c.Assert(len(listResp1.Members), Equals, 1)
+	c.Assert(listResp1.Members, HasLen, 1)
 	// types.ID is an alias of uint64.
 	c.Assert(listResp1.Members[0].ID, Equals, uint64(etcd1.Server.ID()))
 
@@ -90,7 +90,7 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 
 	listResp2, err := ListEtcdMembers(client2)
 	c.Assert(err, IsNil)
-	c.Assert(len(listResp2.Members), Equals, 2)
+	c.Assert(listResp2.Members, HasLen, 2)
 	for _, m := range listResp2.Members {
 		switch m.ID {
 		case uint64(etcd1.Server.ID()):
@@ -112,7 +112,7 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 
 	listResp3, err := ListEtcdMembers(client1)
 	c.Assert(err, IsNil)
-	c.Assert(len(listResp3.Members), Equals, 1)
+	c.Assert(listResp3.Members, HasLen, 1)
 	c.Assert(listResp3.Members[0].ID, Equals, uint64(etcd1.Server.ID()))
 }
 
@@ -152,7 +152,7 @@ func (s *testEtcdutilSuite) TestEtcdKVGet(c *C) {
 	withLimit := clientv3.WithLimit(3)
 	resp, err = EtcdKVGet(client, "test/", withRange, withLimit, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	c.Assert(err, IsNil)
-	c.Assert(len(resp.Kvs), Equals, 3)
+	c.Assert(resp.Kvs, HasLen, 3)
 
 	for i := range resp.Kvs {
 		c.Assert(string(resp.Kvs[i].Key), Equals, keys[i])
@@ -163,7 +163,7 @@ func (s *testEtcdutilSuite) TestEtcdKVGet(c *C) {
 	next := clientv3.GetPrefixRangeEnd(lastKey)
 	resp, err = EtcdKVGet(client, next, withRange, withLimit, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	c.Assert(err, IsNil)
-	c.Assert(len(resp.Kvs), Equals, 2)
+	c.Assert(resp.Kvs, HasLen, 2)
 }
 
 func (s *testEtcdutilSuite) TestEtcdKVPutWithTTL(c *C) {

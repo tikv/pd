@@ -318,7 +318,7 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cluster.WaitLeader()
 	_, _, err = cli.GetTS(s.ctx)
 	c.Assert(err, NotNil)
-	c.Assert(pd.IsLeaderChange(err), Equals, true)
+	c.Assert(pd.IsLeaderChange(err), IsTrue)
 	_, _, err = cli.GetTS(s.ctx)
 	c.Assert(err, IsNil)
 }

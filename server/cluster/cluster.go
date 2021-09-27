@@ -1650,6 +1650,20 @@ func (c *RaftCluster) IsSchedulerExisted(name string) (bool, error) {
 	return c.coordinator.isSchedulerExisted(name)
 }
 
+// PauseOrResumeChecker pauses or resumes checker.
+func (c *RaftCluster) PauseOrResumeChecker(name string, t int64) error {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.pauseOrResumeChecker(name, t)
+}
+
+// IsCheckerPaused returns if checker is paused
+func (c *RaftCluster) IsCheckerPaused(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.isCheckerPaused(name)
+}
+
 // GetStoreLimiter returns the dynamic adjusting limiter
 func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 	return c.limiter

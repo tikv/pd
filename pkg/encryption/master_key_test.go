@@ -35,12 +35,12 @@ func (s *testMasterKeySuite) TestPlaintextMasterKey(c *C) {
 	masterKey, err := NewMasterKey(config, nil)
 	c.Assert(err, IsNil)
 	c.Assert(masterKey, Not(IsNil))
-	c.Assert(len(masterKey.key), Equals, 0)
+	c.Assert(masterKey.key, HasLen, 0)
 
 	plaintext := "this is a plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
 	c.Assert(err, IsNil)
-	c.Assert(len(iv), Equals, 0)
+	c.Assert(iv, HasLen, 0)
 	c.Assert(string(ciphertext), Equals, plaintext)
 
 	plaintext2, err := masterKey.Decrypt(ciphertext, iv)
@@ -58,7 +58,7 @@ func (s *testMasterKeySuite) TestEncrypt(c *C) {
 	plaintext := "this-is-a-plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
 	c.Assert(err, IsNil)
-	c.Assert(len(iv), Equals, ivLengthGCM)
+	c.Assert(iv, HasLen, ivLengthGCM)
 	plaintext2, err := AesGcmDecrypt(key, ciphertext, iv)
 	c.Assert(err, IsNil)
 	c.Assert(string(plaintext2), Equals, plaintext)
