@@ -467,6 +467,57 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	}
 }
 
+// TODO
+func (s *testGetRegionSuite) TestScanRegionByKeys(c *C) {
+	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
+	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("e"))
+	r4 := newTestRegionInfo(5, 2, []byte("x"), []byte("z"))
+	r := newTestRegionInfo(99, 1, []byte{0xFF, 0xFF, 0xAA}, []byte{0xFF, 0xFF, 0xCC}, core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	mustRegionHeartbeat(c, s.svr, r1)
+	mustRegionHeartbeat(c, s.svr, r2)
+	mustRegionHeartbeat(c, s.svr, r3)
+	mustRegionHeartbeat(c, s.svr, r4)
+	mustRegionHeartbeat(c, s.svr, r)
+
+	url := fmt.Sprintf("%s/regions/keys?start_key=%s", s.urlPrefix, "b")
+	regionIds := []uint64{3, 4, 5, 99}
+	regions := &RegionsInfo{}
+	err := readJSON(testDialClient, url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+	url = fmt.Sprintf("%s/regions/keys?end_key=%s", s.urlPrefix, "e")
+	regionIds = []uint64{2, 3, 4}
+	regions = &RegionsInfo{}
+	err = readJSON(testDialClient, url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+	url = fmt.Sprintf("%s/regions/keys?start_key=%s&end_key=%s", s.urlPrefix, "b", "g")
+	regionIds = []uint64{3, 4}
+	regions = &RegionsInfo{}
+	err = readJSON(testDialClient, url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+	url = fmt.Sprintf("%s/regions/keys?start_key=%s&end_key=%s", s.urlPrefix, "b", []byte{0xFF, 0xFF, 0xCC})
+	regionIds = []uint64{3, 4, 5, 99}
+	regions = &RegionsInfo{}
+	err = readJSON(testDialClient, url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+}
+
 // Create n regions (0..n) of n stores (0..n).
 // Each region contains np peers, the first peer is the leader.
 // (copied from server/cluster_test.go)
