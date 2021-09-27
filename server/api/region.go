@@ -300,6 +300,24 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags region
+// @Summary List regions in a given range[startKey,endKey).
+// @Param startkey query string true "Range start key"
+// @Param endkey query string true "Range end key"
+// @Produce json
+// @Success 200 {object} RegionsInfo
+// @Router /regions/keys [get]
+func (h *regionsHandler) ScanRegionsByKeys(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+
+	startKey := r.URL.Query().Get("start_key")
+	endKey := r.URL.Query().Get("end_key")
+
+	regions := rc.ScanRegions([]byte(startKey), []byte(endKey), -1)
+	regionsInfo := convertToAPIRegions(regions)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+// @Tags region
 // @Summary Get count of regions.
 // @Produce json
 // @Success 200 {object} RegionsInfo
