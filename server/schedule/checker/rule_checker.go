@@ -97,10 +97,11 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		return nil
 	}
 	op, err := c.fixOrphanPeers(region, fit)
-	if err == nil && op != nil {
+	if err != nil {
+		log.Debug("fail to fix orphan peer", errs.ZapError(err))
+	} else if op != nil {
 		return op
 	}
-	log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	for _, rf := range fit.RuleFits {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
