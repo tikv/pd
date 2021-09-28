@@ -1,6 +1,6 @@
 PD_PKG := github.com/tikv/pd
 
-TEST_PKGS := $(shell find . ! -path "./tests/*" -iname "*_test.go" -exec dirname {} \; | \
+TEST_PKGS := $(shell find .  -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/")
 INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/" | grep -E "tests")
