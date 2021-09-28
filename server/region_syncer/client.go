@@ -42,8 +42,8 @@ const (
 func (s *RegionSyncer) StopSyncWithLeader() {
 	s.reset()
 	s.mu.Lock()
-	close(s.mu.closed)
-	s.mu.closed = make(chan struct{})
+	s.mu.clientCancel()
+	s.mu.clientCtx, s.mu.clientCancel = context.WithCancel(context.Background())
 	s.mu.Unlock()
 	s.wg.Wait()
 }
@@ -130,14 +130,14 @@ var regionGuide = core.GenerateRegionGuideFunc(false)
 func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	s.wg.Add(1)
 	s.mu.RLock()
-	closed := s.mu.closed
+	ctx := s.mu.clientCtx
 	s.mu.RUnlock()
 	go func() {
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
 		storage := s.server.GetStorage()
-		err := storage.LoadRegionsOnce(bc.CheckAndPutRegion)
+		err := storage.LoadRegionsOnce(ctx, bc.CheckAndPutRegion)
 		if err != nil {
 			log.Warn("failed to load regions.", errs.ZapError(err))
 		}
@@ -145,7 +145,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		var conn *grpc.ClientConn
 		for {
 			select {
-			case <-closed:
+			case <-ctx.Done():
 				return
 			default:
 			}
@@ -161,7 +161,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		// Start syncing data.
 		for {
 			select {
-			case <-closed:
+			case <-ctx.Done():
 				return
 			default:
 			}

@@ -73,7 +73,8 @@ type RegionSyncer struct {
 		streams            map[string]ServerStream
 		regionSyncerCtx    context.Context
 		regionSyncerCancel context.CancelFunc
-		closed             chan struct{}
+		clientCtx          context.Context
+		clientCancel       context.CancelFunc
 	}
 	server    Server
 	wg        sync.WaitGroup
@@ -95,7 +96,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		tlsConfig: s.GetTLSConfig(),
 	}
 	syncer.mu.streams = make(map[string]ServerStream)
-	syncer.mu.closed = make(chan struct{})
+	syncer.mu.clientCtx, syncer.mu.clientCancel = context.WithCancel(context.Background())
 	return syncer
 }
 
