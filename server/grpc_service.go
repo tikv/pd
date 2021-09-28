@@ -1067,7 +1067,7 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 
 // SyncRegions syncs the regions.
 func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
-	if s.cluster == nil {
+	if s.IsClosed() || s.cluster == nil {
 		return ErrNotStarted
 	}
 	return s.cluster.GetRegionSyncer().Sync(stream)
