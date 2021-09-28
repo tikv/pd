@@ -1104,9 +1104,9 @@ func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 	c.core.SlowStoreRecovered(storeID)
 }
 
-// AttachAvailableFunc attaches an available function to a specific store.
-func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
-	c.core.AttachAvailableFunc(storeID, limitType, f)
+// ResetStoreLimit resets the limit for a specific store.
+func (c *RaftCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Type, ratePerSec ...float64) {
+	c.core.ResetStoreLimit(storeID, limitType, ratePerSec...)
 }
 
 // UpStore up a store from offline
@@ -1715,7 +1715,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	cfg := c.opt.GetScheduleConfig().Clone()
 	for _, limitType := range storelimit.TypeNameValue {
-		c.AttachAvailableFunc(storeID, limitType, nil)
+		c.ResetStoreLimit(storeID, limitType)
 	}
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)

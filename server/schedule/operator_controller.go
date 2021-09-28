@@ -68,7 +68,6 @@ type OperatorController struct {
 	histories       *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
-	storesLimit     map[uint64]map[storelimit.Type]*storelimit.StoreLimit
 	wop             WaitingOperator
 	wopStatus       *WaitingOperatorStatus
 	opNotifierQueue operatorQueue
@@ -85,7 +84,6 @@ func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams *
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
-		storesLimit:     make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit),
 		wop:             NewRandBuckets(),
 		wopStatus:       NewWaitingOperatorStatus(),
 		opNotifierQueue: make(operatorQueue, 0),
@@ -465,11 +463,8 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	operatorWaitDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
-		if oc.storesLimit[storeID] == nil {
-			continue
-		}
 		for n, v := range storelimit.TypeNameValue {
-			storeLimit := oc.storesLimit[storeID][v]
+			storeLimit := oc.cluster.GetStore(storeID).GetStoreLimit(v)
 			if storeLimit == nil {
 				continue
 			}
@@ -916,28 +911,15 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 	return false
 }
 
-// newStoreLimit is used to create the limit of a store.
-func (oc *OperatorController) newStoreLimit(storeID uint64, ratePerSec float64, limitType storelimit.Type) {
-	log.Info("create or update a store limit", zap.Uint64("store-id", storeID), zap.String("type", limitType.String()), zap.Float64("rate", ratePerSec))
-	if oc.storesLimit[storeID] == nil {
-		oc.storesLimit[storeID] = make(map[storelimit.Type]*storelimit.StoreLimit)
-	}
-	oc.storesLimit[storeID][limitType] = storelimit.NewStoreLimit(ratePerSec, storelimit.RegionInfluence[limitType])
-}
-
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
 	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
-	if oc.storesLimit[storeID][limitType] == nil {
-		oc.newStoreLimit(storeID, ratePerSec, limitType)
-		oc.cluster.AttachAvailableFunc(storeID, limitType, func() bool {
-			oc.RLock()
-			defer oc.RUnlock()
-			return oc.storesLimit[storeID][limitType] == nil || oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
-		})
+	s := oc.cluster.GetStore(storeID)
+	if s.GetStoreLimit(limitType) == nil {
+		oc.cluster.ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
-	if ratePerSec != oc.storesLimit[storeID][limitType].Rate() {
-		oc.newStoreLimit(storeID, ratePerSec, limitType)
+	if ratePerSec != s.GetStoreLimit(limitType).Rate() {
+		oc.cluster.ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
-	return oc.storesLimit[storeID][limitType]
+	return s.GetStoreLimit(limitType)
 }
