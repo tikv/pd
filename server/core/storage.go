@@ -14,6 +14,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -193,22 +194,22 @@ func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, e
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (s *Storage) LoadRegions(f func(region *RegionInfo) []*RegionInfo) error {
+func (s *Storage) LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
-		return loadRegions(s.regionStorage, s.encryptionKeyManager, f)
+		return loadRegions(ctx, s.regionStorage, s.encryptionKeyManager, f)
 	}
-	return loadRegions(s.Base, s.encryptionKeyManager, f)
+	return loadRegions(ctx, s.Base, s.encryptionKeyManager, f)
 }
 
 // LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
-func (s *Storage) LoadRegionsOnce(f func(region *RegionInfo) []*RegionInfo) error {
+func (s *Storage) LoadRegionsOnce(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) == 0 {
-		return loadRegions(s.Base, s.encryptionKeyManager, f)
+		return loadRegions(ctx, s.Base, s.encryptionKeyManager, f)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.regionLoaded == 0 {
-		if err := loadRegions(s.regionStorage, s.encryptionKeyManager, f); err != nil {
+		if err := loadRegions(ctx, s.regionStorage, s.encryptionKeyManager, f); err != nil {
 			return err
 		}
 		s.regionLoaded = 1

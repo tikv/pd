@@ -718,7 +718,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	for _, region := range regions {
 		c.Assert(storage.SaveRegion(region), IsNil)
 	}
-	raftCluster.GetStorage().LoadRegionsOnce(raftCluster.GetCacheCluster().PutRegion)
+	raftCluster.GetStorage().LoadRegionsOnce(s.ctx, raftCluster.GetCacheCluster().PutRegion)
 	c.Assert(raftCluster.GetRegionCount(), Equals, n)
 }
 
