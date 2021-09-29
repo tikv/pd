@@ -74,8 +74,8 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Error("marshal plans failed", errs.ZapError(err))
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
-	} else {
-		log.Debug("marshal plans completed", zap.String("plans", string(data)))
-		h.rd.JSON(w, http.StatusOK, plans)
 	}
+
+	log.Debug("marshal plans completed", zap.String("plans", string(data)))
+	h.rd.JSON(w, http.StatusOK, plans)
 }
