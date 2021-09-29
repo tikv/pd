@@ -223,7 +223,7 @@ func toRegionCache(r *core.RegionInfo) regionCache {
 	}
 }
 
-// validateStores checks whether store isn't offline, unhealthy and disconnected.
+// ValidateStores checks whether store isn't offline, unhealthy and disconnected.
 // Only Up store should be cached in RegionFitCache
 func ValidateStores(stores []*core.StoreInfo) bool {
 	return slice.NoneOf(stores, func(i int) bool {
@@ -231,12 +231,12 @@ func ValidateStores(stores []*core.StoreInfo) bool {
 	})
 }
 
-// validateRegion checks whether region is healthy
+// ValidateRegion checks whether region is healthy
 func ValidateRegion(region *core.RegionInfo) bool {
 	return region != nil && region.GetLeader() != nil && len(region.GetDownPeers()) == 0 && region.GetRegionEpoch() != nil
 }
 
-// validateFit checks whether regionFit is valid
+// ValidateFit checks whether regionFit is valid
 func ValidateFit(fit *RegionFit) bool {
 	return fit != nil && fit.rules != nil && len(fit.rules) > 0 && fit.regionStores != nil && len(fit.regionStores) > 0 &&
 		fit.IsSatisfied()
