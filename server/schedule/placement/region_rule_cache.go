@@ -93,6 +93,9 @@ type RegionRuleFitCache struct {
 
 // IsUnchanged checks whether the region and rules unchanged for the cache
 func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule, stores []*core.StoreInfo) bool {
+	if !ValidateRegion(region) || !ValidateStores(stores) {
+		return false
+	}
 	return cache.isRegionUnchanged(region) && rulesEqual(cache.rules, rules) && storesEqual(cache.regionStores, stores)
 }
 
