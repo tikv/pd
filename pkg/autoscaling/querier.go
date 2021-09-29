@@ -29,7 +29,6 @@ type Querier interface {
 type QueryOptions struct {
 	component ComponentType
 	metric    MetricType
-	addresses []string
 	timestamp time.Time
 	duration  time.Duration
 }
@@ -38,11 +37,10 @@ type QueryOptions struct {
 // The options will be used to query metrics of `duration` long UNTIL `timestamp`
 // which has `metric` type (CPU, Storage) for a specific `component` type
 // and returns metrics value for each instance in `instances`
-func NewQueryOptions(component ComponentType, metric MetricType, addresses []string, timestamp time.Time, duration time.Duration) *QueryOptions {
+func NewQueryOptions(component ComponentType, metric MetricType, timestamp time.Time, duration time.Duration) *QueryOptions {
 	return &QueryOptions{
 		component,
 		metric,
-		addresses,
 		timestamp,
 		duration,
 	}

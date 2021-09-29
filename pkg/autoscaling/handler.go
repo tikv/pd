@@ -19,9 +19,11 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 // HTTPHandler is a handler to handle the auto scaling HTTP request.
@@ -51,12 +53,29 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Debug("get http body completed", zap.String("strategy", string(data)))
+
 	strategy := Strategy{}
-	if err := json.Unmarshal(data, &strategy); err != nil {
+	if err = json.Unmarshal(data, &strategy); err != nil {
+		log.Error("unmarshall strategy failed", errs.ZapError(err))
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	plan := calculate(rc, h.svr.GetPDServerConfig(), &strategy)
-	h.rd.JSON(w, http.StatusOK, plan)
+	plans, err := calculate(rc, &strategy)
+	if err != nil {
+		log.Error("calculate plans failed", errs.ZapError(err))
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	data, err = json.Marshal(plans)
+	if err != nil {
+		log.Error("marshal plans failed", errs.ZapError(err))
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	} else {
+		log.Debug("marshal plans completed", zap.String("plans", string(data)))
+		h.rd.JSON(w, http.StatusOK, plans)
+	}
 }

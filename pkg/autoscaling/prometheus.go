@@ -18,11 +18,8 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net"
-	"strings"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	promClient "github.com/prometheus/client_golang/api"
 	promAPI "github.com/prometheus/client_golang/api/prometheus/v1"
@@ -36,9 +33,8 @@ const (
 	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{component="tidb"}[%s])) by (instance, kubernetes_namespace)`
 	tikvCPUQuotaMetricsPattern    = `tikv_server_cpu_cores_quota`
 	tidbCPUQuotaMetricsPattern    = `tidb_server_maxprocs`
-	instanceLabelName             = "instance"
-	namespaceLabelName            = "kubernetes_namespace"
-	addressFormat                 = "pod-name.peer-svc.namespace.svc:port"
+	instanceLabelKey              = "instance"
+	namespaceLabelKey             = "kubernetes_namespace"
 
 	httpRequestTimeout = 5 * time.Second
 )
@@ -79,7 +75,7 @@ func (prom *PrometheusQuerier) Query(options *QueryOptions) (QueryResult, error)
 		return nil, err
 	}
 
-	result, err := extractInstancesFromResponse(resp, options.addresses)
+	result, err := extractInstancesFromResponse(resp)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +100,7 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 	return resp, nil
 }
 
-func extractInstancesFromResponse(resp promModel.Value, addresses []string) (QueryResult, error) {
+func extractInstancesFromResponse(resp promModel.Value) (QueryResult, error) {
 	if resp == nil {
 		return nil, errs.ErrEmptyMetricsResponse.FastGenByArgs()
 	}
@@ -123,32 +119,25 @@ func extractInstancesFromResponse(resp promModel.Value, addresses []string) (Que
 		return nil, errs.ErrEmptyMetricsResult.FastGenByArgs("query metrics duration must be at least twice the Prometheus scrape interval")
 	}
 
-	instancesSet := map[string]string{}
-	for _, addr := range addresses {
-		instanceName, err := getInstanceNameFromAddress(addr)
-		if err == nil {
-			instancesSet[instanceName] = addr
-		}
-	}
+	var (
+		instanceName string
+		namespace    string
+	)
 
 	result := make(QueryResult)
 
 	for _, sample := range vector {
-		podName, ok := sample.Metric[instanceLabelName]
-		if !ok {
-			continue
+		instanceLabel, ok := sample.Metric[instanceLabelKey]
+		if ok {
+			instanceName = string(instanceLabel)
+		}
+		namespaceLabel, ok := sample.Metric[namespaceLabelKey]
+		if ok {
+			namespace = string(namespaceLabel)
 		}
 
-		namespace, ok := sample.Metric[namespaceLabelName]
-		if !ok {
-			continue
-		}
-
-		instanceName := buildInstanceIdentifier(string(podName), string(namespace))
-
-		if addr, ok := instancesSet[instanceName]; ok {
-			result[addr] = float64(sample.Value)
-		}
+		instanceFullName := buildInstanceIdentifier(instanceName, namespace)
+		result[instanceFullName] = float64(sample.Value)
 	}
 
 	return result, nil
@@ -182,34 +171,6 @@ func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
 
 	query := fmt.Sprintf(pattern, getDurationExpression(options.duration))
 	return query, nil
-}
-
-// this function assumes that addr is already a valid resolvable address
-// returns in format "podname_namespace"
-func getInstanceNameFromAddress(addr string) (string, error) {
-	// In K8s, a StatefulSet pod address is composed of pod-name.peer-svc.namespace.svc:port
-	// Extract the hostname part without port
-	hostname := addr
-	portColonIdx := strings.LastIndex(addr, ":")
-	if portColonIdx >= 0 {
-		hostname = addr[:portColonIdx]
-	}
-
-	// Just to make sure it is not an IP address
-	ip := net.ParseIP(hostname)
-	if ip != nil {
-		// Hostname is an IP address, return the whole address
-		return "", errors.Errorf("address %s is an ip address", addr)
-	}
-
-	parts := strings.Split(hostname, ".")
-	if len(parts) < 4 {
-		return "", errors.Errorf("address %s does not match the expected format %s", addr, addressFormat)
-	}
-
-	podName, namespace := parts[0], parts[2]
-
-	return buildInstanceIdentifier(podName, namespace), nil
 }
 
 func buildInstanceIdentifier(podName string, namespace string) string {

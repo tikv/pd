@@ -21,13 +21,32 @@ import (
 	"strings"
 
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/server/schedule/filter"
 	"go.etcd.io/etcd/clientv3"
 )
+
+const (
+	httpPrefix                  = "http://"
+	homogeneousTiKVResourceType = "default_homogeneous_tikv"
+	homogeneousTiDBResourceType = "default_homogeneous_tidb"
+)
+
+// Address presents https or https url
+type Address struct {
+	IP   string `json:"ip"`
+	Port int    `json:"port"`
+	Path string `json:"path"`
+}
+
+func (address *Address) String() string {
+	return fmt.Sprintf("%s%s:%d%s", httpPrefix, address.IP, address.Port, address.Path)
+}
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
 type Strategy struct {
 	Rules     []*Rule     `json:"rules"`
 	Resources []*Resource `json:"resources"`
+	NodeCount uint64      `json:"node_count"`
 }
 
 // Rule is a set of constraints for a kind of component.
@@ -39,13 +58,18 @@ type Rule struct {
 
 // CPURule is the constraints about CPU.
 type CPURule struct {
-	MaxThreshold  float64  `json:"max_threshold"`
+	// cpu usage max threshold
+	MaxThreshold float64 `json:"max_threshold"`
+	// cpu usage min threshold
 	MinThreshold  float64  `json:"min_threshold"`
 	ResourceTypes []string `json:"resource_types"`
 }
 
 // StorageRule is the constraints about storage.
 type StorageRule struct {
+	// storage usage max threshold
+	MaxThreshold float64 `json:"max_threshold"`
+	// storage usage min threshold
 	MinThreshold  float64  `json:"min_threshold"`
 	ResourceTypes []string `json:"resource_types"`
 }
@@ -68,6 +92,36 @@ type Plan struct {
 	Count        uint64            `json:"count"`
 	ResourceType string            `json:"resource_type"`
 	Labels       map[string]string `json:"labels"`
+}
+
+// NewPlan returns a new *Plan
+func NewPlan(component ComponentType, count uint64, resourceType string) *Plan {
+	labels := getLabelsByResourceType(resourceType, component)
+
+	return &Plan{
+		Component:    component.String(),
+		Count:        count,
+		ResourceType: resourceType,
+		Labels:       labels,
+	}
+}
+
+func (p *Plan) String() string {
+	return fmt.Sprintf("{Component: %s, Count: %d, ResourceType: %s, Labels: %v}", p.Component, p.Count, p.ResourceType, p.Labels)
+}
+
+// CloneWithoutLabel clones *Plan without the label
+func (p *Plan) CloneWithoutLabel() *Plan {
+	var component ComponentType
+
+	switch p.Component {
+	case TiKV.String():
+		component = TiKV
+	case TiDB.String():
+		component = TiDB
+	}
+
+	return NewPlan(component, p.Count, p.ResourceType)
 }
 
 // ComponentType distinguishes different kinds of components.
@@ -99,6 +153,10 @@ const (
 	CPUUsage MetricType = iota
 	// CPUQuota is cpu cores quota for each instance
 	CPUQuota
+	// StorageUsage is storage usage in the duration
+	StorageUsage
+	// StorageQuota is storage quota for each instance
+	StorageQuota
 )
 
 func (c MetricType) String() string {
@@ -107,6 +165,10 @@ func (c MetricType) String() string {
 		return "cpu_usage"
 	case CPUQuota:
 		return "cpu_quota"
+	case StorageUsage:
+		return "storage_usage"
+	case StorageQuota:
+		return "storage_quota"
 	default:
 		return "unknown"
 	}
@@ -115,6 +177,11 @@ func (c MetricType) String() string {
 type instance struct {
 	id      uint64
 	address string
+}
+
+type storage struct {
+	capacity float64
+	usedSize float64
 }
 
 // TiDBInfo record the detail tidb info
@@ -190,4 +257,18 @@ func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
 		}
 	}
 	return tidbs, nil
+}
+
+func getLabelsByResourceType(resourceType string, component ComponentType) map[string]string {
+	labels := map[string]string{}
+
+	if resourceType != homogeneousTiKVResourceType && resourceType != homogeneousTiDBResourceType {
+		labels[groupLabelKey] = fmt.Sprintf("%s-%s-%s", autoScalingGroupLabelKeyPrefix, component.String(), resourceType)
+		labels[resourceTypeLabelKey] = resourceType
+		if component == TiKV {
+			labels[filter.SpecialUseKey] = filter.SpecialUseHotRegion
+		}
+	}
+
+	return labels
 }
