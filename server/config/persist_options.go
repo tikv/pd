@@ -144,6 +144,11 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// IsPlacementRulesCacheEnabled returns if the placement rules cache is enabled
+func (o *PersistOptions) IsPlacementRulesCacheEnabled() bool {
+	return o.GetReplicationConfig().EnablePlacementRulesCache
+}
+
 // SetPlacementRuleEnabled set PlacementRuleEnabled
 func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()
