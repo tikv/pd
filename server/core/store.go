@@ -623,7 +623,7 @@ func (s *StoresInfo) SlowStoreRecovered(storeID uint64) {
 // ResetStoreLimit resets the limit for a specific store.
 func (s *StoresInfo) ResetStoreLimit(storeID uint64, limitType storelimit.Type, ratePerSec ...float64) {
 	if store, ok := s.stores[storeID]; ok {
-		s.stores[storeID] = store.Clone(SetStoreLimit(limitType, ratePerSec...))
+		s.stores[storeID] = store.Clone(ResetStoreLimit(limitType, ratePerSec...))
 	}
 }
 

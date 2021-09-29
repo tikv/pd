@@ -916,10 +916,10 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	s := oc.cluster.GetStore(storeID)
 	if s.GetStoreLimit(limitType) == nil {
-		oc.cluster.ResetStoreLimit(storeID, limitType, ratePerSec)
+		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
 	if ratePerSec != s.GetStoreLimit(limitType).Rate() {
-		oc.cluster.ResetStoreLimit(storeID, limitType, ratePerSec)
+		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
 	return s.GetStoreLimit(limitType)
 }

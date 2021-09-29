@@ -412,6 +412,13 @@ func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	return c.coordinator.opController
 }
 
+// GetBasicCluster returns the basic cluster.
+func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core
+}
+
 // GetRegionScatter returns the region scatter.
 func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
 	c.RLock()
@@ -1104,11 +1111,6 @@ func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 	c.core.SlowStoreRecovered(storeID)
 }
 
-// ResetStoreLimit resets the limit for a specific store.
-func (c *RaftCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Type, ratePerSec ...float64) {
-	c.core.ResetStoreLimit(storeID, limitType, ratePerSec...)
-}
-
 // UpStore up a store from offline
 func (c *RaftCluster) UpStore(storeID uint64) error {
 	c.Lock()
@@ -1715,7 +1717,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	cfg := c.opt.GetScheduleConfig().Clone()
 	for _, limitType := range storelimit.TypeNameValue {
-		c.ResetStoreLimit(storeID, limitType)
+		c.core.ResetStoreLimit(storeID, limitType)
 	}
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)

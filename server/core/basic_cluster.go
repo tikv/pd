@@ -447,8 +447,6 @@ type StoreSetController interface {
 
 	SlowStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
-
-	ResetStoreLimit(id uint64, limitType storelimit.Type, ratePerSec ...float64)
 }
 
 // KeyRange is a key range.
