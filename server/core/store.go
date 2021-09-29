@@ -138,6 +138,8 @@ func (s *StoreInfo) EvictedAsSlowStore() bool {
 
 // IsAvailable returns if the store bucket of limitation is available
 func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.limiter != nil && s.limiter[limitType] != nil {
 		return s.limiter[limitType].Available() >= storelimit.RegionInfluence[limitType]
 	}

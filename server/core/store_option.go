@@ -217,6 +217,8 @@ func SetNewStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 // ResetStoreLimit resets the store limit for a store.
 func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCreateOption {
 	return func(store *StoreInfo) {
+		store.mu.Lock()
+		defer store.mu.Unlock()
 		if len(ratePerSec) == 0 {
 			store.limiter[limitType] = nil
 			return
