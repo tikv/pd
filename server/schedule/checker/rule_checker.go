@@ -112,7 +112,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			return op
 		}
 	}
-	if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 {
+	if placement.ValidateFit(fit) && placement.ValidateRegion(region) && placement.ValidateStores(fit.GetRegionStores()) {
 		// If there is no need to fix, we will cache the fit
 		c.ruleManager.SetRegionFitCache(region, fit)
 		checkerCounter.WithLabelValues("rule_checker", "set-cache").Inc()

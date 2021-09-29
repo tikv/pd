@@ -59,6 +59,9 @@ func (manager *RegionRuleFitCacheManager) Invalid(regionID uint64) {
 func (manager *RegionRuleFitCacheManager) CheckAndGetCache(region *core.RegionInfo,
 	rules []*Rule,
 	stores []*core.StoreInfo) (bool, *RegionFit) {
+	if !ValidateRegion(region) || !ValidateStores(stores) {
+		return false, nil
+	}
 	manager.mu.RLock()
 	defer manager.mu.RUnlock()
 	if cache, ok := manager.caches[region.GetID()]; ok && cache.bestFit != nil {
@@ -71,7 +74,7 @@ func (manager *RegionRuleFitCacheManager) CheckAndGetCache(region *core.RegionIn
 
 // SetCache stores RegionFit cache
 func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit *RegionFit) {
-	if !validateRegion(region) || !validateFit(fit) {
+	if !ValidateRegion(region) || !ValidateFit(fit) || !ValidateStores(fit.regionStores) {
 		return
 	}
 	manager.mu.Lock()
@@ -94,10 +97,6 @@ func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*R
 }
 
 func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
-	// we only cache region when it is valid
-	if !validateRegion(region) {
-		return false
-	}
 	return region.GetLeader().StoreId == cache.region.leaderStoreID &&
 		cache.region.epochEqual(region)
 }
@@ -122,14 +121,6 @@ func storesEqual(a []storeCache, b []*core.StoreInfo) bool {
 			return a[i].storeEqual(b[j])
 		})
 	})
-}
-
-func validateRegion(region *core.RegionInfo) bool {
-	return region != nil && region.GetLeader() != nil && len(region.GetDownPeers()) == 0 && region.GetRegionEpoch() != nil
-}
-
-func validateFit(fit *RegionFit) bool {
-	return fit != nil && fit.rules != nil && len(fit.rules) > 0 && fit.regionStores != nil && len(fit.regionStores) > 0
 }
 
 func toRegionRuleFitCache(region *core.RegionInfo, fit *RegionFit) *RegionRuleFitCache {
@@ -230,4 +221,23 @@ func toRegionCache(r *core.RegionInfo) regionCache {
 		confVer:       r.GetRegionEpoch().ConfVer,
 		version:       r.GetRegionEpoch().Version,
 	}
+}
+
+// validateStores checks whether store isn't offline, unhealthy and disconnected.
+// Only Up store should be cached in RegionFitCache
+func ValidateStores(stores []*core.StoreInfo) bool {
+	return slice.NoneOf(stores, func(i int) bool {
+		return stores[i].IsOffline() && stores[i].IsUnhealthy() && stores[i].IsDisconnected()
+	})
+}
+
+// validateRegion checks whether region is healthy
+func ValidateRegion(region *core.RegionInfo) bool {
+	return region != nil && region.GetLeader() != nil && len(region.GetDownPeers()) == 0 && region.GetRegionEpoch() != nil
+}
+
+// validateFit checks whether regionFit is valid
+func ValidateFit(fit *RegionFit) bool {
+	return fit != nil && fit.rules != nil && len(fit.rules) > 0 && fit.regionStores != nil && len(fit.regionStores) > 0 &&
+		fit.IsSatisfied()
 }

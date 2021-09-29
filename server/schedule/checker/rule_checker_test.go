@@ -761,3 +761,29 @@ func (s *testRuleCheckerSuite) TestDemoteVoter(c *C) {
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "fix-demote-voter")
 }
+
+func (s *testRuleCheckerSuite) TestOfflineAndDownStore(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z4"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z4"})
+	region := s.cluster.AddLeaderRegion(1, 1, 2, 3)
+	op := s.rc.Check(region)
+	c.Assert(op, IsNil)
+	// assert rule checker should generate replace offline peer operator after cached
+	s.cluster.SetStoreOffline(1)
+	op = s.rc.Check(region)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
+	// re-cache the regionFit
+	s.cluster.SetStoreUp(1)
+	op = s.rc.Check(region)
+	c.Assert(op, IsNil)
+
+	// assert rule checker should generate replace down peer operator after cached
+	s.cluster.SetStoreDown(2)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(2), DownSeconds: 60000}}))
+	op = s.rc.Check(region)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "replace-rule-down-peer")
+}
