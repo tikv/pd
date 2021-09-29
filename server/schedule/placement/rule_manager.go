@@ -19,7 +19,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/server/config"
 	"regexp"
 	"sort"
 	"strings"
@@ -29,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
