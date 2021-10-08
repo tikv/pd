@@ -38,6 +38,7 @@ var (
 	ErrResetUserTimestamp = errors.Normalize("reset user timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrResetUserTimestamp"))
 	ErrGenerateTimestamp  = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
 	ErrLogicOverflow      = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
+	ErrProxyTSOTimeout    = errors.Normalize("proxy tso timeout", errors.RFCCodeText("PD:tso:ErrProxyTSOTimeout"))
 )
 
 // member errors
@@ -165,13 +166,12 @@ var (
 
 // grpc errors
 var (
-	ErrGRPCDial            = errors.Normalize("dial error", errors.RFCCodeText("PD:grpc:ErrGRPCDial"))
-	ErrCloseGRPCConn       = errors.Normalize("close gRPC connection failed", errors.RFCCodeText("PD:grpc:ErrCloseGRPCConn"))
-	ErrGRPCSend            = errors.Normalize("send request error", errors.RFCCodeText("PD:grpc:ErrGRPCSend"))
-	ErrGRPCRecv            = errors.Normalize("receive response error", errors.RFCCodeText("PD:grpc:ErrGRPCRecv"))
-	ErrGRPCCloseSend       = errors.Normalize("close send error", errors.RFCCodeText("PD:grpc:ErrGRPCCloseSend"))
-	ErrGRPCCreateStream    = errors.Normalize("create stream error", errors.RFCCodeText("PD:grpc:ErrGRPCCreateStream"))
-	ErrGRPCProxyTSOTimeout = errors.Normalize("proxy tso timeout", errors.RFCCodeText("PD:grpc:ErrGRPCProxyTSOTimeout"))
+	ErrGRPCDial         = errors.Normalize("dial error", errors.RFCCodeText("PD:grpc:ErrGRPCDial"))
+	ErrCloseGRPCConn    = errors.Normalize("close gRPC connection failed", errors.RFCCodeText("PD:grpc:ErrCloseGRPCConn"))
+	ErrGRPCSend         = errors.Normalize("send request error", errors.RFCCodeText("PD:grpc:ErrGRPCSend"))
+	ErrGRPCRecv         = errors.Normalize("receive response error", errors.RFCCodeText("PD:grpc:ErrGRPCRecv"))
+	ErrGRPCCloseSend    = errors.Normalize("close send error", errors.RFCCodeText("PD:grpc:ErrGRPCCloseSend"))
+	ErrGRPCCreateStream = errors.Normalize("create stream error", errors.RFCCodeText("PD:grpc:ErrGRPCCreateStream"))
 )
 
 // proto errors

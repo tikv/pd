@@ -331,11 +331,6 @@ error = '''
 dial error
 '''
 
-["PD:grpc:ErrGRPCProxyTSOTimeout"]
-error = '''
-proxy tso timeout
-'''
-
 ["PD:grpc:ErrGRPCRecv"]
 error = '''
 receive response error
@@ -624,6 +619,11 @@ get local allocator failed, %s
 ["PD:tso:ErrLogicOverflow"]
 error = '''
 logic part overflow
+'''
+
+["PD:tso:ErrProxyTSOTimeout"]
+error = '''
+proxy tso timeout
 '''
 
 ["PD:tso:ErrResetUserTimestamp"]
