@@ -90,6 +90,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/config/default", confHandler.GetDefault).Methods("GET")
 	apiRouter.HandleFunc("/config/schedule", confHandler.GetSchedule).Methods("GET")
 	apiRouter.HandleFunc("/config/schedule", confHandler.SetSchedule).Methods("POST")
+	apiRouter.HandleFunc("/config/pd-server", confHandler.GetPDServer).Methods("GET")
 	apiRouter.HandleFunc("/config/replicate", confHandler.GetReplication).Methods("GET")
 	apiRouter.HandleFunc("/config/replicate", confHandler.SetReplication).Methods("POST")
 	apiRouter.HandleFunc("/config/label-property", confHandler.GetLabelProperty).Methods("GET")
