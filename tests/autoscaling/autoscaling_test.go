@@ -27,7 +27,6 @@ import (
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-
 	"go.uber.org/goleak"
 )
 
