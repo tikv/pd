@@ -302,7 +302,33 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cluster.CheckClusterDCLocation()
 	cluster.WaitAllLeaders(c, dcLocationConfig)
 
-	wg := sync.WaitGroup{}
+	wg := &sync.WaitGroup{}
+	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
+
+	// Test a nonexistent dc-location for Local TSO
+	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
+	c.Assert(p, Equals, int64(0))
+	c.Assert(l, Equals, int64(0))
+	c.Assert(err, NotNil)
+
+	// assert global tso after resign leader
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`), IsNil)
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, NotNil)
+	c.Assert(pd.IsLeaderChange(err), IsTrue)
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"), IsNil)
+
+	// Test the TSO follower proxy while enabling the Local TSO.
+	cli = setupCli(c, s.ctx, endpoints, pd.WithTSOFollowerProxy(true))
+	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
+}
+
+func requestGlobalAndLocalTSO(c *C, wg *sync.WaitGroup, dcLocationConfig map[string]string, cli pd.Client) {
 	for _, dcLocation := range dcLocationConfig {
 		wg.Add(tsoRequestConcurrencyNumber)
 		for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -329,24 +355,6 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 		}
 	}
 	wg.Wait()
-
-	// Test a nonexistent dc-location for Local TSO
-	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
-	c.Assert(p, Equals, int64(0))
-	c.Assert(l, Equals, int64(0))
-	c.Assert(err, NotNil)
-
-	// assert global tso after resign leader
-	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`), IsNil)
-	defer failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember")
-	err = cluster.ResignLeader()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	_, _, err = cli.GetTS(s.ctx)
-	c.Assert(err, NotNil)
-	c.Assert(pd.IsLeaderChange(err), IsTrue)
-	_, _, err = cli.GetTS(s.ctx)
-	c.Assert(err, IsNil)
 }
 
 func (s *clientTestSuite) TestCustomTimeout(c *C) {
