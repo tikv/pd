@@ -79,15 +79,15 @@ func (s *apiTestSuite) TestAPI(c *C) {
                 "min_threshold":0.2,
                 "resource_types":[
                     "resource_a",
-					"default_homogeneous_tikv"
+                    "default_homogeneous_tikv"
                 ]
             },
             "storage_rule":{
-				"max_threshold":0.8,
-				"min_threshold":0.2,
+                "max_threshold":0.8,
+                "min_threshold":0.2,
                 "resource_types":[
                     "resource_a",
-					"default_homogeneous_tikv"
+                    "default_homogeneous_tikv"
                 ]
             }
         }
@@ -100,14 +100,14 @@ func (s *apiTestSuite) TestAPI(c *C) {
             "storage":10737418240,
             "count": 2
         },
-		{
+        {
             "resource_type":"default_homogeneous_tikv",
             "cpu":4000,
             "memory":17179869184,
             "storage":10737418240
         }
     ],
-	"node_count": 5
+    "node_count": 5
 }`),
 		autoscaling.TiDB: []byte(`
 {
@@ -119,15 +119,15 @@ func (s *apiTestSuite) TestAPI(c *C) {
                 "min_threshold":0.2,
                 "resource_types":[
                     "resource_b",
-					"default_homogeneous_tidb"
+                    "default_homogeneous_tidb"
                 ]
             },
             "storage_rule":{
-				"max_threshold":0.8,
-				"min_threshold":0.2,
+                "max_threshold":0.8,
+                "min_threshold":0.2,
                 "resource_types":[
-					"resource_b",
-					"default_homogeneous_tidb"
+                    "resource_b",
+                    "default_homogeneous_tidb"
                 ]
             }
         }
@@ -140,14 +140,14 @@ func (s *apiTestSuite) TestAPI(c *C) {
             "storage":10737418240,
             "count": 4
         },
-		{
+        {
             "resource_type":"default_homogeneous_tidb",
             "cpu":4000,
             "memory":8589934592,
             "storage":10737418240
         }
     ],
-	"node_count": 5
+    "node_count": 5
 }`),
 	}
 
