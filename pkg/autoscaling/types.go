@@ -174,6 +174,13 @@ func (c MetricType) String() string {
 	}
 }
 
+type ResourceKind int
+
+const (
+	CPU ResourceKind = iota
+	Storage
+)
+
 type instance struct {
 	id      uint64
 	address string

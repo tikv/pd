@@ -161,7 +161,7 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 
 	if storageUsage > storageMaxThreshold {
 		// generate homogeneous tikv plan
-		resources := getStorageResourcesByComponent(strategy, TiKV)
+		resources := getResourcesByComponentAndKind(strategy, TiKV, Storage)
 		homogeneousTiKVCount := getCountByResourceType(resources, homogeneousTiKVResourceType)
 
 		if resourceMap[homogeneousTiKVResourceType] == strategy.NodeCount || (homogeneousTiKVCount != nil && resourceMap[homogeneousTiKVResourceType] > *homogeneousTiKVCount) {
@@ -278,7 +278,7 @@ func getCPUPlans(querier Querier, instances []instance, strategy *Strategy, reso
 	totalInstanceCount := uint64(len(instances))
 	totalCPUUsage := totalCPUUsedTime / totalCPUQuota
 	cpuUsageTarget := (cpuMaxThreshold + cpuMinThreshold) / 2
-	resources := getCPUResourcesByComponent(strategy, component)
+	resources := getResourcesByComponentAndKind(strategy, component, CPU)
 
 	log.Debug("calculate total cpu usage information completed",
 		zap.String("component", component.String()),
@@ -497,34 +497,25 @@ func getTotalStorageInfo(rc *cluster.RaftCluster, healthyInstances []instance) (
 	}, nil
 }
 
-func getCPUResourcesByComponent(strategy *Strategy, component ComponentType) []*Resource {
+func getResourcesByComponentAndKind(strategy *Strategy, component ComponentType, kind ResourceKind) []*Resource {
 	var resources []*Resource
 
 	for _, rule := range strategy.Rules {
 		if rule.Component == component.String() {
-			for _, resourceType := range rule.CPURule.ResourceTypes {
-				resource := getResourceByResourceType(strategy, resourceType)
-				if resource != nil {
-					resources = append(resources, resource)
+			switch kind {
+			case CPU:
+				for _, resourceType := range rule.CPURule.ResourceTypes {
+					resource := getResourceByResourceType(strategy, resourceType)
+					if resource != nil {
+						resources = append(resources, resource)
+					}
 				}
-			}
-
-			return resources
-		}
-	}
-
-	return resources
-}
-
-func getStorageResourcesByComponent(strategy *Strategy, component ComponentType) []*Resource {
-	var resources []*Resource
-
-	for _, rule := range strategy.Rules {
-		if rule.Component == component.String() {
-			for _, resourceType := range rule.StorageRule.ResourceTypes {
-				resource := getResourceByResourceType(strategy, resourceType)
-				if resource != nil {
-					resources = append(resources, resource)
+			case Storage:
+				for _, resourceType := range rule.StorageRule.ResourceTypes {
+					resource := getResourceByResourceType(strategy, resourceType)
+					if resource != nil {
+						resources = append(resources, resource)
+					}
 				}
 			}
 
