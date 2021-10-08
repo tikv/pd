@@ -44,7 +44,7 @@ type response struct {
 }
 
 type data struct {
-	ResultType string   `json:"resultType"`
+	ResultType string   `json:"result_type"`
 	Result     []result `json:"result"`
 }
 
