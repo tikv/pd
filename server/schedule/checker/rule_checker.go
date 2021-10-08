@@ -97,10 +97,11 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		return nil
 	}
 	op, err := c.fixOrphanPeers(region, fit)
-	if err == nil && op != nil {
+	if err != nil {
+		log.Debug("fail to fix orphan peer", errs.ZapError(err))
+	} else if op != nil {
 		return op
 	}
-	log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	for _, rf := range fit.RuleFits {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
@@ -237,6 +238,10 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		}
 		checkerCounter.WithLabelValues("rule_checker", "no-new-leader").Inc()
 		return nil, errors.New("no new leader")
+	}
+	if core.IsVoter(peer) && rf.Rule.Role == placement.Learner {
+		checkerCounter.WithLabelValues("rule_checker", "demote-voter-role").Inc()
+		return operator.CreateDemoteVoterOperator("fix-demote-voter", c.cluster, region, peer)
 	}
 	return nil, nil
 }

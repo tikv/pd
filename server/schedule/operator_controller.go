@@ -927,19 +927,15 @@ func (oc *OperatorController) newStoreLimit(storeID uint64, ratePerSec float64, 
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
+	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	if oc.storesLimit[storeID][limitType] == nil {
-		ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 		oc.newStoreLimit(storeID, ratePerSec, limitType)
 		oc.cluster.AttachAvailableFunc(storeID, limitType, func() bool {
 			oc.RLock()
 			defer oc.RUnlock()
-			if oc.storesLimit[storeID][limitType] == nil {
-				return true
-			}
-			return oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
+			return oc.storesLimit[storeID][limitType] == nil || oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
 		})
 	}
-	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	if ratePerSec != oc.storesLimit[storeID][limitType].Rate() {
 		oc.newStoreLimit(storeID, ratePerSec, limitType)
 	}

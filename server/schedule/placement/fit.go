@@ -209,7 +209,6 @@ func (w *fitWorker) fitRule(index int) bool {
 		// 3. Not selected by other rules.
 		for _, p := range w.peers {
 			if MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) &&
-				p.matchRoleLoose(w.rules[index].Role) &&
 				!p.selected {
 				candidates = append(candidates, p)
 			}
@@ -316,13 +315,6 @@ func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 		return core.IsLearner(p.Peer)
 	}
 	return false
-}
-
-func (p *fitPeer) matchRoleLoose(role PeerRoleType) bool {
-	// non-learner cannot become learner. All other roles can migrate to
-	// others by scheduling. For example, Leader->Follower, Learner->Leader
-	// are possible, but Voter->Learner is impossible.
-	return role != Learner || core.IsLearner(p.Peer)
 }
 
 func isolationScore(peers []*fitPeer, labels []string) float64 {
