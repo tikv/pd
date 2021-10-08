@@ -230,7 +230,7 @@ func toRegionCache(r *core.RegionInfo) regionCache {
 // Only Up store should be cached in RegionFitCache
 func ValidateStores(stores []*core.StoreInfo) bool {
 	return slice.NoneOf(stores, func(i int) bool {
-		return stores[i].IsOffline() && stores[i].IsUnhealthy() && stores[i].IsDisconnected()
+		return stores[i].IsOffline() && stores[i].IsDisconnected()
 	})
 }
 
@@ -241,6 +241,5 @@ func ValidateRegion(region *core.RegionInfo) bool {
 
 // ValidateFit checks whether regionFit is valid
 func ValidateFit(fit *RegionFit) bool {
-	return fit != nil && fit.rules != nil && len(fit.rules) > 0 && fit.regionStores != nil && len(fit.regionStores) > 0 &&
-		fit.IsSatisfied()
+	return fit != nil && len(fit.rules) > 0 && len(fit.regionStores) > 0 && fit.IsSatisfied()
 }
