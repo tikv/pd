@@ -113,7 +113,7 @@ func getPlansByRule(rc *cluster.RaftCluster, strategy *Strategy, rule *Rule) ([]
 		return nil, err
 	}
 	if plans != nil {
-		log.Info("get autoscaling tikv plans completed", zap.Any("plans", plans))
+		log.Info("get autoscaling plans completed", zap.Any("plans", plans))
 	}
 
 	return mergePlans(plans, groups), nil
