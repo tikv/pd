@@ -295,7 +295,7 @@ func getCPUPlans(querier Querier, instances []instance, strategy *Strategy, reso
 
 		if resourceMap[homogeneousResourceType] >= strategy.NodeCount || (homogeneousCount != nil && resourceMap[homogeneousResourceType] >= *homogeneousCount) {
 			// homogeneous instance number reaches k8s node number or the resource limit,
-			// can not scale out homogeneous instance any more
+			// can not scale out homogeneous instance anymore
 			log.Warn("can not scale out homogeneous instance",
 				zap.String("component", component.String()),
 				zap.Uint64("homogeneous instance number", resourceMap[homogeneousResourceType]),
