@@ -42,7 +42,7 @@ type CheckerController struct {
 	splitChecker      *checker.SplitChecker
 	mergeChecker      *checker.MergeChecker
 	jointStateChecker *checker.JointStateChecker
-	priorityChecker   *checker.PriorityChecker
+	priorityInspector *checker.PriorityInspector
 	regionWaitingList cache.Cache
 }
 
@@ -60,7 +60,7 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager 
 		splitChecker:      checker.NewSplitChecker(cluster, ruleManager, labeler),
 		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
 		jointStateChecker: checker.NewJointStateChecker(cluster),
-		priorityChecker:   checker.NewPriorityChecker(cluster),
+		priorityInspector: checker.NewPriorityInspector(cluster),
 		regionWaitingList: regionWaitingList,
 	}
 }
@@ -80,15 +80,13 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 	}
 
 	if c.opts.IsPlacementRulesEnabled() {
-		fit := c.priorityChecker.Check(region)
-		if fit != nil { // priority checker is not paused
-			if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
-				if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-					return []*operator.Operator{op}
-				}
-				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
-				c.regionWaitingList.Put(region.GetID(), nil)
+		fit := c.priorityInspector.Inspect(region)
+		if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
+			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+				return []*operator.Operator{op}
 			}
+			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
+			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
@@ -144,12 +142,12 @@ func (c *CheckerController) RemoveWaitingRegion(id uint64) {
 
 // GetPriorityRegions returns the region in priority queue
 func (c *CheckerController) GetPriorityRegions() []uint64 {
-	return c.priorityChecker.GetPriorityRegions()
+	return c.priorityInspector.GetPriorityRegions()
 }
 
 // RemovePriorityRegions removes priority region from priority queue
 func (c *CheckerController) RemovePriorityRegions(id uint64) {
-	c.priorityChecker.RemovePriorityRegion(id)
+	c.priorityInspector.RemovePriorityRegion(id)
 }
 
 // GetPauseController returns pause controller of the checker
@@ -167,8 +165,6 @@ func (c *CheckerController) GetPauseController(name string) (*checker.PauseContr
 		return &c.mergeChecker.PauseController, nil
 	case "joint-state":
 		return &c.jointStateChecker.PauseController, nil
-	case "priority":
-		return &c.priorityChecker.PauseController, nil
 	default:
 		return nil, errs.ErrCheckerNotFound.FastGenByArgs()
 	}
