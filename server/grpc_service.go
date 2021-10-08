@@ -93,7 +93,10 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 	}, nil
 }
 
-const maxMergeTSORequests = 10000
+const (
+	maxMergeTSORequests    = 10000
+	defaultTSOProxyTimeout = 3 * time.Second
+)
 
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
@@ -176,8 +179,6 @@ func (s *Server) dispatchTSORequest(ctx context.Context, request *tsoRequest, fo
 	}
 	tsoRequestChInterface.(chan *tsoRequest) <- request
 }
-
-const defaultTSOProxyTimeout = 3 * time.Second
 
 func (s *Server) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error) {
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
