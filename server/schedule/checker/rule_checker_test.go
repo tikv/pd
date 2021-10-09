@@ -52,6 +52,7 @@ func (s *testRuleCheckerSerialSuite) TearDownTest(c *C) {
 
 func (s *testRuleCheckerSerialSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
+	cfg.SetPlacementRulesCacheEnabled(true)
 	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.cluster.SetEnablePlacementRules(true)
@@ -721,4 +722,43 @@ func (s *testRuleCheckerSuite) TestSkipFixOrphanPeerIfSelectedPeerisPendingOrDow
 	op = s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op.Step(0), FitsTypeOf, remove)
 	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+}
+
+// Ref https://github.com/tikv/pd/issues/4140
+func (s *testRuleCheckerSuite) TestDemoteVoter(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z4"})
+	region := s.cluster.AddLeaderRegion(1, 1, 4)
+	rule := &placement.Rule{
+		GroupID: "pd",
+		ID:      "test",
+		Role:    placement.Voter,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "zone",
+				Op:     placement.In,
+				Values: []string{"z1"},
+			},
+		},
+	}
+	rule2 := &placement.Rule{
+		GroupID: "pd",
+		ID:      "test2",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "zone",
+				Op:     placement.In,
+				Values: []string{"z4"},
+			},
+		},
+	}
+	s.ruleManager.SetRule(rule)
+	s.ruleManager.SetRule(rule2)
+	s.ruleManager.DeleteRule("pd", "default")
+	op := s.rc.Check(region)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "fix-demote-voter")
 }
