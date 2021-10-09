@@ -112,10 +112,12 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			return op
 		}
 	}
-	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() && fit.IsSatisfied() && len(region.GetDownPeers()) == 0 {
-		// If there is no need to fix, we will cache the fit
-		c.ruleManager.SetRegionFitCache(region, fit)
-		checkerCounter.WithLabelValues("rule_checker", "set-cache").Inc()
+	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() {
+		if placement.ValidateFit(fit) && placement.ValidateRegion(region) && placement.ValidateStores(fit.GetRegionStores()) {
+			// If there is no need to fix, we will cache the fit
+			c.ruleManager.SetRegionFitCache(region, fit)
+			checkerCounter.WithLabelValues("rule_checker", "set-cache").Inc()
+		}
 	}
 	return nil
 }
