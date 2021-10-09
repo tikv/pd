@@ -621,6 +621,11 @@ error = '''
 logic part overflow
 '''
 
+["PD:tso:ErrProxyTSOTimeout"]
+error = '''
+proxy tso timeout
+'''
+
 ["PD:tso:ErrResetUserTimestamp"]
 error = '''
 reset user timestamp failed, %s
