@@ -174,11 +174,11 @@ func (c MetricType) String() string {
 	}
 }
 
-type ResourceKind int
+type resourceKind int
 
 const (
-	CPU ResourceKind = iota
-	Storage
+	cpu resourceKind = iota
+	storage
 )
 
 type instance struct {
@@ -186,7 +186,7 @@ type instance struct {
 	address string
 }
 
-type storage struct {
+type storageInfo struct {
 	capacity float64
 	usedSize float64
 }

@@ -161,7 +161,7 @@ func getTiKVStoragePlans(rc *cluster.RaftCluster, instances []instance, strategy
 
 	if storageUsage > storageMaxThreshold {
 		// generate homogeneous tikv plan
-		resources := getResourcesByComponentAndKind(strategy, TiKV, Storage)
+		resources := getResourcesByComponentAndKind(strategy, TiKV, storage)
 		homogeneousTiKVCount := getCountByResourceType(resources, homogeneousTiKVResourceType)
 
 		if resourceMap[homogeneousTiKVResourceType] == strategy.NodeCount || (homogeneousTiKVCount != nil && resourceMap[homogeneousTiKVResourceType] > *homogeneousTiKVCount) {
@@ -278,7 +278,7 @@ func getCPUPlans(querier Querier, instances []instance, strategy *Strategy, reso
 	totalInstanceCount := uint64(len(instances))
 	totalCPUUsage := totalCPUUsedTime / totalCPUQuota
 	cpuUsageTarget := (cpuMaxThreshold + cpuMinThreshold) / 2
-	resources := getResourcesByComponentAndKind(strategy, component, CPU)
+	resources := getResourcesByComponentAndKind(strategy, component, cpu)
 
 	log.Debug("calculate total cpu usage information completed",
 		zap.String("component", component.String()),
@@ -470,7 +470,7 @@ func getHeterogeneousGroupsByComponent(resourceMap map[string]uint64, component 
 	return groups
 }
 
-func getTotalStorageInfo(rc *cluster.RaftCluster, healthyInstances []instance) (*storage, error) {
+func getTotalStorageInfo(rc *cluster.RaftCluster, healthyInstances []instance) (*storageInfo, error) {
 	var (
 		totalStorageUsedSize uint64
 		totalStorageCapacity uint64
@@ -491,26 +491,26 @@ func getTotalStorageInfo(rc *cluster.RaftCluster, healthyInstances []instance) (
 		}
 	}
 
-	return &storage{
+	return &storageInfo{
 		capacity: float64(totalStorageCapacity),
 		usedSize: float64(totalStorageUsedSize),
 	}, nil
 }
 
-func getResourcesByComponentAndKind(strategy *Strategy, component ComponentType, kind ResourceKind) []*Resource {
+func getResourcesByComponentAndKind(strategy *Strategy, component ComponentType, kind resourceKind) []*Resource {
 	var resources []*Resource
 
 	for _, rule := range strategy.Rules {
 		if rule.Component == component.String() {
 			switch kind {
-			case CPU:
+			case cpu:
 				for _, resourceType := range rule.CPURule.ResourceTypes {
 					resource := getResourceByResourceType(strategy, resourceType)
 					if resource != nil {
 						resources = append(resources, resource)
 					}
 				}
-			case Storage:
+			case storage:
 				for _, resourceType := range rule.StorageRule.ResourceTypes {
 					resource := getResourceByResourceType(strategy, resourceType)
 					if resource != nil {
