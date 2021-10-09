@@ -1026,6 +1026,9 @@ type ReplicationConfig struct {
 	// When PlacementRules feature is enabled. MaxReplicas, LocationLabels and IsolationLabels are not used any more.
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 
+	// EnablePlacementRuleCache controls whether use cache during rule checker
+	EnablePlacementRulesCache bool `toml:"enable-placement-rules-cache" json:"enable-placement-rules-cache,string"`
+
 	// IsolationLevel is used to isolate replicas explicitly and forcibly if it's not empty.
 	// Its value must be empty or one of LocationLabels.
 	// Example:
