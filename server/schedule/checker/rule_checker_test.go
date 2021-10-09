@@ -52,6 +52,7 @@ func (s *testRuleCheckerSerialSuite) TearDownTest(c *C) {
 
 func (s *testRuleCheckerSerialSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
+	cfg.SetPlacementRulesCacheEnabled(true)
 	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	s.cluster.SetEnablePlacementRules(true)

@@ -151,6 +151,18 @@ func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
 	o.SetReplicationConfig(v)
 }
 
+// IsPlacementRulesCacheEnabled returns if the placement rules cache is enabled
+func (o *PersistOptions) IsPlacementRulesCacheEnabled() bool {
+	return o.GetReplicationConfig().EnablePlacementRulesCache
+}
+
+// SetPlacementRulesCacheEnabled set EnablePlacementRulesCache
+func (o *PersistOptions) SetPlacementRulesCacheEnabled(enabled bool) {
+	v := o.GetReplicationConfig().Clone()
+	v.EnablePlacementRulesCache = enabled
+	o.SetReplicationConfig(v)
+}
+
 // GetStrictlyMatchLabel returns whether check label strict.
 func (o *PersistOptions) GetStrictlyMatchLabel() bool {
 	return o.GetReplicationConfig().StrictlyMatchLabel
