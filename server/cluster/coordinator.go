@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
@@ -857,7 +856,7 @@ func (s *scheduleController) Schedule() []*operator.Operator {
 		}
 		cacheCluster := opt.NewCacheCluster(s.cluster)
 		// If we have schedule, reset interval to the minimal interval.
-		if op := s.Scheduler.Schedule(cacheCluster); op != nil {
+		if op := s.Scheduler.Schedule(s.cluster); op != nil {
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return op
 		}
