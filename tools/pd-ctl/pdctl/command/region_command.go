@@ -41,7 +41,6 @@ var (
 	regionsVersionPrefix   = "pd/api/v1/regions/version"
 	regionsSizePrefix      = "pd/api/v1/regions/size"
 	regionsKeyPrefix       = "pd/api/v1/regions/key"
-	regionsKeysPrefix      = "pd/api/v1/regions/keys"
 	regionsSiblingPrefix   = "pd/api/v1/regions/sibling"
 	regionIDPrefix         = "pd/api/v1/region/id"
 	regionKeyPrefix        = "pd/api/v1/region/key"
@@ -58,8 +57,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionWithCheckCommand())
 	r.AddCommand(NewRegionWithSiblingCommand())
 	r.AddCommand(NewRegionWithStoreCommand())
-	r.AddCommand(NewRegionsWithStartKeyCommand())
-	r.AddCommand(NewRegionsWithKeysCommand())
+	r.AddCommand(NewRegionsByKeysCommand())
 
 	topRead := &cobra.Command{
 		Use:   `topread <limit> [--jq="<query string>"]`,
@@ -375,49 +373,10 @@ func decodeKey(text string) (string, error) {
 	return string(buf), nil
 }
 
-// NewRegionsWithStartKeyCommand returns regions from startkey subcommand of regionCmd.
-func NewRegionsWithStartKeyCommand() *cobra.Command {
+// NewRegionsWithKeysCommand returns regions in a given range[startkey, endkey) subcommand of regionCmd.
+func NewRegionsByKeysCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "startkey [--format=raw|encode|hex] <key> <limit>",
-		Short: "show regions from start key",
-		Run:   showRegionsFromStartKeyCommandFunc,
-	}
-
-	r.Flags().String("format", "hex", "the key format")
-	return r
-}
-
-func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) < 1 || len(args) > 2 {
-		cmd.Println(cmd.UsageString())
-		return
-	}
-	key, err := parseKey(cmd.Flags(), args[0])
-	if err != nil {
-		cmd.Println("Error: ", err)
-		return
-	}
-	key = url.QueryEscape(key)
-	prefix := regionsKeyPrefix + "?key=" + key
-	if len(args) == 2 {
-		if _, err = strconv.Atoi(args[1]); err != nil {
-			cmd.Println("limit should be a number")
-			return
-		}
-		prefix += "&limit=" + args[1]
-	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
-	if err != nil {
-		cmd.Printf("Failed to get region: %s\n", err)
-		return
-	}
-	cmd.Println(r)
-}
-
-// NewRegionsWithKeysCommand returns regions in a given range[startkey, endkey).
-func NewRegionsWithKeysCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   "keys [--format=raw|encode|hex] <start_key> <end_key>",
+		Use:   "keys [--format=raw|encode|hex] <start_key> <end_key> <limit>",
 		Short: "show regions in a given range[startkey, endkey)",
 		Run:   showRegionsByKeysCommandFunc,
 	}
@@ -427,23 +386,31 @@ func NewRegionsWithKeysCommand() *cobra.Command {
 }
 
 func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
+	if len(args) < 1 || len(args) > 3 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-
-	startKey, err := parseKey(cmd.Flags(), args[0])
+	key, err := parseKey(cmd.Flags(), args[0])
 	if err != nil {
 		cmd.Println("Error: ", err)
 		return
 	}
+	key = url.QueryEscape(key)
 	endKey, err := parseKey(cmd.Flags(), args[1])
 	if err != nil {
 		cmd.Println("Error: ", err)
 		return
 	}
-	uri := regionsKeysPrefix + "?start_key=" + url.QueryEscape(startKey) + "&end_key=" + url.QueryEscape(endKey)
-	r, err := doRequest(cmd, uri, http.MethodGet)
+	endKey = url.QueryEscape(endKey)
+	prefix := regionsKeyPrefix + "?key=" + key + "&end_key=" + endKey
+	if len(args) == 3 {
+		if _, err = strconv.Atoi(args[2]); err != nil {
+			cmd.Println("limit should be a number")
+			return
+		}
+		prefix += "&limit=" + args[2]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get region: %s\n", err)
 		return
