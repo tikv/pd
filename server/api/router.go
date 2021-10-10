@@ -166,7 +166,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	regionsHandler := newRegionsHandler(svr, rd)
 	clusterRouter.HandleFunc("/regions/key", regionsHandler.ScanRegions).Methods("GET")
-	clusterRouter.HandleFunc("/regions/keys", regionsHandler.ScanRegionsByKeys).Methods("GET")
 	clusterRouter.HandleFunc("/regions/count", regionsHandler.GetRegionCount).Methods("GET")
 	clusterRouter.HandleFunc("/regions/store/{id}", regionsHandler.GetStoreRegions).Methods("GET")
 	clusterRouter.HandleFunc("/regions/writeflow", regionsHandler.GetTopWriteFlow).Methods("GET")
