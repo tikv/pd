@@ -72,7 +72,7 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(NewShowLabelPropertyCommand())
 	sc.AddCommand(NewShowClusterVersionCommand())
 	sc.AddCommand(newShowReplicationModeCommand())
-	sc.AddCommand(NewShowServerCommand())
+	sc.AddCommand(NewShowServerConfigCommand())
 	return sc
 }
 
@@ -134,8 +134,8 @@ func newShowReplicationModeCommand() *cobra.Command {
 	}
 }
 
-// NewShowServerCommand returns a server configuration of show subcommand.
-func NewShowServerCommand() *cobra.Command {
+// NewShowServerConfigCommand returns a server configuration of show subcommand.
+func NewShowServerConfigCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "server",
 		Short: "show PD server config",
