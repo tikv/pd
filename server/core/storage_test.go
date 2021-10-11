@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -218,8 +218,8 @@ func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := mem.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	c.Assert(err, IsNil)
-	c.Assert(len(keys), Equals, 3)
-	c.Assert(len(values), Equals, 3)
+	c.Assert(keys, HasLen, 3)
+	c.Assert(values, HasLen, 3)
 
 	ssp := &ServiceSafePoint{}
 	for i, key := range keys {

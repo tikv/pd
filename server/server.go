@@ -141,8 +141,13 @@ type Server struct {
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
 	serviceSafePointLock sync.Mutex
 
+	//hot region history info storeage
+	hotRegionStorage *core.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
+	// tsoDispatcher is used to dispatch different TSO requests to
+	// the corresponding forwarding TSO channel.
+	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -391,7 +396,15 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
-
+	//initial hot_region_storage in here.
+	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
+	s.hotRegionStorage, err = core.NewHotRegionsStorage(
+		ctx, hotRegionPath, encryptionKeyManager, s.handler,
+		s.cfg.Schedule.HotRegionsResevervedDays,
+		s.cfg.Schedule.HotRegionsWriteInterval.Duration)
+	if err != nil {
+		return err
+	}
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
 		cb()
@@ -453,6 +466,10 @@ func (s *Server) Close() {
 	}
 	if err := s.storage.Close(); err != nil {
 		log.Error("close storage meet error", errs.ZapError(err))
+	}
+
+	if err := s.hotRegionStorage.Close(); err != nil {
+		log.Error("close hot region storage meet error", errs.ZapError(err))
 	}
 
 	// Run callbacks
@@ -701,6 +718,11 @@ func (s *Server) GetMember() *member.Member {
 // GetStorage returns the backend storage of server.
 func (s *Server) GetStorage() *core.Storage {
 	return s.storage
+}
+
+// GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
+func (s *Server) GetHistoryHotRegionStorage() *core.HotRegionStorage {
+	return s.hotRegionStorage
 }
 
 // SetStorage changes the storage only for test purpose.

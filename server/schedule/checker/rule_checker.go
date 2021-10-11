@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
@@ -33,6 +34,7 @@ import (
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
+	PauseController
 	cluster           opt.Cluster
 	ruleManager       *placement.RuleManager
 	name              string
@@ -59,12 +61,32 @@ func (c *RuleChecker) GetType() string {
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
-	fit := c.cluster.FitRegion(region)
+	fit := opt.FitRegion(c.cluster, region)
 	return c.CheckWithFit(region, fit)
 }
 
-// CheckWithFit checkWithFit is similar with Checker with placement.RegionFit
-func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) *operator.Operator {
+// CheckWithFit is similar with Checker with placement.RegionFit
+func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) (op *operator.Operator) {
+	if c.IsPaused() {
+		checkerCounter.WithLabelValues("rule_checker", "paused").Inc()
+		return nil
+	}
+	// If the fit is fetched from cache, it seems that the region doesn't need cache
+	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() && fit.IsCached() {
+		failpoint.Inject("assertShouldNotCache", func() {
+			panic("cached shouldn't be used")
+		})
+		checkerCounter.WithLabelValues("rule_checker", "get-cache").Inc()
+		return nil
+	}
+	failpoint.Inject("assertShouldCache", func() {
+		panic("cached should be used")
+	})
+
+	// If the fit is calculated by FitRegion, which means we get a new fit result, thus we should
+	// invalid the cache if it exists
+	c.ruleManager.InvalidCache(region.GetID())
+
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
 	c.record.refresh(c.cluster)
 
@@ -75,10 +97,11 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		return nil
 	}
 	op, err := c.fixOrphanPeers(region, fit)
-	if err == nil && op != nil {
+	if err != nil {
+		log.Debug("fail to fix orphan peer", errs.ZapError(err))
+	} else if op != nil {
 		return op
 	}
-	log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	for _, rf := range fit.RuleFits {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
@@ -87,6 +110,13 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		}
 		if op != nil {
 			return op
+		}
+	}
+	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() {
+		if placement.ValidateFit(fit) && placement.ValidateRegion(region) && placement.ValidateStores(fit.GetRegionStores()) {
+			// If there is no need to fix, we will cache the fit
+			c.ruleManager.SetRegionFitCache(region, fit)
+			checkerCounter.WithLabelValues("rule_checker", "set-cache").Inc()
 		}
 	}
 	return nil
@@ -211,6 +241,10 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		checkerCounter.WithLabelValues("rule_checker", "no-new-leader").Inc()
 		return nil, errors.New("no new leader")
 	}
+	if core.IsVoter(peer) && rf.Rule.Role == placement.Learner {
+		checkerCounter.WithLabelValues("rule_checker", "demote-voter-role").Inc()
+		return operator.CreateDemoteVoterOperator("fix-demote-voter", c.cluster, region, peer)
+	}
 	return nil, nil
 }
 
@@ -260,11 +294,26 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
 	}
-	// remove orphan peers only when all rules are satisfied (count+role)
+	// remove orphan peers only when all rules are satisfied (count+role) and all peers selected
+	// by RuleFits is not pending or down.
 	for _, rf := range fit.RuleFits {
 		if !rf.IsSatisfied() {
 			checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
 			return nil, nil
+		}
+		for _, p := range rf.Peers {
+			for _, pendingPeer := range region.GetPendingPeers() {
+				if pendingPeer.Id == p.Id {
+					checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
+					return nil, nil
+				}
+			}
+			for _, downPeer := range region.GetDownPeers() {
+				if downPeer.Peer.Id == p.Id {
+					checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
+					return nil, nil
+				}
+			}
 		}
 	}
 	checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
@@ -283,10 +332,8 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return false
 		}
+		// Only consider the state of the Store, not `stats.DownSeconds`.
 		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
-			continue
-		}
-		if stats.GetDownSeconds() < uint64(c.cluster.GetOpts().GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
 		return true

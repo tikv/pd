@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build tso_full_test || tso_function_test
 // +build tso_full_test tso_function_test
 
 package tso_test
@@ -88,7 +89,7 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 		obtainedServerNumber := 0
 		dcLocationMap := server.GetTSOAllocatorManager().GetClusterDCLocations()
 		c.Assert(err, IsNil)
-		c.Assert(len(dcLocationMap), Equals, testCase.dcLocationNumber)
+		c.Assert(dcLocationMap, HasLen, testCase.dcLocationNumber)
 		for obtainedDCLocation, info := range dcLocationMap {
 			obtainedServerNumber += len(info.ServerIDs)
 			for _, serverID := range info.ServerIDs {
@@ -135,7 +136,7 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 			cluster.GetEtcdClient(),
 			tsoAllocatorManager.GetLocalTSOSuffixPath(dcLocation))
 		c.Assert(err, IsNil)
-		c.Assert(len(suffixResp.Kvs), Equals, 1)
+		c.Assert(suffixResp.Kvs, HasLen, 1)
 		// Test the increment of the suffix
 		allSuffixResp, err := etcdutil.EtcdKVGet(
 			cluster.GetEtcdClient(),

@@ -12,9 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package labeler
-
-const (
-	// NoMerge is the label for the regions that should not merge.
-	NoMerge = "nomerge"
-)
+package distro

@@ -358,19 +358,14 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 	}
 	for i := 0; i < maxRetryCount; i++ {
-		currentPhysical, currentLogical := t.getTSO()
+		currentPhysical, _ := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
 			if leadership.Check() {
-				log.Info("this PD is a new leader, but sync hasn't been completed yet, wait for a while")
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
 			tsoCounter.WithLabelValues("not_leader_anymore", t.dcLocation).Inc()
-			log.Error("invalid timestamp",
-				zap.Any("timestamp-physical", currentPhysical),
-				zap.Any("timestamp-logical", currentLogical),
-				errs.ZapError(errs.ErrInvalidTimestamp))
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count

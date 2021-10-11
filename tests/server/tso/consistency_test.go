@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build tso_full_test || tso_consistency_test
 // +build tso_full_test tso_consistency_test
 
 package tso_test

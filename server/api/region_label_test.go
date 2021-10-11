@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -53,9 +54,9 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 	c.Assert(resp, HasLen, 0)
 
 	rules := []*labeler.LabelRule{
-		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "1234", "end_key": "5678"}},
-		{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "ab12", "end_key": "cd12"}},
-		{ID: "rule3", Labels: []labeler.RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "abcd", "end_key": "efef"}},
+		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},
+		{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
+		{ID: "rule3", Labels: []labeler.RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: makeKeyRanges("abcd", "efef")},
 	}
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
@@ -83,7 +84,7 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 
 	patch := labeler.LabelRulePatch{
 		SetRules: []*labeler.LabelRule{
-			{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Rule: map[string]interface{}{"start_key": "ab12", "end_key": "cd12"}},
+			{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
 		},
 		DeleteRules: []string{"rule1"},
 	}
@@ -94,4 +95,12 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 	c.Assert(err, IsNil)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[1], rules[2]})
+}
+
+func makeKeyRanges(keys ...string) []interface{} {
+	var res []interface{}
+	for i := 0; i < len(keys); i += 2 {
+		res = append(res, map[string]interface{}{"start_key": keys[i], "end_key": keys[i+1]})
+	}
+	return res
 }

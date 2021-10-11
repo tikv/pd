@@ -51,13 +51,13 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	output := make(map[string][]string)
 	err := readJSON(testDialClient, addr, &output)
 	c.Assert(err, IsNil)
-	c.Assert(len(output), Equals, 0)
+	c.Assert(output, HasLen, 0)
 
 	addr1 := fmt.Sprintf("%s/component/c1", urlPrefix)
 	var output1 []string
 	err = readJSON(testDialClient, addr1, &output)
 	c.Assert(strings.Contains(err.Error(), "404"), IsTrue)
-	c.Assert(len(output1), Equals, 0)
+	c.Assert(output1, HasLen, 0)
 
 	// register 2 c1, 1 c2, and 1 c3
 	reqs := []map[string]string{

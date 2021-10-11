@@ -15,6 +15,7 @@
 package config_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -109,7 +110,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
-	c.Assert(svr.GetPDServerConfig().TraceRegionFlow, Equals, false)
+	c.Assert(svr.GetPDServerConfig().TraceRegionFlow, IsFalse)
 
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "10"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
@@ -454,10 +455,10 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(err, IsNil)
 	b, _ = os.ReadFile(fname)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+	assertBundles(bundles, []placement.GroupBundle{
 		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}},
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}, c)
 
 	// test delete
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "pd")
@@ -467,9 +468,9 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(err, IsNil)
 	b, _ = os.ReadFile(fname)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+	assertBundles(bundles, []placement.GroupBundle{
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}, c)
 
 	// test delete regexp
 	bundle.ID = "pf"
@@ -487,9 +488,9 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(err, IsNil)
 	b, _ = os.ReadFile(fname)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+	assertBundles(bundles, []placement.GroupBundle{
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}, c)
 
 	// test save
 	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}
@@ -505,10 +506,10 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	b, err = os.ReadFile(fname)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+	assertBundles(bundles, []placement.GroupBundle{
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
 		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}, c)
 
 	// partial update, so still one group is left, no error
 	bundles = []placement.GroupBundle{{ID: "pe", Rules: []*placement.Rule{}}}
@@ -523,9 +524,9 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	b, err = os.ReadFile(fname)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(b, &bundles), IsNil)
-	c.Assert(bundles, DeepEquals, []placement.GroupBundle{
+	assertBundles(bundles, []placement.GroupBundle{
 		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}, c)
 }
 
 func (s *configTestSuite) TestReplicationMode(c *C) {
@@ -620,7 +621,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 		c.Assert(err, IsNil)
 		replicationCfg := config.ReplicationConfig{}
 		c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
-		c.Assert(len(replicationCfg.LocationLabels), Equals, expect)
+		c.Assert(replicationCfg.LocationLabels, HasLen, expect)
 	}
 
 	checkRuleCount := func(expect int) {
@@ -638,7 +639,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 		c.Assert(err, IsNil)
 		rule := placement.Rule{}
 		c.Assert(json.Unmarshal(output, &rule), IsNil)
-		c.Assert(len(rule.LocationLabels), Equals, expect)
+		c.Assert(rule.LocationLabels, HasLen, expect)
 	}
 
 	// update successfully when placement rules is not enabled.
@@ -699,4 +700,35 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	checkRuleCount(4)
 	checkLocaltionLabels(1)
 	checkRuleLocationLabels(1)
+}
+
+func assertBundles(a, b []placement.GroupBundle, c *C) {
+	c.Assert(len(a), Equals, len(b))
+	for i := 0; i < len(a); i++ {
+		assertBundle(a[i], b[i], c)
+	}
+}
+
+func assertBundle(a, b placement.GroupBundle, c *C) {
+	c.Assert(a.ID, Equals, b.ID)
+	c.Assert(a.Index, Equals, b.Index)
+	c.Assert(a.Override, Equals, b.Override)
+	c.Assert(len(a.Rules), Equals, len(b.Rules))
+	for i := 0; i < len(a.Rules); i++ {
+		assertRule(a.Rules[i], b.Rules[i], c)
+	}
+}
+
+func assertRule(a, b *placement.Rule, c *C) {
+	c.Assert(a.GroupID, Equals, b.GroupID)
+	c.Assert(a.ID, Equals, b.ID)
+	c.Assert(a.Index, Equals, b.Index)
+	c.Assert(a.Override, Equals, b.Override)
+	c.Assert(bytes.Equal(a.StartKey, b.StartKey), IsTrue)
+	c.Assert(bytes.Equal(a.EndKey, b.EndKey), IsTrue)
+	c.Assert(a.Role, Equals, b.Role)
+	c.Assert(a.Count, Equals, b.Count)
+	c.Assert(a.LabelConstraints, DeepEquals, b.LabelConstraints)
+	c.Assert(a.LocationLabels, DeepEquals, b.LocationLabels)
+	c.Assert(a.IsolationLevel, Equals, b.IsolationLevel)
 }

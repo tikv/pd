@@ -141,7 +141,7 @@ func (s *memberTestSuite) TestMemberDelete(c *C) {
 		key := member.GetServer().GetMember().GetDCLocationPath(member.GetServerID())
 		resp, err := etcdutil.EtcdKVGet(leader.GetEtcdClient(), key)
 		c.Assert(err, IsNil)
-		c.Assert(len(resp.Kvs), Equals, 0)
+		c.Assert(resp.Kvs, HasLen, 0)
 	}
 }
 

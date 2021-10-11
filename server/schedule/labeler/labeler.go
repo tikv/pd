@@ -96,45 +96,66 @@ func (l *RegionLabeler) adjustRule(rule *LabelRule) error {
 
 	switch rule.RuleType {
 	case KeyRange:
-		data, ok := rule.Rule.(map[string]interface{})
+		rules, ok := rule.Data.([]interface{})
 		if !ok {
-			return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %T", reflect.TypeOf(rule.Rule)))
+			return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %T", rule.Data))
 		}
-		startKey, ok := data["start_key"].(string)
-		if !ok {
-			return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid startKey type: %T", reflect.TypeOf(data["start_key"])))
+		if len(rules) == 0 {
+			return errs.ErrRegionRuleContent.FastGenByArgs("no key ranges")
 		}
-		endKey, ok := data["end_key"].(string)
-		if !ok {
-			return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid endKey type: %T", reflect.TypeOf(data["end_key"])))
+		rs := make([]*KeyRangeRule, 0, len(rules))
+		for _, r := range rules {
+			rr, err := l.adjustKeyRangeRule(r)
+			if err != nil {
+				return err
+			}
+			rs = append(rs, rr)
 		}
-		var r KeyRangeRule
-		r.StartKeyHex, r.EndKeyHex = startKey, endKey
-		var err error
-		r.StartKey, err = hex.DecodeString(r.StartKeyHex)
-		if err != nil {
-			return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
-		}
-		r.EndKey, err = hex.DecodeString(r.EndKeyHex)
-		if err != nil {
-			return errs.ErrHexDecodingString.FastGenByArgs(r.EndKeyHex)
-		}
-		if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
-			return errs.ErrRegionRuleContent.FastGenByArgs("endKey should be greater than startKey")
-		}
-		rule.Rule = &r
+		rule.Data = rs
 		return nil
 	}
 	log.Error("invalid rule type", zap.String("rule-type", rule.RuleType))
 	return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %s", rule.RuleType))
 }
 
+func (l *RegionLabeler) adjustKeyRangeRule(rule interface{}) (*KeyRangeRule, error) {
+	data, ok := rule.(map[string]interface{})
+	if !ok {
+		return nil, errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %T", reflect.TypeOf(rule)))
+	}
+	startKey, ok := data["start_key"].(string)
+	if !ok {
+		return nil, errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid startKey type: %T", reflect.TypeOf(data["start_key"])))
+	}
+	endKey, ok := data["end_key"].(string)
+	if !ok {
+		return nil, errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid endKey type: %T", reflect.TypeOf(data["end_key"])))
+	}
+	var r KeyRangeRule
+	r.StartKeyHex, r.EndKeyHex = startKey, endKey
+	var err error
+	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
+	if err != nil {
+		return nil, errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
+	}
+	r.EndKey, err = hex.DecodeString(r.EndKeyHex)
+	if err != nil {
+		return nil, errs.ErrHexDecodingString.FastGenByArgs(r.EndKeyHex)
+	}
+	if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
+		return nil, errs.ErrRegionRuleContent.FastGenByArgs("endKey should be greater than startKey")
+	}
+	return &r, nil
+}
+
 func (l *RegionLabeler) buildRangeList() {
 	builder := rangelist.NewBuilder()
 	for _, rule := range l.labelRules {
 		if rule.RuleType == KeyRange {
-			r := rule.Rule.(*KeyRangeRule)
-			builder.AddItem(r.StartKey, r.EndKey, rule)
+			rs := rule.Data.([]*KeyRangeRule)
+			for _, r := range rs {
+				builder.AddItem(r.StartKey, r.EndKey, rule)
+			}
 		}
 	}
 	l.rangeList = builder.Build()
@@ -243,37 +264,56 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 }
 
 // GetRegionLabel returns the label of the region for a key.
+// If there are multiple rules that match the key, the one with max rule index will be returned.
 func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) string {
 	l.RLock()
 	defer l.RUnlock()
+	value, index := "", -1
 	// search ranges
 	if i, data := l.rangeList.GetData(region.GetStartKey(), region.GetEndKey()); i != -1 {
 		for _, rule := range data {
-			for _, l := range rule.(*LabelRule).Labels {
+			r := rule.(*LabelRule)
+			if r.Index <= index && value != "" {
+				continue
+			}
+			for _, l := range r.Labels {
 				if l.Key == key {
-					return l.Value
+					value, index = l.Value, r.Index
 				}
 			}
 		}
 	}
-	return ""
+	return value
 }
 
 // GetRegionLabels returns the labels of the region.
+// For each key, the label with max rule index will be returned.
 func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel {
 	l.RLock()
 	defer l.RUnlock()
-	var result []*RegionLabel
+	type valueIndex struct {
+		value string
+		index int
+	}
+	labels := make(map[string]valueIndex)
+
 	// search ranges
 	if i, data := l.rangeList.GetData(region.GetStartKey(), region.GetEndKey()); i != -1 {
 		for _, rule := range data {
-			for _, l := range rule.(*LabelRule).Labels {
-				result = append(result, &RegionLabel{
-					Key:   l.Key,
-					Value: l.Value,
-				})
+			r := rule.(*LabelRule)
+			for _, l := range r.Labels {
+				if old, ok := labels[l.Key]; !ok || old.index < r.Index {
+					labels[l.Key] = valueIndex{l.Value, r.Index}
+				}
 			}
 		}
+	}
+	result := make([]*RegionLabel, 0, len(labels))
+	for k, l := range labels {
+		result = append(result, &RegionLabel{
+			Key:   k,
+			Value: l.value,
+		})
 	}
 	return result
 }

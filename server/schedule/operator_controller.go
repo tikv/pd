@@ -660,19 +660,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			return
 		}
 		cmd = addNode(st.PeerID, st.ToStore)
-	case operator.AddLightPeer:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.AddLearner:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
-	case operator.AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
@@ -948,29 +936,17 @@ func (oc *OperatorController) newStoreLimit(storeID uint64, ratePerSec float64, 
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
+	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	if oc.storesLimit[storeID][limitType] == nil {
-		ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 		oc.newStoreLimit(storeID, ratePerSec, limitType)
 		oc.cluster.AttachAvailableFunc(storeID, limitType, func() bool {
 			oc.RLock()
 			defer oc.RUnlock()
-			if oc.storesLimit[storeID][limitType] == nil {
-				return true
-			}
-			return oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
+			return oc.storesLimit[storeID][limitType] == nil || oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
 		})
 	}
-	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	if ratePerSec != oc.storesLimit[storeID][limitType].Rate() {
 		oc.newStoreLimit(storeID, ratePerSec, limitType)
 	}
 	return oc.storesLimit[storeID][limitType]
-}
-
-// GetLeaderSchedulePolicy is to get leader schedule policy.
-func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
-	if oc.cluster == nil {
-		return core.ByCount
-	}
-	return oc.cluster.GetOpts().GetLeaderSchedulePolicy()
 }

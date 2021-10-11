@@ -1,3 +1,17 @@
+// Copyright 2021 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package schedule
 
 import (
@@ -132,8 +146,8 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 	}
 
 	// Each store should have the same number of leaders.
-	c.Assert(len(countPeers), Equals, int(numStores))
-	c.Assert(len(countLeader), Equals, int(numStores))
+	c.Assert(countPeers, HasLen, int(numStores))
+	c.Assert(countLeader, HasLen, int(numStores))
 	for _, count := range countLeader {
 		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions)/float64(numStores))
 		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions)/float64(numStores))
@@ -282,10 +296,10 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 		_, err := scatterer.Scatter(testcase.checkRegion, "")
 		if testcase.needFix {
 			c.Assert(err, NotNil)
-			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, true)
+			c.Assert(tc.CheckRegionUnderSuspect(1), IsTrue)
 		} else {
 			c.Assert(err, IsNil)
-			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, false)
+			c.Assert(tc.CheckRegionUnderSuspect(1), IsFalse)
 		}
 		tc.ResetSuspectRegions()
 	}
@@ -399,7 +413,7 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
 		groupDistribution, exist := scatterer.ordinaryEngine.selectedLeader.GetGroupDistribution(group)
-		c.Assert(exist, Equals, true)
+		c.Assert(exist, IsTrue)
 		for _, count := range groupDistribution {
 			if count > max {
 				max = count
@@ -413,12 +427,12 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 		c.Assert(max, GreaterEqual, uint64(20))
 		c.Assert(max-min, LessEqual, uint64(3))
 		if testcase.failure {
-			c.Assert(len(failures), Equals, 1)
+			c.Assert(failures, HasLen, 1)
 			_, ok := failures[1]
-			c.Assert(ok, Equals, true)
+			c.Assert(ok, IsTrue)
 			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterFail"), IsNil)
 		} else {
-			c.Assert(len(failures), Equals, 0)
+			c.Assert(failures, HasLen, 0)
 		}
 	}
 }
@@ -432,14 +446,14 @@ func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
 	stores := newSelectedStores(ctx)
 	stores.Put(1, "testgroup")
 	_, ok := stores.GetGroupDistribution("testgroup")
-	c.Assert(ok, Equals, true)
+	c.Assert(ok, IsTrue)
 	_, ok = stores.GetGroupDistribution("testgroup")
-	c.Assert(ok, Equals, true)
+	c.Assert(ok, IsTrue)
 	time.Sleep(gcTTL)
 	_, ok = stores.GetGroupDistribution("testgroup")
-	c.Assert(ok, Equals, false)
+	c.Assert(ok, IsFalse)
 	_, ok = stores.GetGroupDistribution("testgroup")
-	c.Assert(ok, Equals, false)
+	c.Assert(ok, IsFalse)
 }
 
 // TestRegionFromDifferentGroups test the multi regions. each region have its own group.
