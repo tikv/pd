@@ -311,7 +311,7 @@ func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinato
 }
 
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
-	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	hbStreams, opt := co.hbStreams, tc.opt
 	defer cleanup()
 
@@ -321,7 +321,6 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
 	s.checkRegion(c, tc, co, 1, 1)
-	waitOperator(c, co, 1)
 	testutil.CheckAddPeer(c, co.opController.GetOperator(1), operator.OpReplica, 1)
 	s.checkRegion(c, tc, co, 1, 0)
 
@@ -333,12 +332,9 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	)
 	c.Assert(tc.putRegion(r), IsNil)
 	s.checkRegion(c, tc, co, 1, 0)
-	co.stop()
-	co.wg.Wait()
 
 	tc = newTestCluster(s.ctx, opt)
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
-	co.run()
 
 	c.Assert(tc.addRegionStore(4, 4), IsNil)
 	c.Assert(tc.addRegionStore(3, 3), IsNil)
@@ -349,7 +345,6 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	r = r.Clone(core.WithPendingPeers(nil))
 	c.Assert(tc.putRegion(r), IsNil)
 	s.checkRegion(c, tc, co, 1, 1)
-	waitOperator(c, co, 1)
 	op := co.opController.GetOperator(1)
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
@@ -360,7 +355,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0 // ensure replica checker is busy
 		cfg.MergeScheduleLimit = 10
-	}, nil, func(co *coordinator) { co.run() }, c)
+	}, nil, nil, c)
 	defer cleanup()
 
 	c.Assert(tc.addRegionStore(1, 0), IsNil)

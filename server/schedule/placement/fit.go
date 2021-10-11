@@ -77,6 +77,11 @@ func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 	return nil
 }
 
+// GetRegionStores returns region's stores
+func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
+	return f.regionStores
+}
+
 // CompareRegionFit determines the superiority of 2 fits.
 // It returns 1 when the first fit result is better.
 func CompareRegionFit(a, b *RegionFit) int {
@@ -209,7 +214,6 @@ func (w *fitWorker) fitRule(index int) bool {
 		// 3. Not selected by other rules.
 		for _, p := range w.peers {
 			if MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) &&
-				p.matchRoleLoose(w.rules[index].Role) &&
 				!p.selected {
 				candidates = append(candidates, p)
 			}
@@ -316,13 +320,6 @@ func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 		return core.IsLearner(p.Peer)
 	}
 	return false
-}
-
-func (p *fitPeer) matchRoleLoose(role PeerRoleType) bool {
-	// non-learner cannot become learner. All other roles can migrate to
-	// others by scheduling. For example, Leader->Follower, Learner->Leader
-	// are possible, but Voter->Learner is impossible.
-	return role != Learner || core.IsLearner(p.Peer)
 }
 
 func isolationScore(peers []*fitPeer, labels []string) float64 {

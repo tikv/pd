@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
@@ -45,13 +46,15 @@ type RuleManager struct {
 	keyType          string
 	storeSetInformer core.StoreSetInformer
 	cache            *RegionRuleFitCacheManager
+	opt              *config.PersistOptions
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(storage *core.Storage, storeSetInformer core.StoreSetInformer) *RuleManager {
+func NewRuleManager(storage *core.Storage, storeSetInformer core.StoreSetInformer, opt *config.PersistOptions) *RuleManager {
 	return &RuleManager{
 		storage:          storage,
 		storeSetInformer: storeSetInformer,
+		opt:              opt,
 		ruleConfig:       newRuleConfig(),
 		cache:            NewRegionRuleFitCacheManager(),
 	}
@@ -310,8 +313,10 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *RegionFit {
 	regionStores := getStoresByRegion(storeSet, region)
 	rules := m.GetRulesForApplyRegion(region)
-	if ok, fit := m.cache.CheckAndGetCache(region, rules, regionStores); fit != nil && ok {
-		return fit
+	if m.opt.IsPlacementRulesCacheEnabled() {
+		if ok, fit := m.cache.CheckAndGetCache(region, rules, regionStores); fit != nil && ok {
+			return fit
+		}
 	}
 	fit := FitRegion(regionStores, region, rules)
 	fit.regionStores = regionStores

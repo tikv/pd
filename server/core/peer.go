@@ -23,6 +23,11 @@ func IsLearner(peer *metapb.Peer) bool {
 	return peer.GetRole() == metapb.PeerRole_Learner
 }
 
+// IsVoter judges whether the Peer's Role is Voter
+func IsVoter(peer *metapb.Peer) bool {
+	return peer.GetRole() == metapb.PeerRole_Voter
+}
+
 // IsVoterOrIncomingVoter judges whether peer role will become Voter.
 // The peer is not nil and the role is equal to IncomingVoter or Voter.
 func IsVoterOrIncomingVoter(peer *metapb.Peer) bool {
