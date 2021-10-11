@@ -276,6 +276,13 @@ var (
 	ErrLevelDBOpen  = errors.Normalize("leveldb open file error", errors.RFCCodeText("PD:leveldb:ErrLevelDBOpen"))
 )
 
+// BadgerDB errors
+var (
+	ErrBadgerDBClose = errors.Normalize("close badgerdb error", errors.RFCCodeText("PD:badgerdb:ErrBadgerDBClose"))
+	ErrBadgerDBWrite = errors.Normalize("badgerdb write error", errors.RFCCodeText("PD:badgerdb:ErrBadgerDBWrite"))
+	ErrBadgerDBOpen  = errors.Normalize("badgerdb open file error", errors.RFCCodeText("PD:badgerdb:ErrBadgerDBOpen"))
+)
+
 // semver
 var (
 	ErrSemverNewVersion = errors.Normalize("new version error", errors.RFCCodeText("PD:semver:ErrSemverNewVersion"))

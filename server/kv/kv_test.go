@@ -67,6 +67,17 @@ func (s *testKVSuite) TestLevelDB(c *C) {
 	s.testRange(c, kv)
 }
 
+func (s *testKVSuite) TestBadgerDB(c *C) {
+	dir, err := os.MkdirTemp("/tmp", "badgerdb_kv")
+	c.Assert(err, IsNil)
+	defer os.RemoveAll(dir)
+	kv, err := NewBadgerDBKV(dir)
+	c.Assert(err, IsNil)
+
+	s.testReadWrite(c, kv)
+	s.testRange(c, kv)
+}
+
 func (s *testKVSuite) TestMemKV(c *C) {
 	kv := NewMemoryKV()
 	s.testReadWrite(c, kv)

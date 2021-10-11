@@ -32,7 +32,7 @@ var dirtyFlushTick = time.Second
 
 // RegionStorage is used to save regions.
 type RegionStorage struct {
-	*kv.LeveldbKV
+	*kv.BadgerDBKV
 	encryptionKeyManager *encryptionkm.KeyManager
 	mu                   sync.RWMutex
 	batchRegions         map[string]*metapb.Region
@@ -57,13 +57,13 @@ func NewRegionStorage(
 	path string,
 	encryptionKeyManager *encryptionkm.KeyManager,
 ) (*RegionStorage, error) {
-	levelDB, err := kv.NewLeveldbKV(path)
+	badgerDB, err := kv.NewBadgerDBKV(path)
 	if err != nil {
 		return nil, err
 	}
 	regionStorageCtx, regionStorageCancel := context.WithCancel(ctx)
 	s := &RegionStorage{
-		LeveldbKV:            levelDB,
+		BadgerDBKV:           badgerDB,
 		encryptionKeyManager: encryptionKeyManager,
 		batchSize:            defaultBatchSize,
 		flushRate:            defaultFlushRegionRate,
@@ -198,7 +198,7 @@ func (s *RegionStorage) Close() error {
 		log.Error("meet error before close the region storage", errs.ZapError(err))
 	}
 	s.regionStorageCancel()
-	err = s.LeveldbKV.Close()
+	err = s.BadgerDBKV.Close()
 	if err != nil {
 		return errs.ErrLevelDBClose.Wrap(err).GenWithStackByArgs()
 	}

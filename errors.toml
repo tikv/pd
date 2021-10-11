@@ -41,6 +41,21 @@ error = '''
 unsupported metrics type %v
 '''
 
+["PD:badgerdb:ErrBadgerDBClose"]
+error = '''
+close badgerdb error
+'''
+
+["PD:badgerdb:ErrBadgerDBOpen"]
+error = '''
+badgerdb open file error
+'''
+
+["PD:badgerdb:ErrBadgerDBWrite"]
+error = '''
+badgerdb write error
+'''
+
 ["PD:checker:ErrCheckerNotFound"]
 error = '''
 checker not found
