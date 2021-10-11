@@ -262,9 +262,8 @@ func (s *StoreInfo) NeedPersist() bool {
 
 // GetStoreLimit return the limit of a specific store.
 func (s *StoreInfo) GetStoreLimit(limitType storelimit.Type) *storelimit.StoreLimit {
-	if s == nil {
-		return nil
-	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.limiter[limitType]
 }
 

@@ -463,8 +463,13 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	operatorWaitDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
+		store := oc.cluster.GetStore(storeID)
+		if store == nil {
+			log.Error("invalid store ID", zap.Uint64("store-id", storeID))
+			return false
+		}
 		for n, v := range storelimit.TypeNameValue {
-			storeLimit := oc.cluster.GetStore(storeID).GetStoreLimit(v)
+			storeLimit := store.GetStoreLimit(v)
 			if storeLimit == nil {
 				continue
 			}
@@ -903,7 +908,11 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if stepCost == 0 {
 				continue
 			}
-			if oc.getOrCreateStoreLimit(storeID, v).Available() < stepCost {
+			limiter := oc.getOrCreateStoreLimit(storeID, v)
+			if limiter == nil {
+				return false
+			}
+			if limiter.Available() < stepCost {
 				return true
 			}
 		}
@@ -915,6 +924,10 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
 	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	s := oc.cluster.GetStore(storeID)
+	if s == nil {
+		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
+		return nil
+	}
 	if s.GetStoreLimit(limitType) == nil {
 		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
