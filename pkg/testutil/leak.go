@@ -18,6 +18,7 @@ import "go.uber.org/goleak"
 
 // LeakOptions is used to filter the goroutines.
 var LeakOptions = []goleak.Option{
+	goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).mpoolDrain"),
 	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).tCompaction"),
 	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb/util.(*BufferPool).drain"),

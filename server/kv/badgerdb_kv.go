@@ -31,7 +31,10 @@ type BadgerDBKV struct {
 
 // NewBadgerDBKV is used to store regions information.
 func NewBadgerDBKV(path string) (*BadgerDBKV, error) {
-	db, err := badger.Open(badger.DefaultOptions(path))
+	opts := badger.DefaultOptions(path)
+	// TODO: pass a logger correctly.
+	opts.Logger = nil
+	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, errs.ErrBadgerDBOpen.Wrap(err).GenWithStackByCause()
 	}
