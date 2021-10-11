@@ -32,6 +32,15 @@ import (
 
 // revive:disable:unused-parameter
 
+// SelectBadTargetStores selects stores that one of checkers not pass
+func SelectBadTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
+	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		return slice.AnyOf(filters, func(i int) bool {
+			return !filters[i].Target(opt, s)
+		})
+	})
+}
+
 // SelectSourceStores selects stores that be selected as source store from the list.
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {

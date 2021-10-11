@@ -53,14 +53,17 @@ type balancePlan struct {
 
 	sourceScore float64
 	targetScore float64
+
+	excludeTarget []*core.StoreInfo
 }
 
-func newBalancePlan(kind core.ScheduleKind, cluster opt.Cluster, opInfluence operator.OpInfluence) *balancePlan {
+func newBalancePlan(kind core.ScheduleKind, cluster opt.Cluster, opInfluence operator.OpInfluence, excludeTarget []*core.StoreInfo) *balancePlan {
 	return &balancePlan{
 		kind:              kind,
 		cluster:           cluster,
 		opInfluence:       opInfluence,
 		tolerantSizeRatio: adjustTolerantRatio(cluster, kind),
+		excludeTarget:     excludeTarget,
 	}
 }
 

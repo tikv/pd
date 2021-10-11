@@ -143,7 +143,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
 	opInfluence := l.opController.GetOpInfluence(cluster)
 	kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
-	plan := newBalancePlan(kind, cluster, opInfluence)
+	plan := newBalancePlan(kind, cluster, opInfluence, nil)
 
 	stores := cluster.GetStores()
 	sources := filter.SelectSourceStores(stores, l.filters, cluster.GetOpts())

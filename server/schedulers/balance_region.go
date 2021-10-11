@@ -93,7 +93,6 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 		setOption(scheduler)
 	}
 	scheduler.filters = []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true},
 		filter.NewSpecialUseFilter(scheduler.GetName()),
 	}
 	return scheduler
@@ -137,14 +136,17 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+	storeState := &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true}
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
+	excludeTargets := filter.SelectBadTargetStores(stores, []filter.Filter{filter.NewSpecialUseFilter(s.GetName()), storeState}, opts)
+
 	stores = filter.SelectSourceStores(stores, s.filters, opts)
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
 	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
-	plan := newBalancePlan(kind, cluster, opInfluence)
+	plan := newBalancePlan(kind, cluster, opInfluence, excludeTargets)
 
 	sort.Slice(stores, func(i, j int) bool {
 		iOp := plan.GetOpInfluence(stores[i].GetID())
@@ -152,7 +154,6 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return stores[i].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp) >
 			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
 	})
-
 	var allowBalanceEmptyRegion func(*core.RegionInfo) bool
 
 	switch cluster.(type) {
@@ -162,8 +163,11 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	default:
 		allowBalanceEmptyRegion = opt.AllowBalanceEmptyRegion(cluster)
 	}
-
-	for _, plan.source = range stores {
+	var index int
+	for index, plan.source = range stores {
+		if !storeState.Source(opts, plan.source) {
+			continue
+		}
 		retryLimit := s.retryQuota.GetLimit(plan.source)
 		for i := 0; i < retryLimit; i++ {
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
@@ -201,7 +205,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 				continue
 			}
 
-			if op := s.transferPeer(plan); op != nil {
+			if op := s.transferPeer(plan, stores[index:]); op != nil {
 				s.retryQuota.ResetLimit(plan.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}
@@ -214,20 +218,20 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Operator {
+func (s *balanceRegionScheduler) transferPeer(plan *balancePlan, dstStores []*core.StoreInfo) *operator.Operator {
+	excludeTargets := plan.region.GetStoreIds()
+	for _, v := range plan.excludeTarget {
+		excludeTargets[v.GetID()] = struct{}{}
+	}
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(s.GetName(), nil, plan.region.GetStoreIds()),
+		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
 		filter.NewPlacementSafeguard(s.GetName(), plan.cluster, plan.region, plan.source),
-		filter.NewRegionScoreFilter(s.GetName(), plan.source, plan.cluster.GetOpts()),
-		filter.NewSpecialUseFilter(s.GetName()),
-		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
 
-	candidates := filter.NewCandidates(plan.cluster.GetStores()).
-		FilterTarget(plan.cluster.GetOpts(), filters...).
-		Sort(filter.RegionScoreComparer(plan.cluster.GetOpts()))
+	candidates := filter.NewCandidates(dstStores).FilterTarget(plan.cluster.GetOpts(), filters...)
 
-	for _, plan.target = range candidates.Stores {
+	for i := range candidates.Stores {
+		plan.target = candidates.Stores[len(candidates.Stores)-i-1]
 		regionID := plan.region.GetID()
 		sourceID := plan.source.GetID()
 		targetID := plan.target.GetID()
