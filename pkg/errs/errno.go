@@ -278,9 +278,10 @@ var (
 
 // BadgerDB errors
 var (
+	ErrBadgerDBOpen  = errors.Normalize("badgerdb open file error", errors.RFCCodeText("PD:badgerdb:ErrBadgerDBOpen"))
 	ErrBadgerDBClose = errors.Normalize("close badgerdb error", errors.RFCCodeText("PD:badgerdb:ErrBadgerDBClose"))
 	ErrBadgerDBWrite = errors.Normalize("badgerdb write error", errors.RFCCodeText("PD:badgerdb:ErrBadgerDBWrite"))
-	ErrBadgerDBOpen  = errors.Normalize("badgerdb open file error", errors.RFCCodeText("PD:badgerdb:ErrBadgerDBOpen"))
+	ErrBadgerDBGC    = errors.Normalize("badgerdb garbage collection error", errors.RFCCodeText("PD:badgerdb:ErrBadgerDBGC"))
 )
 
 // semver

@@ -49,6 +49,8 @@ const (
 	defaultFlushRegionRate = 3 * time.Second
 	// DefaultBatchSize is the batch size to save the regions to region storage.
 	defaultBatchSize = 100
+	// defaultBadgerDBGCInterval is the interval that the BadgerDB do the garbage collection.
+	defaultBadgerDBGCInterval = 30 * time.Minute
 )
 
 // NewRegionStorage returns a region storage that is used to save regions.
@@ -73,6 +75,7 @@ func NewRegionStorage(
 		regionStorageCancel:  regionStorageCancel,
 	}
 	go s.backgroundFlush()
+	go s.backgroundGC()
 	return s, nil
 }
 
@@ -94,6 +97,22 @@ func (s *RegionStorage) backgroundFlush() {
 			}
 			if err = s.FlushRegion(); err != nil {
 				log.Error("flush regions meet error", errs.ZapError(err))
+			}
+		case <-s.regionStorageCtx.Done():
+			return
+		}
+	}
+}
+
+// BadgerDB relies on the client to perform garbage collection at a time of their choosing.
+func (s *RegionStorage) backgroundGC() {
+	ticker := time.NewTicker(defaultBadgerDBGCInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := s.BadgerDBKV.RunValueLogGC(0.5); err != nil {
+				log.Error("badgerdb garbage collection meet error, wait for the next retry", errs.ZapError(errs.ErrBadgerDBGC.Wrap(err).GenWithStackByArgs()))
 			}
 		case <-s.regionStorageCtx.Done():
 			return
@@ -200,7 +219,7 @@ func (s *RegionStorage) Close() error {
 	s.regionStorageCancel()
 	err = s.BadgerDBKV.Close()
 	if err != nil {
-		return errs.ErrLevelDBClose.Wrap(err).GenWithStackByArgs()
+		return errs.ErrBadgerDBClose.Wrap(err).GenWithStackByArgs()
 	}
 	return nil
 }

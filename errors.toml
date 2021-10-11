@@ -46,6 +46,11 @@ error = '''
 close badgerdb error
 '''
 
+["PD:badgerdb:ErrBadgerDBGC"]
+error = '''
+badgerdb garbage collection error
+'''
+
 ["PD:badgerdb:ErrBadgerDBOpen"]
 error = '''
 badgerdb open file error

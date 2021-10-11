@@ -94,7 +94,7 @@ func (kv *BadgerDBKV) LoadRange(startKey, endKey string, limit int) ([]string, [
 		return nil
 	})
 	if err != nil {
-		return []string{}, []string{}, errors.WithStack(err)
+		return nil, nil, errors.WithStack(err)
 	}
 	return keys, values, nil
 }

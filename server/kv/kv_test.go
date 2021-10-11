@@ -120,8 +120,10 @@ func (s *testKVSuite) testRange(c *C, kv Base) {
 		limit      int
 		expect     []string
 	}{
-		{start: "", end: "z", limit: 100, expect: sortedKeys},
+		{start: "", end: "z", limit: 1, expect: sortedKeys[:1]},
 		{start: "", end: "z", limit: 3, expect: sortedKeys[:3]},
+		{start: "", end: "z", limit: len(sortedKeys), expect: sortedKeys},
+		{start: "testa", end: "testa/", limit: 100, expect: []string{"testa"}},
 		{start: "testa", end: "z", limit: 3, expect: []string{"testa", "testa/a", "testa/ab"}},
 		{start: "test/", end: clientv3.GetPrefixRangeEnd("test/"), limit: 100, expect: []string{"test/a", "test/ab"}},
 		{start: "test-a/", end: clientv3.GetPrefixRangeEnd("test-a/"), limit: 100, expect: []string{"test-a/a", "test-a/ab"}},
