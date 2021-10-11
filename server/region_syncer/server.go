@@ -95,7 +95,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		tlsConfig: s.GetTLSConfig(),
 	}
 	syncer.mu.streams = make(map[string]ServerStream)
-	syncer.mu.clientCtx, syncer.mu.clientCancel = context.WithCancel(s.LoopContext())
+	syncer.mu.clientCtx, syncer.mu.clientCancel = context.WithCancel(context.Background())
 	return syncer
 }
 
