@@ -307,7 +307,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		}
 		isPaused, err := handler.IsSchedulerPaused(createdName)
 		c.Assert(err, IsNil)
-		c.Assert(isPaused, Equals, true)
+		c.Assert(isPaused, IsTrue)
 	}
 	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
@@ -322,7 +322,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		}
 		isPaused, err := handler.IsSchedulerPaused(createdName)
 		c.Assert(err, IsNil)
-		c.Assert(isPaused, Equals, false)
+		c.Assert(isPaused, IsFalse)
 	}
 
 	// test resume all schedulers.
@@ -343,7 +343,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		}
 		isPaused, err := handler.IsSchedulerPaused(createdName)
 		c.Assert(err, IsNil)
-		c.Assert(isPaused, Equals, false)
+		c.Assert(isPaused, IsFalse)
 	}
 
 	// delete schedulers.
@@ -435,7 +435,7 @@ func (s *testScheduleSuite) testPauseOrResume(name, createdName string, body []b
 	c.Assert(err, IsNil)
 	isPaused, err := handler.IsSchedulerPaused(createdName)
 	c.Assert(err, IsNil)
-	c.Assert(isPaused, Equals, true)
+	c.Assert(isPaused, IsTrue)
 	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
@@ -444,7 +444,7 @@ func (s *testScheduleSuite) testPauseOrResume(name, createdName string, body []b
 	time.Sleep(time.Second)
 	isPaused, err = handler.IsSchedulerPaused(createdName)
 	c.Assert(err, IsNil)
-	c.Assert(isPaused, Equals, false)
+	c.Assert(isPaused, IsFalse)
 
 	// test resume.
 	input = make(map[string]interface{})
@@ -460,7 +460,7 @@ func (s *testScheduleSuite) testPauseOrResume(name, createdName string, body []b
 	c.Assert(err, IsNil)
 	isPaused, err = handler.IsSchedulerPaused(createdName)
 	c.Assert(err, IsNil)
-	c.Assert(isPaused, Equals, false)
+	c.Assert(isPaused, IsFalse)
 
 	if extraTest != nil {
 		extraTest(createdName, c)

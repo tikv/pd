@@ -218,8 +218,8 @@ func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := mem.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	c.Assert(err, IsNil)
-	c.Assert(len(keys), Equals, 3)
-	c.Assert(len(values), Equals, 3)
+	c.Assert(keys, HasLen, 3)
+	c.Assert(values, HasLen, 3)
 
 	ssp := &ServiceSafePoint{}
 	for i, key := range keys {

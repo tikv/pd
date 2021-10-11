@@ -37,6 +37,13 @@ func CreateAddPeerOperator(desc string, cluster opt.Cluster, region *core.Region
 		Build(kind)
 }
 
+// CreateDemoteVoterOperator creates an operator that demotes a voter
+func CreateDemoteVoterOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+	return NewBuilder(desc, cluster, region).
+		DemoteVoter(peer.GetStoreId()).
+		Build(0)
+}
+
 // CreatePromoteLearnerOperator creates an operator that promotes a learner.
 func CreatePromoteLearnerOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
