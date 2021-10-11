@@ -44,7 +44,7 @@ func NewBadgerDBKV(path string) (*BadgerDBKV, error) {
 // Load gets a value for a given key.
 func (kv *BadgerDBKV) Load(key string) (string, error) {
 	var value string
-	err := kv.View(func(txn *badger.Txn) error {
+	if err := kv.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(key))
 		if err != nil {
 			return err
@@ -55,8 +55,7 @@ func (kv *BadgerDBKV) Load(key string) (string, error) {
 		}
 		value = string(valueByte)
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		if err == badger.ErrKeyNotFound {
 			return "", nil
 		}
@@ -69,7 +68,7 @@ func (kv *BadgerDBKV) Load(key string) (string, error) {
 func (kv *BadgerDBKV) LoadRange(startKey, endKey string, limit int) ([]string, []string, error) {
 	keys := make([]string, 0, limit)
 	values := make([]string, 0, limit)
-	err := kv.View(func(txn *badger.Txn) error {
+	if err := kv.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
 		count := 0
@@ -92,8 +91,7 @@ func (kv *BadgerDBKV) LoadRange(startKey, endKey string, limit int) ([]string, [
 			count++
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, nil, errors.WithStack(err)
 	}
 	return keys, values, nil
@@ -116,15 +114,15 @@ func (kv *BadgerDBKV) Remove(key string) error {
 // SaveRegions stores some regions.
 func (kv *BadgerDBKV) SaveRegions(regions map[string]*metapb.Region) error {
 	wb := kv.NewWriteBatch()
-
 	for key, r := range regions {
 		value, err := proto.Marshal(r)
 		if err != nil {
 			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
 		}
-		wb.Set([]byte(key), value)
+		if err := wb.Set([]byte(key), value); err != nil {
+			return err
+		}
 	}
-
 	if err := wb.Flush(); err != nil {
 		return errs.ErrBadgerDBWrite.Wrap(err).GenWithStackByCause()
 	}
