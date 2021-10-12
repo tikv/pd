@@ -557,7 +557,6 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 // @Summary List all range holes whitout any region info.
 // @Produce json
 // @Success 200 {object} [][]string
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/range-holes [get]
 func (h *regionsHandler) GetRangeHoles(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
