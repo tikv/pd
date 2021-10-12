@@ -203,29 +203,6 @@ func (s *testRegionSuite) TestRegionCheck(c *C) {
 	c.Assert(r7, DeepEquals, histKeys)
 }
 
-func (s *testGetRegionSuite) TestRegionRangeHoles(c *C) {
-	// Missing r0 with range ["", "a"]
-	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
-	// Missing r2 with range ["b", "c"]
-	r3 := newTestRegionInfo(3, 1, []byte("c"), []byte("d"))
-	r4 := newTestRegionInfo(4, 2, []byte("d"), []byte("e"))
-	// Missing r5 with range ["e", "x"]
-	r6 := newTestRegionInfo(5, 2, []byte("x"), []byte("z"))
-	mustRegionHeartbeat(c, s.svr, r1)
-	mustRegionHeartbeat(c, s.svr, r3)
-	mustRegionHeartbeat(c, s.svr, r4)
-	mustRegionHeartbeat(c, s.svr, r6)
-
-	url := fmt.Sprintf("%s/regions/range-holes", s.urlPrefix)
-	rangeHoles := new([]string)
-	c.Assert(readJSON(testDialClient, url, rangeHoles), IsNil)
-	c.Assert(*rangeHoles, DeepEquals, [][]string{
-		{"", "a"},
-		{"b", "c"},
-		{"e", "x"},
-	})
-}
-
 func (s *testRegionSuite) TestRegions(c *C) {
 	rs := []*core.RegionInfo{
 		newTestRegionInfo(2, 1, []byte("a"), []byte("b")),
@@ -488,6 +465,50 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	for i, v := range regionIds {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
+}
+
+// Start a new test suite to prevent from being interfered by other tests.
+var _ = Suite(&testGetRegionRangeHolesSuite{})
+
+type testGetRegionRangeHolesSuite struct {
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
+}
+
+func (s *testGetRegionRangeHolesSuite) SetUpSuite(c *C) {
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	mustBootstrapCluster(c, s.svr)
+}
+
+func (s *testGetRegionRangeHolesSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
+func (s *testGetRegionRangeHolesSuite) TestRegionRangeHoles(c *C) {
+	// Missing r0 with range ["", "a"]
+	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	// Missing r2 with range ["b", "c"]
+	r3 := newTestRegionInfo(3, 1, []byte("c"), []byte("d"))
+	r4 := newTestRegionInfo(4, 2, []byte("d"), []byte("e"))
+	// Missing r5 with range ["e", "x"]
+	r6 := newTestRegionInfo(5, 2, []byte("x"), []byte("z"))
+	mustRegionHeartbeat(c, s.svr, r1)
+	mustRegionHeartbeat(c, s.svr, r3)
+	mustRegionHeartbeat(c, s.svr, r4)
+	mustRegionHeartbeat(c, s.svr, r6)
+
+	url := fmt.Sprintf("%s/regions/range-holes", s.urlPrefix)
+	rangeHoles := new([][]string)
+	c.Assert(readJSON(testDialClient, url, rangeHoles), IsNil)
+	c.Assert(*rangeHoles, DeepEquals, [][]string{
+		{"", string(r1.GetStartKey())},
+		{string(r1.GetEndKey()), string(r3.GetStartKey())},
+		{string(r4.GetEndKey()), string(r6.GetStartKey())},
+	})
 }
 
 // Create n regions (0..n) of n stores (0..n).

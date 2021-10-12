@@ -17,7 +17,6 @@ package region_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -184,10 +183,8 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	}
 
 	// Test region range-holes.
-	r5 := pdctl.MustPutRegion(c, cluster, 5, 1, []byte("x"), []byte("z"),
-		core.SetWrittenBytes(100), core.SetReadBytes(100), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetApproximateSize(10))
+	r5 := pdctl.MustPutRegion(c, cluster, 5, 1, []byte("x"), []byte("z"))
 	output, e := pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "region", "range-holes"}...)
-	fmt.Printf("%s", string(output))
 	c.Assert(e, IsNil)
 	rangeHoles := new([][]string)
 	c.Assert(json.Unmarshal(output, rangeHoles), IsNil)

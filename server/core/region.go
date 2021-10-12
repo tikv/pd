@@ -1115,7 +1115,8 @@ func (r *RegionsInfo) GetRangeHoles() [][]string {
 		rangeHoles = make([][]string, 0)
 		lastEndKey = []byte("")
 	)
-	r.tree.scanRange([]byte(""), func(region *RegionInfo) bool {
+	// Start from the zero byte.
+	r.tree.scanRange(lastEndKey, func(region *RegionInfo) bool {
 		startKey := region.GetStartKey()
 		// The last end key should equal to the next start key.
 		// Otherwise it would mean there is a range hole between them.
