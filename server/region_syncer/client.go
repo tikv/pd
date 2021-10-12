@@ -123,7 +123,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		log.Info("region syncer start load region")
 		start := time.Now()
 		err := storage.LoadRegionsOnce(ctx, bc.CheckAndPutRegion)
-		log.Info("region syncer finished load region", zap.Duration("time_cost", time.Since(start)))
+		log.Info("region syncer finished load region", zap.Duration("time-cost", time.Since(start)))
 		if err != nil {
 			log.Warn("failed to load regions.", errs.ZapError(err))
 		}
