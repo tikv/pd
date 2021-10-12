@@ -16,6 +16,8 @@ package pd
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"reflect"
 	"sort"
@@ -66,6 +68,37 @@ type SecurityOption struct {
 	CAPath   string
 	CertPath string
 	KeyPath  string
+
+	SSLCABytes   []byte
+	SSLCertBytes []byte
+	SSLKEYBytes  []byte
+}
+
+// ToTLSConfig constructs a `*tls.Config` by SecurityOption.
+func (s *SecurityOption) ToTLSConfig() (*tls.Config, error) {
+	if len(s.SSLCABytes) != 0 || len(s.SSLCertBytes) != 0 || len(s.SSLKEYBytes) != 0 {
+		cert, err := tls.X509KeyPair(s.SSLCertBytes, s.SSLKEYBytes)
+		if err != nil {
+			return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+		}
+		certificates := []tls.Certificate{cert}
+		// Create a certificate pool from CA
+		certPool := x509.NewCertPool()
+		// Append the certificates from the CA
+		if !certPool.AppendCertsFromPEM(s.SSLCABytes) {
+			return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+		}
+		return &tls.Config{
+			Certificates: certificates,
+			RootCAs:      certPool,
+			NextProtos:   []string{"h2", "http/1.1"}, // specify `h2` to let Go use HTTP/2.
+		}, nil
+	}
+	return grpcutil.TLSConfig{
+		CAPath:   s.CAPath,
+		CertPath: s.CertPath,
+		KeyPath:  s.KeyPath,
+	}.ToTLSConfig()
 }
 
 // newBaseClient returns a new baseClient.
@@ -381,11 +414,7 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 	if ok {
 		return conn.(*grpc.ClientConn), nil
 	}
-	tlsCfg, err := grpcutil.TLSConfig{
-		CAPath:   c.security.CAPath,
-		CertPath: c.security.CertPath,
-		KeyPath:  c.security.KeyPath,
-	}.ToTLSConfig()
+	tlsCfg, err := c.security.ToTLSConfig()
 	if err != nil {
 		return nil, err
 	}

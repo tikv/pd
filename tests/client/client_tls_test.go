@@ -181,14 +181,30 @@ func (s *clientTLSTestSuite) testTLSReload(
 
 	// 6. new requests should trigger listener to reload valid certs
 	dctx, dcancel := context.WithTimeout(s.ctx, 5*time.Second)
+	caData, certData, keyData := loadTLSContent(c,
+		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
 	cli, err := pd.NewClientWithContext(dctx, endpoints, pd.SecurityOption{
-		CAPath:   testClientTLSInfo.TrustedCAFile,
-		CertPath: testClientTLSInfo.CertFile,
-		KeyPath:  testClientTLSInfo.KeyFile,
+		CAPath:       testClientTLSInfo.TrustedCAFile,
+		CertPath:     testClientTLSInfo.CertFile,
+		KeyPath:      testClientTLSInfo.KeyFile,
+		SSLCABytes:   caData,
+		SSLCertBytes: certData,
+		SSLKEYBytes:  keyData,
 	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
 	c.Assert(err, IsNil)
 	dcancel()
 	cli.Close()
+}
+
+func loadTLSContent(c *C, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
+	var err error
+	caData, err = os.ReadFile(caPath)
+	c.Assert(err, IsNil)
+	certData, err = os.ReadFile(certPath)
+	c.Assert(err, IsNil)
+	keyData, err = os.ReadFile(keyPath)
+	c.Assert(err, IsNil)
+	return
 }
 
 // copyTLSFiles clones certs files to dst directory.
