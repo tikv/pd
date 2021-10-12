@@ -130,6 +130,13 @@ func (bc *BasicCluster) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Re
 	return bc.Regions.GetAdjacentRegions(region)
 }
 
+// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
+func (bc *BasicCluster) GetRangeHoles() [][]string {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetRangeHoles()
+}
+
 // PauseLeaderTransfer prevents the store from been selected as source or
 // target store of TransferLeader.
 func (bc *BasicCluster) PauseLeaderTransfer(storeID uint64) error {

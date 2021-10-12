@@ -191,6 +191,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/regions/accelerate-schedule", regionsHandler.AccelerateRegionsScheduleInRange).Methods("POST")
 	clusterRouter.HandleFunc("/regions/scatter", regionsHandler.ScatterRegions).Methods("POST")
 	clusterRouter.HandleFunc("/regions/split", regionsHandler.SplitRegions).Methods("POST")
+	clusterRouter.HandleFunc("/regions/range-holes", regionsHandler.GetRangeHoles).Methods("GET")
 
 	apiRouter.Handle("/version", newVersionHandler(rd)).Methods("GET")
 	apiRouter.Handle("/status", newStatusHandler(svr, rd)).Methods("GET")

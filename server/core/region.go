@@ -1109,6 +1109,25 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Regi
 	return prev, next
 }
 
+// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
+func (r *RegionsInfo) GetRangeHoles() [][]string {
+	var (
+		rangeHoles = make([][]string, 0)
+		lastEndKey = []byte("")
+	)
+	r.tree.scanRange([]byte(""), func(region *RegionInfo) bool {
+		startKey := region.GetStartKey()
+		// The last end key should equal to the next start key.
+		// Otherwise it would mean there is a range hole between them.
+		if !bytes.Equal(lastEndKey, startKey) {
+			rangeHoles = append(rangeHoles, []string{string(lastEndKey), string(startKey)})
+		}
+		lastEndKey = region.GetEndKey()
+		return true
+	})
+	return rangeHoles
+}
+
 // GetAverageRegionSize returns the average region approximate size.
 func (r *RegionsInfo) GetAverageRegionSize() int64 {
 	if r.tree.length() == 0 {
