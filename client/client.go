@@ -107,6 +107,8 @@ type Client interface {
 	ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error)
 	// SplitRegions split regions by given split keys
 	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error)
+	// splitAndScatterRegions split regions by given split keys and scatter new regions
+	SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 	// UpdateOption updates the client option.
@@ -1692,6 +1694,32 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	if resp.Header.GetError() != nil {
 		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.Header.GetError().String())
 	}
+	return resp, nil
+}
+
+func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error) {
+	start := time.Now()
+	defer func() { cmdDurationScatterRegions.Observe(time.Since(start).Seconds()) }()
+	options := &RegionsOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	req := &pdpb.SplitAndScatterRegionsRequest{
+		Header:     c.requestHeader(),
+		SplitKeys:  splitKeys,
+		Group:      options.group,
+		RetryLimit: options.retryLimit,
+	}
+
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	resp, err := c.getClient().SplitAndScatterRegions(ctx, req)
+	cancel()
+
+	if err != nil {
+		return nil, err
+	}
+
 	return resp, nil
 }
 
