@@ -345,4 +345,16 @@ func (s *storeTestSuite) TestStore(c *C) {
 	err = json.Unmarshal(output, scene)
 	c.Assert(err, IsNil)
 	c.Assert(scene.Idle, Equals, 100)
+
+	// store limit all 201 is invalid for all
+	args = []string{"-u", pdAddr, "store", "limit", "all", "201"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "rate should less than"), IsTrue)
+
+	// store limit all 201 is invalid for label
+	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "key", "201", "add-peer"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "rate should less than"), IsTrue)
 }

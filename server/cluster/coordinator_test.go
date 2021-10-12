@@ -355,7 +355,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0 // ensure replica checker is busy
 		cfg.MergeScheduleLimit = 10
-	}, nil, func(co *coordinator) { co.run() }, c)
+	}, nil, nil, c)
 	defer cleanup()
 
 	c.Assert(tc.addRegionStore(1, 0), IsNil)

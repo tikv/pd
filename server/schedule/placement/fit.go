@@ -77,6 +77,11 @@ func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 	return nil
 }
 
+// GetRegionStores returns region's stores
+func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
+	return f.regionStores
+}
+
 // CompareRegionFit determines the superiority of 2 fits.
 // It returns 1 when the first fit result is better.
 func CompareRegionFit(a, b *RegionFit) int {
