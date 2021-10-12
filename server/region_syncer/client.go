@@ -40,10 +40,6 @@ const (
 // StopSyncWithLeader stop to sync the region with leader.
 func (s *RegionSyncer) StopSyncWithLeader() {
 	s.reset()
-	s.mu.Lock()
-	s.mu.clientCancel()
-	s.mu.clientCtx, s.mu.clientCancel = context.WithCancel(context.Background())
-	s.mu.Unlock()
 	s.wg.Wait()
 }
 
@@ -51,19 +47,15 @@ func (s *RegionSyncer) reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.mu.regionSyncerCancel == nil {
-		return
+	if s.mu.clientCancel != nil {
+		s.mu.clientCancel()
 	}
-	s.mu.regionSyncerCancel()
-	s.mu.regionSyncerCancel, s.mu.regionSyncerCtx = nil, nil
+	s.mu.clientCancel, s.mu.clientCtx = nil, nil
 }
 
-func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
-	s.reset()
-	ctx, cancel := context.WithCancel(s.server.LoopContext())
+func (s *RegionSyncer) establish(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	tlsCfg, err := s.tlsConfig.ToTLSConfig()
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 	cc, err := grpcutil.GetClientConn(
@@ -88,28 +80,16 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 		grpc.WithBlock(),
 	)
 	if err != nil {
-		cancel()
 		return nil, errors.WithStack(err)
 	}
-
-	s.mu.Lock()
-	s.mu.regionSyncerCtx, s.mu.regionSyncerCancel = ctx, cancel
-	s.mu.Unlock()
 	return cc, nil
 }
 
-func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
+func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (ClientStream, error) {
 	cli := pdpb.NewPDClient(conn)
-	var ctx context.Context
-	s.mu.RLock()
-	ctx = s.mu.regionSyncerCtx
-	s.mu.RUnlock()
-	if ctx == nil {
-		return nil, errors.New("syncRegion failed due to regionSyncerCtx is nil")
-	}
 	syncStream, err := cli.SyncRegions(ctx)
 	if err != nil {
-		return syncStream, errs.ErrGRPCCreateStream.Wrap(err).FastGenWithCause()
+		return nil, errs.ErrGRPCCreateStream.Wrap(err).FastGenWithCause()
 	}
 	err = syncStream.Send(&pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
@@ -117,7 +97,7 @@ func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 		StartIndex: s.history.GetNextIndex(),
 	})
 	if err != nil {
-		return syncStream, errs.ErrGRPCSend.Wrap(err).FastGenWithCause()
+		return nil, errs.ErrGRPCSend.Wrap(err).FastGenWithCause()
 	}
 
 	return syncStream, nil
@@ -128,9 +108,12 @@ var regionGuide = core.GenerateRegionGuideFunc(false)
 // StartSyncWithLeader starts to sync with leader.
 func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	s.wg.Add(1)
-	s.mu.RLock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mu.clientCtx, s.mu.clientCancel = context.WithCancel(s.server.LoopContext())
 	ctx := s.mu.clientCtx
-	s.mu.RUnlock()
+
 	go func() {
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.
@@ -151,7 +134,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				return
 			default:
 			}
-			conn, err = s.establish(addr)
+			conn, err = s.establish(ctx, addr)
 			if err != nil {
 				log.Error("cannot establish connection with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
 				continue
@@ -168,7 +151,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			default:
 			}
 
-			stream, err := s.syncRegion(conn)
+			stream, err := s.syncRegion(ctx, conn)
 			if err != nil {
 				if ev, ok := status.FromError(err); ok {
 					if ev.Code() == codes.Canceled {
