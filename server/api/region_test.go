@@ -489,13 +489,13 @@ func (s *testGetRegionRangeHolesSuite) TearDownSuite(c *C) {
 }
 
 func (s *testGetRegionRangeHolesSuite) TestRegionRangeHoles(c *C) {
-	// Missing r0 with range ["", "a"]
-	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
-	// Missing r2 with range ["b", "c"]
-	r3 := newTestRegionInfo(3, 1, []byte("c"), []byte("d"))
-	r4 := newTestRegionInfo(4, 2, []byte("d"), []byte("e"))
-	// Missing r5 with range ["e", "x"]
-	r6 := newTestRegionInfo(5, 2, []byte("x"), []byte("z"))
+	// Missing r0 with range [0, 0xEA]
+	r1 := newTestRegionInfo(2, 1, []byte{0xEA}, []byte{0xEB})
+	// Missing r2 with range [0xEB, 0xEC]
+	r3 := newTestRegionInfo(3, 1, []byte{0xEC}, []byte{0xED})
+	r4 := newTestRegionInfo(4, 2, []byte{0xED}, []byte{0xEE})
+	// Missing r5 with range [0xEE, 0xFE]
+	r6 := newTestRegionInfo(5, 2, []byte{0xFE}, []byte{0xFF})
 	mustRegionHeartbeat(c, s.svr, r1)
 	mustRegionHeartbeat(c, s.svr, r3)
 	mustRegionHeartbeat(c, s.svr, r4)
@@ -505,9 +505,9 @@ func (s *testGetRegionRangeHolesSuite) TestRegionRangeHoles(c *C) {
 	rangeHoles := new([][]string)
 	c.Assert(readJSON(testDialClient, url, rangeHoles), IsNil)
 	c.Assert(*rangeHoles, DeepEquals, [][]string{
-		{"", string(r1.GetStartKey())},
-		{string(r1.GetEndKey()), string(r3.GetStartKey())},
-		{string(r4.GetEndKey()), string(r6.GetStartKey())},
+		{"", core.HexRegionKeyStr(r1.GetStartKey())},
+		{core.HexRegionKeyStr(r1.GetEndKey()), core.HexRegionKeyStr(r3.GetStartKey())},
+		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r6.GetStartKey())},
 	})
 }
 

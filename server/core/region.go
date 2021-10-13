@@ -1121,7 +1121,7 @@ func (r *RegionsInfo) GetRangeHoles() [][]string {
 		// The last end key should equal to the next start key.
 		// Otherwise it would mean there is a range hole between them.
 		if !bytes.Equal(lastEndKey, startKey) {
-			rangeHoles = append(rangeHoles, []string{string(lastEndKey), string(startKey)})
+			rangeHoles = append(rangeHoles, []string{HexRegionKeyStr(lastEndKey), HexRegionKeyStr(startKey)})
 		}
 		lastEndKey = region.GetEndKey()
 		return true

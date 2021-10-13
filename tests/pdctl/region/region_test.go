@@ -189,7 +189,7 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	rangeHoles := new([][]string)
 	c.Assert(json.Unmarshal(output, rangeHoles), IsNil)
 	c.Assert(*rangeHoles, DeepEquals, [][]string{
-		{"", string(r1.GetStartKey())},
-		{string(r4.GetEndKey()), string(r5.GetStartKey())},
+		{"", core.HexRegionKeyStr(r1.GetStartKey())},
+		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r5.GetStartKey())},
 	})
 }
