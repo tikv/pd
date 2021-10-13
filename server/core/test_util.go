@@ -15,6 +15,8 @@ package core
 
 import (
 	"math"
+	"math/rand"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -121,4 +123,62 @@ func NewStoreInfoWithSizeCount(id uint64, regionCount, leaderCount int, regionSi
 		SetLeaderSize(leaderSize),
 	)
 	return store
+}
+
+// RandomKindReadQuery returns query stat with random query kind, only used for unit test.
+func RandomKindReadQuery(queryRead uint64) *pdpb.QueryStats {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	switch r.Intn(3) {
+	case 0:
+		return &pdpb.QueryStats{
+			Coprocessor: queryRead,
+		}
+	case 1:
+		return &pdpb.QueryStats{
+			Scan: queryRead,
+		}
+	case 2:
+		return &pdpb.QueryStats{
+			Get: queryRead,
+		}
+	default:
+		return &pdpb.QueryStats{}
+	}
+}
+
+// RandomKindWriteQuery returns query stat with random query kind, only used for unit test.
+func RandomKindWriteQuery(queryWrite uint64) *pdpb.QueryStats {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	switch r.Intn(7) {
+	case 0:
+		return &pdpb.QueryStats{
+			Put: queryWrite,
+		}
+	case 1:
+		return &pdpb.QueryStats{
+			Delete: queryWrite,
+		}
+	case 2:
+		return &pdpb.QueryStats{
+			DeleteRange: queryWrite,
+		}
+	case 3:
+		return &pdpb.QueryStats{
+			AcquirePessimisticLock: queryWrite,
+		}
+	case 4:
+		return &pdpb.QueryStats{
+			Rollback: queryWrite,
+		}
+	case 5:
+		return &pdpb.QueryStats{
+			Prewrite: queryWrite,
+		}
+	case 6:
+		return &pdpb.QueryStats{
+			Commit: queryWrite,
+		}
+	default:
+		return &pdpb.QueryStats{}
+	}
 }
