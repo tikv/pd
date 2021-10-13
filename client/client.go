@@ -282,16 +282,7 @@ func (c *client) updateTSODispatcher() {
 	c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
 		dcLocation := dcLocationKey.(string)
 		if !c.checkTSODispatcher(dcLocation) {
-			log.Info("[pd] create tso dispatcher", zap.String("dc-location", dcLocation))
 			c.createTSODispatcher(dcLocation)
-			dispatcher, _ := c.tsoDispatcher.Load(dcLocation)
-			dispatcherCtx := dispatcher.(*tsoDispatcher).dispatcherCtx
-			tsoRequestCh := dispatcher.(*tsoDispatcher).tsoRequestCh
-			// Each goroutine is responsible for handling the tso stream request for its dc-location.
-			// The only case that will make the dispatcher goroutine exit
-			// is that the loopCtx is done, otherwise there is no circumstance
-			// this goroutine should exit.
-			go c.handleDispatcher(dispatcherCtx, dcLocation, tsoRequestCh)
 		}
 		return true
 	})
@@ -488,6 +479,7 @@ func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel con
 		failpoint.Inject("unreachableNetwork", func() {
 			resp.Status = healthpb.HealthCheckResponse_UNKNOWN
 		})
+		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 			// create a stream of the original allocator
 			cctx, cancel := context.WithCancel(dispatcherCtx)
@@ -501,11 +493,9 @@ func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel con
 					cancel: cancel,
 					stream: stream,
 				}
-				healthCancel()
 				return
 			}
 		}
-		healthCancel()
 		select {
 		case <-dispatcherCtx.Done():
 			return
@@ -532,7 +522,13 @@ func (c *client) createTSODispatcher(dcLocation string) {
 		dispatcherCancel: dispatcherCancel,
 		tsoRequestCh:     make(chan *tsoRequest, maxMergeTSORequests),
 	}
+	// Each goroutine is responsible for handling the tso stream request for its dc-location.
+	// The only case that will make the dispatcher goroutine exit
+	// is that the loopCtx is done, otherwise there is no circumstance
+	// this goroutine should exit.
+	go c.handleDispatcher(dispatcherCtx, dcLocation, dispatcher.tsoRequestCh)
 	c.tsoDispatcher.Store(dcLocation, dispatcher)
+	log.Info("[pd] tso dispatcher created", zap.String("dc-location", dcLocation))
 }
 
 type streamCh chan struct {
@@ -911,11 +907,10 @@ func (c *client) followerClient() (pdpb.PDClient, string) {
 		}
 		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.timeout)
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
+		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			healthCancel()
 			return pdpb.NewPDClient(cc), addr
 		}
-		healthCancel()
 	}
 	return nil, ""
 }
