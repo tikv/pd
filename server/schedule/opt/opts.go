@@ -23,12 +23,6 @@ import (
 	"github.com/tikv/pd/server/versioninfo"
 )
 
-const (
-	// RejectLeader is the label property type that suggests a store should not
-	// have any region leaders.
-	RejectLeader = "reject-leader"
-)
-
 // Cluster provides an overview of a cluster's regions distribution.
 // TODO: This interface should be moved to a better place.
 type Cluster interface {

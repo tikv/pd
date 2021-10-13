@@ -357,7 +357,7 @@ func (f *StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store
 
 func (f *StoreStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, store *core.StoreInfo) bool {
 	f.Reason = "reject-leader"
-	return opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())
+	return opts.CheckLabelProperty(config.RejectLeader, store.GetLabels())
 }
 
 // The condition table.

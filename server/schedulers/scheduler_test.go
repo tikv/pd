@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
@@ -84,7 +83,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	defer cancel()
 	opts := config.NewTestOptions()
 	opts.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
+		config.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
 	tc := mockcluster.NewCluster(ctx, opts)
 
