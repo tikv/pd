@@ -86,7 +86,7 @@ func (s *SecurityOption) ToTLSConfig() (*tls.Config, error) {
 		certPool := x509.NewCertPool()
 		// Append the certificates from the CA
 		if !certPool.AppendCertsFromPEM(s.SSLCABytes) {
-			return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+			return nil, errs.ErrEtcdTLSConfig.Wrap(errors.New("failed to append ca certs")).GenWithStackByCause()
 		}
 		return &tls.Config{
 			Certificates: certificates,

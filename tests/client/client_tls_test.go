@@ -194,6 +194,25 @@ func (s *clientTLSTestSuite) testTLSReload(
 	c.Assert(err, IsNil)
 	dcancel()
 	cli.Close()
+
+	// 7. new client failed due to wrong tls certs
+	ctx1, cancel1 := context.WithTimeout(s.ctx, 2*time.Second)
+	cli, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
+		SSLCABytes:   caData,
+		SSLCertBytes: []byte("invalid cert"), // wrong cert
+		SSLKEYBytes:  keyData,
+	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	c.Assert(err, ErrorMatches, ".* failed to get cluster id.*")
+	cancel1()
+
+	ctx2, cancel2 := context.WithTimeout(s.ctx, 2*time.Second)
+	cli, err = pd.NewClientWithContext(ctx2, endpoints, pd.SecurityOption{
+		SSLCABytes:   []byte("invalid ca"), // wrong ca
+		SSLCertBytes: certData,
+		SSLKEYBytes:  keyData,
+	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	c.Assert(err, ErrorMatches, ".* failed to get cluster id.*")
+	cancel2()
 }
 
 func loadTLSContent(c *C, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
