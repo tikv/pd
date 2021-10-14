@@ -58,7 +58,7 @@ type StoreInfo struct {
 	lastPersistTime     time.Time
 	leaderWeight        float64
 	regionWeight        float64
-	available           map[storelimit.Type]func() bool
+	limiter             map[storelimit.Type]*storelimit.StoreLimit
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -68,6 +68,7 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 		storeStats:   newStoreStats(),
 		leaderWeight: 1.0,
 		regionWeight: 1.0,
+		limiter:      make(map[storelimit.Type]*storelimit.StoreLimit),
 	}
 	for _, opt := range opts {
 		opt(storeInfo)
@@ -91,7 +92,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		lastPersistTime:     s.lastPersistTime,
 		leaderWeight:        s.leaderWeight,
 		regionWeight:        s.regionWeight,
-		available:           s.available,
+		limiter:             s.limiter,
 	}
 
 	for _, opt := range opts {
@@ -115,7 +116,7 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 		lastPersistTime:     s.lastPersistTime,
 		leaderWeight:        s.leaderWeight,
 		regionWeight:        s.regionWeight,
-		available:           s.available,
+		limiter:             s.limiter,
 	}
 
 	for _, opt := range opts {
@@ -137,8 +138,10 @@ func (s *StoreInfo) EvictedAsSlowStore() bool {
 
 // IsAvailable returns if the store bucket of limitation is available
 func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
-	if s.available != nil && s.available[limitType] != nil {
-		return s.available[limitType]()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.limiter != nil && s.limiter[limitType] != nil {
+		return s.limiter[limitType].Available() >= storelimit.RegionInfluence[limitType]
 	}
 	return true
 }
@@ -255,6 +258,13 @@ func (s *StoreInfo) GetLastHeartbeatTS() time.Time {
 // NeedPersist returns if it needs to save to etcd.
 func (s *StoreInfo) NeedPersist() bool {
 	return s.GetLastHeartbeatTS().Sub(s.lastPersistTime) > storePersistInterval
+}
+
+// GetStoreLimit return the limit of a specific store.
+func (s *StoreInfo) GetStoreLimit(limitType storelimit.Type) *storelimit.StoreLimit {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.limiter[limitType]
 }
 
 const minWeight = 1e-6
@@ -611,10 +621,10 @@ func (s *StoresInfo) SlowStoreRecovered(storeID uint64) {
 	s.stores[storeID] = store.Clone(SlowStoreRecovered())
 }
 
-// AttachAvailableFunc attaches f to a specific store.
-func (s *StoresInfo) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
+// ResetStoreLimit resets the limit for a specific store.
+func (s *StoresInfo) ResetStoreLimit(storeID uint64, limitType storelimit.Type, ratePerSec ...float64) {
 	if store, ok := s.stores[storeID]; ok {
-		s.stores[storeID] = store.Clone(AttachAvailableFunc(limitType, f))
+		s.stores[storeID] = store.Clone(ResetStoreLimit(limitType, ratePerSec...))
 	}
 }
 
