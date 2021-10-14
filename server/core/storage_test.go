@@ -14,6 +14,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -142,7 +143,7 @@ func (s *testKVSuite) TestLoadRegions(c *C) {
 
 	n := 10
 	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegions(cache.SetRegion), IsNil)
+	c.Assert(storage.LoadRegions(context.Background(), cache.SetRegion), IsNil)
 
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
@@ -156,7 +157,7 @@ func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
 
 	n := 10
 	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegionsOnce(cache.SetRegion), IsNil)
+	c.Assert(storage.LoadRegionsOnce(context.Background(), cache.SetRegion), IsNil)
 
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
@@ -165,7 +166,7 @@ func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
 
 	n = 20
 	mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegionsOnce(cache.SetRegion), IsNil)
+	c.Assert(storage.LoadRegionsOnce(context.Background(), cache.SetRegion), IsNil)
 	c.Assert(cache.GetRegionCount(), Equals, n)
 }
 
@@ -175,7 +176,7 @@ func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
 
 	n := 1000
 	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegions(cache.SetRegion), IsNil)
+	c.Assert(storage.LoadRegions(context.Background(), cache.SetRegion), IsNil)
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])

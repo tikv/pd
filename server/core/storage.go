@@ -14,6 +14,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -160,22 +161,36 @@ func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (bool, erro
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (s *Storage) LoadRegions(f func(region *RegionInfo) []*RegionInfo) error {
+func (s *Storage) LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
+<<<<<<< HEAD
 		return loadRegions(s.regionStorage, f)
 	}
 	return loadRegions(s.Base, f)
+=======
+		return loadRegions(ctx, s.regionStorage, s.encryptionKeyManager, f)
+	}
+	return loadRegions(ctx, s.Base, s.encryptionKeyManager, f)
+>>>>>>> 335f3846d (core: allow cancel load region (#4175))
 }
 
 // LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
-func (s *Storage) LoadRegionsOnce(f func(region *RegionInfo) []*RegionInfo) error {
+func (s *Storage) LoadRegionsOnce(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) == 0 {
+<<<<<<< HEAD
 		return loadRegions(s.Base, f)
+=======
+		return loadRegions(ctx, s.Base, s.encryptionKeyManager, f)
+>>>>>>> 335f3846d (core: allow cancel load region (#4175))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.regionLoaded == 0 {
+<<<<<<< HEAD
 		if err := loadRegions(s.regionStorage, f); err != nil {
+=======
+		if err := loadRegions(ctx, s.regionStorage, s.encryptionKeyManager, f); err != nil {
+>>>>>>> 335f3846d (core: allow cancel load region (#4175))
 			return err
 		}
 		s.regionLoaded = 1

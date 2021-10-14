@@ -67,6 +67,7 @@ type Server interface {
 
 // RegionSyncer is used to sync the region information without raft.
 type RegionSyncer struct {
+<<<<<<< HEAD
 	sync.RWMutex
 	streams            map[string]ServerStream
 	regionSyncerCtx    context.Context
@@ -77,6 +78,19 @@ type RegionSyncer struct {
 	history            *historyBuffer
 	limit              *ratelimit.Bucket
 	securityConfig     *grpcutil.SecurityConfig
+=======
+	mu struct {
+		sync.RWMutex
+		streams      map[string]ServerStream
+		clientCtx    context.Context
+		clientCancel context.CancelFunc
+	}
+	server    Server
+	wg        sync.WaitGroup
+	history   *historyBuffer
+	limit     *ratelimit.Bucket
+	tlsConfig *grpcutil.TLSConfig
+>>>>>>> 335f3846d (core: allow cancel load region (#4175))
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -93,6 +107,11 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		limit:          ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
 		securityConfig: s.GetSecurityConfig(),
 	}
+<<<<<<< HEAD
+=======
+	syncer.mu.streams = make(map[string]ServerStream)
+	return syncer
+>>>>>>> 335f3846d (core: allow cancel load region (#4175))
 }
 
 // RunServer runs the server of the region syncer.
