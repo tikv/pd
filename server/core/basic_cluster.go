@@ -168,11 +168,11 @@ func (bc *BasicCluster) SlowStoreRecovered(storeID uint64) {
 	bc.Stores.SlowStoreRecovered(storeID)
 }
 
-// AttachAvailableFunc attaches an available function to a specific store.
-func (bc *BasicCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
+// ResetStoreLimit resets the limit for a specific store.
+func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Type, ratePerSec ...float64) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.AttachAvailableFunc(storeID, limitType, f)
+	bc.Stores.ResetStoreLimit(storeID, limitType, ratePerSec...)
 }
 
 // UpdateStoreStatus updates the information of the store.
@@ -454,8 +454,6 @@ type StoreSetController interface {
 
 	SlowStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
-
-	AttachAvailableFunc(id uint64, limitType storelimit.Type, f func() bool)
 }
 
 // KeyRange is a key range.
