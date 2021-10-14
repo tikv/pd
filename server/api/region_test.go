@@ -467,6 +467,50 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	}
 }
 
+// Start a new test suite to prevent from being interfered by other tests.
+var _ = Suite(&testGetRegionRangeHolesSuite{})
+
+type testGetRegionRangeHolesSuite struct {
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
+}
+
+func (s *testGetRegionRangeHolesSuite) SetUpSuite(c *C) {
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	mustBootstrapCluster(c, s.svr)
+}
+
+func (s *testGetRegionRangeHolesSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
+func (s *testGetRegionRangeHolesSuite) TestRegionRangeHoles(c *C) {
+	// Missing r0 with range [0, 0xEA]
+	r1 := newTestRegionInfo(2, 1, []byte{0xEA}, []byte{0xEB})
+	// Missing r2 with range [0xEB, 0xEC]
+	r3 := newTestRegionInfo(3, 1, []byte{0xEC}, []byte{0xED})
+	r4 := newTestRegionInfo(4, 2, []byte{0xED}, []byte{0xEE})
+	// Missing r5 with range [0xEE, 0xFE]
+	r6 := newTestRegionInfo(5, 2, []byte{0xFE}, []byte{0xFF})
+	mustRegionHeartbeat(c, s.svr, r1)
+	mustRegionHeartbeat(c, s.svr, r3)
+	mustRegionHeartbeat(c, s.svr, r4)
+	mustRegionHeartbeat(c, s.svr, r6)
+
+	url := fmt.Sprintf("%s/regions/range-holes", s.urlPrefix)
+	rangeHoles := new([][]string)
+	c.Assert(readJSON(testDialClient, url, rangeHoles), IsNil)
+	c.Assert(*rangeHoles, DeepEquals, [][]string{
+		{"", core.HexRegionKeyStr(r1.GetStartKey())},
+		{core.HexRegionKeyStr(r1.GetEndKey()), core.HexRegionKeyStr(r3.GetStartKey())},
+		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r6.GetStartKey())},
+	})
+}
+
 // Create n regions (0..n) of n stores (0..n).
 // Each region contains np peers, the first peer is the leader.
 // (copied from server/cluster_test.go)

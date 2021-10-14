@@ -900,6 +900,11 @@ func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionI
 	return c.core.GetAdjacentRegions(region)
 }
 
+// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
+func (c *RaftCluster) GetRangeHoles() [][]string {
+	return c.core.GetRangeHoles()
+}
+
 // UpdateStoreLabels updates a store's location labels
 // If 'force' is true, then update the store's labels forcibly.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
