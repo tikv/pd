@@ -172,6 +172,7 @@ func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
 		},
 	}
 	for _, testcase := range testcases {
+		c.Log(testcase.name)
 		c.Assert(cache.IsUnchanged(testcase.region, testcase.rules, mockStores(3)), Equals, testcase.unchanged)
 	}
 	// Invalid Input4

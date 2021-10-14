@@ -72,7 +72,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		return nil
 	}
 	// If the fit is fetched from cache, it seems that the region doesn't need cache
-	if fit.IsCached() {
+	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() && fit.IsCached() {
 		failpoint.Inject("assertShouldNotCache", func() {
 			panic("cached shouldn't be used")
 		})
@@ -112,10 +112,12 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			return op
 		}
 	}
-	if fit.IsSatisfied() && len(region.GetDownPeers()) == 0 {
-		// If there is no need to fix, we will cache the fit
-		c.ruleManager.SetRegionFitCache(region, fit)
-		checkerCounter.WithLabelValues("rule_checker", "set-cache").Inc()
+	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() {
+		if placement.ValidateFit(fit) && placement.ValidateRegion(region) && placement.ValidateStores(fit.GetRegionStores()) {
+			// If there is no need to fix, we will cache the fit
+			c.ruleManager.SetRegionFitCache(region, fit)
+			checkerCounter.WithLabelValues("rule_checker", "set-cache").Inc()
+		}
 	}
 	return nil
 }
