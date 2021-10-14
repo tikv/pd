@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"net/url"
 
 	"github.com/pingcap/log"
@@ -50,18 +49,17 @@ type TLSConfig struct {
 
 // ToTLSConfig generates tls config.
 func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
-
 	if len(s.SSLCABytes) != 0 || len(s.SSLCertBytes) != 0 || len(s.SSLKEYBytes) != 0 {
 		cert, err := tls.X509KeyPair(s.SSLCertBytes, s.SSLKEYBytes)
 		if err != nil {
-			return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+			return nil, errs.ErrCryptoX509KeyPair.GenWithStackByCause()
 		}
 		certificates := []tls.Certificate{cert}
 		// Create a certificate pool from CA
 		certPool := x509.NewCertPool()
 		// Append the certificates from the CA
 		if !certPool.AppendCertsFromPEM(s.SSLCABytes) {
-			return nil, errs.ErrEtcdTLSConfig.Wrap(errors.New("failed to append ca certs")).GenWithStackByCause()
+			return nil, errs.ErrCryptoAppendCertsFromPEM.GenWithStackByCause()
 		}
 		return &tls.Config{
 			Certificates: certificates,

@@ -181,16 +181,26 @@ func (s *clientTLSTestSuite) testTLSReload(
 
 	// 6. new requests should trigger listener to reload valid certs
 	dctx, dcancel := context.WithTimeout(s.ctx, 5*time.Second)
-	caData, certData, keyData := loadTLSContent(c,
-		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
 	cli, err := pd.NewClientWithContext(dctx, endpoints, pd.SecurityOption{
-		SSLCABytes:   caData, // test use raw bytes to init tls config
-		SSLCertBytes: certData,
-		SSLKEYBytes:  keyData,
+		CAPath:   testClientTLSInfo.TrustedCAFile,
+		CertPath: testClientTLSInfo.CertFile,
+		KeyPath:  testClientTLSInfo.KeyFile,
 	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
 	c.Assert(err, IsNil)
 	dcancel()
 	cli.Close()
+
+	// 7. test use raw bytes to init tls config
+	caData, certData, keyData := loadTLSContent(c,
+		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
+	ctx1, cancel1 := context.WithTimeout(s.ctx, 2*time.Second)
+	_, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
+		SSLCABytes:   caData,
+		SSLCertBytes: certData,
+		SSLKEYBytes:  keyData,
+	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	c.Assert(err, IsNil)
+	cancel1()
 }
 
 func loadTLSContent(c *C, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {

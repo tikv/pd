@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 func Test(t *testing.T) {
@@ -47,12 +49,11 @@ func (s *gRPCUtilSuite) TestToTLSConfig(c *C) {
 	// test wrong cert bytes
 	tlsConfig.SSLCertBytes = []byte("invalid cert")
 	_, err = tlsConfig.ToTLSConfig()
-	c.Assert(err, ErrorMatches, ".* failed to find any PEM data in certificate input")
+	c.Assert(errors.ErrorEqual(err, errs.ErrCryptoX509KeyPair), IsTrue)
 
 	//test wrong ca bytes
 	tlsConfig.SSLCertBytes = certData
 	tlsConfig.SSLCABytes = []byte("invalid ca")
 	_, err = tlsConfig.ToTLSConfig()
-	c.Assert(err, ErrorMatches, ".*failed to append ca certs")
-
+	c.Assert(errors.ErrorEqual(err, errs.ErrCryptoAppendCertsFromPEM), IsTrue)
 }
