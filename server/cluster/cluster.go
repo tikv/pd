@@ -1345,7 +1345,7 @@ func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	c.Lock()
 	defer c.Unlock()
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.getRegionStoresLocked(region), c.opt.GetLocationLabels())
+		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.opt.GetLocationLabels())
 	}
 }
 
@@ -1353,6 +1353,16 @@ func (c *RaftCluster) getRegionStoresLocked(region *core.RegionInfo) []*core.Sto
 	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
 	for _, p := range region.GetPeers() {
 		if store := c.core.GetStore(p.StoreId); store != nil {
+			stores = append(stores, store)
+		}
+	}
+	return stores
+}
+
+func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, value string) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
+	for _, p := range region.GetPeers() {
+		if store := c.core.GetStore(p.StoreId); store != nil && !core.IsStoreContainLabel(store.GetMeta(), key, value) {
 			stores = append(stores, store)
 		}
 	}
@@ -1691,7 +1701,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
-	if core.IsTiFlashStore(store) {
+	if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 		sc = config.StoreLimitConfig{
 			AddPeer:    config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 			RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
