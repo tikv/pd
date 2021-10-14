@@ -702,6 +702,42 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	checkRuleLocationLabels(1)
 }
 
+func (s *configTestSuite) TestPDServerConfig(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctlCmd.GetRootCmd()
+
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	pdctl.MustPutStore(c, svr, store)
+	defer cluster.Destroy()
+
+	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")
+	c.Assert(err, IsNil)
+	var conf config.PDServerConfig
+	json.Unmarshal(output, &conf)
+
+	c.Assert(conf.UseRegionStorage, Equals, bool(true))
+	c.Assert(conf.MaxResetTSGap.Duration, Equals, time.Duration(24*time.Hour))
+	c.Assert(conf.KeyType, Equals, "table")
+	c.Assert(conf.RuntimeServices, DeepEquals, typeutil.StringSlice([]string{}))
+	c.Assert(conf.MetricStorage, Equals, "")
+	c.Assert(conf.DashboardAddress, Equals, "auto")
+	c.Assert(conf.FlowRoundByDigit, Equals, int(3))
+}
+
 func assertBundles(a, b []placement.GroupBundle, c *C) {
 	c.Assert(len(a), Equals, len(b))
 	for i := 0; i < len(a); i++ {
