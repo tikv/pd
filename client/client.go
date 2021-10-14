@@ -821,11 +821,11 @@ func addLogical(logical, count int64, suffixBits uint32) int64 {
 }
 
 func (c *client) compareAndSwapTS(dcLocation string, physical, firstLogical int64, suffixBits uint32, count int64) {
-	highestLogical := addLogical(firstLogical, count-1, suffixBits)
+	largestLogical := addLogical(firstLogical, count-1, suffixBits)
 	lastTSOInterface, loaded := c.lastTSMap.LoadOrStore(dcLocation, &lastTSO{
 		physical: physical,
-		// Save the highest logical part here
-		logical: highestLogical,
+		// Save the largest logical part here
+		logical: largestLogical,
 	})
 	if !loaded {
 		return
@@ -833,15 +833,15 @@ func (c *client) compareAndSwapTS(dcLocation string, physical, firstLogical int6
 	lastTSOPointer := lastTSOInterface.(*lastTSO)
 	lastPhysical := lastTSOPointer.physical
 	lastLogical := lastTSOPointer.logical
-	// The TSO we get is a range like [highestLogical-count+1, highestLogical], so we save the last TSO's highest logical to compare with the new TSO's first logical.
+	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical to compare with the new TSO's first logical.
 	// For example, if we have a TSO resp with logical 10, count 5, then all TSOs we get will be [6, 7, 8, 9, 10].
 	if tsLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
 		panic(errors.Errorf("%s timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
 			dcLocation, physical, firstLogical, lastPhysical, lastLogical))
 	}
 	lastTSOPointer.physical = physical
-	// Same as above, we save the highest logical part here.
-	lastTSOPointer.logical = highestLogical
+	// Same as above, we save the largest logical part here.
+	lastTSOPointer.logical = largestLogical
 }
 
 func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
