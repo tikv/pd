@@ -184,35 +184,13 @@ func (s *clientTLSTestSuite) testTLSReload(
 	caData, certData, keyData := loadTLSContent(c,
 		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
 	cli, err := pd.NewClientWithContext(dctx, endpoints, pd.SecurityOption{
-		CAPath:       testClientTLSInfo.TrustedCAFile,
-		CertPath:     testClientTLSInfo.CertFile,
-		KeyPath:      testClientTLSInfo.KeyFile,
-		SSLCABytes:   caData,
+		SSLCABytes:   caData, // test use raw bytes to init tls config
 		SSLCertBytes: certData,
 		SSLKEYBytes:  keyData,
 	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
 	c.Assert(err, IsNil)
 	dcancel()
 	cli.Close()
-
-	// 7. new client failed due to wrong tls certs
-	ctx1, cancel1 := context.WithTimeout(s.ctx, 2*time.Second)
-	_, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
-		SSLCABytes:   caData,
-		SSLCertBytes: []byte("invalid cert"), // wrong cert
-		SSLKEYBytes:  keyData,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
-	c.Assert(err, ErrorMatches, ".* failed to get cluster id.*")
-	cancel1()
-
-	ctx2, cancel2 := context.WithTimeout(s.ctx, 2*time.Second)
-	_, err = pd.NewClientWithContext(ctx2, endpoints, pd.SecurityOption{
-		SSLCABytes:   []byte("invalid ca"), // wrong ca
-		SSLCertBytes: certData,
-		SSLKEYBytes:  keyData,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
-	c.Assert(err, ErrorMatches, ".* failed to get cluster id.*")
-	cancel2()
 }
 
 func loadTLSContent(c *C, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
