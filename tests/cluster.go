@@ -341,6 +341,13 @@ func (s *TestServer) GetAdjacentRegions(region *core.RegionInfo) []*core.RegionI
 	return []*core.RegionInfo{left, right}
 }
 
+// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
+func (s *TestServer) GetRangeHoles() [][]string {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster().GetRangeHoles()
+}
+
 // GetStoreRegions returns all regions' information with a given storeID.
 func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	s.RLock()

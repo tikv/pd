@@ -45,6 +45,7 @@ type Cluster interface {
 	RemoveScheduler(name string) error
 	IsFeatureSupported(f versioninfo.Feature) bool
 	AddSuspectRegions(ids ...uint64)
+	GetBasicCluster() *core.BasicCluster
 }
 
 // FitRegion tries to fit the region with placement rules.
