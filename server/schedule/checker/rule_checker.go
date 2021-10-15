@@ -405,6 +405,50 @@ func (o *recorder) incOfflineLeaderCount(storeID uint64) {
 	o.lastUpdateTime = time.Now()
 }
 
+func (c *RuleChecker) isDamagedPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
+	for _, stats := range region.GetDownPeers() {
+		if stats.GetPeer().GetId() != peer.GetId() {
+			continue
+		}
+		store := c.cluster.GetStore(peer.GetStoreId())
+		if store == nil {
+			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", peer.StoreId))
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
+	for _, stats := range region.GetDownPeers() {
+		if stats.GetPeer().GetId() != peer.GetId() {
+			continue
+		}
+		storeID := peer.GetStoreId()
+		store := c.cluster.GetStore(storeID)
+		if store == nil {
+			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
+			return false
+		}
+		// Only consider the state of the Store, not `stats.DownSeconds`.
+		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
+	store := c.cluster.GetStore(peer.GetStoreId())
+	if store == nil {
+		log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", peer.StoreId))
+		return false
+	}
+	return !store.IsUp()
+}
+
 // Offline is triggered manually and only appears when the node makes some adjustments. here is an operator timeout / 2.
 var offlineCounterTTL = 5 * time.Minute
 
