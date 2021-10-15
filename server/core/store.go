@@ -693,6 +693,7 @@ func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCo
 	}
 }
 
+// IsStoreContainLabel return if the store contains the given label.
 func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 	for _, l := range store.GetLabels() {
 		if l.GetKey() == key && l.GetValue() == value {
