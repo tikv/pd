@@ -153,7 +153,7 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 	for _, store := range stores {
 		id := store.GetID()
 		if loads, ok := storesLoads[id]; ok {
-			if core.IsTiFlashStore(store.GetMeta()) {
+			if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 				stats.BytesWriteStats[id] = loads[statistics.StoreRegionsWriteBytes]
 				stats.KeysWriteStats[id] = loads[statistics.StoreRegionsWriteKeys]
 			} else {
