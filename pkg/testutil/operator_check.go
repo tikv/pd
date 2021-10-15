@@ -51,6 +51,15 @@ func CheckTransferLeader(c *C, op *operator.Operator, kind operator.OpKind, sour
 	c.Assert(op.Kind()&kind, Equals, kind)
 }
 
+// CheckTransferLeaderV2 checks if the operator is to transfer leader between the specified source and target stores.
+func CheckTransferLeaderV2(c *C, op *operator.Operator, kind operator.OpKind, sourceID uint64, targetIDs []uint64) {
+	c.Assert(op, NotNil)
+	c.Assert(op.Len(), Equals, 1)
+	c.Assert(op.Step(0), DeepEquals, operator.TransferLeaderV2{FromStore: sourceID, ToStores: targetIDs})
+	kind |= operator.OpLeader
+	c.Assert(op.Kind()&kind, Equals, kind)
+}
+
 // CheckTransferLeaderFrom checks if the operator is to transfer leader out of the specified store.
 func CheckTransferLeaderFrom(c *C, op *operator.Operator, kind operator.OpKind, sourceID uint64) {
 	c.Assert(op, NotNil)

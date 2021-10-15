@@ -74,7 +74,7 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 			}
 		}
 	} else if resp.GetTransferLeader() != nil {
-		changePeer := resp.GetTransferLeader().GetPeer()
+		changePeer := resp.GetTransferLeader().GetPeers()[0]
 		fromPeer := region.GetLeader()
 		return &transferLeader{
 			regionID: regionID,

@@ -56,3 +56,6 @@ require (
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+// !!! remove this after [kvproto#undefined]() is merged
+replace github.com/pingcap/kvproto v0.0.0-20210819164333-bd5706b9d9f2 => github.com/mrcroxx/kvproto v0.0.0-20211014081919-b86b85bbdeca

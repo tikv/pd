@@ -81,6 +81,60 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 	to.LeaderCount++
 }
 
+// TransferLeaderV2 is an OpStep that transfers a region's leader to one of the targets.
+type TransferLeaderV2 struct {
+	FromStore uint64
+	ToStores  []uint64
+}
+
+// ConfVerChanged returns the delta value for version increased by this step.
+func (tlv2 TransferLeaderV2) ConfVerChanged(region *core.RegionInfo) uint64 {
+	return 0 // transfer leader never change the conf version
+}
+
+func (tlv2 TransferLeaderV2) String() string {
+	return fmt.Sprintf("transfer leader from store %v to one store in %v", tlv2.FromStore, tlv2.ToStores)
+}
+
+// IsFinish checks if current step is finished.
+func (tlv2 TransferLeaderV2) IsFinish(region *core.RegionInfo) bool {
+	currentLeaderStore := region.GetLeader().GetStoreId()
+	for _, store := range tlv2.ToStores {
+		if currentLeaderStore == store {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckSafety checks if the step meets the safety properties.
+func (tlv2 TransferLeaderV2) CheckSafety(region *core.RegionInfo) error {
+	for _, store := range tlv2.ToStores {
+		peer := region.GetStorePeer(store)
+		if peer == nil {
+			return errors.New("peer does not existed")
+		}
+		if core.IsLearner(peer) {
+			return errors.New("peer already is a learner")
+		}
+	}
+	return nil
+}
+
+// Influence calculates the store difference that current step makes.
+func (tlv2 TransferLeaderV2) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	// TODO(MrCroxx): review me.
+	// ToStore here is not deterministic, may be influence can be better calculated?
+	from := opInfluence.GetStoreInfluence(tlv2.FromStore)
+	from.LeaderSize -= region.GetApproximateSize()
+	from.LeaderCount--
+	for _, ToStore := range tlv2.ToStores {
+		to := opInfluence.GetStoreInfluence(ToStore)
+		to.LeaderSize += region.GetApproximateSize()
+		to.LeaderCount++
+	}
+}
+
 // AddPeer is an OpStep that adds a region peer.
 type AddPeer struct {
 	ToStore, PeerID uint64

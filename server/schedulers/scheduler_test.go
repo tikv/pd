@@ -265,7 +265,7 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	op := sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	testutil.CheckTransferLeaderV2(c, op[0], operator.OpLeader, 1, []uint64{2})
 }
 
 func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {
@@ -292,11 +292,11 @@ func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {
 	// only pending
 	tc.PutRegion(region.Clone(withPendingPeer))
 	op := sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 3)
+	testutil.CheckTransferLeaderV2(c, op[0], operator.OpLeader, 1, []uint64{3})
 	// only down
 	tc.PutRegion(region.Clone(withDownPeer))
 	op = sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	testutil.CheckTransferLeaderV2(c, op[0], operator.OpLeader, 1, []uint64{2})
 	// pending + down
 	tc.PutRegion(region.Clone(withPendingPeer, withDownPeer))
 	c.Assert(sl.Schedule(tc), HasLen, 0)
@@ -640,7 +640,7 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	c.Assert(es.IsScheduleAllowed(tc), IsTrue)
 	// Add evict leader scheduler to store 1
 	op := es.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	testutil.CheckTransferLeaderV2(c, op[0], operator.OpLeader, 1, []uint64{2})
 	// Cannot balance leaders to store 1
 	op = bs.Schedule(tc)
 	c.Check(op, IsNil)
