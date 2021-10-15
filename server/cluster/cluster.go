@@ -299,7 +299,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err := c.storage.LoadRegionsOnce(c.core.CheckAndPutRegion); err != nil {
+	if err := c.storage.LoadRegionsOnce(c.ctx, c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -410,6 +410,13 @@ func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.opController
+}
+
+// GetBasicCluster returns the basic cluster.
+func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core
 }
 
 // GetRegionScatter returns the region scatter.
@@ -893,6 +900,11 @@ func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionI
 	return c.core.GetAdjacentRegions(region)
 }
 
+// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
+func (c *RaftCluster) GetRangeHoles() [][]string {
+	return c.core.GetRangeHoles()
+}
+
 // UpdateStoreLabels updates a store's location labels
 // If 'force' is true, then update the store's labels forcibly.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
@@ -1102,11 +1114,6 @@ func (c *RaftCluster) SlowStoreEvicted(storeID uint64) error {
 // SlowStoreRecovered cleans the evicted state of a store.
 func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 	c.core.SlowStoreRecovered(storeID)
-}
-
-// AttachAvailableFunc attaches an available function to a specific store.
-func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
-	c.core.AttachAvailableFunc(storeID, limitType, f)
 }
 
 // UpStore up a store from offline
@@ -1715,7 +1722,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	cfg := c.opt.GetScheduleConfig().Clone()
 	for _, limitType := range storelimit.TypeNameValue {
-		c.AttachAvailableFunc(storeID, limitType, nil)
+		c.core.ResetStoreLimit(storeID, limitType)
 	}
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)

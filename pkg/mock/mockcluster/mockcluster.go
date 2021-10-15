@@ -749,6 +749,11 @@ func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
 	}
 }
 
+// GetBasicCluster mock method
+func (mc *Cluster) GetBasicCluster() *core.BasicCluster {
+	return mc.BasicCluster
+}
+
 // CheckRegionUnderSuspect only used for unit test
 func (mc *Cluster) CheckRegionUnderSuspect(id uint64) bool {
 	_, ok := mc.suspectRegions[id]
