@@ -961,6 +961,95 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 	}, nil
 }
 
+// ScatterRegion implements gRPC PDServer.
+func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionRequest) (*pdpb.ScatterRegionResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).ScatterRegion(ctx, request)
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	if len(request.GetRegionsId()) > 0 {
+		finishedPercentage, err := s.doScatterRegions(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
+		if err != nil {
+			return nil, err
+		}
+		return &pdpb.ScatterRegionResponse{
+			Header:             s.header(),
+			FinishedPercentage: finishedPercentage,
+		}, nil
+	}
+
+	//nolint
+	region := rc.GetRegion(request.GetRegionId())
+	if region == nil {
+		if request.GetRegion() == nil {
+			//nolint
+			return nil, errors.Errorf("region %d not found", request.GetRegionId())
+		}
+		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
+	}
+
+	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())
+	if err != nil {
+		return nil, err
+	}
+	if op != nil {
+		rc.GetOperatorController().AddOperator(op)
+	}
+
+	return &pdpb.ScatterRegionResponse{
+		Header:             s.header(),
+		FinishedPercentage: 100,
+	}, nil
+}
+
+func (s *Server) doScatterRegions(regionsId []uint64, group string, retry int) (uint64, error) {
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return uint64(0), errors.New("Null raft cluster")
+	}
+
+	if len(regionsId) > 0 {
+		ops, failures, err := rc.GetRegionScatter().ScatterRegionsByID(regionsId, group, retry)
+		if err != nil {
+			return uint64(0), err
+		}
+		for _, op := range ops {
+			if ok := rc.GetOperatorController().AddOperator(op); !ok {
+				failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
+			}
+		}
+		percentage := 100
+		if len(failures) > 0 {
+			percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+			log.Debug("scatter regions", zap.Errors("failures", func() []error {
+				r := make([]error, 0, len(failures))
+				for _, err := range failures {
+					r = append(r, err)
+				}
+				return r
+			}()))
+		}
+		return uint64(percentage), nil
+	}
+	return uint64(100), nil
+}
+
 // GetGCSafePoint implements gRPC PDServer.
 func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePointRequest) (*pdpb.GetGCSafePointResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
@@ -1309,95 +1398,7 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 	}, nil
 }
 
-// ScatterRegion implements gRPC PDServer.
-func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionRequest) (*pdpb.ScatterRegionResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
-		return pdpb.NewPDClient(client).ScatterRegion(ctx, request)
-	}
-
-	if err := s.validateRequest(request.GetHeader()); err != nil {
-		return nil, err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
-	}
-
-	if len(request.GetRegionsId()) > 0 {
-		finishedPercentage, err := s.doScatterRegions(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
-		if err != nil {
-			return nil, err
-		}
-		return &pdpb.ScatterRegionResponse{
-			Header:             s.header(),
-			FinishedPercentage: finishedPercentage,
-		}, nil
-	}
-
-	//nolint
-	region := rc.GetRegion(request.GetRegionId())
-	if region == nil {
-		if request.GetRegion() == nil {
-			//nolint
-			return nil, errors.Errorf("region %d not found", request.GetRegionId())
-		}
-		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
-	}
-
-	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())
-	if err != nil {
-		return nil, err
-	}
-	if op != nil {
-		rc.GetOperatorController().AddOperator(op)
-	}
-
-	return &pdpb.ScatterRegionResponse{
-		Header:             s.header(),
-		FinishedPercentage: 100,
-	}, nil
-}
-
-func (s *Server) doScatterRegions(regionsId []uint64, group string, retry int) (uint64, error) {
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return uint64(0), errors.New("Null raft cluster")
-	}
-
-	if len(regionsId) > 0 {
-		ops, failures, err := rc.GetRegionScatter().ScatterRegionsByID(regionsId, group, retry)
-		if err != nil {
-			return uint64(0), err
-		}
-		for _, op := range ops {
-			if ok := rc.GetOperatorController().AddOperator(op); !ok {
-				failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
-			}
-		}
-		percentage := 100
-		if len(failures) > 0 {
-			percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
-			log.Debug("scatter regions", zap.Errors("failures", func() []error {
-				r := make([]error, 0, len(failures))
-				for _, err := range failures {
-					r = append(r, err)
-				}
-				return r
-			}()))
-		}
-		return uint64(percentage), nil
-	}
-	return uint64(100), nil
-}
-
+// SplitAndScatterRegions split regions by the given split keys, and scatter regions
 func (s *Server) SplitAndScatterRegions(ctx context.Context, request *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
