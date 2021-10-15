@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/encryption"
@@ -130,6 +131,7 @@ func deleteRegion(kv kv.Base, region *metapb.Region) error {
 }
 
 func loadRegions(
+	ctx context.Context,
 	kv kv.Base,
 	encryptionKeyManager *encryptionkm.KeyManager,
 	f func(region *RegionInfo) []*RegionInfo,
@@ -142,6 +144,10 @@ func loadRegions(
 	// a variable rangeLimit to work around.
 	rangeLimit := maxKVRangeLimit
 	for {
+		failpoint.Inject("slowLoadRegion", func() {
+			rangeLimit = 1
+			time.Sleep(time.Second)
+		})
 		startKey := regionPath(nextID)
 		_, res, err := kv.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {
@@ -149,6 +155,11 @@ func loadRegions(
 				continue
 			}
 			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
 
 		for _, s := range res {
