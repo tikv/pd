@@ -250,7 +250,8 @@ func (s *clientTestSuite) TestTSOFollowerProxy(c *C) {
 	defer cluster.Destroy()
 
 	endpoints := s.runServer(c, cluster)
-	cli := setupCli(c, s.ctx, endpoints, pd.WithTSOFollowerProxy(true))
+	cli1 := setupCli(c, s.ctx, endpoints)
+	cli2 := setupCli(c, s.ctx, endpoints, pd.WithTSOFollowerProxy(true))
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
@@ -259,9 +260,15 @@ func (s *clientTestSuite) TestTSOFollowerProxy(c *C) {
 			defer wg.Done()
 			var lastTS uint64
 			for i := 0; i < tsoRequestRound; i++ {
-				physical, logical, err := cli.GetTS(context.Background())
+				physical, logical, err := cli2.GetTS(context.Background())
 				c.Assert(err, IsNil)
 				ts := tsoutil.ComposeTS(physical, logical)
+				c.Assert(lastTS, Less, ts)
+				lastTS = ts
+				// After requesting with the follower proxy, request with the leader directly.
+				physical, logical, err = cli1.GetTS(context.Background())
+				c.Assert(err, IsNil)
+				ts = tsoutil.ComposeTS(physical, logical)
 				c.Assert(lastTS, Less, ts)
 				lastTS = ts
 			}

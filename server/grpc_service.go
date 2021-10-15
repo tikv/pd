@@ -279,8 +279,10 @@ func (s *Server) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []
 	tsoProxyBatchSize.Observe(float64(count))
 	// Split the response
 	physical, logical, suffixBits := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
-	// logical is the highest ts here, we need to do the subtracting before we finish each TSO request.
-	firstLogical := addLogical(logical, -int64(count)+1, suffixBits)
+	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
+	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
+	// count is 5, then the splitting results should be 5 and 10.
+	firstLogical := addLogical(logical, -int64(count), suffixBits)
 	return s.finishTSORequest(requests, physical, firstLogical, suffixBits)
 }
 

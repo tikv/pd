@@ -810,7 +810,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 	}
 
 	physical, logical, suffixBits := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
-	// logical is the highest ts here, we need to do the subtracting before we finish each TSO request.
+	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 	firstLogical := addLogical(logical, -count+1, suffixBits)
 	c.compareAndSwapTS(dcLocation, physical, firstLogical, suffixBits, count)
 	c.finishTSORequest(requests, physical, firstLogical, suffixBits, nil)
@@ -823,11 +823,11 @@ func addLogical(logical, count int64, suffixBits uint32) int64 {
 }
 
 func (c *client) compareAndSwapTS(dcLocation string, physical, firstLogical int64, suffixBits uint32, count int64) {
-	highestLogical := addLogical(firstLogical, count-1, suffixBits)
+	largestLogical := addLogical(firstLogical, count-1, suffixBits)
 	lastTSOInterface, loaded := c.lastTSMap.LoadOrStore(dcLocation, &lastTSO{
 		physical: physical,
-		// Save the highest logical part here
-		logical: highestLogical,
+		// Save the largest logical part here
+		logical: largestLogical,
 	})
 	if !loaded {
 		return
@@ -835,14 +835,15 @@ func (c *client) compareAndSwapTS(dcLocation string, physical, firstLogical int6
 	lastTSOPointer := lastTSOInterface.(*lastTSO)
 	lastPhysical := lastTSOPointer.physical
 	lastLogical := lastTSOPointer.logical
-	// The TSO we get is a range like [a, b), so we save the last TSO's b as the lastLogical and compare the new TSO's a with it.
+	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical to compare with the new TSO's first logical.
+	// For example, if we have a TSO resp with logical 10, count 5, then all TSOs we get will be [6, 7, 8, 9, 10].
 	if tsLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
 		panic(errors.Errorf("%s timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
 			dcLocation, physical, firstLogical, lastPhysical, lastLogical))
 	}
 	lastTSOPointer.physical = physical
-	// Same as above, we save the highest logical part here.
-	lastTSOPointer.logical = highestLogical
+	// Same as above, we save the largest logical part here.
+	lastTSOPointer.logical = largestLogical
 }
 
 func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
