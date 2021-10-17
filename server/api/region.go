@@ -285,6 +285,10 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	endKey := r.URL.Query().Get("end_key")
 
 	limit := defaultRegionLimit
+	// avoid incomplete results with end_key
+	if endKey != "" {
+		limit = noRegionLimit
+	}
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		var err error
 		limit, err = strconv.Atoi(limitStr)
@@ -586,6 +590,7 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 const (
 	defaultRegionLimit     = 16
 	maxRegionLimit         = 10240
+	noRegionLimit          = -1
 	minRegionHistogramSize = 1
 	minRegionHistogramKeys = 1000
 )
