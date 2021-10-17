@@ -1584,6 +1584,9 @@ func (s *Server) SplitAndScatterRegions(ctx context.Context, request *pdpb.Split
 		return nil, err
 	}
 
+
+	log.Info("Im a new grpc service, see here -----------------------------")
+
 	// Split first
 	splitFinishedPercentage, newRegions := s.cluster.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 
@@ -1610,16 +1613,30 @@ func (s *Server) SplitAndScatterRegions(ctx context.Context, request *pdpb.Split
 		log.Info("Batch split regions complete, start scatter regions",
 			zap.Int("batch scatter region count", len(newRegions)))
 
+		rc := s.GetRaftCluster()
+
 		// Scatter regions
-		scatterFinishedPercentage, err := s.doScatterRegions(newRegions, request.GetGroup(), int(request.GetRetryLimit()))
-		if err != nil {
-			return nil, err
+		for _, regionId := range newRegions {
+			go func(regionId uint64) {
+				region := rc.GetRegion(regionId)
+				if region == nil {
+					log.Warn("Region not found",
+						zap.Uint64("region id", regionId))
+				}
+
+				op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())
+
+				if err != nil {
+					return
+				}
+				if op != nil {
+					rc.GetOperatorController().AddOperator(op)
+				}
+			}(regionId)
 		}
 
-		resp.ScatterFinishedPercentage = scatterFinishedPercentage
-
 		log.Info("Batch scatter regions complete",
-			zap.Uint64("finishedPercentage", scatterFinishedPercentage))
+			zap.Uint64("finishedPercentage", 100))
 
 	} else {
 		log.Info("newRegion's size is zero, not need to scatter")
