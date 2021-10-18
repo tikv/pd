@@ -257,7 +257,7 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
 	// Add regions 1, 2, 3 with leaders in stores 1, 2, 3
-	tc.AddLeaderRegion(1, 1, 2)
+	tc.AddLeaderRegion(1, 1, 2, 3)
 	tc.AddLeaderRegion(2, 2, 1)
 	tc.AddLeaderRegion(3, 3, 1)
 
@@ -265,7 +265,9 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	op := sl.Schedule(tc)
-	testutil.CheckTransferLeaderV2(c, op[0], operator.OpLeader, 1, []uint64{2})
+	testutil.CheckTransferLeaderV2(c, op[0], operator.OpLeader, 1, []uint64{2, 3})
+	c.Assert(op[0].Step(0).(operator.TransferLeaderV2).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsFalse)
+	c.Assert(op[0].Step(0).(operator.TransferLeaderV2).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsTrue)
 }
 
 func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {

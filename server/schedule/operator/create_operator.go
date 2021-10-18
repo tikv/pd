@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"sort"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -76,6 +77,7 @@ func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region 
 // CreateEvictLeaderOperator creates an operator that transfers the leader from a source store to one of the given target stores.
 func CreateEvictLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
 	brief := fmt.Sprintf("transfer leader: store %d to one of the stores in %v", sourceStoreID, targetStoreIDs)
+	sort.Slice(targetStoreIDs, func(i, j int) bool { return targetStoreIDs[i] < targetStoreIDs[j] })
 	step := TransferLeaderV2{
 		FromStore: sourceStoreID,
 		ToStores:  targetStoreIDs,
