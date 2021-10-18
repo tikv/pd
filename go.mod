@@ -28,10 +28,10 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20201126102027-b0a155152ca3
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20210805052247-76981389e818
+	github.com/pingcap/kvproto v0.0.0-20210819164333-bd5706b9d9f2
 	github.com/pingcap/log v0.0.0-20210625125904-98ed8e2eb1c7
 	github.com/pingcap/sysutil v0.0.0-20210730114356-fcd8a63f68c5
-	github.com/pingcap/tidb-dashboard v0.0.0-20210826074103-29034af68525
+	github.com/pingcap/tidb-dashboard v0.0.0-20211008050453-a25c25809529
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.6.0

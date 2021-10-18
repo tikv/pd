@@ -242,8 +242,8 @@ func (conf *hotRegionSchedulerConfig) GetEnableForTiFlash() bool {
 }
 
 func (conf *hotRegionSchedulerConfig) SetEnableForTiFlash(enable bool) {
-	conf.RLock()
-	defer conf.RUnlock()
+	conf.Lock()
+	defer conf.Unlock()
 	conf.EnableForTiFlash = enable
 }
 
@@ -309,7 +309,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	}
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
-		conf.persist()
+		conf.persistLocked()
 		rd.Text(w, http.StatusOK, "success")
 	}
 
@@ -333,7 +333,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	rd.Text(w, http.StatusBadRequest, "config item not found")
 }
 
-func (conf *hotRegionSchedulerConfig) persist() error {
+func (conf *hotRegionSchedulerConfig) persistLocked() error {
 	data, err := schedule.EncodeConfig(conf)
 	if err != nil {
 		return err
@@ -343,6 +343,8 @@ func (conf *hotRegionSchedulerConfig) persist() error {
 
 func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster opt.Cluster) bool {
 	querySupport := cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
+	conf.Lock()
+	defer conf.Unlock()
 	if querySupport != conf.lastQuerySupported {
 		log.Info("query supported changed",
 			zap.Bool("last-query-support", conf.lastQuerySupported),

@@ -1043,7 +1043,8 @@ func GetWriteQueryNum(stats *pdpb.QueryStats) uint64 {
 	if stats == nil {
 		return 0
 	}
-	return stats.Put + stats.Delete + stats.DeleteRange
+	return stats.Put + stats.Delete + stats.DeleteRange + // raw
+		stats.AcquirePessimisticLock + stats.Commit + stats.Prewrite + stats.Rollback // txn
 }
 
 // GetLoads returns loads from region

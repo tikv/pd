@@ -19,6 +19,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
@@ -264,6 +265,40 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	op := sl.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+}
+
+func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	sl, err := schedule.CreateScheduler(EvictLeaderType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
+	c.Assert(err, IsNil)
+
+	// Add stores 1, 2, 3
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	// Add region 1, which has 3 peers. 1 is leader. 2 is healthy or pending, 3 is healthy or down.
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.MockRegionInfo(1, 1, []uint64{2, 3}, nil, nil)
+	withDownPeer := core.WithDownPeers([]*pdpb.PeerStats{{
+		Peer:        region.GetPeers()[2],
+		DownSeconds: 1000,
+	}})
+	withPendingPeer := core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[1]})
+
+	// only pending
+	tc.PutRegion(region.Clone(withPendingPeer))
+	op := sl.Schedule(tc)
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 3)
+	// only down
+	tc.PutRegion(region.Clone(withDownPeer))
+	op = sl.Schedule(tc)
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	// pending + down
+	tc.PutRegion(region.Clone(withPendingPeer, withDownPeer))
+	c.Assert(sl.Schedule(tc), HasLen, 0)
 }
 
 var _ = Suite(&testShuffleRegionSuite{})
