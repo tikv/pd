@@ -15,7 +15,6 @@
 package config
 
 import (
-	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
@@ -1240,33 +1239,6 @@ func (c *Config) GetZapLogProperties() *log.ZapProperties {
 // GetConfigFile gets the config file.
 func (c *Config) GetConfigFile() string {
 	return c.configFile
-}
-
-// RewriteFile rewrites the config file after updating the config.
-func (c *Config) RewriteFile(new *Config) error {
-	filePath := c.GetConfigFile()
-	if filePath == "" {
-		return nil
-	}
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(*new); err != nil {
-		return err
-	}
-	dir := filepath.Dir(filePath)
-	tmpfile := filepath.Join(dir, "tmp_pd.toml")
-
-	f, err := os.Create(tmpfile)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.Write(buf.Bytes()); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	return os.Rename(tmpfile, filePath)
 }
 
 // GenEmbedEtcdConfig generates a configuration for embedded etcd.
