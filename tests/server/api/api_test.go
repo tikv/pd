@@ -78,7 +78,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	err = cluster.GetServer(leader).Stop()
 	c.Assert(err, IsNil)
 	newLeader := cluster.WaitLeader()
-	c.Assert(len(newLeader), Not(Equals), 0)
+	c.Assert(newLeader, Not(HasLen), 0)
 
 	// Make sure they proxy requests to the new leader.
 	for name, s := range cluster.GetServers() {
@@ -124,7 +124,7 @@ func (s *testRedirectorSuite) SetUpSuite(c *C) {
 	})
 	c.Assert(err, IsNil)
 	c.Assert(cluster.RunInitialServers(), IsNil)
-	c.Assert(len(cluster.WaitLeader()), Not(Equals), 0)
+	c.Assert(cluster.WaitLeader(), Not(HasLen), 0)
 	s.cluster = cluster
 }
 

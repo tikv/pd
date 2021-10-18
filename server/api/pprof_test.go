@@ -53,6 +53,6 @@ func (s *ProfSuite) TestGetZip(c *C) {
 	c.Assert(body, NotNil)
 	zipReader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
 	c.Assert(err, IsNil)
-	c.Assert(len(zipReader.File), Equals, 7)
+	c.Assert(zipReader.File, HasLen, 7)
 
 }

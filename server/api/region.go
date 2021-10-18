@@ -560,6 +560,16 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 }
 
 // @Tags region
+// @Summary List all range holes whitout any region info.
+// @Produce json
+// @Success 200 {object} [][]string
+// @Router /regions/range-holes [get]
+func (h *regionsHandler) GetRangeHoles(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	h.rd.JSON(w, http.StatusOK, rc.GetRangeHoles())
+}
+
+// @Tags region
 // @Summary List sibling regions of a specific region.
 // @Param id path integer true "Region Id"
 // @Produce json

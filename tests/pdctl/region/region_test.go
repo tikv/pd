@@ -189,4 +189,15 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		c.Assert(json.Unmarshal(output, region), IsNil)
 		pdctl.CheckRegionInfo(c, region, testCase.expect)
 	}
+
+	// Test region range-holes.
+	r5 := pdctl.MustPutRegion(c, cluster, 5, 1, []byte("x"), []byte("z"))
+	output, e := pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "region", "range-holes"}...)
+	c.Assert(e, IsNil)
+	rangeHoles := new([][]string)
+	c.Assert(json.Unmarshal(output, rangeHoles), IsNil)
+	c.Assert(*rangeHoles, DeepEquals, [][]string{
+		{"", core.HexRegionKeyStr(r1.GetStartKey())},
+		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r5.GetStartKey())},
+	})
 }

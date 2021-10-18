@@ -41,6 +41,11 @@ error = '''
 unsupported metrics type %v
 '''
 
+["PD:checker:ErrCheckerNotFound"]
+error = '''
+checker not found
+'''
+
 ["PD:client:ErrClientCreateTSOStream"]
 error = '''
 create TSO stream failed
@@ -614,6 +619,11 @@ get local allocator failed, %s
 ["PD:tso:ErrLogicOverflow"]
 error = '''
 logic part overflow
+'''
+
+["PD:tso:ErrProxyTSOTimeout"]
+error = '''
+proxy tso timeout
 '''
 
 ["PD:tso:ErrResetUserTimestamp"]

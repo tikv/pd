@@ -946,7 +946,7 @@ func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
 	tc.PutRegion(region)
 	operators := sb.Schedule(tc)
 	if operators != nil {
-		c.Assert(len(operators), Equals, 0)
+		c.Assert(operators, HasLen, 0)
 	} else {
 		c.Assert(operators, IsNil)
 	}

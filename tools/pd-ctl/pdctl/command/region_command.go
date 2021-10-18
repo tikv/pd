@@ -32,18 +32,19 @@ import (
 )
 
 var (
-	regionsPrefix          = "pd/api/v1/regions"
-	regionsStorePrefix     = "pd/api/v1/regions/store"
-	regionsCheckPrefix     = "pd/api/v1/regions/check"
-	regionsWriteFlowPrefix = "pd/api/v1/regions/writeflow"
-	regionsReadFlowPrefix  = "pd/api/v1/regions/readflow"
-	regionsConfVerPrefix   = "pd/api/v1/regions/confver"
-	regionsVersionPrefix   = "pd/api/v1/regions/version"
-	regionsSizePrefix      = "pd/api/v1/regions/size"
-	regionsKeyPrefix       = "pd/api/v1/regions/key"
-	regionsSiblingPrefix   = "pd/api/v1/regions/sibling"
-	regionIDPrefix         = "pd/api/v1/region/id"
-	regionKeyPrefix        = "pd/api/v1/region/key"
+	regionsPrefix           = "pd/api/v1/regions"
+	regionsStorePrefix      = "pd/api/v1/regions/store"
+	regionsCheckPrefix      = "pd/api/v1/regions/check"
+	regionsWriteFlowPrefix  = "pd/api/v1/regions/writeflow"
+	regionsReadFlowPrefix   = "pd/api/v1/regions/readflow"
+	regionsConfVerPrefix    = "pd/api/v1/regions/confver"
+	regionsVersionPrefix    = "pd/api/v1/regions/version"
+	regionsSizePrefix       = "pd/api/v1/regions/size"
+	regionsKeyPrefix        = "pd/api/v1/regions/key"
+	regionsSiblingPrefix    = "pd/api/v1/regions/sibling"
+	regionsRangeHolesPrefix = "pd/api/v1/regions/range-holes"
+	regionIDPrefix          = "pd/api/v1/region/id"
+	regionKeyPrefix         = "pd/api/v1/region/key"
 )
 
 // NewRegionCommand returns a region subcommand of rootCmd
@@ -58,6 +59,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionWithSiblingCommand())
 	r.AddCommand(NewRegionWithStoreCommand())
 	r.AddCommand(NewRegionsByKeysCommand())
+	r.AddCommand(NewRangesWithRangeHolesCommand())
 
 	topRead := &cobra.Command{
 		Use:   `topread <limit> [--jq="<query string>"]`,
@@ -509,6 +511,25 @@ func showRegionWithStoreCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get regions with the given storeID: %s\n", err)
+		return
+	}
+	cmd.Println(r)
+}
+
+// NewRangesWithRangeHolesCommand returns ranges with range-holes subcommand of regionCmd
+func NewRangesWithRangeHolesCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "range-holes",
+		Short: "show all empty ranges without any region info",
+		Run:   showRangesWithRangeHolesCommandFunc,
+	}
+	return r
+}
+
+func showRangesWithRangeHolesCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, regionsRangeHolesPrefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get range holes: %s\n", err)
 		return
 	}
 	cmd.Println(r)

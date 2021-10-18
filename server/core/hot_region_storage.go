@@ -100,10 +100,30 @@ const (
 	defaultDeleteTime = 4
 )
 
+// HotRegionType stands for hot type.
+type HotRegionType uint32
+
+// Flags for flow.
+const (
+	WriteType HotRegionType = iota
+	ReadType
+)
+
 // HotRegionTypes stands for hot type.
 var HotRegionTypes = []string{
-	"read",
-	"write",
+	WriteType.String(),
+	ReadType.String(),
+}
+
+// String return HotRegionType in string format.
+func (h HotRegionType) String() string {
+	switch h {
+	case WriteType:
+		return "write"
+	case ReadType:
+		return "read"
+	}
+	return "unimplemented"
 }
 
 // NewHotRegionsStorage create storage to store hot regions info.
@@ -223,14 +243,14 @@ func (h *HotRegionStorage) pullHotRegionInfo() error {
 	if err != nil {
 		return err
 	}
-	if err := h.packHistoryHotRegions(historyHotReadRegions, HotRegionTypes[0]); err != nil {
+	if err := h.packHistoryHotRegions(historyHotReadRegions, ReadType.String()); err != nil {
 		return err
 	}
 	historyHotWriteRegions, err := h.hotRegionStorageHandler.PackHistoryHotWriteRegions()
 	if err != nil {
 		return err
 	}
-	err = h.packHistoryHotRegions(historyHotWriteRegions, HotRegionTypes[1])
+	err = h.packHistoryHotRegions(historyHotWriteRegions, WriteType.String())
 	return err
 }
 
@@ -248,7 +268,7 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 		}
 		historyHotRegions[i].StartKey = region.StartKey
 		historyHotRegions[i].EndKey = region.EndKey
-		key := HotRegionStorePath(HotRegionTypes[0], historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
+		key := HotRegionStorePath(hotRegionType, historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
 		h.batchHotInfo[key] = &historyHotRegions[i]
 	}
 	return nil
