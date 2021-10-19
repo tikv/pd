@@ -125,11 +125,14 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 
 // CheckInProgress checks if the step is in the progress of advancing.
 func (ap AddPeer) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+	if err := validateStore(cluster, ap.ToStore); err != nil {
+		return err
+	}
 	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil && peer.GetId() != ap.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
 	}
-	return validateStore(cluster, ap.ToStore)
+	return nil
 }
 
 // AddLearner is an OpStep that adds a region learner peer.
@@ -162,6 +165,9 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 
 // CheckInProgress checks if the step is in the progress of advancing.
 func (al AddLearner) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+	if err := validateStore(cluster, al.ToStore); err != nil {
+		return err
+	}
 	peer := region.GetStorePeer(al.ToStore)
 	if peer == nil {
 		return nil
@@ -172,7 +178,7 @@ func (al AddLearner) CheckInProgress(cluster opt.Cluster, region *core.RegionInf
 	if !core.IsLearner(peer) {
 		return errors.New("peer already is a voter")
 	}
-	return validateStore(cluster, al.ToStore)
+	return nil
 }
 
 // Influence calculates the store difference that current step makes.
@@ -220,7 +226,7 @@ func (pl PromoteLearner) CheckInProgress(cluster opt.Cluster, region *core.Regio
 	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
 	}
-	return validateStore(cluster, pl.ToStore)
+	return nil
 }
 
 // Influence calculates the store difference that current step makes.
