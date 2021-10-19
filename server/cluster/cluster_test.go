@@ -677,6 +677,56 @@ func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
 	checkRegion(c, cluster.GetRegionByKey([]byte{}), target)
 }
 
+func (s *testClusterInfoSuite) TestRegionLabelIsolationLevel(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	cfg := opt.GetReplicationConfig()
+	cfg.LocationLabels = []string{"zone"}
+	opt.SetReplicationConfig(cfg)
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	for i := uint64(1); i <= 4; i++ {
+		var labels []*metapb.StoreLabel
+		if i == 4 {
+			labels = []*metapb.StoreLabel{{Key: "zone", Value: fmt.Sprintf("%d", 3)}, {Key: "engine", Value: "tiflash"}}
+		} else {
+			labels = []*metapb.StoreLabel{{Key: "zone", Value: fmt.Sprintf("%d", i)}}
+		}
+		store := &metapb.Store{
+			Id:      i,
+			Address: fmt.Sprintf("127.0.0.1:%d", i),
+			State:   metapb.StoreState_Up,
+			Labels:  labels,
+		}
+		c.Assert(cluster.putStoreLocked(core.NewStoreInfo(store)), IsNil)
+	}
+
+	peers := make([]*metapb.Peer, 0, 4)
+	for i := uint64(1); i <= 4; i++ {
+		peer := &metapb.Peer{
+			Id: i + 4,
+		}
+		peer.StoreId = i
+		if i == 8 {
+			peer.Role = metapb.PeerRole_Learner
+		}
+		peers = append(peers, peer)
+	}
+	region := &metapb.Region{
+		Id:       9,
+		Peers:    peers,
+		StartKey: []byte{byte(1)},
+		EndKey:   []byte{byte(2)},
+	}
+	r := core.NewRegionInfo(region, peers[0])
+	c.Assert(cluster.putRegion(r), IsNil)
+
+	cluster.updateRegionsLabelLevelStats([]*core.RegionInfo{r})
+	counter := cluster.labelLevelStats.GetLabelCounter()
+	c.Assert(counter["none"], Equals, 0)
+	c.Assert(counter["zone"], Equals, 1)
+}
+
 func heartbeatRegions(c *C, cluster *RaftCluster, regions []*core.RegionInfo) {
 	// Heartbeat and check region one by one.
 	for _, r := range regions {
