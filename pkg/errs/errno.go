@@ -307,3 +307,9 @@ var (
 	ErrEncryptionSaveDataKeys       = errors.Normalize("failed to save data keys", errors.RFCCodeText("PD:encryption:ErrEncryptionSaveDataKeys"))
 	ErrEncryptionKMS                = errors.Normalize("KMS error", errors.RFCCodeText("PD:ErrEncryptionKMS"))
 )
+
+// crypto
+var (
+	ErrCryptoX509KeyPair        = errors.Normalize("x509 keypair error", errors.RFCCodeText("PD:crypto:ErrCryptoX509KeyPair"))
+	ErrCryptoAppendCertsFromPEM = errors.Normalize("cert pool append certs error", errors.RFCCodeText("PD:crypto:ErrCryptoAppendCertsFromPEM"))
+)

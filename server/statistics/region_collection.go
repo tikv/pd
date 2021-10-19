@@ -296,6 +296,11 @@ func (l *LabelStatistics) ClearDefunctRegion(regionID uint64) {
 	}
 }
 
+// GetLabelCounter is only used for tests.
+func (l *LabelStatistics) GetLabelCounter() map[string]int {
+	return l.labelCounter
+}
+
 func getRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
 	if len(stores) == 0 || len(labels) == 0 {
 		return nonIsolation

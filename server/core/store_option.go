@@ -214,12 +214,15 @@ func SetNewStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	}
 }
 
-// AttachAvailableFunc attaches a customize function for the store. The function f returns true if the store limit is not exceeded.
-func AttachAvailableFunc(limitType storelimit.Type, f func() bool) StoreCreateOption {
+// ResetStoreLimit resets the store limit for a store.
+func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCreateOption {
 	return func(store *StoreInfo) {
-		if store.available == nil {
-			store.available = make(map[storelimit.Type]func() bool)
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		if len(ratePerSec) == 0 {
+			store.limiter[limitType] = nil
+			return
 		}
-		store.available[limitType] = f
+		store.limiter[limitType] = storelimit.NewStoreLimit(ratePerSec[0], storelimit.RegionInfluence[limitType])
 	}
 }

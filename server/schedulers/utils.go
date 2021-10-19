@@ -403,7 +403,7 @@ func summaryStoreInfos(cluster opt.Cluster) map[uint64]*storeSummaryInfo {
 	for _, store := range stores {
 		info := &storeSummaryInfo{
 			Store:      store,
-			IsTiFlash:  core.IsTiFlashStore(store.GetMeta()),
+			IsTiFlash:  core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash),
 			PendingSum: nil,
 		}
 		infos[store.GetID()] = info

@@ -1044,14 +1044,25 @@ func (s *testOperatorControllerSuite) TestDownStoreLimit(c *C) {
 	region := tc.GetRegion(1)
 	tc.setStoreDown(1)
 	tc.SetStoreLimit(1, storelimit.RemovePeer, 1)
+
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{
 			Peer:        region.GetStorePeer(1),
 			DownSeconds: 24 * 60 * 60,
 		},
-	}))
+	}), core.SetApproximateSize(1))
+	tc.putRegion(region)
+	for i := uint64(1); i < 20; i++ {
+		tc.addRegionStore(i+3, 100)
+		op := rc.Check(region)
+		c.Assert(op, NotNil)
+		c.Assert(oc.AddOperator(op), IsTrue)
+		oc.RemoveOperator(op)
+	}
 
-	for i := uint64(1); i <= 5; i++ {
+	region = region.Clone(core.SetApproximateSize(100))
+	tc.putRegion(region)
+	for i := uint64(20); i < 25; i++ {
 		tc.addRegionStore(i+3, 100)
 		op := rc.Check(region)
 		c.Assert(op, NotNil)
