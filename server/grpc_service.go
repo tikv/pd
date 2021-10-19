@@ -1398,8 +1398,8 @@ func (s *Server) SplitAndScatterRegions(ctx context.Context, request *pdpb.Split
 	}
 
 	splitRequest := &pdpb.SplitRegionsRequest{
-		Header: request.GetHeader(),
-		SplitKeys: request.GetSplitKeys(),
+		Header:     request.GetHeader(),
+		SplitKeys:  request.GetSplitKeys(),
 		RetryLimit: request.GetRetryLimit(),
 	}
 
@@ -1417,10 +1417,10 @@ func (s *Server) SplitAndScatterRegions(ctx context.Context, request *pdpb.Split
 	}
 
 	scatterRequest := &pdpb.ScatterRegionRequest{
-		Header: request.GetHeader(),
-		RegionsId: newRegions,
+		Header:     request.GetHeader(),
+		RegionsId:  newRegions,
 		RetryLimit: request.GetRetryLimit(),
-		Group: request.GetGroup(),
+		Group:      request.GetGroup(),
 	}
 
 	// Scatter regions
@@ -1428,7 +1428,6 @@ func (s *Server) SplitAndScatterRegions(ctx context.Context, request *pdpb.Split
 	if err != nil {
 		return nil, err
 	}
-
 
 	return &pdpb.SplitAndScatterRegionsResponse{
 		RegionsId:                 newRegions,
