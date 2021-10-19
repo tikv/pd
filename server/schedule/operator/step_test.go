@@ -14,12 +14,18 @@
 package operator
 
 import (
+	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
-type testStepSuite struct{}
+type testStepSuite struct {
+	cluster *mockcluster.Cluster
+}
 
 var _ = Suite(&testStepSuite{})
 
@@ -27,7 +33,14 @@ type testCase struct {
 	Peers          []*metapb.Peer // first is leader
 	ConfVerChanged uint64
 	IsFinish       bool
-	CheckSafety    Checker
+	CheckInProgres Checker
+}
+
+func (s *testStepSuite) SetUpTest(c *C) {
+	s.cluster = mockcluster.NewCluster(context.Background(), config.NewTestOptions())
+	for i := 1; i <= 10; i++ {
+		s.cluster.PutStoreWithLabels(uint64(i))
+	}
 }
 
 func (s *testStepSuite) TestDemoteFollower(c *C) {
@@ -344,6 +357,6 @@ func (s *testStepSuite) check(c *C, step OpStep, desc string, cases []testCase) 
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.Peers}, tc.Peers[0])
 		c.Assert(step.ConfVerChanged(region), Equals, tc.ConfVerChanged)
 		c.Assert(step.IsFinish(region), Equals, tc.IsFinish)
-		c.Assert(step.CheckSafety(region), tc.CheckSafety)
+		c.Assert(step.CheckInProgress(s.cluster, region), tc.CheckInProgres)
 	}
 }
