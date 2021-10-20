@@ -62,7 +62,7 @@ type Server interface {
 	GetStorage() *core.Storage
 	Name() string
 	GetRegions() []*core.RegionInfo
-	GetTLSConfig() *grpcutil.TLSConfig
+	GetSecurityConfig() *grpcutil.SecurityConfig
 	GetBasicCluster() *core.BasicCluster
 }
 
@@ -74,11 +74,11 @@ type RegionSyncer struct {
 		clientCtx    context.Context
 		clientCancel context.CancelFunc
 	}
-	server    Server
-	wg        sync.WaitGroup
-	history   *historyBuffer
-	limit     *ratelimit.Bucket
-	tlsConfig *grpcutil.TLSConfig
+	server         Server
+	wg             sync.WaitGroup
+	history        *historyBuffer
+	limit          *ratelimit.Bucket
+	securityConfig *grpcutil.SecurityConfig
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -88,10 +88,10 @@ type RegionSyncer struct {
 // no longer etcd but go-leveldb.
 func NewRegionSyncer(s Server) *RegionSyncer {
 	syncer := &RegionSyncer{
-		server:    s,
-		history:   newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
-		limit:     ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
-		tlsConfig: s.GetTLSConfig(),
+		server:         s,
+		history:        newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
+		limit:          ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
+		securityConfig: s.GetSecurityConfig(),
 	}
 	syncer.mu.streams = make(map[string]ServerStream)
 	return syncer

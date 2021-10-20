@@ -55,7 +55,7 @@ func (s *RegionSyncer) reset() {
 }
 
 func (s *RegionSyncer) establish(ctx context.Context, addr string) (*grpc.ClientConn, error) {
-	tlsCfg, err := s.tlsConfig.ToTLSConfig()
+	tlsCfg, err := s.securityConfig.ToTLSConfig()
 	if err != nil {
 		return nil, err
 	}
