@@ -37,12 +37,15 @@ func (t *testClientSuite) TestLoadRegion(c *C) {
 	tempDir, err := os.MkdirTemp(os.TempDir(), "region_syncer_load_region")
 	c.Assert(err, IsNil)
 	defer os.RemoveAll(tempDir)
-	rs, err := core.NewRegionStorage(context.Background(), tempDir, nil)
+	rs, err := core.NewRegionStorage(context.Background(), tempDir)
 	c.Assert(err, IsNil)
+
+	storage := core.NewStorage(kv.NewMemoryKV())
+	storage.SetRegionStorage(rs)
 
 	server := &mockServer{
 		ctx:     context.Background(),
-		storage: core.NewStorage(kv.NewMemoryKV(), core.WithRegionStorage(rs)),
+		storage: storage,
 		bc:      core.NewBasicCluster(),
 	}
 	for i := 0; i < 30; i++ {
@@ -95,8 +98,8 @@ func (s *mockServer) GetRegions() []*core.RegionInfo {
 	return s.bc.GetRegions()
 }
 
-func (s *mockServer) GetTLSConfig() *grpcutil.TLSConfig {
-	return &grpcutil.TLSConfig{}
+func (s *mockServer) GetSecurityConfig() *grpcutil.SecurityConfig {
+	return &grpcutil.SecurityConfig{}
 }
 
 func (s *mockServer) GetBasicCluster() *core.BasicCluster {
