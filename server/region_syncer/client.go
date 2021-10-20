@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -40,33 +41,13 @@ const (
 // StopSyncWithLeader stop to sync the region with leader.
 func (s *RegionSyncer) StopSyncWithLeader() {
 	s.reset()
-<<<<<<< HEAD
-	s.Lock()
-	close(s.closed)
-	s.closed = make(chan struct{})
-	s.Unlock()
-=======
->>>>>>> 335f3846d (core: allow cancel load region (#4175))
 	s.wg.Wait()
 }
 
 func (s *RegionSyncer) reset() {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-<<<<<<< HEAD
-	if s.regionSyncerCancel == nil {
-		return
-	}
-	s.regionSyncerCancel()
-	s.regionSyncerCancel, s.regionSyncerCtx = nil, nil
-}
-
-func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
-	s.reset()
-	ctx, cancel := context.WithCancel(s.server.LoopContext())
-	tlsCfg, err := s.securityConfig.ToTLSConfig()
-=======
 	if s.mu.clientCancel != nil {
 		s.mu.clientCancel()
 	}
@@ -75,7 +56,6 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 
 func (s *RegionSyncer) establish(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	tlsCfg, err := s.tlsConfig.ToTLSConfig()
->>>>>>> 335f3846d (core: allow cancel load region (#4175))
 	if err != nil {
 		return nil, err
 	}
@@ -103,23 +83,12 @@ func (s *RegionSyncer) establish(ctx context.Context, addr string) (*grpc.Client
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-<<<<<<< HEAD
-
-	s.Lock()
-	s.regionSyncerCtx, s.regionSyncerCancel = ctx, cancel
-	s.Unlock()
-=======
->>>>>>> 335f3846d (core: allow cancel load region (#4175))
 	return cc, nil
 }
 
 func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (ClientStream, error) {
 	cli := pdpb.NewPDClient(conn)
-<<<<<<< HEAD
-	syncStream, err := cli.SyncRegions(s.regionSyncerCtx)
-=======
 	syncStream, err := cli.SyncRegions(ctx)
->>>>>>> 335f3846d (core: allow cancel load region (#4175))
 	if err != nil {
 		return nil, errs.ErrGRPCCreateStream.Wrap(err).FastGenWithCause()
 	}
@@ -140,18 +109,12 @@ var regionGuide = core.GenerateRegionGuideFunc(false)
 // StartSyncWithLeader starts to sync with leader.
 func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	s.wg.Add(1)
-<<<<<<< HEAD
-	s.RLock()
-	closed := s.closed
-	s.RUnlock()
-=======
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.mu.clientCtx, s.mu.clientCancel = context.WithCancel(s.server.LoopContext())
 	ctx := s.mu.clientCtx
 
->>>>>>> 335f3846d (core: allow cancel load region (#4175))
 	go func() {
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.

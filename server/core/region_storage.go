@@ -119,16 +119,7 @@ func deleteRegion(kv kv.Base, region *metapb.Region) error {
 	return kv.Remove(regionPath(region.GetId()))
 }
 
-<<<<<<< HEAD
-func loadRegions(kv kv.Base, f func(region *RegionInfo) []*RegionInfo) error {
-=======
-func loadRegions(
-	ctx context.Context,
-	kv kv.Base,
-	encryptionKeyManager *encryptionkm.KeyManager,
-	f func(region *RegionInfo) []*RegionInfo,
-) error {
->>>>>>> 335f3846d (core: allow cancel load region (#4175))
+func loadRegions(ctx context.Context, kv kv.Base, f func(region *RegionInfo) []*RegionInfo) error {
 	nextID := uint64(0)
 	endKey := regionPath(math.MaxUint64)
 
