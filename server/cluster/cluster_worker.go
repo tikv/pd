@@ -216,10 +216,18 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 	}
 	last := len(regions) - 1
 	originRegion := proto.Clone(regions[last]).(*metapb.Region)
-	hrm = core.RegionsToHexMeta(regions[:last])
 	log.Info("region batch split, generate new regions",
 		zap.Uint64("region-id", originRegion.GetId()),
 		zap.Stringer("origin", hrm),
 		zap.Int("total", last))
+
+	for _, region := range hrm {
+		regionInfo := core.NewRegionInfo(region, nil)
+		if err = c.HandleRegionHeartbeat(regionInfo); err != nil {
+			log.Warn("region handler error",
+				zap.Stringer("region-meta", region),
+				errs.ZapError(err))
+		}
+	}
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
