@@ -74,12 +74,14 @@ func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region 
 		Build(kind)
 }
 
-// CreateEvictLeaderOperator creates an operator that transfers the leader from a source store to one of the given target stores.
-func CreateEvictLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
+// CreateEvictLeaderOperator creates an operator that transfers the leader from a source store to one of the given target stores
+// or the given target store when incompatible.
+func CreateEvictLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
 	brief := fmt.Sprintf("transfer leader: store %d to one of the stores in %v", sourceStoreID, targetStoreIDs)
 	sort.Slice(targetStoreIDs, func(i, j int) bool { return targetStoreIDs[i] < targetStoreIDs[j] })
-	step := TransferLeaderV2{
+	step := EvictLeader{
 		FromStore: sourceStoreID,
+		ToStore:   targetStoreID,
 		ToStores:  targetStoreIDs,
 	}
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpLeader, step), nil

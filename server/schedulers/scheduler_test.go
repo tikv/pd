@@ -266,8 +266,8 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	op := sl.Schedule(tc)
 	testutil.CheckTransferLeaderV2(c, op[0], operator.OpLeader, 1, []uint64{2, 3})
-	c.Assert(op[0].Step(0).(operator.TransferLeaderV2).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsFalse)
-	c.Assert(op[0].Step(0).(operator.TransferLeaderV2).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsTrue)
+	c.Assert(op[0].Step(0).(operator.EvictLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsFalse)
+	c.Assert(op[0].Step(0).(operator.EvictLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsTrue)
 }
 
 func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {

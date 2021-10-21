@@ -55,7 +55,11 @@ func CheckTransferLeader(c *C, op *operator.Operator, kind operator.OpKind, sour
 func CheckTransferLeaderV2(c *C, op *operator.Operator, kind operator.OpKind, sourceID uint64, targetIDs []uint64) {
 	c.Assert(op, NotNil)
 	c.Assert(op.Len(), Equals, 1)
-	c.Assert(op.Step(0), DeepEquals, operator.TransferLeaderV2{FromStore: sourceID, ToStores: targetIDs})
+	expectedOps := make([]interface{}, 0, len(targetIDs))
+	for _, targetID := range targetIDs {
+		expectedOps = append(expectedOps, operator.EvictLeader{FromStore: sourceID, ToStore: targetID, ToStores: targetIDs})
+	}
+	c.Assert(op.Step(0), DeepEqualsIn, expectedOps)
 	kind |= operator.OpLeader
 	c.Assert(op.Kind()&kind, Equals, kind)
 }

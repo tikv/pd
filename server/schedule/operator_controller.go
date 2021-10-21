@@ -645,13 +645,14 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				Peers: []*metapb.Peer{region.GetStorePeer(st.ToStore)},
 			},
 		}
-	case operator.TransferLeaderV2:
+	case operator.EvictLeader:
 		peers := make([]*metapb.Peer, 0, len(st.ToStores))
 		for _, storeID := range st.ToStores {
 			peers = append(peers, region.GetStorePeer(storeID))
 		}
 		cmd = &pdpb.RegionHeartbeatResponse{
 			TransferLeader: &pdpb.TransferLeader{
+				Peer:  region.GetStorePeer(st.ToStore),
 				Peers: peers,
 			},
 		}
