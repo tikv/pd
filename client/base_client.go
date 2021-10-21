@@ -41,7 +41,7 @@ type baseClient struct {
 	leader atomic.Value // Store as string
 	// PD follower URLs
 	followers atomic.Value // Store as []string
-	// dc-location -> TSO allocator leader gRPC connection
+	// addr -> TSO allocator leader gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 	// dc-location -> TSO allocator leader URL
 	allocators sync.Map // Store as map[string]string
@@ -118,6 +118,8 @@ func (c *baseClient) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
+const memberUpdateInterval = time.Minute
+
 func (c *baseClient) memberLoop() {
 	defer c.wg.Done()
 
@@ -127,7 +129,7 @@ func (c *baseClient) memberLoop() {
 	for {
 		select {
 		case <-c.checkLeaderCh:
-		case <-time.After(time.Minute):
+		case <-time.After(memberUpdateInterval):
 		case <-ctx.Done():
 			return
 		}

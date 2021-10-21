@@ -538,75 +538,78 @@ type streamCh chan struct {
 
 func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoDispatcher chan *tsoRequest) {
 	var (
-		err            error
-		cancel         context.CancelFunc
-		stream         pdpb.PD_TsoClient
+		err        error
+		stream     pdpb.PD_TsoClient
+		streamCh   streamCh
+		streamAddr string
+		cancel     context.CancelFunc
+		requests   = make([]*tsoRequest, maxMergeTSORequests+1)
+		// addr -> connectionContext
+		connectionCtxs sync.Map
 		opts           []opentracing.StartSpanOption
-		requests       = make([]*tsoRequest, maxMergeTSORequests+1)
-		needUpdate     = false
-		streamCh       streamCh
-		connectionCtxs []connectionContext
 	)
 	defer func() {
 		log.Info("[pd] exit tso dispatcher", zap.String("dc-location", dc))
-		if cancel != nil {
-			cancel()
-		}
-	}()
-	// Normal connection creating, it will be affected by the `enableForwarding`.
-	createTSOConnection := c.tryConnect
-	if c.enableTSOFollowerProxy && dc == globalDCLocation /* only support Global TSO proxy now */ {
-		createTSOConnection = c.tryConnectToProxy
-	}
-	for {
-		// If the tso stream for the corresponding dc-location has not been created yet or needs to be re-created,
-		// we will try to create the stream first.
-		if len(connectionCtxs) == 0 {
-			if needUpdate {
-				err = c.updateMember()
-				if err != nil {
-					select {
-					case <-dispatcherCtx.Done():
-						return
-					default:
-					}
-					continue
-				}
-				needUpdate = false
+		// Cancel all connections.
+		connectionCtxs.Range(func(_, value interface{}) bool {
+			connectionCtx := value.(connectionContext)
+			cancel = connectionCtx.cancel
+			if cancel != nil {
+				cancel()
 			}
-			connectionCtxs, err = createTSOConnection(dispatcherCtx, dc)
-			if err != nil || len(connectionCtxs) == 0 {
-				select {
-				case <-dispatcherCtx.Done():
-					return
-				default:
-				}
-				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientCreateTSOStream, err))
-				c.ScheduleCheckLeader()
-				c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
-				select {
-				case <-time.After(time.Second):
-				case <-dispatcherCtx.Done():
-					return
-				}
+			return true
+		})
+	}()
+	// connectionCtxsUpdater is used to update the connectionCtxs
+	connectionCtxsUpdater := func() {
+		updaterCtx, updaterCancel := context.WithCancel(dispatcherCtx)
+		defer updaterCancel()
+		for {
+			select {
+			case <-updaterCtx.Done():
+				return
+			case <-time.After(memberUpdateInterval):
+				c.updateConnectionCtxs(updaterCtx, dc, &connectionCtxs)
+			}
+		}
+	}
+	// Call updateConnectionCtxs() once before creating the daemon.
+	c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
+	go connectionCtxsUpdater()
+
+	// Loop through each batch of TSO requests and send them for processing.
+	for {
+		select {
+		case <-dispatcherCtx.Done():
+			return
+		default:
+		}
+		// Randomly choose the next stream.
+		connectionCtxs.Range(func(addr, connectionCtxInterface interface{}) bool {
+			connectionCtx := connectionCtxInterface.(connectionContext)
+			streamAddr = addr.(string)
+			stream, cancel, streamCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh
+			return rand.Intn(2) == 0
+		})
+		if stream == nil {
+			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
+			select {
+			case <-dispatcherCtx.Done():
+				return
+			case <-time.After(time.Second):
 				continue
 			}
 		}
-		connectionIdx := 0
-		connectionCtxsLength := len(connectionCtxs)
-		if connectionCtxsLength > 1 {
-			// Randomly choose the next stream.
-			connectionIdx = rand.Intn(connectionCtxsLength)
-		}
-		connectionCtx := connectionCtxs[connectionIdx]
-		stream, cancel, streamCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh
 		select {
 		case first := <-tsoDispatcher:
+			// Fetch pendingTSOReqCount TSO requests in single batch.
 			pendingTSOReqCount := len(tsoDispatcher) + 1
 			requests[0] = first
 			for i := 1; i < pendingTSOReqCount; i++ {
 				requests[i] = <-tsoDispatcher
 			}
+			// Send `dl` to the corresponding `tsDeadlineCh` to manually
+			// control the timeout of `processTSORequests` later.
 			done := make(chan struct{})
 			dl := deadline{
 				timer:  time.After(c.timeout),
@@ -625,16 +628,19 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				return
 			}
 			opts = extractSpanReference(requests[:pendingTSOReqCount], opts[:0])
-			select {
-			// The connection should be switched to the new stream.
-			// NOTICE: Only work with the normal mode which does not involve the proxy.
-			case newStream, ok := <-streamCh:
-				if ok {
-					stream = newStream.stream
-					cancel = newStream.cancel
-					log.Info("tso stream has changed back to pd or tso allocator leader")
+			// This is used to do the stream replacement when the network with leader recovers.
+			if streamCh != nil {
+				select {
+				// The connection should be switched to the new stream.
+				// NOTICE: Only work with the normal mode which does not involve the proxy.
+				case newStream, ok := <-streamCh:
+					if ok {
+						stream = newStream.stream
+						cancel = newStream.cancel
+						log.Info("[pd] tso stream has changed back to pd or tso allocator leader")
+					}
+				default:
 				}
-			default:
 			}
 			err = c.processTSORequests(stream, dc, requests[:pendingTSOReqCount], opts)
 			close(done)
@@ -648,15 +654,22 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				return
 			default:
 			}
-			log.Error("[pd] getTS error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
 			c.ScheduleCheckLeader()
+			log.Error("[pd] getTS error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
 			cancel()
 			// Remove this stream from the `connectionCtxs`.
-			connectionCtxs[connectionIdx] = connectionCtxs[connectionCtxsLength-1]
-			connectionCtxs = connectionCtxs[:connectionCtxsLength-1]
+			connectionCtxs.Delete(streamAddr)
+			// If leader changes, updateMember ASAP.
 			if IsLeaderChange(err) {
-				needUpdate = true
+				if err := c.updateMember(); err != nil {
+					select {
+					case <-dispatcherCtx.Done():
+						return
+					default:
+					}
+				}
 			}
+			c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 		}
 	}
 }
@@ -669,21 +682,39 @@ type connectionContext struct {
 	streamCh streamCh
 }
 
+func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) {
+	// Normal connection creating, it will be affected by the `enableForwarding`.
+	createTSOConnection := c.tryConnect
+	if c.enableTSOFollowerProxy && dc == globalDCLocation /* only support Global TSO proxy now */ {
+		createTSOConnection = c.tryConnectToProxy
+	}
+	if err := createTSOConnection(updaterCtx, dc, connectionCtxs); err != nil {
+		log.Error("[pd] update connection contexts failed", zap.String("dc", dc), errs.ZapError(err))
+	}
+}
+
 // tryConnect will try to connect to the TSO allocator leader. If the connection becomes unreachable
 // and enableForwarding is true, it will create a new connection to a follower to do the forwarding,
 // while a new daemon will be created also to switch back to a normal leader connection ASAP the
 // connection comes back to normal.
-func (c *client) tryConnect(dispatcherCtx context.Context, dc string) ([]connectionContext, error) {
+func (c *client) tryConnect(
+	dispatcherCtx context.Context,
+	dc string,
+	connectionCtxs *sync.Map,
+) error {
+	// Clear the map first.
+	connectionCtxs.Range(func(addr, _ interface{}) bool {
+		connectionCtxs.Delete(addr)
+		return true
+	})
 	var (
-		url           string
 		networkErrNum uint64
 		err           error
-		cc            *grpc.ClientConn
 		stream        pdpb.PD_TsoClient
 	)
+	cc, url := c.getAllocatorClientConnByDCLocation(dc)
 	// retry several times before falling back to the follower when the network problem happens
 	for i := 0; i < maxRetryTimes; i++ {
-		cc, url = c.getAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 		failpoint.Inject("unreachableNetwork", func() {
@@ -691,7 +722,8 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) ([]connect
 			err = status.New(codes.Unavailable, "unavailable").Err()
 		})
 		if stream != nil && err == nil {
-			return []connectionContext{{stream, cancel, nil}}, nil
+			connectionCtxs.Store(url, connectionContext{stream, cancel, nil})
+			return nil
 		}
 
 		if err != nil && c.enableForwarding {
@@ -708,7 +740,7 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) ([]connect
 		cancel()
 		select {
 		case <-dispatcherCtx.Done():
-			return nil, err
+			return err
 		case <-time.After(retryInterval):
 		}
 	}
@@ -717,10 +749,10 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) ([]connect
 		// encounter the network error
 		followerClient, addr := c.followerClient()
 		if followerClient != nil {
-			log.Info("fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("addr", addr))
+			log.Info("[pd] fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("addr", addr))
 			forwardedHost, ok := c.getAllocatorLeaderAddrByDCLocation(dc)
 			if !ok {
-				return nil, errors.Errorf("cannot find the allocator leader in %s", dc)
+				return errors.Errorf("cannot find the allocator leader in %s", dc)
 			}
 
 			// create the follower stream
@@ -734,44 +766,54 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) ([]connect
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkAllocator(dispatcherCtx, cancel, dc, forwardedHostTrim, addrTrim, url, streamCh)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
-				return []connectionContext{{stream, cancel, streamCh}}, nil
+				connectionCtxs.Store(addr, connectionContext{stream, cancel, streamCh})
+				return nil
 			}
 			cancel()
 		}
 	}
-	return nil, err
+	return err
 }
 
 // tryConnectToProxy will create multiple streams to all the PD servers to work as a TSO proxy to reduce
 // the pressure of PD leader.
-func (c *client) tryConnectToProxy(dispatcherCtx context.Context, dc string) ([]connectionContext, error) {
-	clients, addrs := c.getAllClients()
-	connectionCtxs := make([]connectionContext, 0, len(clients))
-	for i, client := range clients {
-		addr := addrs[i]
-		log.Info("use follower to forward tso stream to do the proxy", zap.String("dc", dc), zap.String("addr", addr))
-		forwardedHost, ok := c.getAllocatorLeaderAddrByDCLocation(dc)
-		if !ok {
-			return nil, errors.Errorf("cannot find the allocator leader in %s", dc)
-		}
-
-		// Create the TSO stream.
-		cctx, cancel := context.WithCancel(dispatcherCtx)
-		cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
-		stream, err := c.createTsoStream(cctx, cancel, client)
-		if err == nil {
-			forwardedHostTrim := trimHTTPPrefix(forwardedHost)
-			addrTrim := trimHTTPPrefix(addr)
-			requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
-			connectionCtxs = append(connectionCtxs, connectionContext{stream, cancel, nil})
+func (c *client) tryConnectToProxy(
+	dispatcherCtx context.Context,
+	dc string,
+	connectionCtxs *sync.Map,
+) error {
+	clients := c.getAllClients()
+	leaderAddr := c.GetLeaderAddr()
+	forwardedHost, ok := c.getAllocatorLeaderAddrByDCLocation(dc)
+	if !ok {
+		return errors.Errorf("cannot find the allocator leader in %s", dc)
+	}
+	for addr, client := range clients {
+		// Only update the missing one.
+		if _, ok = connectionCtxs.Load(addr); ok {
 			continue
 		}
+		cctx, cancel := context.WithCancel(dispatcherCtx)
+		// Do not proxy the leader client.
+		if addr != leaderAddr {
+			log.Info("[pd] use follower to forward tso stream to do the proxy", zap.String("dc", dc), zap.String("addr", addr))
+			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
+		}
+		// Create the TSO stream.
+		stream, err := c.createTsoStream(cctx, cancel, client)
+		if err == nil {
+			if addr != leaderAddr {
+				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
+				addrTrim := trimHTTPPrefix(addr)
+				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
+			}
+			connectionCtxs.Store(addr, connectionContext{stream, cancel, nil})
+			continue
+		}
+		log.Error("[pd] create the tso stream failed", zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
 		cancel()
 	}
-	if len(connectionCtxs) > 0 {
-		return connectionCtxs, nil
-	}
-	return nil, errors.Errorf("cannot create any client in %s", dc)
+	return errors.Errorf("cannot create any client in %s", dc)
 }
 
 func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
@@ -941,12 +983,12 @@ func (c *client) getClient() pdpb.PDClient {
 	return c.leaderClient()
 }
 
-func (c *client) getAllClients() ([]pdpb.PDClient, []string) {
+func (c *client) getAllClients() map[string]pdpb.PDClient {
 	var (
 		leaderAddr    = c.GetLeaderAddr()
 		followerAddrs = c.GetFollowerAddr()
 		addrs         = append(followerAddrs, leaderAddr)
-		clients       = make([]pdpb.PDClient, 0, len(addrs))
+		clients       = make(map[string]pdpb.PDClient, len(addrs))
 		cc            *grpc.ClientConn
 		err           error
 	)
@@ -961,10 +1003,10 @@ func (c *client) getAllClients() ([]pdpb.PDClient, []string) {
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			clients = append(clients, pdpb.NewPDClient(cc))
+			clients[addr] = pdpb.NewPDClient(cc)
 		}
 	}
-	return clients, addrs
+	return clients
 }
 
 var tsoReqPool = sync.Pool{
