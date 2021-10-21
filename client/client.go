@@ -381,7 +381,7 @@ func (c *client) watchTSDeadline(ctx context.Context, dcLocation string) {
 				case d := <-tsDeadlineCh:
 					select {
 					case <-d.timer:
-						log.Error("tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
+						log.Error("[pd] tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
 						d.cancel()
 					case <-d.done:
 						continue
@@ -471,7 +471,7 @@ func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel con
 	for {
 		// the pd/allocator leader change, we need to re-establish the stream
 		if u != url {
-			log.Info("the leader of the allocator leader is changed", zap.String("dc", dc), zap.String("origin", url), zap.String("new", u))
+			log.Info("[pd] the leader of the allocator leader is changed", zap.String("dc", dc), zap.String("origin", url), zap.String("new", u))
 			return
 		}
 		healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.timeout)
@@ -485,7 +485,7 @@ func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel con
 			cctx, cancel := context.WithCancel(dispatcherCtx)
 			stream, err := c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 			if err == nil && stream != nil {
-				log.Info("recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
+				log.Info("[pd] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
 				streamCh <- struct {
 					cancel context.CancelFunc
 					stream pdpb.PD_TsoClient
@@ -976,7 +976,7 @@ func (c *client) getClient() pdpb.PDClient {
 	if c.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
 		followerClient, addr := c.followerClient()
 		if followerClient != nil {
-			log.Debug("use follower client", zap.String("addr", addr))
+			log.Debug("[pd] use follower client", zap.String("addr", addr))
 			return followerClient
 		}
 	}
