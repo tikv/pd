@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/juju/ratelimit"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
@@ -38,6 +39,11 @@ const (
 	errRedirectFailed      = "redirect failed"
 	errRedirectToNotLeader = "redirect to not leader"
 )
+
+// the api which will be limit by api limit.
+var limitAPIPrefix = []string{
+	"pd/api/v1/hotspot/regions/history",
+}
 
 type runtimeServiceValidator struct {
 	s     *server.Server
@@ -121,6 +127,28 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	}
 	client := h.s.GetHTTPClient()
 	NewCustomReverseProxies(client, urls).ServeHTTP(w, r)
+}
+
+type apiLimit struct {
+	bucket *ratelimit.Bucket
+}
+
+// NewAPILimit returns apiLimit which limit http access rate.
+func NewAPILimit(capacity int64, ratePerSec float64) *apiLimit {
+	return &apiLimit{
+		bucket: ratelimit.NewBucketWithRate(ratePerSec, capacity),
+	}
+}
+
+func (a *apiLimit) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	path := r.URL.Path
+	for _, apiPrefix := range limitAPIPrefix {
+		if strings.HasPrefix(path, apiPrefix) {
+			a.bucket.Wait(1)
+			break
+		}
+	}
+	next(w, r)
 }
 
 type customReverseProxies struct {
