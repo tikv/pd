@@ -669,6 +669,8 @@ func (c *client) handleDispatcher(
 					default:
 					}
 				}
+				// In case the leader remains the same as before.
+				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 			}
 		}
 	}
