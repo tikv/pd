@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -42,6 +43,7 @@ const (
 // Unhealthy replica management, mainly used for disaster recovery of TiKV.
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
+	PauseController
 	cluster           opt.Cluster
 	opts              *config.PersistOptions
 	regionWaitingList cache.Cache
@@ -64,6 +66,10 @@ func (r *ReplicaChecker) GetType() string {
 // Check verifies a region's replicas, creating an operator.Operator if need.
 func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("replica_checker", "check").Inc()
+	if r.IsPaused() {
+		checkerCounter.WithLabelValues("replica_checker", "paused").Inc()
+		return nil
+	}
 	if op := r.checkDownPeer(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
 		op.SetPriorityLevel(core.HighPriority)
@@ -106,13 +112,10 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operat
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return nil
 		}
+		// Only consider the state of the Store, not `stats.DownSeconds`.
 		if store.DownTime() < r.opts.GetMaxStoreDownTime() {
 			continue
 		}
-		if stats.GetDownSeconds() < uint64(r.opts.GetMaxStoreDownTime().Seconds()) {
-			continue
-		}
-
 		return r.fixPeer(region, storeID, downStatus)
 	}
 	return nil

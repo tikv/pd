@@ -4,16 +4,18 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -42,6 +44,7 @@ const (
 	gcPath                     = "gc"
 	rulesPath                  = "rules"
 	ruleGroupPath              = "rule_group"
+	regionLabelPath            = "region_label"
 	replicationPath            = "replication_mode"
 	componentPath              = "component"
 	customScheduleConfigPath   = "scheduler_config"
@@ -193,22 +196,22 @@ func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, e
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (s *Storage) LoadRegions(f func(region *RegionInfo) []*RegionInfo) error {
+func (s *Storage) LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
-		return loadRegions(s.regionStorage, s.encryptionKeyManager, f)
+		return loadRegions(ctx, s.regionStorage, s.encryptionKeyManager, f)
 	}
-	return loadRegions(s.Base, s.encryptionKeyManager, f)
+	return loadRegions(ctx, s.Base, s.encryptionKeyManager, f)
 }
 
 // LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
-func (s *Storage) LoadRegionsOnce(f func(region *RegionInfo) []*RegionInfo) error {
+func (s *Storage) LoadRegionsOnce(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) == 0 {
-		return loadRegions(s.Base, s.encryptionKeyManager, f)
+		return loadRegions(ctx, s.Base, s.encryptionKeyManager, f)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.regionLoaded == 0 {
-		if err := loadRegions(s.regionStorage, s.encryptionKeyManager, f); err != nil {
+		if err := loadRegions(ctx, s.regionStorage, s.encryptionKeyManager, f); err != nil {
 			return err
 		}
 		s.regionLoaded = 1
@@ -270,6 +273,21 @@ func (s *Storage) DeleteRule(ruleKey string) error {
 // LoadRules loads placement rules from storage.
 func (s *Storage) LoadRules(f func(k, v string)) error {
 	return s.LoadRangeByPrefix(rulesPath+"/", f)
+}
+
+// SaveRegionRule saves a region rule to the storage.
+func (s *Storage) SaveRegionRule(ruleKey string, rule interface{}) error {
+	return s.SaveJSON(regionLabelPath, ruleKey, rule)
+}
+
+// DeleteRegionRule removes a region rule from storage.
+func (s *Storage) DeleteRegionRule(ruleKey string) error {
+	return s.Remove(path.Join(regionLabelPath, ruleKey))
+}
+
+// LoadRegionRules loads region rules from storage.
+func (s *Storage) LoadRegionRules(f func(k, v string)) error {
+	return s.LoadRangeByPrefix(regionLabelPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -74,4 +75,12 @@ func (w *WMA) Reset() {
 func (w *WMA) Set(n float64) {
 	w.Reset()
 	w.Add(n)
+}
+
+// GetInstantaneous returns the value just added.
+func (w *WMA) GetInstantaneous() float64 {
+	if w.count == 0 {
+		return 0
+	}
+	return w.records[(w.count-1)%w.size]
 }

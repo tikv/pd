@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -34,6 +35,13 @@ func CreateAddPeerOperator(desc string, cluster opt.Cluster, region *core.Region
 	return NewBuilder(desc, cluster, region).
 		AddPeer(peer).
 		Build(kind)
+}
+
+// CreateDemoteVoterOperator creates an operator that demotes a voter
+func CreateDemoteVoterOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+	return NewBuilder(desc, cluster, region).
+		DemoteVoter(peer.GetStoreId()).
+		Build(0)
 }
 
 // CreatePromoteLearnerOperator creates an operator that promotes a learner.

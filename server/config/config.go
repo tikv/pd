@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -226,11 +227,12 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage = true
-	defaultTraceRegionFlow  = true
-	defaultFlowRoundByDigit = 3
-	defaultMaxResetTSGap    = 24 * time.Hour
-	defaultKeyType          = "table"
+	defaultUseRegionStorage  = true
+	defaultTraceRegionFlow   = true
+	defaultFlowRoundByDigit  = 3 // KB
+	maxTraceFlowRoundByDigit = 5 // 0.1 MB
+	defaultMaxResetTSGap     = 24 * time.Hour
+	defaultKeyType           = "table"
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
@@ -735,6 +737,12 @@ type ScheduleConfig struct {
 	// is overwritten, the value is fixed until it is deleted.
 	// Default: manual
 	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
+
+	// Controls the time interval between write hot regions info into leveldb.
+	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
+
+	// The day of hot regions data to be reserved. 0 means close.
+	HotRegionsResevervedDays int64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -756,12 +764,12 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 
 const (
 	defaultMaxReplicas               = 3
-	defaultMaxSnapshotCount          = 3
-	defaultMaxPendingPeerCount       = 16
+	defaultMaxSnapshotCount          = 64
+	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
 	defaultMaxMergeRegionKeys        = 200000
 	defaultSplitMergeInterval        = 1 * time.Hour
-	defaultPatrolRegionInterval      = 100 * time.Millisecond
+	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
 	defaultRegionScheduleLimit       = 2048
@@ -780,6 +788,8 @@ const (
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
 	defaultEnableCrossTableMerge       = true
+	defaultHotRegionsWriteInterval     = 10 * time.Minute
+	defaultHotRegionsResevervedDays    = 7
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -859,6 +869,14 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 
 	if c.StoreLimit == nil {
 		c.StoreLimit = make(map[uint64]StoreLimitConfig)
+	}
+
+	if !meta.IsDefined("hot-regions-write-interval") {
+		adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
+	}
+
+	if !meta.IsDefined("hot-regions-reserved-days") {
+		adjustInt64(&c.HotRegionsResevervedDays, defaultHotRegionsResevervedDays)
 	}
 
 	return c.Validate()
@@ -1007,6 +1025,9 @@ type ReplicationConfig struct {
 
 	// When PlacementRules feature is enabled. MaxReplicas, LocationLabels and IsolationLabels are not used any more.
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
+
+	// EnablePlacementRuleCache controls whether use cache during rule checker
+	EnablePlacementRulesCache bool `toml:"enable-placement-rules-cache" json:"enable-placement-rules-cache,string"`
 
 	// IsolationLevel is used to isolate replicas explicitly and forcibly if it's not empty.
 	// Its value must be empty or one of LocationLabels.

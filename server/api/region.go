@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -550,6 +551,16 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 	}
 	sort.Sort(histSlice(histItems))
 	return &histItems
+}
+
+// @Tags region
+// @Summary List all range holes whitout any region info.
+// @Produce json
+// @Success 200 {object} [][]string
+// @Router /regions/range-holes [get]
+func (h *regionsHandler) GetRangeHoles(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	h.rd.JSON(w, http.StatusOK, rc.GetRangeHoles())
 }
 
 // @Tags region

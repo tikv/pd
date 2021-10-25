@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -70,6 +71,7 @@ type balanceLeaderSchedulerConfig struct {
 
 type balanceLeaderScheduler struct {
 	*BaseScheduler
+	*retryQuota
 	conf         *balanceLeaderSchedulerConfig
 	opController *schedule.OperatorController
 	filters      []filter.Filter
@@ -83,6 +85,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 
 	s := &balanceLeaderScheduler{
 		BaseScheduler: base,
+		retryQuota:    newRetryQuota(balanceLeaderRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceLeaderCounter,
@@ -137,7 +140,7 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
-	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
+	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
 	opInfluence := l.opController.GetOpInfluence(cluster)
 	kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
 	plan := newBalancePlan(kind, cluster, opInfluence)
@@ -153,7 +156,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	})
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := plan.GetOpInfluence(targets[i].GetID())
-		jOp := plan.GetOpInfluence(targets[i].GetID())
+		jOp := plan.GetOpInfluence(targets[j].GetID())
 		return targets[i].LeaderScore(leaderSchedulePolicy, iOp) <
 			targets[j].LeaderScore(leaderSchedulePolicy, jOp)
 	})
@@ -161,32 +164,38 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	for i := 0; i < len(sources) || i < len(targets); i++ {
 		if i < len(sources) {
 			plan.source, plan.target = sources[i], nil
+			retryLimit := l.retryQuota.GetLimit(plan.source)
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("source-store", plan.SourceStoreID()))
 			l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
-			for j := 0; j < balanceLeaderRetryLimit; j++ {
+			for j := 0; j < retryLimit; j++ {
 				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
 				if ops := l.transferLeaderOut(plan); len(ops) > 0 {
+					l.retryQuota.ResetLimit(plan.source)
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", plan.SourceMetricLabel()))
 					return ops
 				}
 			}
+			l.Attenuate(plan.source)
 			log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64("source", plan.SourceStoreID()))
 		}
 		if i < len(targets) {
 			plan.source, plan.target = nil, targets[i]
+			retryLimit := l.retryQuota.GetLimit(plan.target)
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("target-store", plan.TargetStoreID()))
 			l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
-
-			for j := 0; j < balanceLeaderRetryLimit; j++ {
+			for j := 0; j < retryLimit; j++ {
 				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
 				if ops := l.transferLeaderIn(plan); len(ops) > 0 {
+					l.retryQuota.ResetLimit(plan.target)
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-in", plan.TargetMetricLabel()))
 					return ops
 				}
 			}
+			l.Attenuate(plan.target)
 			log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64("target", plan.TargetStoreID()))
 		}
 	}
+	l.retryQuota.GC(append(sources, targets...))
 	return nil
 }
 
@@ -206,7 +215,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) []*operato
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, plan.cluster.GetOpts())
-	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
+	leaderSchedulePolicy := plan.cluster.GetOpts().GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := plan.GetOpInfluence(targets[i].GetID())
 		jOp := plan.GetOpInfluence(targets[j].GetID())
@@ -281,9 +290,9 @@ func (l *balanceLeaderScheduler) createOperator(plan *balancePlan) []*operator.O
 	}
 	op.Counters = append(op.Counters,
 		schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
-		balanceDirectionCounter.WithLabelValues(l.GetName(), plan.SourceMetricLabel(), plan.TargetMetricLabel()),
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
+		balanceDirectionCounter.WithLabelValues(l.GetName(), plan.SourceMetricLabel(), plan.TargetMetricLabel()),
 		l.counter.WithLabelValues("move-leader", plan.SourceMetricLabel()+"-out"),
 		l.counter.WithLabelValues("move-leader", plan.TargetMetricLabel()+"-in"),
 	)

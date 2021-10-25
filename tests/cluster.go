@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -338,6 +339,13 @@ func (s *TestServer) GetAdjacentRegions(region *core.RegionInfo) []*core.RegionI
 	defer s.RUnlock()
 	left, right := s.server.GetRaftCluster().GetAdjacentRegions(region)
 	return []*core.RegionInfo{left, right}
+}
+
+// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
+func (s *TestServer) GetRangeHoles() [][]string {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster().GetRangeHoles()
 }
 
 // GetStoreRegions returns all regions' information with a given storeID.

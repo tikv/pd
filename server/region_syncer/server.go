@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -69,10 +70,9 @@ type Server interface {
 type RegionSyncer struct {
 	mu struct {
 		sync.RWMutex
-		streams            map[string]ServerStream
-		regionSyncerCtx    context.Context
-		regionSyncerCancel context.CancelFunc
-		closed             chan struct{}
+		streams      map[string]ServerStream
+		clientCtx    context.Context
+		clientCancel context.CancelFunc
 	}
 	server    Server
 	wg        sync.WaitGroup
@@ -94,7 +94,6 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		tlsConfig: s.GetTLSConfig(),
 	}
 	syncer.mu.streams = make(map[string]ServerStream)
-	syncer.mu.closed = make(chan struct{})
 	return syncer
 }
 
@@ -105,6 +104,7 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 	var stats []*pdpb.RegionStat
 	var leaders []*metapb.Peer
 	ticker := time.NewTicker(syncerKeepAliveInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-quit:
@@ -112,8 +112,8 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 			return
 		case first := <-regionNotifier:
 			requests = append(requests, first.GetMeta())
-			stats := append(stats, first.GetStat())
-			leaders := append(leaders, first.GetLeader())
+			stats = append(stats, first.GetStat())
+			leaders = append(leaders, first.GetLeader())
 			startIndex := s.history.GetNextIndex()
 			s.history.Record(first)
 			pending := len(regionNotifier)
@@ -140,6 +140,8 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 			s.broadcast(alive)
 		}
 		requests = requests[:0]
+		stats = stats[:0]
+		leaders = leaders[:0]
 	}
 }
 
@@ -210,9 +212,11 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 				lastIndex += len(metas)
 				if err := stream.Send(resp); err != nil {
 					log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
+					return err
 				}
 				metas = metas[:0]
 				stats = stats[:0]
+				leaders = leaders[:0]
 			}
 			log.Info("requested server has completed full synchronization with server",
 				zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))

@@ -48,7 +48,6 @@ type HotRegionStorage struct {
 	batchHotInfo            map[string]*HistoryHotRegion
 	remianedDays            int64
 	pullInterval            time.Duration
-	compactionCountdown     int
 	hotRegionInfoCtx        context.Context
 	hotRegionInfoCancel     context.CancelFunc
 	hotRegionStorageHandler HotRegionStorageHandler

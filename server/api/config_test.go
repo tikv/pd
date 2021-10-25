@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -276,6 +277,29 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	c.Assert(defaultCfg.Replication.LocationLabels, DeepEquals, typeutil.StringSlice([]string{}))
 	c.Assert(defaultCfg.Schedule.RegionScheduleLimit, Equals, uint64(2048))
 	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
+}
+
+func (s *testConfigSuite) TestConfigPDServer(c *C) {
+	addr := fmt.Sprintf("%s/config", s.urlPrefix)
+
+	ms := map[string]interface{}{
+		"metric-storage": "",
+	}
+	postData, err := json.Marshal(ms)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(testDialClient, addr, postData), IsNil)
+
+	addr = fmt.Sprintf("%s/config/pd-server", s.urlPrefix)
+	sc := &config.PDServerConfig{}
+	c.Assert(readJSON(testDialClient, addr, sc), IsNil)
+
+	c.Assert(sc.UseRegionStorage, Equals, bool(true))
+	c.Assert(sc.KeyType, Equals, "table")
+	c.Assert(sc.RuntimeServices, DeepEquals, typeutil.StringSlice([]string{}))
+	c.Assert(sc.MetricStorage, Equals, "")
+	c.Assert(sc.DashboardAddress, Equals, "auto")
+	c.Assert(sc.FlowRoundByDigit, Equals, int(3))
+	c.Assert(sc.MaxResetTSGap.Duration, Equals, time.Duration(24*time.Hour))
 }
 
 var ttlConfig = map[string]interface{}{

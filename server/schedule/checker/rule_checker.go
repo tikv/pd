@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -18,8 +19,8 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
@@ -33,6 +34,7 @@ import (
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
+	PauseController
 	cluster           opt.Cluster
 	ruleManager       *placement.RuleManager
 	name              string
@@ -59,20 +61,47 @@ func (c *RuleChecker) GetType() string {
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
+	fit := opt.FitRegion(c.cluster, region)
+	return c.CheckWithFit(region, fit)
+}
+
+// CheckWithFit is similar with Checker with placement.RegionFit
+func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) (op *operator.Operator) {
+	if c.IsPaused() {
+		checkerCounter.WithLabelValues("rule_checker", "paused").Inc()
+		return nil
+	}
+	// If the fit is fetched from cache, it seems that the region doesn't need cache
+	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() && fit.IsCached() {
+		failpoint.Inject("assertShouldNotCache", func() {
+			panic("cached shouldn't be used")
+		})
+		checkerCounter.WithLabelValues("rule_checker", "get-cache").Inc()
+		return nil
+	}
+	failpoint.Inject("assertShouldCache", func() {
+		panic("cached should be used")
+	})
+
+	// If the fit is calculated by FitRegion, which means we get a new fit result, thus we should
+	// invalid the cache if it exists
+	c.ruleManager.InvalidCache(region.GetID())
+
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
 	c.record.refresh(c.cluster)
-	fit := c.cluster.FitRegion(region)
+
 	if len(fit.RuleFits) == 0 {
-		checkerCounter.WithLabelValues("rule_checker", "fix-range").Inc()
+		checkerCounter.WithLabelValues("rule_checker", "need-split").Inc()
 		// If the region matches no rules, the most possible reason is it spans across
 		// multiple rules.
-		return c.fixRange(region)
+		return nil
 	}
 	op, err := c.fixOrphanPeers(region, fit)
-	if err == nil && op != nil {
+	if err != nil {
+		log.Debug("fail to fix orphan peer", errs.ZapError(err))
+	} else if op != nil {
 		return op
 	}
-	log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	for _, rf := range fit.RuleFits {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
@@ -83,22 +112,14 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 			return op
 		}
 	}
+	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() {
+		if placement.ValidateFit(fit) && placement.ValidateRegion(region) && placement.ValidateStores(fit.GetRegionStores()) {
+			// If there is no need to fix, we will cache the fit
+			c.ruleManager.SetRegionFitCache(region, fit)
+			checkerCounter.WithLabelValues("rule_checker", "set-cache").Inc()
+		}
+	}
 	return nil
-}
-
-func (c *RuleChecker) fixRange(region *core.RegionInfo) *operator.Operator {
-	keys := c.ruleManager.GetSplitKeys(region.GetStartKey(), region.GetEndKey())
-	if len(keys) == 0 {
-		return nil
-	}
-
-	op, err := operator.CreateSplitRegionOperator("rule-split-region", region, 0, pdpb.CheckPolicy_USEKEY, keys)
-	if err != nil {
-		log.Debug("create split region operator failed", errs.ZapError(err))
-		return nil
-	}
-
-	return op
 }
 
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
@@ -220,6 +241,10 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		checkerCounter.WithLabelValues("rule_checker", "no-new-leader").Inc()
 		return nil, errors.New("no new leader")
 	}
+	if core.IsVoter(peer) && rf.Rule.Role == placement.Learner {
+		checkerCounter.WithLabelValues("rule_checker", "demote-voter-role").Inc()
+		return operator.CreateDemoteVoterOperator("fix-demote-voter", c.cluster, region, peer)
+	}
 	return nil, nil
 }
 
@@ -269,11 +294,26 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
 	}
-	// remove orphan peers only when all rules are satisfied (count+role)
+	// remove orphan peers only when all rules are satisfied (count+role) and all peers selected
+	// by RuleFits is not pending or down.
 	for _, rf := range fit.RuleFits {
 		if !rf.IsSatisfied() {
 			checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
 			return nil, nil
+		}
+		for _, p := range rf.Peers {
+			for _, pendingPeer := range region.GetPendingPeers() {
+				if pendingPeer.Id == p.Id {
+					checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
+					return nil, nil
+				}
+			}
+			for _, downPeer := range region.GetDownPeers() {
+				if downPeer.Peer.Id == p.Id {
+					checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
+					return nil, nil
+				}
+			}
 		}
 	}
 	checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
@@ -292,10 +332,8 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return false
 		}
+		// Only consider the state of the Store, not `stats.DownSeconds`.
 		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
-			continue
-		}
-		if stats.GetDownSeconds() < uint64(c.cluster.GetOpts().GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
 		return true

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -138,6 +139,18 @@ func (o *Operator) SchedulerKind() OpKind {
 // Status returns operator status.
 func (o *Operator) Status() OpStatus {
 	return o.status.Status()
+}
+
+// CheckAndGetStatus returns operator status after `CheckExpired` and `CheckTimeout`.
+func (o *Operator) CheckAndGetStatus() OpStatus {
+	switch {
+	case o.CheckExpired():
+		return EXPIRED
+	case o.CheckTimeout():
+		return TIMEOUT
+	default:
+		return o.Status()
+	}
 }
 
 // GetReachTimeOf returns the time when operator reaches the given status.
@@ -321,11 +334,7 @@ func (o *Operator) History() []OpHistory {
 			})
 		case AddPeer:
 			addPeerStores = append(addPeerStores, s.ToStore)
-		case AddLightPeer:
-			addPeerStores = append(addPeerStores, s.ToStore)
 		case AddLearner:
-			addPeerStores = append(addPeerStores, s.ToStore)
-		case AddLightLearner:
 			addPeerStores = append(addPeerStores, s.ToStore)
 		case RemovePeer:
 			removePeerStores = append(removePeerStores, s.FromStore)

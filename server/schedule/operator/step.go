@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -83,6 +84,7 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 // AddPeer is an OpStep that adds a region peer.
 type AddPeer struct {
 	ToStore, PeerID uint64
+	IsLightWeight   bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -114,6 +116,9 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	regionSize := region.GetApproximateSize()
 	to.RegionSize += regionSize
 	to.RegionCount++
+	if ap.IsLightWeight {
+		return
+	}
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
@@ -129,6 +134,7 @@ func (ap AddPeer) CheckSafety(region *core.RegionInfo) error {
 // AddLearner is an OpStep that adds a region learner peer.
 type AddLearner struct {
 	ToStore, PeerID uint64
+	IsLightWeight   bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -175,6 +181,9 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	regionSize := region.GetApproximateSize()
 	to.RegionSize += regionSize
 	to.RegionCount++
+	if al.IsLightWeight {
+		return
+	}
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
@@ -219,6 +228,7 @@ func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionI
 // RemovePeer is an OpStep that removes a region peer.
 type RemovePeer struct {
 	FromStore, PeerID uint64
+	IsDownStore       bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -259,6 +269,10 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	regionSize := region.GetApproximateSize()
 	from.RegionSize -= regionSize
 	from.RegionCount--
+
+	if rp.IsDownStore && regionSize > storelimit.SmallRegionThreshold {
+		regionSize = storelimit.SmallRegionThreshold
+	}
 	from.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
 
@@ -345,100 +359,6 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 // CheckSafety checks if the step meets the safety properties.
 func (sr SplitRegion) CheckSafety(region *core.RegionInfo) error {
 	return nil
-}
-
-// AddLightPeer is an OpStep that adds a region peer without considering the influence.
-type AddLightPeer struct {
-	ToStore, PeerID uint64
-}
-
-// ConfVerChanged returns the delta value for version increased by this step.
-func (ap AddLightPeer) ConfVerChanged(region *core.RegionInfo) uint64 {
-	peer := region.GetStoreVoter(ap.ToStore)
-	return typeutil.BoolToUint64(peer.GetId() == ap.PeerID)
-}
-
-func (ap AddLightPeer) String() string {
-	return fmt.Sprintf("add peer %v on store %v", ap.PeerID, ap.ToStore)
-}
-
-// IsFinish checks if current step is finished.
-func (ap AddLightPeer) IsFinish(region *core.RegionInfo) bool {
-	if peer := region.GetStoreVoter(ap.ToStore); peer != nil {
-		if peer.GetId() != ap.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", peer.GetId()))
-			return false
-		}
-		return region.GetPendingVoter(peer.GetId()) == nil
-	}
-	return false
-}
-
-// CheckSafety checks if the step meets the safety properties.
-func (ap AddLightPeer) CheckSafety(region *core.RegionInfo) error {
-	peer := region.GetStorePeer(ap.ToStore)
-	if peer != nil && peer.GetId() != ap.PeerID {
-		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
-	}
-	return nil
-}
-
-// Influence calculates the store difference that current step makes.
-func (ap AddLightPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
-	to := opInfluence.GetStoreInfluence(ap.ToStore)
-
-	to.RegionSize += region.GetApproximateSize()
-	to.RegionCount++
-}
-
-// AddLightLearner is an OpStep that adds a region learner peer without considering the influence.
-type AddLightLearner struct {
-	ToStore, PeerID uint64
-}
-
-// ConfVerChanged returns the delta value for version increased by this step.
-func (al AddLightLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
-	peer := region.GetStorePeer(al.ToStore)
-	return typeutil.BoolToUint64(peer.GetId() == al.PeerID)
-}
-
-func (al AddLightLearner) String() string {
-	return fmt.Sprintf("add learner peer %v on store %v", al.PeerID, al.ToStore)
-}
-
-// IsFinish checks if current step is finished.
-func (al AddLightLearner) IsFinish(region *core.RegionInfo) bool {
-	if peer := region.GetStoreLearner(al.ToStore); peer != nil {
-		if peer.GetId() != al.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", peer.GetId()))
-			return false
-		}
-		return region.GetPendingLearner(peer.GetId()) == nil
-	}
-	return false
-}
-
-// CheckSafety checks if the step meets the safety properties.
-func (al AddLightLearner) CheckSafety(region *core.RegionInfo) error {
-	peer := region.GetStorePeer(al.ToStore)
-	if peer == nil {
-		return nil
-	}
-	if peer.GetId() != al.PeerID {
-		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
-	}
-	if !core.IsLearner(peer) {
-		return errors.New("peer already is a voter")
-	}
-	return nil
-}
-
-// Influence calculates the store difference that current step makes.
-func (al AddLightLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
-	to := opInfluence.GetStoreInfluence(al.ToStore)
-
-	to.RegionSize += region.GetApproximateSize()
-	to.RegionCount++
 }
 
 // DemoteFollower is an OpStep that demotes a region follower peer to learner.

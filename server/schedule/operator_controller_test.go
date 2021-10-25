@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -427,7 +428,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	op := operator.NewOperator("test", "test", 1,
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
 		operator.OpRegion, steps...)
-	c.Assert(controller.AddOperator(op), Equals, true)
+	c.Assert(controller.AddOperator(op), IsTrue)
 	c.Assert(stream.MsgLength(), Equals, 1)
 
 	// report the result of transferring leader
@@ -450,7 +451,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	op = operator.NewOperator("test", "test", 1,
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
 		operator.OpRegion, steps...)
-	c.Assert(controller.AddOperator(op), Equals, true)
+	c.Assert(controller.AddOperator(op), IsTrue)
 	c.Assert(op.ConfVerChanged(region), Equals, uint64(0))
 	c.Assert(stream.MsgLength(), Equals, 3)
 
@@ -477,20 +478,21 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	// Put region into cluster, otherwise, AddOperator will fail because of
 	// missing region
 	cluster.PutRegion(region)
-
+	cluster.AddRegionStore(1, 1)
+	cluster.AddRegionStore(3, 1)
 	// The next allocated peer should have peerid 3, so we add this peer
 	// to store 3
 	testSteps := [][]operator.OpStep{
 		{
 			operator.AddLearner{ToStore: 3, PeerID: 3},
 			operator.PromoteLearner{ToStore: 3, PeerID: 3},
-			operator.TransferLeader{ToStore: 3},
+			operator.TransferLeader{FromStore: 1, ToStore: 3},
 			operator.RemovePeer{FromStore: 1},
 		},
 		{
-			operator.AddLightLearner{ToStore: 3, PeerID: 3},
+			operator.AddLearner{ToStore: 3, PeerID: 3, IsLightWeight: true},
 			operator.PromoteLearner{ToStore: 3, PeerID: 3},
-			operator.TransferLeader{ToStore: 3},
+			operator.TransferLeader{FromStore: 1, ToStore: 3},
 			operator.RemovePeer{FromStore: 1},
 		},
 	}
@@ -499,7 +501,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		// Create an operator
 		op := operator.NewOperator("test", "test", 1, epoch,
 			operator.OpRegion, steps...)
-		c.Assert(controller.AddOperator(op), Equals, true)
+		c.Assert(controller.AddOperator(op), IsTrue)
 		c.Assert(stream.MsgLength(), Equals, 1)
 
 		// Create region2 which is cloned from the original region.
@@ -513,7 +515,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 			core.WithIncConfVer(),
 		)
 		c.Assert(region2.GetPendingPeers(), NotNil)
-		c.Assert(steps[0].IsFinish(region2), Equals, false)
+		c.Assert(steps[0].IsFinish(region2), IsFalse)
 		controller.Dispatch(region2, DispatchFromHeartBeat)
 
 		// In this case, the conf version has been changed, but the
@@ -531,7 +533,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}),
 			core.WithIncConfVer(),
 		)
-		c.Assert(steps[0].IsFinish(region3), Equals, true)
+		c.Assert(steps[0].IsFinish(region3), IsTrue)
 		controller.Dispatch(region3, DispatchFromHeartBeat)
 		c.Assert(op.ConfVerChanged(region3), Equals, uint64(1))
 		c.Assert(stream.MsgLength(), Equals, 2)
@@ -540,7 +542,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 			core.WithPromoteLearner(3),
 			core.WithIncConfVer(),
 		)
-		c.Assert(steps[1].IsFinish(region4), Equals, true)
+		c.Assert(steps[1].IsFinish(region4), IsTrue)
 		controller.Dispatch(region4, DispatchFromHeartBeat)
 		c.Assert(op.ConfVerChanged(region4), Equals, uint64(2))
 		c.Assert(stream.MsgLength(), Equals, 3)
@@ -549,7 +551,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		region5 := region4.Clone(
 			core.WithLeader(region4.GetStorePeer(3)),
 		)
-		c.Assert(steps[2].IsFinish(region5), Equals, true)
+		c.Assert(steps[2].IsFinish(region5), IsTrue)
 		controller.Dispatch(region5, DispatchFromHeartBeat)
 		c.Assert(op.ConfVerChanged(region5), Equals, uint64(2))
 		c.Assert(stream.MsgLength(), Equals, 4)
@@ -559,7 +561,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 			core.WithRemoveStorePeer(1),
 			core.WithIncConfVer(),
 		)
-		c.Assert(steps[3].IsFinish(region6), Equals, true)
+		c.Assert(steps[3].IsFinish(region6), IsTrue)
 		controller.Dispatch(region6, DispatchFromHeartBeat)
 		c.Assert(op.ConfVerChanged(region6), Equals, uint64(3))
 
@@ -604,6 +606,10 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 		}),
 		core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}),
 	)
+
+	// set to a small rate to reduce unstable possibility.
+	tc.SetAllStoresLimit(storelimit.AddPeer, 0.0000001)
+	tc.SetAllStoresLimit(storelimit.RemovePeer, 0.0000001)
 	tc.PutRegion(regions[2])
 	// The size of Region is less or equal than 1MB.
 	for i := 0; i < 50; i++ {
@@ -694,7 +700,7 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	// both of the pair are allowed
 	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
 	c.Assert(err, IsNil)
-	c.Assert(len(ops), Equals, 2)
+	c.Assert(ops, HasLen, 2)
 	c.Assert(controller.AddWaitingOperator(ops...), Equals, 2)
 
 	// no space left, new operator can not be added.

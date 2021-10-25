@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -52,6 +53,9 @@ type Leadership struct {
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
 	leaderValue string
+
+	keepAliveCtx        context.Context
+	keepAliceCancelFunc context.CancelFunc
 }
 
 // NewLeadership creates a new Leadership.
@@ -80,11 +84,17 @@ func (ls *Leadership) setLease(lease *lease) {
 
 // GetClient is used to get the etcd client.
 func (ls *Leadership) GetClient() *clientv3.Client {
+	if ls == nil {
+		return nil
+	}
 	return ls.client
 }
 
 // GetLeaderKey is used to get the leader key of etcd.
 func (ls *Leadership) GetLeaderKey() string {
+	if ls == nil {
+		return ""
+	}
 	return ls.leaderKey
 }
 
@@ -92,12 +102,13 @@ func (ls *Leadership) GetLeaderKey() string {
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
-	ls.setLease(&lease{
+	newLease := &lease{
 		Purpose: ls.purpose,
 		client:  ls.client,
 		lease:   clientv3.NewLease(ls.client),
-	})
-	if err := ls.getLease().Grant(leaseTimeout); err != nil {
+	}
+	ls.setLease(newLease)
+	if err := newLease.Grant(leaseTimeout); err != nil {
 		return err
 	}
 	finalCmps := make([]clientv3.Cmp, 0, len(cmps)+1)
@@ -106,15 +117,15 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	finalCmps = append(finalCmps, clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
 	resp, err := kv.NewSlowLogTxn(ls.client).
 		If(finalCmps...).
-		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(ls.getLease().ID))).
+		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(newLease.ID))).
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
-		ls.getLease().Close()
+		newLease.Close()
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		ls.getLease().Close()
+		newLease.Close()
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	log.Info("write leaderData to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
@@ -123,10 +134,14 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 
 // Keep will keep the leadership available by update the lease's expired time continuously
 func (ls *Leadership) Keep(ctx context.Context) {
-	ls.getLease().KeepAlive(ctx)
+	if ls == nil {
+		return
+	}
+	ls.keepAliveCtx, ls.keepAliceCancelFunc = context.WithCancel(ctx)
+	ls.getLease().KeepAlive(ls.keepAliveCtx)
 }
 
-// Check returns whether the leadership is still available
+// Check returns whether the leadership is still available.
 func (ls *Leadership) Check() bool {
 	return ls != nil && ls.getLease() != nil && !ls.getLease().IsExpired()
 }
@@ -160,6 +175,9 @@ func (ls *Leadership) DeleteLeaderKey() error {
 // Watch is used to watch the changes of the leadership, usually is used to
 // detect the leadership stepping down and restart an election as soon as possible.
 func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
+	if ls == nil {
+		return
+	}
 	watcher := clientv3.NewWatcher(ls.client)
 	defer watcher.Close()
 	ctx, cancel := context.WithCancel(serverCtx)
@@ -207,10 +225,13 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 	}
 }
 
-// Reset does some defer job such as closing lease, resetting lease etc.
+// Reset does some defer jobs such as closing lease, resetting lease etc.
 func (ls *Leadership) Reset() {
 	if ls == nil || ls.getLease() == nil {
 		return
+	}
+	if ls.keepAliceCancelFunc != nil {
+		ls.keepAliceCancelFunc()
 	}
 	ls.getLease().Close()
 }
