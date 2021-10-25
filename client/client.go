@@ -551,8 +551,9 @@ type streamCh chan struct {
 func (c *client) handleDispatcher(
 	dispatcherCtx context.Context,
 	dc string,
-	tsoDispatcher <-chan *tsoRequest) {
+	tsoDispatcher chan *tsoRequest) {
 	var (
+		retryTimes int
 		err        error
 		stream     pdpb.PD_TsoClient
 		streamCh   streamCh
@@ -595,13 +596,21 @@ func (c *client) handleDispatcher(
 		}
 		if stream == nil {
 			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
+			c.ScheduleCheckLeader()
+			if retryTimes >= 3 {
+				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientCreateTSOStream, err))
+				c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
+				retryTimes = 0
+			}
 			select {
 			case <-dispatcherCtx.Done():
 				return
 			case <-time.After(time.Second):
-				continue
 			}
+			retryTimes++
+			continue
 		}
+		retryTimes = 0
 		select {
 		case first := <-tsoDispatcher:
 			// Fetch pendingTSOReqCount TSO requests in single batch.
