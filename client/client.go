@@ -549,14 +549,15 @@ func (c *client) handleDispatcher(
 		cancel     context.CancelFunc
 		requests   = make([]*tsoRequest, maxMergeTSORequests+1)
 		// addr -> connectionContext
-		connectionCtxs sync.Map
-		opts           []opentracing.StartSpanOption
+		connectionCtxs         sync.Map
+		opts                   []opentracing.StartSpanOption
+		tsoFollowerProxySwitch = c.isTSOFollowerProxyEnabled()
 	)
 	defer func() {
 		log.Info("[pd] exit tso dispatcher", zap.String("dc-location", dc))
 		// Cancel all connections.
-		connectionCtxs.Range(func(_, value interface{}) bool {
-			connectionCtx := value.(*connectionContext)
+		connectionCtxs.Range(func(_, cc interface{}) bool {
+			connectionCtx := cc.(*connectionContext)
 			cancel = connectionCtx.cancel
 			if cancel != nil {
 				cancel()
@@ -573,10 +574,15 @@ func (c *client) handleDispatcher(
 			return
 		default:
 		}
-		if c.isTSOFollowerProxyEnabled() || stream == nil {
+		newTSOFollowerProxySwitch := c.isTSOFollowerProxyEnabled()
+		// Three cases to choose a new connection:
+		//   1. stream is nil.
+		//   2. enableTSOFollowerProxy is true.
+		//   3. enableTSOFollowerProxy switches from true to false.
+		if stream == nil || newTSOFollowerProxySwitch || tsoFollowerProxySwitch {
 			// Randomly choose the next stream when we have multiple connections.
-			connectionCtxs.Range(func(addr, value interface{}) bool {
-				connectionCtx := value.(*connectionContext)
+			connectionCtxs.Range(func(addr, cc interface{}) bool {
+				connectionCtx := cc.(*connectionContext)
 				streamAddr = addr.(string)
 				stream, cancel, streamCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh
 				return rand.Intn(2) == 0
@@ -599,6 +605,7 @@ func (c *client) handleDispatcher(
 			retryTimes++
 			continue
 		}
+		tsoFollowerProxySwitch = newTSOFollowerProxySwitch
 		retryTimes = 0
 		select {
 		case first := <-tsoDispatcher:
@@ -728,8 +735,10 @@ func (c *client) tryConnect(
 	)
 	updateAndClear := func(newAddr string, connectionCtx *connectionContext) {
 		connectionCtxs.Store(newAddr, connectionCtx)
-		connectionCtxs.Range(func(addr, _ interface{}) bool {
+		connectionCtxs.Range(func(addr, cc interface{}) bool {
 			if addr.(string) != newAddr {
+				connectionCtx := cc.(*connectionContext)
+				connectionCtx.cancel()
 				connectionCtxs.Delete(addr)
 			}
 			return true
