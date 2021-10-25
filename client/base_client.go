@@ -46,8 +46,9 @@ type baseClient struct {
 	// dc-location -> TSO allocator leader URL
 	allocators sync.Map // Store as map[string]string
 
-	checkLeaderCh        chan struct{}
-	checkTSODispatcherCh chan struct{}
+	checkLeaderCh          chan struct{}
+	checkTSODispatcherCh   chan struct{}
+	updateConnectionCtxsCh chan struct{}
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -56,9 +57,10 @@ type baseClient struct {
 	security SecurityOption
 
 	// BaseClient options.
-	gRPCDialOptions []grpc.DialOption
-	timeout         time.Duration
-	maxRetryTimes   int
+	gRPCDialOptions        []grpc.DialOption
+	timeout                time.Duration
+	maxRetryTimes          int
+	enableTSOFollowerProxy atomic.Value // Store as bool.
 }
 
 // SecurityOption records options about tls
@@ -76,14 +78,15 @@ type SecurityOption struct {
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption) *baseClient {
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	return &baseClient{
-		urls:                 urls,
-		checkLeaderCh:        make(chan struct{}, 1),
-		checkTSODispatcherCh: make(chan struct{}, 1),
-		ctx:                  clientCtx,
-		cancel:               clientCancel,
-		security:             security,
-		timeout:              defaultPDTimeout,
-		maxRetryTimes:        maxInitClusterRetries,
+		urls:                   urls,
+		checkLeaderCh:          make(chan struct{}, 1),
+		checkTSODispatcherCh:   make(chan struct{}, 1),
+		updateConnectionCtxsCh: make(chan struct{}, 1),
+		ctx:                    clientCtx,
+		cancel:                 clientCancel,
+		security:               security,
+		timeout:                defaultPDTimeout,
+		maxRetryTimes:          maxInitClusterRetries,
 	}
 }
 
@@ -118,8 +121,6 @@ func (c *baseClient) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
-const memberUpdateInterval = time.Minute
-
 func (c *baseClient) memberLoop() {
 	defer c.wg.Done()
 
@@ -129,7 +130,7 @@ func (c *baseClient) memberLoop() {
 	for {
 		select {
 		case <-c.checkLeaderCh:
-		case <-time.After(memberUpdateInterval):
+		case <-time.After(time.Minute):
 		case <-ctx.Done():
 			return
 		}
@@ -153,6 +154,13 @@ func (c *baseClient) ScheduleCheckLeader() {
 func (c *baseClient) scheduleCheckTSODispatcher() {
 	select {
 	case c.checkTSODispatcherCh <- struct{}{}:
+	default:
+	}
+}
+
+func (c *baseClient) scheduleUpdateConnectionCtxs() {
+	select {
+	case c.updateConnectionCtxsCh <- struct{}{}:
 	default:
 	}
 }
@@ -213,6 +221,11 @@ func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grp
 		panic(fmt.Sprintf("the client connection of %s in %s should exist", url, dcLocation))
 	}
 	return cc.(*grpc.ClientConn), url.(string)
+}
+
+func (c *baseClient) isTSOFollowerProxyEnabled() bool {
+	value, ok := c.enableTSOFollowerProxy.Load().(bool)
+	return ok && value
 }
 
 const globalDCLocation = "global"
@@ -314,7 +327,10 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 	if reflect.DeepEqual(c.urls, urls) {
 		return
 	}
-
+	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
+	if c.isTSOFollowerProxyEnabled() {
+		c.scheduleUpdateConnectionCtxs()
+	}
 	log.Info("[pd] update member urls", zap.Strings("old-urls", c.urls), zap.Strings("new-urls", urls))
 	c.urls = urls
 }
@@ -331,6 +347,8 @@ func (c *baseClient) switchLeader(addrs []string) error {
 		log.Warn("[pd] failed to connect leader", zap.String("leader", addr), errs.ZapError(err))
 		return err
 	}
+	// Update the connection contexts when leader changes.
+	c.scheduleUpdateConnectionCtxs()
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
 	c.allocators.Store(globalDCLocation, addr)

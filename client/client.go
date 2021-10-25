@@ -163,10 +163,9 @@ type tsoRequest struct {
 }
 
 type tsoDispatcher struct {
-	dispatcherCtx          context.Context
-	dispatcherCancel       context.CancelFunc
-	tsoRequestCh           chan *tsoRequest
-	updateConnectionCtxsCh chan struct{}
+	dispatcherCtx    context.Context
+	dispatcherCancel context.CancelFunc
+	tsoRequestCh     chan *tsoRequest
 }
 
 type lastTSO struct {
@@ -228,7 +227,7 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
-// WithTSOFollowerProxy configures the client with TSO Follower Proxy feature switch.
+// WithTSOFollowerProxy configures the client with TSO Follower Proxy option.
 func WithTSOFollowerProxy(enableTSOFollowerProxy bool) ClientOption {
 	return func(c *client) {
 		c.enableTSOFollowerProxy.Store(enableTSOFollowerProxy)
@@ -250,8 +249,7 @@ type client struct {
 	leaderNetworkFailure int32
 
 	// Client options.
-	enableForwarding       bool
-	enableTSOFollowerProxy atomic.Value // Store as bool.
+	enableForwarding bool
 }
 
 // NewClient creates a PD client.
@@ -289,7 +287,7 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 // WithTSOFollowerProxy enables/disables the TSO Follower Proxy feature.
 func (c *client) WithTSOFollowerProxy(enableTSOFollowerProxy bool) {
 	c.enableTSOFollowerProxy.Store(enableTSOFollowerProxy)
-	c.scheduleUpdateConnectionCtxsCh()
+	c.scheduleUpdateConnectionCtxs()
 }
 
 func (c *client) updateTSODispatcher() {
@@ -451,7 +449,6 @@ func (c *client) tsLoop() {
 
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
 	defer loopCancel()
-
 	ticker := time.NewTicker(tsLoopDCCheckInterval)
 	defer ticker.Stop()
 	for {
@@ -533,29 +530,17 @@ func (c *client) checkTSODispatcher(dcLocation string) bool {
 func (c *client) createTSODispatcher(dcLocation string) {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(c.ctx)
 	dispatcher := &tsoDispatcher{
-		dispatcherCtx:          dispatcherCtx,
-		dispatcherCancel:       dispatcherCancel,
-		tsoRequestCh:           make(chan *tsoRequest, maxMergeTSORequests),
-		updateConnectionCtxsCh: make(chan struct{}, 1),
+		dispatcherCtx:    dispatcherCtx,
+		dispatcherCancel: dispatcherCancel,
+		tsoRequestCh:     make(chan *tsoRequest, maxMergeTSORequests),
 	}
 	// Each goroutine is responsible for handling the tso stream request for its dc-location.
 	// The only case that will make the dispatcher goroutine exit
 	// is that the loopCtx is done, otherwise there is no circumstance
 	// this goroutine should exit.
-	go c.handleDispatcher(dispatcherCtx, dcLocation, dispatcher.tsoRequestCh, dispatcher.updateConnectionCtxsCh)
+	go c.handleDispatcher(dispatcherCtx, dcLocation, dispatcher.tsoRequestCh)
 	c.tsoDispatcher.Store(dcLocation, dispatcher)
 	log.Info("[pd] tso dispatcher created", zap.String("dc-location", dcLocation))
-}
-
-func (c *client) scheduleUpdateConnectionCtxsCh() {
-	c.tsoDispatcher.Range(func(dcLocation, dispatcher interface{}) bool {
-		select {
-		case dispatcher.(*tsoDispatcher).updateConnectionCtxsCh <- struct{}{}:
-		default:
-		}
-		log.Info("[pd] schedule update connection contexts", zap.String("dc-location", dcLocation.(string)))
-		return true
-	})
 }
 
 type streamCh chan struct {
@@ -566,8 +551,7 @@ type streamCh chan struct {
 func (c *client) handleDispatcher(
 	dispatcherCtx context.Context,
 	dc string,
-	tsoDispatcher <-chan *tsoRequest,
-	updateConnectionCtxsCh <-chan struct{}) {
+	tsoDispatcher <-chan *tsoRequest) {
 	var (
 		err        error
 		stream     pdpb.PD_TsoClient
@@ -583,7 +567,7 @@ func (c *client) handleDispatcher(
 		log.Info("[pd] exit tso dispatcher", zap.String("dc-location", dc))
 		// Cancel all connections.
 		connectionCtxs.Range(func(_, value interface{}) bool {
-			connectionCtx := value.(connectionContext)
+			connectionCtx := value.(*connectionContext)
 			cancel = connectionCtx.cancel
 			if cancel != nil {
 				cancel()
@@ -591,7 +575,7 @@ func (c *client) handleDispatcher(
 			return true
 		})
 	}()
-	go c.connectionCtxsUpdater(dispatcherCtx, dc, &connectionCtxs, updateConnectionCtxsCh)
+	go c.connectionCtxsUpdater(dispatcherCtx, dc, &connectionCtxs)
 
 	// Loop through each batch of TSO requests and send them for processing.
 	for {
@@ -600,13 +584,15 @@ func (c *client) handleDispatcher(
 			return
 		default:
 		}
-		// Randomly choose the next stream.
-		connectionCtxs.Range(func(addr, connectionCtxInterface interface{}) bool {
-			connectionCtx := connectionCtxInterface.(connectionContext)
-			streamAddr = addr.(string)
-			stream, cancel, streamCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh
-			return rand.Intn(2) == 0
-		})
+		if c.isTSOFollowerProxyEnabled() || stream == nil {
+			// Randomly choose the next stream when we have multiple connections.
+			connectionCtxs.Range(func(addr, value interface{}) bool {
+				connectionCtx := value.(*connectionContext)
+				streamAddr = addr.(string)
+				stream, cancel, streamCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh
+				return rand.Intn(2) == 0
+			})
+		}
 		if stream == nil {
 			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
 			select {
@@ -686,7 +672,6 @@ func (c *client) handleDispatcher(
 					}
 				}
 			}
-			c.scheduleUpdateConnectionCtxsCh()
 		}
 	}
 }
@@ -703,8 +688,7 @@ type connectionContext struct {
 func (c *client) connectionCtxsUpdater(
 	dispatcherCtx context.Context,
 	dc string,
-	connectionCtxs *sync.Map,
-	updateConnectionCtxsCh <-chan struct{}) {
+	connectionCtxs *sync.Map) {
 	updaterCtx, updaterCancel := context.WithCancel(dispatcherCtx)
 	defer updaterCancel()
 	for {
@@ -712,8 +696,7 @@ func (c *client) connectionCtxsUpdater(
 		select {
 		case <-updaterCtx.Done():
 			return
-		case <-updateConnectionCtxsCh:
-		case <-time.After(memberUpdateInterval):
+		case <-c.updateConnectionCtxsCh:
 		}
 	}
 }
@@ -721,8 +704,7 @@ func (c *client) connectionCtxsUpdater(
 func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnect
-	enableTSOFollowerProxy, ok := c.enableTSOFollowerProxy.Load().(bool)
-	if ok && enableTSOFollowerProxy && dc == globalDCLocation /* only support Global TSO proxy now */ {
+	if c.isTSOFollowerProxyEnabled() && dc == globalDCLocation /* only support Global TSO proxy now */ {
 		createTSOConnection = c.tryConnectToProxy
 	}
 	if err := createTSOConnection(updaterCtx, dc, connectionCtxs); err != nil {
@@ -739,16 +721,20 @@ func (c *client) tryConnect(
 	dc string,
 	connectionCtxs *sync.Map,
 ) error {
-	// Clear the map first.
-	connectionCtxs.Range(func(addr, _ interface{}) bool {
-		connectionCtxs.Delete(addr)
-		return true
-	})
 	var (
 		networkErrNum uint64
 		err           error
 		stream        pdpb.PD_TsoClient
 	)
+	updateAndClear := func(newAddr string, connectionCtx *connectionContext) {
+		connectionCtxs.Store(newAddr, connectionCtx)
+		connectionCtxs.Range(func(addr, _ interface{}) bool {
+			if addr.(string) != newAddr {
+				connectionCtxs.Delete(addr)
+			}
+			return true
+		})
+	}
 	cc, url := c.getAllocatorClientConnByDCLocation(dc)
 	// retry several times before falling back to the follower when the network problem happens
 	for i := 0; i < maxRetryTimes; i++ {
@@ -759,7 +745,7 @@ func (c *client) tryConnect(
 			err = status.New(codes.Unavailable, "unavailable").Err()
 		})
 		if stream != nil && err == nil {
-			connectionCtxs.Store(url, connectionContext{stream, cancel, nil})
+			updateAndClear(url, &connectionContext{stream, cancel, nil})
 			return nil
 		}
 
@@ -797,13 +783,13 @@ func (c *client) tryConnect(
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
 			stream, err = c.createTsoStream(cctx, cancel, followerClient)
 			if err == nil {
-				streamCh := make(streamCh)
+				streamCh := make(streamCh, 1)
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
 				addrTrim := trimHTTPPrefix(addr)
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkAllocator(dispatcherCtx, cancel, dc, forwardedHostTrim, addrTrim, url, streamCh)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
-				connectionCtxs.Store(addr, connectionContext{stream, cancel, streamCh})
+				updateAndClear(addr, &connectionContext{stream, cancel, streamCh})
 				return nil
 			}
 			cancel()
@@ -825,8 +811,15 @@ func (c *client) tryConnectToProxy(
 	if !ok {
 		return errors.Errorf("cannot find the allocator leader in %s", dc)
 	}
+	// GC the stale one.
+	connectionCtxs.Range(func(addr, _ interface{}) bool {
+		if _, ok := clients[addr.(string)]; !ok {
+			connectionCtxs.Delete(addr)
+		}
+		return true
+	})
+	// Update the missing one.
 	for addr, client := range clients {
-		// Only update the missing one.
 		if _, ok = connectionCtxs.Load(addr); ok {
 			continue
 		}
@@ -844,7 +837,7 @@ func (c *client) tryConnectToProxy(
 				addrTrim := trimHTTPPrefix(addr)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
-			connectionCtxs.Store(addr, connectionContext{stream, cancel, nil})
+			connectionCtxs.Store(addr, &connectionContext{stream, cancel, nil})
 			continue
 		}
 		log.Error("[pd] create the tso stream failed", zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
