@@ -437,6 +437,7 @@ func (c *client) tsLoop() {
 
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
 	defer loopCancel()
+
 	ticker := time.NewTicker(tsLoopDCCheckInterval)
 	defer ticker.Stop()
 	for {
@@ -549,9 +550,8 @@ func (c *client) handleDispatcher(
 		cancel     context.CancelFunc
 		requests   = make([]*tsoRequest, maxMergeTSORequests+1)
 		// addr -> connectionContext
-		connectionCtxs         sync.Map
-		opts                   []opentracing.StartSpanOption
-		tsoFollowerProxySwitch = c.isTSOFollowerProxyEnabled()
+		connectionCtxs sync.Map
+		opts           []opentracing.StartSpanOption
 	)
 	defer func() {
 		log.Info("[pd] exit tso dispatcher", zap.String("dc-location", dc))
@@ -574,12 +574,8 @@ func (c *client) handleDispatcher(
 			return
 		default:
 		}
-		newTSOFollowerProxySwitch := c.isTSOFollowerProxyEnabled()
-		// Three cases to choose a new connection:
-		//   1. stream is nil.
-		//   2. enableTSOFollowerProxy is true.
-		//   3. enableTSOFollowerProxy switches from true to false.
-		if stream == nil || newTSOFollowerProxySwitch || tsoFollowerProxySwitch {
+		// Choose a stream to send the TSO gRPC request.
+		if c.isTSOFollowerProxyEnabled() {
 			// Randomly choose the next stream when we have multiple connections.
 			connectionCtxs.Range(func(addr, cc interface{}) bool {
 				connectionCtx := cc.(*connectionContext)
@@ -587,7 +583,16 @@ func (c *client) handleDispatcher(
 				stream, cancel, streamCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh
 				return rand.Intn(2) == 0
 			})
+		} else if stream == nil {
+			// Choose the only stream.
+			connectionCtxs.Range(func(addr, cc interface{}) bool {
+				connectionCtx := cc.(*connectionContext)
+				streamAddr = addr.(string)
+				stream, cancel, streamCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh
+				return false
+			})
 		}
+		// Check stream and retry if necessary.
 		if stream == nil {
 			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
 			if retryTimes >= 3 {
@@ -605,8 +610,8 @@ func (c *client) handleDispatcher(
 			retryTimes++
 			continue
 		}
-		tsoFollowerProxySwitch = newTSOFollowerProxySwitch
 		retryTimes = 0
+		// Start to collect the TSO requests.
 		select {
 		case first := <-tsoDispatcher:
 			// Fetch pendingTSOReqCount TSO requests in single batch.
@@ -649,6 +654,7 @@ func (c *client) handleDispatcher(
 				default:
 				}
 			}
+			// Send the gRPC request and dispatch the TSO results.
 			err = c.processTSORequests(stream, dc, requests[:pendingTSOReqCount], opts)
 			close(done)
 		case <-dispatcherCtx.Done():
