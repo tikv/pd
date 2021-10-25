@@ -596,9 +596,10 @@ func (c *client) handleDispatcher(
 		}
 		if stream == nil {
 			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-			c.ScheduleCheckLeader()
 			if retryTimes >= 3 {
-				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientCreateTSOStream, err))
+				err = errs.ErrClientCreateTSOStream.FastGenByArgs()
+				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
+				c.ScheduleCheckLeader()
 				c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
 				retryTimes = 0
 			}
