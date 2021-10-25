@@ -45,24 +45,32 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 	left := &metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("b")}
 	right := &metapb.Region{Id: 2, StartKey: []byte("b"), EndKey: []byte("c")}
-	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: left, Right: right})
-	c.Assert(err, IsNil)
+	c.Assert(cluster.GetRegion(1), IsNil)
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: right, Right: left})
 	c.Assert(err, NotNil)
+	c.Assert(cluster.GetRegion(1), IsNil)
+	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: left, Right: right})
+	c.Assert(err, IsNil)
+	c.Assert(cluster.GetRegion(1), NotNil)
+
 }
 
 func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 	regions := []*metapb.Region{
 		{Id: 1, StartKey: []byte(""), EndKey: []byte("a")},
 		{Id: 2, StartKey: []byte("a"), EndKey: []byte("b")},
 		{Id: 3, StartKey: []byte("b"), EndKey: []byte("c")},
 		{Id: 3, StartKey: []byte("c"), EndKey: []byte("")},
 	}
+	c.Assert(cluster.GetRegion(1), IsNil)
 	_, err = cluster.HandleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
+	c.Assert(cluster.GetRegion(1), NotNil)
 	c.Assert(err, IsNil)
 }
