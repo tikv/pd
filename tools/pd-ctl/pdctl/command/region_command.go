@@ -375,7 +375,7 @@ func decodeKey(text string) (string, error) {
 	return string(buf), nil
 }
 
-// NewRegionsWithKeysCommand returns regions in a given range[startkey, endkey) subcommand of regionCmd.
+// NewRegionsByKeysCommand returns regions in a given range[startkey, endkey) subcommand of regionCmd.
 func NewRegionsByKeysCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "keys [--format=raw|encode|hex] <start_key> <end_key> <limit>",
