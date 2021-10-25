@@ -898,6 +898,87 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	}, ttl)
 }
 
+// IsLeader return ture if this server is leader
+func (h *Handler) IsLeader() bool {
+	return h.s.member.IsLeader()
+}
+
+// PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
+func (h *Handler) PackHistoryHotReadRegions() ([]core.HistoryHotRegion, error) {
+	hotReadRegions := h.GetHotReadRegions()
+	if hotReadRegions == nil {
+		return nil, nil
+	}
+	hotReadPeerRegions := hotReadRegions.AsPeer
+	return h.packHotRegions(hotReadPeerRegions, core.ReadType.String())
+
+}
+
+// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
+func (h *Handler) PackHistoryHotWriteRegions() ([]core.HistoryHotRegion, error) {
+	hotWriteRegions := h.GetHotWriteRegions()
+	if hotWriteRegions == nil {
+		return nil, nil
+	}
+	hotWritePeerRegions := hotWriteRegions.AsPeer
+	return h.packHotRegions(hotWritePeerRegions, core.WriteType.String())
+}
+
+func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []core.HistoryHotRegion, err error) {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	for _, hotPeersStat := range hotPeersStat {
+		stats := hotPeersStat.Stats
+		for _, hotPeerStat := range stats {
+			region := c.GetRegion(hotPeerStat.RegionID)
+			if region == nil {
+				continue
+			}
+			meta := region.GetMeta()
+			meta, err := encryption.EncryptRegion(meta, h.s.encryptionKeyManager)
+			if err != nil {
+				return nil, err
+			}
+			var peerID uint64
+			var isLearner bool
+			for _, peer := range meta.Peers {
+				if peer.StoreId == hotPeerStat.StoreID {
+					peerID = peer.Id
+					isLearner = peer.Role == metapb.PeerRole_Learner
+				}
+			}
+			stat := core.HistoryHotRegion{
+				// store in  ms.
+				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
+				RegionID:       hotPeerStat.RegionID,
+				StoreID:        hotPeerStat.StoreID,
+				PeerID:         peerID,
+				IsLeader:       meta.Id == region.GetLeader().Id,
+				IsLearner:      isLearner,
+				HotDegree:      int64(hotPeerStat.HotDegree),
+				FlowBytes:      hotPeerStat.ByteRate,
+				KeyRate:        hotPeerStat.KeyRate,
+				QueryRate:      hotPeerStat.QueryRate,
+				StartKey:       meta.StartKey,
+				EndKey:         meta.EndKey,
+				EncryptionMeta: meta.EncryptionMeta,
+				HotRegionType:  hotRegionType,
+			}
+			historyHotRegions = append(historyHotRegions, stat)
+		}
+	}
+	return
+}
+
+// GetHistoryHotRegionIter return a iter which iter all qualified item .
+func (h *Handler) GetHistoryHotRegionIter(hotRegionTypes []string,
+	StartTime, EndTime int64) core.HotRegionStorageIterator {
+	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, StartTime, EndTime)
+	return iter
+}
+
 func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {
 	store := rc.GetStore(storeID)
 	if store == nil {
