@@ -49,15 +49,6 @@ type Region struct {
 // Client is a PD (Placement Driver) client.
 // It should not be used after calling Close().
 type Client interface {
-	// [PD client methods]
-
-	// WithTSOFollowerProxy controls whether the client TSO Follower Proxy function is on.
-	WithTSOFollowerProxy(enableFollowerTSOBacth bool)
-	// Close closes the client.
-	Close()
-
-	// [PD gRPC methods]
-
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
 	// GetAllMembers gets the members Info from PD
@@ -102,6 +93,7 @@ type Client interface {
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
+
 	// UpdateServiceGCSafePoint updates the safepoint for specific service and
 	// returns the minimum safepoint across all services, this value is used to
 	// determine the safepoint for multiple services, it does not trigger a GC
@@ -118,6 +110,8 @@ type Client interface {
 	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
+	// Close closes the client.
+	Close()
 }
 
 // GetStoreOp represents available options when getting stores.
@@ -282,12 +276,6 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	go c.leaderCheckLoop()
 
 	return c, nil
-}
-
-// WithTSOFollowerProxy enables/disables the TSO Follower Proxy feature.
-func (c *client) WithTSOFollowerProxy(enableTSOFollowerProxy bool) {
-	c.enableTSOFollowerProxy.Store(enableTSOFollowerProxy)
-	c.scheduleUpdateConnectionCtxs()
 }
 
 func (c *client) updateTSODispatcher() {
