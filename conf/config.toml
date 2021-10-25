@@ -105,7 +105,10 @@
 # metric-storage = ""
 ## There are some values supported: "auto", "none", or a specific address, default: "auto".
 # dashboard-address = "auto"
-
+## the max token store in bucket which use in limit api access rate
+# api-bucket-capacity=20
+## increase the number of tokens which use in limit api access rate per second
+# api-bucket-rate= 3.0
 [schedule]
 ## Controls the size limit of Region Merge.
 # max-merge-region-size = 20

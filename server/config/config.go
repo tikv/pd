@@ -257,9 +257,11 @@ const (
 )
 
 var (
-	defaultEnableTelemetry = true
-	defaultRuntimeServices = []string{}
-	defaultLocationLabels  = []string{}
+	defaultEnableTelemetry   = true
+	defaultRuntimeServices   = []string{}
+	defaultLocationLabels    = []string{}
+	defalutAPIBucketCapacity = 20
+	defalutAPIBucketRate     = 3.0
 	// DefaultStoreLimit is the default store limit of add peer and remove peer.
 	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
 	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
@@ -1081,6 +1083,10 @@ type PDServerConfig struct {
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
 	// FlowRoundByDigit used to discretization processing flow information.
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
+	// the max token store in bucket which use in limit api access rate
+	APIBucketCapacity int64 `toml:"api-bucket-capacity" json:"api-bucket-capacity"`
+	// increase the number of tokens which use in limit api access rate per second
+	APIBucketRate float64 `toml:"api-bucket-rate" json:"api-bucket-rate"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1102,6 +1108,12 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("flow-round-by-digit") {
 		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
+	}
+	if !meta.IsDefined("api-bucket-capacity") {
+		adjustInt64(&c.APIBucketCapacity, int64(defalutAPIBucketCapacity))
+	}
+	if !meta.IsDefined("api-bucket-rate") {
+		adjustFloat64(&c.APIBucketRate, defalutAPIBucketRate)
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()

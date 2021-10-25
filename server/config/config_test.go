@@ -459,6 +459,52 @@ wait-store-timeout = "120s"
 	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
 }
 
+func (s *testConfigSuite) TestHotRegionConfig(c *C) {
+	cfgData := `
+[schedule]
+hot-regions-reserved-days= 30
+hot-regions-write-interval= "30m"
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta, false)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, time.Minute*30)
+	c.Assert(cfg.Schedule.HotRegionsResevervedDays, Equals, int64(30))
+
+	cfg = NewConfig()
+	meta, err = toml.Decode("", &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta, false)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, defaultHotRegionsWriteInterval)
+	c.Assert(cfg.Schedule.HotRegionsResevervedDays, Equals, int64(defaultHotRegionsResevervedDays))
+}
+
+func (s *testConfigSuite) TestApiRatelimitConfig(c *C) {
+	cfgData := `
+[pd-server]
+api-bucket-capacity=10
+api-bucket-rate=4.0
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta, false)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.PDServerCfg.APIBucketCapacity, Equals, int64(10))
+	c.Assert(cfg.PDServerCfg.APIBucketRate, Equals, 4.0)
+
+	cfg = NewConfig()
+	meta, err = toml.Decode("", &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta, false)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.PDServerCfg.APIBucketCapacity, Equals, int64(defalutAPIBucketCapacity))
+	c.Assert(cfg.PDServerCfg.APIBucketRate, Equals, defalutAPIBucketRate)
+}
+
 func (s *testConfigSuite) TestConfigClone(c *C) {
 	cfg := &Config{}
 	cfg.Adjust(nil, false)
