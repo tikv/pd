@@ -158,10 +158,119 @@ type tsoRequest struct {
 	dcLocation string
 }
 
+type tsoBatchController struct {
+	maxBatchSize         int
+	maxBatchWaitInterval time.Duration
+	// bestBatchSize is a dynamic size that changed based on the current batch effect.
+	bestBatchSize int
+
+	tsoRequestCh          chan *tsoRequest
+	collectedRequests     []*tsoRequest
+	collectedRequestCount int
+
+	batchStartTime time.Time
+}
+
+func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int, maxBatchWaitInterval time.Duration) *tsoBatchController {
+	return &tsoBatchController{
+		maxBatchSize:          maxBatchSize,
+		maxBatchWaitInterval:  maxBatchWaitInterval,
+		bestBatchSize:         8, /* Starting from a low value is necessary because we need to make sure it will be converged to (current_batch_size - 4) */
+		tsoRequestCh:          tsoRequestCh,
+		collectedRequests:     make([]*tsoRequest, maxBatchSize+1),
+		collectedRequestCount: 0,
+	}
+}
+
+// fetchPendingRequests will start a new round of the batch collecting from the channel.
+// It returns true if everything goes well, otherwise false which means we should stop the service.
+func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context) error {
+	var firstTSORequest *tsoRequest
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case firstTSORequest = <-tbc.tsoRequestCh:
+	}
+	// Start to batch when the first TSO request arrives.
+	tbc.batchStartTime = time.Now()
+	tbc.collectedRequestCount = 0
+	tbc.pushRequest(firstTSORequest)
+
+	// This loop is for trying best to collect more requests, so we use `tbc.maxBatchSize` here.
+fetchPendingRequestsLoop:
+	for tbc.collectedRequestCount < tbc.maxBatchSize {
+		select {
+		case tsoReq := <-tbc.tsoRequestCh:
+			tbc.pushRequest(tsoReq)
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			break fetchPendingRequestsLoop
+		}
+	}
+
+	// Check whether we should fetch more pending TSO requests from the channel.
+	// TODO: maybe consider the actual load that returns through a TSO response from PD server.
+	if tbc.collectedRequestCount >= tbc.maxBatchSize || tbc.maxBatchWaitInterval <= 0 {
+		return nil
+	}
+
+	// Fetches more pending TSO requests from the channel.
+	// Try to collect `tbc.bestBatchSize` requests, or wait `tbc.maxBatchWaitInterval`
+	// when `tbc.collectedRequestCount` is less than the `tbc.bestBatchSize`.
+	if tbc.collectedRequestCount < tbc.bestBatchSize {
+		after := time.NewTimer(tbc.maxBatchWaitInterval)
+		defer after.Stop()
+		for tbc.collectedRequestCount < tbc.bestBatchSize {
+			select {
+			case tsoReq := <-tbc.tsoRequestCh:
+				tbc.pushRequest(tsoReq)
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-after.C:
+				return nil
+			}
+		}
+	}
+
+	// Do an additional non-block try. Here we test the length with `tbc.maxBatchSize` instead
+	// of `tbc.bestBatchSize` because trying best to fetch more requests is necessary so that
+	// we can adjust the `tbc.bestBatchSize` dynamically later.
+	for tbc.collectedRequestCount < tbc.maxBatchSize {
+		select {
+		case tsoReq := <-tbc.tsoRequestCh:
+			tbc.pushRequest(tsoReq)
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+func (tbc *tsoBatchController) pushRequest(tsoReq *tsoRequest) {
+	tbc.collectedRequests[tbc.collectedRequestCount] = tsoReq
+	tbc.collectedRequestCount++
+}
+
+// adjustBestBatchSize stabilizes the latency with the AIAD algorithm.
+func (tbc *tsoBatchController) adjustBestBatchSize() {
+	tsoBestBatchSize.Observe(float64(tbc.bestBatchSize))
+	length := tbc.collectedRequestCount
+	if length < tbc.bestBatchSize && tbc.bestBatchSize > 1 {
+		// Waits too long to collect requests, reduce the target batch size.
+		tbc.bestBatchSize--
+	} else if length > tbc.bestBatchSize+4 /* Hard-coded number, in order to make `tbc.bestBatchSize` stable */ &&
+		tbc.bestBatchSize < tbc.maxBatchSize {
+		tbc.bestBatchSize++
+	}
+}
+
 type tsoDispatcher struct {
-	dispatcherCtx    context.Context
-	dispatcherCancel context.CancelFunc
-	tsoRequestCh     chan *tsoRequest
+	dispatcherCtx      context.Context
+	dispatcherCancel   context.CancelFunc
+	tsoBatchController *tsoBatchController
 }
 
 type lastTSO struct {
@@ -170,17 +279,17 @@ type lastTSO struct {
 }
 
 const (
-	defaultPDTimeout      = 3 * time.Second
-	dialTimeout           = 3 * time.Second
-	updateMemberTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
-	tsLoopDCCheckInterval = time.Minute
-	maxMergeTSORequests   = 10000 // should be higher if client is sending requests in burst
-	maxInitClusterRetries = 100
-	retryInterval         = 1 * time.Second
-	maxRetryTimes         = 5
+	defaultPDTimeout       = 3 * time.Second
+	dialTimeout            = 3 * time.Second
+	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
+	tsLoopDCCheckInterval  = time.Minute
+	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
+	maxInitClusterRetries  = 100
+	retryInterval          = 1 * time.Second
+	maxRetryTimes          = 5
 )
 
-// LeaderHealthCheckInterval might be chagned in the unit to shorten the testing time.
+// LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
 var LeaderHealthCheckInterval = time.Second
 
 var (
@@ -230,6 +339,13 @@ func WithTSOFollowerProxy(enableFollowerTSOBacth bool) ClientOption {
 	}
 }
 
+// WithMaxTSOBatchWaitInterval configures the client max TSO batch wait interval.
+func WithMaxTSOBatchWaitInterval(maxTSOBatchWaitInterval time.Duration) ClientOption {
+	return func(c *client) {
+		c.maxTSOBatchWaitInterval = maxTSOBatchWaitInterval
+	}
+}
+
 type client struct {
 	*baseClient
 	// tsoDispatcher is used to dispatch different TSO requests to
@@ -247,6 +363,8 @@ type client struct {
 	// Client options.
 	enableForwarding       bool
 	enableTSOFollowerProxy bool
+	// TODO: make `maxTSOBatchWaitInterval` can be changed manually online.
+	maxTSOBatchWaitInterval time.Duration
 }
 
 // NewClient creates a PD client.
@@ -280,7 +398,7 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 }
 
 func (c *client) updateTSODispatcher() {
-	// Set up the new TSO dispatcher
+	// Set up the new TSO dispatcher and batch controller.
 	c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
 		dcLocation := dcLocationKey.(string)
 		if !c.checkTSODispatcher(dcLocation) {
@@ -520,15 +638,15 @@ func (c *client) checkTSODispatcher(dcLocation string) bool {
 func (c *client) createTSODispatcher(dcLocation string) {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(c.ctx)
 	dispatcher := &tsoDispatcher{
-		dispatcherCtx:    dispatcherCtx,
-		dispatcherCancel: dispatcherCancel,
-		tsoRequestCh:     make(chan *tsoRequest, maxMergeTSORequests),
+		dispatcherCtx:      dispatcherCtx,
+		dispatcherCancel:   dispatcherCancel,
+		tsoBatchController: newTSOBatchController(make(chan *tsoRequest, defaultMaxTSOBatchSize*2), defaultMaxTSOBatchSize, c.maxTSOBatchWaitInterval),
 	}
 	// Each goroutine is responsible for handling the tso stream request for its dc-location.
 	// The only case that will make the dispatcher goroutine exit
 	// is that the loopCtx is done, otherwise there is no circumstance
 	// this goroutine should exit.
-	go c.handleDispatcher(dispatcherCtx, dcLocation, dispatcher.tsoRequestCh)
+	go c.handleDispatcher(dispatcherCtx, dcLocation, dispatcher.tsoBatchController)
 	c.tsoDispatcher.Store(dcLocation, dispatcher)
 	log.Info("[pd] tso dispatcher created", zap.String("dc-location", dcLocation))
 }
@@ -538,13 +656,12 @@ type streamCh chan struct {
 	stream pdpb.PD_TsoClient
 }
 
-func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoDispatcher chan *tsoRequest) {
+func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tbc *tsoBatchController) {
 	var (
 		err           error
 		cancel        context.CancelFunc
 		stream        pdpb.PD_TsoClient
 		opts          []opentracing.StartSpanOption
-		requests      = make([]*tsoRequest, maxMergeTSORequests+1)
 		needUpdate    = false
 		streamCh      streamCh
 		connectionCtx connectionContext
@@ -588,7 +705,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				}
 				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientCreateTSOStream, err))
 				c.ScheduleCheckLeader()
-				c.revokeTSORequest(errors.WithStack(err), tsoDispatcher)
+				c.revokeTSORequest(errors.WithStack(err), tbc.tsoRequestCh)
 				select {
 				case <-time.After(time.Second):
 				case <-dispatcherCtx.Done():
@@ -597,46 +714,43 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tsoD
 				continue
 			}
 		}
+		if err = tbc.fetchPendingRequests(dispatcherCtx); err != nil {
+			log.Error("[pd] fetch pending tso requests error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+			return
+		}
+		if tbc.maxBatchWaitInterval >= 0 {
+			tbc.adjustBestBatchSize()
+		}
+		done := make(chan struct{})
+		dl := deadline{
+			timer:  time.After(c.timeout),
+			done:   done,
+			cancel: cancel,
+		}
+		tsDeadlineCh, ok := c.tsDeadline.Load(dc)
+		for !ok || tsDeadlineCh == nil {
+			c.scheduleCheckTSDeadline()
+			time.Sleep(time.Millisecond * 100)
+			tsDeadlineCh, ok = c.tsDeadline.Load(dc)
+		}
 		select {
-		case first := <-tsoDispatcher:
-			pendingTSOReqCount := len(tsoDispatcher) + 1
-			requests[0] = first
-			for i := 1; i < pendingTSOReqCount; i++ {
-				requests[i] = <-tsoDispatcher
-			}
-			done := make(chan struct{})
-			dl := deadline{
-				timer:  time.After(c.timeout),
-				done:   done,
-				cancel: cancel,
-			}
-			tsDeadlineCh, ok := c.tsDeadline.Load(dc)
-			for !ok || tsDeadlineCh == nil {
-				c.scheduleCheckTSDeadline()
-				time.Sleep(time.Millisecond * 100)
-				tsDeadlineCh, ok = c.tsDeadline.Load(dc)
-			}
-			select {
-			case tsDeadlineCh.(chan deadline) <- dl:
-			case <-dispatcherCtx.Done():
-				return
-			}
-			opts = extractSpanReference(requests[:pendingTSOReqCount], opts[:0])
-			select {
-			// The connection should be switched to the new stream.
-			case newStream, ok := <-streamCh:
-				if ok {
-					stream = newStream.stream
-					cancel = newStream.cancel
-					log.Info("tso stream has changed back to pd or tso allocator leader")
-				}
-			default:
-			}
-			err = c.processTSORequests(stream, dc, requests[:pendingTSOReqCount], opts)
-			close(done)
+		case tsDeadlineCh.(chan deadline) <- dl:
 		case <-dispatcherCtx.Done():
 			return
 		}
+		opts = extractSpanReference(tbc, opts[:0])
+		select {
+		// The connection should be switched to the new stream.
+		case newStream, ok := <-streamCh:
+			if ok {
+				stream = newStream.stream
+				cancel = newStream.cancel
+				log.Info("tso stream has changed back to pd or tso allocator leader")
+			}
+		default:
+		}
+		err = c.processTSORequests(stream, dc, tbc, opts)
+		close(done)
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if err != nil {
 			select {
@@ -763,8 +877,8 @@ func (c *client) tryConnectToFollowerProxy(dispatcherCtx context.Context, dc str
 	return connectionContext{}, errors.Errorf("cannot find the follower client in %s", dc)
 }
 
-func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
-	for _, req := range requests {
+func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
+	for _, req := range tbc.collectedRequests[:tbc.collectedRequestCount] {
 		if span := opentracing.SpanFromContext(req.requestCtx); span != nil {
 			opts = append(opts, opentracing.ChildOf(span.Context()))
 		}
@@ -772,12 +886,13 @@ func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOp
 	return opts
 }
 
-func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string, requests []*tsoRequest, opts []opentracing.StartSpanOption) error {
+func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption) error {
 	if len(opts) > 0 {
 		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
 		defer span.Finish()
 	}
 	start := time.Now()
+	requests := tbc.collectedRequests[:tbc.collectedRequestCount]
 	count := int64(len(requests))
 	req := &pdpb.TsoRequest{
 		Header:     c.requestHeader(),
@@ -790,6 +905,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err
 	}
+	tsoBatchSendLatency.Observe(float64(time.Since(tbc.batchStartTime)))
 	resp, err := stream.Recv()
 	if err != nil {
 		err = errors.WithStack(err)
@@ -859,7 +975,7 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 	}
 }
 
-func (c *client) revokeTSORequest(err error, tsoDispatcher chan *tsoRequest) {
+func (c *client) revokeTSORequest(err error, tsoDispatcher <-chan *tsoRequest) {
 	for i := 0; i < len(tsoDispatcher); i++ {
 		req := <-tsoDispatcher
 		req.done <- err
@@ -872,7 +988,7 @@ func (c *client) Close() {
 
 	c.tsoDispatcher.Range(func(_, dispatcher interface{}) bool {
 		if dispatcher != nil {
-			c.revokeTSORequest(errors.WithStack(errClosing), dispatcher.(*tsoDispatcher).tsoRequestCh)
+			c.revokeTSORequest(errors.WithStack(errClosing), dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh)
 			dispatcher.(*tsoDispatcher).dispatcherCancel()
 		}
 		return true
@@ -971,7 +1087,7 @@ func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) error {
 		c.ScheduleCheckLeader()
 		return err
 	}
-	dispatcher.(*tsoDispatcher).tsoRequestCh <- request
+	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
 	return nil
 }
 
