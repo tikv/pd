@@ -889,9 +889,9 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
 		defer span.Finish()
 	}
+	start := time.Now()
 	requests := tbc.collectedRequests[:tbc.collectedRequestCount]
 	count := int64(len(requests))
-	start := time.Now()
 	req := &pdpb.TsoRequest{
 		Header:     c.requestHeader(),
 		Count:      uint32(count),
