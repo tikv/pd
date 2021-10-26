@@ -224,7 +224,7 @@ func WithMaxErrorRetry(count int) ClientOption {
 // WithTSOFollowerProxy configures the client with TSO Follower Proxy option.
 func WithTSOFollowerProxy(enableTSOFollowerProxy bool) ClientOption {
 	return func(c *client) {
-		c.enableTSOFollowerProxy.Store(enableTSOFollowerProxy)
+		c.enableTSOFollowerProxy = enableTSOFollowerProxy
 	}
 }
 
@@ -258,8 +258,6 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		baseClient:        newBaseClient(ctx, addrsToUrls(pdAddrs), security),
 		checkTSDeadlineCh: make(chan struct{}),
 	}
-	// Set the default value manually.
-	c.enableTSOFollowerProxy.Store(false)
 	// Inject the client options.
 	for _, opt := range opts {
 		opt(c)
@@ -655,7 +653,7 @@ func (c *client) handleDispatcher(
 
 // TSO Follower Proxy only supports the Global TSO proxy now.
 func (c *client) validateTSOFollowerProxy(dc string) bool {
-	return dc == globalDCLocation && c.isTSOFollowerProxyEnabled()
+	return dc == globalDCLocation && c.enableTSOFollowerProxy
 }
 
 func (c *client) chooseStream(connectionCtxs *sync.Map, random bool) (connectionCtx *connectionContext) {

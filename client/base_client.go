@@ -60,7 +60,7 @@ type baseClient struct {
 	gRPCDialOptions        []grpc.DialOption
 	timeout                time.Duration
 	maxRetryTimes          int
-	enableTSOFollowerProxy atomic.Value // Store as bool.
+	enableTSOFollowerProxy bool
 }
 
 // SecurityOption records options about tls
@@ -87,6 +87,7 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption) 
 		security:               security,
 		timeout:                defaultPDTimeout,
 		maxRetryTimes:          maxInitClusterRetries,
+		enableTSOFollowerProxy: false,
 	}
 }
 
@@ -228,11 +229,6 @@ func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grp
 	return cc.(*grpc.ClientConn), url.(string)
 }
 
-func (c *baseClient) isTSOFollowerProxyEnabled() bool {
-	value, ok := c.enableTSOFollowerProxy.Load().(bool)
-	return ok && value
-}
-
 const globalDCLocation = "global"
 
 func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
@@ -333,7 +329,7 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 		return
 	}
 	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
-	if c.isTSOFollowerProxyEnabled() {
+	if c.enableTSOFollowerProxy {
 		c.scheduleUpdateConnectionCtxs()
 	}
 	log.Info("[pd] update member urls", zap.Strings("old-urls", c.urls), zap.Strings("new-urls", urls))
