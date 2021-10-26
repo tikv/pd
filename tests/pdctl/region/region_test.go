@@ -144,10 +144,18 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		{[]string{"region", "check", "down-peer"}, []*core.RegionInfo{r3}},
 		// region check learner-peer command
 		{[]string{"region", "check", "learner-peer"}, []*core.RegionInfo{r3}},
-		// region startkey --format=raw <key> command
-		{[]string{"region", "startkey", "--format=raw", "b", "2"}, []*core.RegionInfo{r2, r3}},
-		// region startkey --format=hex <key> command
-		{[]string{"region", "startkey", "--format=hex", "63", "2"}, []*core.RegionInfo{r3, r4}},
+		// region keys --format=raw <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=raw", "b", "", "2"}, []*core.RegionInfo{r2, r3}},
+		// region keys --format=hex <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=hex", "63", "", "2"}, []*core.RegionInfo{r3, r4}},
+		// region keys --format=hex <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=hex", "", "63", "2"}, []*core.RegionInfo{r1, r2}},
+		// region keys --format=raw <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=raw", "b", "d"}, []*core.RegionInfo{r2, r3}},
+		// region keys --format=hex <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=hex", "63", "65"}, []*core.RegionInfo{r3, r4}},
+		// region keys --format=hex <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=hex", "63", "65", "1"}, []*core.RegionInfo{r3}},
 	}
 
 	for _, testCase := range testRegionsCases {
@@ -181,4 +189,15 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		c.Assert(json.Unmarshal(output, region), IsNil)
 		pdctl.CheckRegionInfo(c, region, testCase.expect)
 	}
+
+	// Test region range-holes.
+	r5 := pdctl.MustPutRegion(c, cluster, 5, 1, []byte("x"), []byte("z"))
+	output, e := pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "region", "range-holes"}...)
+	c.Assert(e, IsNil)
+	rangeHoles := new([][]string)
+	c.Assert(json.Unmarshal(output, rangeHoles), IsNil)
+	c.Assert(*rangeHoles, DeepEquals, [][]string{
+		{"", core.HexRegionKeyStr(r1.GetStartKey())},
+		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r5.GetStartKey())},
+	})
 }

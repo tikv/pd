@@ -272,7 +272,8 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 
 // @Tags region
 // @Summary List regions start from a key.
-// @Param key query string true "Region key"
+// @Param key query string true "Region start key"
+// @Param endkey query string true "Range end key"
 // @Param limit query integer false "Limit count" default(16)
 // @Produce json
 // @Success 200 {object} RegionsInfo
@@ -281,8 +282,13 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey := r.URL.Query().Get("key")
+	endKey := r.URL.Query().Get("end_key")
 
 	limit := defaultRegionLimit
+	// avoid incomplete results with end_key
+	if endKey != "" {
+		limit = noRegionLimit
+	}
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		var err error
 		limit, err = strconv.Atoi(limitStr)
@@ -294,7 +300,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	if limit > maxRegionLimit {
 		limit = maxRegionLimit
 	}
-	regions := rc.ScanRegions([]byte(startKey), nil, limit)
+	regions := rc.ScanRegions([]byte(startKey), []byte(endKey), limit)
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
@@ -554,6 +560,16 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 }
 
 // @Tags region
+// @Summary List all range holes whitout any region info.
+// @Produce json
+// @Success 200 {object} [][]string
+// @Router /regions/range-holes [get]
+func (h *regionsHandler) GetRangeHoles(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	h.rd.JSON(w, http.StatusOK, rc.GetRangeHoles())
+}
+
+// @Tags region
 // @Summary List sibling regions of a specific region.
 // @Param id path integer true "Region Id"
 // @Produce json
@@ -584,6 +600,7 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 const (
 	defaultRegionLimit     = 16
 	maxRegionLimit         = 10240
+	noRegionLimit          = -1
 	minRegionHistogramSize = 1
 	minRegionHistogramKeys = 1000
 )

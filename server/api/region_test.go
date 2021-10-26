@@ -309,7 +309,7 @@ func (s *testRegionSuite) TestAccelerateRegionsScheduleInRange(c *C) {
 	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", s.urlPrefix), []byte(body))
 	c.Assert(err, IsNil)
 	idList := s.svr.GetRaftCluster().GetSuspectRegions()
-	c.Assert(len(idList), Equals, 2)
+	c.Assert(idList, HasLen, 2)
 }
 
 func (s *testRegionSuite) TestScatterRegions(c *C) {
@@ -386,7 +386,7 @@ func (s *testRegionSuite) TestTopN(c *C) {
 		if n > len(writtenBytes) {
 			c.Assert(len(topN), Equals, len(writtenBytes))
 		} else {
-			c.Assert(len(topN), Equals, n)
+			c.Assert(topN, HasLen, n)
 		}
 		for i := range topN {
 			c.Assert(topN[i].GetBytesWritten(), Equals, writtenBytes[i])
@@ -443,7 +443,7 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	regions := &RegionsInfo{}
 	err := readJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(len(regionIds), Equals, regions.Count)
+	c.Assert(regionIds, HasLen, regions.Count)
 	for i, v := range regionIds {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
@@ -452,7 +452,7 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	regions = &RegionsInfo{}
 	err = readJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(len(regionIds), Equals, regions.Count)
+	c.Assert(regionIds, HasLen, regions.Count)
 	for i, v := range regionIds {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
@@ -461,10 +461,81 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	regions = &RegionsInfo{}
 	err = readJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
+	c.Assert(regionIds, HasLen, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+	url = fmt.Sprintf("%s/regions/key?end_key=%s", s.urlPrefix, "e")
+	regionIds = []uint64{2, 3, 4}
+	regions = &RegionsInfo{}
+	err = readJSON(testDialClient, url, regions)
+	c.Assert(err, IsNil)
 	c.Assert(len(regionIds), Equals, regions.Count)
 	for i, v := range regionIds {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
+	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", s.urlPrefix, "b", "g")
+	regionIds = []uint64{3, 4}
+	regions = &RegionsInfo{}
+	err = readJSON(testDialClient, url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", s.urlPrefix, "b", []byte{0xFF, 0xFF, 0xCC})
+	regionIds = []uint64{3, 4, 5, 99}
+	regions = &RegionsInfo{}
+	err = readJSON(testDialClient, url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+}
+
+// Start a new test suite to prevent from being interfered by other tests.
+var _ = Suite(&testGetRegionRangeHolesSuite{})
+
+type testGetRegionRangeHolesSuite struct {
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
+}
+
+func (s *testGetRegionRangeHolesSuite) SetUpSuite(c *C) {
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	mustBootstrapCluster(c, s.svr)
+}
+
+func (s *testGetRegionRangeHolesSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
+func (s *testGetRegionRangeHolesSuite) TestRegionRangeHoles(c *C) {
+	// Missing r0 with range [0, 0xEA]
+	r1 := newTestRegionInfo(2, 1, []byte{0xEA}, []byte{0xEB})
+	// Missing r2 with range [0xEB, 0xEC]
+	r3 := newTestRegionInfo(3, 1, []byte{0xEC}, []byte{0xED})
+	r4 := newTestRegionInfo(4, 2, []byte{0xED}, []byte{0xEE})
+	// Missing r5 with range [0xEE, 0xFE]
+	r6 := newTestRegionInfo(5, 2, []byte{0xFE}, []byte{0xFF})
+	mustRegionHeartbeat(c, s.svr, r1)
+	mustRegionHeartbeat(c, s.svr, r3)
+	mustRegionHeartbeat(c, s.svr, r4)
+	mustRegionHeartbeat(c, s.svr, r6)
+
+	url := fmt.Sprintf("%s/regions/range-holes", s.urlPrefix)
+	rangeHoles := new([][]string)
+	c.Assert(readJSON(testDialClient, url, rangeHoles), IsNil)
+	c.Assert(*rangeHoles, DeepEquals, [][]string{
+		{"", core.HexRegionKeyStr(r1.GetStartKey())},
+		{core.HexRegionKeyStr(r1.GetEndKey()), core.HexRegionKeyStr(r3.GetStartKey())},
+		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r6.GetStartKey())},
+	})
 }
 
 // Create n regions (0..n) of n stores (0..n).

@@ -66,6 +66,10 @@ type SecurityOption struct {
 	CAPath   string
 	CertPath string
 	KeyPath  string
+
+	SSLCABytes   []byte
+	SSLCertBytes []byte
+	SSLKEYBytes  []byte
 }
 
 // newBaseClient returns a new baseClient.
@@ -385,6 +389,10 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 		CAPath:   c.security.CAPath,
 		CertPath: c.security.CertPath,
 		KeyPath:  c.security.KeyPath,
+
+		SSLCABytes:   c.security.SSLCABytes,
+		SSLCertBytes: c.security.SSLCertBytes,
+		SSLKEYBytes:  c.security.SSLKEYBytes,
 	}.ToTLSConfig()
 	if err != nil {
 		return nil, err

@@ -330,6 +330,13 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
+// WithTSOFollowerProxy configures the client with follower TSO proxy.
+func WithTSOFollowerProxy(enableFollowerTSOBacth bool) ClientOption {
+	return func(c *client) {
+		c.enableTSOFollowerProxy = enableFollowerTSOBacth
+	}
+}
+
 // WithMaxTSOBatchWaitInterval configures the client max TSO batch wait interval.
 func WithMaxTSOBatchWaitInterval(maxTSOBatchWaitInterval time.Duration) ClientOption {
 	return func(c *client) {
@@ -352,7 +359,8 @@ type client struct {
 	leaderNetworkFailure int32
 
 	// Client options.
-	enableForwarding bool
+	enableForwarding       bool
+	enableTSOFollowerProxy bool
 	// TODO: make `maxTSOBatchWaitInterval` can be changed manually online.
 	maxTSOBatchWaitInterval time.Duration
 }
@@ -494,6 +502,7 @@ func (c *client) watchTSDeadline(ctx context.Context, dcLocation string) {
 						log.Error("tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
 						d.cancel()
 					case <-d.done:
+						continue
 					case <-ctx.Done():
 						return
 					}
@@ -588,6 +597,7 @@ func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel con
 		failpoint.Inject("unreachableNetwork", func() {
 			resp.Status = healthpb.HealthCheckResponse_UNKNOWN
 		})
+		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 			// create a stream of the original allocator
 			cctx, cancel := context.WithCancel(dispatcherCtx)
@@ -601,11 +611,9 @@ func (c *client) checkAllocator(dispatcherCtx context.Context, forwardCancel con
 					cancel: cancel,
 					stream: stream,
 				}
-				healthCancel()
 				return
 			}
 		}
-		healthCancel()
 		select {
 		case <-dispatcherCtx.Done():
 			return
@@ -662,6 +670,11 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tbc 
 			cancel()
 		}
 	}()
+	// Normal connection creating, it will be affected by the `enableForwarding`.
+	createTSOConnection := c.tryConnect
+	if c.enableTSOFollowerProxy && dc == globalDCLocation /* only support Global TSO proxy now */ {
+		createTSOConnection = c.tryConnectToFollowerProxy
+	}
 	for {
 		// If the tso stream for the corresponding dc-location has not been created yet or needs to be re-created,
 		// we will try to create the stream first.
@@ -679,7 +692,7 @@ func (c *client) handleDispatcher(dispatcherCtx context.Context, dc string, tbc 
 				needUpdate = false
 			}
 
-			connectionCtx, err = c.tryConnect(dispatcherCtx, dc)
+			connectionCtx, err = createTSOConnection(dispatcherCtx, dc)
 			stream, cancel, streamCh = connectionCtx.stream, connectionCtx.cancel, connectionCtx.streamCh
 
 			if err != nil || stream == nil {
@@ -762,6 +775,10 @@ type connectionContext struct {
 	streamCh streamCh
 }
 
+// tryConnect will try to connect to the TSO allocator leader. If the connection becomes unreachable
+// and enableForwarding is true, it will create a new connection to a follower to do the forwarding,
+// while a new daemon will be created also to switch back to a normal leader connection ASAP the
+// connection comes back to normal.
 func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectionContext, error) {
 	var (
 		url           string
@@ -832,6 +849,32 @@ func (c *client) tryConnect(dispatcherCtx context.Context, dc string) (connectio
 	return connectionContext{}, err
 }
 
+// tryConnectToFollowerProxy will create a stream to the PD follower to do the TSO requests proxy to reduce
+// the pressure of its leader.
+func (c *client) tryConnectToFollowerProxy(dispatcherCtx context.Context, dc string) (connectionContext, error) {
+	if followerClient, addr := c.followerClient(); followerClient != nil {
+		log.Info("use follower to forward tso stream to do the proxy", zap.String("dc", dc), zap.String("addr", addr))
+		forwardedHost, ok := c.getAllocatorLeaderAddrByDCLocation(dc)
+		if !ok {
+			return connectionContext{}, errors.Errorf("cannot find the allocator leader in %s", dc)
+		}
+
+		// create the follower stream
+		cctx, cancel := context.WithCancel(dispatcherCtx)
+		cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
+		stream, err := c.createTsoStream(cctx, cancel, followerClient)
+		if err == nil {
+			forwardedHostTrim := trimHTTPPrefix(forwardedHost)
+			addrTrim := trimHTTPPrefix(addr)
+			requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
+			return connectionContext{stream, cancel, nil}, nil
+		}
+		cancel()
+		return connectionContext{}, err
+	}
+	return connectionContext{}, errors.Errorf("cannot find the follower client in %s", dc)
+}
+
 func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
 	for _, req := range tbc.collectedRequests[:tbc.collectedRequestCount] {
 		if span := opentracing.SpanFromContext(req.requestCtx); span != nil {
@@ -877,7 +920,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 	}
 
 	physical, logical, suffixBits := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
-	// logical is the highest ts here, we need to do the subtracting before we finish each TSO request.
+	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 	firstLogical := addLogical(logical, -count+1, suffixBits)
 	c.compareAndSwapTS(dcLocation, physical, firstLogical, suffixBits, count)
 	c.finishTSORequest(requests, physical, firstLogical, suffixBits, nil)
@@ -890,11 +933,11 @@ func addLogical(logical, count int64, suffixBits uint32) int64 {
 }
 
 func (c *client) compareAndSwapTS(dcLocation string, physical, firstLogical int64, suffixBits uint32, count int64) {
-	highestLogical := addLogical(firstLogical, count-1, suffixBits)
+	largestLogical := addLogical(firstLogical, count-1, suffixBits)
 	lastTSOInterface, loaded := c.lastTSMap.LoadOrStore(dcLocation, &lastTSO{
 		physical: physical,
-		// Save the highest logical part here
-		logical: highestLogical,
+		// Save the largest logical part here
+		logical: largestLogical,
 	})
 	if !loaded {
 		return
@@ -902,14 +945,15 @@ func (c *client) compareAndSwapTS(dcLocation string, physical, firstLogical int6
 	lastTSOPointer := lastTSOInterface.(*lastTSO)
 	lastPhysical := lastTSOPointer.physical
 	lastLogical := lastTSOPointer.logical
-	// The TSO we get is a range like [a, b), so we save the last TSO's b as the lastLogical and compare the new TSO's a with it.
+	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical to compare with the new TSO's first logical.
+	// For example, if we have a TSO resp with logical 10, count 5, then all TSOs we get will be [6, 7, 8, 9, 10].
 	if tsLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
 		panic(errors.Errorf("%s timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
 			dcLocation, physical, firstLogical, lastPhysical, lastLogical))
 	}
 	lastTSOPointer.physical = physical
-	// Same as above, we save the highest logical part here.
-	lastTSOPointer.logical = highestLogical
+	// Same as above, we save the largest logical part here.
+	lastTSOPointer.logical = largestLogical
 }
 
 func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
@@ -964,7 +1008,7 @@ func (c *client) leaderClient() pdpb.PDClient {
 	return nil
 }
 
-// followerClient gets the client of current PD follower.
+// followerClient gets a client of the current reachable and healthy PD follower randomly.
 func (c *client) followerClient() (pdpb.PDClient, string) {
 	addrs := c.GetFollowerAddr()
 	var cc *grpc.ClientConn
@@ -980,11 +1024,10 @@ func (c *client) followerClient() (pdpb.PDClient, string) {
 		}
 		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.timeout)
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
+		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			healthCancel()
 			return pdpb.NewPDClient(cc), addr
 		}
-		healthCancel()
 	}
 	return nil, ""
 }

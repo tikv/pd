@@ -43,6 +43,7 @@ var (
 	ruleGroupsPrefix      = "pd/api/v1/config/rule_groups"
 	replicationModePrefix = "pd/api/v1/config/replication-mode"
 	ruleBundlePrefix      = "pd/api/v1/config/placement-rule"
+	pdServerPrefix        = "pd/api/v1/config/pd-server"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -71,6 +72,7 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(NewShowLabelPropertyCommand())
 	sc.AddCommand(NewShowClusterVersionCommand())
 	sc.AddCommand(newShowReplicationModeCommand())
+	sc.AddCommand(NewShowServerConfigCommand())
 	return sc
 }
 
@@ -129,6 +131,15 @@ func newShowReplicationModeCommand() *cobra.Command {
 		Use:   "replication-mode",
 		Short: "show replication mode config",
 		Run:   showReplicationModeCommandFunc,
+	}
+}
+
+// NewShowServerConfigCommand returns a server configuration of show subcommand.
+func NewShowServerConfigCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "server",
+		Short: "show PD server config",
+		Run:   showServerCommandFunc,
 	}
 }
 
@@ -297,6 +308,15 @@ func showReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, replicationModePrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get replication mode config: %s\n", err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func showServerCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, pdServerPrefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get server config: %s\n", err)
 		return
 	}
 	cmd.Println(r)

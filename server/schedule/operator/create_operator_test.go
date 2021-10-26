@@ -144,7 +144,7 @@ func (s *testCreateOperatorSuite) TestCreateSplitRegionOperator(c *C) {
 		}
 		c.Assert(err, IsNil)
 		c.Assert(op.Kind(), Equals, OpSplit)
-		c.Assert(len(op.steps), Equals, 1)
+		c.Assert(op.steps, HasLen, 1)
 		for i := 0; i < op.Len(); i++ {
 			switch step := op.Step(i).(type) {
 			case SplitRegion:
@@ -243,7 +243,7 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 			continue
 		}
 		c.Assert(err, IsNil)
-		c.Assert(len(ops), Equals, 2)
+		c.Assert(ops, HasLen, 2)
 		c.Assert(ops[0].kind, Equals, tc.kind)
 		c.Assert(ops[0].Len(), Equals, len(tc.prepareSteps)+1)
 		c.Assert(ops[1].kind, Equals, tc.kind)
@@ -370,7 +370,7 @@ func (s *testCreateOperatorSuite) TestCreateTransferLeaderOperator(c *C) {
 
 		c.Assert(err, IsNil)
 		c.Assert(op.Kind(), Equals, OpLeader)
-		c.Assert(len(op.steps), Equals, 1)
+		c.Assert(op.steps, HasLen, 1)
 		switch step := op.Step(0).(type) {
 		case TransferLeader:
 			c.Assert(step.FromStore, Equals, tc.originPeers[0].StoreId)

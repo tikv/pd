@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/influxdata/tdigest"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -136,6 +137,8 @@ func bench(mainCtx context.Context) {
 	}
 }
 
+var latencyTDigest *tdigest.TDigest = tdigest.New()
+
 func showStats(ctx context.Context, durCh chan time.Duration) {
 	defer wg.Done()
 
@@ -148,6 +151,7 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 	s := newStats()
 	total := newStats()
 
+	fmt.Println()
 	for {
 		select {
 		case <-ticker.C:
@@ -163,6 +167,8 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 			fmt.Println("\nTotal:")
 			fmt.Println(total.Counter())
 			fmt.Println(total.Percentage())
+			// Calculate the percentiles by using the tDigest algorithm.
+			fmt.Printf("P0.5: %.4fms, P0.8: %.4fms, P0.9: %.4fms, P0.99: %.4fms\n\n", latencyTDigest.Quantile(0.5), latencyTDigest.Quantile(0.8), latencyTDigest.Quantile(0.9), latencyTDigest.Quantile(0.99))
 			if *verbose {
 				fmt.Println(collectMetrics(promServer))
 			}
@@ -213,6 +219,7 @@ func newStats() *stats {
 func (s *stats) update(dur time.Duration) {
 	s.count++
 	s.totalDur += dur
+	latencyTDigest.Add(float64(dur.Nanoseconds())/1e6, 1)
 
 	if dur > s.maxDur {
 		s.maxDur = dur

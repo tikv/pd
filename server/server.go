@@ -141,10 +141,13 @@ type Server struct {
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
 	serviceSafePointLock sync.Mutex
 
-	// Store as map[string]*grpc.ClientConn
-	clientConns sync.Map
 	//hot region history info storeage
 	hotRegionStorage *core.HotRegionStorage
+	// Store as map[string]*grpc.ClientConn
+	clientConns sync.Map
+	// tsoDispatcher is used to dispatch different TSO requests to
+	// the corresponding forwarding TSO channel.
+	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -854,7 +857,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range raftCluster.GetStores() {
-				if !s.IsTombstone() && core.IsTiFlashStore(s.GetMeta()) {
+				if !s.IsTombstone() && core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}
