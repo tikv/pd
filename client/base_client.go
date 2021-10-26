@@ -188,6 +188,11 @@ func (c *baseClient) GetFollowerAddr() []string {
 	return followerAddrs.([]string)
 }
 
+// GetAllAddr returns all address.
+func (c *baseClient) GetAllAddrs() []string {
+	return append(c.GetFollowerAddr(), c.GetLeaderAddr())
+}
+
 // GetURLs returns the URLs.
 // For testing use. It should only be called when the client is closed.
 func (c *baseClient) GetURLs() []string {
