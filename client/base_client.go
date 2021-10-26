@@ -191,7 +191,9 @@ func (c *baseClient) GetFollowerAddr() []string {
 
 // GetAllAddr returns all address.
 func (c *baseClient) GetAllAddrs() []string {
-	return append(c.GetFollowerAddr(), c.GetLeaderAddr())
+	addr := c.GetFollowerAddr()
+	addr = append(addr, c.GetLeaderAddr())
+	return addr
 }
 
 // GetURLs returns the URLs.
