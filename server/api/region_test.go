@@ -465,6 +465,33 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	for i, v := range regionIds {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
+	url = fmt.Sprintf("%s/regions/key?end_key=%s", s.urlPrefix, "e")
+	regionIds = []uint64{2, 3, 4}
+	regions = &RegionsInfo{}
+	err = readJSON(testDialClient, url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", s.urlPrefix, "b", "g")
+	regionIds = []uint64{3, 4}
+	regions = &RegionsInfo{}
+	err = readJSON(testDialClient, url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", s.urlPrefix, "b", []byte{0xFF, 0xFF, 0xCC})
+	regionIds = []uint64{3, 4, 5, 99}
+	regions = &RegionsInfo{}
+	err = readJSON(testDialClient, url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
 }
 
 // Start a new test suite to prevent from being interfered by other tests.

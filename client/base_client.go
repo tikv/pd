@@ -180,8 +180,8 @@ func (c *baseClient) GetLeaderAddr() string {
 	return leaderAddr.(string)
 }
 
-// GetLeaderAddr returns the follower address.
-func (c *baseClient) GetFollowerAddr() []string {
+// GetFollowerAddrs returns the follower address.
+func (c *baseClient) GetFollowerAddrs() []string {
 	followerAddrs := c.followers.Load()
 	if followerAddrs == nil {
 		return []string{}
@@ -189,11 +189,28 @@ func (c *baseClient) GetFollowerAddr() []string {
 	return followerAddrs.([]string)
 }
 
-// GetAllAddr returns all address.
+// getFollowerAddrsNum returns the number of the follower addresses.
+func (c *baseClient) getFollowerAddrsNum() int {
+	followerAddrs := c.followers.Load()
+	if followerAddrs == nil {
+		return 0
+	}
+	return len(followerAddrs.([]string))
+}
+
+// GetAllAddrs returns all addresses.
 func (c *baseClient) GetAllAddrs() []string {
-	addr := c.GetFollowerAddr()
-	addr = append(addr, c.GetLeaderAddr())
-	return addr
+	followerAddrs := c.GetFollowerAddrs()
+	followerNum := len(followerAddrs)
+	addrs := make([]string, followerNum+1)
+	copy(addrs, followerAddrs)
+	addrs[followerNum] = c.GetLeaderAddr()
+	return addrs
+}
+
+// GetAllAddrsNum returns the number of all addresses.
+func (c *baseClient) GetAllAddrsNum() int {
+	return c.getFollowerAddrsNum() + 1
 }
 
 // GetURLs returns the URLs.
