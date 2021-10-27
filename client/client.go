@@ -650,11 +650,11 @@ func (c *client) handleDispatcher(
 	dc string,
 	tbc *tsoBatchController) {
 	var (
-		retryTimes int
-		err        error
-		streamAddr string
-		stream     pdpb.PD_TsoClient
-		cancel     context.CancelFunc
+		retryTimeConsuming time.Duration
+		err                error
+		streamAddr         string
+		stream             pdpb.PD_TsoClient
+		cancel             context.CancelFunc
 		// addr -> connectionContext
 		connectionCtxs sync.Map
 		opts           []opentracing.StartSpanOption
@@ -664,10 +664,7 @@ func (c *client) handleDispatcher(
 		// Cancel all connections.
 		connectionCtxs.Range(func(_, cc interface{}) bool {
 			connectionCtx := cc.(*connectionContext)
-			cancel = connectionCtx.cancel
-			if cancel != nil {
-				cancel()
-			}
+			connectionCtx.cancel()
 			return true
 		})
 	}()
@@ -688,22 +685,22 @@ func (c *client) handleDispatcher(
 		// Check stream and retry if necessary.
 		if stream == nil {
 			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-			if retryTimes >= 3 {
+			if retryTimeConsuming >= c.timeout {
 				err = errs.ErrClientCreateTSOStream.FastGenByArgs()
 				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 				c.ScheduleCheckLeader()
 				c.revokeTSORequest(errors.WithStack(err), tbc.tsoRequestCh)
-				retryTimes = 0
+				retryTimeConsuming = 0
 			}
 			select {
 			case <-dispatcherCtx.Done():
 				return
 			case <-time.After(time.Second):
 			}
-			retryTimes++
+			retryTimeConsuming += time.Second
 			continue
 		}
-		retryTimes = 0
+		retryTimeConsuming = 0
 		// Start to collect the TSO requests.
 		if err = tbc.fetchPendingRequests(dispatcherCtx); err != nil {
 			log.Error("[pd] fetch pending tso requests error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
