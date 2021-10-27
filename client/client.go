@@ -663,8 +663,7 @@ func (c *client) handleDispatcher(
 		log.Info("[pd] exit tso dispatcher", zap.String("dc-location", dc))
 		// Cancel all connections.
 		connectionCtxs.Range(func(_, cc interface{}) bool {
-			connectionCtx := cc.(*connectionContext)
-			connectionCtx.cancel()
+			cc.(*connectionContext).cancel()
 			return true
 		})
 	}()
@@ -829,11 +828,14 @@ func (c *client) tryConnect(
 		stream        pdpb.PD_TsoClient
 	)
 	updateAndClear := func(newAddr string, connectionCtx *connectionContext) {
-		connectionCtxs.Store(newAddr, connectionCtx)
+		if cc, loaded := connectionCtxs.LoadOrStore(newAddr, connectionCtx); loaded {
+			// If the previous connection still exists, we should close it first.
+			cc.(*connectionContext).cancel()
+			connectionCtxs.Store(newAddr, connectionCtx)
+		}
 		connectionCtxs.Range(func(addr, cc interface{}) bool {
 			if addr.(string) != newAddr {
-				connectionCtx := cc.(*connectionContext)
-				connectionCtx.cancel()
+				cc.(*connectionContext).cancel()
 				connectionCtxs.Delete(addr)
 			}
 			return true
@@ -915,8 +917,9 @@ func (c *client) tryConnectToProxy(
 		return errors.Errorf("cannot find the allocator leader in %s", dc)
 	}
 	// GC the stale one.
-	connectionCtxs.Range(func(addr, _ interface{}) bool {
+	connectionCtxs.Range(func(addr, cc interface{}) bool {
 		if _, ok := clients[addr.(string)]; !ok {
+			cc.(*connectionContext).cancel()
 			connectionCtxs.Delete(addr)
 		}
 		return true
