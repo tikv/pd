@@ -331,9 +331,9 @@ func WithMaxErrorRetry(count int) ClientOption {
 }
 
 // WithTSOFollowerProxy configures the client with TSO Follower Proxy option.
-func WithTSOFollowerProxy(enableTSOFollowerProxy bool) ClientOption {
+func WithTSOFollowerProxy(enable bool) ClientOption {
 	return func(c *client) {
-		c.enableTSOFollowerProxy = enableTSOFollowerProxy
+		c.enableTSOFollowerProxy = enable
 	}
 }
 
@@ -678,7 +678,7 @@ func (c *client) handleDispatcher(
 		default:
 		}
 		// Choose a stream to send the TSO gRPC request.
-		connectionCtx := c.chooseStream(&connectionCtxs, c.validateTSOFollowerProxy(dc))
+		connectionCtx := c.chooseStream(&connectionCtxs)
 		if connectionCtx != nil {
 			streamAddr, stream, cancel = connectionCtx.streamAddr, connectionCtx.stream, connectionCtx.cancel
 		}
@@ -691,14 +691,15 @@ func (c *client) handleDispatcher(
 				c.ScheduleCheckLeader()
 				c.revokeTSORequest(errors.WithStack(err), tbc.tsoRequestCh)
 				retryTimeConsuming = 0
+				continue
 			}
 			select {
 			case <-dispatcherCtx.Done():
 				return
 			case <-time.After(time.Second):
+				retryTimeConsuming += time.Second
+				continue
 			}
-			retryTimeConsuming += time.Second
-			continue
 		}
 		retryTimeConsuming = 0
 		// Start to collect the TSO requests.
@@ -722,9 +723,9 @@ func (c *client) handleDispatcher(
 			tsDeadlineCh, ok = c.tsDeadline.Load(dc)
 		}
 		select {
-		case tsDeadlineCh.(chan deadline) <- dl:
 		case <-dispatcherCtx.Done():
 			return
+		case tsDeadlineCh.(chan deadline) <- dl:
 		}
 		opts = extractSpanReference(tbc, opts[:0])
 		err = c.processTSORequests(stream, dc, tbc, opts)
@@ -759,20 +760,18 @@ func (c *client) handleDispatcher(
 }
 
 // TSO Follower Proxy only supports the Global TSO proxy now.
-func (c *client) validateTSOFollowerProxy(dc string) bool {
+func (c *client) allowTSOFollowerProxy(dc string) bool {
 	return dc == globalDCLocation && c.enableTSOFollowerProxy
 }
 
-func (c *client) chooseStream(connectionCtxs *sync.Map, random bool) (connectionCtx *connectionContext) {
-	targetIdx := 0
-	if random {
-		targetIdx = rand.Intn(len(c.GetAllAddrs()))
-	}
+// chooseStream uses the reservoir sampling algorithm to randomly choose a connection.
+// connectionCtxs will only have only one stream to choose when the TSO Follower Proxy is off.
+func (c *client) chooseStream(connectionCtxs *sync.Map) (connectionCtx *connectionContext) {
 	idx := 0
 	connectionCtxs.Range(func(addr, cc interface{}) bool {
-		if idx == targetIdx {
+		j := rand.Intn(idx + 1)
+		if j < 1 {
 			connectionCtx = cc.(*connectionContext)
-			return false
 		}
 		idx++
 		return true
@@ -807,7 +806,7 @@ func (c *client) connectionCtxsUpdater(
 func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnect
-	if c.validateTSOFollowerProxy(dc) {
+	if c.allowTSOFollowerProxy(dc) {
 		createTSOConnection = c.tryConnectToProxy
 	}
 	if err := createTSOConnection(updaterCtx, dc, connectionCtxs); err != nil {
