@@ -58,7 +58,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionWithCheckCommand())
 	r.AddCommand(NewRegionWithSiblingCommand())
 	r.AddCommand(NewRegionWithStoreCommand())
-	r.AddCommand(NewRegionsWithStartKeyCommand())
+	r.AddCommand(NewRegionsByKeysCommand())
 	r.AddCommand(NewRangesWithRangeHolesCommand())
 
 	topRead := &cobra.Command{
@@ -375,20 +375,20 @@ func decodeKey(text string) (string, error) {
 	return string(buf), nil
 }
 
-// NewRegionsWithStartKeyCommand returns regions from startkey subcommand of regionCmd.
-func NewRegionsWithStartKeyCommand() *cobra.Command {
+// NewRegionsByKeysCommand returns regions in a given range[startkey, endkey) subcommand of regionCmd.
+func NewRegionsByKeysCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "startkey [--format=raw|encode|hex] <key> <limit>",
-		Short: "show regions from start key",
-		Run:   showRegionsFromStartKeyCommandFunc,
+		Use:   "keys [--format=raw|encode|hex] <start_key> <end_key> <limit>",
+		Short: "show regions in a given range[startkey, endkey)",
+		Run:   showRegionsByKeysCommandFunc,
 	}
 
 	r.Flags().String("format", "hex", "the key format")
 	return r
 }
 
-func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) < 1 || len(args) > 2 {
+func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 || len(args) > 3 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
@@ -398,13 +398,19 @@ func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	key = url.QueryEscape(key)
-	prefix := regionsKeyPrefix + "?key=" + key
-	if len(args) == 2 {
-		if _, err = strconv.Atoi(args[1]); err != nil {
+	endKey, err := parseKey(cmd.Flags(), args[1])
+	if err != nil {
+		cmd.Println("Error: ", err)
+		return
+	}
+	endKey = url.QueryEscape(endKey)
+	prefix := regionsKeyPrefix + "?key=" + key + "&end_key=" + endKey
+	if len(args) == 3 {
+		if _, err = strconv.Atoi(args[2]); err != nil {
 			cmd.Println("limit should be a number")
 			return
 		}
-		prefix += "&limit=" + args[1]
+		prefix += "&limit=" + args[2]
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
