@@ -62,11 +62,11 @@ func (s *testClientSuite) TestUpdateURLs(c *C) {
 	}
 	cli := &baseClient{}
 	cli.updateURLs(members[1:])
-	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
+	c.Assert(cli.GetURLs(), DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
 	cli.updateURLs(members[1:])
-	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
+	c.Assert(cli.GetURLs(), DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
 	cli.updateURLs(members)
-	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
+	c.Assert(cli.GetURLs(), DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
 }
 
 const testClientURL = "tmp://test.url:5255"
@@ -101,7 +101,6 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	defer cancel()
 	// nolint
 	cli := &baseClient{
-		urls:                 []string{testClientURL},
 		checkLeaderCh:        make(chan struct{}, 1),
 		checkTSODispatcherCh: make(chan struct{}, 1),
 		ctx:                  ctx,
@@ -109,6 +108,7 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 		security:             SecurityOption{},
 		gRPCDialOptions:      []grpc.DialOption{grpc.WithBlock()},
 	}
+	cli.urls.Store([]string{testClientURL})
 
 	err := cli.updateMember()
 	c.Assert(err, NotNil)

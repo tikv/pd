@@ -1128,7 +1128,7 @@ func (c *client) getClient() pdpb.PDClient {
 
 func (c *client) getAllClients() map[string]pdpb.PDClient {
 	var (
-		addrs   = c.GetAllAddrs()
+		addrs   = c.GetURLs()
 		clients = make(map[string]pdpb.PDClient, len(addrs))
 		cc      *grpc.ClientConn
 		err     error

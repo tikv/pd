@@ -40,7 +40,7 @@ const (
 
 // baseClient is a basic client for all other complex client.
 type baseClient struct {
-	urls      []string
+	urls      atomic.Value // Store as []string
 	clusterID uint64
 	// PD leader URL
 	leader atomic.Value // Store as string
@@ -82,8 +82,7 @@ type SecurityOption struct {
 // newBaseClient returns a new baseClient.
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption) *baseClient {
 	clientCtx, clientCancel := context.WithCancel(ctx)
-	return &baseClient{
-		urls:                   urls,
+	bc := &baseClient{
 		checkLeaderCh:          make(chan struct{}, 1),
 		checkTSODispatcherCh:   make(chan struct{}, 1),
 		updateConnectionCtxsCh: make(chan struct{}, 1),
@@ -94,6 +93,8 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption) 
 		maxRetryTimes:          maxInitClusterRetries,
 		enableTSOFollowerProxy: false,
 	}
+	bc.urls.Store(urls)
+	return bc
 }
 
 func (c *baseClient) init() error {
@@ -194,20 +195,13 @@ func (c *baseClient) GetFollowerAddrs() []string {
 	return followerAddrs.([]string)
 }
 
-// GetAllAddrs returns all addresses.
-func (c *baseClient) GetAllAddrs() []string {
-	followerAddrs := c.GetFollowerAddrs()
-	followerNum := len(followerAddrs)
-	addrs := make([]string, followerNum+1)
-	copy(addrs, followerAddrs)
-	addrs[followerNum] = c.GetLeaderAddr()
-	return addrs
-}
-
 // GetURLs returns the URLs.
-// For testing use. It should only be called when the client is closed.
 func (c *baseClient) GetURLs() []string {
-	return c.urls
+	urls := c.urls.Load()
+	if urls == nil {
+		return []string{}
+	}
+	return urls.([]string)
 }
 
 func (c *baseClient) GetAllocatorLeaderURLs() map[string]string {
@@ -258,7 +252,7 @@ func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Memb
 func (c *baseClient) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
-	for _, u := range c.urls {
+	for _, u := range c.GetURLs() {
 		members, err := c.getMembers(ctx, u, c.timeout)
 		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", u), errs.ZapError(err))
@@ -271,7 +265,7 @@ func (c *baseClient) initClusterID() error {
 }
 
 func (c *baseClient) updateMember() error {
-	for _, u := range c.urls {
+	for _, u := range c.GetURLs() {
 		members, err := c.getMembers(c.ctx, u, updateMemberTimeout)
 
 		var errTSO error
@@ -332,16 +326,17 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 	}
 
 	sort.Strings(urls)
+	oldURLs := c.GetURLs()
 	// the url list is same.
-	if reflect.DeepEqual(c.urls, urls) {
+	if reflect.DeepEqual(oldURLs, urls) {
 		return
 	}
+	c.urls.Store(urls)
 	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
 	if c.enableTSOFollowerProxy {
 		c.scheduleUpdateConnectionCtxs()
 	}
-	log.Info("[pd] update member urls", zap.Strings("old-urls", c.urls), zap.Strings("new-urls", urls))
-	c.urls = urls
+	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
 
 func (c *baseClient) switchLeader(addrs []string) error {
