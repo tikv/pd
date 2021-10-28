@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 var _ = Suite(&testRegionStructSuite{})
@@ -536,6 +537,121 @@ func (s *testGetRegionRangeHolesSuite) TestRegionRangeHoles(c *C) {
 		{core.HexRegionKeyStr(r1.GetEndKey()), core.HexRegionKeyStr(r3.GetStartKey())},
 		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r6.GetStartKey())},
 	})
+}
+
+var _ = Suite(&testRegionsReplicatedSuite{})
+
+type testRegionsReplicatedSuite struct {
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
+}
+
+func (s *testRegionsReplicatedSuite) SetUpSuite(c *C) {
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+
+	mustBootstrapCluster(c, s.svr)
+}
+
+func (s *testRegionsReplicatedSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
+func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
+	// enable placement rule
+	c.Assert(postJSON(testDialClient, s.urlPrefix+"/config", []byte(`{"enable-placement-rules":"true"}`)), IsNil)
+	defer func() {
+		c.Assert(postJSON(testDialClient, s.urlPrefix+"/config", []byte(`{"enable-placement-rules":"false"}`)), IsNil)
+	}()
+
+	// add test region
+	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	mustRegionHeartbeat(c, s.svr, r1)
+
+	// set the bundle
+	bundle := []placement.GroupBundle{
+		{
+			ID:    "5",
+			Index: 5,
+			Rules: []*placement.Rule{
+				{
+					ID: "foo", Index: 1, Role: "voter", Count: 1,
+				},
+			},
+		},
+	}
+
+	status := false
+
+	// invalid url
+	url := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, "_", "t")
+	err := readJSON(testDialClient, url, &status)
+	c.Assert(err, NotNil)
+
+	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, hex.EncodeToString(r1.GetStartKey()), "_")
+	err = readJSON(testDialClient, url, &status)
+	c.Assert(err, NotNil)
+
+	// correct test
+	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, hex.EncodeToString(r1.GetStartKey()), hex.EncodeToString(r1.GetEndKey()))
+
+	// test one rule
+	data, err := json.Marshal(bundle)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data)
+	c.Assert(err, IsNil)
+
+	err = readJSON(testDialClient, url, &status)
+	c.Assert(err, IsNil)
+	c.Assert(status, Equals, true)
+
+	// test multiple rules
+	r1 = newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1})
+	mustRegionHeartbeat(c, s.svr, r1)
+
+	bundle[0].Rules = append(bundle[0].Rules, &placement.Rule{
+		ID: "bar", Index: 1, Role: "voter", Count: 1,
+	})
+	data, err = json.Marshal(bundle)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data)
+	c.Assert(err, IsNil)
+
+	err = readJSON(testDialClient, url, &status)
+	c.Assert(err, IsNil)
+	c.Assert(status, Equals, true)
+
+	// test multiple bundles
+	bundle = append(bundle, placement.GroupBundle{
+		ID:    "6",
+		Index: 6,
+		Rules: []*placement.Rule{
+			{
+				ID: "foo", Index: 1, Role: "voter", Count: 2,
+			},
+		},
+	})
+	data, err = json.Marshal(bundle)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data)
+	c.Assert(err, IsNil)
+
+	err = readJSON(testDialClient, url, &status)
+	c.Assert(err, IsNil)
+	c.Assert(status, Equals, false)
+
+	r1 = newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1}, &metapb.Peer{Id: 6, StoreId: 1}, &metapb.Peer{Id: 7, StoreId: 1})
+	mustRegionHeartbeat(c, s.svr, r1)
+
+	err = readJSON(testDialClient, url, &status)
+	c.Assert(err, IsNil)
+	c.Assert(status, Equals, true)
 }
 
 // Create n regions (0..n) of n stores (0..n).

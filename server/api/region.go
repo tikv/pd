@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -233,6 +234,42 @@ func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
 	}
 	regionInfo := rc.GetRegionByKey([]byte(key))
 	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
+}
+
+// @Tags region
+// @Summary Check if regions in the given key ranges are replicated.
+// @Param startKey query string true "Regions start key, hex encoded"
+// @Param endKey query string true "Regions end key, hex encoded"
+// @Produce plain
+// @Success 200 {string} string "true"
+// @Failure 400 {string} string "The input is invalid."
+// @Router /regions/replicated [get]
+func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+
+	vars := mux.Vars(r)
+	startKeyHex := vars["startKey"]
+	startKey, err := hex.DecodeString(startKeyHex)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	endKeyHex := vars["endKey"]
+	endKey, err := hex.DecodeString(endKeyHex)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	regions := rc.ScanRegions(startKey, endKey, -1)
+	replicated := true
+	for _, region := range regions {
+		if !opt.IsRegionReplicated(rc, region) {
+			replicated = false
+			break
+		}
+	}
+	h.rd.JSON(w, http.StatusOK, replicated)
 }
 
 type regionsHandler struct {

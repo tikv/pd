@@ -938,34 +938,24 @@ func (h *Handler) IsLeader() bool {
 }
 
 // PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
-func (h *Handler) PackHistoryHotReadRegions() (historyHotRegions []core.HistoryHotRegion, err error) {
+func (h *Handler) PackHistoryHotReadRegions() ([]core.HistoryHotRegion, error) {
 	hotReadRegions := h.GetHotReadRegions()
 	if hotReadRegions == nil {
-		return
+		return nil, nil
 	}
 	hotReadPeerRegions := hotReadRegions.AsPeer
-	historyPeerHotRegions, err := h.packHotRegions(hotReadPeerRegions, core.ReadType.String())
-	if err != nil {
-		return
-	}
-	historyHotRegions = append(historyHotRegions, historyPeerHotRegions...)
-	return
+	return h.packHotRegions(hotReadPeerRegions, core.ReadType.String())
+
 }
 
 // PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
-func (h *Handler) PackHistoryHotWriteRegions() (historyHotRegions []core.HistoryHotRegion, err error) {
+func (h *Handler) PackHistoryHotWriteRegions() ([]core.HistoryHotRegion, error) {
 	hotWriteRegions := h.GetHotWriteRegions()
 	if hotWriteRegions == nil {
-		return
+		return nil, nil
 	}
 	hotWritePeerRegions := hotWriteRegions.AsPeer
-	historyPeerHotRegions, err := h.packHotRegions(hotWritePeerRegions, core.WriteType.String())
-	if err != nil {
-		return
-	}
-
-	historyHotRegions = append(historyHotRegions, historyPeerHotRegions...)
-	return
+	return h.packHotRegions(hotWritePeerRegions, core.WriteType.String())
 }
 
 func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []core.HistoryHotRegion, err error) {
