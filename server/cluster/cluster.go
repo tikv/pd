@@ -622,6 +622,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
+	region.CorrectApproximateSize(origin)
+
 	hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
 	reportInterval := region.GetInterval()
