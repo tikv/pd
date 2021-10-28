@@ -61,11 +61,8 @@ type baseClient struct {
 
 	security SecurityOption
 
-	// BaseClient options.
-	gRPCDialOptions        []grpc.DialOption
-	timeout                time.Duration
-	maxRetryTimes          int
-	enableTSOFollowerProxy bool
+	// Client option.
+	clientOption *ClientOption
 }
 
 // SecurityOption records options about tls
@@ -89,9 +86,7 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption) 
 		ctx:                    clientCtx,
 		cancel:                 clientCancel,
 		security:               security,
-		timeout:                defaultPDTimeout,
-		maxRetryTimes:          maxInitClusterRetries,
-		enableTSOFollowerProxy: false,
+		clientOption:           NewClientOption(),
 	}
 	bc.urls.Store(urls)
 	return bc
@@ -115,7 +110,7 @@ func (c *baseClient) init() error {
 
 func (c *baseClient) initRetry(f func() error) error {
 	var err error
-	for i := 0; i < c.maxRetryTimes; i++ {
+	for i := 0; i < c.clientOption.maxRetryTimes; i++ {
 		if err = f(); err == nil {
 			return nil
 		}
@@ -250,7 +245,7 @@ func (c *baseClient) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	for _, u := range c.GetURLs() {
-		members, err := c.getMembers(ctx, u, c.timeout)
+		members, err := c.getMembers(ctx, u, c.clientOption.timeout)
 		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", u), errs.ZapError(err))
 			continue
@@ -330,7 +325,7 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 	}
 	c.urls.Store(urls)
 	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
-	if c.enableTSOFollowerProxy {
+	if c.clientOption.GetEnableTSOFollowerProxy() {
 		c.scheduleUpdateConnectionCtxs()
 	}
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
@@ -418,7 +413,7 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 	}
 	dCtx, cancel := context.WithTimeout(c.ctx, dialTimeout)
 	defer cancel()
-	cc, err := grpcutil.GetClientConn(dCtx, addr, tlsCfg, c.gRPCDialOptions...)
+	cc, err := grpcutil.GetClientConn(dCtx, addr, tlsCfg, c.clientOption.gRPCDialOptions...)
 	if err != nil {
 		return nil, err
 	}

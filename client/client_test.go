@@ -60,7 +60,7 @@ func (s *testClientSuite) TestUpdateURLs(c *C) {
 		}
 		return
 	}
-	cli := &baseClient{}
+	cli := &baseClient{clientOption: NewClientOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
 	c.Assert(cli.GetURLs(), DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
@@ -107,10 +107,10 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 		ctx:                  ctx,
 		cancel:               cancel,
 		security:             SecurityOption{},
-		gRPCDialOptions:      []grpc.DialOption{grpc.WithBlock()},
+		clientOption:         NewClientOption(),
 	}
+	cli.clientOption.gRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
 	cli.urls.Store([]string{testClientURL})
-
 	err := cli.updateMember()
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Greater, 500*time.Millisecond)
