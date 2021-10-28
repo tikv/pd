@@ -77,9 +77,9 @@ func (co *ClientOption) GetMaxTSOBatchWaitInterval() time.Duration {
 	return co.maxTSOBatchWaitInterval.Load().(time.Duration)
 }
 
-// SetEnableTSOFollowerProxy sets the TSO Follower Proxy option.
-func (co *ClientOption) SetEnableTSOFollowerProxy(enable bool) {
-	old := co.GetEnableTSOFollowerProxy()
+// SetTSOFollowerProxyOption sets the TSO Follower Proxy option.
+func (co *ClientOption) SetTSOFollowerProxyOption(enable bool) {
+	old := co.GetTSOFollowerProxyOption()
 	if enable != old {
 		co.enableTSOFollowerProxy.Store(enable)
 		select {
@@ -89,8 +89,8 @@ func (co *ClientOption) SetEnableTSOFollowerProxy(enable bool) {
 	}
 }
 
-// GetEnableTSOFollowerProxy gets the TSO Follower Proxy option.
-func (co *ClientOption) GetEnableTSOFollowerProxy() bool {
+// GetTSOFollowerProxyOption gets the TSO Follower Proxy option.
+func (co *ClientOption) GetTSOFollowerProxyOption() bool {
 	value, ok := co.enableTSOFollowerProxy.Load().(bool)
 	return ok && value
 }

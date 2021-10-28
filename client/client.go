@@ -329,17 +329,17 @@ func WithMaxErrorRetry(count int) ClientOptionFunc {
 	}
 }
 
+// WithTSOFollowerProxy configures the client with TSO Follower Proxy option.
+func WithTSOFollowerProxy(enable bool) ClientOptionFunc {
+	return func(co *ClientOption) {
+		co.SetTSOFollowerProxyOption(enable)
+	}
+}
+
 // WithMaxTSOBatchWaitInterval configures the client max TSO batch wait interval.
 func WithMaxTSOBatchWaitInterval(interval time.Duration) ClientOptionFunc {
 	return func(co *ClientOption) {
 		co.SetMaxTSOBatchWaitInterval(interval)
-	}
-}
-
-// WithTSOFollowerProxy configures the client with TSO Follower Proxy option.
-func WithTSOFollowerProxy(enable bool) ClientOptionFunc {
-	return func(co *ClientOption) {
-		co.SetEnableTSOFollowerProxy(enable)
 	}
 }
 
@@ -689,7 +689,7 @@ func (c *client) handleDispatcher(
 	if dc == globalDCLocation {
 		go func() {
 			var updateTicker = &time.Ticker{}
-			if c.clientOption.GetEnableTSOFollowerProxy() {
+			if c.clientOption.GetTSOFollowerProxyOption() {
 				updateTicker = time.NewTicker(memberUpdateInterval)
 				defer updateTicker.Stop()
 			}
@@ -698,10 +698,14 @@ func (c *client) handleDispatcher(
 				case <-dispatcherCtx.Done():
 					return
 				case <-c.clientOption.enableTSOFollowerProxyCh:
-					if c.clientOption.GetEnableTSOFollowerProxy() && updateTicker.C == nil {
+					// Because the TSO Follower Proxy is enabled,
+					// the periodic check needs to be performed.
+					if c.clientOption.GetTSOFollowerProxyOption() && updateTicker.C == nil {
 						updateTicker = time.NewTicker(memberUpdateInterval)
 						defer updateTicker.Stop()
-					} else if !c.clientOption.GetEnableTSOFollowerProxy() {
+					} else if !c.clientOption.GetTSOFollowerProxyOption() {
+						// Because the TSO Follower Proxy is disabled,
+						// the periodic check needs to be turned off.
 						if updateTicker != nil {
 							updateTicker.Stop()
 							updateTicker = &time.Ticker{}
@@ -799,15 +803,20 @@ func (c *client) handleDispatcher(
 					default:
 					}
 				}
+				// Because the TSO Follower Proxy could be configured online,
+				// If we change it from on -> off, background updateConnectionCtxs
+				// will cancel the current stream, then the EOF error caused by cancel()
+				// should not trigger the updateConnectionCtxs here.
+				// So we should only call it when the leader changes.
+				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 			}
-			c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 		}
 	}
 }
 
 // TSO Follower Proxy only supports the Global TSO proxy now.
 func (c *client) allowTSOFollowerProxy(dc string) bool {
-	return dc == globalDCLocation && c.clientOption.GetEnableTSOFollowerProxy()
+	return dc == globalDCLocation && c.clientOption.GetTSOFollowerProxyOption()
 }
 
 // chooseStream uses the reservoir sampling algorithm to randomly choose a connection.
