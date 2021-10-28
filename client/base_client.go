@@ -196,12 +196,9 @@ func (c *baseClient) GetFollowerAddrs() []string {
 }
 
 // GetURLs returns the URLs.
+// For testing use. It should only be called when the client is closed.
 func (c *baseClient) GetURLs() []string {
-	urls := c.urls.Load()
-	if urls == nil {
-		return []string{}
-	}
-	return urls.([]string)
+	return c.urls.Load().([]string)
 }
 
 func (c *baseClient) GetAllocatorLeaderURLs() map[string]string {
@@ -301,7 +298,7 @@ func (c *baseClient) updateMember() error {
 		// the error of `switchTSOAllocatorLeader` will be returned.
 		return errTSO
 	}
-	return errs.ErrClientGetLeader.FastGenByArgs(c.urls)
+	return errs.ErrClientGetLeader.FastGenByArgs(c.GetURLs())
 }
 
 func (c *baseClient) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
