@@ -309,14 +309,15 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cluster.CheckClusterDCLocation()
 	cluster.WaitAllLeaders(c, dcLocationConfig)
 
-	wg := &sync.WaitGroup{}
-	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
-
 	// Test a nonexistent dc-location for Local TSO
 	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
 	c.Assert(p, Equals, int64(0))
 	c.Assert(l, Equals, int64(0))
 	c.Assert(err, NotNil)
+	c.Assert(err, ErrorMatches, ".*unknown dc-location.*")
+
+	wg := &sync.WaitGroup{}
+	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
 
 	// assert global tso after resign leader
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`), IsNil)
