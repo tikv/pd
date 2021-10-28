@@ -667,7 +667,23 @@ func (c *client) handleDispatcher(
 			return true
 		})
 	}()
-	go c.connectionCtxsUpdater(dispatcherCtx, dc, &connectionCtxs)
+	// Call updateConnectionCtxs once to init the connectionCtxs first.
+	c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
+	// Only the Global TSO needs to watch the updateConnectionCtxsCh to sense the
+	// change of the cluster when TSO Follower Proxy is enabled.
+	// TODO: support TSO Follower Proxy for the Local TSO.
+	if dc == globalDCLocation {
+		go func() {
+			for {
+				select {
+				case <-dispatcherCtx.Done():
+					return
+				case <-c.updateConnectionCtxsCh:
+					c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
+				}
+			}
+		}()
+	}
 
 	// Loop through each batch of TSO requests and send them for processing.
 	for {
@@ -684,6 +700,7 @@ func (c *client) handleDispatcher(
 		// Check stream and retry if necessary.
 		if stream == nil {
 			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
+			c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 			if retryTimeConsuming >= c.timeout {
 				err = errs.ErrClientCreateTSOStream.FastGenByArgs()
 				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
@@ -751,9 +768,8 @@ func (c *client) handleDispatcher(
 					default:
 					}
 				}
-				// In case the leader remains the same as before.
-				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 			}
+			c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 		}
 	}
 }
@@ -785,28 +801,11 @@ type connectionContext struct {
 	cancel context.CancelFunc
 }
 
-// connectionCtxsUpdater is used to update the connectionCtxs.
-func (c *client) connectionCtxsUpdater(
-	dispatcherCtx context.Context,
-	dc string,
-	connectionCtxs *sync.Map) {
-	updaterCtx, updaterCancel := context.WithCancel(dispatcherCtx)
-	defer updaterCancel()
-	for {
-		c.updateConnectionCtxs(updaterCtx, dc, connectionCtxs)
-		select {
-		case <-updaterCtx.Done():
-			return
-		case <-c.updateConnectionCtxsCh:
-		}
-	}
-}
-
 func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnect
 	if c.allowTSOFollowerProxy(dc) {
-		createTSOConnection = c.tryConnectToProxy
+		createTSOConnection = c.tryConnectWithProxy
 	}
 	if err := createTSOConnection(updaterCtx, dc, connectionCtxs); err != nil {
 		log.Error("[pd] update connection contexts failed", zap.String("dc", dc), errs.ZapError(err))
@@ -903,9 +902,9 @@ func (c *client) tryConnect(
 	return err
 }
 
-// tryConnectToProxy will create multiple streams to all the PD servers to work as a TSO proxy to reduce
+// tryConnectWithProxy will create multiple streams to all the PD servers to work as a TSO proxy to reduce
 // the pressure of PD leader.
-func (c *client) tryConnectToProxy(
+func (c *client) tryConnectWithProxy(
 	dispatcherCtx context.Context,
 	dc string,
 	connectionCtxs *sync.Map,
@@ -949,7 +948,7 @@ func (c *client) tryConnectToProxy(
 		log.Error("[pd] create the tso stream failed", zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
 		cancel()
 	}
-	return errors.Errorf("cannot create any client in %s", dc)
+	return nil
 }
 
 func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {

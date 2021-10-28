@@ -41,7 +41,7 @@ type baseClient struct {
 	leader atomic.Value // Store as string
 	// PD follower URLs
 	followers atomic.Value // Store as []string
-	// addr -> TSO allocator leader gRPC connection
+	// addr -> TSO gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 	// dc-location -> TSO allocator leader URL
 	allocators sync.Map // Store as map[string]string
@@ -353,8 +353,6 @@ func (c *baseClient) switchLeader(addrs []string) error {
 		log.Warn("[pd] failed to connect leader", zap.String("leader", addr), errs.ZapError(err))
 		return err
 	}
-	// Update the connection contexts when leader changes.
-	c.scheduleUpdateConnectionCtxs()
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
 	c.allocators.Store(globalDCLocation, addr)
