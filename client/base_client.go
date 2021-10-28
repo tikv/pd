@@ -33,6 +33,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	globalDCLocation     = "global"
+	memberUpdateInterval = time.Minute
+)
+
 // baseClient is a basic client for all other complex client.
 type baseClient struct {
 	urls      []string
@@ -131,7 +136,7 @@ func (c *baseClient) memberLoop() {
 	for {
 		select {
 		case <-c.checkLeaderCh:
-		case <-time.After(time.Minute):
+		case <-time.After(memberUpdateInterval):
 		case <-ctx.Done():
 			return
 		}
@@ -233,8 +238,6 @@ func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grp
 	}
 	return cc.(*grpc.ClientConn), url.(string)
 }
-
-const globalDCLocation = "global"
 
 func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
 	// Clean up the old TSO allocators

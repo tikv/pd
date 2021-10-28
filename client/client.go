@@ -674,13 +674,19 @@ func (c *client) handleDispatcher(
 	// TODO: support TSO Follower Proxy for the Local TSO.
 	if dc == globalDCLocation {
 		go func() {
+			var updateTicker = &time.Ticker{}
+			if c.enableTSOFollowerProxy {
+				updateTicker = time.NewTicker(memberUpdateInterval)
+				defer updateTicker.Stop()
+			}
 			for {
 				select {
 				case <-dispatcherCtx.Done():
 					return
+				case <-updateTicker.C:
 				case <-c.updateConnectionCtxsCh:
-					c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 				}
+				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 			}
 		}()
 	}
