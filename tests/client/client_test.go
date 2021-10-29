@@ -251,7 +251,8 @@ func (s *clientTestSuite) TestTSOFollowerProxy(c *C) {
 
 	endpoints := s.runServer(c, cluster)
 	cli1 := setupCli(c, s.ctx, endpoints)
-	cli2 := setupCli(c, s.ctx, endpoints, pd.WithTSOFollowerProxy(true))
+	cli2 := setupCli(c, s.ctx, endpoints)
+	cli2.UpdateOption(pd.EnableTSOFollowerProxy, true)
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
@@ -332,7 +333,10 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"), IsNil)
 
 	// Test the TSO follower proxy while enabling the Local TSO.
-	cli = setupCli(c, s.ctx, endpoints, pd.WithTSOFollowerProxy(true))
+	cli = setupCli(c, s.ctx, endpoints)
+	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
+	cli.UpdateOption(pd.EnableTSOFollowerProxy, false)
 	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
 }
 

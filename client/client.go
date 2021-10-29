@@ -330,20 +330,6 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
-// WithTSOFollowerProxy configures the client with TSO Follower Proxy option.
-func WithTSOFollowerProxy(enable bool) ClientOption {
-	return func(c *client) {
-		c.option.setTSOFollowerProxyOption(enable)
-	}
-}
-
-// WithMaxTSOBatchWaitInterval configures the client max TSO batch wait interval.
-func WithMaxTSOBatchWaitInterval(interval time.Duration) ClientOption {
-	return func(c *client) {
-		c.option.setMaxTSOBatchWaitInterval(interval)
-	}
-}
-
 type client struct {
 	*baseClient
 	// tsoDispatcher is used to dispatch different TSO requests to
