@@ -251,7 +251,8 @@ func (s *clientTestSuite) TestTSOFollowerProxy(c *C) {
 
 	endpoints := s.runServer(c, cluster)
 	cli1 := setupCli(c, s.ctx, endpoints)
-	cli2 := setupCli(c, s.ctx, endpoints, pd.WithTSOFollowerProxy(true))
+	cli2 := setupCli(c, s.ctx, endpoints)
+	cli2.UpdateOption(pd.EnableTSOFollowerProxy, true)
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
@@ -332,7 +333,15 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"), IsNil)
 
 	// Test the TSO follower proxy while enabling the Local TSO.
-	cli = setupCli(c, s.ctx, endpoints, pd.WithTSOFollowerProxy(true))
+	cli = setupCli(c, s.ctx, endpoints)
+	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
+	cli.UpdateOption(pd.EnableTSOFollowerProxy, false)
+	// There will be a stream has been chosen before when the TSO Follower Proxy is enabled.
+	// We need to consume it before the client starts the next round of TSO request batch.
+	// TODO: fix this corner case.
+	_, _, err = cli.GetTS(context.TODO())
+	c.Assert(err, ErrorMatches, ".*context canceled.*")
 	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
 }
 

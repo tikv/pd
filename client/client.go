@@ -93,7 +93,6 @@ type Client interface {
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
-
 	// UpdateServiceGCSafePoint updates the safepoint for specific service and
 	// returns the minimum safepoint across all services, this value is used to
 	// determine the safepoint for multiple services, it does not trigger a GC
@@ -112,6 +111,8 @@ type Client interface {
 	SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
+	// UpdateOption updates the client option.
+	UpdateOption(option DynamicOption, value interface{}) error
 	// Close closes the client.
 	Close()
 }
@@ -159,8 +160,7 @@ type tsoRequest struct {
 }
 
 type tsoBatchController struct {
-	maxBatchSize         int
-	maxBatchWaitInterval time.Duration
+	maxBatchSize int
 	// bestBatchSize is a dynamic size that changed based on the current batch effect.
 	bestBatchSize int
 
@@ -171,10 +171,9 @@ type tsoBatchController struct {
 	batchStartTime time.Time
 }
 
-func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int, maxBatchWaitInterval time.Duration) *tsoBatchController {
+func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int) *tsoBatchController {
 	return &tsoBatchController{
 		maxBatchSize:          maxBatchSize,
-		maxBatchWaitInterval:  maxBatchWaitInterval,
 		bestBatchSize:         8, /* Starting from a low value is necessary because we need to make sure it will be converged to (current_batch_size - 4) */
 		tsoRequestCh:          tsoRequestCh,
 		collectedRequests:     make([]*tsoRequest, maxBatchSize+1),
@@ -184,7 +183,10 @@ func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int, maxB
 
 // fetchPendingRequests will start a new round of the batch collecting from the channel.
 // It returns true if everything goes well, otherwise false which means we should stop the service.
-func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context) error {
+func (tbc *tsoBatchController) fetchPendingRequests(
+	ctx context.Context,
+	maxTSOBatchWaitInterval time.Duration,
+) error {
 	var firstTSORequest *tsoRequest
 	select {
 	case <-ctx.Done():
@@ -211,7 +213,7 @@ fetchPendingRequestsLoop:
 
 	// Check whether we should fetch more pending TSO requests from the channel.
 	// TODO: maybe consider the actual load that returns through a TSO response from PD server.
-	if tbc.collectedRequestCount >= tbc.maxBatchSize || tbc.maxBatchWaitInterval <= 0 {
+	if tbc.collectedRequestCount >= tbc.maxBatchSize || maxTSOBatchWaitInterval <= 0 {
 		return nil
 	}
 
@@ -219,7 +221,7 @@ fetchPendingRequestsLoop:
 	// Try to collect `tbc.bestBatchSize` requests, or wait `tbc.maxBatchWaitInterval`
 	// when `tbc.collectedRequestCount` is less than the `tbc.bestBatchSize`.
 	if tbc.collectedRequestCount < tbc.bestBatchSize {
-		after := time.NewTimer(tbc.maxBatchWaitInterval)
+		after := time.NewTimer(maxTSOBatchWaitInterval)
 		defer after.Stop()
 		for tbc.collectedRequestCount < tbc.bestBatchSize {
 			select {
@@ -279,12 +281,10 @@ type lastTSO struct {
 }
 
 const (
-	defaultPDTimeout       = 3 * time.Second
 	dialTimeout            = 3 * time.Second
 	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-	maxInitClusterRetries  = 100
 	retryInterval          = 1 * time.Second
 	maxRetryTimes          = 5
 )
@@ -307,42 +307,28 @@ type ClientOption func(c *client)
 // WithGRPCDialOptions configures the client with gRPC dial options.
 func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
 	return func(c *client) {
-		c.gRPCDialOptions = append(c.gRPCDialOptions, opts...)
+		c.option.gRPCDialOptions = append(c.option.gRPCDialOptions, opts...)
 	}
 }
 
 // WithCustomTimeoutOption configures the client with timeout option.
 func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
 	return func(c *client) {
-		c.timeout = timeout
+		c.option.timeout = timeout
 	}
 }
 
 // WithForwardingOption configures the client with forwarding option.
 func WithForwardingOption(enableForwarding bool) ClientOption {
 	return func(c *client) {
-		c.enableForwarding = enableForwarding
+		c.option.enableForwarding = enableForwarding
 	}
 }
 
 // WithMaxErrorRetry configures the client max retry times when connect meets error.
 func WithMaxErrorRetry(count int) ClientOption {
 	return func(c *client) {
-		c.maxRetryTimes = count
-	}
-}
-
-// WithTSOFollowerProxy configures the client with TSO Follower Proxy option.
-func WithTSOFollowerProxy(enable bool) ClientOption {
-	return func(c *client) {
-		c.enableTSOFollowerProxy = enable
-	}
-}
-
-// WithMaxTSOBatchWaitInterval configures the client max TSO batch wait interval.
-func WithMaxTSOBatchWaitInterval(maxTSOBatchWaitInterval time.Duration) ClientOption {
-	return func(c *client) {
-		c.maxTSOBatchWaitInterval = maxTSOBatchWaitInterval
+		c.option.maxRetryTimes = count
 	}
 }
 
@@ -359,11 +345,6 @@ type client struct {
 	// For internal usage.
 	checkTSDeadlineCh    chan struct{}
 	leaderNetworkFailure int32
-
-	// Client options.
-	enableForwarding bool
-	// TODO: make `maxTSOBatchWaitInterval` can be changed manually online.
-	maxTSOBatchWaitInterval time.Duration
 }
 
 // NewClient creates a PD client.
@@ -394,6 +375,29 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	go c.leaderCheckLoop()
 
 	return c, nil
+}
+
+// UpdateOption updates the client option.
+func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
+	switch option {
+	case MaxTSOBatchWaitInterval:
+		interval, ok := value.(time.Duration)
+		if !ok {
+			return errors.New("[pd] invalid value type for MaxTSOBatchWaitInterval option, it should be time.Duration")
+		}
+		if err := c.option.setMaxTSOBatchWaitInterval(interval); err != nil {
+			return err
+		}
+	case EnableTSOFollowerProxy:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
+		}
+		c.option.setTSOFollowerProxyOption(enable)
+	default:
+		return errors.New("[pd] unsupported client option")
+	}
+	return nil
 }
 
 func (c *client) updateTSODispatcher() {
@@ -441,7 +445,7 @@ func (c *client) leaderCheckLoop() {
 }
 
 func (c *client) checkLeaderHealth(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	defer cancel()
 	if cc, ok := c.clientConns.Load(c.GetLeaderAddr()); ok {
 		healthCli := healthpb.NewHealthClient(cc.(*grpc.ClientConn))
@@ -526,7 +530,7 @@ func (c *client) checkStreamTimeout(streamCtx context.Context, cancel context.Ca
 	select {
 	case <-done:
 		return
-	case <-time.After(c.timeout):
+	case <-time.After(c.option.timeout):
 		cancel()
 	case <-streamCtx.Done():
 	}
@@ -537,7 +541,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	start := time.Now()
 	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetMembersRequest{Header: c.requestHeader()}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetMembers(ctx, req)
@@ -596,7 +600,7 @@ func (c *client) checkAllocator(
 			log.Info("[pd] the leader of the allocator leader is changed", zap.String("dc", dc), zap.String("origin", url), zap.String("new", u))
 			return
 		}
-		healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.timeout)
+		healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.option.timeout)
 		resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		failpoint.Inject("unreachableNetwork", func() {
 			resp.Status = healthpb.HealthCheckResponse_UNKNOWN
@@ -634,9 +638,11 @@ func (c *client) checkTSODispatcher(dcLocation string) bool {
 func (c *client) createTSODispatcher(dcLocation string) {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(c.ctx)
 	dispatcher := &tsoDispatcher{
-		dispatcherCtx:      dispatcherCtx,
-		dispatcherCancel:   dispatcherCancel,
-		tsoBatchController: newTSOBatchController(make(chan *tsoRequest, defaultMaxTSOBatchSize*2), defaultMaxTSOBatchSize, c.maxTSOBatchWaitInterval),
+		dispatcherCtx:    dispatcherCtx,
+		dispatcherCancel: dispatcherCancel,
+		tsoBatchController: newTSOBatchController(
+			make(chan *tsoRequest, defaultMaxTSOBatchSize*2),
+			defaultMaxTSOBatchSize),
 	}
 	// Each goroutine is responsible for handling the tso stream request for its dc-location.
 	// The only case that will make the dispatcher goroutine exit
@@ -677,7 +683,7 @@ func (c *client) handleDispatcher(
 	if dc == globalDCLocation {
 		go func() {
 			var updateTicker = &time.Ticker{}
-			if c.enableTSOFollowerProxy {
+			if c.option.getTSOFollowerProxyOption() {
 				updateTicker = time.NewTicker(memberUpdateInterval)
 				defer updateTicker.Stop()
 			}
@@ -685,6 +691,20 @@ func (c *client) handleDispatcher(
 				select {
 				case <-dispatcherCtx.Done():
 					return
+				case <-c.option.enableTSOFollowerProxyCh:
+					// Because the TSO Follower Proxy is enabled,
+					// the periodic check needs to be performed.
+					if c.option.getTSOFollowerProxyOption() && updateTicker.C == nil {
+						updateTicker = time.NewTicker(memberUpdateInterval)
+						defer updateTicker.Stop()
+					} else if !c.option.getTSOFollowerProxyOption() {
+						// Because the TSO Follower Proxy is disabled,
+						// the periodic check needs to be turned off.
+						if updateTicker != nil {
+							updateTicker.Stop()
+							updateTicker = &time.Ticker{}
+						}
+					}
 				case <-updateTicker.C:
 				case <-c.updateConnectionCtxsCh:
 				}
@@ -709,7 +729,7 @@ func (c *client) handleDispatcher(
 		if stream == nil {
 			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
 			c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-			if retryTimeConsuming >= c.timeout {
+			if retryTimeConsuming >= c.option.timeout {
 				err = errs.ErrClientCreateTSOStream.FastGenByArgs()
 				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 				c.ScheduleCheckLeader()
@@ -727,16 +747,17 @@ func (c *client) handleDispatcher(
 		}
 		retryTimeConsuming = 0
 		// Start to collect the TSO requests.
-		if err = tbc.fetchPendingRequests(dispatcherCtx); err != nil {
+		maxTSOBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
+		if err = tbc.fetchPendingRequests(dispatcherCtx, maxTSOBatchWaitInterval); err != nil {
 			log.Error("[pd] fetch pending tso requests error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
 			return
 		}
-		if tbc.maxBatchWaitInterval >= 0 {
+		if maxTSOBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
 		}
 		done := make(chan struct{})
 		dl := deadline{
-			timer:  time.After(c.timeout),
+			timer:  time.After(c.option.timeout),
 			done:   done,
 			cancel: cancel,
 		}
@@ -776,15 +797,20 @@ func (c *client) handleDispatcher(
 					default:
 					}
 				}
+				// Because the TSO Follower Proxy could be configured online,
+				// If we change it from on -> off, background updateConnectionCtxs
+				// will cancel the current stream, then the EOF error caused by cancel()
+				// should not trigger the updateConnectionCtxs here.
+				// So we should only call it when the leader changes.
+				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 			}
-			c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 		}
 	}
 }
 
 // TSO Follower Proxy only supports the Global TSO proxy now.
 func (c *client) allowTSOFollowerProxy(dc string) bool {
-	return dc == globalDCLocation && c.enableTSOFollowerProxy
+	return dc == globalDCLocation && c.option.getTSOFollowerProxyOption()
 }
 
 // chooseStream uses the reservoir sampling algorithm to randomly choose a connection.
@@ -862,7 +888,7 @@ func (c *client) tryConnect(
 			return nil
 		}
 
-		if err != nil && c.enableForwarding {
+		if err != nil && c.option.enableForwarding {
 			// The reason we need to judge if the error code is equal to "Canceled" here is that
 			// when we create a stream we use a goroutine to manually control the timeout of the connection.
 			// There is no need to wait for the transport layer timeout which can reduce the time of unavailability.
@@ -1107,7 +1133,7 @@ func (c *client) followerClient() (pdpb.PDClient, string) {
 		if cc, err = c.getOrCreateGRPCConn(addr); err != nil {
 			continue
 		}
-		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.timeout)
+		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
@@ -1118,7 +1144,7 @@ func (c *client) followerClient() (pdpb.PDClient, string) {
 }
 
 func (c *client) getClient() pdpb.PDClient {
-	if c.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
+	if c.option.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
 		followerClient, addr := c.followerClient()
 		if followerClient != nil {
 			log.Debug("[pd] use follower client", zap.String("addr", addr))
@@ -1142,7 +1168,7 @@ func (c *client) getAllClients() map[string]pdpb.PDClient {
 		if cc, err = c.getOrCreateGRPCConn(addr); err != nil {
 			continue
 		}
-		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.timeout)
+		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
@@ -1263,7 +1289,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 	start := time.Now()
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetRegionRequest{
 		Header:    c.requestHeader(),
 		RegionKey: key,
@@ -1330,7 +1356,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 	start := time.Now()
 	defer func() { cmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetRegionRequest{
 		Header:    c.requestHeader(),
 		RegionKey: key,
@@ -1355,7 +1381,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*Region, e
 	start := time.Now()
 	defer func() { cmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetRegionByIDRequest{
 		Header:   c.requestHeader(),
 		RegionId: regionID,
@@ -1383,7 +1409,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 	var cancel context.CancelFunc
 	scanCtx := ctx
 	if _, ok := ctx.Deadline(); !ok {
-		scanCtx, cancel = context.WithTimeout(ctx, c.timeout)
+		scanCtx, cancel = context.WithTimeout(ctx, c.option.timeout)
 		defer cancel()
 	}
 	req := &pdpb.ScanRegionsRequest{
@@ -1440,7 +1466,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	start := time.Now()
 	defer func() { cmdDurationGetStore.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetStoreRequest{
 		Header:  c.requestHeader(),
 		StoreId: storeID,
@@ -1482,7 +1508,7 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 	start := time.Now()
 	defer func() { cmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetAllStoresRequest{
 		Header:                 c.requestHeader(),
 		ExcludeTombstoneStores: options.excludeTombstone,
@@ -1507,7 +1533,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 	start := time.Now()
 	defer func() { cmdDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.UpdateGCSafePointRequest{
 		Header:    c.requestHeader(),
 		SafePoint: safePoint,
@@ -1537,7 +1563,7 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	start := time.Now()
 	defer func() { cmdDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.UpdateServiceGCSafePointRequest{
 		Header:    c.requestHeader(),
 		ServiceId: []byte(serviceID),
@@ -1568,7 +1594,7 @@ func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, g
 	start := time.Now()
 	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.ScatterRegionRequest{
 		Header:   c.requestHeader(),
 		RegionId: regionID,
@@ -1602,7 +1628,7 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 	start := time.Now()
 	defer func() { cmdDurationGetOperator.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	defer cancel()
 	req := &pdpb.GetOperatorRequest{
 		Header:   c.requestHeader(),
@@ -1620,7 +1646,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 	}
 	start := time.Now()
 	defer func() { cmdDurationSplitRegions.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	defer cancel()
 	options := &RegionsOp{}
 	for _, opt := range opts {
@@ -1648,7 +1674,7 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	for _, opt := range opts {
 		opt(options)
 	}
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.ScatterRegionRequest{
 		Header:     c.requestHeader(),
 		Group:      options.group,
