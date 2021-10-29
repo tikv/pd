@@ -381,7 +381,7 @@ func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
 	case MaxTSOBatchWaitInterval:
 		interval, ok := value.(time.Duration)
 		if !ok {
-			return errors.New("[pd] invalid value for MaxTSOBatchWaitInterval option, it should be time.Duration")
+			return errors.New("[pd] invalid value type for MaxTSOBatchWaitInterval option, it should be time.Duration")
 		}
 		if err := c.option.setMaxTSOBatchWaitInterval(interval); err != nil {
 			return err
@@ -389,7 +389,7 @@ func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
 	case EnableTSOFollowerProxy:
 		enable, ok := value.(bool)
 		if !ok {
-			return errors.New("[pd] invalid value for EnableTSOFollowerProxy option, it should be bool")
+			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
 		}
 		c.option.setTSOFollowerProxyOption(enable)
 	default:

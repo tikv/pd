@@ -337,6 +337,11 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
 	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, false)
+	// There will be a stream has been chosen before when the TSO Follower Proxy is enabled.
+	// We need to consume it before the client starts the next round of TSO request batch.
+	// TODO: fix this corner case.
+	_, _, err = cli.GetTS(context.TODO())
+	c.Assert(err, ErrorMatches, ".*context canceled.*")
 	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
 }
 
