@@ -26,31 +26,31 @@ var _ = Suite(&testClientOptionSuite{})
 type testClientOptionSuite struct{}
 
 func (s *testClientSuite) TestDynamicOptionChange(c *C) {
-	co := NewClientOption()
+	o := newClientOption()
 	// Check the default value setting.
-	c.Assert(co.GetMaxTSOBatchWaitInterval(), Equals, time.Duration(defaultMaxTSOBatchWaitInterval))
-	c.Assert(co.GetTSOFollowerProxyOption(), Equals, defaultEnableTSOFollowerProxy)
+	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, time.Duration(defaultMaxTSOBatchWaitInterval))
+	c.Assert(o.getTSOFollowerProxyOption(), Equals, defaultEnableTSOFollowerProxy)
 
 	// Check the invalid value setting.
-	co.SetMaxTSOBatchWaitInterval(time.Second)
-	c.Assert(co.GetMaxTSOBatchWaitInterval(), Equals, time.Duration(defaultMaxTSOBatchWaitInterval))
+	c.Assert(o.setMaxTSOBatchWaitInterval(time.Second), NotNil)
+	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, time.Duration(defaultMaxTSOBatchWaitInterval))
 	expectInterval := time.Millisecond
-	co.SetMaxTSOBatchWaitInterval(expectInterval)
-	c.Assert(co.GetMaxTSOBatchWaitInterval(), Equals, expectInterval)
-	co.SetMaxTSOBatchWaitInterval(expectInterval)
-	c.Assert(co.GetMaxTSOBatchWaitInterval(), Equals, expectInterval)
+	o.setMaxTSOBatchWaitInterval(expectInterval)
+	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, expectInterval)
+	o.setMaxTSOBatchWaitInterval(expectInterval)
+	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, expectInterval)
 
 	expectBool := true
-	co.SetTSOFollowerProxyOption(expectBool)
+	o.setTSOFollowerProxyOption(expectBool)
 	// Check the value changing notification.
 	testutil.WaitUntil(c, func(c *C) bool {
-		<-co.enableTSOFollowerProxyCh
+		<-o.enableTSOFollowerProxyCh
 		return true
 	})
-	c.Assert(co.GetTSOFollowerProxyOption(), Equals, expectBool)
+	c.Assert(o.getTSOFollowerProxyOption(), Equals, expectBool)
 	// Check whether any data will be sent to the channel.
 	// It will panic if the test fails.
-	close(co.enableTSOFollowerProxyCh)
+	close(o.enableTSOFollowerProxyCh)
 	// Setting the same value should not notify the channel.
-	co.SetTSOFollowerProxyOption(expectBool)
+	o.setTSOFollowerProxyOption(expectBool)
 }

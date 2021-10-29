@@ -62,7 +62,7 @@ type baseClient struct {
 	security SecurityOption
 
 	// Client option.
-	clientOption *ClientOption
+	option *option
 }
 
 // SecurityOption records options about tls
@@ -86,7 +86,7 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption) 
 		ctx:                    clientCtx,
 		cancel:                 clientCancel,
 		security:               security,
-		clientOption:           NewClientOption(),
+		option:                 newClientOption(),
 	}
 	bc.urls.Store(urls)
 	return bc
@@ -110,7 +110,7 @@ func (c *baseClient) init() error {
 
 func (c *baseClient) initRetry(f func() error) error {
 	var err error
-	for i := 0; i < c.clientOption.maxRetryTimes; i++ {
+	for i := 0; i < c.option.maxRetryTimes; i++ {
 		if err = f(); err == nil {
 			return nil
 		}
@@ -245,7 +245,7 @@ func (c *baseClient) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	for _, u := range c.GetURLs() {
-		members, err := c.getMembers(ctx, u, c.clientOption.timeout)
+		members, err := c.getMembers(ctx, u, c.option.timeout)
 		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", u), errs.ZapError(err))
 			continue
@@ -325,7 +325,7 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 	}
 	c.urls.Store(urls)
 	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
-	if c.clientOption.GetTSOFollowerProxyOption() {
+	if c.option.getTSOFollowerProxyOption() {
 		c.scheduleUpdateConnectionCtxs()
 	}
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
@@ -413,7 +413,7 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 	}
 	dCtx, cancel := context.WithTimeout(c.ctx, dialTimeout)
 	defer cancel()
-	cc, err := grpcutil.GetClientConn(dCtx, addr, tlsCfg, c.clientOption.gRPCDialOptions...)
+	cc, err := grpcutil.GetClientConn(dCtx, addr, tlsCfg, c.option.gRPCDialOptions...)
 	if err != nil {
 		return nil, err
 	}

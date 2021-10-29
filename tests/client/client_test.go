@@ -492,7 +492,7 @@ func (s *clientTestSuite) runServer(c *C, cluster *tests.TestCluster) []string {
 	return endpoints
 }
 
-func setupCli(c *C, ctx context.Context, endpoints []string, opts ...pd.ClientOptionFunc) pd.Client {
+func setupCli(c *C, ctx context.Context, endpoints []string, opts ...pd.ClientOption) pd.Client {
 	cli, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, opts...)
 	c.Assert(err, IsNil)
 	return cli
