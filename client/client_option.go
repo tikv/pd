@@ -28,7 +28,8 @@ const (
 	defaultEnableTSOFollowerProxy  = false
 )
 
-// ClientOption is the configurable option for the PD client
+// ClientOption is the configurable option for the PD client.
+// It provides the ability to change some PD client's options online from the outside.
 type ClientOption struct {
 	// Static options.
 	gRPCDialOptions  []grpc.DialOption
@@ -37,19 +38,17 @@ type ClientOption struct {
 	enableForwarding bool
 	// Dynamic options.
 	// TODO: maybe using a more flexible way to do the dynamic registration for the new option.
-	maxTSOBatchWaitInterval   atomic.Value // Store as time.Duration.
-	maxTSOBatchWaitIntervalCh chan struct{}
-	enableTSOFollowerProxy    atomic.Value // Store as bool.
-	enableTSOFollowerProxyCh  chan struct{}
+	maxTSOBatchWaitInterval  atomic.Value // Store as time.Duration.
+	enableTSOFollowerProxy   atomic.Value // Store as bool.
+	enableTSOFollowerProxyCh chan struct{}
 }
 
 // NewClientOption creates a new ClientOption with the default values set.
 func NewClientOption() *ClientOption {
 	co := &ClientOption{
-		timeout:                   defaultPDTimeout,
-		maxRetryTimes:             maxInitClusterRetries,
-		maxTSOBatchWaitIntervalCh: make(chan struct{}, 1),
-		enableTSOFollowerProxyCh:  make(chan struct{}, 1),
+		timeout:                  defaultPDTimeout,
+		maxRetryTimes:            maxInitClusterRetries,
+		enableTSOFollowerProxyCh: make(chan struct{}, 1),
 	}
 	co.maxTSOBatchWaitInterval.Store(time.Duration(defaultMaxTSOBatchWaitInterval))
 	co.enableTSOFollowerProxy.Store(defaultEnableTSOFollowerProxy)
@@ -65,10 +64,6 @@ func (co *ClientOption) SetMaxTSOBatchWaitInterval(interval time.Duration) {
 	old := co.GetMaxTSOBatchWaitInterval()
 	if interval != old {
 		co.maxTSOBatchWaitInterval.Store(interval)
-		select {
-		case co.maxTSOBatchWaitIntervalCh <- struct{}{}:
-		default:
-		}
 	}
 }
 
