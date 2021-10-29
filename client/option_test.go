@@ -26,7 +26,7 @@ var _ = Suite(&testClientOptionSuite{})
 type testClientOptionSuite struct{}
 
 func (s *testClientSuite) TestDynamicOptionChange(c *C) {
-	o := newClientOption()
+	o := newOption()
 	// Check the default value setting.
 	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, time.Duration(defaultMaxTSOBatchWaitInterval))
 	c.Assert(o.getTSOFollowerProxyOption(), Equals, defaultEnableTSOFollowerProxy)

@@ -55,8 +55,8 @@ type option struct {
 	enableTSOFollowerProxyCh chan struct{}
 }
 
-// newClientOption creates a new ClientOption with the default values set.
-func newClientOption() *option {
+// newOption creates a new PD client option with the default values set.
+func newOption() *option {
 	co := &option{
 		timeout:                  defaultPDTimeout,
 		maxRetryTimes:            maxInitClusterRetries,

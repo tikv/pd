@@ -86,7 +86,7 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption) 
 		ctx:                    clientCtx,
 		cancel:                 clientCancel,
 		security:               security,
-		option:                 newClientOption(),
+		option:                 newOption(),
 	}
 	bc.urls.Store(urls)
 	return bc
