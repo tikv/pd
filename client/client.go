@@ -267,6 +267,19 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
+func (tbc *tsoBatchController) revokeTSORequest(err error) {
+	for i := 0; i < tbc.collectedRequestCount; i++ {
+		tbc.collectedRequests[i].done <- err
+	}
+}
+
+func (tbc *tsoBatchController) revokePendingTSORequest(err error) {
+	for i := 0; i < len(tbc.tsoRequestCh); i++ {
+		req := <-tbc.tsoRequestCh
+		req.done <- err
+	}
+}
+
 type tsoDispatcher struct {
 	dispatcherCtx      context.Context
 	dispatcherCancel   context.CancelFunc
@@ -610,7 +623,7 @@ func (c *client) checkAllocator(
 			stream, err := c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 			if err == nil && stream != nil {
 				log.Info("[pd] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
-				updateAndClear(url, &connectionContext{url, stream, cancel})
+				updateAndClear(url, &connectionContext{url, stream, cctx, cancel})
 				return
 			}
 		}
@@ -660,6 +673,7 @@ func (c *client) handleDispatcher(
 		err                error
 		streamAddr         string
 		stream             pdpb.PD_TsoClient
+		streamCtx          context.Context
 		cancel             context.CancelFunc
 		// addr -> connectionContext
 		connectionCtxs sync.Map
@@ -712,38 +726,13 @@ func (c *client) handleDispatcher(
 	}
 
 	// Loop through each batch of TSO requests and send them for processing.
+tsoBatchLoop:
 	for {
 		select {
 		case <-dispatcherCtx.Done():
 			return
 		default:
 		}
-		// Choose a stream to send the TSO gRPC request.
-		connectionCtx := c.chooseStream(&connectionCtxs)
-		if connectionCtx != nil {
-			streamAddr, stream, cancel = connectionCtx.streamAddr, connectionCtx.stream, connectionCtx.cancel
-		}
-		// Check stream and retry if necessary.
-		if stream == nil {
-			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-			c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-			if retryTimeConsuming >= c.option.timeout {
-				err = errs.ErrClientCreateTSOStream.FastGenByArgs()
-				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-				c.ScheduleCheckLeader()
-				c.revokeTSORequest(errors.WithStack(err), tbc.tsoRequestCh)
-				retryTimeConsuming = 0
-				continue
-			}
-			select {
-			case <-dispatcherCtx.Done():
-				return
-			case <-time.After(time.Second):
-				retryTimeConsuming += time.Second
-				continue
-			}
-		}
-		retryTimeConsuming = 0
 		// Start to collect the TSO requests.
 		maxTSOBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
 		if err = tbc.fetchPendingRequests(dispatcherCtx, maxTSOBatchWaitInterval); err != nil {
@@ -752,6 +741,43 @@ func (c *client) handleDispatcher(
 		}
 		if maxTSOBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
+		}
+		// Choose a stream to send the TSO gRPC request.
+	streamChoosingLoop:
+		for {
+			connectionCtx := c.chooseStream(&connectionCtxs)
+			if connectionCtx != nil {
+				streamAddr, stream, streamCtx, cancel = connectionCtx.streamAddr, connectionCtx.stream, connectionCtx.ctx, connectionCtx.cancel
+			}
+			// Check stream and retry if necessary.
+			if stream == nil {
+				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
+				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
+				if retryTimeConsuming >= c.option.timeout {
+					err = errs.ErrClientCreateTSOStream.FastGenByArgs()
+					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
+					c.ScheduleCheckLeader()
+					tbc.revokeTSORequest(errors.WithStack(err))
+					retryTimeConsuming = 0
+					continue tsoBatchLoop
+				}
+				select {
+				case <-dispatcherCtx.Done():
+					return
+				case <-time.After(time.Second):
+					retryTimeConsuming += time.Second
+					continue
+				}
+			}
+			retryTimeConsuming = 0
+			select {
+			case <-streamCtx.Done():
+				// The stream is closed which also means it's deleted from connectionCtxs,
+				// so we should retry here to get a new one.
+				continue
+			default:
+				break streamChoosingLoop
+			}
 		}
 		done := make(chan struct{})
 		dl := deadline{
@@ -830,6 +856,7 @@ type connectionContext struct {
 	streamAddr string
 	// Current stream to send gRPC requests, maybe a leader or a follower.
 	stream pdpb.PD_TsoClient
+	ctx    context.Context
 	cancel context.CancelFunc
 }
 
@@ -882,7 +909,7 @@ func (c *client) tryConnect(
 			err = status.New(codes.Unavailable, "unavailable").Err()
 		})
 		if stream != nil && err == nil {
-			updateAndClear(url, &connectionContext{url, stream, cancel})
+			updateAndClear(url, &connectionContext{url, stream, cctx, cancel})
 			return nil
 		}
 
@@ -925,7 +952,7 @@ func (c *client) tryConnect(
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkAllocator(dispatcherCtx, cancel, dc, forwardedHostTrim, addrTrim, url, updateAndClear)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
-				updateAndClear(addr, &connectionContext{addr, stream, cancel})
+				updateAndClear(addr, &connectionContext{addr, stream, cctx, cancel})
 				return nil
 			}
 			cancel()
@@ -974,7 +1001,7 @@ func (c *client) tryConnectWithProxy(
 				addrTrim := trimHTTPPrefix(addr)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
-			connectionCtxs.Store(addr, &connectionContext{addr, stream, cancel})
+			connectionCtxs.Store(addr, &connectionContext{addr, stream, cctx, cancel})
 			continue
 		}
 		log.Error("[pd] create the tso stream failed", zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
@@ -1081,21 +1108,17 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 	}
 }
 
-func (c *client) revokeTSORequest(err error, tsoDispatcher <-chan *tsoRequest) {
-	for i := 0; i < len(tsoDispatcher); i++ {
-		req := <-tsoDispatcher
-		req.done <- err
-	}
-}
-
 func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.tsoDispatcher.Range(func(_, dispatcher interface{}) bool {
-		if dispatcher != nil {
-			c.revokeTSORequest(errors.WithStack(errClosing), dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh)
-			dispatcher.(*tsoDispatcher).dispatcherCancel()
+	c.tsoDispatcher.Range(func(_, dispatcherInterface interface{}) bool {
+		if dispatcherInterface != nil {
+			dispatcher := dispatcherInterface.(*tsoDispatcher)
+			tsoErr := errors.WithStack(errClosing)
+			dispatcher.tsoBatchController.revokeTSORequest(tsoErr)
+			dispatcher.tsoBatchController.revokePendingTSORequest(tsoErr)
+			dispatcher.dispatcherCancel()
 		}
 		return true
 	})
