@@ -772,8 +772,11 @@ tsoBatchLoop:
 			retryTimeConsuming = 0
 			select {
 			case <-streamCtx.Done():
-				// The stream is closed which also means it's deleted from connectionCtxs,
-				// so we should retry here to get a new one.
+				log.Info("[pd] tso stream is canceled", zap.String("dc", dc), zap.String("stream-addr", streamAddr))
+				// Set `stream` to nil and remove this stream from the `connectionCtxs` due to being canceled.
+				connectionCtxs.Delete(streamAddr)
+				cancel()
+				stream = nil
 				continue
 			default:
 				break streamChoosingLoop
@@ -807,11 +810,11 @@ tsoBatchLoop:
 			default:
 			}
 			c.ScheduleCheckLeader()
-			log.Error("[pd] getTS error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
-			cancel()
-			// Set `stream` to nil and remove this stream from the `connectionCtxs`.
-			stream = nil
+			log.Error("[pd] getTS error", zap.String("dc-location", dc), zap.String("stream-addr", streamAddr), errs.ZapError(errs.ErrClientGetTSO, err))
+			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
+			cancel()
+			stream = nil
 			// Because ScheduleCheckLeader is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
 				if err := c.updateMember(); err != nil {
