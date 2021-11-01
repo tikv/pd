@@ -107,9 +107,10 @@ const (
 // RegionFromHeartbeat constructs a Region from region heartbeat.
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
 	// Convert unit to MB.
-	// If region is empty or less than 1MB, use 1MB instead.
+	// If region isn't empty and less than 1MB, use 1MB instead.
+	// The size of empty region will be correct by the previous RegionInfo.
 	regionSize := heartbeat.GetApproximateSize() / (1 << 20)
-	if regionSize < EmptyRegionApproximateSize {
+	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}
 
@@ -148,6 +149,21 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 
 	classifyVoterAndLearner(region)
 	return region
+}
+
+// CorrectApproximateSize correct approximate size by the previous size if here exists an reported RegionInfo.
+//
+// See https://github.com/tikv/tikv/issues/11114
+func (r *RegionInfo) CorrectApproximateSize(origin *RegionInfo) {
+	if r.approximateSize != 0 {
+		return
+	}
+
+	if origin != nil {
+		r.approximateSize = origin.approximateSize
+	} else {
+		r.approximateSize = EmptyRegionApproximateSize
+	}
 }
 
 // Clone returns a copy of current regionInfo.
