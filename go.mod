@@ -29,7 +29,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20201126102027-b0a155152ca3
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20211029081837-3c7bd947cf9b
+	github.com/pingcap/kvproto v0.0.0-20211102031927-b7d07d198381
 	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354
 	github.com/pingcap/sysutil v0.0.0-20210730114356-fcd8a63f68c5
 	github.com/pingcap/tidb-dashboard v0.0.0-20211031170437-08e58c069a2a
@@ -56,6 +56,3 @@ require (
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
-
-// !!! remove this after [kvproto#undefined]() is merged
-replace github.com/pingcap/kvproto v0.0.0-20211029081837-3c7bd947cf9b => github.com/mrcroxx/kvproto v0.0.0-20211029085511-6ae2e1be0a48
