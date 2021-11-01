@@ -125,6 +125,8 @@ type RaftCluster struct {
 
 	// It's used to manage components.
 	componentManager *component.Manager
+
+	unsafeRecoveryController *unsafeRecoveryController
 }
 
 // Status saves some state information.
@@ -261,6 +263,7 @@ func (c *RaftCluster) Start(s Server) error {
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
+	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
 
 	c.wg.Add(5)
 	go c.runCoordinator()
@@ -503,6 +506,11 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 	c.suspectRegions.Remove(id)
 }
 
+// GetUnsafeRecoveryController returns the unsafe recovery controller.
+func (c *RaftCluster) GetUnsafeRecoveryController() *unsafeRecoveryController {
+	return c.unsafeRecoveryController
+}
+
 // AddSuspectKeyRange adds the key range with the its ruleID as the key
 // The instance of each keyRange is like following format:
 // [2][]byte: start key/end key
@@ -622,6 +630,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
+	region.CorrectApproximateSize(origin)
+
 	hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
 	reportInterval := region.GetInterval()

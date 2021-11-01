@@ -1070,7 +1070,7 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 			StartKey: []byte{byte(2)},
 			EndKey:   []byte{byte(3)},
 			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
+				ConfVer: 2,
 				Version: 1,
 			},
 		},
@@ -1105,4 +1105,11 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	region = core.RegionFromHeartbeat(regionReq)
 	err = rc.HandleRegionHeartbeat(region)
 	c.Assert(err, NotNil)
+
+	// Allow regions that are created by unsafe recover to send a heartbeat, even though they
+	// are considered "stale" because their conf ver and version are both equal to 1.
+	regionReq.Region.RegionEpoch.ConfVer = 1
+	region = core.RegionFromHeartbeat(regionReq)
+	err = rc.HandleRegionHeartbeat(region)
+	c.Assert(err, IsNil)
 }
