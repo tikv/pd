@@ -587,34 +587,40 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
-		return &pdpb.StoreHeartbeatResponse{
-			Header: s.errorHeader(pberr),
-		}, nil
+	// Bypass stats handling if the store report for unsafe recover is not empty.
+	if request.GetStoreReport() == nil {
+		if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
+			return &pdpb.StoreHeartbeatResponse{
+				Header: s.errorHeader(pberr),
+			}, nil
+		}
+
+		storeID := request.Stats.GetStoreId()
+		store := rc.GetStore(storeID)
+		if store == nil {
+			return nil, errors.Errorf("store %v not found", storeID)
+		}
+
+		storeAddress := store.GetAddress()
+		storeLabel := strconv.FormatUint(storeID, 10)
+		start := time.Now()
+
+		err := rc.HandleStoreHeartbeat(request.Stats)
+		if err != nil {
+			return nil, status.Errorf(codes.Unknown, err.Error())
+		}
+		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 
-	storeID := request.Stats.GetStoreId()
-	store := rc.GetStore(storeID)
-	if store == nil {
-		return nil, errors.Errorf("store %v not found", storeID)
-	}
-
-	storeAddress := store.GetAddress()
-	storeLabel := strconv.FormatUint(storeID, 10)
-	start := time.Now()
-
-	err := rc.HandleStoreHeartbeat(request.Stats)
-	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
-	}
-
-	storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
-
-	return &pdpb.StoreHeartbeatResponse{
+	resp := &pdpb.StoreHeartbeatResponse{
 		Header:            s.header(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 		ClusterVersion:    rc.GetClusterVersion(),
-	}, nil
+	}
+	if rc.GetUnsafeRecoveryController() != nil {
+		rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
+	}
+	return resp, nil
 }
 
 const regionHeartbeatSendTimeout = 5 * time.Second
