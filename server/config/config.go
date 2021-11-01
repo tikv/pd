@@ -789,7 +789,7 @@ const (
 	defaultEnableJointConsensus        = true
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
-	defaultHotRegionsResevervedDays    = 7
+	defaultHotRegionsResevervedDays    = 0
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
