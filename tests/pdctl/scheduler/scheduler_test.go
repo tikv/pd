@@ -276,6 +276,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"write-peer-priorities":      []interface{}{"byte", "key"},
 		"strict-picking-store":       "true",
 		"enable-for-tiflash":         "true",
+		"forbid-rw-type":             "none",
 	}
 	c.Assert(conf, DeepEquals, expected1)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.02"}, nil)
@@ -315,6 +316,10 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	// write-priorities is divided into write-leader-priorities and write-peer-priorities
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-priorities", "key,byte"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "forbid-rw-type", "read"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	expected1["forbid-rw-type"] = "read"
 	c.Assert(conf1, DeepEquals, expected1)
 	// test compatibility
 	for _, store := range stores {

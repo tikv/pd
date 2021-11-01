@@ -164,9 +164,14 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 
 	switch typ {
 	case read:
-		return h.balanceHotReadRegions(cluster)
+		if !h.conf.IsForbidRWType(typ) {
+			return h.balanceHotReadRegions(cluster)
+		}
+
 	case write:
-		return h.balanceHotWriteRegions(cluster)
+		if !h.conf.IsForbidRWType(typ) {
+			return h.balanceHotWriteRegions(cluster)
+		}
 	}
 	return nil
 }
