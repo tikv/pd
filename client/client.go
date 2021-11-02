@@ -181,10 +181,7 @@ func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int) *tso
 
 // fetchPendingRequests will start a new round of the batch collecting from the channel.
 // It returns true if everything goes well, otherwise false which means we should stop the service.
-func (tbc *tsoBatchController) fetchPendingRequests(
-	ctx context.Context,
-	maxTSOBatchWaitInterval time.Duration,
-) error {
+func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context, maxBatchWaitInterval time.Duration) error {
 	var firstTSORequest *tsoRequest
 	select {
 	case <-ctx.Done():
@@ -211,15 +208,15 @@ fetchPendingRequestsLoop:
 
 	// Check whether we should fetch more pending TSO requests from the channel.
 	// TODO: maybe consider the actual load that returns through a TSO response from PD server.
-	if tbc.collectedRequestCount >= tbc.maxBatchSize || maxTSOBatchWaitInterval <= 0 {
+	if tbc.collectedRequestCount >= tbc.maxBatchSize || maxBatchWaitInterval <= 0 {
 		return nil
 	}
 
 	// Fetches more pending TSO requests from the channel.
-	// Try to collect `tbc.bestBatchSize` requests, or wait `tbc.maxBatchWaitInterval`
+	// Try to collect `tbc.bestBatchSize` requests, or wait `maxBatchWaitInterval`
 	// when `tbc.collectedRequestCount` is less than the `tbc.bestBatchSize`.
 	if tbc.collectedRequestCount < tbc.bestBatchSize {
-		after := time.NewTimer(maxTSOBatchWaitInterval)
+		after := time.NewTimer(maxBatchWaitInterval)
 		defer after.Stop()
 		for tbc.collectedRequestCount < tbc.bestBatchSize {
 			select {
@@ -391,7 +388,7 @@ func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
 		}
-		c.option.setTSOFollowerProxyOption(enable)
+		c.option.setEnableTSOFollowerProxy(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -681,27 +678,31 @@ func (c *client) handleDispatcher(
 	if dc == globalDCLocation {
 		go func() {
 			var updateTicker = &time.Ticker{}
-			if c.option.getTSOFollowerProxyOption() {
-				updateTicker = time.NewTicker(memberUpdateInterval)
-				defer updateTicker.Stop()
+			setNewUpdateTicker := func(ticker *time.Ticker) {
+				if updateTicker.C != nil {
+					updateTicker.Stop()
+				}
+				updateTicker = ticker
 			}
+			defer setNewUpdateTicker(nil)
+
 			for {
 				select {
 				case <-dispatcherCtx.Done():
 					return
 				case <-c.option.enableTSOFollowerProxyCh:
-					// Because the TSO Follower Proxy is enabled,
-					// the periodic check needs to be performed.
-					if c.option.getTSOFollowerProxyOption() && updateTicker.C == nil {
-						updateTicker = time.NewTicker(memberUpdateInterval)
-						defer updateTicker.Stop()
-					} else if !c.option.getTSOFollowerProxyOption() {
+					enableTSOFollowerProxy := c.option.getEnableTSOFollowerProxy()
+					if enableTSOFollowerProxy && updateTicker.C == nil {
+						// Because the TSO Follower Proxy is enabled,
+						// the periodic check needs to be performed.
+						setNewUpdateTicker(time.NewTicker(memberUpdateInterval))
+					} else if !enableTSOFollowerProxy && updateTicker.C != nil {
 						// Because the TSO Follower Proxy is disabled,
 						// the periodic check needs to be turned off.
-						if updateTicker != nil {
-							updateTicker.Stop()
-							updateTicker = &time.Ticker{}
-						}
+						setNewUpdateTicker(&time.Ticker{})
+					} else {
+						// The status of TSO Follower Proxy does not change, and updateConnectionCtxs is not triggered
+						continue
 					}
 				case <-updateTicker.C:
 				case <-c.updateConnectionCtxsCh:
@@ -745,12 +746,12 @@ func (c *client) handleDispatcher(
 		}
 		retryTimeConsuming = 0
 		// Start to collect the TSO requests.
-		maxTSOBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
-		if err = tbc.fetchPendingRequests(dispatcherCtx, maxTSOBatchWaitInterval); err != nil {
+		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
+		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
 			log.Error("[pd] fetch pending tso requests error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
 			return
 		}
-		if maxTSOBatchWaitInterval >= 0 {
+		if maxBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
 		}
 		done := make(chan struct{})
@@ -808,7 +809,7 @@ func (c *client) handleDispatcher(
 
 // TSO Follower Proxy only supports the Global TSO proxy now.
 func (c *client) allowTSOFollowerProxy(dc string) bool {
-	return dc == globalDCLocation && c.option.getTSOFollowerProxyOption()
+	return dc == globalDCLocation && c.option.getEnableTSOFollowerProxy()
 }
 
 // chooseStream uses the reservoir sampling algorithm to randomly choose a connection.
