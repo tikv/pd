@@ -15,7 +15,7 @@
 package pd
 
 import (
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -23,10 +23,10 @@ import (
 )
 
 const (
-	defaultPDTimeout               = 3 * time.Second
-	maxInitClusterRetries          = 100
-	defaultMaxTSOBatchWaitInterval = 0
-	defaultEnableTSOFollowerProxy  = false
+	defaultPDTimeout                             = 3 * time.Second
+	maxInitClusterRetries                        = 100
+	defaultMaxTSOBatchWaitInterval time.Duration = 0
+	defaultEnableTSOFollowerProxy                = false
 )
 
 // DynamicOption is used to distinguish the dynamic option type.
@@ -39,6 +39,8 @@ const (
 	// EnableTSOFollowerProxy is the TSO Follower Proxy option.
 	// It is stored as bool.
 	EnableTSOFollowerProxy
+
+	dynamicOptionCount
 )
 
 // option is the configurable option for the PD client.
@@ -49,8 +51,9 @@ type option struct {
 	timeout          time.Duration
 	maxRetryTimes    int
 	enableForwarding bool
+
 	// Dynamic options.
-	dynamicOptions sync.Map
+	dynamicOptions [dynamicOptionCount]atomic.Value
 
 	enableTSOFollowerProxyCh chan struct{}
 }
@@ -62,8 +65,9 @@ func newOption() *option {
 		maxRetryTimes:            maxInitClusterRetries,
 		enableTSOFollowerProxyCh: make(chan struct{}, 1),
 	}
-	co.dynamicOptions.Store(MaxTSOBatchWaitInterval, time.Duration(defaultMaxTSOBatchWaitInterval))
-	co.dynamicOptions.Store(EnableTSOFollowerProxy, defaultEnableTSOFollowerProxy)
+
+	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
+	co.dynamicOptions[EnableTSOFollowerProxy].Store(defaultEnableTSOFollowerProxy)
 	return co
 }
 
@@ -75,25 +79,21 @@ func (o *option) setMaxTSOBatchWaitInterval(interval time.Duration) error {
 	}
 	old := o.getMaxTSOBatchWaitInterval()
 	if interval != old {
-		o.dynamicOptions.Store(MaxTSOBatchWaitInterval, interval)
+		o.dynamicOptions[MaxTSOBatchWaitInterval].Store(interval)
 	}
 	return nil
 }
 
 // getMaxTSOBatchWaitInterval gets the max TSO batch wait interval option.
 func (o *option) getMaxTSOBatchWaitInterval() time.Duration {
-	value, ok := o.dynamicOptions.Load(MaxTSOBatchWaitInterval)
-	if !ok {
-		return 0
-	}
-	return value.(time.Duration)
+	return o.dynamicOptions[MaxTSOBatchWaitInterval].Load().(time.Duration)
 }
 
 // setTSOFollowerProxyOption sets the TSO Follower Proxy option.
 func (o *option) setTSOFollowerProxyOption(enable bool) {
 	old := o.getTSOFollowerProxyOption()
 	if enable != old {
-		o.dynamicOptions.Store(EnableTSOFollowerProxy, enable)
+		o.dynamicOptions[EnableTSOFollowerProxy].Store(enable)
 		select {
 		case o.enableTSOFollowerProxyCh <- struct{}{}:
 		default:
@@ -103,6 +103,5 @@ func (o *option) setTSOFollowerProxyOption(enable bool) {
 
 // getTSOFollowerProxyOption gets the TSO Follower Proxy option.
 func (o *option) getTSOFollowerProxyOption() bool {
-	value, ok := o.dynamicOptions.Load(EnableTSOFollowerProxy)
-	return ok && value.(bool)
+	return o.dynamicOptions[EnableTSOFollowerProxy].Load().(bool)
 }
