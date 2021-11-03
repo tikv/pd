@@ -21,8 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -119,7 +117,7 @@ func (conf *grantHotRegionSchedulerConfig) getSchedulerName() string {
 	return GrantHotRegionName
 }
 
-// grantLeaderScheduler transfers all hot peers to peers in the store and transfer
+// grantLeaderScheduler transfers all hot peers to peers  and transfer leader to the fixed store
 type grantHotRegionScheduler struct {
 	*BaseScheduler
 	r           *rand.Rand
@@ -200,25 +198,20 @@ func (handler *grantHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	}
 	leaderID, err := strconv.ParseUint(input["store-leader-id"].(string), 10, 64)
 	if err != nil {
-		log.Info("grant hot region config update")
 		_ = handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
 		return
 	}
 	if !contains(leaderID, storeIDs) {
-		log.Info("grant hot region config update")
 		_ = handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig)
 		return
 	}
 
-	handler.config.StoreIDs = storeIDs
-	handler.config.StoreLeadID = leaderID
+	handler.config.StoreIDs, handler.config.StoreLeadID = storeIDs, leaderID
 	if err = handler.config.Persist(); err != nil {
-		log.Info("grant hot region config update", zap.Any("config", handler.config))
 		handler.config.StoreLeadID = 0
 		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	log.Info("grant hot region config update", zap.Any("config", handler.config))
 	_ = handler.rd.JSON(w, http.StatusOK, nil)
 }
 
