@@ -161,17 +161,15 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 	defer h.Unlock()
 
 	h.prepareForBalance(typ, cluster)
+	if h.conf.IsForbidRWType(typ) {
+		return nil
+	}
 
 	switch typ {
 	case read:
-		if !h.conf.IsForbidRWType(typ) {
-			return h.balanceHotReadRegions(cluster)
-		}
-
+		return h.balanceHotReadRegions(cluster)
 	case write:
-		if !h.conf.IsForbidRWType(typ) {
-			return h.balanceHotWriteRegions(cluster)
-		}
+		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
 }
