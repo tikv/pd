@@ -110,13 +110,13 @@ func (el EvictLeader) IsFinish(region *core.RegionInfo) bool {
 
 // CheckSafety checks if the step meets the safety properties.
 func (el EvictLeader) CheckSafety(region *core.RegionInfo) error {
-	for _, store := range el.ToStores {
+	for _, store := range append(el.ToStores, el.ToStore) {
 		peer := region.GetStorePeer(store)
 		if peer == nil {
-			return errors.New("peer does not existed")
+			return errors.New(fmt.Sprintf("peer %d does not existed", peer.GetId()))
 		}
 		if core.IsLearner(peer) {
-			return errors.New("peer already is a learner")
+			return errors.New(fmt.Sprintf("peer %d already is a learner", peer.GetId()))
 		}
 	}
 	return nil

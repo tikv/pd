@@ -163,6 +163,13 @@ func (t *testOperatorControllerSuite) TestFastFailOperator(c *C) {
 	oc.Dispatch(region, DispatchFromHeartBeat)
 	c.Assert(op.Status(), Equals, operator.CANCELED)
 	c.Assert(oc.GetOperator(region.GetID()), IsNil)
+
+	// evict leader to an illegal store.
+	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.EvictLeader{FromStore: 1, ToStore: 5, ToStores: []uint64{5, 6}})
+	oc.SetOperator(op)
+	oc.Dispatch(region, DispatchFromHeartBeat)
+	c.Assert(op.Status(), Equals, operator.CANCELED)
+	c.Assert(oc.GetOperator(region.GetID()), IsNil)
 }
 
 func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
