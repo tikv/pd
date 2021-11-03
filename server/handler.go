@@ -207,12 +207,10 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-
 	s, err := schedule.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedule.ConfigSliceDecoder(name, args))
 	if err != nil {
 		return err
 	}
-	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	if err = c.AddScheduler(s, args...); err != nil {
 		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 	} else if err = h.opt.Persist(c.GetStorage()); err != nil {
@@ -327,6 +325,11 @@ func (h *Handler) AddEvictSlowStoreScheduler() error {
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
 	return h.AddScheduler(schedulers.RandomMergeType)
+}
+
+// AddGrantHotRegionScheduler adds a grant-hot-region-scheduler
+func (h *Handler) AddGrantHotRegionScheduler(leaderID, peers string) error {
+	return h.AddScheduler(schedulers.GrantHotRegionType, leaderID, peers)
 }
 
 // GetOperator returns the region operator.
