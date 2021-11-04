@@ -174,7 +174,11 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 		})
 	}
 	// Sort peers to keep the match result deterministic.
-	sort.Slice(peers, func(i, j int) bool { return peers[i].GetId() < peers[j].GetId() })
+	sort.Slice(peers, func(i, j int) bool {
+		// Put healthy peers in front to priority to fit healthy peers.
+		si, sj := stateScore(region, peers[i].GetId()), stateScore(region, peers[j].GetId())
+		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
+	})
 
 	return &fitWorker{
 		stores:        stores,
@@ -351,4 +355,15 @@ func needIsolation(rules []*Rule) bool {
 		}
 	}
 	return false
+}
+
+func stateScore(region *core.RegionInfo, peerID uint64) int {
+	switch {
+	case region.GetDownPeer(peerID) != nil:
+		return 0
+	case region.GetPendingPeer(peerID) != nil:
+		return 1
+	default:
+		return 2
+	}
 }
