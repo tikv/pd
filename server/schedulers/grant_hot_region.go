@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -250,7 +252,7 @@ func (s *grantHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 			cluster.RegionReadStats(),
 			isTraceRegionFlow,
 			read, core.RegionKind)
-		return s.randomSchedule(cluster, s.stLoadInfos[readLeader])
+		return s.randomSchedule(cluster, s.stLoadInfos[readPeer])
 	case write:
 		s.stLoadInfos[writePeer] = summaryStoresLoad(
 			storeInfos,
@@ -258,7 +260,7 @@ func (s *grantHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 			cluster.RegionWriteStats(),
 			isTraceRegionFlow,
 			write, core.RegionKind)
-		return s.randomSchedule(cluster, s.stLoadInfos[writeLeader])
+		return s.randomSchedule(cluster, s.stLoadInfos[writePeer])
 	}
 	return nil
 }
@@ -293,7 +295,13 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDetail
 
 func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64, srcStoreID uint64, isLeader bool) (op *operator.Operator, err error) {
 	srcRegion := cluster.GetRegion(regionID)
+	if srcRegion == nil || len(srcRegion.GetDownPeers()) != 0 || len(srcRegion.GetPendingPeers()) != 0 {
+		return nil, errs.ErrRegionRuleNotFound
+	}
 	srcStore := cluster.GetStore(srcStoreID)
+	if srcStore == nil {
+		log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID), errs.ZapError(errs.ErrGetSourceStore))
+	}
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
 		filter.NewPlacementSafeguard(s.GetName(), cluster, srcRegion, srcStore),
