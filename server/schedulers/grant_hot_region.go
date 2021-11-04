@@ -305,6 +305,7 @@ func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64,
 	srcStore := cluster.GetStore(srcStoreID)
 	if srcStore == nil {
 		log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID), errs.ZapError(errs.ErrGetSourceStore))
+		return nil, errs.ErrStoreNotFound
 	}
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
@@ -328,12 +329,12 @@ func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64,
 		destStoreIDs = append(destStoreIDs, storeID)
 	}
 	if len(destStoreIDs) == 0 {
-		return nil, nil
+		return nil, errs.ErrCheckerNotFound
 	}
 
 	srcPeer := srcStore.GetMeta()
 	if srcPeer == nil {
-		return nil, nil
+		return nil, errs.ErrStoreNotFound
 	}
 
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[0]}
