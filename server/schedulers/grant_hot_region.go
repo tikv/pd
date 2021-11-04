@@ -16,10 +16,13 @@ package schedulers
 import (
 	"math/rand"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tikv/pd/server/statistics"
 
 	"go.uber.org/zap"
 
@@ -248,29 +251,39 @@ func (s *grantHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
+	var stLoadInfos map[uint64]*storeLoadDetail
 	switch typ {
 	case read:
-		s.stLoadInfos[readPeer] = summaryStoresLoad(
+		stLoadInfos = summaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionReadStats(),
 			isTraceRegionFlow,
 			read, core.RegionKind)
-		return s.randomSchedule(cluster, s.stLoadInfos[readPeer])
 	case write:
-		s.stLoadInfos[writePeer] = summaryStoresLoad(
+		stLoadInfos = summaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionWriteStats(),
 			isTraceRegionFlow,
 			write, core.RegionKind)
-		return s.randomSchedule(cluster, s.stLoadInfos[writePeer])
 	}
-	return nil
+	infos := make([]*storeLoadDetail, len(stLoadInfos))
+	index := 0
+	for _, info := range stLoadInfos {
+		infos[index] = info
+		index++
+	}
+	// the less bytes,the higher scheduler
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].LoadPred.Current.Loads[statistics.ByteDim] < infos[i].LoadPred.Current.Loads[statistics.ByteDim]
+	})
+	return s.randomSchedule(cluster, infos)
 }
 
-func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) (ops []*operator.Operator) {
-	for srcStoreID, detail := range loadDetail {
+func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, infos []*storeLoadDetail) (ops []*operator.Operator) {
+	for _, detail := range infos {
+		srcStoreID := detail.Info.Store.GetID()
 		if s.conf.has(srcStoreID) || len(detail.HotPeers) < 1 {
 			continue
 		}
@@ -284,7 +297,8 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDetail
 			return []*operator.Operator{op}
 		}
 	}
-	for srcStoreID, detail := range loadDetail {
+	for _, detail := range infos {
+		srcStoreID := detail.Info.Store.GetID()
 		if !s.conf.has(srcStoreID) || srcStoreID == s.conf.StoreLeadID {
 			continue
 		}
@@ -341,13 +355,13 @@ func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64,
 	if srcPeer == nil {
 		return nil, errs.ErrStoreNotFound
 	}
-
-	dstStore := &metapb.Peer{StoreId: destStoreIDs[0]}
+	i := s.r.Int() % len(destStoreIDs)
+	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
 
 	if isLeader {
-		return operator.CreateTransferLeaderOperator(GrantHotRegionType, cluster, srcRegion, srcRegion.GetLeader().GetStoreId(), dstStore.StoreId, operator.OpLeader)
+		return operator.CreateTransferLeaderOperator(GrantHotRegionType+"-leader", cluster, srcRegion, srcRegion.GetLeader().GetStoreId(), dstStore.StoreId, operator.OpLeader)
 	} else {
-		return operator.CreateMovePeerOperator("grant-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
+		return operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
 }
 
