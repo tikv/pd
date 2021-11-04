@@ -684,6 +684,7 @@ func (c *client) handleDispatcher(
 				}
 				updateTicker = ticker
 			}
+			// Set to nil before returning to ensure that the existing ticker can be GC.
 			defer setNewUpdateTicker(nil)
 
 			for {
