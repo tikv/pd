@@ -325,7 +325,7 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 	}
 	c.urls.Store(urls)
 	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
-	if c.option.getTSOFollowerProxyOption() {
+	if c.option.getEnableTSOFollowerProxy() {
 		c.scheduleUpdateConnectionCtxs()
 	}
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
