@@ -63,7 +63,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(GrantLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(GrantLeaderType, func(opController *schedule.OperatorController, storage core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &grantLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		conf.cluster = opController.GetCluster()
 		if err := decoder(conf); err != nil {
@@ -75,7 +75,7 @@ func init() {
 
 type grantLeaderSchedulerConfig struct {
 	mu                sync.RWMutex
-	storage           *core.Storage
+	storage           core.Storage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           opt.Cluster
 }

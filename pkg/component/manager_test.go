@@ -20,7 +20,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 )
 
 func Test(t *testing.T) {
@@ -32,7 +31,7 @@ var _ = Suite(&testManagerSuite{})
 type testManagerSuite struct{}
 
 func (s *testManagerSuite) TestManager(c *C) {
-	m := NewManager(core.NewStorage(kv.NewMemoryKV()))
+	m := NewManager(core.NewMemoryStorage())
 	// register legal address
 	c.Assert(m.Register("c1", "127.0.0.1:1"), IsNil)
 	c.Assert(m.Register("c1", "127.0.0.1:2"), IsNil)

@@ -52,7 +52,7 @@ func (s *testServiceGCSafepointSuite) TearDownSuite(c *C) {
 func (s *testServiceGCSafepointSuite) TestRegionStats(c *C) {
 	sspURL := s.urlPrefix + "/gc/safepoint"
 
-	storage := s.svr.GetStorage()
+	storage := s.svr.GetEtcdStorage()
 	list := &listServiceGCSafepoint{
 		ServiceGCSafepoints: []*core.ServiceSafePoint{
 			{
@@ -90,7 +90,7 @@ func (s *testServiceGCSafepointSuite) TestRegionStats(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, http.StatusOK)
 
-	left, err := storage.GetAllServiceGCSafePoints()
+	left, err := storage.LoadAllServiceGCSafePoints()
 	c.Assert(err, IsNil)
 	c.Assert(left, DeepEquals, list.ServiceGCSafepoints[1:])
 }

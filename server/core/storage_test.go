@@ -24,9 +24,8 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -36,9 +35,9 @@ type testKVSuite struct {
 }
 
 func (s *testKVSuite) TestBasic(c *C) {
-	storage := NewStorage(kv.NewMemoryKV())
+	storage := NewMemoryStorage()
 
-	c.Assert(storage.storePath(123), Equals, "raft/s/00000000000000000123")
+	c.Assert(storePath(123), Equals, "raft/s/00000000000000000123")
 	c.Assert(regionPath(123), Equals, "raft/r/00000000000000000123")
 
 	meta := &metapb.Cluster{Id: 123}
@@ -80,7 +79,7 @@ func (s *testKVSuite) TestBasic(c *C) {
 	c.Assert(err, IsNil)
 }
 
-func mustSaveStores(c *C, s *Storage, n int) []*metapb.Store {
+func mustSaveStores(c *C, s Storage, n int) []*metapb.Store {
 	stores := make([]*metapb.Store, 0, n)
 	for i := 0; i < n; i++ {
 		store := &metapb.Store{Id: uint64(i)}
@@ -95,7 +94,7 @@ func mustSaveStores(c *C, s *Storage, n int) []*metapb.Store {
 }
 
 func (s *testKVSuite) TestLoadStores(c *C) {
-	storage := NewStorage(kv.NewMemoryKV())
+	storage := NewMemoryStorage()
 	cache := NewStoresInfo()
 
 	n := 10
@@ -109,7 +108,7 @@ func (s *testKVSuite) TestLoadStores(c *C) {
 }
 
 func (s *testKVSuite) TestStoreWeight(c *C) {
-	storage := NewStorage(kv.NewMemoryKV())
+	storage := NewMemoryStorage()
 	cache := NewStoresInfo()
 	const n = 3
 
@@ -125,7 +124,7 @@ func (s *testKVSuite) TestStoreWeight(c *C) {
 	}
 }
 
-func mustSaveRegions(c *C, s *Storage, n int) []*metapb.Region {
+func mustSaveRegions(c *C, s Storage, n int) []*metapb.Region {
 	regions := make([]*metapb.Region, 0, n)
 	for i := 0; i < n; i++ {
 		region := newTestRegionMeta(uint64(i))
@@ -140,7 +139,7 @@ func mustSaveRegions(c *C, s *Storage, n int) []*metapb.Region {
 }
 
 func (s *testKVSuite) TestLoadRegions(c *C) {
-	storage := NewStorage(kv.NewMemoryKV())
+	storage := NewMemoryStorage()
 	cache := NewRegionsInfo()
 
 	n := 10
@@ -154,12 +153,12 @@ func (s *testKVSuite) TestLoadRegions(c *C) {
 }
 
 func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
-	storage := NewStorage(kv.NewMemoryKV())
+	storage := NewMemoryStorage()
 	cache := NewRegionsInfo()
 
 	n := 10
 	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegionsOnce(context.Background(), cache.SetRegion), IsNil)
+	c.Assert(storage.LoadRegions(context.Background(), cache.SetRegion), IsNil)
 
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
@@ -168,12 +167,13 @@ func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
 
 	n = 20
 	mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegionsOnce(context.Background(), cache.SetRegion), IsNil)
+	c.Assert(storage.LoadRegions(context.Background(), cache.SetRegion), IsNil)
 	c.Assert(cache.GetRegionCount(), Equals, n)
 }
 
 func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
-	storage := NewStorage(&KVWithMaxRangeLimit{Base: kv.NewMemoryKV(), rangeLimit: 500})
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/withRangeLimit", "return(500)"), IsNil)
+	storage := NewMemoryStorage()
 	cache := NewRegionsInfo()
 
 	n := 1000
@@ -183,10 +183,11 @@ func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
 	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/withRangeLimit"), IsNil)
 }
 
 func (s *testKVSuite) TestLoadGCSafePoint(c *C) {
-	storage := NewStorage(kv.NewMemoryKV())
+	storage := NewMemoryStorage()
 	testData := []uint64{0, 1, 2, 233, 2333, 23333333333, math.MaxUint64}
 
 	r, e := storage.LoadGCSafePoint()
@@ -202,8 +203,7 @@ func (s *testKVSuite) TestLoadGCSafePoint(c *C) {
 }
 
 func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
-	mem := kv.NewMemoryKV()
-	storage := NewStorage(mem)
+	storage := NewMemoryStorage()
 	expireAt := time.Now().Add(100 * time.Second).Unix()
 	serviceSafePoints := []*ServiceSafePoint{
 		{"1", expireAt, 1},
@@ -217,7 +217,7 @@ func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
 
 	prefix := path.Join(gcPath, "safe_point", "service") + "/"
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	keys, values, err := mem.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
+	keys, values, err := storage.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	c.Assert(err, IsNil)
 	c.Assert(keys, HasLen, 3)
 	c.Assert(values, HasLen, 3)
@@ -234,8 +234,7 @@ func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
 }
 
 func (s *testKVSuite) TestLoadMinServiceGCSafePoint(c *C) {
-	mem := kv.NewMemoryKV()
-	storage := NewStorage(mem)
+	storage := NewMemoryStorage()
 	expireAt := time.Now().Add(1000 * time.Second).Unix()
 	serviceSafePoints := []*ServiceSafePoint{
 		{"1", 0, 1},
@@ -265,18 +264,6 @@ func (s *testKVSuite) TestLoadMinServiceGCSafePoint(c *C) {
 	c.Assert(ssp.ServiceID, Equals, "2")
 	c.Assert(ssp.ExpiredAt, Equals, expireAt)
 	c.Assert(ssp.SafePoint, Equals, uint64(2))
-}
-
-type KVWithMaxRangeLimit struct {
-	kv.Base
-	rangeLimit int
-}
-
-func (kv *KVWithMaxRangeLimit) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
-	if limit > kv.rangeLimit {
-		return nil, nil, errors.Errorf("limit %v exceed max rangeLimit %v", limit, kv.rangeLimit)
-	}
-	return kv.Base.LoadRange(key, endKey, limit)
 }
 
 func newTestRegionMeta(regionID uint64) *metapb.Region {

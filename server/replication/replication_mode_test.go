@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 )
 
 func TestReplicationMode(t *testing.T) {
@@ -49,7 +48,7 @@ func (s *testReplicationMode) TearDownTest(c *C) {
 }
 
 func (s *testReplicationMode) TestInitial(c *C) {
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewMemoryStorage()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeMajority}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
@@ -79,7 +78,7 @@ func (s *testReplicationMode) TestInitial(c *C) {
 }
 
 func (s *testReplicationMode) TestStatus(c *C) {
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewMemoryStorage()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:        "dr-label",
 		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
@@ -149,7 +148,7 @@ func (rep *mockFileReplicator) ReplicateFileToAllMembers(context.Context, string
 }
 
 func (s *testReplicationMode) TestStateSwitch(c *C) {
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewMemoryStorage()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
@@ -265,7 +264,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 }
 
 func (s *testReplicationMode) TestAsynctimeout(c *C) {
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewMemoryStorage()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
@@ -317,7 +316,7 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 	regionScanBatchSize = 10
 	regionMinSampleSize = 5
 
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewMemoryStorage()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
@@ -377,7 +376,7 @@ func (s *testReplicationMode) TestRecoverProgressWithSplitAndMerge(c *C) {
 	regionScanBatchSize = 10
 	regionMinSampleSize = 5
 
-	store := core.NewStorage(kv.NewMemoryKV())
+	store := core.NewMemoryStorage()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",

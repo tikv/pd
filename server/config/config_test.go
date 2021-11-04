@@ -27,7 +27,6 @@ import (
 	"github.com/BurntSushi/toml"
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 )
 
 func Test(t *testing.T) {
@@ -67,7 +66,7 @@ func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
 func (s *testConfigSuite) TestReloadConfig(c *C) {
 	opt, err := newTestScheduleOption()
 	c.Assert(err, IsNil)
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := core.NewMemoryStorage()
 	scheduleCfg := opt.GetScheduleConfig()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
@@ -107,7 +106,7 @@ func (s *testConfigSuite) TestReloadUpgrade(c *C) {
 		Schedule:    *opt.GetScheduleConfig(),
 		Replication: *opt.GetReplicationConfig(),
 	}
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := core.NewMemoryStorage()
 	c.Assert(storage.SaveConfig(old), IsNil)
 
 	newOpt, err := newTestScheduleOption()
@@ -127,7 +126,7 @@ func (s *testConfigSuite) TestReloadUpgrade2(c *C) {
 	old := &OldConfig{
 		Replication: *opt.GetReplicationConfig(),
 	}
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := core.NewMemoryStorage()
 	c.Assert(storage.SaveConfig(old), IsNil)
 
 	newOpt, err := newTestScheduleOption()

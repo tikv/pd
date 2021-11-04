@@ -110,7 +110,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 
 type hotRegionSchedulerConfig struct {
 	sync.RWMutex
-	storage            *core.Storage
+	storage            core.Storage
 	lastQuerySupported bool
 
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`

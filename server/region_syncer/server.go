@@ -59,7 +59,7 @@ type Server interface {
 	ClusterID() uint64
 	GetMemberInfo() *pdpb.Member
 	GetLeader() *pdpb.Member
-	GetStorage() *core.Storage
+	GetRegionStorage() *core.RegionStorage
 	Name() string
 	GetRegions() []*core.RegionInfo
 	GetTLSConfig() *grpcutil.TLSConfig
@@ -89,7 +89,7 @@ type RegionSyncer struct {
 func NewRegionSyncer(s Server) *RegionSyncer {
 	syncer := &RegionSyncer{
 		server:    s,
-		history:   newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
+		history:   newHistoryBuffer(defaultHistoryBufferSize, s.GetRegionStorage().GetLevelDBStorage()),
 		limit:     ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
 		tlsConfig: s.GetTLSConfig(),
 	}

@@ -37,7 +37,7 @@ var allRoles = []string{roleLeader, roleFollower, roleLearner}
 
 type shuffleRegionSchedulerConfig struct {
 	sync.RWMutex
-	storage *core.Storage
+	storage core.Storage
 
 	Ranges []core.KeyRange `json:"ranges"`
 	Roles  []string        `json:"roles"` // can include `leader`, `follower`, `learner`.

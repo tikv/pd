@@ -35,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/kv"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/tests"
@@ -459,7 +458,7 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	rc.SetStorage(core.NewMemoryStorage())
 	stores := make([]*metapb.Store, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
@@ -647,12 +646,13 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 
 	// Cluster is not bootstrapped.
-	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetEtcdStorage(), svr.GetRegionStorage(), svr.GetBasicCluster())
 	raftCluster, err := rc.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, IsNil)
 
 	storage := rc.GetStorage()
+	regionStorage := rc.GetRegionStorage()
 	basicCluster := rc.GetCacheCluster()
 	opt := rc.GetOpts()
 	// Save meta, stores and regions.
@@ -681,12 +681,12 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	}
 
 	for _, region := range regions {
-		c.Assert(storage.SaveRegion(region), IsNil)
+		c.Assert(regionStorage.SaveRegion(region), IsNil)
 	}
-	c.Assert(storage.Flush(), IsNil)
+	c.Assert(regionStorage.Flush(), IsNil)
 
 	raftCluster = cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
+	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, regionStorage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, NotNil)
@@ -717,7 +717,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	for _, region := range regions {
 		c.Assert(storage.SaveRegion(region), IsNil)
 	}
-	raftCluster.GetStorage().LoadRegionsOnce(s.ctx, raftCluster.GetCacheCluster().PutRegion)
+	raftCluster.GetRegionStorage().LoadRegionsOnce(s.ctx, raftCluster.GetCacheCluster().PutRegion)
 	c.Assert(raftCluster.GetRegionCount(), Equals, n)
 }
 
@@ -890,7 +890,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1"}
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	rc.SetStorage(core.NewMemoryStorage())
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
 		storeID, err := id.Alloc()
@@ -977,7 +977,7 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 	bootstrapCluster(c, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	rc.SetStorage(core.NewMemoryStorage())
 	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up, "test/store1")
 	_, err = putStore(grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
@@ -1035,7 +1035,7 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	rc.SetStorage(core.NewMemoryStorage())
 	peers := make([]*metapb.Peer, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {

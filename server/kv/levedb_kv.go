@@ -15,9 +15,7 @@
 package kv
 
 import (
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/tikv/pd/pkg/errs"
@@ -75,22 +73,4 @@ func (kv *LeveldbKV) Save(key, value string) error {
 // Remove deletes a key-value pair for a given key.
 func (kv *LeveldbKV) Remove(key string) error {
 	return errors.WithStack(kv.Delete([]byte(key), nil))
-}
-
-// SaveRegions stores some regions.
-func (kv *LeveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
-	batch := new(leveldb.Batch)
-
-	for key, r := range regions {
-		value, err := proto.Marshal(r)
-		if err != nil {
-			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
-		}
-		batch.Put([]byte(key), value)
-	}
-
-	if err := kv.Write(batch, nil); err != nil {
-		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
-	}
-	return nil
 }

@@ -119,7 +119,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
-		storage := s.server.GetStorage()
+		storage := s.server.GetRegionStorage()
 		log.Info("region syncer start load region")
 		start := time.Now()
 		err := storage.LoadRegionsOnce(ctx, bc.CheckAndPutRegion)

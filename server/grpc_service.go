@@ -1224,7 +1224,7 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	safePoint, err := s.storage.LoadGCSafePoint()
+	safePoint, err := s.etcdStorage.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
 	}
@@ -1264,7 +1264,7 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	oldSafePoint, err := s.storage.LoadGCSafePoint()
+	oldSafePoint, err := s.etcdStorage.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
 	}
@@ -1273,7 +1273,7 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 
 	// Only save the safe point if it's greater than the previous one
 	if newSafePoint > oldSafePoint {
-		if err := s.storage.SaveGCSafePoint(newSafePoint); err != nil {
+		if err := s.etcdStorage.SaveGCSafePoint(newSafePoint); err != nil {
 			return nil, err
 		}
 		log.Info("updated gc safe point",
@@ -1315,7 +1315,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		return &pdpb.UpdateServiceGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	if request.TTL <= 0 {
-		if err := s.storage.RemoveServiceGCSafePoint(string(request.ServiceId)); err != nil {
+		if err := s.etcdStorage.RemoveServiceGCSafePoint(string(request.ServiceId)); err != nil {
 			return nil, err
 		}
 	}
@@ -1325,7 +1325,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		return nil, err
 	}
 	now, _ := tsoutil.ParseTimestamp(nowTSO)
-	min, err := s.storage.LoadMinServiceGCSafePoint(now)
+	min, err := s.etcdStorage.LoadMinServiceGCSafePoint(now)
 	if err != nil {
 		return nil, err
 	}
@@ -1339,7 +1339,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		if math.MaxInt64-now.Unix() <= request.TTL {
 			ssp.ExpiredAt = math.MaxInt64
 		}
-		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
+		if err := s.etcdStorage.SaveServiceGCSafePoint(ssp); err != nil {
 			return nil, err
 		}
 		log.Info("update service GC safe point",
@@ -1348,7 +1348,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			zap.Uint64("safepoint", ssp.SafePoint))
 		// If the min safepoint is updated, load the next one
 		if string(request.ServiceId) == min.ServiceID {
-			min, err = s.storage.LoadMinServiceGCSafePoint(now)
+			min, err = s.etcdStorage.LoadMinServiceGCSafePoint(now)
 			if err != nil {
 				return nil, err
 			}

@@ -49,7 +49,7 @@ func init() {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(ShuffleRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(ShuffleRegionType, func(opController *schedule.OperatorController, storage core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleRegionSchedulerConfig{storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err

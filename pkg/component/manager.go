@@ -27,13 +27,13 @@ import (
 // Manager is used to manage components.
 type Manager struct {
 	sync.RWMutex
-	storage *core.Storage
+	storage core.Storage
 	// component -> addresses
 	Addresses map[string][]string `json:"address"`
 }
 
 // NewManager creates a new component manager.
-func NewManager(storage *core.Storage) *Manager {
+func NewManager(storage core.Storage) *Manager {
 	return &Manager{
 		storage:   storage,
 		Addresses: make(map[string][]string),

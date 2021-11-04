@@ -36,8 +36,8 @@ import (
 // RuleManager is responsible for the lifecycle of all placement Rules.
 // It is thread safe.
 type RuleManager struct {
-	storage *core.Storage
 	sync.RWMutex
+	storage     core.Storage
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
@@ -50,7 +50,7 @@ type RuleManager struct {
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(storage *core.Storage, storeSetInformer core.StoreSetInformer, opt *config.PersistOptions) *RuleManager {
+func NewRuleManager(storage core.Storage, storeSetInformer core.StoreSetInformer, opt *config.PersistOptions) *RuleManager {
 	return &RuleManager{
 		storage:          storage,
 		storeSetInformer: storeSetInformer,

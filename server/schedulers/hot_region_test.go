@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -36,11 +35,11 @@ import (
 
 func init() {
 	schedulePeerPr = 1.0
-	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		cfg := initHotRegionScheduleConfig()
 		return newHotWriteScheduler(opController, cfg), nil
 	})
-	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
 	})
 }
@@ -82,7 +81,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		tc.PutStoreWithLabels(id)
 	}
 
-	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
+	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewMemoryStorage(), schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 
@@ -163,7 +162,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	tc.SetHotRegionCacheHitsThreshold(0)
 
@@ -364,7 +363,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 			},
 		},
 	}), IsNil)
-	sche, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	sche, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 
@@ -547,7 +546,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithQuery(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
@@ -581,7 +580,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
@@ -635,7 +634,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
@@ -682,7 +681,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestCheckHot(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
@@ -715,7 +714,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestLeader(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -772,7 +771,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	old := pendingAmpFactor
 	pendingAmpFactor = 0.0
@@ -862,7 +861,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithRuleEnabled(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetEnablePlacementRules(true)
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	key, err := hex.DecodeString("")
@@ -935,7 +934,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.DisableFeature(versioninfo.JointConsensus)
-	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -1044,7 +1043,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithQuery(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
@@ -1076,7 +1075,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
@@ -1129,7 +1128,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	// For test
 	hb.(*hotScheduler).conf.GreatDecRatio = 0.99
@@ -1497,7 +1496,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		tc.SetMaxReplicas(3)
 		tc.SetLocationLabels([]string{"zone", "host"})
 		tc.DisableFeature(versioninfo.JointConsensus)
-		sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
+		sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewMemoryStorage(), schedule.ConfigJSONDecoder([]byte("null")))
 		c.Assert(err, IsNil)
 		hb := sche.(*hotScheduler)
 		heartbeat := tc.AddLeaderRegionWithWriteInfo
@@ -1600,7 +1599,7 @@ func (s *testHotCacheSuite) TestSortHotPeer(c *C) {
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.DisableFeature(versioninfo.JointConsensus)
-	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
+	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewMemoryStorage(), schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 	leaderSolver := newBalanceSolver(hb, tc, read, transferLeader)
@@ -1654,7 +1653,7 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
@@ -1747,7 +1746,7 @@ func (s *testHotReadRegionSchedulerSuite) TestHotReadPeerSchedule(c *C) {
 		tc.PutStoreWithLabels(id)
 	}
 
-	sche, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
+	sche, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewMemoryStorage(), schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 	hb.conf.ReadPriorities = []string{BytePriority, KeyPriority}
@@ -1766,7 +1765,7 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1.05)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1.05)
@@ -1803,7 +1802,7 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 	hb.(*hotScheduler).clearPendingInfluence()
 
 	// assert read priority schedule
-	hb, err = schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err = schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	tc.UpdateStorageReadStats(5, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadStats(4, 10*MB*statistics.StoreHeartBeatReportInterval, 10*MB*statistics.StoreHeartBeatReportInterval)
@@ -1823,7 +1822,7 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 	c.Assert(ops, HasLen, 1)
 	testutil.CheckTransferLeader(c, ops[0], operator.OpHotRegion, 1, 3)
 
-	hb, err = schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err = schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.StrictPickingStore = false
 	// assert loose store picking
@@ -1855,7 +1854,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestHotWriteLeaderScheduleWithPriorit
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
@@ -1897,7 +1896,7 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), nil)
 	c.Assert(err, IsNil)
 	tc := mockcluster.NewCluster(ctx, opt)
 	// default
@@ -1969,7 +1968,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 	tc := mockcluster.NewCluster(ctx, opt)
 
 	// From new or 3.x cluster
-	hb, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("hot-region", nil))
+	hb, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewMemoryStorage(), schedule.ConfigSliceDecoder("hot-region", nil))
 	c.Assert(err, IsNil)
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.QueryDim, statistics.ByteDim},
@@ -1978,7 +1977,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 	})
 
 	// Config file is not currently supported
-	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()),
+	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewMemoryStorage(),
 		schedule.ConfigSliceDecoder("hot-region", []string{"read-priorities=byte,query"}))
 	c.Assert(err, IsNil)
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
@@ -1989,7 +1988,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 
 	// from 4.0 or 5.0 or 5.1 cluster
 	var data []byte
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := core.NewMemoryStorage()
 	data, err = schedule.EncodeConfig(map[string]interface{}{
 		"min-hot-byte-rate":         100,
 		"min-hot-key-rate":          10,
@@ -2006,7 +2005,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 	c.Assert(err, IsNil)
 	err = storage.SaveScheduleConfig(HotRegionName, data)
 	c.Assert(err, IsNil)
-	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(data))
+	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewMemoryStorage(), schedule.ConfigJSONDecoder(data))
 	c.Assert(err, IsNil)
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.ByteDim, statistics.KeyDim},
@@ -2015,7 +2014,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 	})
 
 	// From configured cluster
-	storage = core.NewStorage(kv.NewMemoryKV())
+	storage = core.NewMemoryStorage()
 	cfg := initHotRegionScheduleConfig()
 	cfg.ReadPriorities = []string{"key", "query"}
 	cfg.WriteLeaderPriorities = []string{"query", "key"}
@@ -2023,7 +2022,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 	c.Assert(err, IsNil)
 	err = storage.SaveScheduleConfig(HotRegionName, data)
 	c.Assert(err, IsNil)
-	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(data))
+	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewMemoryStorage(), schedule.ConfigJSONDecoder(data))
 	c.Assert(err, IsNil)
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.KeyDim, statistics.QueryDim},

@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 	"go.uber.org/zap"
 )
 
@@ -37,11 +36,11 @@ type historyBuffer struct {
 	head       int
 	tail       int
 	size       int
-	kv         kv.Base
+	storage    core.Storage
 	flushCount int
 }
 
-func newHistoryBuffer(size int, kv kv.Base) *historyBuffer {
+func newHistoryBuffer(size int, storage core.Storage) *historyBuffer {
 	// use an empty space to simplify operation
 	size++
 	if size < 2 {
@@ -51,7 +50,7 @@ func newHistoryBuffer(size int, kv kv.Base) *historyBuffer {
 	h := &historyBuffer{
 		records:    records,
 		size:       size,
-		kv:         kv,
+		storage:    storage,
 		flushCount: defaultFlushCount,
 	}
 	h.reload()
@@ -134,7 +133,7 @@ func (h *historyBuffer) get(index uint64) *core.RegionInfo {
 }
 
 func (h *historyBuffer) reload() {
-	v, err := h.kv.Load(historyKey)
+	v, err := h.storage.Load(historyKey)
 	if err != nil {
 		log.Warn("load history index failed", zap.String("error", err.Error()))
 	}
@@ -150,7 +149,7 @@ func (h *historyBuffer) reload() {
 func (h *historyBuffer) persist() {
 	regionSyncerStatus.WithLabelValues("first_index").Set(float64(h.firstIndex()))
 	regionSyncerStatus.WithLabelValues("last_index").Set(float64(h.nextIndex()))
-	err := h.kv.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
+	err := h.storage.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
 	if err != nil {
 		log.Warn("persist history index failed", zap.Uint64("persist-index", h.nextIndex()), errs.ZapError(err))
 	}

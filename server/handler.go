@@ -208,7 +208,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		return err
 	}
 
-	s, err := schedule.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedule.ConfigSliceDecoder(name, args))
+	s, err := schedule.CreateScheduler(name, c.GetOperatorController(), h.s.GetEtcdStorage(), schedule.ConfigSliceDecoder(name, args))
 	if err != nil {
 		return err
 	}

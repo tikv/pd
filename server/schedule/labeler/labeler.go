@@ -31,14 +31,14 @@ import (
 
 // RegionLabeler is utility to label regions.
 type RegionLabeler struct {
-	storage *core.Storage
+	storage core.Storage
 	sync.RWMutex
 	labelRules map[string]*LabelRule
 	rangeList  rangelist.List // sorted LabelRules of the type `KeyRange`
 }
 
 // NewRegionLabeler creates a Labeler instance.
-func NewRegionLabeler(storage *core.Storage) (*RegionLabeler, error) {
+func NewRegionLabeler(storage core.Storage) (*RegionLabeler, error) {
 	l := &RegionLabeler{
 		storage:    storage,
 		labelRules: make(map[string]*LabelRule),

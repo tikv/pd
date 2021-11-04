@@ -20,7 +20,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 )
 
 var _ = Suite(&testHistoryBuffer{})
@@ -38,7 +37,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	}
 
 	// size equals 1
-	h := newHistoryBuffer(1, kv.NewMemoryKV())
+	h := newHistoryBuffer(1, core.NewMemoryStorage())
 	c.Assert(h.len(), Equals, 0)
 	for _, r := range regions {
 		h.Record(r)
@@ -48,7 +47,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	c.Assert(h.get(99), IsNil)
 
 	// size equals 2
-	h = newHistoryBuffer(2, kv.NewMemoryKV())
+	h = newHistoryBuffer(2, core.NewMemoryStorage())
 	for _, r := range regions {
 		h.Record(r)
 	}
@@ -58,7 +57,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	c.Assert(h.get(98), IsNil)
 
 	// size equals 100
-	kvMem := kv.NewMemoryKV()
+	kvMem := core.NewMemoryStorage()
 	h1 := newHistoryBuffer(100, kvMem)
 	for i := 0; i < 6; i++ {
 		h1.Record(regions[i])
@@ -81,7 +80,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 
 	c.Assert(h2.nextIndex(), Equals, uint64(107))
 	c.Assert(h2.get(h2.nextIndex()), IsNil)
-	s, err := h2.kv.Load(historyKey)
+	s, err := h2.storage.Load(historyKey)
 	c.Assert(err, IsNil)
 	// flush in index 106
 	c.Assert(s, Equals, "106")

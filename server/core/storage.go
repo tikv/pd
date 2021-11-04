@@ -1,4 +1,4 @@
-// Copyright 2017 TiKV Project Authors.
+// Copyright 2021 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,17 +17,15 @@ package core
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"path"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/encryption"
@@ -37,215 +35,70 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-const (
-	clusterPath                = "raft"
-	configPath                 = "config"
-	schedulePath               = "schedule"
-	gcPath                     = "gc"
-	rulesPath                  = "rules"
-	ruleGroupPath              = "rule_group"
-	regionLabelPath            = "region_label"
-	replicationPath            = "replication_mode"
-	componentPath              = "component"
-	customScheduleConfigPath   = "scheduler_config"
-	encryptionKeysPath         = "encryption_keys"
-	gcWorkerServiceSafePointID = "gc_worker"
-)
+// Storage is the interface for the backend storage of the PD.
+type Storage interface {
+	kv.Base
+
+	LoadConfig(cfg interface{}) (bool, error)
+	SaveConfig(cfg interface{}) error
+
+	LoadMeta(meta *metapb.Cluster) (bool, error)
+	SaveMeta(meta *metapb.Cluster) error
+
+	LoadStore(storeID uint64, store *metapb.Store) (bool, error)
+	SaveStore(store *metapb.Store) error
+	SaveStoreWeight(storeID uint64, leader, region float64) error
+	LoadStores(f func(store *StoreInfo)) error
+	DeleteStore(store *metapb.Store) error
+
+	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
+	LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error
+	SaveRegion(region *metapb.Region) error
+	DeleteRegion(region *metapb.Region) error
+
+	LoadRules(f func(k, v string)) error
+	SaveRule(ruleKey string, rule interface{}) error
+	DeleteRule(ruleKey string) error
+	LoadRuleGroups(f func(k, v string)) error
+	SaveRuleGroup(groupID string, group interface{}) error
+	DeleteRuleGroup(groupID string) error
+
+	LoadRegionRules(f func(k, v string)) error
+	SaveRegionRule(ruleKey string, rule interface{}) error
+	DeleteRegionRule(ruleKey string) error
+
+	LoadComponent(component interface{}) (bool, error)
+	SaveComponent(component interface{}) error
+
+	LoadReplicationStatus(mode string, status interface{}) (bool, error)
+	SaveReplicationStatus(mode string, status interface{}) error
+
+	LoadScheduleConfig(scheduleName string) (string, error)
+	LoadAllScheduleConfig() ([]string, []string, error)
+	SaveScheduleConfig(scheduleName string, data []byte) error
+	RemoveScheduleConfig(scheduleName string) error
+
+	LoadGCSafePoint() (uint64, error)
+	SaveGCSafePoint(safePoint uint64) error
+
+	LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error)
+	LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error)
+	SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
+	RemoveServiceGCSafePoint(serviceID string) error
+}
 
 const (
 	maxKVRangeLimit = 10000
 	minKVRangeLimit = 100
 )
 
-// Storage wraps all kv operations, keep it stateless.
-type Storage struct {
+type defaultStorage struct {
 	kv.Base
-	regionStorage        *RegionStorage
 	encryptionKeyManager *encryptionkm.KeyManager
-	useRegionStorage     int32
-	regionLoaded         int32
-	mu                   sync.Mutex
-}
-
-// StorageOpt represents available options to create Storage.
-type StorageOpt struct {
-	regionStorage        *RegionStorage
-	encryptionKeyManager *encryptionkm.KeyManager
-}
-
-// StorageOption configures StorageOpt
-type StorageOption func(*StorageOpt)
-
-// WithRegionStorage sets RegionStorage to the Storage
-func WithRegionStorage(regionStorage *RegionStorage) StorageOption {
-	return func(opt *StorageOpt) {
-		opt.regionStorage = regionStorage
-	}
-}
-
-// WithEncryptionKeyManager sets EncryptionManager to the Storage
-func WithEncryptionKeyManager(encryptionKeyManager *encryptionkm.KeyManager) StorageOption {
-	return func(opt *StorageOpt) {
-		opt.encryptionKeyManager = encryptionKeyManager
-	}
-}
-
-// NewStorage creates Storage instance with Base.
-func NewStorage(base kv.Base, opts ...StorageOption) *Storage {
-	options := &StorageOpt{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	return &Storage{
-		Base:                 base,
-		regionStorage:        options.regionStorage,
-		encryptionKeyManager: options.encryptionKeyManager,
-	}
-}
-
-// GetRegionStorage gets the region storage.
-func (s *Storage) GetRegionStorage() *RegionStorage {
-	return s.regionStorage
-}
-
-// SwitchToRegionStorage switches to the region storage.
-func (s *Storage) SwitchToRegionStorage() {
-	atomic.StoreInt32(&s.useRegionStorage, 1)
-}
-
-// SwitchToDefaultStorage switches to the to default storage.
-func (s *Storage) SwitchToDefaultStorage() {
-	atomic.StoreInt32(&s.useRegionStorage, 0)
-}
-
-func (s *Storage) storePath(storeID uint64) string {
-	return path.Join(clusterPath, "s", fmt.Sprintf("%020d", storeID))
-}
-
-func regionPath(regionID uint64) string {
-	return path.Join(clusterPath, "r", fmt.Sprintf("%020d", regionID))
-}
-
-// ClusterStatePath returns the path to save an option.
-func (s *Storage) ClusterStatePath(option string) string {
-	return path.Join(clusterPath, "status", option)
-}
-
-func (s *Storage) storeLeaderWeightPath(storeID uint64) string {
-	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
-}
-
-func (s *Storage) storeRegionWeightPath(storeID uint64) string {
-	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
-}
-
-// EncryptionKeysPath returns the path to save encryption keys.
-func (s *Storage) EncryptionKeysPath() string {
-	return path.Join(encryptionKeysPath, "keys")
-}
-
-// SaveScheduleConfig saves the config of scheduler.
-func (s *Storage) SaveScheduleConfig(scheduleName string, data []byte) error {
-	configPath := path.Join(customScheduleConfigPath, scheduleName)
-	return s.Save(configPath, string(data))
-}
-
-// RemoveScheduleConfig removes the config of scheduler.
-func (s *Storage) RemoveScheduleConfig(scheduleName string) error {
-	configPath := path.Join(customScheduleConfigPath, scheduleName)
-	return s.Remove(configPath)
-}
-
-// LoadScheduleConfig loads the config of scheduler.
-func (s *Storage) LoadScheduleConfig(scheduleName string) (string, error) {
-	configPath := path.Join(customScheduleConfigPath, scheduleName)
-	return s.Load(configPath)
-}
-
-// LoadMeta loads cluster meta from storage.
-func (s *Storage) LoadMeta(meta *metapb.Cluster) (bool, error) {
-	return loadProto(s.Base, clusterPath, meta)
-}
-
-// SaveMeta save cluster meta to storage.
-func (s *Storage) SaveMeta(meta *metapb.Cluster) error {
-	return saveProto(s.Base, clusterPath, meta)
-}
-
-// LoadStore loads one store from storage.
-func (s *Storage) LoadStore(storeID uint64, store *metapb.Store) (bool, error) {
-	return loadProto(s.Base, s.storePath(storeID), store)
-}
-
-// SaveStore saves one store to storage.
-func (s *Storage) SaveStore(store *metapb.Store) error {
-	return saveProto(s.Base, s.storePath(store.GetId()), store)
-}
-
-// DeleteStore deletes one store from storage.
-func (s *Storage) DeleteStore(store *metapb.Store) error {
-	return s.Remove(s.storePath(store.GetId()))
-}
-
-// LoadRegion loads one region from storage.
-func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
-	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
-		return loadRegion(s.regionStorage, s.encryptionKeyManager, regionID, region)
-	}
-	return loadRegion(s.Base, s.encryptionKeyManager, regionID, region)
-}
-
-// LoadRegions loads all regions from storage to RegionsInfo.
-func (s *Storage) LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
-	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
-		return loadRegions(ctx, s.regionStorage, s.encryptionKeyManager, f)
-	}
-	return loadRegions(ctx, s.Base, s.encryptionKeyManager, f)
-}
-
-// LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
-func (s *Storage) LoadRegionsOnce(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
-	if atomic.LoadInt32(&s.useRegionStorage) == 0 {
-		return loadRegions(ctx, s.Base, s.encryptionKeyManager, f)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.regionLoaded == 0 {
-		if err := loadRegions(ctx, s.regionStorage, s.encryptionKeyManager, f); err != nil {
-			return err
-		}
-		s.regionLoaded = 1
-	}
-	return nil
-}
-
-// SaveRegion saves one region to storage.
-func (s *Storage) SaveRegion(region *metapb.Region) error {
-	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
-		return s.regionStorage.SaveRegion(region)
-	}
-	return saveRegion(s.Base, s.encryptionKeyManager, region)
-}
-
-// DeleteRegion deletes one region from storage.
-func (s *Storage) DeleteRegion(region *metapb.Region) error {
-	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
-		return deleteRegion(s.regionStorage, region)
-	}
-	return deleteRegion(s.Base, region)
-}
-
-// SaveConfig stores marshallable cfg to the configPath.
-func (s *Storage) SaveConfig(cfg interface{}) error {
-	value, err := json.Marshal(cfg)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
-	}
-	return s.Save(configPath, string(value))
 }
 
 // LoadConfig loads config from configPath then unmarshal it to cfg.
-func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
+func (s *defaultStorage) LoadConfig(cfg interface{}) (bool, error) {
 	value, err := s.Load(configPath)
 	if err != nil {
 		return false, err
@@ -260,53 +113,228 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 	return true, nil
 }
 
+// SaveConfig stores marshallable cfg to the configPath.
+func (s *defaultStorage) SaveConfig(cfg interface{}) error {
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
+	}
+	return s.Save(configPath, string(value))
+}
+
+// LoadMeta loads cluster meta from the storage. This method will only
+// be used by the PD server, so we should only implement it for the etcd storage.
+func (s *defaultStorage) LoadMeta(meta *metapb.Cluster) (bool, error) {
+	return s.loadProto(clusterPath, meta)
+}
+
+func (s *defaultStorage) loadProto(key string, msg proto.Message) (bool, error) {
+	value, err := s.Load(key)
+	if err != nil {
+		return false, err
+	}
+	if value == "" {
+		return false, nil
+	}
+	err = proto.Unmarshal([]byte(value), msg)
+	if err != nil {
+		return false, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return true, nil
+}
+
+// SaveMeta save cluster meta to the storage. This method will only
+// be used by the PD server, so we should only implement it for the etcd storage.
+func (s *defaultStorage) SaveMeta(meta *metapb.Cluster) error {
+	return s.saveProto(clusterPath, meta)
+}
+
+func (s *defaultStorage) saveProto(key string, msg proto.Message) error {
+	value, err := proto.Marshal(msg)
+	if err != nil {
+		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
+	}
+	return s.Save(key, string(value))
+}
+
+// LoadStore loads one store from storage.
+func (s *defaultStorage) LoadStore(storeID uint64, store *metapb.Store) (bool, error) {
+	return s.loadProto(storePath(storeID), store)
+}
+
+// SaveStore saves one store to storage.
+func (s *defaultStorage) SaveStore(store *metapb.Store) error {
+	return s.saveProto(storePath(store.GetId()), store)
+}
+
+// SaveStoreWeight saves a store's leader and region weight to storage.
+func (s *defaultStorage) SaveStoreWeight(storeID uint64, leader, region float64) error {
+	leaderValue := strconv.FormatFloat(leader, 'f', -1, 64)
+	if err := s.Save(storeLeaderWeightPath(storeID), leaderValue); err != nil {
+		return err
+	}
+	regionValue := strconv.FormatFloat(region, 'f', -1, 64)
+	return s.Save(storeRegionWeightPath(storeID), regionValue)
+}
+
+// LoadStores loads all stores from storage to StoresInfo.
+func (s *defaultStorage) LoadStores(f func(store *StoreInfo)) error {
+	nextID := uint64(0)
+	endKey := storePath(math.MaxUint64)
+	for {
+		key := storePath(nextID)
+		_, res, err := s.LoadRange(key, endKey, minKVRangeLimit)
+		if err != nil {
+			return err
+		}
+		for _, str := range res {
+			store := &metapb.Store{}
+			if err := store.Unmarshal([]byte(str)); err != nil {
+				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
+			}
+			leaderWeight, err := s.loadFloatWithDefaultValue(storeLeaderWeightPath(store.GetId()), 1.0)
+			if err != nil {
+				return err
+			}
+			regionWeight, err := s.loadFloatWithDefaultValue(storeRegionWeightPath(store.GetId()), 1.0)
+			if err != nil {
+				return err
+			}
+			newStoreInfo := NewStoreInfo(store, SetLeaderWeight(leaderWeight), SetRegionWeight(regionWeight))
+
+			nextID = store.GetId() + 1
+			f(newStoreInfo)
+		}
+		if len(res) < minKVRangeLimit {
+			return nil
+		}
+	}
+}
+
+func (s *defaultStorage) loadFloatWithDefaultValue(path string, def float64) (float64, error) {
+	res, err := s.Load(path)
+	if err != nil {
+		return 0, err
+	}
+	if res == "" {
+		return def, nil
+	}
+	val, err := strconv.ParseFloat(res, 64)
+	if err != nil {
+		return 0, errs.ErrStrconvParseFloat.Wrap(err).GenWithStackByArgs()
+	}
+	return val, nil
+}
+
+// DeleteStore deletes one store from storage.
+func (s *defaultStorage) DeleteStore(store *metapb.Store) error {
+	return s.Remove(storePath(store.GetId()))
+}
+
+// LoadRegion loads one region from the backend storage.
+func (s *defaultStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
+	value, err := s.Load(regionPath(regionID))
+	if err != nil {
+		return false, err
+	}
+	if value == "" {
+		return false, nil
+	}
+	err = proto.Unmarshal([]byte(value), region)
+	if err != nil {
+		return true, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
+	}
+	err = encryption.DecryptRegion(region, s.encryptionKeyManager)
+	return true, err
+}
+
+// LoadRegions loads all regions from storage to RegionsInfo.
+func (s *defaultStorage) LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
+	nextID := uint64(0)
+	endKey := regionPath(math.MaxUint64)
+
+	// Since the region key may be very long, using a larger rangeLimit will cause
+	// the message packet to exceed the grpc message size limit (4MB). Here we use
+	// a variable rangeLimit to work around.
+	rangeLimit := maxKVRangeLimit
+	for {
+		failpoint.Inject("slowLoadRegion", func() {
+			rangeLimit = 1
+			time.Sleep(time.Second)
+		})
+		startKey := regionPath(nextID)
+		_, res, err := s.LoadRange(startKey, endKey, rangeLimit)
+		if err != nil {
+			if rangeLimit /= 2; rangeLimit >= minKVRangeLimit {
+				continue
+			}
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		for _, r := range res {
+			region := &metapb.Region{}
+			if err := region.Unmarshal([]byte(r)); err != nil {
+				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
+			}
+			if err = encryption.DecryptRegion(region, s.encryptionKeyManager); err != nil {
+				return err
+			}
+
+			nextID = region.GetId() + 1
+			overlaps := f(NewRegionInfo(region, nil))
+			for _, item := range overlaps {
+				if err := s.DeleteRegion(item.GetMeta()); err != nil {
+					return err
+				}
+			}
+		}
+
+		if len(res) < rangeLimit {
+			return nil
+		}
+	}
+}
+
+// SaveRegion saves one region to storage.
+func (s *defaultStorage) SaveRegion(region *metapb.Region) error {
+	region, err := encryption.EncryptRegion(region, s.encryptionKeyManager)
+	if err != nil {
+		return err
+	}
+	value, err := proto.Marshal(region)
+	if err != nil {
+		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByArgs()
+	}
+	return s.Save(regionPath(region.GetId()), string(value))
+}
+
+// DeleteRegion deletes one region from storage.
+func (s *defaultStorage) DeleteRegion(region *metapb.Region) error {
+	return s.Remove(regionPath(region.GetId()))
+}
+
 // SaveRule stores a rule cfg to the rulesPath.
-func (s *Storage) SaveRule(ruleKey string, rule interface{}) error {
+func (s *defaultStorage) SaveRule(ruleKey string, rule interface{}) error {
 	return s.SaveJSON(rulesPath, ruleKey, rule)
 }
 
 // DeleteRule removes a rule from storage.
-func (s *Storage) DeleteRule(ruleKey string) error {
+func (s *defaultStorage) DeleteRule(ruleKey string) error {
 	return s.Remove(path.Join(rulesPath, ruleKey))
 }
 
 // LoadRules loads placement rules from storage.
-func (s *Storage) LoadRules(f func(k, v string)) error {
+func (s *defaultStorage) LoadRules(f func(k, v string)) error {
 	return s.LoadRangeByPrefix(rulesPath+"/", f)
 }
 
-// SaveRegionRule saves a region rule to the storage.
-func (s *Storage) SaveRegionRule(ruleKey string, rule interface{}) error {
-	return s.SaveJSON(regionLabelPath, ruleKey, rule)
-}
-
-// DeleteRegionRule removes a region rule from storage.
-func (s *Storage) DeleteRegionRule(ruleKey string) error {
-	return s.Remove(path.Join(regionLabelPath, ruleKey))
-}
-
-// LoadRegionRules loads region rules from storage.
-func (s *Storage) LoadRegionRules(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(regionLabelPath+"/", f)
-}
-
-// SaveRuleGroup stores a rule group config to storage.
-func (s *Storage) SaveRuleGroup(groupID string, group interface{}) error {
-	return s.SaveJSON(ruleGroupPath, groupID, group)
-}
-
-// DeleteRuleGroup removes a rule group from storage.
-func (s *Storage) DeleteRuleGroup(groupID string) error {
-	return s.Remove(path.Join(ruleGroupPath, groupID))
-}
-
-// LoadRuleGroups loads all rule groups from storage.
-func (s *Storage) LoadRuleGroups(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(ruleGroupPath+"/", f)
-}
-
 // SaveJSON saves json format data to storage.
-func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
+func (s *defaultStorage) SaveJSON(prefix, key string, data interface{}) error {
 	value, err := json.Marshal(data)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
@@ -315,7 +343,7 @@ func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
 }
 
 // LoadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
-func (s *Storage) LoadRangeByPrefix(prefix string, f func(k, v string)) error {
+func (s *defaultStorage) LoadRangeByPrefix(prefix string, f func(k, v string)) error {
 	nextKey := prefix
 	endKey := clientv3.GetPrefixRangeEnd(prefix)
 	for {
@@ -333,42 +361,38 @@ func (s *Storage) LoadRangeByPrefix(prefix string, f func(k, v string)) error {
 	}
 }
 
-// SaveReplicationStatus stores replication status by mode.
-func (s *Storage) SaveReplicationStatus(mode string, status interface{}) error {
-	value, err := json.Marshal(status)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
-	}
-	return s.Save(path.Join(replicationPath, mode), string(value))
+// LoadRuleGroups loads all rule groups from storage.
+func (s *defaultStorage) LoadRuleGroups(f func(k, v string)) error {
+	return s.LoadRangeByPrefix(ruleGroupPath+"/", f)
 }
 
-// LoadReplicationStatus loads replication status by mode.
-func (s *Storage) LoadReplicationStatus(mode string, status interface{}) (bool, error) {
-	v, err := s.Load(path.Join(replicationPath, mode))
-	if err != nil {
-		return false, err
-	}
-	if v == "" {
-		return false, nil
-	}
-	err = json.Unmarshal([]byte(v), status)
-	if err != nil {
-		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
-	}
-	return true, nil
+// SaveRuleGroup stores a rule group config to storage.
+func (s *defaultStorage) SaveRuleGroup(groupID string, group interface{}) error {
+	return s.SaveJSON(ruleGroupPath, groupID, group)
 }
 
-// SaveComponent stores marshallable components to the componentPath.
-func (s *Storage) SaveComponent(component interface{}) error {
-	value, err := json.Marshal(component)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	return s.Save(componentPath, string(value))
+// DeleteRuleGroup removes a rule group from storage.
+func (s *defaultStorage) DeleteRuleGroup(groupID string) error {
+	return s.Remove(path.Join(ruleGroupPath, groupID))
+}
+
+// LoadRegionRules loads region rules from storage.
+func (s *defaultStorage) LoadRegionRules(f func(k, v string)) error {
+	return s.LoadRangeByPrefix(regionLabelPath+"/", f)
+}
+
+// SaveRegionRule saves a region rule to the storage.
+func (s *defaultStorage) SaveRegionRule(ruleKey string, rule interface{}) error {
+	return s.SaveJSON(regionLabelPath, ruleKey, rule)
+}
+
+// DeleteRegionRule removes a region rule from storage.
+func (s *defaultStorage) DeleteRegionRule(ruleKey string) error {
+	return s.Remove(path.Join(regionLabelPath, ruleKey))
 }
 
 // LoadComponent loads components from componentPath then unmarshal it to component.
-func (s *Storage) LoadComponent(component interface{}) (bool, error) {
+func (s *defaultStorage) LoadComponent(component interface{}) (bool, error) {
 	v, err := s.Load(componentPath)
 	if err != nil {
 		return false, err
@@ -383,93 +407,77 @@ func (s *Storage) LoadComponent(component interface{}) (bool, error) {
 	return true, nil
 }
 
-// LoadStores loads all stores from storage to StoresInfo.
-func (s *Storage) LoadStores(f func(store *StoreInfo)) error {
-	nextID := uint64(0)
-	endKey := s.storePath(math.MaxUint64)
-	for {
-		key := s.storePath(nextID)
-		_, res, err := s.LoadRange(key, endKey, minKVRangeLimit)
-		if err != nil {
-			return err
-		}
-		for _, str := range res {
-			store := &metapb.Store{}
-			if err := store.Unmarshal([]byte(str)); err != nil {
-				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
-			}
-			leaderWeight, err := s.loadFloatWithDefaultValue(s.storeLeaderWeightPath(store.GetId()), 1.0)
-			if err != nil {
-				return err
-			}
-			regionWeight, err := s.loadFloatWithDefaultValue(s.storeRegionWeightPath(store.GetId()), 1.0)
-			if err != nil {
-				return err
-			}
-			newStoreInfo := NewStoreInfo(store, SetLeaderWeight(leaderWeight), SetRegionWeight(regionWeight))
-
-			nextID = store.GetId() + 1
-			f(newStoreInfo)
-		}
-		if len(res) < minKVRangeLimit {
-			return nil
-		}
-	}
-}
-
-// SaveStoreWeight saves a store's leader and region weight to storage.
-func (s *Storage) SaveStoreWeight(storeID uint64, leader, region float64) error {
-	leaderValue := strconv.FormatFloat(leader, 'f', -1, 64)
-	if err := s.Save(s.storeLeaderWeightPath(storeID), leaderValue); err != nil {
-		return err
-	}
-	regionValue := strconv.FormatFloat(region, 'f', -1, 64)
-	return s.Save(s.storeRegionWeightPath(storeID), regionValue)
-}
-
-func (s *Storage) loadFloatWithDefaultValue(path string, def float64) (float64, error) {
-	res, err := s.Load(path)
+// SaveComponent stores marshallable components to the componentPath.
+func (s *defaultStorage) SaveComponent(component interface{}) error {
+	value, err := json.Marshal(component)
 	if err != nil {
-		return 0, err
+		return errors.WithStack(err)
 	}
-	if res == "" {
-		return def, nil
-	}
-	val, err := strconv.ParseFloat(res, 64)
+	return s.Save(componentPath, string(value))
+}
+
+// LoadReplicationStatus loads replication status by mode.
+func (s *defaultStorage) LoadReplicationStatus(mode string, status interface{}) (bool, error) {
+	v, err := s.Load(path.Join(replicationPath, mode))
 	if err != nil {
-		return 0, errs.ErrStrconvParseFloat.Wrap(err).GenWithStackByArgs()
+		return false, err
 	}
-	return val, nil
+	if v == "" {
+		return false, nil
+	}
+	err = json.Unmarshal([]byte(v), status)
+	if err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
+	}
+	return true, nil
 }
 
-// Flush flushes the dirty region to storage.
-func (s *Storage) Flush() error {
-	if s.regionStorage != nil {
-		return s.regionStorage.FlushRegion()
+// SaveReplicationStatus stores replication status by mode.
+func (s *defaultStorage) SaveReplicationStatus(mode string, status interface{}) error {
+	value, err := json.Marshal(status)
+	if err != nil {
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
 	}
-	return nil
+	return s.Save(path.Join(replicationPath, mode), string(value))
 }
 
-// Close closes the s.
-func (s *Storage) Close() error {
-	if s.regionStorage != nil {
-		err := s.regionStorage.Close()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+// LoadScheduleConfig loads the config of scheduler.
+func (s *defaultStorage) LoadScheduleConfig(scheduleName string) (string, error) {
+	configPath := path.Join(customScheduleConfigPath, scheduleName)
+	return s.Load(configPath)
 }
 
-// SaveGCSafePoint saves new GC safe point to storage.
-func (s *Storage) SaveGCSafePoint(safePoint uint64) error {
-	key := path.Join(gcPath, "safe_point")
-	value := strconv.FormatUint(safePoint, 16)
-	return s.Save(key, value)
+// LoadAllScheduleConfig loads all schedulers' config.
+func (s *defaultStorage) LoadAllScheduleConfig() ([]string, []string, error) {
+	prefix := customScheduleConfigPath + "/"
+	keys, values, err := s.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 1000)
+	for i, key := range keys {
+		keys[i] = strings.TrimPrefix(key, prefix)
+	}
+	return keys, values, err
+}
+
+// SaveScheduleConfig saves the config of scheduler.
+func (s *defaultStorage) SaveScheduleConfig(scheduleName string, data []byte) error {
+	configPath := path.Join(customScheduleConfigPath, scheduleName)
+	return s.Save(configPath, string(data))
+}
+
+// RemoveScheduleConfig removes the config of scheduler.
+func (s *defaultStorage) RemoveScheduleConfig(scheduleName string) error {
+	configPath := path.Join(customScheduleConfigPath, scheduleName)
+	return s.Remove(configPath)
+}
+
+// ServiceSafePoint is the safepoint for a specific service
+type ServiceSafePoint struct {
+	ServiceID string `json:"service_id"`
+	ExpiredAt int64  `json:"expired_at"`
+	SafePoint uint64 `json:"safe_point"`
 }
 
 // LoadGCSafePoint loads current GC safe point from storage.
-func (s *Storage) LoadGCSafePoint() (uint64, error) {
+func (s *defaultStorage) LoadGCSafePoint() (uint64, error) {
 	key := path.Join(gcPath, "safe_point")
 	value, err := s.Load(key)
 	if err != nil {
@@ -485,55 +493,15 @@ func (s *Storage) LoadGCSafePoint() (uint64, error) {
 	return safePoint, nil
 }
 
-// ServiceSafePoint is the safepoint for a specific service
-type ServiceSafePoint struct {
-	ServiceID string `json:"service_id"`
-	ExpiredAt int64  `json:"expired_at"`
-	SafePoint uint64 `json:"safe_point"`
-}
-
-// SaveServiceGCSafePoint saves a GC safepoint for the service
-func (s *Storage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
-	if ssp.ServiceID == "" {
-		return errors.New("service id of service safepoint cannot be empty")
-	}
-
-	if ssp.ServiceID == gcWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
-		return errors.New("TTL of gc_worker's service safe point must be infinity")
-	}
-
-	key := path.Join(gcPath, "safe_point", "service", ssp.ServiceID)
-	value, err := json.Marshal(ssp)
-	if err != nil {
-		return err
-	}
-
-	return s.Save(key, string(value))
-}
-
-// RemoveServiceGCSafePoint removes a GC safepoint for the service
-func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
-	if serviceID == gcWorkerServiceSafePointID {
-		return errors.New("cannot remove service safe point of gc_worker")
-	}
-	key := path.Join(gcPath, "safe_point", "service", serviceID)
-	return s.Remove(key)
-}
-
-func (s *Storage) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
-	ssp := &ServiceSafePoint{
-		ServiceID: gcWorkerServiceSafePointID,
-		SafePoint: initialValue,
-		ExpiredAt: math.MaxInt64,
-	}
-	if err := s.SaveServiceGCSafePoint(ssp); err != nil {
-		return nil, err
-	}
-	return ssp, nil
+// SaveGCSafePoint saves new GC safe point to storage.
+func (s *defaultStorage) SaveGCSafePoint(safePoint uint64) error {
+	key := path.Join(gcPath, "safe_point")
+	value := strconv.FormatUint(safePoint, 16)
+	return s.Save(key, value)
 }
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
-func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
+func (s *defaultStorage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
 	prefix := path.Join(gcPath, "safe_point", "service") + "/"
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
@@ -590,8 +558,20 @@ func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, e
 	return min, nil
 }
 
-// GetAllServiceGCSafePoints returns all services GC safepoints
-func (s *Storage) GetAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
+func (s *defaultStorage) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
+	ssp := &ServiceSafePoint{
+		ServiceID: gcWorkerServiceSafePointID,
+		SafePoint: initialValue,
+		ExpiredAt: math.MaxInt64,
+	}
+	if err := s.SaveServiceGCSafePoint(ssp); err != nil {
+		return nil, err
+	}
+	return ssp, nil
+}
+
+// LoadAllServiceGCSafePoints returns all services GC safepoints
+func (s *defaultStorage) LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
 	prefix := path.Join(gcPath, "safe_point", "service") + "/"
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
@@ -614,72 +594,30 @@ func (s *Storage) GetAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
 	return ssps, nil
 }
 
-// LoadAllScheduleConfig loads all schedulers' config.
-func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
-	prefix := customScheduleConfigPath + "/"
-	keys, values, err := s.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 1000)
-	for i, key := range keys {
-		keys[i] = strings.TrimPrefix(key, prefix)
+// SaveServiceGCSafePoint saves a GC safepoint for the service
+func (s *defaultStorage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
+	if ssp.ServiceID == "" {
+		return errors.New("service id of service safepoint cannot be empty")
 	}
-	return keys, values, err
-}
 
-func loadProto(s kv.Base, key string, msg proto.Message) (bool, error) {
-	value, err := s.Load(key)
-	if err != nil {
-		return false, err
+	if ssp.ServiceID == gcWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
+		return errors.New("TTL of gc_worker's service safe point must be infinity")
 	}
-	if value == "" {
-		return false, nil
-	}
-	err = proto.Unmarshal([]byte(value), msg)
-	if err != nil {
-		return false, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
-	}
-	return true, nil
-}
 
-func saveProto(s kv.Base, key string, msg proto.Message) error {
-	value, err := proto.Marshal(msg)
-	if err != nil {
-		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
-	}
-	return s.Save(key, string(value))
-}
-
-func loadRegion(
-	kv kv.Base,
-	encryptionKeyManager *encryptionkm.KeyManager,
-	regionID uint64,
-	region *metapb.Region,
-) (ok bool, err error) {
-	value, err := kv.Load(regionPath(regionID))
-	if err != nil {
-		return false, err
-	}
-	if value == "" {
-		return false, nil
-	}
-	err = proto.Unmarshal([]byte(value), region)
-	if err != nil {
-		return true, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
-	}
-	err = encryption.DecryptRegion(region, encryptionKeyManager)
-	return true, err
-}
-
-func saveRegion(
-	kv kv.Base,
-	encryptionKeyManager *encryptionkm.KeyManager,
-	region *metapb.Region,
-) error {
-	region, err := encryption.EncryptRegion(region, encryptionKeyManager)
+	key := path.Join(gcPath, "safe_point", "service", ssp.ServiceID)
+	value, err := json.Marshal(ssp)
 	if err != nil {
 		return err
 	}
-	value, err := proto.Marshal(region)
-	if err != nil {
-		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByArgs()
+
+	return s.Save(key, string(value))
+}
+
+// RemoveServiceGCSafePoint removes a GC safepoint for the service
+func (s *defaultStorage) RemoveServiceGCSafePoint(serviceID string) error {
+	if serviceID == gcWorkerServiceSafePointID {
+		return errors.New("cannot remove service safe point of gc_worker")
 	}
-	return kv.Save(regionPath(region.GetId()), string(value))
+	key := path.Join(gcPath, "safe_point", "service", serviceID)
+	return s.Remove(key)
 }

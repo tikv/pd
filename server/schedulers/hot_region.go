@@ -43,7 +43,7 @@ func init() {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := initHotRegionScheduleConfig()
 
 		var data map[string]interface{}

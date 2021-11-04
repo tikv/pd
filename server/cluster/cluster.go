@@ -69,7 +69,8 @@ type Server interface {
 	GetAllocator() id.Allocator
 	GetConfig() *config.Config
 	GetPersistOptions() *config.PersistOptions
-	GetStorage() *core.Storage
+	GetEtcdStorage() *core.EtcdStorage
+	GetRegionStorage() *core.RegionStorage
 	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
@@ -93,12 +94,13 @@ type RaftCluster struct {
 	clusterRoot string
 
 	// cached cluster info
-	core    *core.BasicCluster
-	meta    *metapb.Cluster
-	opt     *config.PersistOptions
-	storage *core.Storage
-	id      id.Allocator
-	limiter *StoreLimiter
+	core          *core.BasicCluster
+	meta          *metapb.Cluster
+	opt           *config.PersistOptions
+	storage       core.Storage
+	regionStorage *core.RegionStorage
+	id            id.Allocator
+	limiter       *StoreLimiter
 
 	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
@@ -192,7 +194,7 @@ func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
 // yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(c.storage.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.storage.Load(core.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return t, err
 	}
@@ -203,10 +205,16 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) {
+func (c *RaftCluster) InitCluster(
+	id id.Allocator,
+	opt *config.PersistOptions,
+	storage core.Storage,
+	regionStorage *core.RegionStorage,
+	basicCluster *core.BasicCluster) {
 	c.core = basicCluster
 	c.opt = opt
 	c.storage = storage
+	c.regionStorage = regionStorage
 	c.id = id
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx, c.quit)
@@ -227,7 +235,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 	c.quit = make(chan struct{})
-	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
+	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetEtcdStorage(), s.GetRegionStorage(), s.GetBasicCluster())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -255,7 +263,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster, s)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetEtcdStorage(), cluster, s)
 	if err != nil {
 		return err
 	}
@@ -302,7 +310,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err := c.storage.LoadRegionsOnce(c.ctx, c.core.CheckAndPutRegion); err != nil {
+	if err := c.regionStorage.LoadRegionsOnce(c.ctx, c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -465,17 +473,24 @@ func (c *RaftCluster) GetReplicationMode() *replication.ModeManager {
 }
 
 // GetStorage returns the storage.
-func (c *RaftCluster) GetStorage() *core.Storage {
+func (c *RaftCluster) GetStorage() core.Storage {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storage
 }
 
-// SetStorage set the storage for test purpose.
-func (c *RaftCluster) SetStorage(s *core.Storage) {
+// SetStorage sets the storage, which should only be used in test.
+func (c *RaftCluster) SetStorage(storage core.Storage) {
 	c.Lock()
 	defer c.Unlock()
-	c.storage = s
+	c.storage = storage
+}
+
+// GetRegionStorage returns the region storage.
+func (c *RaftCluster) GetRegionStorage() *core.RegionStorage {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regionStorage
 }
 
 // GetOpts returns cluster's configuration.
@@ -621,7 +636,7 @@ var regionGuide = core.GenerateRegionGuideFunc(true)
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
-	storage := c.storage
+	regionStorage := c.regionStorage
 	coreCluster := c.core
 	hotStat := c.hotStat
 	c.RUnlock()
@@ -700,13 +715,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 	c.Unlock()
 
-	if storage != nil {
+	if regionStorage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.
 		// Not successfully saved to storage is not fatal, it only leads to longer warm-up
 		// after restart. Here we only log the error then go on updating cache.
 		for _, item := range overlaps {
-			if err := storage.DeleteRegion(item.GetMeta()); err != nil {
+			if err := regionStorage.DeleteRegion(item.GetMeta()); err != nil {
 				log.Error("failed to delete region from storage",
 					zap.Uint64("region-id", item.GetID()),
 					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
@@ -714,7 +729,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			}
 		}
 		if saveKV {
-			if err := storage.SaveRegion(region.GetMeta()); err != nil {
+			if err := regionStorage.SaveRegion(region.GetMeta()); err != nil {
 				log.Error("failed to save region to storage",
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
@@ -1517,8 +1532,8 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()
-	if c.storage != nil {
-		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
+	if c.regionStorage != nil {
+		if err := c.regionStorage.SaveRegion(region.GetMeta()); err != nil {
 			return err
 		}
 	}

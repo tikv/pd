@@ -22,7 +22,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 )
 
 func TestT(t *testing.T) {
@@ -32,12 +31,12 @@ func TestT(t *testing.T) {
 var _ = Suite(&testLabelerSuite{})
 
 type testLabelerSuite struct {
-	store   *core.Storage
+	store   core.Storage
 	labeler *RegionLabeler
 }
 
 func (s *testLabelerSuite) SetUpTest(c *C) {
-	s.store = core.NewStorage(kv.NewMemoryKV())
+	s.store = core.NewMemoryStorage()
 	var err error
 	s.labeler, err = NewRegionLabeler(s.store)
 	c.Assert(err, IsNil)

@@ -66,7 +66,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(EvictLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(EvictLeaderType, func(opController *schedule.OperatorController, storage core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -91,7 +91,7 @@ func SchedulerArgs() []string {
 
 type evictLeaderSchedulerConfig struct {
 	mu               sync.RWMutex
-	storage          *core.Storage
+	storage          core.Storage
 	StoreIDWitRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster          opt.Cluster
 }

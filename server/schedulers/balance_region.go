@@ -46,7 +46,7 @@ func init() {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(BalanceRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(BalanceRegionType, func(opController *schedule.OperatorController, storage core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceRegionSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err

@@ -59,7 +59,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(EvictSlowStoreType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(EvictSlowStoreType, func(opController *schedule.OperatorController, storage core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &evictSlowStoreSchedulerConfig{storage: storage, EvictedStores: make([]uint64, 0)}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -69,7 +69,7 @@ func init() {
 }
 
 type evictSlowStoreSchedulerConfig struct {
-	storage       *core.Storage
+	storage       core.Storage
 	EvictedStores []uint64 `json:"evict-stores"`
 }
 
