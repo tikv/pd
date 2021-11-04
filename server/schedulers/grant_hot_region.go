@@ -267,7 +267,6 @@ func (s *grantHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 }
 
 func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) []*operator.Operator {
-	log.Debug("grant hot region scheduler", zap.Any("load detail", loadDetail))
 	for srcStoreID, detail := range loadDetail {
 		if len(detail.HotPeers) < 1 || srcStoreID == s.conf.StoreLeadID {
 			continue
