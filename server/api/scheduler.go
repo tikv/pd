@@ -111,13 +111,13 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}
+
 	name, ok := input["name"].(string)
 	if !ok {
 		h.r.JSON(w, http.StatusBadRequest, "missing scheduler name")
 		return
 	}
 
-	log.Info("add scheduler", zap.String("name", name), zap.Any("args", input))
 	switch name {
 	case schedulers.BalanceLeaderName:
 		if err := h.AddBalanceLeaderScheduler(); err != nil {
@@ -175,7 +175,6 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 		}
 	case schedulers.ShuffleRegionName:
 		if err := h.AddShuffleRegionScheduler(); err != nil {
-			log.Error("create scheduler failed", zap.Error(err))
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

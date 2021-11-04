@@ -322,7 +322,7 @@ func NewLabelSchedulerCommand() *cobra.Command {
 func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "grant-hot-region-scheduler <store_lead_id> <store_id_1,store_id_2>",
-		Short: "add a scheduler to scheduler hot region to grant",
+		Short: "add a scheduler to grant hot region to fixed store",
 		Run:   addSchedulerForGrantHotRegionCommandFunc,
 	}
 	return c
@@ -585,7 +585,6 @@ func setGrantHotRegionCommandFunc(cmd *cobra.Command, schedulerName string, args
 	input := make(map[string]interface{})
 	input["store-leader-id"] = args[0]
 	input["store-id"] = args[1]
-	cmd.Printf("update config :%v", input)
 	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 
