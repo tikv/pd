@@ -274,44 +274,47 @@ func (s *grantHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 		infos[index] = info
 		index++
 	}
-	// the less bytes,the higher scheduler
 	sort.Slice(infos, func(i, j int) bool {
-		return infos[i].LoadPred.Current.Loads[statistics.ByteDim] < infos[i].LoadPred.Current.Loads[statistics.ByteDim]
+		return infos[i].LoadPred.Current.Loads[statistics.ByteDim] > infos[j].LoadPred.Current.Loads[statistics.ByteDim]
 	})
 	return s.randomSchedule(cluster, infos)
 }
 
 func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, infos []*storeLoadDetail) (ops []*operator.Operator) {
-	for _, detail := range infos {
-		srcStoreID := detail.Info.Store.GetID()
-		if s.conf.has(srcStoreID) || len(detail.HotPeers) < 1 {
-			continue
-		}
-		for _, peer := range detail.HotPeers {
-			op, err := s.transfer(cluster, peer.RegionID, srcStoreID, false)
-			if err != nil {
-				log.Debug("fail to create transfer hot region operator", zap.Uint64("regionid", peer.RegionID),
-					zap.Uint64("src store id", srcStoreID), errs.ZapError(err))
+	if s.r.Int()%2 == 1 {
+		for _, detail := range infos {
+			srcStoreID := detail.Info.Store.GetID()
+			if s.conf.has(srcStoreID) || len(detail.HotPeers) < 1 {
 				continue
 			}
-			return []*operator.Operator{op}
+			for _, peer := range detail.HotPeers {
+				op, err := s.transfer(cluster, peer.RegionID, srcStoreID, false)
+				if err != nil {
+					log.Debug("fail to create transfer hot region operator", zap.Uint64("region-id", peer.RegionID),
+						zap.Uint64("src store id", srcStoreID), errs.ZapError(err))
+					continue
+				}
+				return []*operator.Operator{op}
+			}
 		}
-	}
-	for _, detail := range infos {
-		srcStoreID := detail.Info.Store.GetID()
-		if !s.conf.has(srcStoreID) || srcStoreID == s.conf.StoreLeadID {
-			continue
-		}
-		for _, peer := range detail.HotPeers {
-			op, err := s.transfer(cluster, peer.RegionID, srcStoreID, true)
-			if err != nil {
-				log.Debug("fail to create transfer hot region operator", zap.Uint64("regionid", peer.RegionID),
-					zap.Uint64("src store id", srcStoreID), errs.ZapError(err))
+	} else {
+		for _, detail := range infos {
+			srcStoreID := detail.Info.Store.GetID()
+			if !s.conf.has(srcStoreID) || srcStoreID == s.conf.StoreLeadID {
 				continue
 			}
-			return []*operator.Operator{op}
+			for _, peer := range detail.HotPeers {
+				op, err := s.transfer(cluster, peer.RegionID, srcStoreID, true)
+				if err != nil {
+					log.Debug("fail to create transfer hot region operator", zap.Uint64("region-id", peer.RegionID),
+						zap.Uint64("src store id", srcStoreID), errs.ZapError(err))
+					continue
+				}
+				return []*operator.Operator{op}
+			}
 		}
 	}
+
 	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 	return nil
 }
