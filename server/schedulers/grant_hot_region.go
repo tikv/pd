@@ -330,7 +330,6 @@ func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64,
 		return nil, errs.ErrStoreNotFound
 	}
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
 		filter.NewPlacementSafeguard(s.GetName(), cluster, srcRegion, srcStore),
 	}
 
@@ -340,7 +339,8 @@ func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64,
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true})
 		candidate = []uint64{s.conf.StoreLeadID}
 	} else {
-		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true})
+		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
+			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()))
 		candidate = s.conf.StoreIDs
 	}
 	for _, storeID := range candidate {
