@@ -29,7 +29,7 @@ func (s *testClientSuite) TestDynamicOptionChange(c *C) {
 	o := newOption()
 	// Check the default value setting.
 	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, time.Duration(defaultMaxTSOBatchWaitInterval))
-	c.Assert(o.getTSOFollowerProxyOption(), Equals, defaultEnableTSOFollowerProxy)
+	c.Assert(o.getEnableTSOFollowerProxy(), Equals, defaultEnableTSOFollowerProxy)
 
 	// Check the invalid value setting.
 	c.Assert(o.setMaxTSOBatchWaitInterval(time.Second), NotNil)
@@ -41,16 +41,16 @@ func (s *testClientSuite) TestDynamicOptionChange(c *C) {
 	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, expectInterval)
 
 	expectBool := true
-	o.setTSOFollowerProxyOption(expectBool)
+	o.setEnableTSOFollowerProxy(expectBool)
 	// Check the value changing notification.
 	testutil.WaitUntil(c, func(c *C) bool {
 		<-o.enableTSOFollowerProxyCh
 		return true
 	})
-	c.Assert(o.getTSOFollowerProxyOption(), Equals, expectBool)
+	c.Assert(o.getEnableTSOFollowerProxy(), Equals, expectBool)
 	// Check whether any data will be sent to the channel.
 	// It will panic if the test fails.
 	close(o.enableTSOFollowerProxyCh)
 	// Setting the same value should not notify the channel.
-	o.setTSOFollowerProxyOption(expectBool)
+	o.setEnableTSOFollowerProxy(expectBool)
 }
