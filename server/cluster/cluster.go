@@ -85,7 +85,11 @@ type Server interface {
 // region 1 -> /1/raft/r/1, value is metapb.Region
 type RaftCluster struct {
 	sync.RWMutex
-	ctx context.Context
+
+	serverCtx context.Context
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 
 	running bool
 
@@ -111,8 +115,6 @@ type RaftCluster struct {
 	suspectRegions   *cache.TTLUint64 // suspectRegions are regions that may need fix
 	suspectKeyRanges *cache.TTLString // suspect key-range regions that may need fix
 
-	wg           sync.WaitGroup
-	quit         chan struct{}
 	regionSyncer *syncer.RegionSyncer
 
 	ruleManager   *placement.RuleManager
@@ -139,7 +141,7 @@ type Status struct {
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		ctx:          ctx,
+		serverCtx:    ctx,
 		running:      false,
 		clusterID:    clusterID,
 		clusterRoot:  root,
@@ -204,12 +206,10 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 
 // InitCluster initializes the raft cluster.
 func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) {
-	c.core = basicCluster
-	c.opt = opt
-	c.storage = storage
-	c.id = id
+	c.core, c.opt, c.storage, c.id = basicCluster, opt, storage, id
+	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
-	c.hotStat = statistics.NewHotStat(c.ctx, c.quit)
+	c.hotStat = statistics.NewHotStat(c.ctx)
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
@@ -226,8 +226,9 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-	c.quit = make(chan struct{})
+
 	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
+
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -324,7 +325,7 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 
 	for {
 		select {
-		case <-c.quit:
+		case <-c.ctx.Done():
 			log.Info("metrics are reset")
 			c.resetMetrics()
 			log.Info("background jobs has been stopped")
@@ -346,7 +347,7 @@ func (c *RaftCluster) runStatsBackgroundJobs() {
 
 	for {
 		select {
-		case <-c.quit:
+		case <-c.ctx.Done():
 			log.Info("statistics background jobs has been stopped")
 			return
 		case <-ticker.C:
@@ -375,13 +376,13 @@ func (c *RaftCluster) runCoordinator() {
 func (c *RaftCluster) syncRegions() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	c.regionSyncer.RunServer(c.changedRegionNotifier(), c.quit)
+	c.regionSyncer.RunServer(c.ctx, c.changedRegionNotifier())
 }
 
 func (c *RaftCluster) runReplicationMode() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	c.replicationMode.Run(c.quit)
+	c.replicationMode.Run(c.ctx)
 }
 
 // Stop stops the cluster.
@@ -395,7 +396,7 @@ func (c *RaftCluster) Stop() {
 
 	c.running = false
 	c.coordinator.stop()
-	close(c.quit)
+	c.cancel()
 	c.Unlock()
 	c.wg.Wait()
 	log.Info("raftcluster is stopped")
