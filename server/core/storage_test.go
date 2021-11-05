@@ -24,7 +24,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
@@ -173,7 +173,8 @@ func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
 }
 
 func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
-	storage := NewStorage(&KVWithMaxRangeLimit{Base: kv.NewMemoryKV(), rangeLimit: 500})
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/withRangeLimit", "return(500)"), IsNil)
+	storage := NewStorage(kv.NewMemoryKV())
 	cache := NewRegionsInfo()
 
 	n := 1000
@@ -183,6 +184,7 @@ func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
 	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/withRangeLimit"), IsNil)
 }
 
 func (s *testKVSuite) TestLoadGCSafePoint(c *C) {
@@ -265,18 +267,6 @@ func (s *testKVSuite) TestLoadMinServiceGCSafePoint(c *C) {
 	c.Assert(ssp.ServiceID, Equals, "2")
 	c.Assert(ssp.ExpiredAt, Equals, expireAt)
 	c.Assert(ssp.SafePoint, Equals, uint64(2))
-}
-
-type KVWithMaxRangeLimit struct {
-	kv.Base
-	rangeLimit int
-}
-
-func (kv *KVWithMaxRangeLimit) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
-	if limit > kv.rangeLimit {
-		return nil, nil, errors.Errorf("limit %v exceed max rangeLimit %v", limit, kv.rangeLimit)
-	}
-	return kv.Base.LoadRange(key, endKey, limit)
 }
 
 func newTestRegionMeta(regionID uint64) *metapb.Region {
