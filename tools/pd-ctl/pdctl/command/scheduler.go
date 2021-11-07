@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/server/schedulers"
 )
@@ -423,14 +424,22 @@ func newConfigHotRegionCommand() *cobra.Command {
 		Short: "balance-hot-region-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
+
+	// Deprecated: 'list' command will be deprecated in future version, use 'show' command instead.
 	c.AddCommand(&cobra.Command{
 		Use:   "list",
+		Short: "list the config item (will be deprecated in feature version, use show command instead)",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "show",
 		Short: "list the config item",
-		Run:   listSchedulerConfigCommandFunc})
-	c.AddCommand(&cobra.Command{
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
 		Use:   "set <key> <value>",
 		Short: "set the config item",
-		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) }})
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+
 	return c
 }
 
@@ -512,6 +521,9 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	p := cmd.Name()
 	if p == "list" {
+		p = cmd.Parent().Name()
+		log.Info("The list command will be deprecated in future version, use show command instead")
+	} else if p == "show" {
 		p = cmd.Parent().Name()
 	}
 	path := path.Join(schedulerConfigPrefix, p, "list")
