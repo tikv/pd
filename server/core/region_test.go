@@ -283,6 +283,11 @@ func (s *testRegionGuideSuite) TestNeedSync(c *C) {
 			needSync: true,
 		},
 		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(250), WithFlowRoundByDigit(2)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(349), WithFlowRoundByDigit(2)},
+			needSync: false,
+		},
+		{
 			optionsA: []RegionCreateOption{SetWrittenBytes(200), WithFlowRoundByDigit(4)},
 			optionsB: []RegionCreateOption{SetWrittenBytes(300), WithFlowRoundByDigit(4)},
 			needSync: false,
