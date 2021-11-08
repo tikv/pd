@@ -43,6 +43,7 @@ const (
 )
 
 var (
+	// ErrNotStarted is returned when current server is starting.
 	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
 )
 
