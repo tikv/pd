@@ -100,9 +100,9 @@ func (c *coordinator) patrolRegions() {
 	defer timer.Stop()
 
 	log.Info("coordinator starts patrol regions")
-	start := time.Now()
 	var key []byte
 	for {
+		start := time.Now()
 		select {
 		case <-timer.C:
 			timer.Reset(c.cluster.GetOpts().GetPatrolRegionInterval())
@@ -150,7 +150,6 @@ func (c *coordinator) patrolRegions() {
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
-			start = time.Now()
 		}
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()

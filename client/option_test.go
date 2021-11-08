@@ -28,12 +28,12 @@ type testClientOptionSuite struct{}
 func (s *testClientSuite) TestDynamicOptionChange(c *C) {
 	o := newOption()
 	// Check the default value setting.
-	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, time.Duration(defaultMaxTSOBatchWaitInterval))
+	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, defaultMaxTSOBatchWaitInterval)
 	c.Assert(o.getEnableTSOFollowerProxy(), Equals, defaultEnableTSOFollowerProxy)
 
 	// Check the invalid value setting.
 	c.Assert(o.setMaxTSOBatchWaitInterval(time.Second), NotNil)
-	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, time.Duration(defaultMaxTSOBatchWaitInterval))
+	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, defaultMaxTSOBatchWaitInterval)
 	expectInterval := time.Millisecond
 	o.setMaxTSOBatchWaitInterval(expectInterval)
 	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, expectInterval)
