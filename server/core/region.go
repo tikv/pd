@@ -551,7 +551,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			// Because keys and bytes are strongly related, only bytes are judged.
 			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
 				region.GetRoundBytesRead() != origin.GetRoundBytesRead() ||
-				region.flowRoundDivisor != origin.flowRoundDivisor {
+				region.flowRoundDivisor < origin.flowRoundDivisor {
 				saveCache, needSync = true, true
 			}
 

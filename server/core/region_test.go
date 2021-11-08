@@ -234,19 +234,19 @@ func (s *testRegionGuideSuite) TestNeedSync(c *C) {
 		needSync bool
 	}{
 		{
-			optionsA: []RegionCreateOption{WithLeader(nil)},
+			optionsB: []RegionCreateOption{WithLeader(nil)},
 			needSync: true,
 		},
 		{
-			optionsA: []RegionCreateOption{WithLeader(meta.Peers[1])},
+			optionsB: []RegionCreateOption{WithLeader(meta.Peers[1])},
 			needSync: true,
 		},
 		{
-			optionsA: []RegionCreateOption{WithPendingPeers(meta.Peers[1:2])},
+			optionsB: []RegionCreateOption{WithPendingPeers(meta.Peers[1:2])},
 			needSync: true,
 		},
 		{
-			optionsA: []RegionCreateOption{WithDownPeers([]*pdpb.PeerStats{{Peer: meta.Peers[1], DownSeconds: 600}})},
+			optionsB: []RegionCreateOption{WithDownPeers([]*pdpb.PeerStats{{Peer: meta.Peers[1], DownSeconds: 600}})},
 			needSync: true,
 		},
 		{
@@ -272,6 +272,11 @@ func (s *testRegionGuideSuite) TestNeedSync(c *C) {
 		{
 			optionsA: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(127)},
 			optionsB: []RegionCreateOption{SetWrittenBytes(0), WithFlowRoundByDigit(2)},
+			needSync: false,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(0), WithFlowRoundByDigit(2)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(127)},
 			needSync: true,
 		},
 	}
