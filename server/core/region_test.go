@@ -204,6 +204,81 @@ func (s *testRegionInfoSuite) TestRegionWriteRate(c *C) {
 	}
 }
 
+var _ = Suite(&testRegionGuideSuite{})
+
+type testRegionGuideSuite struct {
+	RegionGuide RegionGuideFunc
+}
+
+func (s *testRegionGuideSuite) SetUpSuite(c *C) {
+	s.RegionGuide = GenerateRegionGuideFunc(false)
+}
+
+func (s *testRegionGuideSuite) TestNeedSync(c *C) {
+	meta := &metapb.Region{
+		Id:          1000,
+		StartKey:    []byte("a"),
+		EndKey:      []byte("z"),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
+		Peers: []*metapb.Peer{
+			{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: 13, StoreId: 1, Role: metapb.PeerRole_Voter},
+		},
+	}
+	region := NewRegionInfo(meta, meta.Peers[0])
+
+	testcases := []struct {
+		optionsA []RegionCreateOption
+		optionsB []RegionCreateOption
+		needSync bool
+	}{
+		{
+			optionsA: []RegionCreateOption{WithLeader(nil)},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{WithLeader(meta.Peers[1])},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{WithPendingPeers(meta.Peers[1:2])},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{WithDownPeers([]*pdpb.PeerStats{{Peer: meta.Peers[1], DownSeconds: 600}})},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(200), WithFlowRoundByDigit(2)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(300), WithFlowRoundByDigit(2)},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(200), WithFlowRoundByDigit(4)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(300), WithFlowRoundByDigit(4)},
+			needSync: false,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(4)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(200), WithFlowRoundByDigit(2)},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(127)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(0), WithFlowRoundByDigit(2)},
+			needSync: true,
+		},
+	}
+
+	for _, t := range testcases {
+		regionA := region.Clone(t.optionsA...)
+		regionB := region.Clone(t.optionsB...)
+		_, _, _, needSync := s.RegionGuide(regionA, regionB)
+		c.Assert(needSync, Equals, t.needSync)
+	}
+}
+
 var _ = Suite(&testRegionMapSuite{})
 
 type testRegionMapSuite struct{}
