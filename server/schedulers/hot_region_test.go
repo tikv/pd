@@ -184,14 +184,14 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 	tc.AddLabelsStore(7, 0, map[string]string{"zone": "z5", "host": "h7"})
 	tc.SetStoreDown(7)
 
-	//| store_id | write_bytes_rate |
-	//|----------|------------------|
-	//|    1     |       7.5MB      |
-	//|    2     |       4.5MB      |
-	//|    3     |       4.5MB      |
-	//|    4     |        6MB       |
-	//|    5     |        0MB       |
-	//|    6     |        0MB       |
+	// | store_id | write_bytes_rate |
+	// |----------|------------------|
+	// |    1     |       7.5MB      |
+	// |    2     |       4.5MB      |
+	// |    3     |       4.5MB      |
+	// |    4     |        6MB       |
+	// |    5     |        0MB       |
+	// |    6     |        0MB       |
 	tc.UpdateStorageWrittenBytes(1, 7.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(2, 4.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
@@ -199,11 +199,11 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 	tc.UpdateStorageWrittenBytes(5, 0)
 	tc.UpdateStorageWrittenBytes(6, 0)
 
-	//| region_id | leader_store | follower_store | follower_store | written_bytes |
-	//|-----------|--------------|----------------|----------------|---------------|
-	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       1      |        3       |       4        |      512KB    |
-	//|     3     |       1      |        2       |       4        |      512KB    |
+	// | region_id | leader_store | follower_store | follower_store | written_bytes |
+	// |-----------|--------------|----------------|----------------|---------------|
+	// |     1     |       1      |        2       |       3        |      512KB    |
+	// |     2     |       1      |        3       |       4        |      512KB    |
+	// |     3     |       1      |        2       |       4        |      512KB    |
 	// Region 1, 2 and 3 are hot regions.
 	addRegionInfo(tc, write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 512 * KB, 0, 0},
@@ -265,14 +265,14 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 	c.Assert(hb.Schedule(tc), HasLen, 1)
 	hb.(*hotScheduler).clearPendingInfluence()
 
-	//| store_id | write_bytes_rate |
-	//|----------|------------------|
-	//|    1     |        6MB       |
-	//|    2     |        5MB       |
-	//|    3     |        6MB       |
-	//|    4     |        3.1MB     |
-	//|    5     |        0MB       |
-	//|    6     |        3MB       |
+	// | store_id | write_bytes_rate |
+	// |----------|------------------|
+	// |    1     |        6MB       |
+	// |    2     |        5MB       |
+	// |    3     |        6MB       |
+	// |    4     |        3.1MB     |
+	// |    5     |        0MB       |
+	// |    6     |        3MB       |
 	tc.UpdateStorageWrittenBytes(1, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(2, 5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
@@ -280,13 +280,13 @@ func (s *testHotWriteRegionSchedulerSuite) checkByteRateOnly(c *C, tc *mockclust
 	tc.UpdateStorageWrittenBytes(5, 0)
 	tc.UpdateStorageWrittenBytes(6, 3*MB*statistics.StoreHeartBeatReportInterval)
 
-	//| region_id | leader_store | follower_store | follower_store | written_bytes |
-	//|-----------|--------------|----------------|----------------|---------------|
-	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       1      |        2       |       3        |      512KB    |
-	//|     3     |       6      |        1       |       4        |      512KB    |
-	//|     4     |       5      |        6       |       4        |      512KB    |
-	//|     5     |       3      |        4       |       5        |      512KB    |
+	// | region_id | leader_store | follower_store | follower_store | written_bytes |
+	// |-----------|--------------|----------------|----------------|---------------|
+	// |     1     |       1      |        2       |       3        |      512KB    |
+	// |     2     |       1      |        2       |       3        |      512KB    |
+	// |     3     |       6      |        1       |       4        |      512KB    |
+	// |     4     |       5      |        6       |       4        |      512KB    |
+	// |     5     |       3      |        4       |       5        |      512KB    |
 	addRegionInfo(tc, write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 512 * KB, 0, 0},
 		{2, []uint64{1, 2, 3}, 512 * KB, 0, 0},
@@ -393,12 +393,12 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 			tc.UpdateStorageWrittenBytes(i, 0)
 		}
 	}
-	//| region_id | leader_store | follower_store | follower_store | learner_store | written_bytes |
-	//|-----------|--------------|----------------|----------------|---------------|---------------|
-	//|     1     |       1      |        2       |       3        |       8       |      512 KB   |
-	//|     2     |       1      |        3       |       4        |       8       |      512 KB   |
-	//|     3     |       1      |        2       |       4        |       9       |      512 KB   |
-	//|     4     |       2      |                |                |      10       |      100 B    |
+	// | region_id | leader_store | follower_store | follower_store | learner_store | written_bytes |
+	// |-----------|--------------|----------------|----------------|---------------|---------------|
+	// |     1     |       1      |        2       |       3        |       8       |      512 KB   |
+	// |     2     |       1      |        3       |       4        |       8       |      512 KB   |
+	// |     3     |       1      |        2       |       4        |       9       |      512 KB   |
+	// |     4     |       2      |                |                |      10       |      100 B    |
 	// Region 1, 2 and 3 are hot regions.
 	testRegions := []testRegionInfo{
 		{1, []uint64{1, 2, 3, 8}, 512 * KB, 5 * KB, 3000},
@@ -446,19 +446,19 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 		op := hb.Schedule(tc)[0]
 		testutil.CheckTransferLeaderFrom(c, op, operator.OpHotRegion, 1)
 	}
-	//| store_id | write_bytes_rate |
-	//|----------|------------------|
-	//|    1     |       7.5MB      |
-	//|    2     |       4.5MB      |
-	//|    3     |       4.5MB      |
-	//|    4     |        6MB       |
-	//|    5     |        0MB(Evict)|
-	//|    6     |        0MB       |
-	//|    7     |        n/a (Down)|
-	//|    8     |        n/a       | <- TiFlash is always 0.
-	//|    9     |        n/a       |
-	//|   10     |        n/a       |
-	//|   11     |        n/a       |
+	// | store_id | write_bytes_rate |
+	// |----------|------------------|
+	// |    1     |       7.5MB      |
+	// |    2     |       4.5MB      |
+	// |    3     |       4.5MB      |
+	// |    4     |        6MB       |
+	// |    5     |        0MB(Evict)|
+	// |    6     |        0MB       |
+	// |    7     |        n/a (Down)|
+	// |    8     |        n/a       | <- TiFlash is always 0.
+	// |    9     |        n/a       |
+	// |   10     |        n/a       |
+	// |   11     |        n/a       |
 	storesBytes := map[uint64]uint64{
 		1: 7.5 * MB * statistics.StoreHeartBeatReportInterval,
 		2: 4.5 * MB * statistics.StoreHeartBeatReportInterval,
@@ -947,25 +947,25 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	tc.AddRegionStore(4, 2)
 	tc.AddRegionStore(5, 0)
 
-	//| store_id | read_bytes_rate |
-	//|----------|-----------------|
-	//|    1     |     7.5MB       |
-	//|    2     |     4.9MB       |
-	//|    3     |     3.7MB       |
-	//|    4     |       6MB       |
-	//|    5     |       0MB       |
+	// | store_id | read_bytes_rate |
+	// |----------|-----------------|
+	// |    1     |     7.5MB       |
+	// |    2     |     4.9MB       |
+	// |    3     |     3.7MB       |
+	// |    4     |       6MB       |
+	// |    5     |       0MB       |
 	tc.UpdateStorageReadBytes(1, 7.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(2, 4.9*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(3, 3.7*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(4, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(5, 0)
 
-	//| region_id | leader_store | follower_store | follower_store |   read_bytes_rate  |
-	//|-----------|--------------|----------------|----------------|--------------------|
-	//|     1     |       1      |        2       |       3        |        512KB       |
-	//|     2     |       2      |        1       |       3        |        512KB       |
-	//|     3     |       1      |        2       |       3        |        512KB       |
-	//|     11    |       1      |        2       |       3        |          7KB       |
+	// | region_id | leader_store | follower_store | follower_store |   read_bytes_rate  |
+	// |-----------|--------------|----------------|----------------|--------------------|
+	// |     1     |       1      |        2       |       3        |        512KB       |
+	// |     2     |       2      |        1       |       3        |        512KB       |
+	// |     3     |       1      |        2       |       3        |        512KB       |
+	// |     11    |       1      |        2       |       3        |          7KB       |
 	// Region 1, 2 and 3 are hot regions.
 	addRegionInfo(tc, read, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 512 * KB, 0, 0},
@@ -1001,27 +1001,27 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	// After transfer a hot region leader from store 1 to store 3
 	// the three region leader will be evenly distributed in three stores
 
-	//| store_id | read_bytes_rate |
-	//|----------|-----------------|
-	//|    1     |       6MB       |
-	//|    2     |       5.5MB     |
-	//|    3     |       5.5MB     |
-	//|    4     |       3.4MB     |
-	//|    5     |       3MB       |
+	// | store_id | read_bytes_rate |
+	// |----------|-----------------|
+	// |    1     |       6MB       |
+	// |    2     |       5.5MB     |
+	// |    3     |       5.5MB     |
+	// |    4     |       3.4MB     |
+	// |    5     |       3MB       |
 	tc.UpdateStorageReadBytes(1, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(2, 5.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(3, 5.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(4, 3.4*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(5, 3*MB*statistics.StoreHeartBeatReportInterval)
 
-	//| region_id | leader_store | follower_store | follower_store |   read_bytes_rate  |
-	//|-----------|--------------|----------------|----------------|--------------------|
-	//|     1     |       1      |        2       |       3        |        512KB       |
-	//|     2     |       2      |        1       |       3        |        512KB       |
-	//|     3     |       3      |        2       |       1        |        512KB       |
-	//|     4     |       1      |        2       |       3        |        512KB       |
-	//|     5     |       4      |        2       |       5        |        512KB       |
-	//|     11    |       1      |        2       |       3        |         24KB       |
+	// | region_id | leader_store | follower_store | follower_store |   read_bytes_rate  |
+	// |-----------|--------------|----------------|----------------|--------------------|
+	// |     1     |       1      |        2       |       3        |        512KB       |
+	// |     2     |       2      |        1       |       3        |        512KB       |
+	// |     3     |       3      |        2       |       1        |        512KB       |
+	// |     4     |       1      |        2       |       3        |        512KB       |
+	// |     5     |       4      |        2       |       5        |        512KB       |
+	// |     11    |       1      |        2       |       3        |         24KB       |
 	addRegionInfo(tc, read, []testRegionInfo{
 		{4, []uint64{1, 2, 3}, 512 * KB, 0, 0},
 		{5, []uint64{4, 2, 5}, 512 * KB, 0, 0},

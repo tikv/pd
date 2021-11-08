@@ -351,7 +351,7 @@ func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
 	}
 	U := C - A
 	if s.GetRegionSize() != 0 {
-		U = U + U*(float64(delta))/float64(s.GetRegionSize())
+		U += U * (float64(delta)) / float64(s.GetRegionSize())
 		if U < C && U > 0 {
 			A = C - U
 		}
