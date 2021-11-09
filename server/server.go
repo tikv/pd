@@ -498,6 +498,7 @@ func (s *Server) Run() error {
 		return err
 	}
 
+	s.initConfig()
 	s.startServerLoop(s.ctx)
 
 	return nil
@@ -1346,6 +1347,16 @@ func (s *Server) reloadConfigFromKV() error {
 		s.storage.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
 	}
+	return nil
+}
+
+// persit config to the etcd, and persistOptions.Reload will flush config periodically
+func (s *Server) initConfig() error {
+	c := s.GetConfig()
+	if err := s.storage.SaveConfig(c); err != nil {
+		return err
+	}
+
 	return nil
 }
 

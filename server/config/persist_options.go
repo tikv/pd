@@ -607,7 +607,6 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 	}
 	o.adjustScheduleCfg(&cfg.Schedule)
 	cfg.PDServerCfg.MigrateDeprecatedFlags()
-	// reload will ignore all items of config file defined but follows
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
@@ -615,8 +614,6 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 		o.replicationMode.Store(&cfg.ReplicationMode)
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.SetClusterVersion(&cfg.ClusterVersion)
-		o.SetPlacementRuleEnabled(cfg.Replication.EnablePlacementRules)
-		o.SetPlacementRulesCacheEnabled(cfg.Replication.EnablePlacementRulesCache)
 	}
 	return nil
 }
