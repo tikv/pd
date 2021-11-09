@@ -595,6 +595,7 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 }
 
 // Reload reloads the configuration from the storage.
+// It will be called by pkg dashboard's adapter.(*Manager).updateInfo periodically
 func (o *PersistOptions) Reload(storage *core.Storage) error {
 	cfg := &Config{}
 	// pass nil to initialize cfg to default values (all items undefined)
@@ -606,6 +607,7 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 	}
 	o.adjustScheduleCfg(&cfg.Schedule)
 	cfg.PDServerCfg.MigrateDeprecatedFlags()
+	// reload will ignore all items of config file defined but follows
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
