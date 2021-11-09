@@ -22,23 +22,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tikv/pd/pkg/slice"
-
-	"github.com/tikv/pd/server/statistics"
-
-	"go.uber.org/zap"
-
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const (
