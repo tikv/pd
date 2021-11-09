@@ -1258,12 +1258,21 @@ func waitTransferLeader(c *C, stream mockhbstream.HeartbeatStream, region *core.
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
-			return res.GetRegionId() == region.GetID() && res.GetTransferLeader().GetPeers()[0].GetStoreId() == storeID
+			if res.GetRegionId() == region.GetID() {
+				if res.GetTransferLeader().GetPeer().GetStoreId() == storeID {
+					return true
+				}
+				for _, peer := range res.GetTransferLeader().GetPeers() {
+					if peer.GetStoreId() == storeID {
+						return true
+					}
+				}
+			}
 		}
 		return false
 	})
 	return region.Clone(
-		core.WithLeader(res.GetTransferLeader().GetPeers()[0]),
+		core.WithLeader(region.GetStorePeer(storeID)),
 	)
 }
 
