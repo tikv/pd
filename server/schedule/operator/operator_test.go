@@ -231,6 +231,22 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		RegionCount: 0,
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	})
+
+	EvictLeader{FromStore: 2, ToStore: 1, ToStores: []uint64{1}}.Influence(opInfluence, region)
+	c.Assert(*storeOpInfluence[1], DeepEquals, StoreInfluence{
+		LeaderSize:  0,
+		LeaderCount: -1,
+		RegionSize:  -50,
+		RegionCount: -2,
+		StepCost:    map[storelimit.Type]int64{storelimit.RemovePeer: 1000},
+	})
+	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
+		LeaderSize:  0,
+		LeaderCount: 0,
+		RegionSize:  50,
+		RegionCount: 0,
+		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+	})
 }
 
 func (s *testOperatorSuite) TestOperatorKind(c *C) {
