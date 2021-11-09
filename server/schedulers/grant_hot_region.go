@@ -96,12 +96,16 @@ type grantHotRegionSchedulerConfig struct {
 }
 
 func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) bool {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
 	ret := slice.AnyOf(peers, func(i int) bool {
 		return leaderID == peers[i]
 	})
 	if ret {
+		conf.mu.Lock()
 		conf.StoreLeadID = leaderID
 		conf.StoreIDs = peers
+		conf.mu.Unlock()
 	}
 	return ret
 }
@@ -130,6 +134,8 @@ func (conf *grantHotRegionSchedulerConfig) getSchedulerName() string {
 }
 
 func (conf *grantHotRegionSchedulerConfig) has(storeID uint64) bool {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
 	return slice.AnyOf(conf.StoreIDs, func(i int) bool {
 		return storeID == conf.StoreIDs[i]
 	})
@@ -362,9 +368,9 @@ func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64,
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
 
 	if isLeader {
-		return operator.CreateTransferLeaderOperator(GrantHotRegionType+"-leader", cluster, srcRegion, srcRegion.GetLeader().GetStoreId(), dstStore.StoreId, operator.OpLeader)
+		op, err = operator.CreateTransferLeaderOperator(GrantHotRegionType+"-leader", cluster, srcRegion, srcRegion.GetLeader().GetStoreId(), dstStore.StoreId, operator.OpLeader)
 	} else {
-		return operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
+		op, err = operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
-	return nil, err
+	return
 }
