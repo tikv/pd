@@ -189,39 +189,54 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 	}
 	{
 		// finished op
-		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
-		c.Assert(oc.checkAddOperator(op), IsTrue)
-		op.Start()
-		c.Assert(oc.checkAddOperator(op), IsFalse) // started
-		c.Assert(op.Check(region1), IsNil)
-		c.Assert(op.Status(), Equals, operator.SUCCESS)
-		c.Assert(oc.checkAddOperator(op), IsFalse) // success
+		op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		op2 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.EvictLeader{FromStore: 1, ToStore: 2, ToStores: []uint64{2}})
+		c.Assert(oc.checkAddOperator(op1, op2), IsTrue)
+		op1.Start()
+		op2.Start()
+		c.Assert(oc.checkAddOperator(op1, op2), IsFalse) // started
+		c.Assert(op1.Check(region1), IsNil)
+		c.Assert(op2.Check(region1), IsNil)
+		c.Assert(op1.Status(), Equals, operator.SUCCESS)
+		c.Assert(op2.Status(), Equals, operator.SUCCESS)
+		c.Assert(oc.checkAddOperator(op1, op2), IsFalse) // success
 	}
 	{
 		// finished op canceled
-		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
-		c.Assert(oc.checkAddOperator(op), IsTrue)
-		c.Assert(op.Cancel(), IsTrue)
-		c.Assert(oc.checkAddOperator(op), IsFalse)
+		op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		op2 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.EvictLeader{FromStore: 1, ToStore: 2, ToStores: []uint64{2}})
+		c.Assert(oc.checkAddOperator(op1, op2), IsTrue)
+		c.Assert(op1.Cancel(), IsTrue)
+		c.Assert(op2.Cancel(), IsTrue)
+		c.Assert(oc.checkAddOperator(op1, op2), IsFalse)
 	}
 	{
 		// finished op replaced
-		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
-		c.Assert(oc.checkAddOperator(op), IsTrue)
-		c.Assert(op.Start(), IsTrue)
-		c.Assert(op.Replace(), IsTrue)
-		c.Assert(oc.checkAddOperator(op), IsFalse)
+		op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		op2 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.EvictLeader{FromStore: 1, ToStore: 2, ToStores: []uint64{2}})
+		c.Assert(oc.checkAddOperator(op1, op2), IsTrue)
+		c.Assert(op1.Start(), IsTrue)
+		c.Assert(op2.Start(), IsTrue)
+		c.Assert(op1.Replace(), IsTrue)
+		c.Assert(op2.Replace(), IsTrue)
+		c.Assert(oc.checkAddOperator(op1, op2), IsFalse)
 	}
 	{
 		// finished op expired
 		op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
 		op2 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 1})
-		c.Assert(oc.checkAddOperator(op1, op2), IsTrue)
+		op3 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.EvictLeader{FromStore: 1, ToStore: 2, ToStores: []uint64{2}})
+		op4 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, operator.EvictLeader{FromStore: 2, ToStore: 1, ToStores: []uint64{1}})
+		c.Assert(oc.checkAddOperator(op1, op2, op3, op4), IsTrue)
 		operator.SetOperatorStatusReachTime(op1, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
 		operator.SetOperatorStatusReachTime(op2, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
-		c.Assert(oc.checkAddOperator(op1, op2), IsFalse)
+		operator.SetOperatorStatusReachTime(op3, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
+		operator.SetOperatorStatusReachTime(op4, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
+		c.Assert(oc.checkAddOperator(op1, op2, op3, op4), IsFalse)
 		c.Assert(op1.Status(), Equals, operator.EXPIRED)
 		c.Assert(op2.Status(), Equals, operator.EXPIRED)
+		c.Assert(op3.Status(), Equals, operator.EXPIRED)
+		c.Assert(op4.Status(), Equals, operator.EXPIRED)
 	}
 	// finished op never timeout
 

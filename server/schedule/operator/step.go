@@ -124,8 +124,6 @@ func (el EvictLeader) CheckSafety(region *core.RegionInfo) error {
 
 // Influence calculates the store difference that current step makes.
 func (el EvictLeader) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
-	// TODO(MrCroxx): review me.
-	// ToStore/ToStores here is not deterministic, may be influence can be better calculated?
 	from := opInfluence.GetStoreInfluence(el.FromStore)
 	from.LeaderSize -= region.GetApproximateSize()
 	from.LeaderCount--
