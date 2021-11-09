@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tikv/pd/pkg/slice"
+
 	"github.com/tikv/pd/server/statistics"
 
 	"go.uber.org/zap"
@@ -70,12 +72,9 @@ func init() {
 				}
 				storeIDs = append(storeIDs, storeID)
 			}
-			if !contains(leadID, storeIDs) {
+			if !conf.setStore(leadID, storeIDs) {
 				return errs.ErrSchedulerConfig
 			}
-			conf.StoreLeadID = leadID
-			conf.StoreIDs = storeIDs
-
 			return nil
 		}
 	})
@@ -98,6 +97,16 @@ type grantHotRegionSchedulerConfig struct {
 	StoreLeadID uint64   `json:"store-leader-id"`
 }
 
+func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) bool {
+	ret := slice.AnyOf(peers, func(i int) bool {
+		return leaderID == peers[i]
+	})
+	if ret {
+		conf.StoreLeadID = leaderID
+		conf.StoreIDs = peers
+	}
+	return ret
+}
 func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
@@ -123,7 +132,9 @@ func (conf *grantHotRegionSchedulerConfig) getSchedulerName() string {
 }
 
 func (conf *grantHotRegionSchedulerConfig) has(storeID uint64) bool {
-	return contains(storeID, conf.StoreIDs)
+	return slice.AnyOf(conf.StoreIDs, func(i int) bool {
+		return storeID == conf.StoreIDs[i]
+	})
 }
 
 // grantLeaderScheduler transfers all hot peers to peers  and transfer leader to the fixed store
@@ -210,12 +221,11 @@ func (handler *grantHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *htt
 		_ = handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
 		return
 	}
-	if !contains(leaderID, storeIDs) {
+	if !handler.config.setStore(leaderID, storeIDs) {
 		_ = handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig)
 		return
 	}
 
-	handler.config.StoreIDs, handler.config.StoreLeadID = storeIDs, leaderID
 	if err = handler.config.Persist(); err != nil {
 		handler.config.StoreLeadID = 0
 		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -281,40 +291,32 @@ func (s *grantHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 }
 
 func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, infos []*storeLoadDetail) (ops []*operator.Operator) {
-	if s.r.Int()%2 == 1 {
-		for _, detail := range infos {
-			srcStoreID := detail.Info.Store.GetID()
+	isleader := s.r.Int()%2 == 1
+	for _, detail := range infos {
+		srcStoreID := detail.Info.Store.GetID()
+		if isleader {
 			if s.conf.has(srcStoreID) || len(detail.HotPeers) < 1 {
 				continue
 			}
-			for _, peer := range detail.HotPeers {
-				op, err := s.transfer(cluster, peer.RegionID, srcStoreID, false)
-				if err != nil {
-					log.Debug("fail to create transfer hot region operator", zap.Uint64("region-id", peer.RegionID),
-						zap.Uint64("src store id", srcStoreID), errs.ZapError(err))
-					continue
-				}
-				return []*operator.Operator{op}
-			}
-		}
-	} else {
-		for _, detail := range infos {
-			srcStoreID := detail.Info.Store.GetID()
+		} else {
 			if !s.conf.has(srcStoreID) || srcStoreID == s.conf.StoreLeadID {
 				continue
 			}
-			for _, peer := range detail.HotPeers {
-				op, err := s.transfer(cluster, peer.RegionID, srcStoreID, true)
-				if err != nil {
-					log.Debug("fail to create transfer hot region operator", zap.Uint64("region-id", peer.RegionID),
-						zap.Uint64("src store id", srcStoreID), errs.ZapError(err))
-					continue
-				}
-				return []*operator.Operator{op}
+		}
+
+		for _, peer := range detail.HotPeers {
+			if s.OpController.GetOperator(peer.RegionID) != nil {
+				continue
 			}
+			op, err := s.transfer(cluster, peer.RegionID, srcStoreID, isleader)
+			if err != nil {
+				log.Debug("fail to create grant hot region operator", zap.Uint64("region-id", peer.RegionID),
+					zap.Uint64("src store id", srcStoreID), errs.ZapError(err))
+				continue
+			}
+			return []*operator.Operator{op}
 		}
 	}
-
 	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 	return nil
 }
@@ -366,13 +368,4 @@ func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64,
 	} else {
 		return operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
-}
-
-func contains(id uint64, ids []uint64) bool {
-	for _, v := range ids {
-		if v == id {
-			return true
-		}
-	}
-	return false
 }
