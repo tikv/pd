@@ -319,6 +319,7 @@ func NewLabelSchedulerCommand() *cobra.Command {
 	return c
 }
 
+// NewGrantHotRegionSchedulerCommand returns a command to add a grant-hot-region-scheduler.
 func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "grant-hot-region-scheduler <store_lead_id> <store_id_1,store_id_2>",
