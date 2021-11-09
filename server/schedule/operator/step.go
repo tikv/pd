@@ -125,13 +125,13 @@ func (el EvictLeader) CheckSafety(region *core.RegionInfo) error {
 // Influence calculates the store difference that current step makes.
 func (el EvictLeader) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(el.FromStore)
+	to := opInfluence.GetStoreInfluence(el.ToStore)
+
+	// Only takes determinate store into account.
 	from.LeaderSize -= region.GetApproximateSize()
 	from.LeaderCount--
-	for _, ToStore := range el.ToStores {
-		to := opInfluence.GetStoreInfluence(ToStore)
-		to.LeaderSize += region.GetApproximateSize()
-		to.LeaderCount++
-	}
+	to.LeaderSize += region.GetApproximateSize()
+	to.LeaderCount++
 }
 
 // AddPeer is an OpStep that adds a region peer.
