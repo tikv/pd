@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -85,8 +86,10 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 }
 
 func (kv *etcdKVBase) Save(key, value string) error {
+	failpoint.Inject("etcdSaveFailed", func() {
+		failpoint.Return(errors.New("save failed"))
+	})
 	key = path.Join(kv.rootPath, key)
-
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
