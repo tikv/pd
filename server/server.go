@@ -168,7 +168,7 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
+func combineBuilderServerHTTPService(ctx context.Context, cfg *config.Config, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
 	userHandlers := make(map[string]http.Handler)
 	registerMap := make(map[string]struct{})
 
@@ -176,6 +176,10 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 	recovery := negroni.NewRecovery()
 	apiService.Use(recovery)
 	router := mux.NewRouter()
+
+	if len(cfg.Security.CertAllowedCN) > 0 || len(cfg.Security.CertAllowedSAN) > 0 {
+		apiService.Use(newTLSAuthMiddleware(cfg))
+	}
 
 	for _, build := range serviceBuilders {
 		handler, info, err := build(ctx, svr)
@@ -244,7 +248,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		return nil, err
 	}
 	if len(serviceBuilders) != 0 {
-		userHandlers, err := combineBuilderServerHTTPService(ctx, s, serviceBuilders...)
+		userHandlers, err := combineBuilderServerHTTPService(ctx, cfg, s, serviceBuilders...)
 		if err != nil {
 			return nil, err
 		}
