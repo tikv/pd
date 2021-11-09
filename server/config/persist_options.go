@@ -613,6 +613,8 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 		o.replicationMode.Store(&cfg.ReplicationMode)
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.SetClusterVersion(&cfg.ClusterVersion)
+		o.SetPlacementRuleEnabled(cfg.Replication.EnablePlacementRules)
+		o.SetPlacementRulesCacheEnabled(cfg.Replication.EnablePlacementRulesCache)
 	}
 	return nil
 }

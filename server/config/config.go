@@ -236,6 +236,7 @@ const (
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
+	defaultEnablePlacementRulesCache = false
 	defaultEnableGRPCGateway    = true
 	defaultDisableErrorVerbose  = true
 
@@ -1071,6 +1072,9 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	if !meta.IsDefined("enable-placement-rules") {
 		c.EnablePlacementRules = defaultEnablePlacementRules
+	}
+	if !meta.IsDefined("enable-placement-rules-cache") {
+		c.EnablePlacementRulesCache = defaultEnablePlacementRulesCache
 	}
 	if !meta.IsDefined("strictly-match-label") {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel

@@ -179,6 +179,9 @@
 ## Whether or not to enable placement rules.
 # enable-placement-rules = true
 
+## Whether or not to enable placement rule cache controls whether use cache during rule
+# enable-placement-rules-cache = true
+
 [dashboard]
 ## Configurations below are for the TiDB Dashboard embedded in the PD.
 
