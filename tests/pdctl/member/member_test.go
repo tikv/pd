@@ -102,13 +102,13 @@ func (s *memberTestSuite) TestMember(c *C) {
 	c.Assert(err, IsNil)
 	members, err := etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
-	c.Assert(len(members.Members), Equals, 3)
+	c.Assert(members.Members, HasLen, 3)
 	args = []string{"-u", pdAddr, "member", "delete", "name", name}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	members, err = etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
-	c.Assert(len(members.Members), Equals, 2)
+	c.Assert(members.Members, HasLen, 2)
 
 	// member delete id <member_id>
 	args = []string{"-u", pdAddr, "member", "delete", "id", fmt.Sprint(id)}
@@ -116,6 +116,6 @@ func (s *memberTestSuite) TestMember(c *C) {
 	c.Assert(err, IsNil)
 	members, err = etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
-	c.Assert(len(members.Members), Equals, 2)
+	c.Assert(members.Members, HasLen, 2)
 	c.Succeed()
 }

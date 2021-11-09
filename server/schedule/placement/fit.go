@@ -77,6 +77,11 @@ func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 	return nil
 }
 
+// GetRegionStores returns region's stores
+func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
+	return f.regionStores
+}
+
 // CompareRegionFit determines the superiority of 2 fits.
 // It returns 1 when the first fit result is better.
 func CompareRegionFit(a, b *RegionFit) int {
@@ -169,7 +174,11 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 		})
 	}
 	// Sort peers to keep the match result deterministic.
-	sort.Slice(peers, func(i, j int) bool { return peers[i].GetId() < peers[j].GetId() })
+	sort.Slice(peers, func(i, j int) bool {
+		// Put healthy peers in front to priority to fit healthy peers.
+		si, sj := stateScore(region, peers[i].GetId()), stateScore(region, peers[j].GetId())
+		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
+	})
 
 	return &fitWorker{
 		stores:        stores,
@@ -209,7 +218,6 @@ func (w *fitWorker) fitRule(index int) bool {
 		// 3. Not selected by other rules.
 		for _, p := range w.peers {
 			if MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) &&
-				p.matchRoleLoose(w.rules[index].Role) &&
 				!p.selected {
 				candidates = append(candidates, p)
 			}
@@ -318,13 +326,6 @@ func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 	return false
 }
 
-func (p *fitPeer) matchRoleLoose(role PeerRoleType) bool {
-	// non-learner cannot become learner. All other roles can migrate to
-	// others by scheduling. For example, Leader->Follower, Learner->Leader
-	// are possible, but Voter->Learner is impossible.
-	return role != Learner || core.IsLearner(p.Peer)
-}
-
 func isolationScore(peers []*fitPeer, labels []string) float64 {
 	var score float64
 	if len(labels) == 0 || len(peers) <= 1 {
@@ -354,4 +355,15 @@ func needIsolation(rules []*Rule) bool {
 		}
 	}
 	return false
+}
+
+func stateScore(region *core.RegionInfo, peerID uint64) int {
+	switch {
+	case region.GetDownPeer(peerID) != nil:
+		return 0
+	case region.GetPendingPeer(peerID) != nil:
+		return 1
+	default:
+		return 2
+	}
 }

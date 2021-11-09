@@ -130,6 +130,13 @@ func (bc *BasicCluster) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Re
 	return bc.Regions.GetAdjacentRegions(region)
 }
 
+// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
+func (bc *BasicCluster) GetRangeHoles() [][]string {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetRangeHoles()
+}
+
 // PauseLeaderTransfer prevents the store from been selected as source or
 // target store of TransferLeader.
 func (bc *BasicCluster) PauseLeaderTransfer(storeID uint64) error {
@@ -161,11 +168,11 @@ func (bc *BasicCluster) SlowStoreRecovered(storeID uint64) {
 	bc.Stores.SlowStoreRecovered(storeID)
 }
 
-// AttachAvailableFunc attaches an available function to a specific store.
-func (bc *BasicCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
+// ResetStoreLimit resets the limit for a specific store.
+func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Type, ratePerSec ...float64) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.AttachAvailableFunc(storeID, limitType, f)
+	bc.Stores.ResetStoreLimit(storeID, limitType, ratePerSec...)
 }
 
 // UpdateStoreStatus updates the information of the store.
@@ -337,11 +344,22 @@ func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionIn
 	return
 }
 
+func isRegionRecreated(region *RegionInfo) bool {
+	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
+	// prevent stale bootstrap region (first region in a cluster which covers the entire key
+	// range) from reporting stale info, we execlude regions that covers the entire key range
+	// here. Technically, it is possible for unsafe recover to recreate such region, but that
+	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
+	// better than recreating the cluster.
+	return region.GetRegionEpoch().GetVersion() == 1 && region.GetRegionEpoch().GetConfVer() == 1 && (len(region.GetStartKey()) != 0 || len(region.GetEndKey()) != 0)
+}
+
 // PreCheckPutRegion checks if the region is valid to put.
 func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
 	origin, overlaps := bc.getRelevantRegions(region)
 	for _, item := range overlaps {
-		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
+		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
+		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !isRegionRecreated(region) {
 			return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
 		}
 	}
@@ -354,7 +372,7 @@ func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, erro
 	// TiKV reports term after v3.0
 	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
 	// Region meta is stale, return an error.
-	if isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
+	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !isRegionRecreated(region) {
 		return origin, errRegionIsStale(region.GetMeta(), origin.GetMeta())
 	}
 
@@ -447,8 +465,6 @@ type StoreSetController interface {
 
 	SlowStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
-
-	AttachAvailableFunc(id uint64, limitType storelimit.Type, f func() bool)
 }
 
 // KeyRange is a key range.

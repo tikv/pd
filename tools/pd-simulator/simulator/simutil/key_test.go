@@ -33,7 +33,7 @@ func (t *testTableKeySuite) TestGenerateTableKeys(c *C) {
 	tableCount := 3
 	size := 10
 	keys := GenerateTableKeys(tableCount, size)
-	c.Assert(len(keys), Equals, size)
+	c.Assert(keys, HasLen, size)
 
 	for i := 1; i < len(keys); i++ {
 		c.Assert(keys[i-1], Less, keys[i])

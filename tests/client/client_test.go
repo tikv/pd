@@ -86,8 +86,7 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	defer cluster.Destroy()
 
 	endpoints := s.runServer(c, cluster)
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
-	c.Assert(err, IsNil)
+	cli := setupCli(c, s.ctx, endpoints)
 
 	var ts1, ts2 uint64
 	testutil.WaitUntil(c, func(c *C) bool {
@@ -102,13 +101,13 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	c.Assert(cluster.CheckTSOUnique(ts1), IsTrue)
 
 	leader := cluster.GetLeader()
-	s.waitLeader(c, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(c, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	err = cluster.GetServer(leader).Stop()
 	c.Assert(err, IsNil)
 	leader = cluster.WaitLeader()
 	c.Assert(leader, Not(Equals), "")
-	s.waitLeader(c, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(c, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	// Check TS won't fall back after leader changed.
 	testutil.WaitUntil(c, func(c *C) bool {
@@ -137,7 +136,7 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	defer cluster.Destroy()
 
 	endpoints := s.runServer(c, cluster)
-	cli := s.setupCli(c, endpoints, false)
+	cli := setupCli(c, s.ctx, endpoints)
 
 	var lastTS uint64
 	testutil.WaitUntil(c, func(c *C) bool {
@@ -223,8 +222,7 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 		})
 		allocatorLeaderMap[dcLocation] = pdName
 	}
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
-	c.Assert(err, IsNil)
+	cli := setupCli(c, s.ctx, endpoints)
 
 	// Check allocator leaders URL map.
 	cli.Close()
@@ -246,6 +244,40 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	}
 }
 
+func (s *clientTestSuite) TestTSOFollowerProxy(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	endpoints := s.runServer(c, cluster)
+	cli1 := setupCli(c, s.ctx, endpoints)
+	cli2 := setupCli(c, s.ctx, endpoints)
+	cli2.UpdateOption(pd.EnableTSOFollowerProxy, true)
+
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber)
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		go func() {
+			defer wg.Done()
+			var lastTS uint64
+			for i := 0; i < tsoRequestRound; i++ {
+				physical, logical, err := cli2.GetTS(context.Background())
+				c.Assert(err, IsNil)
+				ts := tsoutil.ComposeTS(physical, logical)
+				c.Assert(lastTS, Less, ts)
+				lastTS = ts
+				// After requesting with the follower proxy, request with the leader directly.
+				physical, logical, err = cli1.GetTS(context.Background())
+				c.Assert(err, IsNil)
+				ts = tsoutil.ComposeTS(physical, logical)
+				c.Assert(lastTS, Less, ts)
+				lastTS = ts
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
@@ -261,8 +293,7 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	defer cluster.Destroy()
 
 	endpoints := s.runServer(c, cluster)
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
-	c.Assert(err, IsNil)
+	cli := setupCli(c, s.ctx, endpoints)
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
@@ -279,7 +310,41 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	cluster.CheckClusterDCLocation()
 	cluster.WaitAllLeaders(c, dcLocationConfig)
 
-	wg := sync.WaitGroup{}
+	// Test a nonexistent dc-location for Local TSO
+	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
+	c.Assert(p, Equals, int64(0))
+	c.Assert(l, Equals, int64(0))
+	c.Assert(err, NotNil)
+	c.Assert(err, ErrorMatches, ".*unknown dc-location.*")
+
+	wg := &sync.WaitGroup{}
+	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
+
+	// assert global tso after resign leader
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`), IsNil)
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, NotNil)
+	c.Assert(pd.IsLeaderChange(err), IsTrue)
+	_, _, err = cli.GetTS(s.ctx)
+	c.Assert(err, IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"), IsNil)
+
+	// Test the TSO follower proxy while enabling the Local TSO.
+	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
+	cli.UpdateOption(pd.EnableTSOFollowerProxy, false)
+	// There will be a stream has been chosen before when the TSO Follower Proxy is enabled.
+	// We need to consume it before the client starts the next round of TSO request batch.
+	// TODO: fix this corner case.
+	_, _, err = cli.GetTS(context.TODO())
+	c.Assert(err, ErrorMatches, ".*context canceled.*")
+	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
+}
+
+func requestGlobalAndLocalTSO(c *C, wg *sync.WaitGroup, dcLocationConfig map[string]string, cli pd.Client) {
 	for _, dcLocation := range dcLocationConfig {
 		wg.Add(tsoRequestConcurrencyNumber)
 		for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -306,24 +371,6 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 		}
 	}
 	wg.Wait()
-
-	// Test a nonexistent dc-location for Local TSO
-	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
-	c.Assert(p, Equals, int64(0))
-	c.Assert(l, Equals, int64(0))
-	c.Assert(err, NotNil)
-
-	// assert global tso after resign leader
-	c.Assert(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`), IsNil)
-	defer failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember")
-	err = cluster.ResignLeader()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	_, _, err = cli.GetTS(s.ctx)
-	c.Assert(err, NotNil)
-	c.Assert(pd.IsLeaderChange(err), Equals, true)
-	_, _, err = cli.GetTS(s.ctx)
-	c.Assert(err, IsNil)
 }
 
 func (s *clientTestSuite) TestCustomTimeout(c *C) {
@@ -332,8 +379,7 @@ func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	defer cluster.Destroy()
 
 	endpoints := s.runServer(c, cluster)
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithCustomTimeoutOption(1*time.Second))
-	c.Assert(err, IsNil)
+	cli := setupCli(c, s.ctx, endpoints, pd.WithCustomTimeoutOption(1*time.Second))
 
 	start := time.Now()
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/customTimeout", "return(true)"), IsNil)
@@ -351,7 +397,7 @@ func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
 	defer cluster.Destroy()
 
 	endpoints := s.runServer(c, cluster)
-	cli := s.setupCli(c, endpoints, true)
+	cli := setupCli(c, s.ctx, endpoints, pd.WithForwardingOption(true))
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"), IsNil)
 	time.Sleep(200 * time.Millisecond)
@@ -374,7 +420,7 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient1(c *C) {
 	defer cluster.Destroy()
 
 	endpoints := s.runServer(c, cluster)
-	cli := s.setupCli(c, endpoints, true)
+	cli := setupCli(c, s.ctx, endpoints, pd.WithForwardingOption(true))
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
 	var lastTS uint64
@@ -402,7 +448,7 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient2(c *C) {
 	defer cluster.Destroy()
 
 	endpoints := s.runServer(c, cluster)
-	cli := s.setupCli(c, endpoints, true)
+	cli := setupCli(c, s.ctx, endpoints, pd.WithForwardingOption(true))
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
 	var lastTS uint64
@@ -454,13 +500,13 @@ func (s *clientTestSuite) runServer(c *C, cluster *tests.TestCluster) []string {
 	return endpoints
 }
 
-func (s *clientTestSuite) setupCli(c *C, endpoints []string, enableForwarding bool) pd.Client {
-	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithForwardingOption(enableForwarding))
+func setupCli(c *C, ctx context.Context, endpoints []string, opts ...pd.ClientOption) pd.Client {
+	cli, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, opts...)
 	c.Assert(err, IsNil)
 	return cli
 }
 
-func (s *clientTestSuite) waitLeader(c *C, cli client, leader string) {
+func waitLeader(c *C, cli client, leader string) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		cli.ScheduleCheckLeader()
 		return cli.GetLeaderAddr() == leader
@@ -539,7 +585,8 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	bootstrapServer(c, newHeader(s.srv), s.grpcPDClient)
 
 	s.ctx, s.clean = context.WithCancel(context.Background())
-	s.client, err = pd.NewClientWithContext(s.ctx, s.srv.GetEndpoints(), pd.SecurityOption{})
+	s.client = setupCli(c, s.ctx, s.srv.GetEndpoints())
+
 	c.Assert(err, IsNil)
 	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(s.ctx)
 	c.Assert(err, IsNil)
@@ -607,6 +654,7 @@ func (s *testClientSuite) TestNormalTSO(c *C) {
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
+			defer wg.Done()
 			var lastTS uint64
 			for i := 0; i < tsoRequestRound; i++ {
 				physical, logical, err := s.client.GetTS(context.Background())
@@ -615,7 +663,6 @@ func (s *testClientSuite) TestNormalTSO(c *C) {
 				c.Assert(lastTS, Less, ts)
 				lastTS = ts
 			}
-			wg.Done()
 		}()
 	}
 	wg.Wait()
@@ -626,6 +673,7 @@ func (s *testClientSuite) TestGetTSAsync(c *C) {
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
+			defer wg.Done()
 			tsFutures := make([]pd.TSFuture, tsoRequestRound)
 			for i := range tsFutures {
 				tsFutures[i] = s.client.GetTSAsync(context.Background())
@@ -638,7 +686,6 @@ func (s *testClientSuite) TestGetTSAsync(c *C) {
 				c.Assert(lastTS, Greater, ts)
 				lastTS = ts
 			}
-			wg.Done()
 		}()
 	}
 	wg.Wait()

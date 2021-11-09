@@ -18,6 +18,8 @@ import (
 	"sync"
 
 	"github.com/google/btree"
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 )
 
 type memoryKV struct {
@@ -51,6 +53,12 @@ func (kv *memoryKV) Load(key string) (string, error) {
 }
 
 func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
+	failpoint.Inject("withRangeLimit", func(val failpoint.Value) {
+		rangeLimit, ok := val.(int)
+		if ok && limit > rangeLimit {
+			failpoint.Return(nil, nil, errors.Errorf("limit %d exceed max rangeLimit %d", limit, rangeLimit))
+		}
+	})
 	kv.RLock()
 	defer kv.RUnlock()
 	keys := make([]string, 0, limit)

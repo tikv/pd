@@ -125,6 +125,8 @@ type RaftCluster struct {
 
 	// It's used to manage components.
 	componentManager *component.Manager
+
+	unsafeRecoveryController *unsafeRecoveryController
 }
 
 // Status saves some state information.
@@ -234,7 +236,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.ruleManager = placement.NewRuleManager(c.storage, c)
+	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
 		if err != nil {
@@ -261,6 +263,7 @@ func (c *RaftCluster) Start(s Server) error {
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
+	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
 
 	c.wg.Add(5)
 	go c.runCoordinator()
@@ -299,7 +302,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err := c.storage.LoadRegionsOnce(c.core.CheckAndPutRegion); err != nil {
+	if err := c.storage.LoadRegionsOnce(c.ctx, c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -391,8 +394,8 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.running = false
-	close(c.quit)
 	c.coordinator.stop()
+	close(c.quit)
 	c.Unlock()
 	c.wg.Wait()
 	log.Info("raftcluster is stopped")
@@ -410,6 +413,13 @@ func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.opController
+}
+
+// GetBasicCluster returns the basic cluster.
+func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core
 }
 
 // GetRegionScatter returns the region scatter.
@@ -494,6 +504,11 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 	c.Lock()
 	defer c.Unlock()
 	c.suspectRegions.Remove(id)
+}
+
+// GetUnsafeRecoveryController returns the unsafe recovery controller.
+func (c *RaftCluster) GetUnsafeRecoveryController() *unsafeRecoveryController {
+	return c.unsafeRecoveryController
 }
 
 // AddSuspectKeyRange adds the key range with the its ruleID as the key
@@ -615,6 +630,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
+	region.CorrectApproximateSize(origin)
+
 	hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
 	reportInterval := region.GetInterval()
@@ -893,6 +910,11 @@ func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionI
 	return c.core.GetAdjacentRegions(region)
 }
 
+// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
+func (c *RaftCluster) GetRangeHoles() [][]string {
+	return c.core.GetRangeHoles()
+}
+
 // UpdateStoreLabels updates a store's location labels
 // If 'force' is true, then update the store's labels forcibly.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
@@ -1102,11 +1124,6 @@ func (c *RaftCluster) SlowStoreEvicted(storeID uint64) error {
 // SlowStoreRecovered cleans the evicted state of a store.
 func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 	c.core.SlowStoreRecovered(storeID)
-}
-
-// AttachAvailableFunc attaches an available function to a specific store.
-func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
-	c.core.AttachAvailableFunc(storeID, limitType, f)
 }
 
 // UpStore up a store from offline
@@ -1345,7 +1362,7 @@ func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	c.Lock()
 	defer c.Unlock()
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.getRegionStoresLocked(region), c.opt.GetLocationLabels())
+		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.opt.GetLocationLabels())
 	}
 }
 
@@ -1353,6 +1370,16 @@ func (c *RaftCluster) getRegionStoresLocked(region *core.RegionInfo) []*core.Sto
 	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
 	for _, p := range region.GetPeers() {
 		if store := c.core.GetStore(p.StoreId); store != nil {
+			stores = append(stores, store)
+		}
+	}
+	return stores
+}
+
+func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, value string) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
+	for _, p := range region.GetPeers() {
+		if store := c.core.GetStore(p.StoreId); store != nil && !core.IsStoreContainLabel(store.GetMeta(), key, value) {
 			stores = append(stores, store)
 		}
 	}
@@ -1650,6 +1677,20 @@ func (c *RaftCluster) IsSchedulerExisted(name string) (bool, error) {
 	return c.coordinator.isSchedulerExisted(name)
 }
 
+// PauseOrResumeChecker pauses or resumes checker.
+func (c *RaftCluster) PauseOrResumeChecker(name string, t int64) error {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.pauseOrResumeChecker(name, t)
+}
+
+// IsCheckerPaused returns if checker is paused
+func (c *RaftCluster) IsCheckerPaused(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.isCheckerPaused(name)
+}
+
 // GetStoreLimiter returns the dynamic adjusting limiter
 func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 	return c.limiter
@@ -1677,7 +1718,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
-	if core.IsTiFlashStore(store) {
+	if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 		sc = config.StoreLimitConfig{
 			AddPeer:    config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 			RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
@@ -1701,7 +1742,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	cfg := c.opt.GetScheduleConfig().Clone()
 	for _, limitType := range storelimit.TypeNameValue {
-		c.AttachAvailableFunc(storeID, limitType, nil)
+		c.core.ResetStoreLimit(storeID, limitType)
 	}
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)

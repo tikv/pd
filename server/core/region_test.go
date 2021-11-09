@@ -157,6 +157,33 @@ func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 	}
 }
 
+func (s *testRegionInfoSuite) TestCorrectRegionApproximateSize(c *C) {
+	// size in MB
+	testcases := []struct {
+		originExists bool
+		originSize   uint64
+		size         uint64
+		expect       uint64
+	}{
+		{false, 0, 0, 1},
+		{false, 0, 2, 2},
+		{true, 0, 2, 2},
+		{true, 1, 2, 2},
+		{true, 2, 0, 2},
+	}
+	for _, t := range testcases {
+		var origin *RegionInfo
+		if t.originExists {
+			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			origin.approximateSize = int64(t.originSize)
+		}
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.approximateSize = int64(t.size)
+		r.CorrectApproximateSize(origin)
+		c.Assert(r.approximateSize, Equals, int64(t.expect))
+	}
+}
+
 func (s *testRegionInfoSuite) TestRegionRoundingFlow(c *C) {
 	testcases := []struct {
 		flow   uint64
@@ -202,6 +229,91 @@ func (s *testRegionInfoSuite) TestRegionWriteRate(c *C) {
 		bytesRate, keysRate := r.GetWriteRate()
 		c.Assert(bytesRate, Equals, t.expectBytesRate)
 		c.Assert(keysRate, Equals, t.expectKeysRate)
+	}
+}
+
+var _ = Suite(&testRegionGuideSuite{})
+
+type testRegionGuideSuite struct {
+	RegionGuide RegionGuideFunc
+}
+
+func (s *testRegionGuideSuite) SetUpSuite(c *C) {
+	s.RegionGuide = GenerateRegionGuideFunc(false)
+}
+
+func (s *testRegionGuideSuite) TestNeedSync(c *C) {
+	meta := &metapb.Region{
+		Id:          1000,
+		StartKey:    []byte("a"),
+		EndKey:      []byte("z"),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
+		Peers: []*metapb.Peer{
+			{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: 13, StoreId: 1, Role: metapb.PeerRole_Voter},
+		},
+	}
+	region := NewRegionInfo(meta, meta.Peers[0])
+
+	testcases := []struct {
+		optionsA []RegionCreateOption
+		optionsB []RegionCreateOption
+		needSync bool
+	}{
+		{
+			optionsB: []RegionCreateOption{WithLeader(nil)},
+			needSync: true,
+		},
+		{
+			optionsB: []RegionCreateOption{WithLeader(meta.Peers[1])},
+			needSync: true,
+		},
+		{
+			optionsB: []RegionCreateOption{WithPendingPeers(meta.Peers[1:2])},
+			needSync: true,
+		},
+		{
+			optionsB: []RegionCreateOption{WithDownPeers([]*pdpb.PeerStats{{Peer: meta.Peers[1], DownSeconds: 600}})},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(200), WithFlowRoundByDigit(2)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(300), WithFlowRoundByDigit(2)},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(250), WithFlowRoundByDigit(2)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(349), WithFlowRoundByDigit(2)},
+			needSync: false,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(200), WithFlowRoundByDigit(4)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(300), WithFlowRoundByDigit(4)},
+			needSync: false,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(4)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(200), WithFlowRoundByDigit(2)},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(127)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(0), WithFlowRoundByDigit(2)},
+			needSync: false,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(0), WithFlowRoundByDigit(2)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(127)},
+			needSync: true,
+		},
+	}
+
+	for _, t := range testcases {
+		regionA := region.Clone(t.optionsA...)
+		regionB := region.Clone(t.optionsB...)
+		_, _, _, needSync := s.RegionGuide(regionA, regionB)
+		c.Assert(needSync, Equals, t.needSync)
 	}
 }
 
@@ -325,7 +437,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 97)
-	c.Assert(len(regions.GetRegions()), Equals, 97)
+	c.Assert(regions.GetRegions(), HasLen, 97)
 
 	regions.SetRegion(region)
 	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
@@ -342,7 +454,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 97)
-	c.Assert(len(regions.GetRegions()), Equals, 97)
+	c.Assert(regions.GetRegions(), HasLen, 97)
 
 	// Test remove overlaps.
 	region = region.Clone(WithStartKey([]byte(fmt.Sprintf("%20d", 175))), WithNewRegionID(201))
@@ -351,7 +463,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 96)
-	c.Assert(len(regions.GetRegions()), Equals, 96)
+	c.Assert(regions.GetRegions(), HasLen, 96)
 	c.Assert(regions.GetRegion(201), NotNil)
 	c.Assert(regions.GetRegion(21), IsNil)
 	c.Assert(regions.GetRegion(18), IsNil)
@@ -366,7 +478,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 96)
-	c.Assert(len(regions.GetRegions()), Equals, 96)
+	c.Assert(regions.GetRegions(), HasLen, 96)
 	c.Assert(regions.GetRegion(201), NotNil)
 	c.Assert(regions.tree.TotalSize(), Equals, int64(30))
 	bytesRate, keysRate := regions.tree.TotalWriteRate()
@@ -393,25 +505,25 @@ func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
 		StartKey: []byte(fmt.Sprintf("%20d", 10)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
 	}, peer1)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsFalse)
 
 	region.leader = peer2
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 
 	region.leader = peer1
 	region.pendingPeers = append(region.pendingPeers, peer4)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 
 	region.pendingPeers = nil
 	region.learners = append(region.learners, peer2)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 
 	origin.learners = append(origin.learners, peer2, peer3)
 	region.learners = append(region.learners, peer4)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsFalse)
 
 	region.voters[2].StoreId = 4
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 }
 
 func checkRegions(c *C, regions *RegionsInfo) {

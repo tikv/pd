@@ -41,6 +41,11 @@ error = '''
 unsupported metrics type %v
 '''
 
+["PD:checker:ErrCheckerNotFound"]
+error = '''
+checker not found
+'''
+
 ["PD:client:ErrClientCreateTSOStream"]
 error = '''
 create TSO stream failed
@@ -119,6 +124,16 @@ store %v is unhealthy
 ["PD:core:ErrWrongRangeKeys"]
 error = '''
 wrong range keys
+'''
+
+["PD:crypto:ErrCryptoAppendCertsFromPEM"]
+error = '''
+cert pool append certs error
+'''
+
+["PD:crypto:ErrCryptoX509KeyPair"]
+error = '''
+x509 keypair error
 '''
 
 ["PD:dashboard:ErrDashboardStart"]
@@ -614,6 +629,11 @@ get local allocator failed, %s
 ["PD:tso:ErrLogicOverflow"]
 error = '''
 logic part overflow
+'''
+
+["PD:tso:ErrProxyTSOTimeout"]
+error = '''
+proxy tso timeout
 '''
 
 ["PD:tso:ErrResetUserTimestamp"]

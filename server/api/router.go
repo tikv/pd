@@ -67,6 +67,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/operators/{region_id}", operatorHandler.Get).Methods("GET")
 	apiRouter.HandleFunc("/operators/{region_id}", operatorHandler.Delete).Methods("DELETE")
 
+	checkerHandler := newCheckerHandler(svr, rd)
+	apiRouter.HandleFunc("/checker/{name}", checkerHandler.PauseOrResume).Methods("POST")
+	apiRouter.HandleFunc("/checker/{name}", checkerHandler.GetStatus).Methods("GET")
+
 	schedulerHandler := newSchedulerHandler(svr, rd)
 	apiRouter.HandleFunc("/schedulers", schedulerHandler.List).Methods("GET")
 	apiRouter.HandleFunc("/schedulers", schedulerHandler.Post).Methods("POST")
@@ -86,6 +90,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/config/default", confHandler.GetDefault).Methods("GET")
 	apiRouter.HandleFunc("/config/schedule", confHandler.GetSchedule).Methods("GET")
 	apiRouter.HandleFunc("/config/schedule", confHandler.SetSchedule).Methods("POST")
+	apiRouter.HandleFunc("/config/pd-server", confHandler.GetPDServer).Methods("GET")
 	apiRouter.HandleFunc("/config/replicate", confHandler.GetReplication).Methods("GET")
 	apiRouter.HandleFunc("/config/replicate", confHandler.SetReplication).Methods("POST")
 	apiRouter.HandleFunc("/config/label-property", confHandler.GetLabelProperty).Methods("GET")
@@ -154,6 +159,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/hotspot/regions/write", hotStatusHandler.GetHotWriteRegions).Methods("GET")
 	apiRouter.HandleFunc("/hotspot/regions/read", hotStatusHandler.GetHotReadRegions).Methods("GET")
 	apiRouter.HandleFunc("/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
+	apiRouter.HandleFunc("/hotspot/regions/history", hotStatusHandler.GetHistoryHotRegions).Methods("GET")
 
 	regionHandler := newRegionHandler(svr, rd)
 	clusterRouter.HandleFunc("/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")
@@ -186,6 +192,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/regions/accelerate-schedule", regionsHandler.AccelerateRegionsScheduleInRange).Methods("POST")
 	clusterRouter.HandleFunc("/regions/scatter", regionsHandler.ScatterRegions).Methods("POST")
 	clusterRouter.HandleFunc("/regions/split", regionsHandler.SplitRegions).Methods("POST")
+	clusterRouter.HandleFunc("/regions/range-holes", regionsHandler.GetRangeHoles).Methods("GET")
+	clusterRouter.HandleFunc("/regions/replicated", regionsHandler.CheckRegionsReplicated).Methods("GET").Queries("startKey", "{startKey}", "endKey", "{endKey}")
 
 	apiRouter.Handle("/version", newVersionHandler(rd)).Methods("GET")
 	apiRouter.Handle("/status", newStatusHandler(svr, rd)).Methods("GET")
@@ -256,6 +264,15 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
 	apiRouter.HandleFunc("/gc/safepoint", serviceGCSafepointHandler.List).Methods("GET")
 	apiRouter.HandleFunc("/gc/safepoint/{service_id}", serviceGCSafepointHandler.Delete).Methods("DELETE")
+
+	// unsafe admin operation API
+	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
+	clusterRouter.HandleFunc("/admin/unsafe/remove-failed-stores",
+		unsafeOperationHandler.RemoveFailedStores).Methods("POST")
+	clusterRouter.HandleFunc("/admin/unsafe/remove-failed-stores/show",
+		unsafeOperationHandler.GetFailedStoresRemovalStatus).Methods("GET")
+	clusterRouter.HandleFunc("/admin/unsafe/remove-failed-stores/history",
+		unsafeOperationHandler.GetFailedStoresRemovalHistory).Methods("GET")
 
 	// API to set or unset failpoints
 	failpoint.Inject("enableFailpointAPI", func() {

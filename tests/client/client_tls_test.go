@@ -189,6 +189,29 @@ func (s *clientTLSTestSuite) testTLSReload(
 	c.Assert(err, IsNil)
 	dcancel()
 	cli.Close()
+
+	// 7. test use raw bytes to init tls config
+	caData, certData, keyData := loadTLSContent(c,
+		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
+	ctx1, cancel1 := context.WithTimeout(s.ctx, 2*time.Second)
+	_, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
+		SSLCABytes:   caData,
+		SSLCertBytes: certData,
+		SSLKEYBytes:  keyData,
+	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	c.Assert(err, IsNil)
+	cancel1()
+}
+
+func loadTLSContent(c *C, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
+	var err error
+	caData, err = os.ReadFile(caPath)
+	c.Assert(err, IsNil)
+	certData, err = os.ReadFile(certPath)
+	c.Assert(err, IsNil)
+	keyData, err = os.ReadFile(keyPath)
+	c.Assert(err, IsNil)
+	return
 }
 
 // copyTLSFiles clones certs files to dst directory.
