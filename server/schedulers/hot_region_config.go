@@ -106,7 +106,6 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 		WritePeerPriorities:    adjustConfig(conf.lastQuerySupported, conf.WritePeerPriorities, getWritePeerPriorities),
 		StrictPickingStore:     conf.StrictPickingStore,
 		EnableForTiFlash:       conf.EnableForTiFlash,
-		ForbidRWType:           conf.ForbidRWType,
 	}
 }
 
@@ -139,8 +138,9 @@ type hotRegionSchedulerConfig struct {
 	StrictPickingStore    bool     `json:"strict-picking-store,string"`
 
 	// Separately control whether to start hotspot scheduling for TiFlash
-	EnableForTiFlash bool   `json:"enable-for-tiflash,string"`
-	ForbidRWType     string `json:"forbid-rw-type"`
+	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
+	// disable read or write scheduler, only for test
+	ForbidRWType string `json:"forbid-rw-type,omitempty"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
