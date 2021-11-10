@@ -409,6 +409,16 @@ func (c *RaftCluster) IsRunning() bool {
 	return c.running
 }
 
+// Context returns the context of RaftCluster.
+func (c *RaftCluster) Context() context.Context {
+	c.RLock()
+	defer c.RUnlock()
+	if c.running {
+		return c.ctx
+	}
+	return nil
+}
+
 // GetOperatorController returns the operator controller.
 func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	c.RLock()

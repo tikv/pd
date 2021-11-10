@@ -47,8 +47,7 @@ import (
 var (
 	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
 	// TODO: work as proxy.
-	ErrNotLeader = status.Errorf(codes.Unavailable, "not leader")
-	// ErrNotStarted is returned when current server is starting.
+	ErrNotLeader  = status.Errorf(codes.Unavailable, "not leader")
 	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
 )
 
@@ -1241,7 +1240,11 @@ func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 	if s.IsClosed() || s.cluster == nil {
 		return ErrNotStarted
 	}
-	return s.cluster.GetRegionSyncer().Sync(stream)
+	ctx := s.cluster.Context()
+	if ctx == nil {
+		return ErrNotStarted
+	}
+	return s.cluster.GetRegionSyncer().Sync(ctx, stream)
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.

@@ -42,11 +42,6 @@ const (
 	defaultHistoryBufferSize = 10000
 )
 
-var (
-	// ErrNotStarted is returned when current server is starting.
-	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
-)
-
 // ClientStream is the client side of the region syncer.
 type ClientStream interface {
 	Recv() (*pdpb.SyncRegionResponse, error)
@@ -78,7 +73,6 @@ type RegionSyncer struct {
 		streams      map[string]ServerStream
 		clientCtx    context.Context
 		clientCancel context.CancelFunc
-		serverCtx    context.Context
 	}
 	server    Server
 	wg        sync.WaitGroup
@@ -111,14 +105,9 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	var leaders []*metapb.Peer
 	ticker := time.NewTicker(syncerKeepAliveInterval)
 
-	s.mu.Lock()
-	s.mu.serverCtx = ctx
-	s.mu.Unlock()
-
 	defer func() {
 		ticker.Stop()
 		s.mu.Lock()
-		s.mu.serverCtx = nil
 		s.mu.streams = make(map[string]ServerStream)
 		s.mu.Unlock()
 	}()
@@ -165,15 +154,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 
 // Sync firstly tries to sync the history records to client.
 // then to sync the latest records.
-func (s *RegionSyncer) Sync(stream pdpb.PD_SyncRegionsServer) error {
-	s.mu.RLock()
-	ctx := s.mu.serverCtx
-	s.mu.RUnlock()
-
-	if ctx == nil {
-		return ErrNotStarted
-	}
-
+func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServer) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -295,9 +276,7 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.mu.serverCtx != nil {
-		s.mu.streams[name] = stream
-	}
+	s.mu.streams[name] = stream
 }
 
 func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
