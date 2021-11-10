@@ -109,6 +109,7 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	steps := []operator.OpStep{
 		operator.RemovePeer{FromStore: 2},
 		operator.AddPeer{ToStore: 2, PeerID: 4},
+		operator.EvictLeader{FromStore: 1, ToStore: 2, ToStores: []uint64{2}},
 	}
 	op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	op2 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)

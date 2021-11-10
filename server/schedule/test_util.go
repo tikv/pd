@@ -28,6 +28,8 @@ func ApplyOperatorStep(region *core.RegionInfo, op *operator.Operator) *core.Reg
 		switch s := step.(type) {
 		case operator.TransferLeader:
 			region = region.Clone(core.WithLeader(region.GetStorePeer(s.ToStore)))
+		case operator.EvictLeader:
+			region = region.Clone(core.WithLeader(region.GetStorePeer(s.ToStore)))
 		case operator.AddPeer:
 			if region.GetStorePeer(s.ToStore) != nil {
 				panic("Add peer that exists")
