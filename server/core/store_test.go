@@ -127,3 +127,32 @@ func (s *testStoreSuite) TestLowSpaceRatio(c *C) {
 	store.rawStats.Available = store.rawStats.Capacity >> 2
 	c.Assert(store.IsLowSpace(0.8), IsFalse)
 }
+
+func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
+	testdata := []struct {
+		bigger *StoreInfo
+		small  *StoreInfo
+	}{{
+		// store1 and store2 has same store available ratio and store1 less 50gb
+		bigger: NewStoreInfoWithAvailable(1, 20*gb, 100*gb),
+		small:  NewStoreInfoWithAvailable(2, 200*gb, 1000*gb),
+	}, {
+		// store1 and store2 has same available space and less than 50gb
+		bigger: NewStoreInfoWithAvailable(1, 10*gb, 1000*gb),
+		small:  NewStoreInfoWithAvailable(2, 10*gb, 100*gb),
+	}, {
+		// store1 and store2 has same available ratio less than 0.2
+		bigger: NewStoreInfoWithAvailable(1, 10*gb, 1000*gb),
+		small:  NewStoreInfoWithAvailable(2, 1*gb, 100*gb),
+	}, {
+		// store1 and store2 has same available ratio
+		// but the store1 ratio less than store2(10/50=0.1<100/200=0.5)
+		bigger: NewStoreInfoWithAvailable(1, 10*gb, 100*gb),
+		small:  NewStoreInfoWithAvailable(2, 100*gb, 1000*gb),
+	}}
+	for _, v := range testdata {
+		score1 := v.bigger.regionScoreV2(0, 0.8)
+		score2 := v.small.regionScoreV2(0, 0.8)
+		c.Assert(score1, Greater, score2)
+	}
+}
