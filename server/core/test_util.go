@@ -85,13 +85,12 @@ func NewTestRegionInfo(start, end []byte) *RegionInfo {
 }
 
 // NewStoreInfoWithAvailable is create with store
-func NewStoreInfoWithAvailable(id, available, capacity uint64) *StoreInfo {
-	amp := uint64(2)
+func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *StoreInfo {
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = capacity
 	stats.Available = available
 	usedSize := capacity - available
-	regionSize := (usedSize * amp) * 1000 / gb
+	regionSize := (float64(usedSize) * amp) / mb
 	store := NewStoreInfo(
 		&metapb.Store{
 			Id: id,
