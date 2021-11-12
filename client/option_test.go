@@ -37,6 +37,10 @@ func (s *testClientSuite) TestDynamicOptionChange(c *C) {
 	expectInterval := time.Millisecond
 	o.setMaxTSOBatchWaitInterval(expectInterval)
 	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, expectInterval)
+	expectInterval = time.Duration(float64(time.Millisecond) * 0.5)
+	o.setMaxTSOBatchWaitInterval(expectInterval)
+	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, expectInterval)
+	expectInterval = time.Duration(float64(time.Millisecond) * 1.5)
 	o.setMaxTSOBatchWaitInterval(expectInterval)
 	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, expectInterval)
 
