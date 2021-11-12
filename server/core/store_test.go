@@ -134,21 +134,36 @@ func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
 		small  *StoreInfo
 	}{{
 		// store1 and store2 has same store available ratio and store1 less 50gb
-		bigger: NewStoreInfoWithAvailable(1, 20*gb, 100*gb),
-		small:  NewStoreInfoWithAvailable(2, 200*gb, 1000*gb),
+		bigger: NewStoreInfoWithAvailable(1, 20*gb, 100*gb, 1.4),
+		small:  NewStoreInfoWithAvailable(2, 200*gb, 1000*gb, 1.4),
 	}, {
 		// store1 and store2 has same available space and less than 50gb
-		bigger: NewStoreInfoWithAvailable(1, 10*gb, 1000*gb),
-		small:  NewStoreInfoWithAvailable(2, 10*gb, 100*gb),
+		bigger: NewStoreInfoWithAvailable(1, 10*gb, 1000*gb, 1.4),
+		small:  NewStoreInfoWithAvailable(2, 10*gb, 100*gb, 1.4),
 	}, {
 		// store1 and store2 has same available ratio less than 0.2
-		bigger: NewStoreInfoWithAvailable(1, 10*gb, 1000*gb),
-		small:  NewStoreInfoWithAvailable(2, 1*gb, 100*gb),
+		bigger: NewStoreInfoWithAvailable(1, 10*gb, 1000*gb, 1.4),
+		small:  NewStoreInfoWithAvailable(2, 1*gb, 100*gb, 1.4),
 	}, {
 		// store1 and store2 has same available ratio
 		// but the store1 ratio less than store2(10/50=0.1<100/200=0.5)
-		bigger: NewStoreInfoWithAvailable(1, 10*gb, 100*gb),
-		small:  NewStoreInfoWithAvailable(2, 100*gb, 1000*gb),
+		bigger: NewStoreInfoWithAvailable(1, 10*gb, 100*gb, 1.4),
+		small:  NewStoreInfoWithAvailable(2, 100*gb, 1000*gb, 1.4),
+	}, {
+		// store1 and store2 has same usedSize and capacity,
+		// but the bigger's amp is bigger
+		bigger: NewStoreInfoWithAvailable(1, 10*gb, 100*gb, 1.5),
+		small:  NewStoreInfoWithAvailable(2, 10*gb, 100*gb, 1.4),
+	}, {
+		// store1 and store2 has same  capacity and regionSize（40g），
+		// but store1 has less available space size
+		bigger: NewStoreInfoWithAvailable(1, 60*gb, 100*gb, 1),
+		small:  NewStoreInfoWithAvailable(2, 80*gb, 100*gb, 2),
+	}, {
+		// store1 and store2 has same  capacity and store2(40g) has twice usedSize than store1(20g)
+		// but store1 has higher amp ,so store1(60g) has more regionSize(40g)
+		bigger: NewStoreInfoWithAvailable(1, 80*gb, 100*gb, 3),
+		small:  NewStoreInfoWithAvailable(2, 60*gb, 100*gb, 1),
 	}}
 	for _, v := range testdata {
 		score1 := v.bigger.regionScoreV2(0, 0.8)
