@@ -346,7 +346,6 @@ func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
 	A := float64(s.GetAvgAvailable()) / gb
 	C := float64(s.GetCapacity()) / gb
 	R := float64(s.GetRegionSize() + delta)
-	log.Info("score v2", zap.Float64("A", A), zap.Float64("C", C), zap.Float64("R", R))
 	if R < 0 {
 		R = float64(s.GetRegionSize())
 	}
