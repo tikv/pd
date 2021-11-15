@@ -330,7 +330,7 @@ type node struct {
 }
 
 func (n *node) length() int {
-	if len(n.indices) <= 0 {
+	if len(n.indices) == 0 {
 		return len(n.items)
 	}
 	return n.indices[len(n.indices)-1]
@@ -705,7 +705,7 @@ func (n *node) iterate(dir direction, start, stop Item, includeStart bool, hit b
 		if start != nil {
 			index, found = n.items.find(start)
 			if !found {
-				index = index - 1
+				index--
 			}
 		} else {
 			index = len(n.items) - 1

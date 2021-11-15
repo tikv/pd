@@ -1,0 +1,5 @@
+# Require review from domain experts when the PR modified significant config files.
+/server/config/config.go @tikv/pd-configuration-reviewer
+/server/schedulers/hot_region_config.go @tikv/pd-configuration-reviewer
+/conf/config.toml @tikv/pd-configuration-reviewer
+/metrics/grafana/pd.json @tikv/pd-configuration-reviewer

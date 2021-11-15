@@ -421,7 +421,6 @@ func (m *ModeManager) checkStoreStatus() (primaryDownCount, drDownCount, primary
 			} else {
 				primaryUpCount++
 			}
-
 		}
 		if labelValue == m.config.DRAutoSync.DR {
 			if down {
