@@ -950,7 +950,6 @@ func (h *Handler) PackHistoryHotReadRegions() ([]core.HistoryHotRegion, error) {
 	}
 	hotReadPeerRegions := hotReadRegions.AsPeer
 	return h.packHotRegions(hotReadPeerRegions, core.ReadType.String())
-
 }
 
 // PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
@@ -1013,8 +1012,8 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 
 // GetHistoryHotRegionIter return a iter which iter all qualified item .
 func (h *Handler) GetHistoryHotRegionIter(hotRegionTypes []string,
-	StartTime, EndTime int64) core.HotRegionStorageIterator {
-	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, StartTime, EndTime)
+	startTime, endTime int64) core.HotRegionStorageIterator {
+	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, startTime, endTime)
 	return iter
 }
 

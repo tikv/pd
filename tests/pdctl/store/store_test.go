@@ -230,7 +230,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 
 	allAddPeerLimit := make(map[string]map[string]interface{})
-	json.Unmarshal([]byte(output), &allAddPeerLimit)
+	json.Unmarshal(output, &allAddPeerLimit)
 	c.Assert(allAddPeerLimit["1"]["add-peer"].(float64), Equals, float64(20))
 	c.Assert(allAddPeerLimit["3"]["add-peer"].(float64), Equals, float64(20))
 	_, ok := allAddPeerLimit["2"]["add-peer"]
@@ -241,7 +241,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 
 	allRemovePeerLimit := make(map[string]map[string]interface{})
-	json.Unmarshal([]byte(output), &allRemovePeerLimit)
+	json.Unmarshal(output, &allRemovePeerLimit)
 	c.Assert(allRemovePeerLimit["1"]["remove-peer"].(float64), Equals, float64(20))
 	c.Assert(allRemovePeerLimit["3"]["remove-peer"].(float64), Equals, float64(25))
 	_, ok = allRemovePeerLimit["2"]["add-peer"]

@@ -730,7 +730,7 @@ func (s *configTestSuite) TestPDServerConfig(c *C) {
 	json.Unmarshal(output, &conf)
 
 	c.Assert(conf.UseRegionStorage, Equals, bool(true))
-	c.Assert(conf.MaxResetTSGap.Duration, Equals, time.Duration(24*time.Hour))
+	c.Assert(conf.MaxResetTSGap.Duration, Equals, 24*time.Hour)
 	c.Assert(conf.KeyType, Equals, "table")
 	c.Assert(conf.RuntimeServices, DeepEquals, typeutil.StringSlice([]string{}))
 	c.Assert(conf.MetricStorage, Equals, "")
