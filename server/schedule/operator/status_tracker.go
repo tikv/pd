@@ -104,8 +104,7 @@ func (trk *OpStatusTracker) IsEnd() bool {
 func (trk *OpStatusTracker) CheckExpired(exp time.Duration) bool {
 	trk.rw.Lock()
 	defer trk.rw.Unlock()
-	switch trk.current {
-	case CREATED:
+	if trk.current == CREATED {
 		if time.Since(trk.reachTimes[CREATED]) < exp {
 			return false
 		}
@@ -119,8 +118,7 @@ func (trk *OpStatusTracker) CheckExpired(exp time.Duration) bool {
 func (trk *OpStatusTracker) CheckTimeout(wait time.Duration) bool {
 	trk.rw.Lock()
 	defer trk.rw.Unlock()
-	switch trk.current {
-	case STARTED:
+	if trk.current == STARTED {
 		if time.Since(trk.reachTimes[STARTED]) < wait {
 			return false
 		}

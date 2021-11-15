@@ -1245,7 +1245,7 @@ func (s *testHotCacheSuite) TestUpdateCache(c *C) {
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 
-	/// For read flow
+	// For read flow
 	addRegionInfo(tc, read, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 512 * KB, 0, 0},
 		{2, []uint64{2, 1, 3}, 512 * KB, 0, 0},
