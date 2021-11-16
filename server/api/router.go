@@ -265,6 +265,15 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/gc/safepoint", serviceGCSafepointHandler.List).Methods("GET")
 	apiRouter.HandleFunc("/gc/safepoint/{service_id}", serviceGCSafepointHandler.Delete).Methods("DELETE")
 
+	// unsafe admin operation API
+	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
+	clusterRouter.HandleFunc("/admin/unsafe/remove-failed-stores",
+		unsafeOperationHandler.RemoveFailedStores).Methods("POST")
+	clusterRouter.HandleFunc("/admin/unsafe/remove-failed-stores/show",
+		unsafeOperationHandler.GetFailedStoresRemovalStatus).Methods("GET")
+	clusterRouter.HandleFunc("/admin/unsafe/remove-failed-stores/history",
+		unsafeOperationHandler.GetFailedStoresRemovalHistory).Methods("GET")
+
 	// API to set or unset failpoints
 	failpoint.Inject("enableFailpointAPI", func() {
 		apiRouter.PathPrefix("/fail").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
