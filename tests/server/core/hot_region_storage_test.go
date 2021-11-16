@@ -50,7 +50,7 @@ func (s *hotRegionHistorySuite) TestHotRegionStorage(c *C) {
 		func(cfg *config.Config, serverName string) {
 			cfg.Schedule.HotRegionCacheHitsThreshold = 0
 			cfg.Schedule.HotRegionsWriteInterval.Duration = 1000 * time.Millisecond
-			cfg.Schedule.HotRegionsResevervedDays = 1
+			cfg.Schedule.HotRegionsReservedDays = 1
 		},
 	)
 	c.Assert(err, IsNil)

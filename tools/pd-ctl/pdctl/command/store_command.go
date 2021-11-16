@@ -96,7 +96,7 @@ func NewSetStoreWeightCommand() *cobra.Command {
 // NewStoreLimitCommand returns a limit subcommand of storeCmd.
 func NewStoreLimitCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "limit [<type>]|[<store_id>|<all> [<key> <value>]... <limit> <type>]",
+		Use:   "limit [<store_id>|<all> [<key> <value>]... <limit> <type>]",
 		Short: "show or set a store's rate limit",
 		Long:  "show or set a store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Run:   storeLimitCommandFunc,

@@ -11,47 +11,50 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package api
 
 import (
-	"archive/zip"
-	"bytes"
+	"encoding/json"
 	"fmt"
-	"io/ioutil"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server"
 )
 
-var _ = Suite(&ProfSuite{})
+var _ = Suite(&testUnsafeAPISuite{})
 
-type ProfSuite struct {
+type testUnsafeAPISuite struct {
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *ProfSuite) SetUpSuite(c *C) {
+func (s *testUnsafeAPISuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = mustNewServer(c)
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/debug", addr, apiPrefix)
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/unsafe", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
 }
 
-func (s *ProfSuite) TearDownSuite(c *C) {
+func (s *testUnsafeAPISuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *ProfSuite) TestGetZip(c *C) {
-	rsp, err := testDialClient.Get(s.urlPrefix + "/pprof/zip?" + "seconds=5s")
+func (s *testUnsafeAPISuite) TestRemoveFailedStores(c *C) {
+	input := map[uint64]string{1: ""}
+	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	body, err := ioutil.ReadAll(rsp.Body)
+	err = postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
 	c.Assert(err, IsNil)
-	c.Assert(body, NotNil)
-	zipReader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	// Test show
+	var output []string
+	err = readJSON(testDialClient, s.urlPrefix+"/remove-failed-stores/show", &output)
 	c.Assert(err, IsNil)
-	c.Assert(zipReader.File, HasLen, 7)
+	// Test history
+	err = readJSON(testDialClient, s.urlPrefix+"/remove-failed-stores/history", &output)
+	c.Assert(err, IsNil)
 }

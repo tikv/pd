@@ -193,6 +193,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/regions/scatter", regionsHandler.ScatterRegions).Methods("POST")
 	clusterRouter.HandleFunc("/regions/split", regionsHandler.SplitRegions).Methods("POST")
 	clusterRouter.HandleFunc("/regions/range-holes", regionsHandler.GetRangeHoles).Methods("GET")
+	clusterRouter.HandleFunc("/regions/replicated", regionsHandler.CheckRegionsReplicated).Methods("GET").Queries("startKey", "{startKey}", "endKey", "{endKey}")
 
 	apiRouter.Handle("/version", newVersionHandler(rd)).Methods("GET")
 	apiRouter.Handle("/status", newStatusHandler(svr, rd)).Methods("GET")
@@ -263,6 +264,15 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
 	apiRouter.HandleFunc("/gc/safepoint", serviceGCSafepointHandler.List).Methods("GET")
 	apiRouter.HandleFunc("/gc/safepoint/{service_id}", serviceGCSafepointHandler.Delete).Methods("DELETE")
+
+	// unsafe admin operation API
+	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
+	clusterRouter.HandleFunc("/admin/unsafe/remove-failed-stores",
+		unsafeOperationHandler.RemoveFailedStores).Methods("POST")
+	clusterRouter.HandleFunc("/admin/unsafe/remove-failed-stores/show",
+		unsafeOperationHandler.GetFailedStoresRemovalStatus).Methods("GET")
+	clusterRouter.HandleFunc("/admin/unsafe/remove-failed-stores/history",
+		unsafeOperationHandler.GetFailedStoresRemovalHistory).Methods("GET")
 
 	// API to set or unset failpoints
 	failpoint.Inject("enableFailpointAPI", func() {

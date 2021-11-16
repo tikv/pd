@@ -48,7 +48,6 @@ type HotRegionStorage struct {
 	batchHotInfo            map[string]*HistoryHotRegion
 	remianedDays            int64
 	pullInterval            time.Duration
-	compactionCountdown     int
 	hotRegionInfoCtx        context.Context
 	hotRegionInfoCancel     context.CancelFunc
 	hotRegionStorageHandler HotRegionStorageHandler
@@ -94,8 +93,6 @@ type HotRegionStorageHandler interface {
 }
 
 const (
-	// leveldb will run compaction after 30 times delete.
-	defaultCompactionTime = 30
 	// delete will run at this o`clock.
 	defaultDeleteTime = 4
 )
@@ -146,7 +143,6 @@ func NewHotRegionsStorage(
 		batchHotInfo:            make(map[string]*HistoryHotRegion),
 		remianedDays:            remianedDays,
 		pullInterval:            pullInterval,
-		compactionCountdown:     defaultCompactionTime,
 		hotRegionInfoCtx:        hotRegionInfoCtx,
 		hotRegionInfoCancel:     hotRegionInfoCancle,
 		hotRegionStorageHandler: hotRegionStorageHandler,
@@ -166,7 +162,7 @@ func (h *HotRegionStorage) backgroundDelete() {
 	next := time.Date(now.Year(), now.Month(), now.Day(), defaultDeleteTime, 0, 0, 0, now.Location())
 	d := next.Sub(now)
 	if d < 0 {
-		d = d + 24*time.Hour
+		d += 24 * time.Hour
 	}
 	isFirst := true
 	ticker := time.NewTicker(d)
@@ -309,16 +305,6 @@ func (h *HotRegionStorage) delete() error {
 	}
 	if err := db.Write(batch, nil); err != nil {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
-	}
-	h.compactionCountdown--
-	if h.compactionCountdown == 0 {
-		h.compactionCountdown = defaultCompactionTime
-		for _, hotRegionType := range HotRegionTypes {
-			startKey := HotRegionStorePath(hotRegionType, 0, 0)
-			endTime := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).Unix()
-			endKey := HotRegionStorePath(hotRegionType, endTime, math.MaxInt64)
-			db.CompactRange(util.Range{Start: []byte(startKey), Limit: []byte(endKey)})
-		}
 	}
 	return nil
 }

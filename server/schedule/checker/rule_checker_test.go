@@ -724,6 +724,38 @@ func (s *testRuleCheckerSuite) TestSkipFixOrphanPeerIfSelectedPeerisPendingOrDow
 	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
 }
 
+func (s *testRuleCheckerSuite) TestPriorityFitHealthPeers(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+	r1 := s.cluster.GetRegion(1)
+
+	// set peer3 to pending
+	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetPeer(3)}))
+	s.cluster.PutRegion(r1)
+
+	var remove operator.RemovePeer
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op.Step(0), FitsTypeOf, remove)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+
+	// set peer3 to down
+	r1 = r1.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{
+			Peer:        r1.GetStorePeer(3),
+			DownSeconds: 42,
+		},
+	}))
+	r1 = r1.Clone(core.WithPendingPeers(nil))
+	s.cluster.PutRegion(r1)
+
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op.Step(0), FitsTypeOf, remove)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+}
+
 // Ref https://github.com/tikv/pd/issues/4140
 func (s *testRuleCheckerSuite) TestDemoteVoter(c *C) {
 	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})

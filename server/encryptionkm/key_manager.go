@@ -189,7 +189,7 @@ func newKeyManagerImpl(
 		helper:                helper,
 	}
 	// Load encryption keys from storage.
-	_, err = m.loadKeys()
+	err = m.loadKeys()
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +267,7 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 				errs.ZapError(errs.ErrEncryptionKeysWatcher, resp.Err()))
 		}
 
-		if _, err := m.loadKeys(); err != nil {
+		if err := m.loadKeys(); err != nil {
 			log.Error("encryption key reload failed", errs.ZapError(err))
 		}
 	}
@@ -336,10 +336,11 @@ func (m *KeyManager) loadKeysImpl() (keys *encryptionpb.KeyDictionary, err error
 }
 
 // loadKeys reload keys from etcd storage.
-func (m *KeyManager) loadKeys() (*encryptionpb.KeyDictionary, error) {
+func (m *KeyManager) loadKeys() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.loadKeysImpl()
+	_, err := m.loadKeysImpl()
+	return err
 }
 
 // rotateKeyIfNeeded rotate key if one of the following condition is meet.
