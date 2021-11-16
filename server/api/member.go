@@ -244,8 +244,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 		return
 	}
 	for k, v := range input {
-		switch k {
-		case "leader-priority":
+		if k == "leader-priority" {
 			priority, ok := v.(float64)
 			if !ok {
 				h.rd.JSON(w, http.StatusBadRequest, "bad format leader priority")

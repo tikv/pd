@@ -821,3 +821,100 @@ func (s *testRuleCheckerSuite) TestOfflineAndDownStore(c *C) {
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "replace-rule-down-peer")
 }
+
+func (s *testRuleCheckerSuite) TestPriorityFitHealthPeers(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+	r1 := s.cluster.GetRegion(1)
+
+	// set peer3 to pending
+	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetPeer(3)}))
+	s.cluster.PutRegion(r1)
+
+	var remove operator.RemovePeer
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op.Step(0), FitsTypeOf, remove)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+
+	// set peer3 to down
+	r1 = r1.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{
+			Peer:        r1.GetStorePeer(3),
+			DownSeconds: 42,
+		},
+	}))
+	r1 = r1.Clone(core.WithPendingPeers(nil))
+	s.cluster.PutRegion(r1)
+
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op.Step(0), FitsTypeOf, remove)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+}
+
+// Ref https://github.com/tikv/pd/issues/4140
+func (s *testRuleCheckerSuite) TestDemoteVoter(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z4"})
+	region := s.cluster.AddLeaderRegion(1, 1, 4)
+	rule := &placement.Rule{
+		GroupID: "pd",
+		ID:      "test",
+		Role:    placement.Voter,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "zone",
+				Op:     placement.In,
+				Values: []string{"z1"},
+			},
+		},
+	}
+	rule2 := &placement.Rule{
+		GroupID: "pd",
+		ID:      "test2",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "zone",
+				Op:     placement.In,
+				Values: []string{"z4"},
+			},
+		},
+	}
+	s.ruleManager.SetRule(rule)
+	s.ruleManager.SetRule(rule2)
+	s.ruleManager.DeleteRule("pd", "default")
+	op := s.rc.Check(region)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "fix-demote-voter")
+}
+
+func (s *testRuleCheckerSuite) TestOfflineAndDownStore(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z4"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z4"})
+	region := s.cluster.AddLeaderRegion(1, 1, 2, 3)
+	op := s.rc.Check(region)
+	c.Assert(op, IsNil)
+	// assert rule checker should generate replace offline peer operator after cached
+	s.cluster.SetStoreOffline(1)
+	op = s.rc.Check(region)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
+	// re-cache the regionFit
+	s.cluster.SetStoreUp(1)
+	op = s.rc.Check(region)
+	c.Assert(op, IsNil)
+
+	// assert rule checker should generate replace down peer operator after cached
+	s.cluster.SetStoreDown(2)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(2), DownSeconds: 60000}}))
+	op = s.rc.Check(region)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "replace-rule-down-peer")
+}

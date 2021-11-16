@@ -92,7 +92,7 @@ func GetBackupInfo(client *clientv3.Client, pdAddr string) (*BackupInfo, error) 
 	return backInfo, nil
 }
 
-//OutputToFile output the backupInfo to the file.
+// OutputToFile output the backupInfo to the file.
 func OutputToFile(backInfo *BackupInfo, f *os.File) error {
 	w := bufio.NewWriter(f)
 	defer w.Flush()

@@ -34,11 +34,11 @@ var (
 )
 
 // InitHTTPSClient creates https client with ca file
-func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
+func InitHTTPSClient(caPath, certPath, keyPath string) error {
 	tlsInfo := transport.TLSInfo{
-		CertFile:      CertPath,
-		KeyFile:       KeyPath,
-		TrustedCAFile: CAPath,
+		CertFile:      certPath,
+		KeyFile:       keyPath,
+		TrustedCAFile: caPath,
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {

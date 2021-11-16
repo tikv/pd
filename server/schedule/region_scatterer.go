@@ -60,7 +60,7 @@ func (s *selectedStores) Put(id uint64, group string) {
 		distribution = map[uint64]uint64{}
 		distribution[id] = 0
 	}
-	distribution[id] = distribution[id] + 1
+	distribution[id]++
 	s.groupDistribution.Put(group, distribution)
 }
 

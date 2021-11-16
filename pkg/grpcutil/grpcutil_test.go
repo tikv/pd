@@ -51,7 +51,7 @@ func (s *gRPCUtilSuite) TestToTLSConfig(c *C) {
 	_, err = tlsConfig.ToTLSConfig()
 	c.Assert(errors.ErrorEqual(err, errs.ErrCryptoX509KeyPair), IsTrue)
 
-	//test wrong ca bytes
+	// test wrong ca bytes
 	tlsConfig.SSLCertBytes = certData
 	tlsConfig.SSLCABytes = []byte("invalid ca")
 	_, err = tlsConfig.ToTLSConfig()
