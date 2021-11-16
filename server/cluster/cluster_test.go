@@ -1141,9 +1141,15 @@ func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluste
 	return &testCluster{RaftCluster: rc}
 }
 
-func newTestRaftCluster(ctx context.Context, id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
+func newTestRaftCluster(
+	ctx context.Context,
+	id id.Allocator,
+	opt *config.PersistOptions,
+	storage *core.Storage,
+	basicCluster *core.BasicCluster,
+) *RaftCluster {
 	rc := &RaftCluster{serverCtx: ctx}
-	rc.InitCluster(id, opt, storage, basicCluster)
+	rc.InitCluster(id, opt, storage, core.NewMemoryStorage(), basicCluster)
 	return rc
 }
 

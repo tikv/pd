@@ -389,7 +389,7 @@ func (c *coordinator) run() {
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
 	c.cluster.opt.SetScheduleConfig(scheduleCfg)
-	if err := c.cluster.opt.Persist(c.cluster.storage); err != nil {
+	if err := c.cluster.opt.Persist(c.cluster.storageV2); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
 
@@ -657,7 +657,7 @@ func (c *coordinator) removeScheduler(name string) error {
 		return err
 	}
 
-	if err := opt.Persist(c.cluster.storage); err != nil {
+	if err := opt.Persist(c.cluster.storageV2); err != nil {
 		log.Error("the option can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
