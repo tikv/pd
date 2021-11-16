@@ -1216,7 +1216,7 @@ func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
 	}
 }
 
-func checkRegionsKV(c *C, s *core.Storage, regions []*core.RegionInfo) {
+func checkRegionsKV(c *C, s core.MetaStorage, regions []*core.RegionInfo) {
 	if s != nil {
 		for _, region := range regions {
 			var meta metapb.Region

@@ -121,7 +121,7 @@ type Server struct {
 	// for encryption
 	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
-	storage *core.Storage
+	storage *core.Storage /* NOTICE: this field will be removed later. */
 	// for etcd storage operation.
 	etcdStorage *core.EtcdStorage
 	// for basicCluster operation.

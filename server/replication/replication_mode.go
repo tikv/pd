@@ -63,7 +63,7 @@ type ModeManager struct {
 
 	sync.RWMutex
 	config         config.ReplicationModeConfig
-	storage        *core.Storage
+	storage        core.ReplicationStatusStorage
 	cluster        opt.Cluster
 	fileReplicater FileReplicater
 
@@ -82,7 +82,7 @@ type ModeManager struct {
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
-func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, cluster opt.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
+func NewReplicationModeManager(config config.ReplicationModeConfig, storage core.ReplicationStatusStorage, cluster opt.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
 	m := &ModeManager{
 		initTime:              time.Now(),
 		config:                config,

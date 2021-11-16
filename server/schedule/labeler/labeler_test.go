@@ -32,7 +32,7 @@ func TestT(t *testing.T) {
 var _ = Suite(&testLabelerSuite{})
 
 type testLabelerSuite struct {
-	store   *core.Storage
+	store   core.RuleStorage
 	labeler *RegionLabeler
 }
 

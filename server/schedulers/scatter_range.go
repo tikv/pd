@@ -51,7 +51,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(ScatterRangeType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(ScatterRangeType, func(opController *schedule.OperatorController, storage core.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &scatterRangeSchedulerConfig{
 			storage: storage,
 		}
@@ -75,7 +75,7 @@ const (
 
 type scatterRangeSchedulerConfig struct {
 	mu        sync.RWMutex
-	storage   *core.Storage
+	storage   core.ConfigStorage
 	RangeName string `json:"range-name"`
 	StartKey  string `json:"start-key"`
 	EndKey    string `json:"end-key"`

@@ -59,7 +59,7 @@ type Server interface {
 	ClusterID() uint64
 	GetMemberInfo() *pdpb.Member
 	GetLeader() *pdpb.Member
-	GetStorage() *core.Storage
+	GetStorage() *core.Storage /* NOTICE: this method will be removed later. */
 	Name() string
 	GetRegions() []*core.RegionInfo
 	GetTLSConfig() *grpcutil.TLSConfig

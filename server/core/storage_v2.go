@@ -39,59 +39,26 @@ import (
 // V2 is just a temp name, we will rename it to Storage eventually.
 // TODO: replace the core.Storage with this interface later.
 type StorageV2 interface {
-	kv.Base
-
-	LoadConfig(cfg interface{}) (bool, error)
-	SaveConfig(cfg interface{}) error
-
-	LoadMeta(meta *metapb.Cluster) (bool, error)
-	SaveMeta(meta *metapb.Cluster) error
-
-	LoadStore(storeID uint64, store *metapb.Store) (bool, error)
-	SaveStore(store *metapb.Store) error
-	SaveStoreWeight(storeID uint64, leader, region float64) error
-	LoadStores(f func(store *StoreInfo)) error
-	DeleteStore(store *metapb.Store) error
-
-	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
-	LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error
-	SaveRegion(region *metapb.Region) error
-	DeleteRegion(region *metapb.Region) error
-
-	LoadRules(f func(k, v string)) error
-	SaveRule(ruleKey string, rule interface{}) error
-	DeleteRule(ruleKey string) error
-	LoadRuleGroups(f func(k, v string)) error
-	SaveRuleGroup(groupID string, group interface{}) error
-	DeleteRuleGroup(groupID string) error
-
-	LoadRegionRules(f func(k, v string)) error
-	SaveRegionRule(ruleKey string, rule interface{}) error
-	DeleteRegionRule(ruleKey string) error
-
-	LoadComponent(component interface{}) (bool, error)
-	SaveComponent(component interface{}) error
-
-	LoadReplicationStatus(mode string, status interface{}) (bool, error)
-	SaveReplicationStatus(mode string, status interface{}) error
-
-	LoadScheduleConfig(scheduleName string) (string, error)
-	LoadAllScheduleConfig() ([]string, []string, error)
-	SaveScheduleConfig(scheduleName string, data []byte) error
-	RemoveScheduleConfig(scheduleName string) error
-
-	LoadGCSafePoint() (uint64, error)
-	SaveGCSafePoint(safePoint uint64) error
-
-	LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error)
-	LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error)
-	SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
-	RemoveServiceGCSafePoint(serviceID string) error
+	ConfigStorage
+	MetaStorage
+	RuleStorage
+	ComponentStorage
+	ReplicationStatusStorage
+	GCSafePointStorage
 }
 
 type defaultStorage struct {
 	kv.Base
 	encryptionKeyManager *encryptionkm.KeyManager
+}
+
+// ConfigStorage defines the storage operations on the config.
+type ConfigStorage interface {
+	LoadConfig(cfg interface{}) (bool, error)
+	SaveConfig(cfg interface{}) error
+	LoadAllScheduleConfig() ([]string, []string, error)
+	SaveScheduleConfig(scheduleName string, data []byte) error
+	RemoveScheduleConfig(scheduleName string) error
 }
 
 // LoadConfig loads config from configPath then unmarshal it to cfg.
@@ -117,6 +84,43 @@ func (s *defaultStorage) SaveConfig(cfg interface{}) error {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
 	return s.Save(configPath, string(value))
+}
+
+// LoadAllScheduleConfig loads all schedulers' config.
+func (s *defaultStorage) LoadAllScheduleConfig() ([]string, []string, error) {
+	prefix := customScheduleConfigPath + "/"
+	keys, values, err := s.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 1000)
+	for i, key := range keys {
+		keys[i] = strings.TrimPrefix(key, prefix)
+	}
+	return keys, values, err
+}
+
+// SaveScheduleConfig saves the config of scheduler.
+func (s *defaultStorage) SaveScheduleConfig(scheduleName string, data []byte) error {
+	configPath := path.Join(customScheduleConfigPath, scheduleName)
+	return s.Save(configPath, string(data))
+}
+
+// RemoveScheduleConfig removes the config of scheduler.
+func (s *defaultStorage) RemoveScheduleConfig(scheduleName string) error {
+	configPath := path.Join(customScheduleConfigPath, scheduleName)
+	return s.Remove(configPath)
+}
+
+// MetaStorage defines the storage operations on the PD cluster meta info.
+type MetaStorage interface {
+	LoadMeta(meta *metapb.Cluster) (bool, error)
+	SaveMeta(meta *metapb.Cluster) error
+	LoadStore(storeID uint64, store *metapb.Store) (bool, error)
+	SaveStore(store *metapb.Store) error
+	SaveStoreWeight(storeID uint64, leader, region float64) error
+	LoadStores(f func(store *StoreInfo)) error
+	DeleteStore(store *metapb.Store) error
+	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
+	LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error
+	SaveRegion(region *metapb.Region) error
+	DeleteRegion(region *metapb.Region) error
 }
 
 // LoadMeta loads cluster meta from the storage. This method will only
@@ -315,32 +319,26 @@ func (s *defaultStorage) DeleteRegion(region *metapb.Region) error {
 	return s.Remove(regionPath(region.GetId()))
 }
 
-// SaveRule stores a rule cfg to the rulesPath.
-func (s *defaultStorage) SaveRule(ruleKey string, rule interface{}) error {
-	return s.SaveJSON(rulesPath, ruleKey, rule)
-}
-
-// DeleteRule removes a rule from storage.
-func (s *defaultStorage) DeleteRule(ruleKey string) error {
-	return s.Remove(path.Join(rulesPath, ruleKey))
+// RuleStorage defines the storage operations on the rule.
+type RuleStorage interface {
+	LoadRules(f func(k, v string)) error
+	SaveRule(ruleKey string, rule interface{}) error
+	DeleteRule(ruleKey string) error
+	LoadRuleGroups(f func(k, v string)) error
+	SaveRuleGroup(groupID string, group interface{}) error
+	DeleteRuleGroup(groupID string) error
+	LoadRegionRules(f func(k, v string)) error
+	SaveRegionRule(ruleKey string, rule interface{}) error
+	DeleteRegionRule(ruleKey string) error
 }
 
 // LoadRules loads placement rules from storage.
 func (s *defaultStorage) LoadRules(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(rulesPath+"/", f)
+	return s.loadRangeByPrefix(rulesPath+"/", f)
 }
 
-// SaveJSON saves json format data to storage.
-func (s *defaultStorage) SaveJSON(prefix, key string, data interface{}) error {
-	value, err := json.Marshal(data)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
-	}
-	return s.Save(path.Join(prefix, key), string(value))
-}
-
-// LoadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
-func (s *defaultStorage) LoadRangeByPrefix(prefix string, f func(k, v string)) error {
+// loadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
+func (s *defaultStorage) loadRangeByPrefix(prefix string, f func(k, v string)) error {
 	nextKey := prefix
 	endKey := clientv3.GetPrefixRangeEnd(prefix)
 	for {
@@ -358,14 +356,32 @@ func (s *defaultStorage) LoadRangeByPrefix(prefix string, f func(k, v string)) e
 	}
 }
 
+// SaveRule stores a rule cfg to the rulesPath.
+func (s *defaultStorage) SaveRule(ruleKey string, rule interface{}) error {
+	return s.saveJSON(rulesPath, ruleKey, rule)
+}
+
+// DeleteRule removes a rule from storage.
+func (s *defaultStorage) DeleteRule(ruleKey string) error {
+	return s.Remove(path.Join(rulesPath, ruleKey))
+}
+
+func (s *defaultStorage) saveJSON(prefix, key string, data interface{}) error {
+	value, err := json.Marshal(data)
+	if err != nil {
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
+	}
+	return s.Save(path.Join(prefix, key), string(value))
+}
+
 // LoadRuleGroups loads all rule groups from storage.
 func (s *defaultStorage) LoadRuleGroups(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(ruleGroupPath+"/", f)
+	return s.loadRangeByPrefix(ruleGroupPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.
 func (s *defaultStorage) SaveRuleGroup(groupID string, group interface{}) error {
-	return s.SaveJSON(ruleGroupPath, groupID, group)
+	return s.saveJSON(ruleGroupPath, groupID, group)
 }
 
 // DeleteRuleGroup removes a rule group from storage.
@@ -375,17 +391,23 @@ func (s *defaultStorage) DeleteRuleGroup(groupID string) error {
 
 // LoadRegionRules loads region rules from storage.
 func (s *defaultStorage) LoadRegionRules(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(regionLabelPath+"/", f)
+	return s.loadRangeByPrefix(regionLabelPath+"/", f)
 }
 
 // SaveRegionRule saves a region rule to the storage.
 func (s *defaultStorage) SaveRegionRule(ruleKey string, rule interface{}) error {
-	return s.SaveJSON(regionLabelPath, ruleKey, rule)
+	return s.saveJSON(regionLabelPath, ruleKey, rule)
 }
 
 // DeleteRegionRule removes a region rule from storage.
 func (s *defaultStorage) DeleteRegionRule(ruleKey string) error {
 	return s.Remove(path.Join(regionLabelPath, ruleKey))
+}
+
+// ComponentStorage defines the storage operations on the component.
+type ComponentStorage interface {
+	LoadComponent(component interface{}) (bool, error)
+	SaveComponent(component interface{}) error
 }
 
 // LoadComponent loads components from componentPath then unmarshal it to component.
@@ -413,6 +435,12 @@ func (s *defaultStorage) SaveComponent(component interface{}) error {
 	return s.Save(componentPath, string(value))
 }
 
+// ReplicationStatusStorage defines the storage operations on the replication status.
+type ReplicationStatusStorage interface {
+	LoadReplicationStatus(mode string, status interface{}) (bool, error)
+	SaveReplicationStatus(mode string, status interface{}) error
+}
+
 // LoadReplicationStatus loads replication status by mode.
 func (s *defaultStorage) LoadReplicationStatus(mode string, status interface{}) (bool, error) {
 	v, err := s.Load(path.Join(replicationPath, mode))
@@ -438,32 +466,14 @@ func (s *defaultStorage) SaveReplicationStatus(mode string, status interface{}) 
 	return s.Save(path.Join(replicationPath, mode), string(value))
 }
 
-// LoadScheduleConfig loads the config of scheduler.
-func (s *defaultStorage) LoadScheduleConfig(scheduleName string) (string, error) {
-	configPath := path.Join(customScheduleConfigPath, scheduleName)
-	return s.Load(configPath)
-}
-
-// LoadAllScheduleConfig loads all schedulers' config.
-func (s *defaultStorage) LoadAllScheduleConfig() ([]string, []string, error) {
-	prefix := customScheduleConfigPath + "/"
-	keys, values, err := s.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 1000)
-	for i, key := range keys {
-		keys[i] = strings.TrimPrefix(key, prefix)
-	}
-	return keys, values, err
-}
-
-// SaveScheduleConfig saves the config of scheduler.
-func (s *defaultStorage) SaveScheduleConfig(scheduleName string, data []byte) error {
-	configPath := path.Join(customScheduleConfigPath, scheduleName)
-	return s.Save(configPath, string(data))
-}
-
-// RemoveScheduleConfig removes the config of scheduler.
-func (s *defaultStorage) RemoveScheduleConfig(scheduleName string) error {
-	configPath := path.Join(customScheduleConfigPath, scheduleName)
-	return s.Remove(configPath)
+// GCSafePointStorage defines the storage operations on the GC safe point.
+type GCSafePointStorage interface {
+	LoadGCSafePoint() (uint64, error)
+	SaveGCSafePoint(safePoint uint64) error
+	LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error)
+	LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error)
+	SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
+	RemoveServiceGCSafePoint(serviceID string) error
 }
 
 // LoadGCSafePoint loads current GC safe point from storage.

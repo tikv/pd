@@ -578,7 +578,7 @@ func (o *PersistOptions) DeleteLabelProperty(typ, labelKey, labelValue string) {
 }
 
 // Persist saves the configuration to the storage.
-func (o *PersistOptions) Persist(storage core.StorageV2) error {
+func (o *PersistOptions) Persist(storage core.ConfigStorage) error {
 	cfg := &Config{
 		Schedule:        *o.GetScheduleConfig(),
 		Replication:     *o.GetReplicationConfig(),
@@ -595,7 +595,7 @@ func (o *PersistOptions) Persist(storage core.StorageV2) error {
 }
 
 // Reload reloads the configuration from the storage.
-func (o *PersistOptions) Reload(storage core.StorageV2) error {
+func (o *PersistOptions) Reload(storage core.ConfigStorage) error {
 	cfg := &Config{}
 	// pass nil to initialize cfg to default values (all items undefined)
 	cfg.Adjust(nil, true)

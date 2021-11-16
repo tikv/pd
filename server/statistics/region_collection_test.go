@@ -33,7 +33,7 @@ func TestStatistics(t *testing.T) {
 var _ = Suite(&testRegionStatisticsSuite{})
 
 type testRegionStatisticsSuite struct {
-	store   *core.Storage
+	store   core.RuleStorage
 	manager *placement.RuleManager
 }
 

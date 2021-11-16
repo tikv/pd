@@ -36,11 +36,11 @@ import (
 
 func init() {
 	schedulePeerPr = 1.0
-	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage core.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		cfg := initHotRegionScheduleConfig()
 		return newHotWriteScheduler(opController, cfg), nil
 	})
-	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage core.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
 	})
 }
