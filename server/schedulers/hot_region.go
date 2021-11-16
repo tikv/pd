@@ -161,6 +161,7 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 	defer h.Unlock()
 
 	h.prepareForBalance(typ, cluster)
+	// it can not move earlier to support to use api and metrics.
 	if h.conf.IsForbidRWType(typ) {
 		return nil
 	}
