@@ -118,7 +118,9 @@ func runCompletionBash(out io.Writer, cmd *cobra.Command) error {
 func runCompletionZsh(out io.Writer, cmd *cobra.Command) error {
 	zshHead := "#compdef pd-ctl\n"
 
-	out.Write([]byte(zshHead))
+	if _, err := out.Write([]byte(zshHead)); err != nil {
+		return err
+	}
 
 	zshInitialization := `
 __pd-ctl_bash_source() {
@@ -262,11 +264,17 @@ __pd-ctl_convert_bash_to_zsh() {
 	-e "s/\\\$(type${RWORD}/\$(__pd-ctl_type/g" \
 	<<'BASH_COMPLETION_EOF'
 `
-	out.Write([]byte(zshInitialization))
+	if _, err := out.Write([]byte(zshInitialization)); err != nil {
+		return err
+	}
 
 	buf := new(bytes.Buffer)
-	cmd.GenBashCompletion(buf)
-	out.Write(buf.Bytes())
+	if err := cmd.GenBashCompletion(buf); err != nil {
+		return err
+	}
+	if _, err := out.Write(buf.Bytes()); err != nil {
+		return err
+	}
 
 	zshTail := `
 BASH_COMPLETION_EOF
@@ -275,6 +283,8 @@ BASH_COMPLETION_EOF
 __pd-ctl_bash_source <(__pd-ctl_convert_bash_to_zsh)
 _complete pd-ctl 2>/dev/null
 `
-	out.Write([]byte(zshTail))
+	if _, err := out.Write([]byte(zshTail)); err != nil {
+		return err
+	}
 	return nil
 }

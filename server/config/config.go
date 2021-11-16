@@ -742,7 +742,7 @@ type ScheduleConfig struct {
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
 
 	// The day of hot regions data to be reserved. 0 means close.
-	HotRegionsResevervedDays int64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
+	HotRegionsReservedDays int64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -876,7 +876,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 
 	if !meta.IsDefined("hot-regions-reserved-days") {
-		adjustInt64(&c.HotRegionsResevervedDays, defaultHotRegionsResevervedDays)
+		adjustInt64(&c.HotRegionsReservedDays, defaultHotRegionsResevervedDays)
 	}
 
 	return c.Validate()
