@@ -69,7 +69,7 @@ type Server interface {
 	GetAllocator() id.Allocator
 	GetConfig() *config.Config
 	GetPersistOptions() *config.PersistOptions
-	GetStorage() *core.Storage
+	GetStorage() *core.Storage /* NOTICE: this method will be removed later. */
 	GetEtcdStorage() *core.EtcdStorage
 	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster

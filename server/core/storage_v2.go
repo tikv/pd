@@ -36,6 +36,7 @@ import (
 )
 
 // StorageV2 is the interface for the backend storage of the PD.
+// V2 is just a temp name, we will rename it to Storage eventually.
 // TODO: replace the core.Storage with this interface later.
 type StorageV2 interface {
 	kv.Base
