@@ -38,6 +38,7 @@ import (
 
 // MetaStore contains meta information about a store which needed to show.
 type MetaStore struct {
+	//nolint
 	Id                   uint64               `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
 	Address              string               `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
 	Labels               []*metapb.StoreLabel `protobuf:"bytes,4,rep,name=labels" json:"labels,omitempty"`
@@ -49,9 +50,6 @@ type MetaStore struct {
 	DeployPath           string               `protobuf:"bytes,10,opt,name=deploy_path,json=deployPath,proto3" json:"deploy_path,omitempty"`
 	LastHeartbeat        int64                `protobuf:"varint,11,opt,name=last_heartbeat,json=lastHeartbeat,proto3" json:"last_heartbeat,omitempty"`
 	PhysicallyDestroyed  bool                 `protobuf:"varint,12,opt,name=physically_destroyed,json=physicallyDestroyed,proto3" json:"physically_destroyed,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}             `json:"-"`
-	XXX_unrecognized     []byte               `json:"-"`
-	XXX_sizecache        int32                `json:"-"`
 	StateName            string               `json:"state_name"`
 }
 
@@ -68,9 +66,6 @@ func NewMetaStore(store *metapb.Store, StateName string) *MetaStore {
 	metaStore.DeployPath = store.GetDeployPath()
 	metaStore.LastHeartbeat = store.GetLastHeartbeat()
 	metaStore.PhysicallyDestroyed = store.GetPhysicallyDestroyed()
-	metaStore.XXX_NoUnkeyedLiteral = store.XXX_NoUnkeyedLiteral
-	metaStore.XXX_unrecognized = store.XXX_unrecognized
-	metaStore.XXX_sizecache = store.XXX_sizecache
 	return metaStore
 }
 
@@ -87,9 +82,6 @@ func (m *MetaStore) ConvertToMetapbStore() *metapb.Store {
 		StartTimestamp:       m.StartTimestamp,
 		DeployPath:           m.DeployPath,
 		LastHeartbeat:        m.LastHeartbeat,
-		XXX_NoUnkeyedLiteral: m.XXX_NoUnkeyedLiteral,
-		XXX_unrecognized:     m.XXX_unrecognized,
-		XXX_sizecache:        m.XXX_sizecache,
 	}
 	return metapbStore
 }
