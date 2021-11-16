@@ -48,7 +48,7 @@ func WithFlowRoundByDigit(digit int) RegionCreateOption {
 func WithPendingPeers(pendingPeers []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.pendingPeers = append(pendingPeers[:0:0], pendingPeers...)
-		sort.Sort(peerSlice(region.pepundingPeers))
+		sort.Sort(peerSlice(region.pendingPeers))
 	}
 }
 
