@@ -83,10 +83,10 @@ func (o *Operator) String() string {
 	}
 	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, steps:[%s])", o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(), o.GetStartTime(), atomic.LoadInt32(&o.currentStep), strings.Join(stepStrs, ", "))
 	if o.CheckSuccess() {
-		s = s + " finished"
+		s += " finished"
 	}
 	if o.CheckTimeout() {
-		s = s + " timeout"
+		s += " timeout"
 	}
 	return s
 }

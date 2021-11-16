@@ -733,7 +733,7 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 			zap.Uint64("server-id", am.member.ID()))
 		return -1, errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
-	return int32(maxSuffix), nil
+	return maxSuffix, nil
 }
 
 func (am *AllocatorManager) getDCLocationSuffixMapFromEtcd() (map[string]int32, error) {

@@ -65,6 +65,7 @@ func (s *testOperatorSuite) TearDownTest(c *C) {
 	s.cancel()
 }
 
+//nolint
 func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {
 	var (
 		region metapb.Region
@@ -95,6 +96,7 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 	c.Assert(RemovePeer{FromStore: 3}.IsFinish(region), IsTrue)
 }
 
+//nolint
 func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
 	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, kind, steps...)
 }

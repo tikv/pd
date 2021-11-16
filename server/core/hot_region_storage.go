@@ -162,7 +162,7 @@ func (h *HotRegionStorage) backgroundDelete() {
 	next := time.Date(now.Year(), now.Month(), now.Day(), defaultDeleteTime, 0, 0, 0, now.Location())
 	d := next.Sub(now)
 	if d < 0 {
-		d = d + 24*time.Hour
+		d += 24 * time.Hour
 	}
 	isFirst := true
 	ticker := time.NewTicker(d)
