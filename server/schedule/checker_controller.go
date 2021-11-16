@@ -93,36 +93,8 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 	return c.mergeChecker
 }
-<<<<<<< HEAD
-=======
 
-// GetRuleChecker returns the rule checker.
-func (c *CheckerController) GetRuleChecker() *checker.RuleChecker {
-	return c.ruleChecker
+// GetReplicaChecker returns the replica checker.
+func (c *CheckerController) GetReplicaChecker() *checker.ReplicaChecker {
+	return c.replicaChecker
 }
-
-// GetWaitingRegions returns the regions in the waiting list.
-func (c *CheckerController) GetWaitingRegions() []*cache.Item {
-	return c.regionWaitingList.Elems()
-}
-
-// AddWaitingRegion returns the regions in the waiting list.
-func (c *CheckerController) AddWaitingRegion(region *core.RegionInfo) {
-	c.regionWaitingList.Put(region.GetID(), nil)
-}
-
-// RemoveWaitingRegion removes the region from the waiting list.
-func (c *CheckerController) RemoveWaitingRegion(id uint64) {
-	c.regionWaitingList.Remove(id)
-}
-
-// GetPriorityRegions returns the region in priority queue
-func (c *CheckerController) GetPriorityRegions() []uint64 {
-	return c.priorityChecker.GetPriorityRegions()
-}
-
-// RemovePriorityRegions removes priority region from priority queue
-func (c *CheckerController) RemovePriorityRegions(id uint64) {
-	c.priorityChecker.RemovePriorityRegion(id)
-}
->>>>>>> 1a7caa95c (schedule: not limit remove peer of the down store (#4097))

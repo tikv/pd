@@ -53,7 +53,6 @@ func (c *RuleChecker) GetType() string {
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
-
 	fit := c.cluster.FitRegion(region)
 	if len(fit.RuleFits) == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "fix-range").Inc()

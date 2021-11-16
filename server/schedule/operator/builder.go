@@ -332,41 +332,22 @@ func (b *Builder) execAddPeer(p *metapb.Peer) {
 	if !p.GetIsLearner() {
 		b.steps = append(b.steps, PromoteLearner{ToStore: p.GetStoreId(), PeerID: p.GetId()})
 	}
-<<<<<<< HEAD
 	b.currentPeers.Set(p)
 	if b.peerAddStep == nil {
 		b.peerAddStep = make(map[uint64]int)
-=======
-	b.currentPeers.Set(peer)
-	b.peerAddStep[peer.GetStoreId()] = len(b.steps)
-	delete(b.toAdd, peer.GetStoreId())
-}
-
-func (b *Builder) execRemovePeer(peer *metapb.Peer) {
-	removeStoreID := peer.GetStoreId()
-	var isDownStore bool
-	store := b.cluster.GetStore(removeStoreID)
-	if store != nil {
-		isDownStore = store.DownTime() > b.cluster.GetOpts().GetMaxStoreDownTime()
-	}
-	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore})
-	delete(b.currentPeers, removeStoreID)
-	delete(b.toRemove, removeStoreID)
-}
-
-func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
-	// Enter
-	step := ChangePeerV2Enter{
-		PromoteLearners: make([]PromoteLearner, 0, len(b.toPromote)),
-		DemoteVoters:    make([]DemoteVoter, 0, len(b.toDemote)),
->>>>>>> 1a7caa95c (schedule: not limit remove peer of the down store (#4097))
 	}
 	b.peerAddStep[p.GetStoreId()] = len(b.steps)
 	b.toAdd.Delete(p.GetStoreId())
 }
 
 func (b *Builder) execRemovePeer(p *metapb.Peer) {
-	b.steps = append(b.steps, RemovePeer{FromStore: p.GetStoreId()})
+	removeStoreID := p.GetStoreId()
+	var isDownStore bool
+	store := b.cluster.GetStore(removeStoreID)
+	if store != nil {
+		isDownStore = store.DownTime() > b.cluster.GetMaxStoreDownTime()
+	}
+	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, IsDownStore: isDownStore})
 	b.currentPeers.Delete(p.GetStoreId())
 	b.toRemove.Delete(p.GetStoreId())
 }
