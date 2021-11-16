@@ -1704,7 +1704,7 @@ func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte,
 	for _, opt := range opts {
 		opt(options)
 	}
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.SplitAndScatterRegionsRequest{
 		Header:     c.requestHeader(),
 		SplitKeys:  splitKeys,
