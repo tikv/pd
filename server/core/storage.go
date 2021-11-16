@@ -156,12 +156,6 @@ func (s *Storage) RemoveScheduleConfig(scheduleName string) error {
 	return s.Remove(configPath)
 }
 
-// LoadScheduleConfig loads the config of scheduler.
-func (s *Storage) LoadScheduleConfig(scheduleName string) (string, error) {
-	configPath := path.Join(customScheduleConfigPath, scheduleName)
-	return s.Load(configPath)
-}
-
 // LoadMeta loads cluster meta from storage.
 func (s *Storage) LoadMeta(meta *metapb.Cluster) (bool, error) {
 	return loadProto(s.Base, clusterPath, meta)
@@ -262,7 +256,7 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 
 // SaveRule stores a rule cfg to the rulesPath.
 func (s *Storage) SaveRule(ruleKey string, rule interface{}) error {
-	return s.SaveJSON(rulesPath, ruleKey, rule)
+	return s.saveJSON(rulesPath, ruleKey, rule)
 }
 
 // DeleteRule removes a rule from storage.
@@ -272,12 +266,12 @@ func (s *Storage) DeleteRule(ruleKey string) error {
 
 // LoadRules loads placement rules from storage.
 func (s *Storage) LoadRules(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(rulesPath+"/", f)
+	return s.loadRangeByPrefix(rulesPath+"/", f)
 }
 
 // SaveRegionRule saves a region rule to the storage.
 func (s *Storage) SaveRegionRule(ruleKey string, rule interface{}) error {
-	return s.SaveJSON(regionLabelPath, ruleKey, rule)
+	return s.saveJSON(regionLabelPath, ruleKey, rule)
 }
 
 // DeleteRegionRule removes a region rule from storage.
@@ -287,12 +281,12 @@ func (s *Storage) DeleteRegionRule(ruleKey string) error {
 
 // LoadRegionRules loads region rules from storage.
 func (s *Storage) LoadRegionRules(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(regionLabelPath+"/", f)
+	return s.loadRangeByPrefix(regionLabelPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.
 func (s *Storage) SaveRuleGroup(groupID string, group interface{}) error {
-	return s.SaveJSON(ruleGroupPath, groupID, group)
+	return s.saveJSON(ruleGroupPath, groupID, group)
 }
 
 // DeleteRuleGroup removes a rule group from storage.
@@ -302,11 +296,11 @@ func (s *Storage) DeleteRuleGroup(groupID string) error {
 
 // LoadRuleGroups loads all rule groups from storage.
 func (s *Storage) LoadRuleGroups(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(ruleGroupPath+"/", f)
+	return s.loadRangeByPrefix(ruleGroupPath+"/", f)
 }
 
-// SaveJSON saves json format data to storage.
-func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
+// saveJSON saves json format data to storage.
+func (s *Storage) saveJSON(prefix, key string, data interface{}) error {
 	value, err := json.Marshal(data)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
@@ -314,8 +308,8 @@ func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
 	return s.Save(path.Join(prefix, key), string(value))
 }
 
-// LoadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
-func (s *Storage) LoadRangeByPrefix(prefix string, f func(k, v string)) error {
+// loadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
+func (s *Storage) loadRangeByPrefix(prefix string, f func(k, v string)) error {
 	nextKey := prefix
 	endKey := clientv3.GetPrefixRangeEnd(prefix)
 	for {
