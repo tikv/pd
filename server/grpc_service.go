@@ -1580,12 +1580,6 @@ func (s *Server) SplitAndScatterRegions(ctx context.Context, request *pdpb.Split
 	}
 
 	newRegions := splitResp.RegionsId
-	if len(newRegions) > 1 {
-		// Divide a region into n, one of them may not need to be scattered,
-		// so n-1 needs to be scattered to other stores.
-		newRegions = newRegions[:len(newRegions)-1]
-	}
-
 	scatterRequest := &pdpb.ScatterRegionRequest{
 		Header:     request.GetHeader(),
 		RegionsId:  newRegions,
