@@ -737,7 +737,7 @@ func (f *isolationFilter) Source(opt *config.PersistOptions, store *core.StoreIn
 
 func (f *isolationFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	// No isolation constraint to fit
-	if len(f.constraintSet) <= 0 {
+	if len(f.constraintSet) == 0 {
 		return true
 	}
 	for _, constrainList := range f.constraintSet {
