@@ -166,7 +166,7 @@ func (t *testOperatorControllerSuite) TestFastFailOperator(c *C) {
 }
 
 // Issue 3353
-func (t *testOperatorControllerSuite) TestFastFailOperator2(c *C) {
+func (t *testOperatorControllerSuite) TestFastFailWithUnhealthyStore(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(t.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
