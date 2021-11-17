@@ -257,6 +257,24 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestForceRemoveStore(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	// Put 2 stores.
+	for _, store := range newTestStores(2, "5.3.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	for storeID := uint64(0); storeID <= 2; storeID++ {
+		store := cluster.GetStore(storeID)
+		if store == nil {
+			c.Assert(errors.ErrorEqual(cluster.ForceRemoveStore(storeID), errs.ErrStoreNotFound.FastGenByArgs(storeID)), IsTrue)
+		} else {
+			c.Assert(cluster.ForceRemoveStore(storeID), IsNil)
+		}
+	}
+}
+
 func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)

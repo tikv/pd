@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
@@ -79,6 +80,12 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 		return errors.Errorf("Another request is working in progress")
 	}
 	u.reset()
+	for failedStore, _ := range failedStores {
+		err := u.cluster.ForceRemoveStore(failedStore)
+		if !errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
+			return err
+		}
+	}
 	u.failedStores = failedStores
 	for _, s := range u.cluster.GetStores() {
 		if s.IsTombstone() || s.IsPhysicallyDestroyed() || core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {

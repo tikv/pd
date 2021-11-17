@@ -1114,6 +1114,37 @@ func (c *RaftCluster) buryStore(storeID uint64) error {
 	return err
 }
 
+// ForceRemoveStore set a store as tombstone directly without waiting for the data to be moved somewhere else.
+func (c *RaftCluster) ForceRemoveStore(storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	// Bury a tombstone store should be OK, nothing to do.
+	if store.IsTombstone() {
+		return nil
+	}
+
+	tombStone := store.Clone(core.TombstoneStore())
+	log.Warn("store has been forcibly removed",
+		zap.Uint64("store-id", tombStone.GetID()),
+		zap.String("store-address", tombStone.GetAddress()),
+		zap.String("state", tombStone.GetState().String()),
+		zap.Bool("physically-destroyed", tombStone.IsPhysicallyDestroyed()))
+	err := c.putStoreLocked(tombStone)
+	c.onStoreVersionChangeLocked()
+	if err == nil {
+		// clean up the residual information.
+		c.RemoveStoreLimit(storeID)
+		c.hotStat.RemoveRollingStoreStats(storeID)
+	}
+	return err
+}
+
 // PauseLeaderTransfer prevents the store from been selected as source or
 // target store of TransferLeader.
 func (c *RaftCluster) PauseLeaderTransfer(storeID uint64) error {

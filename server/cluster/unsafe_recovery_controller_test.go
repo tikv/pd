@@ -617,3 +617,19 @@ func (s *testUnsafeRecoverSuite) TestPlanExecution(c *C) {
 	c.Assert(recoveryController.numStoresPlanExecuted, Equals, 2)
 	c.Assert(recoveryController.stage, Equals, finished)
 }
+
+func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	for _, store := range newTestStores(2, "5.3.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	failedStores := map[uint64]string{
+		2: "",
+		3: "",
+	}
+
+	c.Assert(recoveryController.RemoveFailedStores(failedStores), IsNil)
+	c.Assert(cluster.GetStore(uint64(2)).IsTombstone(), IsTrue)
+}
