@@ -57,11 +57,10 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
-	mockQuit := make(chan struct{})
 	clus := &Cluster{
 		BasicCluster:     core.NewBasicCluster(),
 		IDAllocator:      mockid.NewIDAllocator(),
-		HotStat:          statistics.NewHotStat(ctx, mockQuit),
+		HotStat:          statistics.NewHotStat(ctx),
 		PersistOptions:   opts,
 		suspectRegions:   map[uint64]struct{}{},
 		disabledFeatures: make(map[versioninfo.Feature]struct{}),
@@ -636,7 +635,7 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, othe
 	var followerStoreIDs []uint64
 	var learnerStoreIDs []uint64
 	for _, storeID := range otherPeerStoreIDs {
-		if store := mc.GetStore(storeID); store != nil && core.IsTiFlashStore(store.GetMeta()) {
+		if store := mc.GetStore(storeID); store != nil && core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 			learnerStoreIDs = append(learnerStoreIDs, storeID)
 		} else {
 			followerStoreIDs = append(followerStoreIDs, storeID)
@@ -747,6 +746,11 @@ func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
 	for _, id := range ids {
 		mc.suspectRegions[id] = struct{}{}
 	}
+}
+
+// GetBasicCluster mock method
+func (mc *Cluster) GetBasicCluster() *core.BasicCluster {
+	return mc.BasicCluster
 }
 
 // CheckRegionUnderSuspect only used for unit test

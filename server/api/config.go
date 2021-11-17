@@ -507,3 +507,12 @@ func (h *confHandler) SetReplicationMode(w http.ResponseWriter, r *http.Request)
 	}
 	h.rd.JSON(w, http.StatusOK, "The replication mode config is updated.")
 }
+
+// @Tags config
+// @Summary Get PD server config.
+// @Produce json
+// @Success 200 {object} config.PDServerConfig
+// @Router /config/pd-server [get]
+func (h *confHandler) GetPDServer(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, h.svr.GetPDServerConfig())
+}

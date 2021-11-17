@@ -279,8 +279,10 @@ func (s *Server) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []
 	tsoProxyBatchSize.Observe(float64(count))
 	// Split the response
 	physical, logical, suffixBits := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
-	// logical is the highest ts here, we need to do the subtracting before we finish each TSO request.
-	firstLogical := addLogical(logical, -int64(count)+1, suffixBits)
+	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
+	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
+	// count is 5, then the splitting results should be 5 and 10.
+	firstLogical := addLogical(logical, -int64(count), suffixBits)
 	return s.finishTSORequest(requests, physical, firstLogical, suffixBits)
 }
 
@@ -502,7 +504,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	// NOTE: can be removed when placement rules feature is enabled by default.
-	if !s.GetConfig().Replication.EnablePlacementRules && core.IsTiFlashStore(store) {
+	if !s.GetConfig().Replication.EnablePlacementRules && core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 
@@ -585,34 +587,40 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
-		return &pdpb.StoreHeartbeatResponse{
-			Header: s.errorHeader(pberr),
-		}, nil
+	// Bypass stats handling if the store report for unsafe recover is not empty.
+	if request.GetStoreReport() == nil {
+		if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
+			return &pdpb.StoreHeartbeatResponse{
+				Header: s.errorHeader(pberr),
+			}, nil
+		}
+
+		storeID := request.Stats.GetStoreId()
+		store := rc.GetStore(storeID)
+		if store == nil {
+			return nil, errors.Errorf("store %v not found", storeID)
+		}
+
+		storeAddress := store.GetAddress()
+		storeLabel := strconv.FormatUint(storeID, 10)
+		start := time.Now()
+
+		err := rc.HandleStoreHeartbeat(request.Stats)
+		if err != nil {
+			return nil, status.Errorf(codes.Unknown, err.Error())
+		}
+		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 
-	storeID := request.Stats.GetStoreId()
-	store := rc.GetStore(storeID)
-	if store == nil {
-		return nil, errors.Errorf("store %v not found", storeID)
-	}
-
-	storeAddress := store.GetAddress()
-	storeLabel := strconv.FormatUint(storeID, 10)
-	start := time.Now()
-
-	err := rc.HandleStoreHeartbeat(request.Stats)
-	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
-	}
-
-	storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
-
-	return &pdpb.StoreHeartbeatResponse{
+	resp := &pdpb.StoreHeartbeatResponse{
 		Header:            s.header(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 		ClusterVersion:    rc.GetClusterVersion(),
-	}, nil
+	}
+	if rc.GetUnsafeRecoveryController() != nil {
+		rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
+	}
+	return resp, nil
 }
 
 const regionHeartbeatSendTimeout = 5 * time.Second
@@ -658,9 +666,9 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
-	server := &heartbeatServer{stream: stream}
-	FlowRoundByDigit := s.persistOptions.GetPDServerConfig().FlowRoundByDigit
 	var (
+		server            = &heartbeatServer{stream: stream}
+		flowRoundOption   = core.WithFlowRoundByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
 		forwardStream     pdpb.PD_RegionHeartbeatClient
 		cancel            context.CancelFunc
 		lastForwardedHost string
@@ -742,11 +750,11 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
 			s.hbStreams.BindStream(storeID, server)
 			// refresh FlowRoundByDigit
-			FlowRoundByDigit = s.persistOptions.GetPDServerConfig().FlowRoundByDigit
+			flowRoundOption = core.WithFlowRoundByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
 			lastBind = time.Now()
 		}
 
-		region := core.RegionFromHeartbeat(request, core.WithFlowRoundByDigit(FlowRoundByDigit))
+		region := core.RegionFromHeartbeat(request, flowRoundOption)
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
@@ -1232,7 +1240,11 @@ func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 	if s.IsClosed() || s.cluster == nil {
 		return ErrNotStarted
 	}
-	return s.cluster.GetRegionSyncer().Sync(stream)
+	ctx := s.cluster.Context()
+	if ctx == nil {
+		return ErrNotStarted
+	}
+	return s.cluster.GetRegionSyncer().Sync(ctx, stream)
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.

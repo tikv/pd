@@ -142,21 +142,20 @@ func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 // remove removes a region if the region is in the tree.
 // It will do nothing if it cannot find the region or the found region
 // is not the same with the region.
-func (t *regionTree) remove(region *RegionInfo) btree.Item {
+func (t *regionTree) remove(region *RegionInfo) {
 	if t.length() == 0 {
-		return nil
+		return
 	}
 	result := t.find(region)
 	if result == nil || result.region.GetID() != region.GetID() {
-		return nil
+		return
 	}
 
 	t.totalSize -= region.approximateSize
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
-
-	return t.tree.Delete(result)
+	t.tree.Delete(result)
 }
 
 // search returns a region that contains the key.

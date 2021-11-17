@@ -148,16 +148,13 @@ func (s *testLogSuite) TestRedactLog(c *C) {
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		SetRedactLog(testcase.enableRedactLog)
-		switch testcase.arg.(type) {
+		switch r := testcase.arg.(type) {
 		case []byte:
-			r := RedactBytes(testcase.arg.([]byte))
-			c.Assert(r, DeepEquals, testcase.expect)
+			c.Assert(RedactBytes(r), DeepEquals, testcase.expect)
 		case string:
-			r := RedactString(testcase.arg.(string))
-			c.Assert(r, DeepEquals, testcase.expect)
+			c.Assert(RedactString(r), DeepEquals, testcase.expect)
 		case fmt.Stringer:
-			r := RedactStringer(testcase.arg.(fmt.Stringer))
-			c.Assert(r, DeepEquals, testcase.expect)
+			c.Assert(RedactStringer(r), DeepEquals, testcase.expect)
 		default:
 			panic("unmatched case")
 		}

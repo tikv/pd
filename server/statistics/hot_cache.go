@@ -29,7 +29,6 @@ const queueCap = 20000
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx            context.Context
-	quit           <-chan struct{}
 	readFlowQueue  chan FlowItemTask
 	writeFlowQueue chan FlowItemTask
 	writeFlow      *hotPeerCache
@@ -37,10 +36,9 @@ type HotCache struct {
 }
 
 // NewHotCache creates a new hot spot cache.
-func NewHotCache(ctx context.Context, quit <-chan struct{}) *HotCache {
+func NewHotCache(ctx context.Context) *HotCache {
 	w := &HotCache{
 		ctx:            ctx,
-		quit:           quit,
 		readFlowQueue:  make(chan FlowItemTask, queueCap),
 		writeFlowQueue: make(chan FlowItemTask, queueCap),
 		writeFlow:      NewHotPeerCache(WriteFlow),
@@ -103,14 +101,14 @@ func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*Ho
 		if !succ {
 			return nil
 		}
-		return task.waitRet(w.ctx, w.quit)
+		return task.waitRet(w.ctx)
 	case ReadFlow:
 		task := newCollectRegionStatsTask(minHotDegree)
 		succ := w.CheckReadAsync(task)
 		if !succ {
 			return nil
 		}
-		return task.waitRet(w.ctx, w.quit)
+		return task.waitRet(w.ctx)
 	}
 	return nil
 }
@@ -130,7 +128,7 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 	succ1 := w.CheckWriteAsync(writeIsRegionHotTask)
 	succ2 := w.CheckReadAsync(readIsRegionHotTask)
 	if succ1 && succ2 {
-		return writeIsRegionHotTask.waitRet(w.ctx, w.quit) || readIsRegionHotTask.waitRet(w.ctx, w.quit)
+		return writeIsRegionHotTask.waitRet(w.ctx) || readIsRegionHotTask.waitRet(w.ctx)
 	}
 	return false
 }
@@ -185,8 +183,6 @@ func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task Flow
 	for {
 		select {
 		case <-w.ctx.Done():
-			return
-		case <-w.quit:
 			return
 		case task := <-queue:
 			runTask(task)

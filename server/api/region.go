@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -235,6 +236,42 @@ func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
 }
 
+// @Tags region
+// @Summary Check if regions in the given key ranges are replicated.
+// @Param startKey query string true "Regions start key, hex encoded"
+// @Param endKey query string true "Regions end key, hex encoded"
+// @Produce plain
+// @Success 200 {string} string "true"
+// @Failure 400 {string} string "The input is invalid."
+// @Router /regions/replicated [get]
+func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+
+	vars := mux.Vars(r)
+	startKeyHex := vars["startKey"]
+	startKey, err := hex.DecodeString(startKeyHex)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	endKeyHex := vars["endKey"]
+	endKey, err := hex.DecodeString(endKeyHex)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	regions := rc.ScanRegions(startKey, endKey, -1)
+	replicated := true
+	for _, region := range regions {
+		if !opt.IsRegionReplicated(rc, region) {
+			replicated = false
+			break
+		}
+	}
+	h.rd.JSON(w, http.StatusOK, replicated)
+}
+
 type regionsHandler struct {
 	svr *server.Server
 	rd  *render.Render
@@ -272,7 +309,8 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 
 // @Tags region
 // @Summary List regions start from a key.
-// @Param key query string true "Region key"
+// @Param key query string true "Region start key"
+// @Param endkey query string true "Range end key"
 // @Param limit query integer false "Limit count" default(16)
 // @Produce json
 // @Success 200 {object} RegionsInfo
@@ -281,8 +319,13 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey := r.URL.Query().Get("key")
+	endKey := r.URL.Query().Get("end_key")
 
 	limit := defaultRegionLimit
+	// avoid incomplete results with end_key
+	if endKey != "" {
+		limit = noRegionLimit
+	}
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		var err error
 		limit, err = strconv.Atoi(limitStr)
@@ -294,7 +337,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	if limit > maxRegionLimit {
 		limit = maxRegionLimit
 	}
-	regions := rc.ScanRegions([]byte(startKey), nil, limit)
+	regions := rc.ScanRegions([]byte(startKey), []byte(endKey), limit)
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
@@ -554,6 +597,16 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 }
 
 // @Tags region
+// @Summary List all range holes whitout any region info.
+// @Produce json
+// @Success 200 {object} [][]string
+// @Router /regions/range-holes [get]
+func (h *regionsHandler) GetRangeHoles(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	h.rd.JSON(w, http.StatusOK, rc.GetRangeHoles())
+}
+
+// @Tags region
 // @Summary List sibling regions of a specific region.
 // @Param id path integer true "Region Id"
 // @Produce json
@@ -584,6 +637,7 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 const (
 	defaultRegionLimit     = 16
 	maxRegionLimit         = 10240
+	noRegionLimit          = -1
 	minRegionHistogramSize = 1
 	minRegionHistogramKeys = 1000
 )

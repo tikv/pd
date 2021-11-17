@@ -279,6 +279,29 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
 }
 
+func (s *testConfigSuite) TestConfigPDServer(c *C) {
+	addr := fmt.Sprintf("%s/config", s.urlPrefix)
+
+	ms := map[string]interface{}{
+		"metric-storage": "",
+	}
+	postData, err := json.Marshal(ms)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(testDialClient, addr, postData), IsNil)
+
+	addr = fmt.Sprintf("%s/config/pd-server", s.urlPrefix)
+	sc := &config.PDServerConfig{}
+	c.Assert(readJSON(testDialClient, addr, sc), IsNil)
+
+	c.Assert(sc.UseRegionStorage, Equals, bool(true))
+	c.Assert(sc.KeyType, Equals, "table")
+	c.Assert(sc.RuntimeServices, DeepEquals, typeutil.StringSlice([]string{}))
+	c.Assert(sc.MetricStorage, Equals, "")
+	c.Assert(sc.DashboardAddress, Equals, "auto")
+	c.Assert(sc.FlowRoundByDigit, Equals, int(3))
+	c.Assert(sc.MaxResetTSGap.Duration, Equals, 24*time.Hour)
+}
+
 var ttlConfig = map[string]interface{}{
 	"schedule.max-snapshot-count":             999,
 	"schedule.enable-location-replacement":    false,

@@ -188,11 +188,11 @@ func (s *testShuffleHotRegionSchedulerSuite) checkBalance(c *C, tc *mockcluster.
 	tc.UpdateStorageWrittenBytes(6, 0)
 
 	// Region 1, 2 and 3 are hot regions.
-	//| region_id | leader_store | follower_store | follower_store | written_bytes |
-	//|-----------|--------------|----------------|----------------|---------------|
-	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       1      |        3       |       4        |      512KB    |
-	//|     3     |       1      |        2       |       4        |      512KB    |
+	// | region_id | leader_store | follower_store | follower_store | written_bytes |
+	// |-----------|--------------|----------------|----------------|---------------|
+	// |     1     |       1      |        2       |       3        |      512KB    |
+	// |     2     |       1      |        3       |       4        |      512KB    |
+	// |     3     |       1      |        2       |       4        |      512KB    |
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
 	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{3, 4})
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 4})

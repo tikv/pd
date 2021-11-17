@@ -127,7 +127,7 @@ func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
 	// region storage flush rate limit (3s).
 	time.Sleep(4 * time.Second)
 
-	//test All regions have been synchronized to the cache of followerServer
+	// test All regions have been synchronized to the cache of followerServer
 	followerServer := cluster.GetServer(cluster.GetFollower())
 	c.Assert(followerServer, NotNil)
 	cacheRegions := followerServer.GetServer().GetBasicCluster().GetRegions()

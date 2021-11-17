@@ -40,11 +40,12 @@ import (
 )
 
 const (
-	runSchedulerCheckInterval = 3 * time.Second
-	collectFactor             = 0.8
-	collectTimeout            = 5 * time.Minute
-	maxScheduleRetries        = 10
-	maxLoadConfigRetries      = 10
+	runSchedulerCheckInterval  = 3 * time.Second
+	checkSuspectRangesInterval = 100 * time.Millisecond
+	collectFactor              = 0.8
+	collectTimeout             = 5 * time.Minute
+	maxScheduleRetries         = 10
+	maxLoadConfigRetries       = 10
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 	// PluginLoad means action for load plugin
@@ -113,8 +114,6 @@ func (c *coordinator) patrolRegions() {
 		c.checkPriorityRegions()
 		// Check suspect regions first.
 		c.checkSuspectRegions()
-		// Check suspect key ranges
-		c.checkSuspectKeyRanges()
 		// Check regions in the waiting list
 		c.checkWaitingRegions()
 
@@ -206,31 +205,43 @@ func (c *coordinator) checkSuspectRegions() {
 	}
 }
 
-// checkSuspectKeyRanges would pop one suspect key range group
+// checkSuspectRanges would pop one suspect key range group
 // The regions of new version key range and old version key range would be placed into
 // the suspect regions map
-func (c *coordinator) checkSuspectKeyRanges() {
-	keyRange, success := c.cluster.PopOneSuspectKeyRange()
-	if !success {
-		return
-	}
-	limit := 1024
-	regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], limit)
-	if len(regions) == 0 {
-		return
-	}
-	regionIDList := make([]uint64, 0, len(regions))
-	for _, region := range regions {
-		regionIDList = append(regionIDList, region.GetID())
-	}
+func (c *coordinator) checkSuspectRanges() {
+	defer c.wg.Done()
+	log.Info("coordinator begins to check suspect key ranges")
+	ticker := time.NewTicker(checkSuspectRangesInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("check suspect key ranges has been stopped")
+			return
+		case <-ticker.C:
+			keyRange, success := c.cluster.PopOneSuspectKeyRange()
+			if !success {
+				continue
+			}
+			limit := 1024
+			regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], limit)
+			if len(regions) == 0 {
+				continue
+			}
+			regionIDList := make([]uint64, 0, len(regions))
+			for _, region := range regions {
+				regionIDList = append(regionIDList, region.GetID())
+			}
 
-	// if the last region's end key is smaller the keyRange[1] which means there existed the remaining regions between
-	// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
-	lastRegion := regions[len(regions)-1]
-	if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
-		c.cluster.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
+			// if the last region's end key is smaller the keyRange[1] which means there existed the remaining regions between
+			// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
+			lastRegion := regions[len(regions)-1]
+			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
+				c.cluster.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
+			}
+			c.cluster.AddSuspectRegions(regionIDList...)
+		}
 	}
-	c.cluster.AddSuspectRegions(regionIDList...)
 }
 
 func (c *coordinator) checkWaitingRegions() {
@@ -381,9 +392,11 @@ func (c *coordinator) run() {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
 
-	c.wg.Add(2)
+	c.wg.Add(3)
 	// Starts to patrol regions.
 	go c.patrolRegions()
+	// Checks suspect key ranges
+	go c.checkSuspectRanges()
 	go c.drivePushOperator()
 }
 

@@ -98,7 +98,7 @@ func newTestKeyFile(c *C, key ...string) (keyFilePath string, cleanup func()) {
 	tempDir, err := os.MkdirTemp("/tmp", "test_key_file")
 	c.Assert(err, IsNil)
 	keyFilePath = tempDir + "/key"
-	err = os.WriteFile(keyFilePath, []byte(testKey), 0644)
+	err = os.WriteFile(keyFilePath, []byte(testKey), 0600)
 	c.Assert(err, IsNil)
 
 	cleanup = func() {
@@ -357,8 +357,7 @@ func (s *testKeyManagerSuite) TestLoadKeyEmpty(c *C) {
 	// Simulate keys get deleted.
 	_, err = client.Delete(context.Background(), EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	_, err = m.loadKeys()
-	c.Assert(err, NotNil)
+	c.Assert(m.loadKeys(), NotNil)
 }
 
 func (s *testKeyManagerSuite) TestWatcher(c *C) {

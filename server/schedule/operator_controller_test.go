@@ -478,20 +478,21 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	// Put region into cluster, otherwise, AddOperator will fail because of
 	// missing region
 	cluster.PutRegion(region)
-
+	cluster.AddRegionStore(1, 1)
+	cluster.AddRegionStore(3, 1)
 	// The next allocated peer should have peerid 3, so we add this peer
 	// to store 3
 	testSteps := [][]operator.OpStep{
 		{
 			operator.AddLearner{ToStore: 3, PeerID: 3},
 			operator.PromoteLearner{ToStore: 3, PeerID: 3},
-			operator.TransferLeader{ToStore: 3},
+			operator.TransferLeader{FromStore: 1, ToStore: 3},
 			operator.RemovePeer{FromStore: 1},
 		},
 		{
 			operator.AddLearner{ToStore: 3, PeerID: 3, IsLightWeight: true},
 			operator.PromoteLearner{ToStore: 3, PeerID: 3},
-			operator.TransferLeader{ToStore: 3},
+			operator.TransferLeader{FromStore: 1, ToStore: 3},
 			operator.RemovePeer{FromStore: 1},
 		},
 	}
