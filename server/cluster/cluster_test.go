@@ -262,17 +262,14 @@ func (s *testClusterInfoSuite) TestForceRemoveStore(c *C) {
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	// Put 2 stores.
-	for _, store := range newTestStores(2, "5.3.0") {
+	stores := newTestStores(2, "5.3.0")
+	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
+	for _, store := range stores {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
-	for storeID := uint64(0); storeID <= 2; storeID++ {
-		store := cluster.GetStore(storeID)
-		if store == nil {
-			c.Assert(errors.ErrorEqual(cluster.ForceRemoveStore(storeID), errs.ErrStoreNotFound.FastGenByArgs(storeID)), IsTrue)
-		} else {
-			c.Assert(cluster.ForceRemoveStore(storeID), IsNil)
-		}
-	}
+	c.Assert(cluster.ForceRemoveStore(uint64(1)), IsNil)
+	c.Assert(cluster.ForceRemoveStore(uint64(2)), NotNil)
+	c.Assert(errors.ErrorEqual(cluster.ForceRemoveStore(uint64(3)), errs.ErrStoreNotFound.FastGenByArgs(uint64(3))), IsTrue)
 }
 
 func (s *testClusterInfoSuite) TestReuseAddress(c *C) {

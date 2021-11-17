@@ -1124,9 +1124,12 @@ func (c *RaftCluster) ForceRemoveStore(storeID uint64) error {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	// Bury a tombstone store should be OK, nothing to do.
 	if store.IsTombstone() {
 		return nil
+	}
+
+	if store.GetState() == metapb.StoreState_Up && !store.IsDisconnected() {
+		return errors.Errorf("The store %v is not offline nor disconnected", storeID)
 	}
 
 	tombStone := store.Clone(core.TombstoneStore())

@@ -80,7 +80,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 		return errors.Errorf("Another request is working in progress")
 	}
 	u.reset()
-	for failedStore, _ := range failedStores {
+	for failedStore := range failedStores {
 		err := u.cluster.ForceRemoveStore(failedStore)
 		if !errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
 			return err

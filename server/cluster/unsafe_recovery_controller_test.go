@@ -17,6 +17,7 @@ package cluster
 import (
 	"bytes"
 	"context"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -621,15 +622,24 @@ func (s *testUnsafeRecoverSuite) TestPlanExecution(c *C) {
 func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
-	for _, store := range newTestStores(2, "5.3.0") {
+	stores := newTestStores(2, "5.3.0")
+	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
+	for _, store := range stores {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
 	failedStores := map[uint64]string{
-		2: "",
+		1: "",
 		3: "",
 	}
 
 	c.Assert(recoveryController.RemoveFailedStores(failedStores), IsNil)
-	c.Assert(cluster.GetStore(uint64(2)).IsTombstone(), IsTrue)
+	c.Assert(cluster.GetStore(uint64(1)).IsTombstone(), IsTrue)
+
+	// Store 2's last heartbeat is recent, and is not allowed to be removed.
+	failedStores = map[uint64]string{
+		2: "",
+	}
+
+	c.Assert(recoveryController.RemoveFailedStores(failedStores), NotNil)
 }
