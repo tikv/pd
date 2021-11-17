@@ -16,6 +16,7 @@ package replication
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -140,10 +141,12 @@ func (s *testReplicationMode) TestStatus(c *C) {
 }
 
 type mockFileReplicator struct {
-	err error
+	lastData string
+	err      error
 }
 
-func (rep *mockFileReplicator) ReplicateFileToAllMembers(context.Context, string, []byte) error {
+func (rep *mockFileReplicator) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
+	rep.lastData = string(data)
 	return rep.err
 }
 
@@ -171,6 +174,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	c.Assert(rep.drGetState(), Equals, drStateSync)
 	stateID := rep.drAutoSync.StateID
 	c.Assert(stateID, Not(Equals), uint64(0))
+	c.Assert(replicator.lastData, Equals, fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID))
 	assertStateIDUpdate := func() {
 		c.Assert(rep.drAutoSync.StateID, Not(Equals), stateID)
 		stateID = rep.drAutoSync.StateID
@@ -180,6 +184,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateAsync)
 	assertStateIDUpdate()
+	c.Assert(replicator.lastData, Equals, fmt.Sprintf(`{"state":"async","state_id":%d}`, stateID))
 
 	// add new store in dr zone.
 	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone2"})
