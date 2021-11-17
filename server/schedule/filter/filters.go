@@ -357,7 +357,7 @@ func (f *StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store
 
 func (f *StoreStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, store *core.StoreInfo) bool {
 	f.Reason = "reject-leader"
-	return opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())
+	return opts.CheckLabelProperty(config.RejectLeader, store.GetLabels())
 }
 
 // The condition table.
@@ -479,7 +479,7 @@ func newRuleFitFilter(scope string, cluster opt.Cluster, region *core.RegionInfo
 		scope:    scope,
 		cluster:  cluster,
 		region:   region,
-		oldFit:   opt.FitRegion(cluster, region),
+		oldFit:   cluster.GetRuleManager().FitRegion(cluster, region),
 		srcStore: oldStoreID,
 	}
 }
@@ -500,7 +500,7 @@ func (f *ruleFitFilter) Target(options *config.PersistOptions, store *core.Store
 	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
 		f.region.GetPeers(), f.region.GetLeader(),
 		core.WithReplacePeerStore(f.srcStore, store.GetID()))
-	newFit := opt.FitRegion(f.cluster, region)
+	newFit := f.cluster.GetRuleManager().FitRegion(f.cluster, region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
@@ -524,7 +524,7 @@ func newRuleLeaderFitFilter(scope string, cluster opt.Cluster, region *core.Regi
 		scope:            scope,
 		cluster:          cluster,
 		region:           region,
-		oldFit:           opt.FitRegion(cluster, region),
+		oldFit:           cluster.GetRuleManager().FitRegion(cluster, region),
 		srcLeaderStoreID: srcLeaderStoreID,
 	}
 }
@@ -550,7 +550,7 @@ func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core
 	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
 		f.region.GetPeers(), f.region.GetLeader(),
 		core.WithLeader(targetPeer))
-	newFit := opt.FitRegion(f.cluster, copyRegion)
+	newFit := f.cluster.GetRuleManager().FitRegion(f.cluster, copyRegion)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
