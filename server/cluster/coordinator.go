@@ -117,7 +117,7 @@ func (c *coordinator) patrolRegions() {
 			}
 			checkerIsBusy, ops := c.checkers.CheckRegion(region)
 			if checkerIsBusy {
-				continue
+				break
 			}
 			if len(ops) > 0 {
 				c.opController.AddWaitingOperator(ops...)
