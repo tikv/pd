@@ -141,7 +141,7 @@ type Server struct {
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
 	serviceSafePointLock sync.Mutex
 
-	//hot region history info storeage
+	// hot region history info storeage
 	hotRegionStorage *core.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
@@ -400,11 +400,11 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
-	//initial hot_region_storage in here.
+	// initial hot_region_storage in here.
 	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
 	s.hotRegionStorage, err = core.NewHotRegionsStorage(
 		ctx, hotRegionPath, encryptionKeyManager, s.handler,
-		s.cfg.Schedule.HotRegionsResevervedDays,
+		s.cfg.Schedule.HotRegionsReservedDays,
 		s.cfg.Schedule.HotRegionsWriteInterval.Duration)
 	if err != nil {
 		return err
@@ -1387,7 +1387,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
-	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
+	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644) // #nosec
 }
 
 // SaveTTLConfig save ttl config

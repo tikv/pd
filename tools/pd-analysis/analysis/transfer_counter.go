@@ -238,7 +238,11 @@ func (c *TransferCounter) PrintResult() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer fd.Close()
+	defer func() {
+		if err := fd.Close(); err != nil {
+			log.Printf("Error closing file: %s\n", err)
+		}
+	}()
 	fdContent := strings.Join([]string{
 		toString(uint64(c.storeNum)),
 		toString(uint64(c.regionNum)),
