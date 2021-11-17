@@ -54,8 +54,8 @@ type MetaStore struct {
 }
 
 // NewMetaStore convert metapb.Store to MetaStore without State
-func NewMetaStore(store *metapb.Store, StateName string) *MetaStore {
-	metaStore := &MetaStore{StateName: StateName}
+func NewMetaStore(store *metapb.Store, stateName string) *MetaStore {
+	metaStore := &MetaStore{StateName: stateName}
 	metaStore.StoreID = store.GetId()
 	metaStore.Address = store.GetAddress()
 	metaStore.Labels = store.GetLabels()
