@@ -39,23 +39,24 @@ import (
 // MetaStore contains meta information about a store which needed to show.
 type MetaStore struct {
 	//nolint
-	Id                   uint64               `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Address              string               `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
-	Labels               []*metapb.StoreLabel `protobuf:"bytes,4,rep,name=labels" json:"labels,omitempty"`
-	Version              string               `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`
-	PeerAddress          string               `protobuf:"bytes,6,opt,name=peer_address,json=peerAddress,proto3" json:"peer_address,omitempty"`
-	StatusAddress        string               `protobuf:"bytes,7,opt,name=status_address,json=statusAddress,proto3" json:"status_address,omitempty"`
-	GitHash              string               `protobuf:"bytes,8,opt,name=git_hash,json=gitHash,proto3" json:"git_hash,omitempty"`
-	StartTimestamp       int64                `protobuf:"varint,9,opt,name=start_timestamp,json=startTimestamp,proto3" json:"start_timestamp,omitempty"`
-	DeployPath           string               `protobuf:"bytes,10,opt,name=deploy_path,json=deployPath,proto3" json:"deploy_path,omitempty"`
-	LastHeartbeat        int64                `protobuf:"varint,11,opt,name=last_heartbeat,json=lastHeartbeat,proto3" json:"last_heartbeat,omitempty"`
-	PhysicallyDestroyed  bool                 `protobuf:"varint,12,opt,name=physically_destroyed,json=physicallyDestroyed,proto3" json:"physically_destroyed,omitempty"`
-	StateName            string               `json:"state_name"`
+	StoreID             uint64               `json:"id,omitempty"`
+	Address             string               `json:"address,omitempty"`
+	Labels              []*metapb.StoreLabel `json:"labels,omitempty"`
+	Version             string               `json:"version,omitempty"`
+	PeerAddress         string               `json:"peer_address,omitempty"`
+	StatusAddress       string               `json:"status_address,omitempty"`
+	GitHash             string               `json:"git_hash,omitempty"`
+	StartTimestamp      int64                `json:"start_timestamp,omitempty"`
+	DeployPath          string               `json:"deploy_path,omitempty"`
+	LastHeartbeat       int64                `json:"last_heartbeat,omitempty"`
+	PhysicallyDestroyed bool                 `json:"physically_destroyed,omitempty"`
+	StateName           string               `json:"state_name"`
 }
 
+// NewMetaStore convert metapb.Store to MetaStore without State
 func NewMetaStore(store *metapb.Store, StateName string) *MetaStore {
 	metaStore := &MetaStore{StateName: StateName}
-	metaStore.Id = store.GetId()
+	metaStore.StoreID = store.GetId()
 	metaStore.Address = store.GetAddress()
 	metaStore.Labels = store.GetLabels()
 	metaStore.Version = store.GetVersion()
@@ -69,19 +70,20 @@ func NewMetaStore(store *metapb.Store, StateName string) *MetaStore {
 	return metaStore
 }
 
+// ConvertToMetapbStore convert to metapb.Store
 func (m *MetaStore) ConvertToMetapbStore() *metapb.Store {
 	metapbStore := &metapb.Store{
-		Id:                   m.Id,
-		Address:              m.Address,
-		State:                metapb.StoreState(metapb.StoreState_value[m.StateName]),
-		Labels:               m.Labels,
-		Version:              m.Version,
-		PeerAddress:          m.PeerAddress,
-		StatusAddress:        m.StatusAddress,
-		GitHash:              m.GitHash,
-		StartTimestamp:       m.StartTimestamp,
-		DeployPath:           m.DeployPath,
-		LastHeartbeat:        m.LastHeartbeat,
+		Id:             m.StoreID,
+		Address:        m.Address,
+		State:          metapb.StoreState(metapb.StoreState_value[m.StateName]),
+		Labels:         m.Labels,
+		Version:        m.Version,
+		PeerAddress:    m.PeerAddress,
+		StatusAddress:  m.StatusAddress,
+		GitHash:        m.GitHash,
+		StartTimestamp: m.StartTimestamp,
+		DeployPath:     m.DeployPath,
+		LastHeartbeat:  m.LastHeartbeat,
 	}
 	return metapbStore
 }
