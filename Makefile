@@ -176,20 +176,22 @@ test-with-cover: install-go-tools dashboard-ui
 	for PKG in $(TEST_PKGS); do\
 		set -euo pipefail;\
 		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
-		rm coverage.tmp;
+		rm coverage.tmp;\
 	done
 	@$(FAILPOINT_DISABLE)
 
-test-with-cover-parallel: install-go-tools dashboard-ui tools/bin/gotestsum tools/bin/gocov tools/bin/gocov-xml
-	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
-	split packages.list -n r/${TASK_COUNT} packages_unit_ -a 1 --numeric-suffixes=1;\
-	cat packages_unit_${TASK_ID} |tr "\n" "," >package.list;\
-    TEST_PKGS=`cat package.list`;
+test-with-cover-parallel: install-go-tools dashboard-ui tools/bin/gotestsum tools/bin/gocov tools/bin/gocov-xml tools/split
 
 	@$(FAILPOINT_ENABLE)
+
 	set -euo pipefail;\
-	CGO_ENABLED=1 GO111MODULE=on tools/bin/gotestsum --junitfile test-reporet.xml  -- -v --race -covermode=atomic -coverprofile=coverage -coverpkg=./... ${TEST_PKGS}  2>&1 || { $(FAILPOINT_DISABLE); }; \
+
+	export TASK_PKGS="$(shell cat package.list)"\
+
+	CGO_ENABLED=1 GO111MODULE=on tools/bin/gotestsum --junitfile test-reporet.xml  -- -v --race -covermode=atomic -coverprofile=coverage ${TASK_PKGS}  2>&1 || { $(FAILPOINT_DISABLE); }; \
+
 	tools/bin/gocov convert coverage | tools/bin/gocov-xml >> pd-coverage.xml;
+
 	@$(FAILPOINT_DISABLE)
 
 test-tso-function: install-go-tools dashboard-ui
@@ -295,6 +297,14 @@ tools/bin/gocov-xml: tools/check/go.mod
 
 tools/bin/gotestsum: tools/check/go.mod
 	cd tools/check && $(GO) build -o ../bin/gotestsum gotest.tools/gotestsum
+
+tools/split:
+	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
+
+	split packages.list -n r/${TASK_COUNT} packages_unit_ -a 1 --numeric-suffixes=1;\
+
+	cat packages_unit_${TASK_ID} |tr "\n" " " >package.list;
+
 clean: failpoint-disable deadlock-disable clean-test clean-build
 
 .PHONY: all ci vendor tidy clean-test clean-build clean
