@@ -107,7 +107,7 @@ type Client interface {
 	ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error)
 	// SplitRegions split regions by given split keys
 	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error)
-	// splitAndScatterRegions split regions by given split keys and scatter new regions
+	// SplitAndScatterRegions split regions by given split keys and scatter new regions
 	SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
@@ -1699,7 +1699,7 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 
 func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error) {
 	start := time.Now()
-	defer func() { cmdDurationScatterRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationSplitAndScatterRegions.Observe(time.Since(start).Seconds()) }()
 	options := &RegionsOp{}
 	for _, opt := range opts {
 		opt(options)
