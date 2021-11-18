@@ -186,9 +186,8 @@ test-with-cover-parallel: install-go-tools dashboard-ui tools/bin/gotestsum tool
 
 	set -euo pipefail;\
 
-	export TASK_PKGS="$(shell cat package.list)"\
 
-	CGO_ENABLED=1 GO111MODULE=on tools/bin/gotestsum --junitfile test-reporet.xml  -- -v --race -covermode=atomic -coverprofile=coverage ${TASK_PKGS}  2>&1 || { $(FAILPOINT_DISABLE); }; \
+	CGO_ENABLED=1 GO111MODULE=on tools/bin/gotestsum --junitfile test-reporet.xml  -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
 
 	tools/bin/gocov convert coverage | tools/bin/gocov-xml >> pd-coverage.xml;
 
