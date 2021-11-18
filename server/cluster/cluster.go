@@ -1077,10 +1077,9 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	return err
 }
 
-// buryStore marks a store as tombstone in cluster.
-// The store should be empty before calling this func
-// State transition: Offline -> Tombstone.
-func (c *RaftCluster) buryStore(storeID uint64) error {
+// BuryStore marks a store as tombstone in cluster.
+// If forceBury is false, the store should be offlined and emptied before calling this func.
+func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -1095,7 +1094,11 @@ func (c *RaftCluster) buryStore(storeID uint64) error {
 	}
 
 	if store.IsUp() {
-		return errs.ErrStoreIsUp.FastGenByArgs()
+		if !forceBury {
+			return errs.ErrStoreIsUp.FastGenByArgs()
+		} else if !store.IsDisconnected() {
+			return errors.Errorf("The store %v is not offline nor disconnected", storeID)
+		}
 	}
 
 	newStore := store.Clone(core.TombstoneStore())
@@ -1105,40 +1108,6 @@ func (c *RaftCluster) buryStore(storeID uint64) error {
 		zap.String("state", store.GetState().String()),
 		zap.Bool("physically-destroyed", store.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
-	c.onStoreVersionChangeLocked()
-	if err == nil {
-		// clean up the residual information.
-		c.RemoveStoreLimit(storeID)
-		c.hotStat.RemoveRollingStoreStats(storeID)
-	}
-	return err
-}
-
-// ForceRemoveStore set a store as tombstone directly without waiting for the data to be moved somewhere else.
-func (c *RaftCluster) ForceRemoveStore(storeID uint64) error {
-	c.Lock()
-	defer c.Unlock()
-
-	store := c.GetStore(storeID)
-	if store == nil {
-		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
-	}
-
-	if store.IsTombstone() {
-		return nil
-	}
-
-	if store.GetState() == metapb.StoreState_Up && !store.IsDisconnected() {
-		return errors.Errorf("The store %v is not offline nor disconnected", storeID)
-	}
-
-	tombStone := store.Clone(core.TombstoneStore())
-	log.Warn("store has been forcibly removed",
-		zap.Uint64("store-id", tombStone.GetID()),
-		zap.String("store-address", tombStone.GetAddress()),
-		zap.String("state", tombStone.GetState().String()),
-		zap.Bool("physically-destroyed", tombStone.IsPhysicallyDestroyed()))
-	err := c.putStoreLocked(tombStone)
 	c.onStoreVersionChangeLocked()
 	if err == nil {
 		// clean up the residual information.
@@ -1253,7 +1222,7 @@ func (c *RaftCluster) checkStores() {
 		// If the store is empty, it can be buried.
 		regionCount := c.core.GetStoreRegionCount(offlineStore.GetId())
 		if regionCount == 0 {
-			if err := c.buryStore(offlineStore.GetId()); err != nil {
+			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
 					errs.ZapError(err))

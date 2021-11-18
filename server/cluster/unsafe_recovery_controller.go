@@ -81,7 +81,13 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 	}
 	u.reset()
 	for failedStore := range failedStores {
-		err := u.cluster.ForceRemoveStore(failedStore)
+		store := u.cluster.GetStore(failedStore)
+		if store != nil && store.IsUp() && !store.IsDisconnected() {
+			return errors.Errorf("Store %v is up and connected", failedStore)
+		}
+	}
+	for failedStore := range failedStores {
+		err := u.cluster.BuryStore(failedStore, true)
 		if !errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
 			return err
 		}
