@@ -75,7 +75,7 @@ func (p *PriorityInspector) Inspect(region *core.RegionInfo) (fit *placement.Reg
 
 // inspectRegionInPlacementRule inspects region in placement rule mode
 func (p *PriorityInspector) inspectRegionInPlacementRule(region *core.RegionInfo) (makeupCount int, fit *placement.RegionFit) {
-	fit = opt.FitRegion(p.cluster, region)
+	fit = p.cluster.GetRuleManager().FitRegion(p.cluster, region)
 	if len(fit.RuleFits) == 0 {
 		return
 	}
@@ -102,7 +102,7 @@ func (p *PriorityInspector) addOrRemoveRegion(priority int, regionID uint64) {
 	if priority < 0 {
 		if entry := p.queue.Get(regionID); entry != nil && entry.Priority == priority {
 			e := entry.Value.(*RegionPriorityEntry)
-			e.Attempt = e.Attempt + 1
+			e.Attempt++
 			e.Last = time.Now()
 		}
 		entry := NewRegionEntry(regionID)

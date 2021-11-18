@@ -31,10 +31,10 @@ type ScheduleKind struct {
 }
 
 // NewScheduleKind creates a schedule kind with resource kind and schedule policy.
-func NewScheduleKind(Resource ResourceKind, Policy SchedulePolicy) ScheduleKind {
+func NewScheduleKind(resource ResourceKind, policy SchedulePolicy) ScheduleKind {
 	return ScheduleKind{
-		Resource: Resource,
-		Policy:   Policy,
+		Resource: resource,
+		Policy:   policy,
 	}
 }
 

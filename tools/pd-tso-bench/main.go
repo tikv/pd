@@ -78,7 +78,7 @@ func main() {
 	}()
 
 	for i := 0; i < *count; i++ {
-		fmt.Printf("\nStart benchmark #%d, duration: %+vs\n", i, (*duration).Seconds())
+		fmt.Printf("\nStart benchmark #%d, duration: %+vs\n", i, duration.Seconds())
 		bench(ctx)
 	}
 }
