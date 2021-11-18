@@ -1124,7 +1124,7 @@ func isLevelLegal(level string) bool {
 
 // GetReplicationModeConfig returns the replication mode config.
 func (s *Server) GetReplicationModeConfig() *config.ReplicationModeConfig {
-	return s.persistOptions.GetReplicationModeConfig()
+	return s.persistOptions.GetReplicationModeConfig().Clone()
 }
 
 // SetReplicationModeConfig sets the replication mode.
