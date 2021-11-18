@@ -33,9 +33,7 @@ require (
 	github.com/pingcap/sysutil v0.0.0-20210730114356-fcd8a63f68c5
 	github.com/pingcap/tidb-dashboard v0.0.0-20211107164327-80363dfbe884
 	github.com/prometheus/client_golang v1.1.0
-	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.6.0
-	github.com/prometheus/procfs v0.0.5 // indirect
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/sirupsen/logrus v1.2.0
 	github.com/spf13/cobra v1.0.0
@@ -48,10 +46,9 @@ require (
 	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
 	go.etcd.io/bbolt v1.3.5 // indirect
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
-	go.uber.org/goleak v1.1.10
+	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.16.0
-	golang.org/x/sys v0.0.0-20210831042530-f4d43177bf5e // indirect
-	golang.org/x/tools v0.0.0-20210112230658-8b4aab62c064
+	golang.org/x/tools v0.1.5
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )

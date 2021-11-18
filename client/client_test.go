@@ -100,7 +100,6 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
-	// nolint
 	cli := &baseClient{
 		checkLeaderCh:        make(chan struct{}, 1),
 		checkTSODispatcherCh: make(chan struct{}, 1),
