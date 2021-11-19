@@ -39,7 +39,7 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-var _ = Suite(&regionSyncerTestSuite{})
+var _ = SerialSuites(&regionSyncerTestSuite{})
 
 type regionSyncerTestSuite struct {
 	ctx    context.Context
