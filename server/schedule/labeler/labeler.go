@@ -94,8 +94,8 @@ func (l *RegionLabeler) adjustRule(rule *LabelRule) error {
 		}
 	}
 
-	switch rule.RuleType {
-	case KeyRange:
+	// TODO: change it to switch statement once we support more types.
+	if rule.RuleType == KeyRange {
 		rules, ok := rule.Data.([]interface{})
 		if !ok {
 			return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %T", rule.Data))

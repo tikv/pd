@@ -343,7 +343,7 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 }
 
 func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
-	A := float64(s.GetAvgAvailable())
+	A := float64(s.GetAvgAvailable()) / gb
 	C := float64(s.GetCapacity()) / gb
 	R := float64(s.GetRegionSize() + delta)
 	if R < 0 {
@@ -351,7 +351,7 @@ func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
 	}
 	U := C - A
 	if s.GetRegionSize() != 0 {
-		U = U + U*(float64(delta))/float64(s.GetRegionSize())
+		U += U * (float64(delta)) / float64(s.GetRegionSize())
 		if U < C && U > 0 {
 			A = C - U
 		}

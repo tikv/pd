@@ -44,7 +44,6 @@ func newProfHandler(svr *server.Server, rd *render.Render) *ProfHandler {
 		svr: svr,
 		rd:  rd,
 	}
-
 }
 
 // @Summary debug zip of PD servers.

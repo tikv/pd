@@ -145,7 +145,7 @@ func (s *testFitSuite) TestFitRegion(c *C) {
 		for _, r := range cc.rules {
 			rules = append(rules, s.makeRule(r))
 		}
-		rf := FitRegion(stores.GetStores(), region, rules)
+		rf := fitRegion(stores.GetStores(), region, rules)
 		expects := strings.Split(cc.fitPeers, "/")
 		for i, f := range rf.RuleFits {
 			c.Assert(s.checkPeerMatch(f.Peers, expects[i]), IsTrue)

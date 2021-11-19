@@ -346,17 +346,17 @@ const (
 )
 
 // Run starts the background job.
-func (m *ModeManager) Run(quit chan struct{}) {
+func (m *ModeManager) Run(ctx context.Context) {
 	// Wait for a while when just start, in case tikv do not connect in time.
 	select {
 	case <-time.After(idleTimeout):
-	case <-quit:
+	case <-ctx.Done():
 		return
 	}
 	for {
 		select {
 		case <-time.After(tickInterval):
-		case <-quit:
+		case <-ctx.Done():
 			return
 		}
 		m.tickDR()
@@ -421,7 +421,6 @@ func (m *ModeManager) checkStoreStatus() (primaryDownCount, drDownCount, primary
 			} else {
 				primaryUpCount++
 			}
-
 		}
 		if labelValue == m.config.DRAutoSync.DR {
 			if down {
