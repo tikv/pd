@@ -20,6 +20,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
@@ -64,6 +65,8 @@ func (i *idAllocator) alloc() uint64 {
 }
 
 func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/core/regionStorageFastFlush", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/server/core/regionStorageFastFlush")
 	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
