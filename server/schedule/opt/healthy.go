@@ -62,7 +62,7 @@ func AllowBalanceEmptyRegion(cluster Cluster) func(*core.RegionInfo) bool {
 // rules is disabled, it should have enough replicas and no any learner peer.
 func IsRegionReplicated(cluster Cluster, region *core.RegionInfo) bool {
 	if cluster.GetOpts().IsPlacementRulesEnabled() {
-		return FitRegion(cluster, region).IsSatisfied()
+		return cluster.GetRuleManager().FitRegion(cluster, region).IsSatisfied()
 	}
 	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetOpts().GetMaxReplicas()
 }

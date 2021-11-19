@@ -666,9 +666,9 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
-	server := &heartbeatServer{stream: stream}
-	FlowRoundByDigit := s.persistOptions.GetPDServerConfig().FlowRoundByDigit
 	var (
+		server            = &heartbeatServer{stream: stream}
+		flowRoundOption   = core.WithFlowRoundByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
 		forwardStream     pdpb.PD_RegionHeartbeatClient
 		cancel            context.CancelFunc
 		lastForwardedHost string
@@ -750,11 +750,11 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
 			s.hbStreams.BindStream(storeID, server)
 			// refresh FlowRoundByDigit
-			FlowRoundByDigit = s.persistOptions.GetPDServerConfig().FlowRoundByDigit
+			flowRoundOption = core.WithFlowRoundByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
 			lastBind = time.Now()
 		}
 
-		region := core.RegionFromHeartbeat(request, core.WithFlowRoundByDigit(FlowRoundByDigit))
+		region := core.RegionFromHeartbeat(request, flowRoundOption)
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
@@ -1240,7 +1240,11 @@ func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 	if s.IsClosed() || s.cluster == nil {
 		return ErrNotStarted
 	}
-	return s.cluster.GetRegionSyncer().Sync(stream)
+	ctx := s.cluster.Context()
+	if ctx == nil {
+		return ErrNotStarted
+	}
+	return s.cluster.GetRegionSyncer().Sync(ctx, stream)
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.
@@ -1549,6 +1553,11 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 		RegionsId:          newRegionIDs,
 		FinishedPercentage: uint64(finishedPercentage),
 	}, nil
+}
+
+// SplitAndScatterRegions split regions by the given split keys, and scatter regions
+func (s *Server) SplitAndScatterRegions(ctx context.Context, request *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
+	panic("unimplemented")
 }
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.

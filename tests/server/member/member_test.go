@@ -202,7 +202,7 @@ func (s *memberTestSuite) TestLeaderPriority(c *C) {
 
 func (s *memberTestSuite) post(c *C, url string, body string) {
 	testutil.WaitUntil(c, func(c *C) bool {
-		res, err := http.Post(url, "", bytes.NewBufferString(body))
+		res, err := http.Post(url, "", bytes.NewBufferString(body)) // #nosec
 		c.Assert(err, IsNil)
 		b, err := io.ReadAll(res.Body)
 		res.Body.Close()
