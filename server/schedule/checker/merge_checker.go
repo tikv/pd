@@ -95,7 +95,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	// when pd just started, it will load region meta from etcd
+	// when pd just started, it will load region meta from region storage,
 	// but the size for these loaded region info is 0
 	// pd don't know the real size of one region until the first heartbeat of the region
 	// thus here when size is 0, just skip.
@@ -112,7 +112,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// skip region has down peers or pending peers or learner peers
-	if !opt.IsRegionHealthy(m.cluster, region) {
+	if !opt.IsRegionHealthy(region) {
 		checkerCounter.WithLabelValues("merge_checker", "special-peer").Inc()
 		return nil
 	}
@@ -168,7 +168,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 	return adjacent != nil && !m.splitCache.Exists(adjacent.GetID()) && !m.cluster.IsRegionHot(adjacent) &&
-		AllowMerge(m.cluster, region, adjacent) && opt.IsRegionHealthy(m.cluster, adjacent) &&
+		AllowMerge(m.cluster, region, adjacent) && opt.IsRegionHealthy(adjacent) &&
 		opt.IsRegionReplicated(m.cluster, adjacent)
 }
 
