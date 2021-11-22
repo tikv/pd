@@ -146,7 +146,6 @@ func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer = cluster.GetServer(cluster.GetLeader())
-	c.Log("leader: ", leaderServer.GetServer().GetMember())
 	c.Assert(leaderServer, NotNil)
 	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
 	c.Assert(loadRegions, HasLen, regionLen)
