@@ -145,7 +145,6 @@ func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	time.Sleep(1 * time.Second)
 	leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Log("leader: ", leaderServer.GetServer().GetMember())
 	c.Assert(leaderServer, NotNil)

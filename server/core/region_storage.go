@@ -90,6 +90,7 @@ func (s *RegionStorage) backgroundFlush() {
 			s.mu.RLock()
 			isFlush = s.flushTime.Before(time.Now())
 			failpoint.Inject("regionStorageFastFlush", func() {
+				log.Info("use fast flush")
 				isFlush = true
 			})
 			s.mu.RUnlock()
