@@ -1240,7 +1240,11 @@ func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 	if s.IsClosed() || s.cluster == nil {
 		return ErrNotStarted
 	}
-	return s.cluster.GetRegionSyncer().Sync(stream)
+	ctx := s.cluster.Context()
+	if ctx == nil {
+		return ErrNotStarted
+	}
+	return s.cluster.GetRegionSyncer().Sync(ctx, stream)
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.
@@ -1549,6 +1553,11 @@ func (s *Server) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsReq
 		RegionsId:          newRegionIDs,
 		FinishedPercentage: uint64(finishedPercentage),
 	}, nil
+}
+
+// SplitAndScatterRegions split regions by the given split keys, and scatter regions
+func (s *Server) SplitAndScatterRegions(ctx context.Context, request *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
+	panic("unimplemented")
 }
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.

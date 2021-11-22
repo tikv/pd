@@ -230,7 +230,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 
 	allAddPeerLimit := make(map[string]map[string]interface{})
-	json.Unmarshal([]byte(output), &allAddPeerLimit)
+	json.Unmarshal(output, &allAddPeerLimit)
 	c.Assert(allAddPeerLimit["1"]["add-peer"].(float64), Equals, float64(20))
 	c.Assert(allAddPeerLimit["3"]["add-peer"].(float64), Equals, float64(20))
 	_, ok := allAddPeerLimit["2"]["add-peer"]
@@ -241,14 +241,14 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 
 	allRemovePeerLimit := make(map[string]map[string]interface{})
-	json.Unmarshal([]byte(output), &allRemovePeerLimit)
+	json.Unmarshal(output, &allRemovePeerLimit)
 	c.Assert(allRemovePeerLimit["1"]["remove-peer"].(float64), Equals, float64(20))
 	c.Assert(allRemovePeerLimit["3"]["remove-peer"].(float64), Equals, float64(25))
 	_, ok = allRemovePeerLimit["2"]["add-peer"]
 	c.Assert(ok, IsFalse)
 
 	// store delete <store_id> command
-	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
+	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
 	args = []string{"-u", pdAddr, "store", "delete", "1"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
@@ -256,7 +256,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
-	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
+	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Offline.String())
 
 	// store check status
 	args = []string{"-u", pdAddr, "store", "check", "Offline"}
@@ -285,7 +285,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
-	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
+	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Offline.String())
 
 	// store remove-tombstone
 	args = []string{"-u", pdAddr, "store", "remove-tombstone"}

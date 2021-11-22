@@ -1021,10 +1021,10 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc))
+		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
 		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
 
-		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc))
+		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
 		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -1040,14 +1040,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc))
+			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		c.Assert(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc)), IsNil)
+		c.Assert(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc)), IsNil)
+		c.Assert(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy), IsNil)
 	}
 }
 
@@ -1142,7 +1142,7 @@ func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluste
 }
 
 func newTestRaftCluster(ctx context.Context, id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
-	rc := &RaftCluster{ctx: ctx}
+	rc := &RaftCluster{serverCtx: ctx}
 	rc.InitCluster(id, opt, storage, basicCluster)
 	return rc
 }

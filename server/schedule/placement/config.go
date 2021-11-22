@@ -158,7 +158,7 @@ func (p *ruleConfigPatch) commit() {
 		} else {
 			oldRule, ok := p.c.rules[key]
 			version := uint64(0)
-			createTimestamp := uint64(0)
+			var createTimestamp uint64
 			if ok {
 				version = oldRule.Version + 1
 				createTimestamp = oldRule.CreateTimestamp
