@@ -51,7 +51,7 @@ func NewHotWriteRegionCommand() *cobra.Command {
 }
 
 func showHotWriteRegionsCommandFunc(cmd *cobra.Command, args []string) {
-	prefix, err := parseOptionalArgs(cmd, hotWriteRegionsPrefix, args)
+	prefix, err := parseOptionalArgs(hotWriteRegionsPrefix, args)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -75,7 +75,7 @@ func NewHotReadRegionCommand() *cobra.Command {
 }
 
 func showHotReadRegionsCommandFunc(cmd *cobra.Command, args []string) {
-	prefix, err := parseOptionalArgs(cmd, hotReadRegionsPrefix, args)
+	prefix, err := parseOptionalArgs(hotReadRegionsPrefix, args)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -107,7 +107,7 @@ func showHotStoresCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func parseOptionalArgs(cmd *cobra.Command, prefix string, args []string) (string, error) {
+func parseOptionalArgs(prefix string, args []string) (string, error) {
 	argsLen := len(args)
 	if argsLen > 0 {
 		prefix += "?"

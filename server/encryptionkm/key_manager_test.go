@@ -43,7 +43,7 @@ func TestKeyManager(t *testing.T) {
 
 type testKeyManagerSuite struct{}
 
-var _ = Suite(&testKeyManagerSuite{})
+var _ = SerialSuites(&testKeyManagerSuite{})
 
 const (
 	testMasterKey     = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b530"
@@ -357,8 +357,7 @@ func (s *testKeyManagerSuite) TestLoadKeyEmpty(c *C) {
 	// Simulate keys get deleted.
 	_, err = client.Delete(context.Background(), EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	_, err = m.loadKeys()
-	c.Assert(err, NotNil)
+	c.Assert(m.loadKeys(), NotNil)
 }
 
 func (s *testKeyManagerSuite) TestWatcher(c *C) {

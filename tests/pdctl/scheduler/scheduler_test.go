@@ -100,7 +100,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		var schedulers []string
 		mustExec([]string{"-u", pdAddr, "scheduler", "show"}, &schedulers)
 		for _, scheduler := range schedulers {
-			c.Assert(expected[scheduler], Equals, true)
+			c.Assert(expected[scheduler], IsTrue)
 		}
 	}
 
@@ -255,8 +255,6 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	// test hot region config
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "[404] scheduler not found"), IsTrue)
-	var conf map[string]interface{}
-	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
 	expected1 := map[string]interface{}{
 		"min-hot-byte-rate":          float64(100),
 		"min-hot-key-rate":           float64(10),
@@ -277,6 +275,10 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"strict-picking-store":       "true",
 		"enable-for-tiflash":         "true",
 	}
+	var conf map[string]interface{}
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
+	c.Assert(conf, DeepEquals, expected1)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "show"}, &conf)
 	c.Assert(conf, DeepEquals, expected1)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.02"}, nil)
 	expected1["src-tolerance-ratio"] = 1.02

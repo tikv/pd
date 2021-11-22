@@ -93,20 +93,28 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 	}, nil
 }
 
+const (
+	maxMergeTSORequests    = 10000
+	defaultTSOProxyTimeout = 3 * time.Second
+)
+
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 	var (
-		forwardStream     pdpb.PD_TsoClient
-		cancel            context.CancelFunc
-		lastForwardedHost string
+		doneCh chan struct{}
+		errCh  chan error
 	)
-	defer func() {
-		// cancel the forward stream
-		if cancel != nil {
-			cancel()
-		}
-	}()
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
 	for {
+		// Prevent unnecessary performance overhead of the channel.
+		if errCh != nil {
+			select {
+			case err := <-errCh:
+				return errors.WithStack(err)
+			default:
+			}
+		}
 		request, err := stream.Recv()
 		if err == io.EOF {
 			return nil
@@ -115,38 +123,19 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 
-		forwardedHost := getForwardedHost(stream.Context())
+		streamCtx := stream.Context()
+		forwardedHost := getForwardedHost(streamCtx)
 		if !s.isLocalRequest(forwardedHost) {
-			if forwardStream == nil || lastForwardedHost != forwardedHost {
-				if cancel != nil {
-					cancel()
-				}
-				client, err := s.getDelegateClient(s.ctx, forwardedHost)
-				if err != nil {
-					return err
-				}
-				// TODO: change it to the info level once the TiKV doesn't use it in a unary way.
-				log.Debug("create TSO forward stream", zap.String("forwarded-host", forwardedHost))
-				forwardStream, cancel, err = s.createTsoForwardStream(client)
-				if err != nil {
-					return err
-				}
-				lastForwardedHost = forwardedHost
+			if errCh == nil {
+				doneCh = make(chan struct{})
+				defer close(doneCh)
+				errCh = make(chan error)
 			}
-
-			// In order to avoid the forwarding stream being canceled, we are not going to handle the EOF before the
-			// forwarding stream responds.
-			// TODO: we should change this part of logic once the TiKV uses this RPC call in the streaming way.
-			if err := forwardStream.Send(request); err != nil {
-				return errors.WithStack(err)
-			}
-			resp, err := forwardStream.Recv()
-			if err != nil {
-				return errors.WithStack(err)
-			}
-			if err := stream.Send(resp); err != nil {
-				return errors.WithStack(err)
-			}
+			s.dispatchTSORequest(ctx, &tsoRequest{
+				forwardedHost,
+				request,
+				stream,
+			}, forwardedHost, doneCh, errCh)
 			continue
 		}
 
@@ -163,7 +152,6 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
-
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		response := &pdpb.TsoResponse{
 			Header:    s.header(),
@@ -172,6 +160,182 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		}
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
+		}
+	}
+}
+
+type tsoRequest struct {
+	forwardedHost string
+	request       *pdpb.TsoRequest
+	stream        pdpb.PD_TsoServer
+}
+
+func (s *Server) dispatchTSORequest(ctx context.Context, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error) {
+	tsoRequestChInterface, loaded := s.tsoDispatcher.LoadOrStore(forwardedHost, make(chan *tsoRequest, maxMergeTSORequests))
+	if !loaded {
+		tsDeadlineCh := make(chan deadline, 1)
+		go s.handleDispatcher(ctx, forwardedHost, tsoRequestChInterface.(chan *tsoRequest), tsDeadlineCh, doneCh, errCh)
+		go watchTSDeadline(ctx, tsDeadlineCh)
+	}
+	tsoRequestChInterface.(chan *tsoRequest) <- request
+}
+
+func (s *Server) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error) {
+	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
+	defer ctxCancel()
+	defer s.tsoDispatcher.Delete(forwardedHost)
+
+	var (
+		forwardStream pdpb.PD_TsoClient
+		cancel        context.CancelFunc
+	)
+	client, err := s.getDelegateClient(ctx, forwardedHost)
+	if err != nil {
+		goto errHandling
+	}
+	log.Info("create tso forward stream", zap.String("forwarded-host", forwardedHost))
+	forwardStream, cancel, err = s.createTsoForwardStream(client)
+errHandling:
+	if err != nil || forwardStream == nil {
+		log.Error("create tso forwarding stream error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCCreateStream, err))
+		select {
+		case <-dispatcherCtx.Done():
+			return
+		case _, ok := <-doneCh:
+			if !ok {
+				return
+			}
+		case errCh <- err:
+			close(errCh)
+			return
+		}
+	}
+	defer cancel()
+
+	requests := make([]*tsoRequest, maxMergeTSORequests+1)
+	for {
+		select {
+		case first := <-tsoRequestCh:
+			pendingTSOReqCount := len(tsoRequestCh) + 1
+			requests[0] = first
+			for i := 1; i < pendingTSOReqCount; i++ {
+				requests[i] = <-tsoRequestCh
+			}
+			done := make(chan struct{})
+			dl := deadline{
+				timer:  time.After(defaultTSOProxyTimeout),
+				done:   done,
+				cancel: cancel,
+			}
+			select {
+			case tsDeadlineCh <- dl:
+			case <-dispatcherCtx.Done():
+				return
+			}
+			err = s.processTSORequests(forwardStream, requests[:pendingTSOReqCount])
+			close(done)
+			if err != nil {
+				log.Error("proxy forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
+				select {
+				case <-dispatcherCtx.Done():
+					return
+				case _, ok := <-doneCh:
+					if !ok {
+						return
+					}
+				case errCh <- err:
+					close(errCh)
+					return
+				}
+			}
+		case <-dispatcherCtx.Done():
+			return
+		}
+	}
+}
+
+func (s *Server) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []*tsoRequest) error {
+	start := time.Now()
+	// Merge the requests
+	count := uint32(0)
+	for _, request := range requests {
+		count += request.request.GetCount()
+	}
+	req := &pdpb.TsoRequest{
+		Header: requests[0].request.GetHeader(),
+		Count:  count,
+		// TODO: support Local TSO proxy forwarding.
+		DcLocation: requests[0].request.GetDcLocation(),
+	}
+	// Send to the leader stream.
+	if err := forwardStream.Send(req); err != nil {
+		return err
+	}
+	resp, err := forwardStream.Recv()
+	if err != nil {
+		return err
+	}
+	tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
+	tsoProxyBatchSize.Observe(float64(count))
+	// Split the response
+	physical, logical, suffixBits := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
+	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
+	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
+	// count is 5, then the splitting results should be 5 and 10.
+	firstLogical := addLogical(logical, -int64(count), suffixBits)
+	return s.finishTSORequest(requests, physical, firstLogical, suffixBits)
+}
+
+// Because of the suffix, we need to shift the count before we add it to the logical part.
+func addLogical(logical, count int64, suffixBits uint32) int64 {
+	return logical + count<<suffixBits
+}
+
+func (s *Server) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32) error {
+	countSum := int64(0)
+	for i := 0; i < len(requests); i++ {
+		count := requests[i].request.GetCount()
+		countSum += int64(count)
+		response := &pdpb.TsoResponse{
+			Header: s.header(),
+			Count:  count,
+			Timestamp: &pdpb.Timestamp{
+				Physical:   physical,
+				Logical:    addLogical(firstLogical, countSum, suffixBits),
+				SuffixBits: suffixBits,
+			},
+		}
+		// Send back to the client.
+		if err := requests[i].stream.Send(response); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type deadline struct {
+	timer  <-chan time.Time
+	done   chan struct{}
+	cancel context.CancelFunc
+}
+
+func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan deadline) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	for {
+		select {
+		case d := <-tsDeadlineCh:
+			select {
+			case <-d.timer:
+				log.Error("tso proxy request processing is canceled due to timeout", errs.ZapError(errs.ErrProxyTSOTimeout))
+				d.cancel()
+			case <-d.done:
+				continue
+			case <-ctx.Done():
+				return
+			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }
@@ -340,7 +504,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	// NOTE: can be removed when placement rules feature is enabled by default.
-	if !s.GetConfig().Replication.EnablePlacementRules && core.IsTiFlashStore(store) {
+	if !s.GetConfig().Replication.EnablePlacementRules && core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 
@@ -423,34 +587,40 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
-		return &pdpb.StoreHeartbeatResponse{
-			Header: s.errorHeader(pberr),
-		}, nil
+	// Bypass stats handling if the store report for unsafe recover is not empty.
+	if request.GetStoreReport() == nil {
+		if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
+			return &pdpb.StoreHeartbeatResponse{
+				Header: s.errorHeader(pberr),
+			}, nil
+		}
+
+		storeID := request.Stats.GetStoreId()
+		store := rc.GetStore(storeID)
+		if store == nil {
+			return nil, errors.Errorf("store %v not found", storeID)
+		}
+
+		storeAddress := store.GetAddress()
+		storeLabel := strconv.FormatUint(storeID, 10)
+		start := time.Now()
+
+		err := rc.HandleStoreHeartbeat(request.Stats)
+		if err != nil {
+			return nil, status.Errorf(codes.Unknown, err.Error())
+		}
+		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 
-	storeID := request.Stats.GetStoreId()
-	store := rc.GetStore(storeID)
-	if store == nil {
-		return nil, errors.Errorf("store %v not found", storeID)
-	}
-
-	storeAddress := store.GetAddress()
-	storeLabel := strconv.FormatUint(storeID, 10)
-	start := time.Now()
-
-	err := rc.HandleStoreHeartbeat(request.Stats)
-	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
-	}
-
-	storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
-
-	return &pdpb.StoreHeartbeatResponse{
+	resp := &pdpb.StoreHeartbeatResponse{
 		Header:            s.header(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 		ClusterVersion:    rc.GetClusterVersion(),
-	}, nil
+	}
+	if rc.GetUnsafeRecoveryController() != nil {
+		rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
+	}
+	return resp, nil
 }
 
 const regionHeartbeatSendTimeout = 5 * time.Second
@@ -496,9 +666,9 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
-	server := &heartbeatServer{stream: stream}
-	FlowRoundByDigit := s.persistOptions.GetPDServerConfig().FlowRoundByDigit
 	var (
+		server            = &heartbeatServer{stream: stream}
+		flowRoundOption   = core.WithFlowRoundByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
 		forwardStream     pdpb.PD_RegionHeartbeatClient
 		cancel            context.CancelFunc
 		lastForwardedHost string
@@ -580,11 +750,11 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
 			s.hbStreams.BindStream(storeID, server)
 			// refresh FlowRoundByDigit
-			FlowRoundByDigit = s.persistOptions.GetPDServerConfig().FlowRoundByDigit
+			flowRoundOption = core.WithFlowRoundByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
 			lastBind = time.Now()
 		}
 
-		region := core.RegionFromHeartbeat(request, core.WithFlowRoundByDigit(FlowRoundByDigit))
+		region := core.RegionFromHeartbeat(request, flowRoundOption)
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
@@ -1067,10 +1237,14 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 
 // SyncRegions syncs the regions.
 func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
-	if s.cluster == nil {
+	if s.IsClosed() || s.cluster == nil {
 		return ErrNotStarted
 	}
-	return s.cluster.GetRegionSyncer().Sync(stream)
+	ctx := s.cluster.Context()
+	if ctx == nil {
+		return ErrNotStarted
+	}
+	return s.cluster.GetRegionSyncer().Sync(ctx, stream)
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.

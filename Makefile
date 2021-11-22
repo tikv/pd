@@ -13,6 +13,9 @@ PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
+TASK_COUNT=4
+TASK_ID=1
+
 BUILD_BIN_PATH := $(shell pwd)/bin
 GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
@@ -38,6 +41,7 @@ BUILD_FLAGS ?=
 BUILD_TAGS ?=
 BUILD_CGO_ENABLED := 0
 PD_EDITION ?= Community
+GO       := GO111MODULE=on go
 
 # Ensure PD_EDITION is set to Community or Enterprise before running build process.
 ifneq "$(PD_EDITION)" "Community"
@@ -171,9 +175,22 @@ test-with-cover: install-go-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
 	for PKG in $(TEST_PKGS); do\
 		set -euo pipefail;\
-		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG  2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
+		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
 		rm coverage.tmp;\
 	done
+	@$(FAILPOINT_DISABLE)
+
+test-with-cover-parallel: install-go-tools dashboard-ui tools/bin/gotestsum tools/bin/gocov tools/bin/gocov-xml tools/split
+
+	@$(FAILPOINT_ENABLE)
+
+	set -euo pipefail;\
+
+
+	CGO_ENABLED=1 GO111MODULE=on tools/bin/gotestsum --junitfile test-reporet.xml  -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
+
+	tools/bin/gocov convert coverage | tools/bin/gocov-xml >> pd-coverage.xml;
+
 	@$(FAILPOINT_DISABLE)
 
 test-tso-function: install-go-tools dashboard-ui
@@ -270,6 +287,22 @@ failpoint-enable: install-go-tools
 failpoint-disable: install-go-tools
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
+
+tools/bin/gocov: tools/check/go.mod
+	cd tools/check && $(GO) build -o ../bin/gocov  github.com/axw/gocov/gocov
+
+tools/bin/gocov-xml: tools/check/go.mod
+	cd tools/check && $(GO) build -o ../bin/gocov-xml github.com/AlekSi/gocov-xml
+
+tools/bin/gotestsum: tools/check/go.mod
+	cd tools/check && $(GO) build -o ../bin/gotestsum gotest.tools/gotestsum
+
+tools/split:
+	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
+
+	split packages.list -n r/${TASK_COUNT} packages_unit_ -a 1 --numeric-suffixes=1;\
+
+	cat packages_unit_${TASK_ID} |tr "\n" " " >package.list;
 
 clean: failpoint-disable deadlock-disable clean-test clean-build
 

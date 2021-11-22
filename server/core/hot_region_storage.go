@@ -48,7 +48,6 @@ type HotRegionStorage struct {
 	batchHotInfo            map[string]*HistoryHotRegion
 	remianedDays            int64
 	pullInterval            time.Duration
-	compactionCountdown     int
 	hotRegionInfoCtx        context.Context
 	hotRegionInfoCancel     context.CancelFunc
 	hotRegionStorageHandler HotRegionStorageHandler
@@ -94,16 +93,34 @@ type HotRegionStorageHandler interface {
 }
 
 const (
-	// leveldb will run compaction after 30 times delete.
-	defaultCompactionTime = 30
 	// delete will run at this o`clock.
 	defaultDeleteTime = 4
 )
 
+// HotRegionType stands for hot type.
+type HotRegionType uint32
+
+// Flags for flow.
+const (
+	WriteType HotRegionType = iota
+	ReadType
+)
+
 // HotRegionTypes stands for hot type.
 var HotRegionTypes = []string{
-	"read",
-	"write",
+	WriteType.String(),
+	ReadType.String(),
+}
+
+// String return HotRegionType in string format.
+func (h HotRegionType) String() string {
+	switch h {
+	case WriteType:
+		return "write"
+	case ReadType:
+		return "read"
+	}
+	return "unimplemented"
 }
 
 // NewHotRegionsStorage create storage to store hot regions info.
@@ -126,7 +143,6 @@ func NewHotRegionsStorage(
 		batchHotInfo:            make(map[string]*HistoryHotRegion),
 		remianedDays:            remianedDays,
 		pullInterval:            pullInterval,
-		compactionCountdown:     defaultCompactionTime,
 		hotRegionInfoCtx:        hotRegionInfoCtx,
 		hotRegionInfoCancel:     hotRegionInfoCancle,
 		hotRegionStorageHandler: hotRegionStorageHandler,
@@ -146,7 +162,7 @@ func (h *HotRegionStorage) backgroundDelete() {
 	next := time.Date(now.Year(), now.Month(), now.Day(), defaultDeleteTime, 0, 0, 0, now.Location())
 	d := next.Sub(now)
 	if d < 0 {
-		d = d + 24*time.Hour
+		d += 24 * time.Hour
 	}
 	isFirst := true
 	ticker := time.NewTicker(d)
@@ -223,14 +239,14 @@ func (h *HotRegionStorage) pullHotRegionInfo() error {
 	if err != nil {
 		return err
 	}
-	if err := h.packHistoryHotRegions(historyHotReadRegions, HotRegionTypes[0]); err != nil {
+	if err := h.packHistoryHotRegions(historyHotReadRegions, ReadType.String()); err != nil {
 		return err
 	}
 	historyHotWriteRegions, err := h.hotRegionStorageHandler.PackHistoryHotWriteRegions()
 	if err != nil {
 		return err
 	}
-	err = h.packHistoryHotRegions(historyHotWriteRegions, HotRegionTypes[1])
+	err = h.packHistoryHotRegions(historyHotWriteRegions, WriteType.String())
 	return err
 }
 
@@ -248,7 +264,7 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 		}
 		historyHotRegions[i].StartKey = region.StartKey
 		historyHotRegions[i].EndKey = region.EndKey
-		key := HotRegionStorePath(HotRegionTypes[0], historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
+		key := HotRegionStorePath(hotRegionType, historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
 		h.batchHotInfo[key] = &historyHotRegions[i]
 	}
 	return nil
@@ -289,16 +305,6 @@ func (h *HotRegionStorage) delete() error {
 	}
 	if err := db.Write(batch, nil); err != nil {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
-	}
-	h.compactionCountdown--
-	if h.compactionCountdown == 0 {
-		h.compactionCountdown = defaultCompactionTime
-		for _, hotRegionType := range HotRegionTypes {
-			startKey := HotRegionStorePath(hotRegionType, 0, 0)
-			endTime := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).Unix()
-			endKey := HotRegionStorePath(hotRegionType, endTime, math.MaxInt64)
-			db.CompactRange(util.Range{Start: []byte(startKey), Limit: []byte(endKey)})
-		}
 	}
 	return nil
 }

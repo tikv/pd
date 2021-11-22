@@ -140,7 +140,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 	}{
 		{
 			name: "Zone",
-			want: s.stores[:],
+			want: s.stores,
 		},
 		{
 			name: "other",

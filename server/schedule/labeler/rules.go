@@ -26,11 +26,11 @@ type LabelRule struct {
 	Index    int           `json:"index"`
 	Labels   []RegionLabel `json:"labels"`
 	RuleType string        `json:"rule_type"`
-	Rule     interface{}   `json:"rule"`
+	Data     interface{}   `json:"data"`
 }
 
 const (
-	// KeyRange is the rule type that labels regions by key range.
+	// KeyRange is the rule type that specifies a list of key ranges.
 	KeyRange = "key-range"
 )
 

@@ -110,7 +110,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
-	c.Assert(svr.GetPDServerConfig().TraceRegionFlow, Equals, false)
+	c.Assert(svr.GetPDServerConfig().TraceRegionFlow, IsFalse)
 
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "10"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
@@ -621,7 +621,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 		c.Assert(err, IsNil)
 		replicationCfg := config.ReplicationConfig{}
 		c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
-		c.Assert(len(replicationCfg.LocationLabels), Equals, expect)
+		c.Assert(replicationCfg.LocationLabels, HasLen, expect)
 	}
 
 	checkRuleCount := func(expect int) {
@@ -639,7 +639,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 		c.Assert(err, IsNil)
 		rule := placement.Rule{}
 		c.Assert(json.Unmarshal(output, &rule), IsNil)
-		c.Assert(len(rule.LocationLabels), Equals, expect)
+		c.Assert(rule.LocationLabels, HasLen, expect)
 	}
 
 	// update successfully when placement rules is not enabled.
@@ -702,6 +702,42 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	checkRuleLocationLabels(1)
 }
 
+func (s *configTestSuite) TestPDServerConfig(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctlCmd.GetRootCmd()
+
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	pdctl.MustPutStore(c, svr, store)
+	defer cluster.Destroy()
+
+	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")
+	c.Assert(err, IsNil)
+	var conf config.PDServerConfig
+	json.Unmarshal(output, &conf)
+
+	c.Assert(conf.UseRegionStorage, Equals, bool(true))
+	c.Assert(conf.MaxResetTSGap.Duration, Equals, 24*time.Hour)
+	c.Assert(conf.KeyType, Equals, "table")
+	c.Assert(conf.RuntimeServices, DeepEquals, typeutil.StringSlice([]string{}))
+	c.Assert(conf.MetricStorage, Equals, "")
+	c.Assert(conf.DashboardAddress, Equals, "auto")
+	c.Assert(conf.FlowRoundByDigit, Equals, int(3))
+}
+
 func assertBundles(a, b []placement.GroupBundle, c *C) {
 	c.Assert(len(a), Equals, len(b))
 	for i := 0; i < len(a); i++ {
@@ -724,8 +760,8 @@ func assertRule(a, b *placement.Rule, c *C) {
 	c.Assert(a.ID, Equals, b.ID)
 	c.Assert(a.Index, Equals, b.Index)
 	c.Assert(a.Override, Equals, b.Override)
-	c.Assert(bytes.Equal(a.StartKey, b.StartKey), Equals, true)
-	c.Assert(bytes.Equal(a.EndKey, b.EndKey), Equals, true)
+	c.Assert(bytes.Equal(a.StartKey, b.StartKey), IsTrue)
+	c.Assert(bytes.Equal(a.EndKey, b.EndKey), IsTrue)
 	c.Assert(a.Role, Equals, b.Role)
 	c.Assert(a.Count, Equals, b.Count)
 	c.Assert(a.LabelConstraints, DeepEquals, b.LabelConstraints)

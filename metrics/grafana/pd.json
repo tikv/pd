@@ -1368,7 +1368,7 @@
             "rgba(237, 129, 40, 0.89)",
             "#d44a3a"
           ],
-          "datasource": "tidb-cluster",
+          "datasource": "${DS_TEST-CLUSTER}",
           "fieldConfig": {
             "defaults": {
               "custom": {}
@@ -7554,7 +7554,7 @@
             "x": 0,
             "y": 20
           },
-          "id": 1433,
+          "id": 1439,
           "legend": {
             "alignAsTable": true,
             "avg": true,
@@ -9104,20 +9104,38 @@
           "steppedLine": false,
           "targets": [
             {
+              "expr": "histogram_quantile(0.90, sum(rate(pd_server_handle_tso_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
+              "format": "time_series",
+              "hide": false,
+              "intervalFactor": 2,
+              "legendFormat": "90% tso",
+              "refId": "A",
+              "step": 2
+            },
+            {
               "expr": "histogram_quantile(0.99, sum(rate(pd_server_handle_tso_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
-              "legendFormat": "99%  tso",
-              "refId": "A",
+              "legendFormat": "99% tso",
+              "refId": "B",
+              "step": 2
+            },
+            {
+              "expr": "histogram_quantile(0.999, sum(rate(pd_server_handle_tso_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
+              "format": "time_series",
+              "hide": false,
+              "intervalFactor": 2,
+              "legendFormat": "99.9% tso",
+              "refId": "C",
               "step": 2
             },
             {
               "expr": "histogram_quantile(0.99999, sum(rate(pd_server_handle_tso_duration_seconds_bucket{tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
               "format": "time_series",
               "intervalFactor": 1,
-              "legendFormat": "99.999%  tso",
-              "refId": "B"
+              "legendFormat": "99.999% tso",
+              "refId": "D"
             }
           ],
           "thresholds": [],

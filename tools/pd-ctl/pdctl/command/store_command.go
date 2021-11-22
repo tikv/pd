@@ -30,6 +30,7 @@ var (
 	storesPrefix      = "pd/api/v1/stores"
 	storesLimitPrefix = "pd/api/v1/stores/limit"
 	storePrefix       = "pd/api/v1/store/%v"
+	maxStoreLimit     = float64(200)
 )
 
 // NewStoreCommand return a stores subcommand of rootCmd
@@ -95,7 +96,7 @@ func NewSetStoreWeightCommand() *cobra.Command {
 // NewStoreLimitCommand returns a limit subcommand of storeCmd.
 func NewStoreLimitCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "limit [<type>]|[<store_id>|<all> [<key> <value>]... <limit> <type>]",
+		Use:   "limit [<store_id>|<all> [<key> <value>]... <limit> <type>]",
 		Short: "show or set a store's rate limit",
 		Long:  "show or set a store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Run:   storeLimitCommandFunc,
@@ -422,6 +423,10 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		var prefix string
 		if args[0] == "all" {
 			prefix = storesLimitPrefix
+			if rate > maxStoreLimit {
+				cmd.Printf("rate should less than %f for all\n", maxStoreLimit)
+				return
+			}
 		} else {
 			prefix = fmt.Sprintf(path.Join(storePrefix, "limit"), args[0])
 		}
@@ -446,6 +451,10 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			rate, err := strconv.ParseFloat(args[ratePos], 64)
 			if err != nil || rate <= 0 {
 				cmd.Println("rate should be a number that > 0.")
+				return
+			}
+			if rate > maxStoreLimit {
+				cmd.Printf("rate should less than %f for all\n", maxStoreLimit)
 				return
 			}
 			postInput["rate"] = rate

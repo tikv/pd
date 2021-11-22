@@ -44,6 +44,15 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"type"})
 
+	tsoBestBatchSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd_client",
+			Subsystem: "request",
+			Name:      "handle_tso_best_batch_size",
+			Help:      "Bucketed histogram of the best batch size of handled requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
+		})
+
 	tsoBatchSize = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd_client",
@@ -52,6 +61,16 @@ var (
 			Help:      "Bucketed histogram of the batch size of handled requests.",
 			Buckets:   []float64{1, 2, 4, 8, 10, 14, 18, 22, 26, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200, 500, 1000},
 		})
+
+	tsoBatchSendLatency = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd_client",
+			Subsystem: "request",
+			Name:      "tso_batch_send_latency",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 34), // 1ns ~ 8s
+			Help:      "tso batch send latency",
+		})
+
 	requestForwarded = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd_client",
@@ -97,6 +116,8 @@ func init() {
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
 	prometheus.MustRegister(requestDuration)
+	prometheus.MustRegister(tsoBestBatchSize)
 	prometheus.MustRegister(tsoBatchSize)
+	prometheus.MustRegister(tsoBatchSendLatency)
 	prometheus.MustRegister(requestForwarded)
 }

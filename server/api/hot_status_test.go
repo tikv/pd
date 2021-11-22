@@ -176,7 +176,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 		c.Assert(statusCode, Equals, 200)
 		historyHotRegions := &core.HistoryHotRegions{}
 		json.Unmarshal(res, historyHotRegions)
-		c.Assert(len(historyHotRegions.HistoryHotRegion), Equals, 1)
+		c.Assert(historyHotRegions.HistoryHotRegion, HasLen, 1)
 		c.Assert(reflect.DeepEqual(historyHotRegions.HistoryHotRegion[0], hotRegions[0]), IsTrue)
 	}
 	err := writeToDB(storage.LeveldbKV, hotRegions)

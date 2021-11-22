@@ -747,19 +747,19 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica5(c *C, tc *mockcluster.Cl
 
 // TestBalance2 for corner case 1:
 // 11 regions distributed across 5 stores.
-//| region_id | leader_store | follower_store | follower_store |
-//|-----------|--------------|----------------|----------------|
-//|     1     |       1      |        2       |       3        |
-//|     2     |       1      |        2       |       3        |
-//|     3     |       1      |        2       |       3        |
-//|     4     |       1      |        2       |       3        |
-//|     5     |       1      |        2       |       3        |
-//|     6     |       1      |        2       |       3        |
-//|     7     |       1      |        2       |       4        |
-//|     8     |       1      |        2       |       4        |
-//|     9     |       1      |        2       |       4        |
-//|    10     |       1      |        4       |       5        |
-//|    11     |       1      |        4       |       5        |
+// | region_id | leader_store | follower_store | follower_store |
+// |-----------|--------------|----------------|----------------|
+// |     1     |       1      |        2       |       3        |
+// |     2     |       1      |        2       |       3        |
+// |     3     |       1      |        2       |       3        |
+// |     4     |       1      |        2       |       3        |
+// |     5     |       1      |        2       |       3        |
+// |     6     |       1      |        2       |       3        |
+// |     7     |       1      |        2       |       4        |
+// |     8     |       1      |        2       |       4        |
+// |     9     |       1      |        2       |       4        |
+// |    10     |       1      |        4       |       5        |
+// |    11     |       1      |        4       |       5        |
 // and the space of last store 5 if very small, about 5 * regionSize
 // the source region is more likely distributed in store[1, 2, 3].
 func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
@@ -946,7 +946,7 @@ func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
 	tc.PutRegion(region)
 	operators := sb.Schedule(tc)
 	if operators != nil {
-		c.Assert(len(operators), Equals, 0)
+		c.Assert(operators, HasLen, 0)
 	} else {
 		c.Assert(operators, IsNil)
 	}
