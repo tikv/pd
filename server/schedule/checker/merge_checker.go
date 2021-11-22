@@ -111,7 +111,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	// skip region has down peers or pending peers or learner peers
+	// skip region has down peers or pending peers
 	if !opt.IsRegionHealthy(region) {
 		checkerCounter.WithLabelValues("merge_checker", "special-peer").Inc()
 		return nil
@@ -142,6 +142,12 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	if target == nil {
 		checkerCounter.WithLabelValues("merge_checker", "no-target").Inc()
+		return nil
+	}
+
+	// Check whether the store of the target region leader has been deleted.
+	if m.cluster.GetStore(target.GetLeader().GetStoreId()) == nil {
+		checkerCounter.WithLabelValues("merge_checker", "target-store-deleted").Inc()
 		return nil
 	}
 

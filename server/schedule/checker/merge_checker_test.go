@@ -178,6 +178,19 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
 
+	// Test the target region's store is deleted.
+	s.cluster.SetEnablePlacementRules(false)
+	storeToDelete := s.cluster.GetStore(4)
+	c.Assert(storeToDelete, NotNil)
+	s.cluster.DeleteStore(storeToDelete)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	s.cluster.PutStore(storeToDelete)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
+
 	// merge cannot across rule key.
 	s.cluster.SetEnablePlacementRules(true)
 	s.cluster.RuleManager.SetRule(&placement.Rule{
