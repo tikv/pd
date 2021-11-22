@@ -145,9 +145,10 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	// Check whether the store of the target region leader has been deleted.
-	if m.cluster.GetStore(target.GetLeader().GetStoreId()) == nil {
-		checkerCounter.WithLabelValues("merge_checker", "target-store-deleted").Inc()
+	// Check whether the store of the target region leader is normal.
+	store := m.cluster.GetStore(target.GetLeader().GetStoreId())
+	if store == nil || store.IsOffline() {
+		checkerCounter.WithLabelValues("merge_checker", "target-store-offline").Inc()
 		return nil
 	}
 

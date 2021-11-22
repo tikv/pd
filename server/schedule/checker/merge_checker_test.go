@@ -178,14 +178,26 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
 
-	// Test the target region's store is deleted.
+	// Test the target region's store check.
 	s.cluster.SetEnablePlacementRules(false)
-	storeToDelete := s.cluster.GetStore(4)
-	c.Assert(storeToDelete, NotNil)
-	s.cluster.DeleteStore(storeToDelete)
+	store := s.cluster.GetStore(4)
+	c.Assert(store, NotNil)
+	s.cluster.DeleteStore(store)
+	// Test the store is deleted.
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
-	s.cluster.PutStore(storeToDelete)
+	// Test the store is normal.
+	s.cluster.PutStore(store)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
+	// Test the store is offline.
+	s.cluster.SetStoreOffline(store.GetID())
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	// Test the store is up.
+	s.cluster.SetStoreUp(store.GetID())
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
