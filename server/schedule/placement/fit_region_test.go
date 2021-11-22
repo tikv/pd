@@ -120,7 +120,7 @@ func BenchmarkFitRegion(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(storesSet.GetStores(), region, rules)
 	}
 }
 
@@ -138,7 +138,7 @@ func BenchmarkFitRegionMoreStores(b *testing.B) {
 	storesSet := newMockStoresSet(200)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(storesSet.GetStores(), region, rules)
 	}
 }
 
@@ -156,7 +156,7 @@ func BenchmarkFitRegionMorePeers(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(storesSet.GetStores(), region, rules)
 	}
 }
 
@@ -181,7 +181,7 @@ func BenchmarkFitRegionMorePeersEquals(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(storesSet.GetStores(), region, rules)
 	}
 }
 
@@ -208,7 +208,7 @@ func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(storesSet.GetStores(), region, rules)
 	}
 }
 
@@ -235,7 +235,7 @@ func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(storesSet.GetStores(), region, rules)
 	}
 }
 
@@ -245,7 +245,7 @@ func BenchmarkFitRegionTiflash(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(storesSet.GetStores(), region, rules)
 	}
 }
 
@@ -271,6 +271,6 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(storesSet.GetStores(), region, rules)
 	}
 }

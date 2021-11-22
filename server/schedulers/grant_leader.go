@@ -232,7 +232,7 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 	defer s.conf.mu.RUnlock()
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
 	for id, ranges := range s.conf.StoreIDWithRanges {
-		region := cluster.RandFollowerRegion(id, ranges, opt.HealthRegion(cluster))
+		region := cluster.RandFollowerRegion(id, ranges, opt.IsRegionHealthy)
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 			continue
