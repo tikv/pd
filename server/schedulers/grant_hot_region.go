@@ -180,6 +180,8 @@ func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
+// IsScheduleAllowed returns whether the scheduler is allowed to schedule.
+// TODO it should check if there is any scheduelr such as evict or hot region scheduler
 func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
