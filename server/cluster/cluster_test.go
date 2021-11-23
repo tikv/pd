@@ -950,25 +950,32 @@ func TestRegionSizeChanged(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipSleep", `return(true)`))
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
+	cluster.regionLabeler, _ = labeler.NewRegionLabeler(ctx, cluster.storage, time.Second*5)
 	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.lastRegionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.coordinator.wg.Add(1)
+	go cluster.coordinator.collectRegionStats()
 	region := newTestRegions(1, 3, 3)[0]
 	cluster.opt.GetMaxMergeRegionKeys()
 	curMaxMergeSize := int64(cluster.opt.GetMaxMergeRegionSize())
 	curMaxMergeKeys := int64(cluster.opt.GetMaxMergeRegionKeys())
 	region = region.Clone(
 		core.WithLeader(region.GetPeers()[2]),
+		core.WithEndKey([]byte{}),
 		core.SetApproximateSize(curMaxMergeSize-1),
 		core.SetApproximateKeys(curMaxMergeKeys-1),
 		core.SetFromHeartbeat(true),
 	)
 	cluster.processRegionHeartbeat(region)
 	regionID := region.GetID()
-	re.True(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
+	time.Sleep(150 * time.Millisecond)
+	re.True(cluster.lastRegionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 	// Test ApproximateSize and ApproximateKeys change.
 	region = region.Clone(
 		core.WithLeader(region.GetPeers()[2]),
@@ -977,16 +984,20 @@ func TestRegionSizeChanged(t *testing.T) {
 		core.SetFromHeartbeat(true),
 	)
 	cluster.processRegionHeartbeat(region)
-	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
+	time.Sleep(150 * time.Millisecond)
+	re.False(cluster.lastRegionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 	// Test MaxMergeRegionSize and MaxMergeRegionKeys change.
 	cluster.opt.SetMaxMergeRegionSize((uint64(curMaxMergeSize + 2)))
 	cluster.opt.SetMaxMergeRegionKeys((uint64(curMaxMergeKeys + 2)))
 	cluster.processRegionHeartbeat(region)
-	re.True(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
+	time.Sleep(150 * time.Millisecond)
+	re.True(cluster.lastRegionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 	cluster.opt.SetMaxMergeRegionSize((uint64(curMaxMergeSize)))
 	cluster.opt.SetMaxMergeRegionKeys((uint64(curMaxMergeKeys)))
 	cluster.processRegionHeartbeat(region)
-	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
+	time.Sleep(150 * time.Millisecond)
+	re.False(cluster.lastRegionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipSleep"))
 }
 
 func TestConcurrentReportBucket(t *testing.T) {
@@ -1105,7 +1116,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	r := core.NewRegionInfo(region, peers[0])
 	re.NoError(cluster.putRegion(r))
 
-	cluster.updateRegionsLabelLevelStats([]*core.RegionInfo{r})
+	cluster.labelLevelStats.Observe(r, cluster.getStoresWithoutLabelLocked(r, core.EngineKey, core.EngineTiFlash), cluster.opt.GetLocationLabels())
 	counter := cluster.labelLevelStats.GetLabelCounter()
 	re.Equal(0, counter["none"])
 	re.Equal(1, counter["zone"])
@@ -1225,6 +1236,7 @@ func TestOfflineAndMerge(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipSleep", `return(true)`))
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1238,7 +1250,10 @@ func TestOfflineAndMerge(t *testing.T) {
 		}
 	}
 	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.lastRegionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
+	cluster.coordinator.wg.Add(1)
+	go cluster.coordinator.collectRegionStats()
 
 	// Put 4 stores.
 	for _, store := range newTestStores(4, "5.0.0") {
@@ -1277,14 +1292,17 @@ func TestOfflineAndMerge(t *testing.T) {
 		regions = core.SplitRegions(regions)
 	}
 	heartbeatRegions(re, cluster, regions)
-	re.Len(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), len(regions))
+	time.Sleep(150 * time.Millisecond)
+	re.Len(cluster.GetRegionStatsByType(statistics.OfflinePeer), len(regions))
 
 	// Merge.
 	for i := 0; i < n; i++ {
 		regions = core.MergeRegions(regions)
 		heartbeatRegions(re, cluster, regions)
-		re.Len(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), len(regions))
+		time.Sleep(150 * time.Millisecond)
+		re.Len(cluster.GetRegionStatsByType(statistics.OfflinePeer), len(regions))
 	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipSleep"))
 }
 
 func TestSyncConfig(t *testing.T) {

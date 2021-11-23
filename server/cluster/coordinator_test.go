@@ -243,6 +243,7 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
 		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
+		tc.lastRegionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
 	}, func(co *coordinator) { co.run() }, re)
 	defer cleanup()
 
@@ -261,7 +262,8 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		co.collectHotSpotMetrics()
 		co.collectSchedulerMetrics()
-		co.cluster.collectClusterMetrics()
+		co.cluster.collectHotStatsMetrics()
+		co.cluster.collectStatsMetrics()
 	}
 	co.resetHotSpotMetrics()
 	co.resetSchedulerMetrics()
@@ -319,10 +321,11 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	}
 	tc := newTestCluster(ctx, opt)
 	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.meta.GetId(), tc, true /* need to run */)
+	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
+	tc.coordinator = co
 	if setTc != nil {
 		setTc(tc)
 	}
-	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
 	if run != nil {
 		run(co)
 	}
@@ -528,7 +531,7 @@ func TestCheckCache(t *testing.T) {
 
 	// Add a peer with two replicas.
 	re.NoError(tc.addLeaderRegion(1, 2, 3))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/breakPatrol", `return`))
 
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
 	co.wg.Add(1)
@@ -562,7 +565,7 @@ func TestCheckCache(t *testing.T) {
 	re.Empty(co.checkers.GetWaitingRegions())
 
 	co.wg.Wait()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/breakPatrol"))
 }
 
 func TestPeerState(t *testing.T) {

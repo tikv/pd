@@ -138,6 +138,7 @@ type RaftCluster struct {
 	coordinator              *coordinator
 	labelLevelStats          *statistics.LabelStatistics
 	regionStats              *statistics.RegionStatistics
+	lastRegionStats          *statistics.RegionStatistics
 	hotStat                  *statistics.HotStat
 	hotBuckets               *buckets.HotBucketCache
 	ruleManager              *placement.RuleManager
@@ -275,6 +276,7 @@ func (c *RaftCluster) Start(s Server) error {
 	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient)
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
+	c.lastRegionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.externalTS, err = c.storage.LoadExternalTS()
 	if err != nil {
@@ -845,19 +847,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 	c.coordinator.CheckTransferWitnessLeader(region)
 
-	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
-	if !saveKV && !saveCache && !isNew {
-		// Due to some config changes need to update the region stats as well,
-		// so we do some extra checks here.
-		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			c.regionStats.Observe(region, c.getRegionStoresLocked(region))
-		}
-		return nil
-	}
 
 	failpoint.Inject("concurrentRegionHeartbeat", func() {
 		time.Sleep(500 * time.Millisecond)
@@ -875,18 +868,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if overlaps, err = c.core.AtomicCheckAndPutRegion(region); err != nil {
 			return err
 		}
-
-		for _, item := range overlaps {
-			if c.regionStats != nil {
-				c.regionStats.ClearDefunctRegion(item.GetID())
-			}
-			c.labelLevelStats.ClearDefunctRegion(item.GetID())
-		}
 		regionUpdateCacheEventCounter.Inc()
-	}
-
-	if hasRegionStats {
-		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
 
 	if !c.IsPrepared() && isNew {
@@ -1031,6 +1013,11 @@ func (c *RaftCluster) GetStoreRegionCount(storeID uint64) int {
 // GetAverageRegionSize returns the average region approximate size.
 func (c *RaftCluster) GetAverageRegionSize() int64 {
 	return c.core.GetAverageRegionSize()
+}
+
+// IsLastRegionStatsEmpty returns if region statistics is empty. Only for test purpose.
+func (c *RaftCluster) IsLastRegionStatsEmpty() bool {
+	return c.lastRegionStats.IsEmpty()
 }
 
 // DropCacheRegion removes a region from the cache.
@@ -1880,7 +1867,7 @@ func (c *RaftCluster) collectMetrics() {
 
 	c.coordinator.collectSchedulerMetrics()
 	c.coordinator.collectHotSpotMetrics()
-	c.collectClusterMetrics()
+	c.collectHotStatsMetrics()
 	c.collectHealthStatus()
 }
 
@@ -1895,21 +1882,29 @@ func (c *RaftCluster) resetMetrics() {
 	c.resetProgressIndicator()
 }
 
-func (c *RaftCluster) collectClusterMetrics() {
-	if c.regionStats == nil {
+func (c *RaftCluster) collectStatsMetrics() {
+	if c.regionStats == nil || c.lastRegionStats == nil {
 		return
 	}
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
+	lastStats := c.regionStats.GetStats()
+	c.lastRegionStats.SetStats(lastStats)
+	c.labelLevelStats.ResetStats()
+	c.regionStats.ResetStats()
+}
+
+func (c *RaftCluster) collectHotStatsMetrics() {
 	// collect hot cache metrics
 	c.hotStat.CollectMetrics()
 }
 
 func (c *RaftCluster) resetClusterMetrics() {
-	if c.regionStats == nil {
+	if c.regionStats == nil || c.lastRegionStats == nil {
 		return
 	}
 	c.regionStats.Reset()
+	c.lastRegionStats.Reset()
 	c.labelLevelStats.Reset()
 	// reset hot cache metrics
 	c.hotStat.ResetMetrics()
@@ -1943,22 +1938,17 @@ func (c *RaftCluster) resetProgressIndicator() {
 
 // GetRegionStatsByType gets the status of the region by types.
 func (c *RaftCluster) GetRegionStatsByType(typ statistics.RegionStatisticType) []*core.RegionInfo {
-	if c.regionStats == nil {
+	if c.lastRegionStats == nil {
 		return nil
 	}
-	return c.regionStats.GetRegionStatsByType(typ)
+	return c.lastRegionStats.GetRegionStatsByType(typ)
 }
 
-// GetOfflineRegionStatsByType gets the status of the offline region by types.
-func (c *RaftCluster) GetOfflineRegionStatsByType(typ statistics.RegionStatisticType) []*core.RegionInfo {
-	if c.regionStats == nil {
-		return nil
-	}
-	return c.regionStats.GetOfflineRegionStatsByType(typ)
-}
-
-func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
+func (c *RaftCluster) updateRegionStats(regions []*core.RegionInfo) {
 	for _, region := range regions {
+		if c.regionStats != nil {
+			c.regionStats.Observe(region, c.getRegionStoresLocked(region))
+		}
 		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.opt.GetLocationLabels())
 	}
 }
