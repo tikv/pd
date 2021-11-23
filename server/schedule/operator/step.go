@@ -123,6 +123,17 @@ func (el EvictLeader) CheckSafety(region *core.RegionInfo) error {
 	return nil
 }
 
+// CheckInProgress checks if the step is in the progress of advancing.
+func (el EvictLeader) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+	for _, storeID := range append(el.ToStores, el.ToStore) {
+		peer := region.GetStorePeer(el.ToStore)
+		if peer != nil && !core.IsLearner(peer) && validateStore(cluster, storeID) == nil {
+			return nil
+		}
+	}
+	return errors.New("no valid peer")
+}
+
 // Influence calculates the store difference that current step makes.
 func (el EvictLeader) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(el.FromStore)
