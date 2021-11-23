@@ -92,12 +92,12 @@ func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
 	tc.AddRegionStore(4, 1)
 	for _, t := range cases {
 		tc.SetEnablePlacementRules(false)
-		c.Assert(IsRegionHealthy(tc, t.region), Equals, t.healthy1)
-		c.Assert(IsHealthyAllowPending(tc, t.region), Equals, t.healthyAllowPending1)
+		c.Assert(IsRegionHealthy(t.region), Equals, t.healthy1)
+		c.Assert(IsRegionHealthyAllowPending(t.region), Equals, t.healthyAllowPending1)
 		c.Assert(IsRegionReplicated(tc, t.region), Equals, t.replicated1)
 		tc.SetEnablePlacementRules(true)
-		c.Assert(IsRegionHealthy(tc, t.region), Equals, t.healthy2)
-		c.Assert(IsHealthyAllowPending(tc, t.region), Equals, t.healthyAllowPending2)
+		c.Assert(IsRegionHealthy(t.region), Equals, t.healthy2)
+		c.Assert(IsRegionHealthyAllowPending(t.region), Equals, t.healthyAllowPending2)
 		c.Assert(IsRegionReplicated(tc, t.region), Equals, t.replicated2)
 	}
 }

@@ -147,8 +147,8 @@ type StoreSet interface {
 	GetStore(id uint64) *core.StoreInfo
 }
 
-// FitRegion tries to fit peers of a region to the rules.
-func FitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *RegionFit {
+// fitRegion tries to fit peers of a region to the rules.
+func fitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *RegionFit {
 	w := newFitWorker(stores, region, rules)
 	w.run()
 	return &w.bestFit

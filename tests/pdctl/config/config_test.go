@@ -299,7 +299,7 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 		Count:   2,
 	})
 	b, _ = json.Marshal(rules)
-	os.WriteFile(fname, b, 0644)
+	os.WriteFile(fname, b, 0600)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	c.Assert(err, IsNil)
 
@@ -316,7 +316,7 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	// test delete
 	rules[0].Count = 0
 	b, _ = json.Marshal(rules)
-	os.WriteFile(fname, b, 0644)
+	os.WriteFile(fname, b, 0600)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	c.Assert(err, IsNil)
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "show", "--group=pd")
@@ -447,7 +447,7 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	bundle.Rules[0].GroupID = "pe"
 	b, err = json.Marshal(bundle)
 	c.Assert(err, IsNil)
-	c.Assert(os.WriteFile(fname, b, 0644), IsNil)
+	c.Assert(os.WriteFile(fname, b, 0600), IsNil)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	c.Assert(err, IsNil)
 
@@ -477,7 +477,7 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}
 	b, err = json.Marshal(bundle)
 	c.Assert(err, IsNil)
-	c.Assert(os.WriteFile(fname, b, 0644), IsNil)
+	c.Assert(os.WriteFile(fname, b, 0600), IsNil)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	c.Assert(err, IsNil)
 
@@ -497,7 +497,7 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	bundles = append(bundles, bundle)
 	b, err = json.Marshal(bundles)
 	c.Assert(err, IsNil)
-	c.Assert(os.WriteFile(fname, b, 0644), IsNil)
+	c.Assert(os.WriteFile(fname, b, 0600), IsNil)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname)
 	c.Assert(err, IsNil)
 
@@ -515,7 +515,7 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	bundles = []placement.GroupBundle{{ID: "pe", Rules: []*placement.Rule{}}}
 	b, err = json.Marshal(bundles)
 	c.Assert(err, IsNil)
-	c.Assert(os.WriteFile(fname, b, 0644), IsNil)
+	c.Assert(os.WriteFile(fname, b, 0600), IsNil)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname, "--partial")
 	c.Assert(err, IsNil)
 
@@ -688,7 +688,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	}
 	b, err := json.Marshal(rules)
 	c.Assert(err, IsNil)
-	os.WriteFile(fname, b, 0644)
+	os.WriteFile(fname, b, 0600)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	c.Assert(err, IsNil)
 	checkMaxReplicas(3)
