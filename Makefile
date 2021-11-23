@@ -41,8 +41,6 @@ BUILD_FLAGS ?=
 BUILD_TAGS ?=
 BUILD_CGO_ENABLED := 0
 PD_EDITION ?= Community
-GO       := GO111MODULE=on go
-
 # Ensure PD_EDITION is set to Community or Enterprise before running build process.
 ifneq "$(PD_EDITION)" "Community"
 ifneq "$(PD_EDITION)" "Enterprise"
@@ -289,13 +287,13 @@ failpoint-disable: install-go-tools
 	@$(FAILPOINT_DISABLE)
 
 tools/bin/gocov: tools/check/go.mod
-	cd tools/check && $(GO) build -o ../bin/gocov  github.com/axw/gocov/gocov
+	cd tools/check && GO111MODULE=on go build -o ../bin/gocov  github.com/axw/gocov/gocov
 
 tools/bin/gocov-xml: tools/check/go.mod
-	cd tools/check && $(GO) build -o ../bin/gocov-xml github.com/AlekSi/gocov-xml
+	cd tools/check && GO111MODULE=on go build -o ../bin/gocov-xml github.com/AlekSi/gocov-xml
 
 tools/bin/gotestsum: tools/check/go.mod
-	cd tools/check && $(GO) build -o ../bin/gotestsum gotest.tools/gotestsum
+	cd tools/check && GO111MODULE=on go build -o ../bin/gotestsum gotest.tools/gotestsum
 
 tools/split:
 	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
