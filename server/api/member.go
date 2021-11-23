@@ -15,7 +15,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -59,9 +58,8 @@ func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, members)
 }
 
-func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
-	members, err := svr.GetMembers(context.Background(), req)
+func getMembers(svr *server.Server) ([]*pdpb.Member, error) {
+	members, err := svr.GetMembers()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -69,7 +67,7 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	for _, m := range members.GetMembers() {
+	for _, m := range members {
 		m.DcLocation = ""
 		binaryVersion, e := svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
 		if e != nil {
@@ -228,7 +226,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 
 	var memberID uint64
 	name := mux.Vars(r)["name"]
-	for _, m := range members.GetMembers() {
+	for _, m := range members {
 		if m.GetName() == name {
 			memberID = m.GetMemberId()
 			break
