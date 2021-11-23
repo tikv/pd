@@ -1383,7 +1383,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
-	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
+	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644) // #nosec
 }
 
 // SaveTTLConfig save ttl config
