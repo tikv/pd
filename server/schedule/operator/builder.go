@@ -125,7 +125,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	// placement rules
 	var rules []*placement.Rule
 	if err == nil && cluster.GetOpts().IsPlacementRulesEnabled() {
-		fit := opt.FitRegion(cluster, region)
+		fit := cluster.GetRuleManager().FitRegion(cluster, region)
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
 		}

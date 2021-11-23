@@ -88,6 +88,7 @@ func newDiagnoseHandler(svr *server.Server, rd *render.Render) *diagnoseHandler 
 	}
 }
 
+//nolint
 func diagnosePD(key diagnoseType, descAdd, instAdd string) *Recommendation {
 	d, ok := diagnoseMap[key]
 	if !ok {

@@ -333,7 +333,6 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"), IsNil)
 
 	// Test the TSO follower proxy while enabling the Local TSO.
-	cli = setupCli(c, s.ctx, endpoints)
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
 	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, false)

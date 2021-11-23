@@ -27,7 +27,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/schedule/opt"
 )
 
 func Test(t *testing.T) {
@@ -49,7 +48,7 @@ func (s *testOperatorSuite) SetUpTest(c *C) {
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "reject", Value: "leader"}},
+		config.RejectLeader: {{Key: "reject", Value: "leader"}},
 	})
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
@@ -65,6 +64,7 @@ func (s *testOperatorSuite) TearDownTest(c *C) {
 	s.cancel()
 }
 
+//nolint
 func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {
 	var (
 		region metapb.Region
@@ -95,6 +95,7 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 	c.Assert(RemovePeer{FromStore: 3}.IsFinish(region), IsTrue)
 }
 
+//nolint
 func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
 	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, kind, steps...)
 }
