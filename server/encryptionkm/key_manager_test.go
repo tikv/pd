@@ -357,8 +357,7 @@ func (s *testKeyManagerSuite) TestLoadKeyEmpty(c *C) {
 	// Simulate keys get deleted.
 	_, err = client.Delete(context.Background(), EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	_, err = m.loadKeys()
-	c.Assert(err, NotNil)
+	c.Assert(m.loadKeys(), NotNil)
 }
 
 func (s *testKeyManagerSuite) TestWatcher(c *C) {

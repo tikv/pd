@@ -138,7 +138,6 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 					u.stage = finished
 				}
 			}
-
 		}
 	}
 }
