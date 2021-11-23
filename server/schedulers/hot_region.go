@@ -156,7 +156,7 @@ func (h *hotScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }
 
-func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
+func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) (ops []*operator.Operator) {
 	h.Lock()
 	defer h.Unlock()
 
@@ -164,11 +164,18 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 
 	switch typ {
 	case read:
-		return h.balanceHotReadRegions(cluster)
+		ops = h.balanceHotReadRegions(cluster)
 	case write:
-		return h.balanceHotWriteRegions(cluster)
+		ops = h.balanceHotWriteRegions(cluster)
 	}
-	return nil
+	if ops != nil && len(ops) >= 0 {
+		name := fmt.Sprintf("%s-new-operator", typ.String())
+		schedulerCounter.WithLabelValues(h.GetName(), name).Inc()
+	} else {
+		name := fmt.Sprintf("%s-skip", typ.String())
+		schedulerCounter.WithLabelValues(h.GetName(), name).Inc()
+	}
+	return
 }
 
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
@@ -264,21 +271,18 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 	peerSolver := newBalanceSolver(h, cluster, read, movePeer)
 	peerOps := peerSolver.solve()
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
-		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 		return nil
 	}
 	if len(leaderOps) == 0 {
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
 		}
-		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 		return nil
 	}
 	if len(peerOps) == 0 {
 		if leaderSolver.tryAddPendingInfluence() {
 			return leaderOps
 		}
-		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 		return nil
 	}
 	leaderSolver.cur = leaderSolver.best
@@ -297,7 +301,6 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 			return leaderOps
 		}
 	}
-	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
 }
 
@@ -320,7 +323,6 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 		return ops
 	}
 
-	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
 }
 
@@ -545,13 +547,24 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
+		idStr := strconv.FormatUint(id, 10)
+		for dim, load := range detail.LoadPred.pending().Loads {
+			ty := fmt.Sprintf("%s-%s", bs.rwTy, dimToString(dim))
+			opInfluenceStatus.WithLabelValues(bs.sche.GetName(), idStr, ty).Set(load)
+		}
 
 		if bs.checkSrcByDimPriorityAndTolerance(detail.LoadPred.min(), &detail.LoadPred.Expect, srcToleranceRatio) {
 			ret[id] = detail
-			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+			ty := fmt.Sprintf("src-store-succ-%s-%s", bs.rwTy.String(), bs.opTy.String())
+			hotSchedulerResultCounter.WithLabelValues(ty, idStr).Inc()
 		} else {
-			hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+			ty := fmt.Sprintf("src-store-failed-%s-%s", bs.rwTy.String(), bs.opTy.String())
+			hotSchedulerResultCounter.WithLabelValues(ty, idStr).Inc()
 		}
+	}
+	if len(ret) <= 0 {
+		name := fmt.Sprintf("%s-%s-no-src", bs.rwTy.String(), bs.cur.srcDetail.Info.Store.GetID())
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), name).Inc()
 	}
 	return ret
 }
@@ -596,6 +609,10 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	ret = make([]*statistics.HotPeerStat, 0, len(union))
 	for peer := range union {
 		ret = appendItem(ret, peer)
+	}
+	if len(ret) <= 0 {
+		name := fmt.Sprintf("%s-%s-no-region", bs.rwTy.String(), bs.cur.srcDetail.Info.Store.GetID())
+		hotSchedulerResultCounter.WithLabelValues(name, strconv.FormatUint(bs.cur.srcDetail.getID(), 10)).Inc()
 	}
 	return ret
 }
@@ -753,9 +770,11 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 			id := store.GetID()
 			if bs.checkDstByPriorityAndTolerance(detail.LoadPred.max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				ret[id] = detail
-				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(id, 10)).Inc()
+				ty := fmt.Sprintf("%s-%s-dst-store-succ", bs.rwTy, bs.opTy)
+				hotSchedulerResultCounter.WithLabelValues(ty, strconv.FormatUint(id, 10)).Inc()
 			} else {
-				hotSchedulerResultCounter.WithLabelValues("dst-store-failed", strconv.FormatUint(id, 10)).Inc()
+				ty := fmt.Sprintf("%s-%s-dst-store-failed", bs.rwTy, bs.opTy)
+				hotSchedulerResultCounter.WithLabelValues(ty, strconv.FormatUint(id, 10)).Inc()
 			}
 		}
 	}
@@ -821,6 +840,17 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			bs.cur.progressiveRank = -1
 			bs.firstPriorityIsBetter = true
 		}
+	}
+	if bs.cur.progressiveRank >= 0 {
+		log.Debug("progressive rank great than 0", zap.Uint64("store-id", bs.cur.srcDetail.getID()),
+			zap.String("rwTy", bs.rwTy.String()),
+			zap.String("opTy", bs.opTy.String()),
+			zap.Int("priority", bs.firstPriority),
+			zap.Any("src", srcLd),
+			zap.Any("dst", dstLd),
+			zap.Any("peer", peer))
+		ty := fmt.Sprintf("%s-%s-rank-not-satisfy", bs.rwTy, bs.opTy)
+		hotSchedulerResultCounter.WithLabelValues(ty, strconv.FormatUint(bs.cur.srcDetail.getID(), 10)).Inc()
 	}
 }
 
