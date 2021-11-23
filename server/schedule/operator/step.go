@@ -22,7 +22,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/server/core"
+<<<<<<< HEAD
 	"github.com/tikv/pd/server/schedule/storelimit"
+=======
+	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/server/schedule/opt"
+>>>>>>> fb3d20428 (operator: check store status for running operators (#4223))
 	"go.uber.org/zap"
 )
 
@@ -31,7 +36,7 @@ type OpStep interface {
 	fmt.Stringer
 	ConfVerChanged(region *core.RegionInfo) bool
 	IsFinish(region *core.RegionInfo) bool
-	CheckSafety(region *core.RegionInfo) error
+	CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
@@ -54,8 +59,8 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 	return region.GetLeader().GetStoreId() == tl.ToStore
 }
 
-// CheckSafety checks if the step meets the safety properties.
-func (tl TransferLeader) CheckSafety(region *core.RegionInfo) error {
+// CheckInProgress checks if the step is in the progress of advancing.
+func (tl TransferLeader) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
 	peer := region.GetStorePeer(tl.ToStore)
 	if peer == nil {
 		return errors.New("peer does not existed")
@@ -63,7 +68,7 @@ func (tl TransferLeader) CheckSafety(region *core.RegionInfo) error {
 	if peer.IsLearner {
 		return errors.New("peer already is a learner")
 	}
-	return nil
+	return validateStore(cluster, tl.ToStore)
 }
 
 // Influence calculates the store difference that current step makes.
@@ -115,8 +120,11 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
-// CheckSafety checks if the step meets the safety properties.
-func (ap AddPeer) CheckSafety(region *core.RegionInfo) error {
+// CheckInProgress checks if the step is in the progress of advancing.
+func (ap AddPeer) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+	if err := validateStore(cluster, ap.ToStore); err != nil {
+		return err
+	}
 	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil && peer.GetId() != ap.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
@@ -153,8 +161,11 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckSafety checks if the step meets the safety properties.
-func (al AddLearner) CheckSafety(region *core.RegionInfo) error {
+// CheckInProgress checks if the step is in the progress of advancing.
+func (al AddLearner) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+	if err := validateStore(cluster, al.ToStore); err != nil {
+		return err
+	}
 	peer := region.GetStorePeer(al.ToStore)
 	if peer == nil {
 		return nil
@@ -206,8 +217,8 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckSafety checks if the step meets the safety properties.
-func (pl PromoteLearner) CheckSafety(region *core.RegionInfo) error {
+// CheckInProgress checks if the step is in the progress of advancing.
+func (pl PromoteLearner) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer == nil {
 		return errors.New("peer does not exist")
@@ -237,8 +248,8 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 	return region.GetStorePeer(rp.FromStore) == nil
 }
 
-// CheckSafety checks if the step meets the safety properties.
-func (rp RemovePeer) CheckSafety(region *core.RegionInfo) error {
+// CheckInProgress checks if the step is in the progress of advancing.
+func (rp RemovePeer) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
 	if rp.FromStore == region.GetLeader().GetStoreId() {
 		return errors.New("cannot remove leader peer")
 	}
@@ -285,8 +296,8 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckSafety checks if the step meets the safety properties.
-func (mr MergeRegion) CheckSafety(region *core.RegionInfo) error {
+// CheckInProgress checks if the step is in the progress of advancing.
+func (mr MergeRegion) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
 	return nil
 }
 
@@ -335,8 +346,8 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 	}
 }
 
-// CheckSafety checks if the step meets the safety properties.
-func (sr SplitRegion) CheckSafety(region *core.RegionInfo) error {
+// CheckInProgress checks if the step is in the progress of advancing.
+func (sr SplitRegion) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
 	return nil
 }
 
@@ -369,11 +380,22 @@ func (ap AddLightPeer) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
+<<<<<<< HEAD
 // CheckSafety checks if the step meets the safety properties.
 func (ap AddLightPeer) CheckSafety(region *core.RegionInfo) error {
 	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil && peer.GetId() != ap.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
+=======
+// CheckInProgress checks if the step is in the progress of advancing.
+func (df DemoteFollower) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+	peer := region.GetStorePeer(df.ToStore)
+	if peer.GetId() != df.PeerID {
+		return errors.New("peer does not exist")
+	}
+	if peer.GetId() == region.GetLeader().GetId() {
+		return errors.New("cannot demote leader peer")
+>>>>>>> fb3d20428 (operator: check store status for running operators (#4223))
 	}
 	return nil
 }
@@ -415,11 +437,34 @@ func (al AddLightLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
+<<<<<<< HEAD
 // CheckSafety checks if the step meets the safety properties.
 func (al AddLightLearner) CheckSafety(region *core.RegionInfo) error {
 	peer := region.GetStorePeer(al.ToStore)
 	if peer == nil {
 		return nil
+=======
+// CheckInProgress checks if the step is in the progress of advancing.
+func (cpe ChangePeerV2Enter) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+	inJointState, notInJointState := false, false
+	for _, pl := range cpe.PromoteLearners {
+		peer := region.GetStorePeer(pl.ToStore)
+		if peer.GetId() != pl.PeerID {
+			return errors.New("peer does not exist")
+		}
+		switch peer.GetRole() {
+		case metapb.PeerRole_Learner:
+			notInJointState = true
+		case metapb.PeerRole_IncomingVoter:
+			inJointState = true
+		case metapb.PeerRole_Voter:
+			return errors.New("peer already is a voter")
+		case metapb.PeerRole_DemotingVoter:
+			return errors.New("cannot promote a demoting voter")
+		default:
+			return errors.New("unexpected peer role")
+		}
+>>>>>>> fb3d20428 (operator: check store status for running operators (#4223))
 	}
 	if peer.GetId() != al.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
@@ -431,9 +476,171 @@ func (al AddLightLearner) CheckSafety(region *core.RegionInfo) error {
 }
 
 // Influence calculates the store difference that current step makes.
+<<<<<<< HEAD
 func (al AddLightLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(al.ToStore)
+=======
+func (cpe ChangePeerV2Enter) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
+
+// GetRequest get the ChangePeerV2 request
+func (cpe ChangePeerV2Enter) GetRequest() *pdpb.ChangePeerV2 {
+	changes := make([]*pdpb.ChangePeer, 0, len(cpe.PromoteLearners)+len(cpe.DemoteVoters))
+	for _, pl := range cpe.PromoteLearners {
+		changes = append(changes, &pdpb.ChangePeer{
+			ChangeType: eraftpb.ConfChangeType_AddNode,
+			Peer: &metapb.Peer{
+				Id:      pl.PeerID,
+				StoreId: pl.ToStore,
+				Role:    metapb.PeerRole_Voter,
+			},
+		})
+	}
+	for _, dv := range cpe.DemoteVoters {
+		changes = append(changes, &pdpb.ChangePeer{
+			ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+			Peer: &metapb.Peer{
+				Id:      dv.PeerID,
+				StoreId: dv.ToStore,
+				Role:    metapb.PeerRole_Learner,
+			},
+		})
+	}
+	return &pdpb.ChangePeerV2{
+		Changes: changes,
+	}
+}
+
+// ChangePeerV2Leave is an OpStep that leaves the joint state.
+type ChangePeerV2Leave struct {
+	PromoteLearners []PromoteLearner
+	DemoteVoters    []DemoteVoter
+}
+
+func (cpl ChangePeerV2Leave) String() string {
+	b := &strings.Builder{}
+	_, _ = b.WriteString("leave joint state")
+	for _, pl := range cpl.PromoteLearners {
+		_, _ = fmt.Fprintf(b, ", promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
+	}
+	for _, dv := range cpl.DemoteVoters {
+		_, _ = fmt.Fprintf(b, ", demote voter peer %v on store %v to learner", dv.PeerID, dv.ToStore)
+	}
+	return b.String()
+}
+
+// ConfVerChanged returns the delta value for version increased by this step.
+func (cpl ChangePeerV2Leave) ConfVerChanged(region *core.RegionInfo) uint64 {
+	for _, pl := range cpl.PromoteLearners {
+		peer := region.GetStoreVoter(pl.ToStore)
+		if peer.GetId() != pl.PeerID || peer.GetRole() != metapb.PeerRole_Voter {
+			return 0
+		}
+	}
+	for _, dv := range cpl.DemoteVoters {
+		if region.GetStorePeer(dv.PeerID) != nil && !dv.ConfVerChanged(region) {
+			return 0
+		}
+	}
+	return uint64(len(cpl.PromoteLearners) + len(cpl.DemoteVoters))
+}
+
+// IsFinish checks if current step is finished.
+func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
+	for _, pl := range cpl.PromoteLearners {
+		peer := region.GetStoreVoter(pl.ToStore)
+		if peer != nil && peer.GetId() != pl.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.GetId()))
+		}
+		if peer.GetId() != pl.PeerID || peer.GetRole() != metapb.PeerRole_Voter {
+			return false
+		}
+	}
+	for _, dv := range cpl.DemoteVoters {
+		if !dv.IsFinish(region) {
+			return false
+		}
+	}
+	if core.IsInJointState(region.GetPeers()...) {
+		log.Warn("region is still in the joint state", zap.Uint64("region-id", region.GetID()))
+		return false
+	}
+	return true
+}
+
+// CheckInProgress checks if the step is in the progress of advancing.
+func (cpl ChangePeerV2Leave) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+	inJointState, notInJointState, demoteLeader := false, false, false
+	leaderStoreID := region.GetLeader().GetStoreId()
+
+	for _, pl := range cpl.PromoteLearners {
+		peer := region.GetStorePeer(pl.ToStore)
+		if peer.GetId() != pl.PeerID {
+			return errors.New("peer does not exist")
+		}
+		switch peer.GetRole() {
+		case metapb.PeerRole_Voter:
+			notInJointState = true
+		case metapb.PeerRole_IncomingVoter:
+			inJointState = true
+		case metapb.PeerRole_Learner:
+			return errors.New("peer is still a learner")
+		case metapb.PeerRole_DemotingVoter:
+			return errors.New("cannot promote a demoting voter")
+		default:
+			return errors.New("unexpected peer role")
+		}
+	}
+	for _, dv := range cpl.DemoteVoters {
+		peer := region.GetStorePeer(dv.ToStore)
+		if peer.GetId() != dv.PeerID {
+			return errors.New("peer does not exist")
+		}
+		switch peer.GetRole() {
+		case metapb.PeerRole_Learner:
+			notInJointState = true
+		case metapb.PeerRole_DemotingVoter:
+			inJointState = true
+			if peer.GetStoreId() == leaderStoreID {
+				demoteLeader = true
+			}
+		case metapb.PeerRole_Voter:
+			return errors.New("peer is still a voter")
+		case metapb.PeerRole_IncomingVoter:
+			return errors.New("cannot demote a incoming voter")
+		default:
+			return errors.New("unexpected peer role")
+		}
+	}
+
+	switch count := core.CountInJointState(region.GetPeers()...); {
+	case notInJointState && inJointState:
+		return errors.New("non-atomic joint consensus")
+	case notInJointState && count != 0:
+		return errors.New("some other peers are in joint state, when the region is in joint state")
+	case inJointState && count != len(cpl.PromoteLearners)+len(cpl.DemoteVoters):
+		return errors.New("some other peers are in joint state, when the region is not in joint state")
+	case demoteLeader:
+		return errors.New("cannot demote leader peer")
+	}
+>>>>>>> fb3d20428 (operator: check store status for running operators (#4223))
 
 	to.RegionSize += region.GetApproximateSize()
 	to.RegionCount++
 }
+<<<<<<< HEAD
+=======
+
+// Influence calculates the store difference that current step makes.
+func (cpl ChangePeerV2Leave) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
+
+func validateStore(cluster opt.Cluster, id uint64) error {
+	store := cluster.GetStore(id)
+	if store == nil {
+		return errors.New("target store does not exist")
+	}
+	if store.DownTime() > cluster.GetOpts().GetMaxStoreDownTime() {
+		return errors.New("target store is down")
+	}
+	return nil
+}
+>>>>>>> fb3d20428 (operator: check store status for running operators (#4223))

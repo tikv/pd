@@ -149,7 +149,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 }
 
 func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step operator.OpStep, region *core.RegionInfo) bool {
-	err := step.CheckSafety(region)
+	err := step.CheckInProgress(oc.cluster, region)
 	if err != nil {
 		if oc.RemoveOperator(op, zap.String("reason", err.Error())) {
 			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
