@@ -59,7 +59,7 @@ func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Re
 		return
 	}
 	var memberID uint64
-	for _, m := range members {
+	for _, m := range members.GetMembers() {
 		if m.GetName() == name {
 			memberID = m.GetMemberId()
 			break
