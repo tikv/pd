@@ -84,6 +84,7 @@ var (
 )
 
 // Server is the pd server.
+// nolint
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
