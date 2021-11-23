@@ -15,12 +15,18 @@
 package operator
 
 import (
+	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
-type testStepSuite struct{}
+type testStepSuite struct {
+	cluster *mockcluster.Cluster
+}
 
 var _ = Suite(&testStepSuite{})
 
@@ -28,7 +34,143 @@ type testCase struct {
 	Peers          []*metapb.Peer // first is leader
 	ConfVerChanged uint64
 	IsFinish       bool
-	CheckSafety    Checker
+	CheckInProgres Checker
+}
+
+func (s *testStepSuite) SetUpTest(c *C) {
+	s.cluster = mockcluster.NewCluster(context.Background(), config.NewTestOptions())
+	for i := 1; i <= 10; i++ {
+		s.cluster.PutStoreWithLabels(uint64(i))
+	}
+	s.cluster.SetStoreDown(8)
+	s.cluster.SetStoreDown(9)
+	s.cluster.SetStoreDown(10)
+}
+
+func (s *testStepSuite) TestTransferLeader(c *C) {
+	step := TransferLeader{FromStore: 1, ToStore: 2}
+	cases := []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			IsNil,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			true,
+			IsNil,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			IsNil,
+		},
+	}
+	s.check(c, step, "transfer leader from store 1 to store 2", cases)
+
+	step = TransferLeader{FromStore: 1, ToStore: 9} // 9 is down
+	cases = []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 9, StoreId: 9, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			NotNil,
+		},
+	}
+	s.check(c, step, "transfer leader from store 1 to store 9", cases)
+}
+
+func (s *testStepSuite) TestAddPeer(c *C) {
+	step := AddPeer{ToStore: 2, PeerID: 2}
+	cases := []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			IsNil,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			1,
+			true,
+			IsNil,
+		},
+	}
+	s.check(c, step, "add peer 2 on store 2", cases)
+
+	step = AddPeer{ToStore: 9, PeerID: 9}
+	cases = []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			NotNil,
+		},
+	}
+	s.check(c, step, "add peer 9 on store 9", cases)
+}
+
+func (s *testStepSuite) TestAddLearner(c *C) {
+	step := AddLearner{ToStore: 2, PeerID: 2}
+	cases := []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			IsNil,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
+			},
+			1,
+			true,
+			IsNil,
+		},
+	}
+	s.check(c, step, "add learner peer 2 on store 2", cases)
+
+	step = AddLearner{ToStore: 9, PeerID: 9}
+	cases = []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			NotNil,
+		},
+	}
+	s.check(c, step, "add learner peer 9 on store 9", cases)
 }
 
 func (s *testStepSuite) TestDemoteFollower(c *C) {
@@ -345,6 +487,6 @@ func (s *testStepSuite) check(c *C, step OpStep, desc string, cases []testCase) 
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.Peers}, tc.Peers[0])
 		c.Assert(step.ConfVerChanged(region), Equals, tc.ConfVerChanged)
 		c.Assert(step.IsFinish(region), Equals, tc.IsFinish)
-		c.Assert(step.CheckSafety(region), tc.CheckSafety)
+		c.Assert(step.CheckInProgress(s.cluster, region), tc.CheckInProgres)
 	}
 }
