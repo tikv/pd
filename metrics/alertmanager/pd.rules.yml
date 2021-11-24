@@ -122,12 +122,12 @@ groups:
       summary: PD_pending_peer_region_count
 
   - alert: PD_leader_change
-    expr: count( changes(pd_server_tso{type="save"}[10m]) > 0 )   >= 2
+    expr: count( changes(pd_tso_events{type="save"}[10m]) > 0 )   >= 2
     for: 1m
     labels:
       env: ENV_LABELS_ENV
       level: warning
-      expr:  count( changes(pd_server_tso{type="save"}[10m]) > 0 )   >= 2
+      expr:  count( changes(pd_tso_events{type="save"}[10m]) > 0 )   >= 2
     annotations:
       description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values:{{ $value }}'
       value: '{{ $value }}'
@@ -146,12 +146,12 @@ groups:
       summary: TiKV_space_used_more_than_80%
 
   - alert: PD_system_time_slow
-    expr: changes(pd_server_tso{type="system_time_slow"}[10m]) >= 1
+    expr: changes(pd_tso_events{type="system_time_slow"}[10m]) >= 1
     for: 1m
     labels:
       env: ENV_LABELS_ENV
       level: warning
-      expr: changes(pd_server_tso{type="system_time_slow"}[10m]) >= 1
+      expr: changes(pd_tso_events{type="system_time_slow"}[10m]) >= 1
     annotations:
       description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values: {{ $value }}'
       value: '{{ $value }}'

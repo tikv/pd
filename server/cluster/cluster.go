@@ -284,7 +284,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err := c.storage.LoadRegionsOnce(c.core.CheckAndPutRegion); err != nil {
+	if err := c.storage.LoadRegionsOnce(c.ctx, c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -353,8 +353,8 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.running = false
-	close(c.quit)
 	c.coordinator.stop()
+	close(c.quit)
 	c.Unlock()
 	c.wg.Wait()
 	log.Info("raftcluster is stopped")

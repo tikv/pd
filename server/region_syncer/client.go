@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -40,30 +41,22 @@ const (
 // StopSyncWithLeader stop to sync the region with leader.
 func (s *RegionSyncer) StopSyncWithLeader() {
 	s.reset()
-	s.Lock()
-	close(s.closed)
-	s.closed = make(chan struct{})
-	s.Unlock()
 	s.wg.Wait()
 }
 
 func (s *RegionSyncer) reset() {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if s.regionSyncerCancel == nil {
-		return
+	if s.mu.clientCancel != nil {
+		s.mu.clientCancel()
 	}
-	s.regionSyncerCancel()
-	s.regionSyncerCancel, s.regionSyncerCtx = nil, nil
+	s.mu.clientCancel, s.mu.clientCtx = nil, nil
 }
 
-func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
-	s.reset()
-	ctx, cancel := context.WithCancel(s.server.LoopContext())
+func (s *RegionSyncer) establish(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	tlsCfg, err := s.securityConfig.ToTLSConfig()
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 	cc, err := grpcutil.GetClientConn(
@@ -88,21 +81,16 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 		grpc.WithBlock(),
 	)
 	if err != nil {
-		cancel()
 		return nil, errors.WithStack(err)
 	}
-
-	s.Lock()
-	s.regionSyncerCtx, s.regionSyncerCancel = ctx, cancel
-	s.Unlock()
 	return cc, nil
 }
 
-func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
+func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (ClientStream, error) {
 	cli := pdpb.NewPDClient(conn)
-	syncStream, err := cli.SyncRegions(s.regionSyncerCtx)
+	syncStream, err := cli.SyncRegions(ctx)
 	if err != nil {
-		return syncStream, errs.ErrGRPCCreateStream.Wrap(err).FastGenWithCause()
+		return nil, errs.ErrGRPCCreateStream.Wrap(err).FastGenWithCause()
 	}
 	err = syncStream.Send(&pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
@@ -110,7 +98,7 @@ func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 		StartIndex: s.history.GetNextIndex(),
 	})
 	if err != nil {
-		return syncStream, errs.ErrGRPCSend.Wrap(err).FastGenWithCause()
+		return nil, errs.ErrGRPCSend.Wrap(err).FastGenWithCause()
 	}
 
 	return syncStream, nil
@@ -121,15 +109,21 @@ var regionGuide = core.GenerateRegionGuideFunc(false)
 // StartSyncWithLeader starts to sync with leader.
 func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	s.wg.Add(1)
-	s.RLock()
-	closed := s.closed
-	s.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mu.clientCtx, s.mu.clientCancel = context.WithCancel(s.server.LoopContext())
+	ctx := s.mu.clientCtx
+
 	go func() {
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
 		storage := s.server.GetStorage()
-		err := storage.LoadRegionsOnce(bc.CheckAndPutRegion)
+		log.Info("region syncer start load region")
+		start := time.Now()
+		err := storage.LoadRegionsOnce(ctx, bc.CheckAndPutRegion)
+		log.Info("region syncer finished load region", zap.Duration("time-cost", time.Since(start)))
 		if err != nil {
 			log.Warn("failed to load regions.", errs.ZapError(err))
 		}
@@ -137,11 +131,11 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		var conn *grpc.ClientConn
 		for {
 			select {
-			case <-closed:
+			case <-ctx.Done():
 				return
 			default:
 			}
-			conn, err = s.establish(addr)
+			conn, err = s.establish(ctx, addr)
 			if err != nil {
 				log.Error("cannot establish connection with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
 				continue
@@ -153,12 +147,12 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		// Start syncing data.
 		for {
 			select {
-			case <-closed:
+			case <-ctx.Done():
 				return
 			default:
 			}
 
-			stream, err := s.syncRegion(conn)
+			stream, err := s.syncRegion(ctx, conn)
 			if err != nil {
 				if ev, ok := status.FromError(err); ok {
 					if ev.Code() == codes.Canceled {

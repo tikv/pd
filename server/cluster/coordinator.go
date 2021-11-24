@@ -117,7 +117,7 @@ func (c *coordinator) patrolRegions() {
 			}
 			checkerIsBusy, ops := c.checkers.CheckRegion(region)
 			if checkerIsBusy {
-				continue
+				break
 			}
 			if len(ops) > 0 {
 				c.opController.AddWaitingOperator(ops...)
@@ -691,6 +691,12 @@ func (s *scheduleController) Stop() {
 
 func (s *scheduleController) Schedule() []*operator.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
+		// no need to retry if schedule should stop to speed exit
+		select {
+		case <-s.ctx.Done():
+			return nil
+		default:
+		}
 		// If we have schedule, reset interval to the minimal interval.
 		if op := s.Scheduler.Schedule(s.cluster); op != nil {
 			s.nextInterval = s.Scheduler.GetMinInterval()
