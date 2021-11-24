@@ -156,8 +156,8 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 // GetAllDownstreamNames tries to get the all bind stream's name.
 // Only for test
 func (s *RegionSyncer) GetAllDownstreamNames() []string {
-	var names []string
 	s.mu.RLock()
+	names := make([]string, 0, len(s.mu.streams))
 	for name := range s.mu.streams {
 		names = append(names, name)
 	}
