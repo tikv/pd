@@ -279,6 +279,9 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
+		if store == nil {
+			return nil
+		}
 		if ordinaryFilter.Target(r.cluster.GetOpts(), store) {
 			ordinaryPeers[peer.GetId()] = peer
 		} else {
@@ -407,7 +410,14 @@ func (r *RegionScatterer) selectAvailableLeaderStores(group string, peers map[ui
 	leaderCandidateStores := make([]uint64, 0)
 	for storeID := range peers {
 		store := r.cluster.GetStore(storeID)
+<<<<<<< HEAD
 		engine := store.GetLabelValue(filter.EngineKey)
+=======
+		if store == nil {
+			return 0
+		}
+		engine := store.GetLabelValue(core.EngineKey)
+>>>>>>> 63c46a1e8 (*: check if GetStore returns nil (#4347))
 		if len(engine) < 1 {
 			leaderCandidateStores = append(leaderCandidateStores, storeID)
 		}
@@ -431,6 +441,9 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 	for _, peer := range peers {
 		storeID := peer.GetStoreId()
 		store := r.cluster.GetStore(storeID)
+		if store == nil {
+			continue
+		}
 		if ordinaryFilter.Target(r.cluster.GetOpts(), store) {
 			r.ordinaryEngine.selectedPeer.Put(storeID, group)
 			scatterDistributionCounter.WithLabelValues(
