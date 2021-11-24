@@ -652,4 +652,5 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	c.Check(es.Schedule(tc), IsNil)
 	op = bs.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 2, 1)
+	c.Assert(op[0].Desc(), Equals, EvictSlowStoreType)
 }
