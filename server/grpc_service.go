@@ -58,6 +58,8 @@ var (
 
 // GetMembers implements gRPC PDServer.
 func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
+	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	members, err := s.Server.GetMembers()
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
