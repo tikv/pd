@@ -536,6 +536,31 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 	return ""
 }
 
+// WaitRegionSyncerClientsReady is used to wait the region syncer clients establish the connection.
+// n means wait n clients.
+func (c *TestCluster) WaitRegionSyncerClientsReady(n int) bool {
+	option := &WaitOp{
+		retryTimes:   40,
+		waitInterval: WaitLeaderCheckInterval,
+	}
+	for i := 0; i < option.retryTimes; i++ {
+		name := c.GetLeader()
+		if len(name) == 0 {
+			time.Sleep(option.waitInterval)
+			continue
+		}
+		leaderServer := c.GetServer(name)
+		clus := leaderServer.GetServer().GetRaftCluster()
+		if clus != nil {
+			if len(clus.GetRegionSyncer().GetAllDownstreamNames()) == n {
+				return true
+			}
+		}
+		time.Sleep(option.waitInterval)
+	}
+	return false
+}
+
 // ResignLeader resigns the leader of the cluster.
 func (c *TestCluster) ResignLeader() error {
 	leader := c.GetLeader()
