@@ -61,7 +61,8 @@ func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 
 func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
-	members, err := svr.GetMembers(context.Background(), req)
+	grpcServer := &server.GrpcServer{Server: svr}
+	members, err := grpcServer.GetMembers(context.Background(), req)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
