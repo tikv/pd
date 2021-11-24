@@ -563,7 +563,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		}
 	}
 	if len(ret) == 0 {
-		name := fmt.Sprintf("%s-%s-no-src", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcDetail.Info.Store.GetID(), 10))
+		name := fmt.Sprintf("%s-%s-no-src", bs.rwTy.String(), bs.opTy.String())
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), name).Inc()
 	}
 	return ret
