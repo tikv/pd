@@ -168,7 +168,7 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) (ops []*operato
 	case write:
 		ops = h.balanceHotWriteRegions(cluster)
 	}
-	if ops != nil && len(ops) > 0 {
+	if len(ops) > 0 {
 		name := fmt.Sprintf("%s-new-operator", typ.String())
 		schedulerCounter.WithLabelValues(h.GetName(), name).Inc()
 	} else {
@@ -562,8 +562,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			hotSchedulerResultCounter.WithLabelValues(ty, idStr).Inc()
 		}
 	}
-	if len(ret) < 0 {
-		name := fmt.Sprintf("%s-%s-no-src", bs.rwTy.String(), bs.cur.srcDetail.Info.Store.GetID())
+	if len(ret) == 0 {
+		name := fmt.Sprintf("%s-%s-no-src", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcDetail.Info.Store.GetID(), 10))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), name).Inc()
 	}
 	return ret
@@ -610,7 +610,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	for peer := range union {
 		ret = appendItem(ret, peer)
 	}
-	if len(ret) < 0 {
+	if len(ret) == 0 {
 		name := fmt.Sprintf("%s-%s-no-region", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcDetail.Info.Store.GetID(), 10))
 		hotSchedulerResultCounter.WithLabelValues(name, strconv.FormatUint(bs.cur.srcDetail.getID(), 10)).Inc()
 	}
