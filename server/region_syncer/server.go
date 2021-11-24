@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -67,16 +68,17 @@ type Server interface {
 
 // RegionSyncer is used to sync the region information without raft.
 type RegionSyncer struct {
-	sync.RWMutex
-	streams            map[string]ServerStream
-	regionSyncerCtx    context.Context
-	regionSyncerCancel context.CancelFunc
-	server             Server
-	closed             chan struct{}
-	wg                 sync.WaitGroup
-	history            *historyBuffer
-	limit              *ratelimit.Bucket
-	securityConfig     *grpcutil.SecurityConfig
+	mu struct {
+		sync.RWMutex
+		streams      map[string]ServerStream
+		clientCtx    context.Context
+		clientCancel context.CancelFunc
+	}
+	server         Server
+	wg             sync.WaitGroup
+	history        *historyBuffer
+	limit          *ratelimit.Bucket
+	securityConfig *grpcutil.SecurityConfig
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -85,14 +87,14 @@ type RegionSyncer struct {
 // Usually open the region syncer in huge cluster and the server
 // no longer etcd but go-leveldb.
 func NewRegionSyncer(s Server) *RegionSyncer {
-	return &RegionSyncer{
-		streams:        make(map[string]ServerStream),
+	syncer := &RegionSyncer{
 		server:         s,
-		closed:         make(chan struct{}),
 		history:        newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
 		limit:          ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
 		securityConfig: s.GetSecurityConfig(),
 	}
+	syncer.mu.streams = make(map[string]ServerStream)
+	return syncer
 }
 
 // RunServer runs the server of the region syncer.
@@ -102,6 +104,7 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 	var stats []*pdpb.RegionStat
 	var leaders []*metapb.Peer
 	ticker := time.NewTicker(syncerKeepAliveInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-quit:
@@ -251,28 +254,28 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 
 // bindStream binds the established server stream.
 func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
-	s.Lock()
-	defer s.Unlock()
-	s.streams[name] = stream
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mu.streams[name] = stream
 }
 
 func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
 	var failed []string
-	s.RLock()
-	for name, sender := range s.streams {
+	s.mu.RLock()
+	for name, sender := range s.mu.streams {
 		err := sender.Send(regions)
 		if err != nil {
 			log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
 			failed = append(failed, name)
 		}
 	}
-	s.RUnlock()
+	s.mu.RUnlock()
 	if len(failed) > 0 {
-		s.Lock()
+		s.mu.Lock()
 		for _, name := range failed {
-			delete(s.streams, name)
+			delete(s.mu.streams, name)
 			log.Info("region syncer delete the stream", zap.String("stream", name))
 		}
-		s.Unlock()
+		s.mu.Unlock()
 	}
 }
