@@ -549,7 +549,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		}
 		idStr := strconv.FormatUint(id, 10)
 		for dim, load := range detail.LoadPred.pending().Loads {
-			ty := fmt.Sprintf("%s-%s", bs.rwTy, dimToString(dim))
+			ty := fmt.Sprintf("%s-%s", bs.rwTy.String(), dimToString(dim))
 			opInfluenceStatus.WithLabelValues(bs.sche.GetName(), idStr, ty).Set(load)
 		}
 
