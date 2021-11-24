@@ -386,8 +386,11 @@ func (ap AddLightPeer) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckSafety checks if the step meets the safety properties.
-func (ap AddLightPeer) CheckSafety(region *core.RegionInfo) error {
+// CheckInProgress checks if the step meets the safety properties.
+func (ap AddLightPeer) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+	if err := validateStore(cluster, ap.ToStore); err != nil {
+		return err
+	}
 	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil && peer.GetId() != ap.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
@@ -430,8 +433,11 @@ func (al AddLightLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckSafety checks if the step meets the safety properties.
-func (al AddLightLearner) CheckSafety(region *core.RegionInfo) error {
+// CheckInProgress checks if the step meets the safety properties.
+func (al AddLightLearner) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+	if err := validateStore(cluster, al.ToStore); err != nil {
+		return err
+	}
 	peer := region.GetStorePeer(al.ToStore)
 	if peer == nil {
 		return nil
