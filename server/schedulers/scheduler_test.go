@@ -640,6 +640,7 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	// Add evict leader scheduler to store 1
 	op := es.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	c.Assert(op[0].Desc(), Equals, EvictSlowStoreType)
 	// Cannot balance leaders to store 1
 	op = bs.Schedule(tc)
 	c.Check(op, IsNil)
@@ -651,5 +652,4 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	c.Check(es.Schedule(tc), IsNil)
 	op = bs.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 2, 1)
-	c.Assert(op[0].Desc(), Equals, EvictSlowStoreType)
 }
