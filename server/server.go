@@ -84,6 +84,7 @@ var (
 )
 
 // Server is the pd server.
+// nolint
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
@@ -251,7 +252,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		etcdCfg.UserHandlers = userHandlers
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
-		pdpb.RegisterPDServer(gs, s)
+		pdpb.RegisterPDServer(gs, &GrpcServer{Server: s})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg
@@ -769,6 +770,15 @@ func (s *Server) ClusterID() uint64 {
 // StartTimestamp returns the start timestamp of this server
 func (s *Server) StartTimestamp() int64 {
 	return s.startTimestamp
+}
+
+// GetMembers returns PD server list.
+func (s *Server) GetMembers() ([]*pdpb.Member, error) {
+	if s.IsClosed() {
+		return nil, errors.New("server not started")
+	}
+	members, err := cluster.GetMembers(s.GetClient())
+	return members, err
 }
 
 // GetConfig gets the config information.
@@ -1353,12 +1363,12 @@ func (s *Server) reloadConfigFromKV() error {
 // Each member will write `data` to a local file named `name`.
 // For security reason, data should be in JSON format.
 func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
-	resp, err := s.GetMembers(ctx, nil)
+	members, err := s.GetMembers()
 	if err != nil {
 		return err
 	}
 	var errs []error
-	for _, member := range resp.Members {
+	for _, member := range members {
 		if err := s.replicateFileToMember(ctx, member, name, data); err != nil {
 			errs = append(errs, err)
 		}
