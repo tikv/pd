@@ -409,14 +409,10 @@ func (r *RegionScatterer) selectAvailableLeaderStores(group string, peers map[ui
 	leaderCandidateStores := make([]uint64, 0)
 	for storeID := range peers {
 		store := r.cluster.GetStore(storeID)
-<<<<<<< HEAD
-		engine := store.GetLabelValue(filter.EngineKey)
-=======
 		if store == nil {
 			return 0
 		}
-		engine := store.GetLabelValue(core.EngineKey)
->>>>>>> 63c46a1e8 (*: check if GetStore returns nil (#4347))
+		engine := store.GetLabelValue(filter.EngineKey)
 		if len(engine) < 1 {
 			leaderCandidateStores = append(leaderCandidateStores, storeID)
 		}
