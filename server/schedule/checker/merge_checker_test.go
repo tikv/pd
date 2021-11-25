@@ -163,6 +163,58 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
 
+	// Test the peer store check.
+	store := s.cluster.GetStore(1)
+	c.Assert(store, NotNil)
+	// Test the peer store is deleted.
+	s.cluster.DeleteStore(store)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	// Test the store is normal.
+	s.cluster.PutStore(store)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+	// Test the store is offline.
+	s.cluster.SetStoreOffline(store.GetID())
+	ops = s.mc.Check(s.regions[2])
+	// Only target region have a peer on the offline store,
+	// so it's not ok to merge.
+	c.Assert(ops, IsNil)
+	// Test the store is up.
+	s.cluster.SetStoreUp(store.GetID())
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+	store = s.cluster.GetStore(5)
+	c.Assert(store, NotNil)
+	// Test the peer store is deleted.
+	s.cluster.DeleteStore(store)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	// Test the store is normal.
+	s.cluster.PutStore(store)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+	// Test the store is offline.
+	s.cluster.SetStoreOffline(store.GetID())
+	ops = s.mc.Check(s.regions[2])
+	// Both regions have peers on the offline store,
+	// so it's ok to merge.
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+	// Test the store is up.
+	s.cluster.SetStoreUp(store.GetID())
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+
 	// Enable one way merge
 	s.cluster.SetEnableOneWayMerge(true)
 	ops = s.mc.Check(s.regions[2])
@@ -175,31 +227,6 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	// Now it merges to next region.
-	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
-	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
-
-	// Test the target region's store check.
-	s.cluster.SetEnablePlacementRules(false)
-	store := s.cluster.GetStore(4)
-	c.Assert(store, NotNil)
-	s.cluster.DeleteStore(store)
-	// Test the store is deleted.
-	ops = s.mc.Check(s.regions[2])
-	c.Assert(ops, IsNil)
-	// Test the store is normal.
-	s.cluster.PutStore(store)
-	ops = s.mc.Check(s.regions[2])
-	c.Assert(ops, NotNil)
-	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
-	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
-	// Test the store is offline.
-	s.cluster.SetStoreOffline(store.GetID())
-	ops = s.mc.Check(s.regions[2])
-	c.Assert(ops, IsNil)
-	// Test the store is up.
-	s.cluster.SetStoreUp(store.GetID())
-	ops = s.mc.Check(s.regions[2])
-	c.Assert(ops, NotNil)
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
 

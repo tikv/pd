@@ -145,13 +145,6 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	// Check whether the store of the target region leader is normal.
-	store := m.cluster.GetStore(target.GetLeader().GetStoreId())
-	if store == nil || store.IsOffline() {
-		checkerCounter.WithLabelValues("merge_checker", "target-store-offline").Inc()
-		return nil
-	}
-
 	if target.GetApproximateSize() > maxTargetRegionSize {
 		checkerCounter.WithLabelValues("merge_checker", "target-too-large").Inc()
 		return nil
@@ -175,12 +168,12 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 	return adjacent != nil && !m.splitCache.Exists(adjacent.GetID()) && !m.cluster.IsRegionHot(adjacent) &&
-		AllowMerge(m.cluster, region, adjacent) && opt.IsRegionHealthy(adjacent) &&
-		opt.IsRegionReplicated(m.cluster, adjacent)
+		AllowMerge(m.cluster, region, adjacent) && checkPeerStore(m.cluster, region, adjacent) &&
+		opt.IsRegionHealthy(adjacent) && opt.IsRegionReplicated(m.cluster, adjacent)
 }
 
 // AllowMerge returns true if two regions can be merged according to the key type.
-func AllowMerge(cluster opt.Cluster, region *core.RegionInfo, adjacent *core.RegionInfo) bool {
+func AllowMerge(cluster opt.Cluster, region, adjacent *core.RegionInfo) bool {
 	var start, end []byte
 	if bytes.Equal(region.GetEndKey(), adjacent.GetStartKey()) && len(region.GetEndKey()) != 0 {
 		start, end = region.GetStartKey(), adjacent.GetEndKey()
@@ -229,6 +222,21 @@ func AllowMerge(cluster opt.Cluster, region *core.RegionInfo, adjacent *core.Reg
 	}
 }
 
-func isTableIDSame(region *core.RegionInfo, adjacent *core.RegionInfo) bool {
+func isTableIDSame(region, adjacent *core.RegionInfo) bool {
 	return codec.Key(region.GetStartKey()).TableID() == codec.Key(adjacent.GetStartKey()).TableID()
+}
+
+// Check whether there is a peer of the adjacent region on an offline store,
+// while the source region has no peer on it. This is to prevent from bringing
+// any other peer into an offline store to slow down the offline process.
+func checkPeerStore(cluster opt.Cluster, region, adjacent *core.RegionInfo) bool {
+	regionStoreIDs := region.GetStoreIds()
+	for _, peer := range adjacent.GetPeers() {
+		storeID := peer.GetStoreId()
+		store := cluster.GetStore(storeID)
+		if _, ok := regionStoreIDs[storeID]; (store == nil || store.IsOffline()) && !ok {
+			return false
+		}
+	}
+	return true
 }
