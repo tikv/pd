@@ -285,7 +285,7 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 
 func (s *StoresStats) storeIsUnhealthy(cluster core.StoreSetInformer, storeID uint64) bool {
 	store := cluster.GetStore(storeID)
-	return store.IsTombstone() || store.IsUnhealth()
+	return store == nil || store.IsTombstone() || store.IsUnhealth()
 }
 
 // FilterUnhealthyStore filter unhealthy store
@@ -293,12 +293,7 @@ func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
 	s.Lock()
 	defer s.Unlock()
 	for storeID := range s.rollingStoresStats {
-<<<<<<< HEAD
 		if s.storeIsUnhealthy(cluster, storeID) {
-=======
-		store := cluster.GetStore(storeID)
-		if store == nil || store.IsTombstone() || store.IsUnhealthy() || store.IsPhysicallyDestroyed() {
->>>>>>> 63c46a1e8 (*: check if GetStore returns nil (#4347))
 			delete(s.rollingStoresStats, storeID)
 		}
 	}
