@@ -234,8 +234,10 @@ func checkPeerStore(cluster opt.Cluster, region, adjacent *core.RegionInfo) bool
 	for _, peer := range adjacent.GetPeers() {
 		storeID := peer.GetStoreId()
 		store := cluster.GetStore(storeID)
-		if _, ok := regionStoreIDs[storeID]; (store == nil || store.IsOffline()) && !ok {
-			return false
+		if store == nil || store.IsOffline() {
+			if _, ok := regionStoreIDs[storeID]; !ok {
+				return false
+			}
 		}
 	}
 	return true
