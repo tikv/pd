@@ -186,6 +186,8 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		peers:              peers,
 		thresholds:         thresholds,
 	}
+
+	var isAdopted bool // from other peer
 	if oldItem == nil {
 		inheritItem := f.takeInheritItem(region.GetID())
 		if inheritItem != nil {
@@ -194,12 +196,13 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 			for _, storeID := range f.getAllStoreIDs(region) {
 				oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
 				if oldItem != nil {
+					isAdopted = true
 					break
 				}
 			}
 		}
 	}
-	return f.updateHotPeerStat(newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
+	return f.updateHotPeerStat(newItem, oldItem, isAdopted, deltaLoads, time.Duration(interval)*time.Second)
 }
 
 // CheckColdPeer checks the collect the un-heartbeat peer and maintain it.
@@ -236,7 +239,7 @@ func (f *hotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]st
 			for i, loads := range oldItem.thresholds {
 				deltaLoads[i] = loads * float64(interval)
 			}
-			stat := f.updateHotPeerStat(newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
+			stat := f.updateHotPeerStat(newItem, oldItem, false, deltaLoads, time.Duration(interval)*time.Second)
 			if stat != nil {
 				ret = append(ret, stat)
 			}
@@ -373,13 +376,16 @@ func (f *hotPeerCache) getDefaultTimeMedian() *movingaverage.TimeMedian {
 	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, time.Duration(f.reportIntervalSecs)*time.Second)
 }
 
-func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
+func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, isAdopted bool, deltaLoads []float64, interval time.Duration) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
 	if oldItem == nil {
 		return f.updateNewHotPeerStat(newItem, deltaLoads, interval)
 	}
-
-	newItem.rollingLoads = oldItem.rollingLoads
+	if isAdopted {
+		copy(newItem.rollingLoads, oldItem.rollingLoads)
+	} else {
+		newItem.rollingLoads = oldItem.rollingLoads
+	}
 
 	if newItem.justTransferLeader {
 		newItem.lastTransferLeaderTime = time.Now()
