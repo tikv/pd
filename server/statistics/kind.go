@@ -14,6 +14,36 @@
 
 package statistics
 
+// FlowKind is a identify Flow types.
+type FlowKind uint32
+
+// Flags for flow.
+const (
+	WriteFlow FlowKind = iota
+	ReadFlow
+)
+
+func (k FlowKind) String() string {
+	switch k {
+	case WriteFlow:
+		return "write"
+	case ReadFlow:
+		return "read"
+	}
+	return "unimplemented"
+}
+
+// RegionStats returns hot items according to kind
+func (k FlowKind) RegionStats() []RegionStatKind {
+	switch k {
+	case WriteFlow:
+		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
+	case ReadFlow:
+		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
+	}
+	return nil
+}
+
 // RegionStatKind represents the statistics type of region.
 type RegionStatKind int
 
@@ -95,4 +125,25 @@ func (k StoreStatKind) String() string {
 	}
 
 	return "unknown StoreStatKind"
+}
+
+// SourceKind represents the statistics item source.
+type SourceKind int
+
+const (
+	Origin  SourceKind = iota // there is a corresponding peer in this store
+	Inherit                   // there is no a corresponding peer in this store and there is a peer just deleted
+	Adopt                     // there is no a corresponding peer in this store and there is no a peer just deleted, we need to copy from other store
+)
+
+func (k SourceKind) String() string {
+	switch k {
+	case Origin:
+		return "origin"
+	case Inherit:
+		return "inherit"
+	case Adopt:
+		return "adopt"
+	}
+	return "unknown"
 }

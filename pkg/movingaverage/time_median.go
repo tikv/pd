@@ -66,3 +66,13 @@ func (t *TimeMedian) GetFilledPeriod() int { // it is unrelated with mfSize
 func (t *TimeMedian) GetInstantaneous() float64 {
 	return t.instantaneous
 }
+
+func (t *TimeMedian) Clone() *TimeMedian {
+	return &TimeMedian{
+		aot:           t.aot.Clone(),
+		mf:            t.mf.Clone(),
+		aotSize:       t.aotSize,
+		mfSize:        t.mfSize,
+		instantaneous: t.instantaneous,
+	}
+}

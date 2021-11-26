@@ -71,3 +71,14 @@ func (r *MedianFilter) Set(n float64) {
 func (r *MedianFilter) GetInstantaneous() float64 {
 	return r.instantaneous
 }
+
+func (r *MedianFilter) Clone() *MedianFilter {
+	records := make([]float64, len(r.records))
+	copy(records, r.records)
+	return &MedianFilter{
+		records:       records,
+		size:          r.size,
+		count:         r.count,
+		instantaneous: r.instantaneous,
+	}
+}

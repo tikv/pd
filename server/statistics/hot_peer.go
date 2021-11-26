@@ -70,6 +70,14 @@ func (d *dimStat) Get() float64 {
 	return d.Rolling.Get()
 }
 
+func (d *dimStat) Clone() *dimStat {
+	return &dimStat{
+		typ:         d.typ,
+		Rolling:     d.Rolling.Clone(),
+		LastAverage: d.LastAverage.Clone(),
+	}
+}
+
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
 	StoreID  uint64 `json:"store_id"`
