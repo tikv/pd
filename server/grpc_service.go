@@ -1561,7 +1561,51 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 
 // SplitAndScatterRegions split regions by the given split keys, and scatter regions
 func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
-	panic("unimplemented")
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).SplitAndScatterRegions(ctx, request)
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	splitRequest := &pdpb.SplitRegionsRequest{
+		Header:     request.GetHeader(),
+		SplitKeys:  request.GetSplitKeys(),
+		RetryLimit: request.GetRetryLimit(),
+	}
+
+	// Split first
+	splitResp, err := s.SplitRegions(ctx, splitRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	newRegions := splitResp.RegionsId
+	scatterRequest := &pdpb.ScatterRegionRequest{
+		Header:     request.GetHeader(),
+		RegionsId:  newRegions,
+		RetryLimit: request.GetRetryLimit(),
+		Group:      request.GetGroup(),
+	}
+
+	// Scatter regions
+	scatterResp, err := s.ScatterRegion(ctx, scatterRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pdpb.SplitAndScatterRegionsResponse{
+		RegionsId:                 newRegions,
+		SplitFinishedPercentage:   splitResp.FinishedPercentage,
+		ScatterFinishedPercentage: scatterResp.FinishedPercentage,
+	}, nil
 }
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
