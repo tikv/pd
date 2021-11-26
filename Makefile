@@ -178,16 +178,15 @@ test-with-cover: install-go-tools dashboard-ui
 	done
 	@$(FAILPOINT_DISABLE)
 
-test-with-cover-parallel: install-go-tools dashboard-ui tools/bin/gotestsum tools/bin/gocov tools/bin/gocov-xml tools/split
+test-with-cover-parallel: install-go-tools dashboard-ui  tools/split
 
 	@$(FAILPOINT_ENABLE)
 
 	set -euo pipefail;\
 
+	CGO_ENABLED=1 GO111MODULE=on gotestsum --junitfile test-report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
 
-	CGO_ENABLED=1 GO111MODULE=on tools/bin/gotestsum --junitfile test-report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
-
-	tools/bin/gocov convert coverage | tools/bin/gocov-xml >> pd-coverage.xml;
+	gocov convert coverage | gocov-xml >> pd-coverage.xml;
 
 	@$(FAILPOINT_DISABLE)
 
@@ -285,15 +284,6 @@ failpoint-enable: install-go-tools
 failpoint-disable: install-go-tools
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
-
-tools/bin/gocov: tools/check/go.mod
-	cd tools/check && GO111MODULE=on go build -o ../bin/gocov  github.com/axw/gocov/gocov
-
-tools/bin/gocov-xml: tools/check/go.mod
-	cd tools/check && GO111MODULE=on go build -o ../bin/gocov-xml github.com/AlekSi/gocov-xml
-
-tools/bin/gotestsum: tools/check/go.mod
-	cd tools/check && GO111MODULE=on go build -o ../bin/gotestsum gotest.tools/gotestsum
 
 tools/split:
 	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
