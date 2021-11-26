@@ -1,7 +1,7 @@
 ---
 name: "🚀 Feature Request"
 about: I have a suggestion
-labels: type/enhancement
+labels: type/feature-request
 ---
 
 ## Feature Request

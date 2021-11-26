@@ -98,7 +98,7 @@ func newTestKeyFile(c *C, key ...string) (keyFilePath string, cleanup func()) {
 	tempDir, err := os.MkdirTemp("/tmp", "test_key_file")
 	c.Assert(err, IsNil)
 	keyFilePath = tempDir + "/key"
-	err = os.WriteFile(keyFilePath, []byte(testKey), 0644)
+	err = os.WriteFile(keyFilePath, []byte(testKey), 0600)
 	c.Assert(err, IsNil)
 
 	cleanup = func() {

@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/goleak"
@@ -66,7 +65,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "reject", Value: "leader"}},
+		config.RejectLeader: {{Key: "reject", Value: "leader"}},
 	})
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	stores := map[uint64][]string{

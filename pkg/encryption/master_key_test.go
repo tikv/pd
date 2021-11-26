@@ -110,7 +110,7 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyNotHexString(c *C) {
 	dir, err := os.MkdirTemp("", "test_key_files")
 	c.Assert(err, IsNil)
 	path := dir + "/key"
-	os.WriteFile(path, []byte("not-a-hex-string"), 0644)
+	os.WriteFile(path, []byte("not-a-hex-string"), 0600)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{
@@ -126,7 +126,7 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyLengthMismatch(c *C) {
 	dir, err := os.MkdirTemp("", "test_key_files")
 	c.Assert(err, IsNil)
 	path := dir + "/key"
-	os.WriteFile(path, []byte("2f07ec61e5a50284f47f2b402a962ec6"), 0644)
+	os.WriteFile(path, []byte("2f07ec61e5a50284f47f2b402a962ec6"), 0600)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{
@@ -143,7 +143,7 @@ func (s *testMasterKeySuite) TestNewFileMasterKey(c *C) {
 	dir, err := os.MkdirTemp("", "test_key_files")
 	c.Assert(err, IsNil)
 	path := dir + "/key"
-	os.WriteFile(path, []byte(key), 0644)
+	os.WriteFile(path, []byte(key), 0600)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{

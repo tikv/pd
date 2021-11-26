@@ -1305,6 +1305,7 @@ func (c *RaftCluster) resetMetrics() {
 func (c *RaftCluster) collectClusterMetrics() {
 	c.RLock()
 	if c.regionStats == nil {
+		c.RUnlock()
 		return
 	}
 	c.regionStats.Collect()
@@ -1317,7 +1318,6 @@ func (c *RaftCluster) collectClusterMetrics() {
 
 func (c *RaftCluster) resetClusterMetrics() {
 	c.RLock()
-
 	if c.regionStats == nil {
 		c.RUnlock()
 		return
@@ -1882,4 +1882,23 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 		}
 	}
 	return false
+}
+
+// cacheCluster include cache info to improve the performance.
+type cacheCluster struct {
+	*RaftCluster
+	stores []*core.StoreInfo
+}
+
+// GetStores returns store infos from cache
+func (c *cacheCluster) GetStores() []*core.StoreInfo {
+	return c.stores
+}
+
+// newCacheCluster constructor for cache
+func newCacheCluster(c *RaftCluster) *cacheCluster {
+	return &cacheCluster{
+		RaftCluster: c,
+		stores:      c.GetStores(),
+	}
 }

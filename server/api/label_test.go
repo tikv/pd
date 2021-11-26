@@ -180,6 +180,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 
 type testStrictlyLabelsStoreSuite struct {
 	svr       *server.Server
+	grpcSvr   *server.GrpcServer
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
@@ -192,6 +193,7 @@ func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
 	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
+	s.grpcSvr = &server.GrpcServer{Server: s.svr}
 	addr := s.svr.GetAddr()
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
@@ -261,7 +263,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 	}
 
 	for _, t := range cases {
-		_, err := s.svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		_, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      t.store.Id,
@@ -281,7 +283,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 	// enable placement rules. Report no error any more.
 	c.Assert(postJSON(testDialClient, fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`)), IsNil)
 	for _, t := range cases {
-		_, err := s.svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		_, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      t.store.Id,
