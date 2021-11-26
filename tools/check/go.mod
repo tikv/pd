@@ -1,4 +1,4 @@
-module github.com/pingcap/tidb-cdc/_tools
+module github.com/tikv/pd/_tools
 
 go 1.16
 
