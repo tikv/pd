@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -30,10 +31,10 @@ type ScheduleKind struct {
 }
 
 // NewScheduleKind creates a schedule kind with resource kind and schedule policy.
-func NewScheduleKind(Resource ResourceKind, Policy SchedulePolicy) ScheduleKind {
+func NewScheduleKind(resource ResourceKind, policy SchedulePolicy) ScheduleKind {
 	return ScheduleKind{
-		Resource: Resource,
-		Policy:   Policy,
+		Resource: resource,
+		Policy:   policy,
 	}
 }
 

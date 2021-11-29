@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -58,15 +59,22 @@ func (s *hotTestSuite) TestHot(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
 
-	store := &metapb.Store{
+	store1 := &metapb.Store{
 		Id:            1,
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
+	store2 := &metapb.Store{
+		Id:            2,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
+		Labels:        []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}},
+	}
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+	pdctl.MustPutStore(c, leaderServer.GetServer(), store1)
+	pdctl.MustPutStore(c, leaderServer.GetServer(), store2)
 	defer cluster.Destroy()
 
 	// test hot store
@@ -89,6 +97,10 @@ func (s *hotTestSuite) TestHot(c *C) {
 		rc.GetStoresStats().Observe(ss.GetID(), newStats)
 	}
 
+	for i := statistics.RegionsStatsRollingWindowsSize; i > 0; i-- {
+		rc.GetStoresStats().ObserveRegionsStats([]uint64{2}, []float64{float64(bytesWritten)}, []float64{float64(keysWritten)})
+	}
+
 	args := []string{"-u", pdAddr, "hot", "store"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
@@ -98,6 +110,8 @@ func (s *hotTestSuite) TestHot(c *C) {
 	c.Assert(hotStores.BytesReadStats[1], Equals, float64(bytesRead)/statistics.StoreHeartBeatReportInterval)
 	c.Assert(hotStores.KeysWriteStats[1], Equals, float64(keysWritten)/statistics.StoreHeartBeatReportInterval)
 	c.Assert(hotStores.KeysReadStats[1], Equals, float64(keysRead)/statistics.StoreHeartBeatReportInterval)
+	c.Assert(hotStores.BytesWriteStats[2], Equals, float64(bytesWritten))
+	c.Assert(hotStores.KeysWriteStats[2], Equals, float64(keysWritten))
 
 	// test hot region
 	args = []string{"-u", pdAddr, "config", "set", "hot-region-cache-hits-threshold", "0"}

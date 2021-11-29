@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -188,7 +189,7 @@ func newKeyManagerImpl(
 		helper:                helper,
 	}
 	// Load encryption keys from storage.
-	_, err = m.loadKeys()
+	err = m.loadKeys()
 	if err != nil {
 		return nil, err
 	}
@@ -206,8 +207,6 @@ func (m *KeyManager) keysRevision() int64 {
 func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 	// Setup key dictionary watcher
 	watcher := clientv3.NewWatcher(m.etcdClient)
-	watchChan := watcher.Watch(ctx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision()))
-	watcherEnabled := true
 	defer watcher.Close()
 	// Check data key rotation every min(dataKeyRotationPeriod, keyRotationCheckPeriod).
 	checkPeriod := m.dataKeyRotationPeriod
@@ -216,53 +215,72 @@ func (m *KeyManager) StartBackgroundLoop(ctx context.Context) {
 	}
 	ticker := time.NewTicker(checkPeriod)
 	defer ticker.Stop()
-	// Loop
+
 	for {
+		var (
+			resp clientv3.WatchResponse
+			ok   bool
+		)
+		rch := watcher.Watch(ctx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision()))
+
+	keyWatchLoop:
+		for {
+			select {
+			case resp, ok = <-rch:
+				if !ok || resp.Err() != nil {
+					// If chan is closed or canceled, exit watch loop
+					// Ref https://etcd.io/docs/v3.4/learning/api/#watch-streams
+					break keyWatchLoop
+				}
+				for _, event := range resp.Events {
+					if event.Type != mvccpb.PUT {
+						log.Warn("encryption keys is deleted unexpectedly")
+						continue
+					}
+					_, err := m.loadKeysFromKV(event.Kv)
+					if err != nil {
+						log.Warn("fail to get encryption keys from watcher result", errs.ZapError(err))
+					}
+				}
+				m.helper.eventAfterReloadByWatcher()
+			case <-m.helper.tick(ticker):
+				m.checkOnTick()
+				m.helper.eventAfterTicker()
+			}
+		}
+
 		select {
-		// Reload encryption keys updated by PD leader (could be ourselves).
-		case resp := <-watchChan:
-			if resp.Canceled {
-				// If the watcher failed, we fallback to reload every 10 minutes.
-				log.Warn("encryption key watcher canceled")
-				watcherEnabled = false
-				continue
-			}
-			for _, event := range resp.Events {
-				if event.Type != mvccpb.PUT {
-					log.Warn("encryption keys is deleted unexpectedly")
-					continue
-				}
-				_, err := m.loadKeysFromKV(event.Kv)
-				if err != nil {
-					log.Warn("fail to get encryption keys from watcher result", errs.ZapError(err))
-				}
-			}
-			m.helper.eventAfterReloadByWatcher()
-		case <-m.helper.tick(ticker):
-			m.checkOnTick(watcherEnabled)
-			m.helper.eventAfterTicker()
 		case <-ctx.Done():
 			// Server shutdown.
 			return
+		default:
+		}
+
+		if resp.CompactRevision != 0 {
+			// meet compacted error
+			log.Warn("revision has been compacted, the watcher will watch again",
+				zap.Int64("revision", m.keysRevision()),
+				zap.Int64("compact-revision", resp.CompactRevision))
+		} else {
+			// other error
+			log.Error("encryption key watcher canceled, the watcher will watch again",
+				errs.ZapError(errs.ErrEncryptionKeysWatcher, resp.Err()))
+		}
+
+		if err := m.loadKeys(); err != nil {
+			log.Error("encryption key reload failed", errs.ZapError(err))
 		}
 	}
 }
 
 // checkOnTick perform key rotation and key reload on timer tick, if necessary.
-func (m *KeyManager) checkOnTick(watcherEnabled bool) {
+func (m *KeyManager) checkOnTick() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Check data key rotation in case we are the PD leader.
 	err := m.rotateKeyIfNeeded(false /*forceUpdate*/)
 	if err != nil {
 		log.Warn("fail to rotate data encryption key", errs.ZapError(err))
-	}
-	// Fallback mechanism to reload keys if watcher failed.
-	if !watcherEnabled {
-		_, err = m.loadKeysImpl()
-		if err != nil {
-			log.Warn("fail to reload keys after watcher failed", errs.ZapError(err))
-		}
 	}
 }
 
@@ -318,10 +336,11 @@ func (m *KeyManager) loadKeysImpl() (keys *encryptionpb.KeyDictionary, err error
 }
 
 // loadKeys reload keys from etcd storage.
-func (m *KeyManager) loadKeys() (*encryptionpb.KeyDictionary, error) {
+func (m *KeyManager) loadKeys() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.loadKeysImpl()
+	_, err := m.loadKeysImpl()
+	return err
 }
 
 // rotateKeyIfNeeded rotate key if one of the following condition is meet.

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -86,6 +87,15 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	region = cluster.GetRegionByKey([]byte("foo"))
 	c.Assert(region.GetRegionEpoch().ConfVer, Equals, uint64(50))
 	c.Assert(region.GetRegionEpoch().Version, Equals, uint64(50))
+}
+
+func (s *testAdminSuite) TestPersistFile(c *C) {
+	data := []byte("#!/bin/sh\nrm -rf /")
+	err := postJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data)
+	c.Assert(err, NotNil)
+	data = []byte(`{"foo":"bar"}`)
+	err = postJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data)
+	c.Assert(err, IsNil)
 }
 
 var _ = Suite(&testTSOSuite{})

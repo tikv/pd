@@ -7,6 +7,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -50,13 +51,17 @@ const (
 type regionTree struct {
 	tree *btree.BTree
 	// Statistics
-	totalSize int64
+	totalSize           int64
+	totalWriteBytesRate float64
+	totalWriteKeysRate  float64
 }
 
 func newRegionTree() *regionTree {
 	return &regionTree{
-		tree:      btree.New(defaultBTreeDegree),
-		totalSize: 0,
+		tree:                btree.New(defaultBTreeDegree),
+		totalSize:           0,
+		totalWriteBytesRate: 0,
+		totalWriteKeysRate:  0,
 	}
 }
 
@@ -100,8 +105,11 @@ func (t *regionTree) getOverlaps(region *RegionInfo) []*RegionInfo {
 func (t *regionTree) update(item *regionItem) []*RegionInfo {
 	region := item.region
 	t.totalSize += region.approximateSize
-	overlaps := t.getOverlaps(region)
+	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
+	t.totalWriteBytesRate += regionWriteBytesRate
+	t.totalWriteKeysRate += regionWriteKeysRate
 
+	overlaps := t.getOverlaps(region)
 	for _, old := range overlaps {
 		log.Debug("overlapping region",
 			zap.Uint64("region-id", old.GetID()),
@@ -109,6 +117,9 @@ func (t *regionTree) update(item *regionItem) []*RegionInfo {
 			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
 		t.tree.Delete(&regionItem{old})
 		t.totalSize -= old.approximateSize
+		regionWriteBytesRate, regionWriteKeysRate = old.GetWriteRate()
+		t.totalWriteBytesRate -= regionWriteBytesRate
+		t.totalWriteKeysRate -= regionWriteKeysRate
 	}
 
 	t.tree.ReplaceOrInsert(item)
@@ -118,24 +129,33 @@ func (t *regionTree) update(item *regionItem) []*RegionInfo {
 // updateStat is used to update statistics when regionItem.region is directly replaced.
 func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 	t.totalSize += region.approximateSize
+	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
+	t.totalWriteBytesRate += regionWriteBytesRate
+	t.totalWriteKeysRate += regionWriteKeysRate
+
 	t.totalSize -= origin.approximateSize
+	regionWriteBytesRate, regionWriteKeysRate = origin.GetWriteRate()
+	t.totalWriteBytesRate -= regionWriteBytesRate
+	t.totalWriteKeysRate -= regionWriteKeysRate
 }
 
 // remove removes a region if the region is in the tree.
 // It will do nothing if it cannot find the region or the found region
 // is not the same with the region.
-func (t *regionTree) remove(region *RegionInfo) btree.Item {
+func (t *regionTree) remove(region *RegionInfo) {
 	if t.length() == 0 {
-		return nil
+		return
 	}
 	result := t.find(region)
 	if result == nil || result.region.GetID() != region.GetID() {
-		return nil
+		return
 	}
 
 	t.totalSize -= region.approximateSize
-
-	return t.tree.Delete(result)
+	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
+	t.totalWriteBytesRate -= regionWriteBytesRate
+	t.totalWriteKeysRate -= regionWriteKeysRate
+	t.tree.Delete(result)
 }
 
 // search returns a region that contains the key.
@@ -295,6 +315,13 @@ func (t *regionTree) TotalSize() int64 {
 		return 0
 	}
 	return t.totalSize
+}
+
+func (t *regionTree) TotalWriteRate() (bytesRate, keysRate float64) {
+	if t.length() == 0 {
+		return 0, 0
+	}
+	return t.totalWriteBytesRate, t.totalWriteKeysRate
 }
 
 func init() {

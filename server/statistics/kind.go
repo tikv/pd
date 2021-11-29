@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -61,6 +62,9 @@ const (
 	StoreDiskReadRate
 	StoreDiskWriteRate
 
+	StoreRegionsWriteBytes // Same as StoreWriteBytes, but it is counted by RegionHeartbeat.
+	StoreRegionsWriteKeys  // Same as StoreWriteKeys, but it is counted by RegionHeartbeat.
+
 	StoreStatCount
 )
 
@@ -84,7 +88,41 @@ func (k StoreStatKind) String() string {
 		return "store_disk_read_rate"
 	case StoreDiskWriteRate:
 		return "store_disk_write_rate"
+	case StoreRegionsWriteBytes:
+		return "store_regions_write_bytes"
+	case StoreRegionsWriteKeys:
+		return "store_regions_write_keys"
 	}
 
 	return "unknown StoreStatKind"
+}
+
+// FlowKind is a identify Flow types.
+type FlowKind uint32
+
+// Flags for flow.
+const (
+	WriteFlow FlowKind = iota
+	ReadFlow
+)
+
+func (k FlowKind) String() string {
+	switch k {
+	case WriteFlow:
+		return "write"
+	case ReadFlow:
+		return "read"
+	}
+	return "unimplemented"
+}
+
+// RegionStats returns hot items according to kind
+func (k FlowKind) RegionStats() []RegionStatKind {
+	switch k {
+	case WriteFlow:
+		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
+	case ReadFlow:
+		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
+	}
+	return nil
 }

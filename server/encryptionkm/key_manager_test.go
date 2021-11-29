@@ -4,10 +4,11 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -42,7 +43,7 @@ func TestKeyManager(t *testing.T) {
 
 type testKeyManagerSuite struct{}
 
-var _ = Suite(&testKeyManagerSuite{})
+var _ = SerialSuites(&testKeyManagerSuite{})
 
 const (
 	testMasterKey     = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b530"
@@ -97,7 +98,7 @@ func newTestKeyFile(c *C, key ...string) (keyFilePath string, cleanup func()) {
 	tempDir, err := os.MkdirTemp("/tmp", "test_key_file")
 	c.Assert(err, IsNil)
 	keyFilePath = tempDir + "/key"
-	err = os.WriteFile(keyFilePath, []byte(testKey), 0644)
+	err = os.WriteFile(keyFilePath, []byte(testKey), 0600)
 	c.Assert(err, IsNil)
 
 	cleanup = func() {
@@ -356,8 +357,7 @@ func (s *testKeyManagerSuite) TestLoadKeyEmpty(c *C) {
 	// Simulate keys get deleted.
 	_, err = client.Delete(context.Background(), EncryptionKeysPath)
 	c.Assert(err, IsNil)
-	_, err = m.loadKeys()
-	c.Assert(err, NotNil)
+	c.Assert(m.loadKeys(), NotNil)
 }
 
 func (s *testKeyManagerSuite) TestWatcher(c *C) {

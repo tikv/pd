@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -22,7 +23,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -84,6 +84,7 @@ var (
 )
 
 // Server is the pd server.
+// nolint
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
@@ -141,8 +142,13 @@ type Server struct {
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
 	serviceSafePointLock sync.Mutex
 
+	// hot region history info storeage
+	hotRegionStorage *core.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
+	// tsoDispatcher is used to dispatch different TSO requests to
+	// the corresponding forwarding TSO channel.
+	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -246,7 +252,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		etcdCfg.UserHandlers = userHandlers
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
-		pdpb.RegisterPDServer(gs, s)
+		pdpb.RegisterPDServer(gs, &GrpcServer{Server: s})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg
@@ -391,7 +397,15 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
-
+	// initial hot_region_storage in here.
+	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
+	s.hotRegionStorage, err = core.NewHotRegionsStorage(
+		ctx, hotRegionPath, encryptionKeyManager, s.handler,
+		s.cfg.Schedule.HotRegionsReservedDays,
+		s.cfg.Schedule.HotRegionsWriteInterval.Duration)
+	if err != nil {
+		return err
+	}
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
 		cb()
@@ -453,6 +467,10 @@ func (s *Server) Close() {
 	}
 	if err := s.storage.Close(); err != nil {
 		log.Error("close storage meet error", errs.ZapError(err))
+	}
+
+	if err := s.hotRegionStorage.Close(); err != nil {
+		log.Error("close hot region storage meet error", errs.ZapError(err))
 	}
 
 	// Run callbacks
@@ -703,6 +721,11 @@ func (s *Server) GetStorage() *core.Storage {
 	return s.storage
 }
 
+// GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
+func (s *Server) GetHistoryHotRegionStorage() *core.HotRegionStorage {
+	return s.hotRegionStorage
+}
+
 // SetStorage changes the storage only for test purpose.
 // When we use it, we should prevent calling GetStorage, otherwise, it may cause a data race problem.
 func (s *Server) SetStorage(storage *core.Storage) {
@@ -747,6 +770,15 @@ func (s *Server) ClusterID() uint64 {
 // StartTimestamp returns the start timestamp of this server
 func (s *Server) StartTimestamp() int64 {
 	return s.startTimestamp
+}
+
+// GetMembers returns PD server list.
+func (s *Server) GetMembers() ([]*pdpb.Member, error) {
+	if s.IsClosed() {
+		return nil, errors.New("server not started")
+	}
+	members, err := cluster.GetMembers(s.GetClient())
+	return members, err
 }
 
 // GetConfig gets the config information.
@@ -835,7 +867,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range raftCluster.GetStores() {
-				if !s.IsTombstone() && core.IsTiFlashStore(s.GetMeta()) {
+				if !s.IsTombstone() && core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}
@@ -853,15 +885,14 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
 				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			rule = defaultRule
-			if !(rule.Count == int(old.MaxReplicas) && reflect.DeepEqual(rule.LocationLabels, []string(old.LocationLabels))) {
+			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.StringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
-		if !(cfg.MaxReplicas == old.MaxReplicas && reflect.DeepEqual(cfg.LocationLabels, old.LocationLabels)) {
+		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.StringsEqual(cfg.LocationLabels, old.LocationLabels)) {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
@@ -1103,7 +1134,7 @@ func isLevelLegal(level string) bool {
 
 // GetReplicationModeConfig returns the replication mode config.
 func (s *Server) GetReplicationModeConfig() *config.ReplicationModeConfig {
-	return s.persistOptions.GetReplicationModeConfig()
+	return s.persistOptions.GetReplicationModeConfig().Clone()
 }
 
 // SetReplicationModeConfig sets the replication mode.
@@ -1330,38 +1361,54 @@ func (s *Server) reloadConfigFromKV() error {
 
 // ReplicateFileToAllMembers is used to synchronize state among all members.
 // Each member will write `data` to a local file named `name`.
+// For security reason, data should be in JSON format.
 func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
-	resp, err := s.GetMembers(ctx, nil)
+	members, err := s.GetMembers()
 	if err != nil {
 		return err
 	}
-	for _, member := range resp.Members {
-		clientUrls := member.GetClientUrls()
-		if len(clientUrls) == 0 {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
-			return errs.ErrClientURLEmpty.FastGenByArgs()
+	var errs []error
+	for _, member := range members {
+		if err := s.replicateFileToMember(ctx, member, name, data); err != nil {
+			errs = append(errs, err)
 		}
-		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
-		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
-		req.Header.Set("PD-Allow-follower-handle", "true")
-		res, err := s.httpClient.Do(req)
-		if err != nil {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
-			return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
-		}
-		// Since we don't read the body, we can close it immediately.
-		res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
-			return errs.ErrSendRequest.FastGenByArgs()
-		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	// join all error messages
+	for _, e := range errs[1:] {
+		errs[0] = errors.Wrap(errs[0], e.Error())
+	}
+	return errs[0]
+}
+
+func (s *Server) replicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error {
+	clientUrls := member.GetClientUrls()
+	if len(clientUrls) == 0 {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()))
+		return errs.ErrClientURLEmpty.FastGenByArgs()
+	}
+	url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
+	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+	req.Header.Set("PD-Allow-follower-handle", "true")
+	res, err := s.httpClient.Do(req)
+	if err != nil {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
+		return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
+	}
+	// Since we don't read the body, we can close it immediately.
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
+		return errs.ErrSendRequest.FastGenByArgs()
 	}
 	return nil
 }
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
-	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
+	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644) // #nosec
 }
 
 // SaveTTLConfig save ttl config

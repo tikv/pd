@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,6 +17,7 @@ package replication
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -140,10 +142,12 @@ func (s *testReplicationMode) TestStatus(c *C) {
 }
 
 type mockFileReplicator struct {
-	err error
+	lastData string
+	err      error
 }
 
-func (rep *mockFileReplicator) ReplicateFileToAllMembers(context.Context, string, []byte) error {
+func (rep *mockFileReplicator) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
+	rep.lastData = string(data)
 	return rep.err
 }
 
@@ -166,17 +170,32 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"zone": "zone1"})
-	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone2"})
-	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone2"})
 
 	// initial state is sync
 	c.Assert(rep.drGetState(), Equals, drStateSync)
 	stateID := rep.drAutoSync.StateID
 	c.Assert(stateID, Not(Equals), uint64(0))
+	c.Assert(replicator.lastData, Equals, fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID))
 	assertStateIDUpdate := func() {
 		c.Assert(rep.drAutoSync.StateID, Not(Equals), stateID)
 		stateID = rep.drAutoSync.StateID
 	}
+
+	// only one zone, sync -> async
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateAsync)
+	assertStateIDUpdate()
+	c.Assert(replicator.lastData, Equals, fmt.Sprintf(`{"state":"async","state_id":%d}`, stateID))
+
+	// add new store in dr zone.
+	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone2"})
+	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone2"})
+	// async -> sync
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
+	rep.drSwitchToSync()
+	c.Assert(rep.drGetState(), Equals, drStateSync)
+	assertStateIDUpdate()
 
 	// sync -> async
 	rep.tickDR()
@@ -357,6 +376,72 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 	c.Assert(rep.drSampleTotalRegion, Equals, 6) // 9 + 10,11,12,13,14
 	c.Assert(rep.drSampleRecoverCount, Equals, 3)
 	c.Assert(rep.estimateProgress(), Equals, (float32(9)+float32(30-9)/2)/float32(30))
+}
+
+func (s *testReplicationMode) TestRecoverProgressWithSplitAndMerge(c *C) {
+	regionScanBatchSize = 10
+	regionMinSampleSize = 5
+
+	store := core.NewStorage(kv.NewMemoryKV())
+	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
+		LabelKey:         "zone",
+		Primary:          "zone1",
+		DR:               "zone2",
+		PrimaryReplicas:  2,
+		DRReplicas:       1,
+		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+	}}
+	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
+	cluster.AddLabelsStore(1, 1, map[string]string{})
+	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
+	c.Assert(err, IsNil)
+
+	prepare := func(n int, asyncRegions []int) {
+		rep.drSwitchToSyncRecover()
+		regions := s.genRegions(cluster, rep.drAutoSync.StateID, n)
+		for _, i := range asyncRegions {
+			regions[i] = regions[i].Clone(core.SetReplicationStatus(&pb.RegionReplicationStatus{
+				State:   pb.RegionReplicationState_SIMPLE_MAJORITY,
+				StateId: regions[i].GetReplicationStatus().GetStateId(),
+			}))
+		}
+		for _, r := range regions {
+			cluster.PutRegion(r)
+		}
+	}
+
+	// merged happened in ahead of the scan
+	prepare(20, nil)
+	r := cluster.GetRegion(1).Clone(core.WithEndKey(cluster.GetRegion(2).GetEndKey()))
+	cluster.PutRegion(r)
+	rep.updateProgress()
+	c.Assert(rep.drRecoverCount, Equals, 19)
+	c.Assert(rep.estimateProgress(), Equals, float32(1.0))
+
+	// merged happened during the scan
+	prepare(20, nil)
+	r1 := cluster.GetRegion(1)
+	r2 := cluster.GetRegion(2)
+	r = r1.Clone(core.WithEndKey(r2.GetEndKey()))
+	cluster.PutRegion(r)
+	rep.drRecoverCount = 1
+	rep.drRecoverKey = r1.GetEndKey()
+	rep.updateProgress()
+	c.Assert(rep.drRecoverCount, Equals, 20)
+	c.Assert(rep.estimateProgress(), Equals, float32(1.0))
+
+	// split, region gap happened during the scan
+	rep.drRecoverCount, rep.drRecoverKey = 0, nil
+	cluster.PutRegion(r1)
+	rep.updateProgress()
+	c.Assert(rep.drRecoverCount, Equals, 1)
+	c.Assert(rep.estimateProgress(), Not(Equals), float32(1.0))
+	// region gap missing
+	cluster.PutRegion(r2)
+	rep.updateProgress()
+	c.Assert(rep.drRecoverCount, Equals, 20)
+	c.Assert(rep.estimateProgress(), Equals, float32(1.0))
 }
 
 func (s *testReplicationMode) genRegions(cluster *mockcluster.Cluster, stateID uint64, n int) []*core.RegionInfo {

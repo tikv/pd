@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -15,6 +16,8 @@ package server_test
 
 import (
 	"context"
+	"io/ioutil"
+	"path/filepath"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -141,4 +144,35 @@ func (s *serverTestSuite) TestLeader(c *C) {
 		leader := cluster.GetLeader()
 		return leader != leader1
 	})
+}
+
+func (s *serverTestSuite) TestPersistFile(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	leader := cluster.WaitLeader()
+	c.Assert(leader, Not(Equals), "")
+
+	follower := cluster.GetFollower()
+	err = cluster.GetServer(follower).Stop()
+	c.Assert(err, IsNil)
+
+	content := `{"bar": 42}`
+	err = cluster.GetServer(leader).GetServer().ReplicateFileToAllMembers(context.Background(), "foo", []byte(content))
+	c.Assert(err, NotNil)
+
+	// check files are persisted except for the killed one.
+	for _, conf := range cluster.GetConfig().InitialServers {
+		data, err := ioutil.ReadFile(filepath.Join(conf.DataDir, "foo"))
+		if conf.Name == follower {
+			c.Assert(err, NotNil)
+		} else {
+			c.Assert(err, IsNil)
+			c.Assert(data, BytesEquals, []byte(content))
+		}
+	}
 }

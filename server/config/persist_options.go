@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -147,6 +148,18 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()
 	v.EnablePlacementRules = enabled
+	o.SetReplicationConfig(v)
+}
+
+// IsPlacementRulesCacheEnabled returns if the placement rules cache is enabled
+func (o *PersistOptions) IsPlacementRulesCacheEnabled() bool {
+	return o.GetReplicationConfig().EnablePlacementRulesCache
+}
+
+// SetPlacementRulesCacheEnabled set EnablePlacementRulesCache
+func (o *PersistOptions) SetPlacementRulesCacheEnabled(enabled bool) {
+	v := o.GetReplicationConfig().Clone()
+	v.EnablePlacementRulesCache = enabled
 	o.SetReplicationConfig(v)
 }
 
@@ -490,6 +503,12 @@ func (o *PersistOptions) IsDebugMetricsEnabled() bool {
 // IsUseJointConsensus returns if using joint consensus as a operator step is enabled.
 func (o *PersistOptions) IsUseJointConsensus() bool {
 	return o.GetScheduleConfig().EnableJointConsensus
+}
+
+// IsTraceRegionFlow returns if the region flow is tracing.
+// If the accuracy cannot reach 0.1 MB, it is considered not.
+func (o *PersistOptions) IsTraceRegionFlow() bool {
+	return o.GetPDServerConfig().FlowRoundByDigit <= maxTraceFlowRoundByDigit
 }
 
 // GetHotRegionCacheHitsThreshold is a threshold to decide if a region is hot.

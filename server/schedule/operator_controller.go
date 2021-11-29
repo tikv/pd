@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -67,7 +68,6 @@ type OperatorController struct {
 	histories       *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
-	storesLimit     map[uint64]map[storelimit.Type]*storelimit.StoreLimit
 	wop             WaitingOperator
 	wopStatus       *WaitingOperatorStatus
 	opNotifierQueue operatorQueue
@@ -84,7 +84,6 @@ func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams *
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
-		storesLimit:     make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit),
 		wop:             NewRandBuckets(),
 		wopStatus:       NewWaitingOperatorStatus(),
 		opNotifierQueue: make(operatorQueue, 0),
@@ -161,7 +160,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 }
 
 func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step operator.OpStep, region *core.RegionInfo) bool {
-	err := step.CheckSafety(region)
+	err := step.CheckInProgress(oc.cluster, region)
 	if err != nil {
 		if oc.RemoveOperator(op, zap.String("reason", err.Error())) {
 			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
@@ -464,11 +463,13 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	operatorWaitDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
-		if oc.storesLimit[storeID] == nil {
-			continue
+		store := oc.cluster.GetStore(storeID)
+		if store == nil {
+			log.Error("invalid store ID", zap.Uint64("store-id", storeID))
+			return false
 		}
 		for n, v := range storelimit.TypeNameValue {
-			storeLimit := oc.storesLimit[storeID][v]
+			storeLimit := store.GetStoreLimit(v)
 			if storeLimit == nil {
 				continue
 			}
@@ -650,19 +651,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			return
 		}
 		cmd = addNode(st.PeerID, st.ToStore)
-	case operator.AddLightPeer:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.AddLearner:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
-	case operator.AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
@@ -919,7 +908,11 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if stepCost == 0 {
 				continue
 			}
-			if oc.getOrCreateStoreLimit(storeID, v).Available() < stepCost {
+			limiter := oc.getOrCreateStoreLimit(storeID, v)
+			if limiter == nil {
+				return false
+			}
+			if limiter.Available() < stepCost {
 				return true
 			}
 		}
@@ -927,40 +920,19 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 	return false
 }
 
-// newStoreLimit is used to create the limit of a store.
-func (oc *OperatorController) newStoreLimit(storeID uint64, ratePerSec float64, limitType storelimit.Type) {
-	log.Info("create or update a store limit", zap.Uint64("store-id", storeID), zap.String("type", limitType.String()), zap.Float64("rate", ratePerSec))
-	if oc.storesLimit[storeID] == nil {
-		oc.storesLimit[storeID] = make(map[storelimit.Type]*storelimit.StoreLimit)
-	}
-	oc.storesLimit[storeID][limitType] = storelimit.NewStoreLimit(ratePerSec, storelimit.RegionInfluence[limitType])
-}
-
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
-	if oc.storesLimit[storeID][limitType] == nil {
-		ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
-		oc.newStoreLimit(storeID, ratePerSec, limitType)
-		oc.cluster.AttachAvailableFunc(storeID, limitType, func() bool {
-			oc.RLock()
-			defer oc.RUnlock()
-			if oc.storesLimit[storeID][limitType] == nil {
-				return true
-			}
-			return oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
-		})
-	}
 	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
-	if ratePerSec != oc.storesLimit[storeID][limitType].Rate() {
-		oc.newStoreLimit(storeID, ratePerSec, limitType)
+	s := oc.cluster.GetStore(storeID)
+	if s == nil {
+		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
+		return nil
 	}
-	return oc.storesLimit[storeID][limitType]
-}
-
-// GetLeaderSchedulePolicy is to get leader schedule policy.
-func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
-	if oc.cluster == nil {
-		return core.ByCount
+	if s.GetStoreLimit(limitType) == nil {
+		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
-	return oc.cluster.GetOpts().GetLeaderSchedulePolicy()
+	if ratePerSec != s.GetStoreLimit(limitType).Rate() {
+		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
+	}
+	return s.GetStoreLimit(limitType)
 }

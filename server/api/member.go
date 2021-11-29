@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -60,7 +61,8 @@ func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 
 func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
-	members, err := svr.GetMembers(context.Background(), req)
+	grpcServer := &server.GrpcServer{Server: svr}
+	members, err := grpcServer.GetMembers(context.Background(), req)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -243,8 +245,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 		return
 	}
 	for k, v := range input {
-		switch k {
-		case "leader-priority":
+		if k == "leader-priority" {
 			priority, ok := v.(float64)
 			if !ok {
 				h.rd.JSON(w, http.StatusBadRequest, "bad format leader priority")

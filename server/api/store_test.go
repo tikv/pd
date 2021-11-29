@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -31,12 +32,14 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 var _ = Suite(&testStoreSuite{})
 
 type testStoreSuite struct {
 	svr       *server.Server
+	grpcSvr   *server.GrpcServer
 	cleanup   cleanUpFunc
 	urlPrefix string
 	stores    []*metapb.Store
@@ -89,6 +92,7 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
+	s.grpcSvr = &server.GrpcServer{Server: s.svr}
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
@@ -111,7 +115,8 @@ func checkStoresInfo(c *C, ss []*StoreInfo, want []*metapb.Store) {
 		}
 	}
 	for _, s := range ss {
-		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
+		metapbStore := s.Store.ConvertToMetapbStore()
+		obtained := proto.Clone(metapbStore).(*metapb.Store)
 		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
@@ -137,12 +142,11 @@ func (s *testStoreSuite) TestStoresList(c *C) {
 	err = readJSON(testDialClient, url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[2:3])
-
 }
 
 func (s *testStoreSuite) TestStoreGet(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
-	s.svr.StoreHeartbeat(
+	s.grpcSvr.StoreHeartbeat(
 		context.Background(), &pdpb.StoreHeartbeatRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Stats: &pdpb.StoreStats{
@@ -162,6 +166,48 @@ func (s *testStoreSuite) TestStoreGet(c *C) {
 	c.Assert(int64(info.Status.Capacity), Equals, capacity)
 	c.Assert(int64(info.Status.Available), Equals, available)
 	checkStoresInfo(c, []*StoreInfo{info}, s.stores[:1])
+}
+
+func (s *testStoreSuite) TestStoreInfoGet(c *C) {
+	timeStamp := time.Now().Unix()
+	url := fmt.Sprintf("%s/store/1112", s.urlPrefix)
+	_, errPut := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
+		Store: &metapb.Store{
+			Id:             1112,
+			Address:        fmt.Sprintf("tikv%d", 1112),
+			State:          1,
+			Labels:         nil,
+			Version:        versioninfo.MinSupportedVersion(versioninfo.Version5_0).String(),
+			StatusAddress:  fmt.Sprintf("tikv%d", 1112),
+			GitHash:        "45ce5b9584d618bc777877bea77cb94f61b8410",
+			StartTimestamp: timeStamp,
+			DeployPath:     "/home/test",
+			LastHeartbeat:  timeStamp,
+		},
+	})
+	c.Assert(errPut, IsNil)
+
+	info := new(StoreInfo)
+
+	err := readJSON(testDialClient, url, info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.StateName, Equals, metapb.StoreState_Offline.String())
+	c.Assert(info.Store.StoreID, Equals, uint64(1112))
+	c.Assert(info.Store.Address, Equals, "tikv1112")
+	c.Assert(info.Store.Version, Equals, versioninfo.MinSupportedVersion(versioninfo.Version5_0).String())
+	c.Assert(info.Store.StatusAddress, Equals, fmt.Sprintf("tikv%d", 1112))
+	c.Assert(info.Store.GitHash, Equals, "45ce5b9584d618bc777877bea77cb94f61b8410")
+	c.Assert(info.Store.StartTimestamp, Equals, timeStamp)
+	c.Assert(info.Store.DeployPath, Equals, "/home/test")
+	c.Assert(info.Store.LastHeartbeat, Equals, timeStamp)
+
+	resp, _ := testDialClient.Get(url)
+	b, _ := io.ReadAll(resp.Body)
+	str := string(b)
+	c.Assert(strings.Contains(str, "\"state\""), Equals, false)
+	s.cleanup()
+	s.SetUpSuite(c)
 }
 
 func (s *testStoreSuite) TestStoreLabel(c *C) {
@@ -259,8 +305,8 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	store := new(StoreInfo)
 	err := readJSON(testDialClient, url, store)
 	c.Assert(err, IsNil)
-	c.Assert(store.Store.PhysicallyDestroyed, Equals, false)
-	c.Assert(store.Store.State, Equals, metapb.StoreState_Offline)
+	c.Assert(store.Store.PhysicallyDestroyed, IsFalse)
+	c.Assert(store.Store.StateName, Equals, metapb.StoreState_Offline.String())
 
 	// up store success because it is offline but not physically destroyed
 	status := requestStatusBody(c, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
@@ -271,16 +317,16 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	store = new(StoreInfo)
 	err = readJSON(testDialClient, url, store)
 	c.Assert(err, IsNil)
-	c.Assert(store.Store.State, Equals, metapb.StoreState_Up)
-	c.Assert(store.Store.PhysicallyDestroyed, Equals, false)
+	c.Assert(store.Store.StateName, Equals, metapb.StoreState_Up.String())
+	c.Assert(store.Store.PhysicallyDestroyed, IsFalse)
 
 	// offline store with physically destroyed
 	status = requestStatusBody(c, testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
 	c.Assert(status, Equals, http.StatusOK)
 	err = readJSON(testDialClient, url, store)
 	c.Assert(err, IsNil)
-	c.Assert(store.Store.State, Equals, metapb.StoreState_Offline)
-	c.Assert(store.Store.PhysicallyDestroyed, Equals, true)
+	c.Assert(store.Store.StateName, Equals, metapb.StoreState_Offline.String())
+	c.Assert(store.Store.PhysicallyDestroyed, IsTrue)
 
 	// try to up store again failed because it is physically destroyed
 	status = requestStatusBody(c, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
@@ -295,7 +341,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	info := StoreInfo{}
 	err := readJSON(testDialClient, url, &info)
 	c.Assert(err, IsNil)
-	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
+	c.Assert(info.Store.StateName, Equals, metapb.StoreState_Up.String())
 
 	// Set to Offline.
 	info = StoreInfo{}
@@ -303,7 +349,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	c.Assert(err, IsNil)
 	err = readJSON(testDialClient, url, &info)
 	c.Assert(err, IsNil)
-	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
+	c.Assert(info.Store.StateName, Equals, metapb.StoreState_Offline.String())
 
 	// store not found
 	info = StoreInfo{}
@@ -318,7 +364,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 		c.Assert(err, NotNil)
 		err = readJSON(testDialClient, url, &info)
 		c.Assert(err, IsNil)
-		c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
+		c.Assert(info.Store.StateName, Equals, metapb.StoreState_Offline.String())
 	}
 
 	// Set back to Up.
@@ -327,7 +373,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	c.Assert(err, IsNil)
 	err = readJSON(testDialClient, url, &info)
 	c.Assert(err, IsNil)
-	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
+	c.Assert(info.Store.StateName, Equals, metapb.StoreState_Up.String())
 }
 
 func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
@@ -436,7 +482,7 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 		c.Assert(len(info), Equals, len(testcase.expectedStores))
 		for id := range testcase.expectedStores {
 			_, ok := info[id]
-			c.Assert(ok, Equals, true)
+			c.Assert(ok, IsTrue)
 		}
 	}
 }

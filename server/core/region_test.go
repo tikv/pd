@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -156,6 +157,33 @@ func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 	}
 }
 
+func (s *testRegionInfoSuite) TestCorrectRegionApproximateSize(c *C) {
+	// size in MB
+	testcases := []struct {
+		originExists bool
+		originSize   uint64
+		size         uint64
+		expect       uint64
+	}{
+		{false, 0, 0, 1},
+		{false, 0, 2, 2},
+		{true, 0, 2, 2},
+		{true, 1, 2, 2},
+		{true, 2, 0, 2},
+	}
+	for _, t := range testcases {
+		var origin *RegionInfo
+		if t.originExists {
+			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			origin.approximateSize = int64(t.originSize)
+		}
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.approximateSize = int64(t.size)
+		r.CorrectApproximateSize(origin)
+		c.Assert(r.approximateSize, Equals, int64(t.expect))
+	}
+}
+
 func (s *testRegionInfoSuite) TestRegionRoundingFlow(c *C) {
 	testcases := []struct {
 		flow   uint64
@@ -176,6 +204,116 @@ func (s *testRegionInfoSuite) TestRegionRoundingFlow(c *C) {
 		r.readBytes = t.flow
 		r.writtenBytes = t.flow
 		c.Assert(r.GetRoundBytesRead(), Equals, t.expect)
+	}
+}
+
+func (s *testRegionInfoSuite) TestRegionWriteRate(c *C) {
+	testcases := []struct {
+		bytes           uint64
+		keys            uint64
+		interval        uint64
+		expectBytesRate float64
+		expectKeysRate  float64
+	}{
+		{0, 0, 0, 0, 0},
+		{10, 3, 0, 0, 0},
+		{0, 0, 1, 0, 0},
+		{10, 3, 1, 0, 0},
+		{0, 0, 5, 0, 0},
+		{10, 3, 5, 2, 0.6},
+		{0, 0, 500, 0, 0},
+		{10, 3, 500, 0, 0},
+	}
+	for _, t := range testcases {
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(t.bytes), SetWrittenKeys(t.keys), SetReportInterval(t.interval))
+		bytesRate, keysRate := r.GetWriteRate()
+		c.Assert(bytesRate, Equals, t.expectBytesRate)
+		c.Assert(keysRate, Equals, t.expectKeysRate)
+	}
+}
+
+var _ = Suite(&testRegionGuideSuite{})
+
+type testRegionGuideSuite struct {
+	RegionGuide RegionGuideFunc
+}
+
+func (s *testRegionGuideSuite) SetUpSuite(c *C) {
+	s.RegionGuide = GenerateRegionGuideFunc(false)
+}
+
+func (s *testRegionGuideSuite) TestNeedSync(c *C) {
+	meta := &metapb.Region{
+		Id:          1000,
+		StartKey:    []byte("a"),
+		EndKey:      []byte("z"),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
+		Peers: []*metapb.Peer{
+			{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: 13, StoreId: 1, Role: metapb.PeerRole_Voter},
+		},
+	}
+	region := NewRegionInfo(meta, meta.Peers[0])
+
+	testcases := []struct {
+		optionsA []RegionCreateOption
+		optionsB []RegionCreateOption
+		needSync bool
+	}{
+		{
+			optionsB: []RegionCreateOption{WithLeader(nil)},
+			needSync: true,
+		},
+		{
+			optionsB: []RegionCreateOption{WithLeader(meta.Peers[1])},
+			needSync: true,
+		},
+		{
+			optionsB: []RegionCreateOption{WithPendingPeers(meta.Peers[1:2])},
+			needSync: true,
+		},
+		{
+			optionsB: []RegionCreateOption{WithDownPeers([]*pdpb.PeerStats{{Peer: meta.Peers[1], DownSeconds: 600}})},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(200), WithFlowRoundByDigit(2)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(300), WithFlowRoundByDigit(2)},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(250), WithFlowRoundByDigit(2)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(349), WithFlowRoundByDigit(2)},
+			needSync: false,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(200), WithFlowRoundByDigit(4)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(300), WithFlowRoundByDigit(4)},
+			needSync: false,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(4)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(200), WithFlowRoundByDigit(2)},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(127)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(0), WithFlowRoundByDigit(2)},
+			needSync: false,
+		},
+		{
+			optionsA: []RegionCreateOption{SetWrittenBytes(0), WithFlowRoundByDigit(2)},
+			optionsB: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(127)},
+			needSync: true,
+		},
+	}
+
+	for _, t := range testcases {
+		regionA := region.Clone(t.optionsA...)
+		regionB := region.Clone(t.optionsB...)
+		_, _, _, needSync := s.RegionGuide(regionA, regionB)
+		c.Assert(needSync, Equals, t.needSync)
 	}
 }
 
@@ -299,7 +437,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 97)
-	c.Assert(len(regions.GetRegions()), Equals, 97)
+	c.Assert(regions.GetRegions(), HasLen, 97)
 
 	regions.SetRegion(region)
 	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
@@ -316,7 +454,7 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 97)
-	c.Assert(len(regions.GetRegions()), Equals, 97)
+	c.Assert(regions.GetRegions(), HasLen, 97)
 
 	// Test remove overlaps.
 	region = region.Clone(WithStartKey([]byte(fmt.Sprintf("%20d", 175))), WithNewRegionID(201))
@@ -325,21 +463,27 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 96)
-	c.Assert(len(regions.GetRegions()), Equals, 96)
+	c.Assert(regions.GetRegions(), HasLen, 96)
 	c.Assert(regions.GetRegion(201), NotNil)
 	c.Assert(regions.GetRegion(21), IsNil)
 	c.Assert(regions.GetRegion(18), IsNil)
 
 	// Test update keys and size of region.
-	region = region.Clone()
-	region.approximateKeys = 20
-	region.approximateSize = 30
+	region = region.Clone(
+		SetApproximateKeys(20),
+		SetApproximateSize(30),
+		SetWrittenBytes(40),
+		SetWrittenKeys(10),
+		SetReportInterval(5))
 	regions.SetRegion(region)
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 96)
-	c.Assert(len(regions.GetRegions()), Equals, 96)
+	c.Assert(regions.GetRegions(), HasLen, 96)
 	c.Assert(regions.GetRegion(201), NotNil)
 	c.Assert(regions.tree.TotalSize(), Equals, int64(30))
+	bytesRate, keysRate := regions.tree.TotalWriteRate()
+	c.Assert(bytesRate, Equals, float64(8))
+	c.Assert(keysRate, Equals, float64(2))
 }
 
 func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
@@ -361,25 +505,25 @@ func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
 		StartKey: []byte(fmt.Sprintf("%20d", 10)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
 	}, peer1)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsFalse)
 
 	region.leader = peer2
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 
 	region.leader = peer1
 	region.pendingPeers = append(region.pendingPeers, peer4)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 
 	region.pendingPeers = nil
 	region.learners = append(region.learners, peer2)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 
 	origin.learners = append(origin.learners, peer2, peer3)
 	region.learners = append(region.learners, peer4)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsFalse)
 
 	region.voters[2].StoreId = 4
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
 }
 
 func checkRegions(c *C, regions *RegionsInfo) {

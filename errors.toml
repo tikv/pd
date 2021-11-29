@@ -41,6 +41,11 @@ error = '''
 unsupported metrics type %v
 '''
 
+["PD:checker:ErrCheckerNotFound"]
+error = '''
+checker not found
+'''
+
 ["PD:client:ErrClientCreateTSOStream"]
 error = '''
 create TSO stream failed
@@ -91,6 +96,11 @@ error = '''
 store %v is paused for leader transfer
 '''
 
+["PD:core:ErrSlowStoreEvicted"]
+error = '''
+store %v is evited as a slow store
+'''
+
 ["PD:core:ErrStoreDestroyed"]
 error = '''
 store %v has been physically destroyed
@@ -114,6 +124,16 @@ store %v is unhealthy
 ["PD:core:ErrWrongRangeKeys"]
 error = '''
 wrong range keys
+'''
+
+["PD:crypto:ErrCryptoAppendCertsFromPEM"]
+error = '''
+cert pool append certs error
+'''
+
+["PD:crypto:ErrCryptoX509KeyPair"]
+error = '''
+x509 keypair error
 '''
 
 ["PD:dashboard:ErrDashboardStart"]
@@ -471,6 +491,16 @@ error = '''
 failed to unmarshal proto
 '''
 
+["PD:region:ErrRegionRuleContent"]
+error = '''
+invalid region rule content, %s
+'''
+
+["PD:region:ErrRegionRuleNotFound"]
+error = '''
+region label rule not found for id %s
+'''
+
 ["PD:schedule:ErrCreateOperator"]
 error = '''
 unable to create operator, %s
@@ -596,14 +626,14 @@ error = '''
 get local allocator failed, %s
 '''
 
-["PD:tso:ErrInvalidTimestamp"]
-error = '''
-invalid timestamp
-'''
-
 ["PD:tso:ErrLogicOverflow"]
 error = '''
 logic part overflow
+'''
+
+["PD:tso:ErrProxyTSOTimeout"]
+error = '''
+proxy tso timeout
 '''
 
 ["PD:tso:ErrResetUserTimestamp"]

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -52,7 +53,7 @@ func (t *testAvgOverTimeSuite) TestChange(c *C) {
 	c.Assert(aot.Get(), LessEqual, 1010.)
 	c.Assert(aot.Get(), GreaterEqual, 990.)
 
-	//phase 2: 500
+	// phase 2: 500
 	for i := 0; i < 5; i++ {
 		aot.Add(500, time.Second)
 	}
@@ -62,7 +63,7 @@ func (t *testAvgOverTimeSuite) TestChange(c *C) {
 		aot.Add(500, time.Second)
 	}
 
-	//phase 3: 100
+	// phase 3: 100
 	for i := 0; i < 5; i++ {
 		aot.Add(100, time.Second)
 	}

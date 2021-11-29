@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -64,7 +65,6 @@ func init() {
 			}
 			conf.StoreIDWithRanges[id] = ranges
 			return nil
-
 		}
 	})
 
@@ -235,35 +235,15 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Operator {
-	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
-	for id, ranges := range s.conf.StoreIDWithRanges {
-		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
-		if region == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
-			continue
-		}
+func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
 
-		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
-			RandomPick()
-		if target == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
-			continue
-		}
-		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
-		if err != nil {
-			log.Debug("fail to create evict leader operator", errs.ZapError(err))
-			continue
-		}
-		op.SetPriorityLevel(core.HighPriority)
-		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-		ops = append(ops, op)
-	}
-	return ops
+	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf.StoreIDWithRanges, EvictLeaderBatchSize)
 }
 
-func (s *evictLeaderScheduler) uniqueAppend(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
+func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
 	regionIDs := make(map[uint64]struct{})
 	for i := range dst {
 		regionIDs[dst[i].RegionID()] = struct{}{}
@@ -278,25 +258,62 @@ func (s *evictLeaderScheduler) uniqueAppend(dst []*operator.Operator, src ...*op
 	return dst
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+func scheduleEvictLeaderBatch(name, typ string, cluster opt.Cluster, storeRanges map[uint64][]core.KeyRange, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
-
-	for i := 0; i < EvictLeaderBatchSize; i++ {
-		once := s.scheduleOnce(cluster)
+	for i := 0; i < batchSize; i++ {
+		once := scheduleEvictLeaderOnce(name, typ, cluster, storeRanges)
 		// no more regions
 		if len(once) == 0 {
 			break
 		}
-		ops = s.uniqueAppend(ops, once...)
+		ops = uniqueAppendOperator(ops, once...)
 		// the batch has been fulfilled
-		if len(ops) > EvictLeaderBatchSize {
+		if len(ops) > batchSize {
 			break
 		}
 	}
+	return ops
+}
 
+func scheduleEvictLeaderOnce(name, typ string, cluster opt.Cluster, storeRanges map[uint64][]core.KeyRange) []*operator.Operator {
+	ops := make([]*operator.Operator, 0, len(storeRanges))
+	for id, ranges := range storeRanges {
+		var filters []filter.Filter
+		region := cluster.RandLeaderRegion(id, ranges, opt.IsRegionHealthy)
+		if region == nil {
+			// try to pick unhealthy region
+			region = cluster.RandLeaderRegion(id, ranges)
+			if region == nil {
+				schedulerCounter.WithLabelValues(name, "no-leader").Inc()
+				continue
+			}
+			schedulerCounter.WithLabelValues(name, "pick-unhealthy-region").Inc()
+			unhealthyPeerStores := make(map[uint64]struct{})
+			for _, peer := range region.GetDownPeers() {
+				unhealthyPeerStores[peer.GetPeer().GetStoreId()] = struct{}{}
+			}
+			for _, peer := range region.GetPendingPeers() {
+				unhealthyPeerStores[peer.GetStoreId()] = struct{}{}
+			}
+			filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores))
+		}
+
+		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true})
+		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
+			FilterTarget(cluster.GetOpts(), filters...).RandomPick()
+		if target == nil {
+			schedulerCounter.WithLabelValues(name, "no-target-store").Inc()
+			continue
+		}
+		op, err := operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		if err != nil {
+			log.Debug("fail to create evict leader operator", errs.ZapError(err))
+			continue
+		}
+		op.SetPriorityLevel(core.HighPriority)
+		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(name, "new-operator"))
+		ops = append(ops, op)
+	}
 	return ops
 }
 

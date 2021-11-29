@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -31,7 +32,8 @@ const (
 	kmsVendorAWS = "AWS"
 
 	// K8S IAM related environment variables.
-	envAwsRoleArn              = "AWS_ROLE_ARN"
+	envAwsRoleArn = "AWS_ROLE_ARN"
+	// #nosec
 	envAwsWebIdentityTokenFile = "AWS_WEB_IDENTITY_TOKEN_FILE"
 	envAwsRoleSessionName      = "AWS_ROLE_SESSION_NAME"
 )

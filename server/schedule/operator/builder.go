@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -124,7 +125,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	// placement rules
 	var rules []*placement.Rule
 	if err == nil && cluster.GetOpts().IsPlacementRulesEnabled() {
-		fit := cluster.FitRegion(region)
+		fit := cluster.GetRuleManager().FitRegion(cluster, region)
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
 		}
@@ -650,7 +651,7 @@ func (b *Builder) execDemoteFollower(peer *metapb.Peer) {
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
 	if b.lightWeight {
-		b.steps = append(b.steps, AddLightLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
+		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightWeight})
 	} else {
 		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
 	}
@@ -663,9 +664,15 @@ func (b *Builder) execAddPeer(peer *metapb.Peer) {
 }
 
 func (b *Builder) execRemovePeer(peer *metapb.Peer) {
-	b.steps = append(b.steps, RemovePeer{FromStore: peer.GetStoreId(), PeerID: peer.GetId()})
-	delete(b.currentPeers, peer.GetStoreId())
-	delete(b.toRemove, peer.GetStoreId())
+	removeStoreID := peer.GetStoreId()
+	var isDownStore bool
+	store := b.cluster.GetStore(removeStoreID)
+	if store != nil {
+		isDownStore = store.DownTime() > b.cluster.GetOpts().GetMaxStoreDownTime()
+	}
+	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore})
+	delete(b.currentPeers, removeStoreID)
+	delete(b.toRemove, removeStoreID)
 }
 
 func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {

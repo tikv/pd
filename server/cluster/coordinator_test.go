@@ -4,10 +4,11 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -310,7 +311,7 @@ func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinato
 }
 
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
-	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	hbStreams, opt := co.hbStreams, tc.opt
 	defer cleanup()
 
@@ -320,7 +321,6 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
 	s.checkRegion(c, tc, co, 1, 1)
-	waitOperator(c, co, 1)
 	testutil.CheckAddPeer(c, co.opController.GetOperator(1), operator.OpReplica, 1)
 	s.checkRegion(c, tc, co, 1, 0)
 
@@ -332,12 +332,9 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	)
 	c.Assert(tc.putRegion(r), IsNil)
 	s.checkRegion(c, tc, co, 1, 0)
-	co.stop()
-	co.wg.Wait()
 
 	tc = newTestCluster(s.ctx, opt)
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
-	co.run()
 
 	c.Assert(tc.addRegionStore(4, 4), IsNil)
 	c.Assert(tc.addRegionStore(3, 3), IsNil)
@@ -348,7 +345,6 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	r = r.Clone(core.WithPendingPeers(nil))
 	c.Assert(tc.putRegion(r), IsNil)
 	s.checkRegion(c, tc, co, 1, 1)
-	waitOperator(c, co, 1)
 	op := co.opController.GetOperator(1)
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
@@ -359,7 +355,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0 // ensure replica checker is busy
 		cfg.MergeScheduleLimit = 10
-	}, nil, func(co *coordinator) { co.run() }, c)
+	}, nil, nil, c)
 	defer cleanup()
 
 	c.Assert(tc.addRegionStore(1, 0), IsNil)
@@ -382,7 +378,6 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 					c.Assert(co.opController.AddWaitingOperator(ops...), Equals, len(ops))
 				}
 			}
-
 		}
 	}
 	s.checkRegion(c, tc, co, num, 0)
@@ -465,7 +460,7 @@ func (s *testCoordinatorSuite) TestCheckCache(c *C) {
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 1)
 
 	// cancel the replica-schedule-limit restriction
 	opt := tc.GetOpts()
@@ -475,22 +470,23 @@ func (s *testCoordinatorSuite) TestCheckCache(c *C) {
 	co.wg.Add(1)
 	co.patrolRegions()
 	oc := co.opController
-	c.Assert(len(oc.GetOperators()), Equals, 1)
-	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 0)
+	c.Assert(oc.GetOperators(), HasLen, 1)
+	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 0)
 
 	// case 2: operator cannot be created due to store limit restriction
 	oc.RemoveOperator(oc.GetOperator(1))
 	tc.SetStoreLimit(1, storelimit.AddPeer, 0)
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 1)
+	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 1)
 
 	// cancel the store limit restriction
 	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
+	time.Sleep(1 * time.Second)
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(len(oc.GetOperators()), Equals, 1)
-	c.Assert(len(co.checkers.GetWaitingRegions()), Equals, 0)
+	c.Assert(oc.GetOperators(), HasLen, 1)
+	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 0)
 
 	co.wg.Wait()
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"), IsNil)
@@ -887,13 +883,13 @@ func BenchmarkPatrolRegion(b *testing.B) {
 		for {
 			if oc.OperatorCount(operator.OpMerge) == mergeLimit {
 				co.cancel()
-				co.wg.Add(1)
 				return
 			}
 		}
 	}()
 	<-listen
 
+	co.wg.Add(1)
 	b.ResetTimer()
 	co.patrolRegions()
 }
@@ -969,7 +965,9 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	tc.putRegion(region)
 	start := time.Now()
 	{
-		op1 := lb.Schedule(tc)[0]
+		ops := lb.Schedule(tc)
+		c.Assert(ops, HasLen, 1)
+		op1 := ops[0]
 		c.Assert(op1, NotNil)
 		c.Assert(oc.AddOperator(op1), IsTrue)
 		c.Assert(oc.RemoveOperator(op1), IsTrue)
@@ -987,14 +985,16 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	// scheduling one time needs 1/10 seconds
 	opt.SetAllStoresLimit(storelimit.AddPeer, 600)
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
+	time.Sleep(time.Second)
 	for i := 0; i < 10; i++ {
-		op1 := lb.Schedule(tc)[0]
-		c.Assert(op1, NotNil)
-		c.Assert(oc.AddOperator(op1), IsTrue)
-		c.Assert(oc.RemoveOperator(op1), IsTrue)
+		ops := lb.Schedule(tc)
+		c.Assert(ops, HasLen, 1)
+		op := ops[0]
+		c.Assert(oc.AddOperator(op), IsTrue)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
 	// sleep 1 seconds to make sure that the token is filled up
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
 		c.Assert(lb.Schedule(tc), NotNil)
 	}
@@ -1028,6 +1028,47 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
 	c.Assert(lb.Schedule(tc), NotNil)
+}
+
+func (s *testOperatorControllerSuite) TestDownStoreLimit(c *C) {
+	tc, co, cleanup := prepare(nil, nil, nil, c)
+	defer cleanup()
+	oc := co.opController
+	rc := co.checkers.GetRuleChecker()
+
+	tc.addRegionStore(1, 100)
+	tc.addRegionStore(2, 100)
+	tc.addRegionStore(3, 100)
+	tc.addLeaderRegion(1, 1, 2, 3)
+
+	region := tc.GetRegion(1)
+	tc.setStoreDown(1)
+	tc.SetStoreLimit(1, storelimit.RemovePeer, 1)
+
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{
+			Peer:        region.GetStorePeer(1),
+			DownSeconds: 24 * 60 * 60,
+		},
+	}), core.SetApproximateSize(1))
+	tc.putRegion(region)
+	for i := uint64(1); i < 20; i++ {
+		tc.addRegionStore(i+3, 100)
+		op := rc.Check(region)
+		c.Assert(op, NotNil)
+		c.Assert(oc.AddOperator(op), IsTrue)
+		oc.RemoveOperator(op)
+	}
+
+	region = region.Clone(core.SetApproximateSize(100))
+	tc.putRegion(region)
+	for i := uint64(20); i < 25; i++ {
+		tc.addRegionStore(i+3, 100)
+		op := rc.Check(region)
+		c.Assert(op, NotNil)
+		c.Assert(oc.AddOperator(op), IsTrue)
+		oc.RemoveOperator(op)
+	}
 }
 
 var _ = Suite(&testScheduleControllerSuite{})

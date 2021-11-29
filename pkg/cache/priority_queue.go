@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -55,13 +56,11 @@ func (pq *PriorityQueue) Put(priority int, value PriorityQueueItem) bool {
 			}
 			pq.Remove(min.(*Entry).Value.ID())
 		}
-	} else {
-		// delete before update
-		if entry.Priority != priority {
-			pq.btree.Delete(entry)
-			entry.Priority = priority
-		}
+	} else if entry.Priority != priority { // delete before update
+		pq.btree.Delete(entry)
+		entry.Priority = priority
 	}
+
 	pq.btree.ReplaceOrInsert(entry)
 	pq.items[id] = entry
 	return true

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -129,11 +130,9 @@ func (t *collectRegionStatsTask) runTask(flow *hotPeerCache) {
 }
 
 // TODO: do we need a wait-return timeout?
-func (t *collectRegionStatsTask) waitRet(ctx context.Context, quit <-chan struct{}) map[uint64][]*HotPeerStat {
+func (t *collectRegionStatsTask) waitRet(ctx context.Context) map[uint64][]*HotPeerStat {
 	select {
 	case <-ctx.Done():
-		return nil
-	case <-quit:
 		return nil
 	case ret := <-t.ret:
 		return ret
@@ -163,11 +162,9 @@ func (t *isRegionHotTask) runTask(flow *hotPeerCache) {
 }
 
 // TODO: do we need a wait-return timeout?
-func (t *isRegionHotTask) waitRet(ctx context.Context, quit <-chan struct{}) bool {
+func (t *isRegionHotTask) waitRet(ctx context.Context) bool {
 	select {
 	case <-ctx.Done():
-		return false
-	case <-quit:
 		return false
 	case r := <-t.ret:
 		return r

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -57,7 +58,7 @@ func NewHotWriteRegionCommand() *cobra.Command {
 }
 
 func showHotWriteRegionsCommandFunc(cmd *cobra.Command, args []string) {
-	prefix, err := parseOptionalArgs(cmd, hotWriteRegionsPrefix, args)
+	prefix, err := parseOptionalArgs(hotWriteRegionsPrefix, args)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -81,7 +82,7 @@ func NewHotReadRegionCommand() *cobra.Command {
 }
 
 func showHotReadRegionsCommandFunc(cmd *cobra.Command, args []string) {
-	prefix, err := parseOptionalArgs(cmd, hotReadRegionsPrefix, args)
+	prefix, err := parseOptionalArgs(hotReadRegionsPrefix, args)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -162,7 +163,7 @@ func showHotRegionsHistoryCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(string(resp))
 }
 
-func parseOptionalArgs(cmd *cobra.Command, prefix string, args []string) (string, error) {
+func parseOptionalArgs(prefix string, args []string) (string, error) {
 	argsLen := len(args)
 	if argsLen > 0 {
 		prefix += "?"

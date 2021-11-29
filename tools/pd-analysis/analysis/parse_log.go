@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -88,7 +89,11 @@ func forEachLine(filename string, solve func(string) error) error {
 	if err != nil {
 		return err
 	}
-	defer fi.Close()
+	defer func() {
+		if err := fi.Close(); err != nil {
+			log.Printf("Error closing file: %s\n", err)
+		}
+	}()
 	br := bufio.NewReader(fi)
 	// For each
 	for {
@@ -118,7 +123,6 @@ func isExpectTime(expect, layout string, isBeforeThanExpect bool) func(time.Time
 	return func(current time.Time) bool {
 		return current.Before(expectTime) == isBeforeThanExpect
 	}
-
 }
 
 func currentTime(layout string) func(content string) (time.Time, error) {

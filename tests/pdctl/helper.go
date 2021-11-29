@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -50,7 +51,8 @@ func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) 
 		}
 	}
 	for _, s := range stores {
-		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
+		metapbStore := s.Store.ConvertToMetapbStore()
+		obtained := proto.Clone(metapbStore).(*metapb.Store)
 		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
@@ -83,9 +85,11 @@ func CheckRegionsInfo(c *check.C, output *api.RegionsInfo, expected []*core.Regi
 // MustPutStore is used for test purpose.
 func MustPutStore(c *check.C, svr *server.Server, store *metapb.Store) {
 	store.Address = fmt.Sprintf("tikv%d", store.GetId())
-	store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
-
-	_, err := svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+	if len(store.Version) == 0 {
+		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
+	}
+	grpcServer := &server.GrpcServer{Server: svr}
+	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
 		Store:  store,
 	})

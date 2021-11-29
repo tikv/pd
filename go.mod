@@ -17,8 +17,9 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
+	github.com/influxdata/tdigest v0.0.1
 	github.com/juju/ratelimit v1.0.1
-	github.com/mattn/go-shellwords v1.0.3
+	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.5.0
 	github.com/opentracing/opentracing-go v1.1.0
@@ -28,14 +29,12 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20201126102027-b0a155152ca3
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20210604082642-dda0a102bc6a
-	github.com/pingcap/log v0.0.0-20210317133921-96f4fcab92a4
-	github.com/pingcap/sysutil v0.0.0-20210315073920-cc0985d983a3
-	github.com/pingcap/tidb-dashboard v0.0.0-20210716172320-2226872e3296
+	github.com/pingcap/kvproto v0.0.0-20211109071446-a8b4d34474bc
+	github.com/pingcap/log v0.0.0-20210625125904-98ed8e2eb1c7
+	github.com/pingcap/sysutil v0.0.0-20210730114356-fcd8a63f68c5
+	github.com/pingcap/tidb-dashboard v0.0.0-20211107164327-80363dfbe884
 	github.com/prometheus/client_golang v1.1.0
-	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.6.0
-	github.com/prometheus/procfs v0.0.5 // indirect
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/sirupsen/logrus v1.2.0
 	github.com/spf13/cobra v1.0.0
@@ -48,9 +47,9 @@ require (
 	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
 	go.etcd.io/bbolt v1.3.5 // indirect
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
-	go.uber.org/goleak v1.1.10
+	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.16.0
-	golang.org/x/tools v0.0.0-20210112230658-8b4aab62c064
+	golang.org/x/tools v0.1.5
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )

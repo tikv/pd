@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -84,21 +85,21 @@ func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
 	newRegions := map[uint64]struct{}{}
 	// assert success
 	failureKeys := splitter.splitRegionsByKeys(s.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
-	c.Assert(len(failureKeys), Equals, 0)
-	c.Assert(len(newRegions), Equals, 2)
+	c.Assert(failureKeys, HasLen, 0)
+	c.Assert(newRegions, HasLen, 2)
 
 	percentage, newRegionsID := splitter.SplitRegions(s.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, 1)
 	c.Assert(percentage, Equals, 100)
-	c.Assert(len(newRegionsID), Equals, 2)
+	c.Assert(newRegionsID, HasLen, 2)
 	// assert out of range
 	newRegions = map[uint64]struct{}{}
 	failureKeys = splitter.splitRegionsByKeys(s.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
-	c.Assert(len(failureKeys), Equals, 2)
-	c.Assert(len(newRegions), Equals, 0)
+	c.Assert(failureKeys, HasLen, 2)
+	c.Assert(newRegions, HasLen, 0)
 
 	percentage, newRegionsID = splitter.SplitRegions(s.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, 1)
 	c.Assert(percentage, Equals, 0)
-	c.Assert(len(newRegionsID), Equals, 0)
+	c.Assert(newRegionsID, HasLen, 0)
 }
 
 func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
@@ -116,17 +117,17 @@ func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
 		[]byte("fff"),
 		[]byte("zzz"),
 	})
-	c.Assert(len(groupKeys), Equals, 3)
+	c.Assert(groupKeys, HasLen, 3)
 	for k, v := range groupKeys {
 		switch k {
 		case uint64(1):
-			c.Assert(len(v.keys), Equals, 1)
+			c.Assert(v.keys, HasLen, 1)
 			c.Assert(v.keys[0], DeepEquals, []byte("bbb"))
 		case uint64(2):
-			c.Assert(len(v.keys), Equals, 1)
+			c.Assert(v.keys, HasLen, 1)
 			c.Assert(v.keys[0], DeepEquals, []byte("ddd"))
 		case uint64(3):
-			c.Assert(len(v.keys), Equals, 1)
+			c.Assert(v.keys, HasLen, 1)
 			c.Assert(v.keys[0], DeepEquals, []byte("fff"))
 		}
 	}

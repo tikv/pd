@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -43,7 +44,7 @@ func (w *WMA) Add(n float64) {
 	w.score = w.score - w.sum + n*float64(w.size)
 	// to avoid reset
 	if w.count < w.size {
-		w.sum = w.sum + n
+		w.sum += n
 	} else {
 		w.sum = w.sum - w.records[w.count%w.size] + n
 	}

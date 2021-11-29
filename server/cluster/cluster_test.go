@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -32,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
@@ -327,7 +329,6 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	// store 4 not exist
 	err = cluster.UpStore(4)
 	c.Assert(errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(4)), IsTrue)
-
 }
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
@@ -676,6 +677,56 @@ func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
 	checkRegion(c, cluster.GetRegionByKey([]byte{}), target)
 }
 
+func (s *testClusterInfoSuite) TestRegionLabelIsolationLevel(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	cfg := opt.GetReplicationConfig()
+	cfg.LocationLabels = []string{"zone"}
+	opt.SetReplicationConfig(cfg)
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	for i := uint64(1); i <= 4; i++ {
+		var labels []*metapb.StoreLabel
+		if i == 4 {
+			labels = []*metapb.StoreLabel{{Key: "zone", Value: fmt.Sprintf("%d", 3)}, {Key: "engine", Value: "tiflash"}}
+		} else {
+			labels = []*metapb.StoreLabel{{Key: "zone", Value: fmt.Sprintf("%d", i)}}
+		}
+		store := &metapb.Store{
+			Id:      i,
+			Address: fmt.Sprintf("127.0.0.1:%d", i),
+			State:   metapb.StoreState_Up,
+			Labels:  labels,
+		}
+		c.Assert(cluster.putStoreLocked(core.NewStoreInfo(store)), IsNil)
+	}
+
+	peers := make([]*metapb.Peer, 0, 4)
+	for i := uint64(1); i <= 4; i++ {
+		peer := &metapb.Peer{
+			Id: i + 4,
+		}
+		peer.StoreId = i
+		if i == 8 {
+			peer.Role = metapb.PeerRole_Learner
+		}
+		peers = append(peers, peer)
+	}
+	region := &metapb.Region{
+		Id:       9,
+		Peers:    peers,
+		StartKey: []byte{byte(1)},
+		EndKey:   []byte{byte(2)},
+	}
+	r := core.NewRegionInfo(region, peers[0])
+	c.Assert(cluster.putRegion(r), IsNil)
+
+	cluster.updateRegionsLabelLevelStats([]*core.RegionInfo{r})
+	counter := cluster.labelLevelStats.GetLabelCounter()
+	c.Assert(counter["none"], Equals, 0)
+	c.Assert(counter["zone"], Equals, 1)
+}
+
 func heartbeatRegions(c *C, cluster *RaftCluster, regions []*core.RegionInfo) {
 	// Heartbeat and check region one by one.
 	for _, r := range regions {
@@ -782,7 +833,7 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
 	storage := core.NewStorage(kv.NewMemoryKV())
-	cluster.ruleManager = placement.NewRuleManager(storage, cluster)
+	cluster.ruleManager = placement.NewRuleManager(storage, cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
 		if err != nil {
@@ -970,10 +1021,10 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc))
+		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
 		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
 
-		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc))
+		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
 		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -989,14 +1040,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc))
+			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		c.Assert(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc)), IsNil)
+		c.Assert(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc)), IsNil)
+		c.Assert(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy), IsNil)
 	}
 }
 
@@ -1078,19 +1129,20 @@ func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, er
 func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluster {
 	storage := core.NewStorage(kv.NewMemoryKV())
 	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage, core.NewBasicCluster())
-	rc.ruleManager = placement.NewRuleManager(storage, rc)
+	rc.ruleManager = placement.NewRuleManager(storage, rc, rc.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
 		if err != nil {
 			panic(err)
 		}
 	}
+	rc.regionLabeler, _ = labeler.NewRegionLabeler(storage)
 
 	return &testCluster{RaftCluster: rc}
 }
 
 func newTestRaftCluster(ctx context.Context, id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
-	rc := &RaftCluster{ctx: ctx}
+	rc := &RaftCluster{serverCtx: ctx}
 	rc.InitCluster(id, opt, storage, basicCluster)
 	return rc
 }

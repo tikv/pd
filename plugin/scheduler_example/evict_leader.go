@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -62,7 +63,6 @@ func init() {
 			}
 			conf.StoreIDWitRanges[id] = ranges
 			return nil
-
 		}
 	})
 
@@ -217,7 +217,7 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id, ranges := range s.conf.StoreIDWitRanges {
-		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
+		region := cluster.RandLeaderRegion(id, ranges, opt.IsRegionHealthy)
 		if region == nil {
 			continue
 		}
@@ -231,7 +231,6 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
-
 		}
 		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)

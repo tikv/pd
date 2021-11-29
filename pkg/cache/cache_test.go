@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -40,26 +41,26 @@ func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 	cache.PutWithTTL(10, "10", 5*time.Second)
 	c.Assert(cache.Len(), Equals, 2)
 	k, v, success := cache.pop()
-	c.Assert(success, Equals, true)
+	c.Assert(success, IsTrue)
 	c.Assert(cache.Len(), Equals, 1)
 	k2, v2, success := cache.pop()
-	c.Assert(success, Equals, true)
+	c.Assert(success, IsTrue)
 	// we can't ensure the order which the key/value pop from cache, so we save into a map
 	kvMap := map[uint64]string{
 		9:  "9",
 		10: "10",
 	}
 	expV, ok := kvMap[k.(uint64)]
-	c.Assert(ok, Equals, true)
+	c.Assert(ok, IsTrue)
 	c.Assert(expV, Equals, v.(string))
 	expV, ok = kvMap[k2.(uint64)]
-	c.Assert(ok, Equals, true)
+	c.Assert(ok, IsTrue)
 	c.Assert(expV, Equals, v2.(string))
 
 	cache.PutWithTTL(11, "11", 1*time.Second)
 	time.Sleep(5 * time.Second)
 	k, v, success = cache.pop()
-	c.Assert(success, Equals, false)
+	c.Assert(success, IsFalse)
 	c.Assert(k, IsNil)
 	c.Assert(v, IsNil)
 
@@ -323,9 +324,9 @@ func (s *testRegionCacheSuite) TestPriorityQueue(c *C) {
 	c.Assert(pq.Get(4), IsNil)
 	c.Assert(pq.Len(), Equals, 3)
 
-	// case1 test getAll ,the highest element should be the first
+	// case1 test getAll, the highest element should be the first
 	entries := pq.Elems()
-	c.Assert(len(entries), Equals, 3)
+	c.Assert(entries, HasLen, 3)
 	c.Assert(entries[0].Priority, Equals, 1)
 	c.Assert(entries[0].Value, Equals, testData[1])
 	c.Assert(entries[1].Priority, Equals, 2)
@@ -353,7 +354,7 @@ func (s *testRegionCacheSuite) TestPriorityQueue(c *C) {
 	// case4 remove all element
 	pq.Remove(uint64(2))
 	c.Assert(pq.Len(), Equals, 0)
-	c.Assert(len(pq.items), Equals, 0)
+	c.Assert(pq.items, HasLen, 0)
 	c.Assert(pq.Peek(), IsNil)
 	c.Assert(pq.Tail(), IsNil)
 }

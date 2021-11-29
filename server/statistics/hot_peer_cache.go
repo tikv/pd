@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -62,8 +63,8 @@ type hotPeerCache struct {
 	reportIntervalSecs int
 }
 
-// NewHotStoresStats creates a HotStoresStats
-func NewHotStoresStats(kind FlowKind) *hotPeerCache {
+// NewHotPeerCache creates a hotPeerCache
+func NewHotPeerCache(kind FlowKind) *hotPeerCache {
 	c := &hotPeerCache{
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
@@ -76,7 +77,7 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 	} else {
 		c.reportIntervalSecs = ReadReportInterval
 	}
-	c.topNTTL = 3 * time.Duration(c.reportIntervalSecs) * time.Second
+	c.topNTTL = time.Duration(3*c.reportIntervalSecs) * time.Second
 	return c
 }
 
@@ -433,10 +434,7 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 		return nil
 	}
 	isHot := slice.AnyOf(regionStats, func(i int) bool {
-		if IsSelectedDim(i) {
-			return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
-		}
-		return false
+		return deltaLoads[regionStats[i]]/interval.Seconds() >= newItem.thresholds[i]
 	})
 	if !isHot {
 		return nil
@@ -517,11 +515,17 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 func hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree + 1
 	newItem.AntiCount = hotRegionAntiCount
+	if newItem.Kind == ReadFlow {
+		newItem.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	}
 }
 
 func initItemDegree(item *HotPeerStat) {
 	item.HotDegree = 1
 	item.AntiCount = hotRegionAntiCount
+	if item.Kind == ReadFlow {
+		item.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	}
 }
 
 func inheritItemDegree(newItem, oldItem *HotPeerStat) {

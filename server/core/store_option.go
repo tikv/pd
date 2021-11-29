@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -117,6 +118,21 @@ func ResumeLeaderTransfer() StoreCreateOption {
 	}
 }
 
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
+// leader to the store
+func SlowStoreEvicted() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.slowStoreEvicted = true
+	}
+}
+
+// SlowStoreRecovered cleans the evicted state of a store.
+func SlowStoreRecovered() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.slowStoreEvicted = false
+	}
+}
+
 // SetLeaderCount sets the leader count for the store.
 func SetLeaderCount(leaderCount int) StoreCreateOption {
 	return func(store *StoreInfo) {
@@ -198,12 +214,15 @@ func SetNewStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	}
 }
 
-// AttachAvailableFunc attaches a customize function for the store. The function f returns true if the store limit is not exceeded.
-func AttachAvailableFunc(limitType storelimit.Type, f func() bool) StoreCreateOption {
+// ResetStoreLimit resets the store limit for a store.
+func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCreateOption {
 	return func(store *StoreInfo) {
-		if store.available == nil {
-			store.available = make(map[storelimit.Type]func() bool)
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		if len(ratePerSec) == 0 {
+			store.limiter[limitType] = nil
+			return
 		}
-		store.available[limitType] = f
+		store.limiter[limitType] = storelimit.NewStoreLimit(ratePerSec[0], storelimit.RegionInfluence[limitType])
 	}
 }

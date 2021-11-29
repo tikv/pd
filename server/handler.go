@@ -4,10 +4,11 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -28,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -144,6 +146,15 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 	return c.GetSchedulers(), nil
 }
 
+// IsCheckerPaused returns if checker is paused
+func (h *Handler) IsCheckerPaused(name string) (bool, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return false, err
+	}
+	return rc.IsCheckerPaused(name)
+}
+
 // GetStores returns all stores in the cluster.
 func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 	rc := h.s.GetRaftCluster()
@@ -240,6 +251,24 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 	return err
 }
 
+// PauseOrResumeChecker pauses checker for delay seconds or resume checker
+// t == 0 : resume checker.
+// t > 0 : checker delays t seconds.
+func (h *Handler) PauseOrResumeChecker(name string, t int64) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	if err = c.PauseOrResumeChecker(name, t); err != nil {
+		if t == 0 {
+			log.Error("can not resume checker", zap.String("checker-name", name), errs.ZapError(err))
+		} else {
+			log.Error("can not pause checker", zap.String("checker-name", name), errs.ZapError(err))
+		}
+	}
+	return err
+}
+
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler(schedulers.BalanceLeaderType)
@@ -288,6 +317,11 @@ func (h *Handler) AddShuffleRegionScheduler() error {
 // AddShuffleHotRegionScheduler adds a shuffle-hot-region-scheduler.
 func (h *Handler) AddShuffleHotRegionScheduler(limit uint64) error {
 	return h.AddScheduler(schedulers.ShuffleHotRegionType, strconv.FormatUint(limit, 10))
+}
+
+// AddEvictSlowStoreScheduler adds a evict-slow-store-scheduler.
+func (h *Handler) AddEvictSlowStoreScheduler() error {
+	return h.AddScheduler(schedulers.EvictSlowStoreType)
 }
 
 // AddRandomMergeScheduler adds a random-merge-scheduler.
@@ -668,11 +702,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if !opt.IsRegionHealthy(c, region) || !opt.IsRegionReplicated(c, region) {
+	if !opt.IsRegionHealthy(region) || !opt.IsRegionReplicated(c, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if !opt.IsRegionHealthy(c, target) || !opt.IsRegionReplicated(c, target) {
+	if !opt.IsRegionHealthy(target) || !opt.IsRegionReplicated(c, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 
@@ -896,6 +930,86 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	return h.s.SaveTTLConfig(map[string]interface{}{
 		data: value,
 	}, ttl)
+}
+
+// IsLeader return ture if this server is leader
+func (h *Handler) IsLeader() bool {
+	return h.s.member.IsLeader()
+}
+
+// PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
+func (h *Handler) PackHistoryHotReadRegions() ([]core.HistoryHotRegion, error) {
+	hotReadRegions := h.GetHotReadRegions()
+	if hotReadRegions == nil {
+		return nil, nil
+	}
+	hotReadPeerRegions := hotReadRegions.AsPeer
+	return h.packHotRegions(hotReadPeerRegions, core.ReadType.String())
+}
+
+// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
+func (h *Handler) PackHistoryHotWriteRegions() ([]core.HistoryHotRegion, error) {
+	hotWriteRegions := h.GetHotWriteRegions()
+	if hotWriteRegions == nil {
+		return nil, nil
+	}
+	hotWritePeerRegions := hotWriteRegions.AsPeer
+	return h.packHotRegions(hotWritePeerRegions, core.WriteType.String())
+}
+
+func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []core.HistoryHotRegion, err error) {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	for _, hotPeersStat := range hotPeersStat {
+		stats := hotPeersStat.Stats
+		for _, hotPeerStat := range stats {
+			region := c.GetRegion(hotPeerStat.RegionID)
+			if region == nil {
+				continue
+			}
+			meta := region.GetMeta()
+			meta, err := encryption.EncryptRegion(meta, h.s.encryptionKeyManager)
+			if err != nil {
+				return nil, err
+			}
+			var peerID uint64
+			var isLearner bool
+			for _, peer := range meta.Peers {
+				if peer.StoreId == hotPeerStat.StoreID {
+					peerID = peer.Id
+					isLearner = peer.Role == metapb.PeerRole_Learner
+				}
+			}
+			stat := core.HistoryHotRegion{
+				// store in  ms.
+				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
+				RegionID:       hotPeerStat.RegionID,
+				StoreID:        hotPeerStat.StoreID,
+				PeerID:         peerID,
+				IsLeader:       meta.Id == region.GetLeader().Id,
+				IsLearner:      isLearner,
+				HotDegree:      int64(hotPeerStat.HotDegree),
+				FlowBytes:      hotPeerStat.ByteRate,
+				KeyRate:        hotPeerStat.KeyRate,
+				QueryRate:      hotPeerStat.QueryRate,
+				StartKey:       meta.StartKey,
+				EndKey:         meta.EndKey,
+				EncryptionMeta: meta.EncryptionMeta,
+				HotRegionType:  hotRegionType,
+			}
+			historyHotRegions = append(historyHotRegions, stat)
+		}
+	}
+	return
+}
+
+// GetHistoryHotRegionIter return a iter which iter all qualified item .
+func (h *Handler) GetHistoryHotRegionIter(hotRegionTypes []string,
+	startTime, endTime int64) core.HotRegionStorageIterator {
+	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, startTime, endTime)
+	return iter
 }
 
 func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {
