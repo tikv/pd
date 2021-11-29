@@ -46,7 +46,7 @@ func CheckRemovePeer(c *C, op *operator.Operator, storeID uint64) {
 func CheckTransferLeader(c *C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	c.Assert(op, NotNil)
 	c.Assert(op.Len(), Equals, 1)
-	c.Assert(op.Step(0), Equals, operator.TransferLeader{FromStore: sourceID, ToStore: targetID})
+	c.Assert(op.Step(0), DeepEquals, operator.TransferLeader{FromStore: sourceID, ToStore: targetID})
 	kind |= operator.OpLeader
 	c.Assert(op.Kind()&kind, Equals, kind)
 }
@@ -60,7 +60,7 @@ func CheckTransferLeaderFrom(c *C, op *operator.Operator, kind operator.OpKind, 
 	c.Assert(op.Kind()&kind, Equals, kind)
 }
 
-// CheckTransferPeerFrom checks if the operator is to transfer leader from the specified source to one of the target stores.
+// CheckMultiTargetTransferLeader checks if the operator is to transfer leader from the specified source to one of the target stores.
 func CheckMultiTargetTransferLeader(c *C, op *operator.Operator, kind operator.OpKind, sourceID uint64, targetIDs []uint64) {
 	c.Assert(op, NotNil)
 	c.Assert(op.Len(), Equals, 1)

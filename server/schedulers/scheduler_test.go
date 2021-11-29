@@ -106,7 +106,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	// If store3 is disconnected, transfer leader to store 2.
 	tc.SetStoreDisconnect(3)
 	op = sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
@@ -132,7 +132,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	}
 	tc.Regions.SetRegion(region)
 	op = sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
 }
 
 func (s *testRejectLeaderSuite) TestRemoveRejectLeader(c *C) {
@@ -653,5 +653,5 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	// Evict leader scheduler of store 1 should be removed, then leader can be balanced to store 1
 	c.Check(es.Schedule(tc), IsNil)
 	op = bs.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 2, []uint64{1})
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 2, 1)
 }
