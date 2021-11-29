@@ -260,9 +260,9 @@ func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
 			b.targetLeaderStoreIDs = append(b.targetLeaderStoreIDs, storeID)
 		}
 	}
-	if len(b.targetLeaderStoreIDs) == 0 {
-		b.err = errors.Errorf("no valid peer to transfer leader to")
-	}
+	// Don't need to check if there's valid target, because `targetLeaderStoreIDs`
+	// can be empty if this is not a multi-target evict leader operation. Besides,
+	// `targetLeaderStoreID` must be valid and there must be at least one valid target.
 	return b
 }
 
