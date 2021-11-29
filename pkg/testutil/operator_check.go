@@ -60,6 +60,19 @@ func CheckTransferLeaderFrom(c *C, op *operator.Operator, kind operator.OpKind, 
 	c.Assert(op.Kind()&kind, Equals, kind)
 }
 
+// CheckTransferPeerFrom checks if the operator is to transfer leader from the specified source to one of the target stores.
+func CheckMultiTargetTransferLeader(c *C, op *operator.Operator, kind operator.OpKind, sourceID uint64, targetIDs []uint64) {
+	c.Assert(op, NotNil)
+	c.Assert(op.Len(), Equals, 1)
+	expectedOps := make([]interface{}, 0, len(targetIDs))
+	for _, targetID := range targetIDs {
+		expectedOps = append(expectedOps, operator.TransferLeader{FromStore: sourceID, ToStore: targetID, ToStores: targetIDs})
+	}
+	c.Assert(op.Step(0), DeepEqualsIn, expectedOps)
+	kind |= operator.OpLeader
+	c.Assert(op.Kind()&kind, Equals, kind)
+}
+
 func trimTransferLeaders(op *operator.Operator) (steps []operator.OpStep, lastLeader uint64) {
 	for i := 0; i < op.Len(); i++ {
 		step := op.Step(i)
