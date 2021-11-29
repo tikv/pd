@@ -360,7 +360,7 @@ func (s *testCreateOperatorSuite) TestCreateTransferLeaderOperator(c *C) {
 	}
 	for _, tc := range cases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.originPeers}, tc.originPeers[0])
-		op, err := CreateTransferLeaderOperator("test", s.cluster, region, tc.originPeers[0].StoreId, tc.targetLeaderStoreID, 0)
+		op, err := CreateTransferLeaderOperator("test", s.cluster, region, tc.originPeers[0].StoreId, tc.targetLeaderStoreID, []uint64{}, 0)
 
 		if tc.isErr {
 			c.Assert(err, NotNil)

@@ -93,7 +93,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		case movePeer:
 			op, err = operator.CreateMovePeerOperator("move-peer-test", tc, region, operator.OpAdmin, 2, &metapb.Peer{Id: region.GetID()*10000 + 1, StoreId: 4})
 		case transferLeader:
-			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 1, 2, operator.OpAdmin)
+			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 1, 2, []uint64{}, operator.OpAdmin)
 		}
 		c.Assert(err, IsNil)
 		c.Assert(op, NotNil)

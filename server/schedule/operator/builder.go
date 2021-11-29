@@ -46,12 +46,13 @@ type Builder struct {
 	expectedRoles map[uint64]placement.PeerRoleType
 
 	// operation record
-	originPeers         peersMap
-	unhealthyPeers      peersMap
-	originLeaderStoreID uint64
-	targetPeers         peersMap
-	targetLeaderStoreID uint64
-	err                 error
+	originPeers          peersMap
+	unhealthyPeers       peersMap
+	originLeaderStoreID  uint64
+	targetPeers          peersMap
+	targetLeaderStoreID  uint64
+	targetLeaderStoreIDs []uint64 // This field is only used during multi-target evict leader, and will not be filtered during `Build`.
+	err                  error
 
 	// skip origin check flags
 	skipOriginJointStateCheck bool
@@ -239,6 +240,28 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot transfer leader to %d: unhealthy", storeID)
 	} else {
 		b.targetLeaderStoreID = storeID
+	}
+	return b
+}
+
+// SetLeaders records all valid target leaders in Builder.
+func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
+	if b.err != nil {
+		return b
+	}
+	for _, storeID := range storeIDs {
+		if peer, ok := b.targetPeers[storeID]; !ok {
+			continue
+		} else if core.IsLearner(peer) {
+			continue
+		} else if _, ok := b.unhealthyPeers[storeID]; ok {
+			continue
+		} else {
+			b.targetLeaderStoreIDs = append(b.targetLeaderStoreIDs, storeID)
+		}
+	}
+	if len(b.targetLeaderStoreIDs) == 0 {
+		b.err = errors.Errorf("no valid peer to transfer leader to")
 	}
 	return b
 }
@@ -451,6 +474,8 @@ func (b *Builder) brief() string {
 		return fmt.Sprintf("promote peer: store %s", b.toPromote)
 	case len(b.toDemote) > 0:
 		return fmt.Sprintf("demote peer: store %s", b.toDemote)
+	case len(b.targetLeaderStoreIDs) != 0:
+		return fmt.Sprintf("evict leader: from store %d to one in %v, or to %d (for compatibility)", b.originLeaderStoreID, b.targetLeaderStoreIDs, b.targetLeaderStoreID)
 	case b.originLeaderStoreID != b.targetLeaderStoreID:
 		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
 	default:

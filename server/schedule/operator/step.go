@@ -42,7 +42,10 @@ type OpStep interface {
 
 // TransferLeader is an OpStep that transfers a region's leader.
 type TransferLeader struct {
+	// Compatible with old TiKV's TransferLeader.
 	FromStore, ToStore uint64
+	// Multi-target transfer leader.
+	ToStores []uint64
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -56,19 +59,34 @@ func (tl TransferLeader) String() string {
 
 // IsFinish checks if current step is finished.
 func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
+	for _, storeID := range tl.ToStores {
+		if region.GetLeader().GetStoreId() == storeID {
+			return true
+		}
+	}
 	return region.GetLeader().GetStoreId() == tl.ToStore
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
 func (tl TransferLeader) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
-	peer := region.GetStorePeer(tl.ToStore)
-	if peer == nil {
-		return errors.New("peer does not existed")
+	errList := make([]error, 0, len(tl.ToStores)+1)
+	for _, storeID := range append(tl.ToStores, tl.ToStore) {
+		peer := region.GetStorePeer(tl.ToStore)
+		if peer == nil {
+			errList = append(errList, errors.New("peer does not existed"))
+			continue
+		}
+		if core.IsLearner(peer) {
+			errList = append(errList, errors.New("peer already is a learner"))
+			continue
+		}
+		if err := validateStore(cluster, storeID); err != nil {
+			errList = append(errList, err)
+			continue
+		}
+		return nil
 	}
-	if core.IsLearner(peer) {
-		return errors.New("peer already is a learner")
-	}
-	return validateStore(cluster, tl.ToStore)
+	return errors.Errorf("%v", errList)
 }
 
 // Influence calculates the store difference that current step makes.

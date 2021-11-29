@@ -505,7 +505,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
-	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpAdmin)
+	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), []uint64{}, operator.OpAdmin)
 	if err != nil {
 		log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 		return err
