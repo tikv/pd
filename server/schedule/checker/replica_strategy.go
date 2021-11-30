@@ -93,8 +93,12 @@ func (s *ReplicaStrategy) SelectStoreToFix(coLocationStores []*core.StoreInfo, o
 func (s *ReplicaStrategy) SelectStoreToImprove(coLocationStores []*core.StoreInfo, old uint64) uint64 {
 	// trick to avoid creating a slice with `old` removed.
 	s.swapStoreToFirst(coLocationStores, old)
+	oldStore := s.cluster.GetStore(old)
+	if oldStore == nil {
+		return 0
+	}
 	filters := []filter.Filter{
-		filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, s.cluster.GetStore(old)),
+		filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, oldStore),
 	}
 	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
 		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores[1:]))

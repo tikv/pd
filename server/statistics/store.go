@@ -94,7 +94,7 @@ func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
 	defer s.Unlock()
 	for storeID := range s.rollingStoresStats {
 		store := cluster.GetStore(storeID)
-		if store.IsTombstone() || store.IsUnhealthy() || store.IsPhysicallyDestroyed() {
+		if store == nil || store.IsTombstone() || store.IsUnhealthy() || store.IsPhysicallyDestroyed() {
 			delete(s.rollingStoresStats, storeID)
 		}
 	}
