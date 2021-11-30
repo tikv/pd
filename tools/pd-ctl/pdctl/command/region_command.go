@@ -375,11 +375,11 @@ func decodeKey(text string) (string, error) {
 	return string(buf), nil
 }
 
-// NewRegionsByKeysCommand returns regions in a given range[startkey, endkey) subcommand of regionCmd.
+// NewRegionsByKeysCommand returns regions in a given range [startkey, endkey) subcommand of regionCmd.
 func NewRegionsByKeysCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "keys [--format=raw|encode|hex] <start_key> <end_key> <limit>",
-		Short: "show regions in a given range[startkey, endkey)",
+		Short: "show regions in a given range [startkey, endkey)",
 		Run:   showRegionsByKeysCommandFunc,
 	}
 
@@ -392,19 +392,22 @@ func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	key, err := parseKey(cmd.Flags(), args[0])
+	startKey, err := parseKey(cmd.Flags(), args[0])
 	if err != nil {
 		cmd.Println("Error: ", err)
 		return
 	}
-	key = url.QueryEscape(key)
-	endKey, err := parseKey(cmd.Flags(), args[1])
-	if err != nil {
-		cmd.Println("Error: ", err)
-		return
+	startKey = url.QueryEscape(startKey)
+	prefix := regionsKeyPrefix + "?key=" + startKey
+	if len(args) >= 2 {
+		endKey, err := parseKey(cmd.Flags(), args[1])
+		if err != nil {
+			cmd.Println("Error: ", err)
+			return
+		}
+		endKey = url.QueryEscape(endKey)
+		prefix += "&end_key=" + endKey
 	}
-	endKey = url.QueryEscape(endKey)
-	prefix := regionsKeyPrefix + "?key=" + key + "&end_key=" + endKey
 	if len(args) == 3 {
 		if _, err = strconv.Atoi(args[2]); err != nil {
 			cmd.Println("limit should be a number")

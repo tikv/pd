@@ -125,7 +125,7 @@ type RaftCluster struct {
 	replicationMode *replication.ModeManager
 	traceRegionFlow bool
 
-	// It's used to manage components.
+	// Deprecated: we do not use it anymore. See https://github.com/tikv/tikv/issues/11472.
 	componentManager *component.Manager
 
 	unsafeRecoveryController *unsafeRecoveryController
@@ -1305,6 +1305,7 @@ func (c *RaftCluster) resetMetrics() {
 func (c *RaftCluster) collectClusterMetrics() {
 	c.RLock()
 	if c.regionStats == nil {
+		c.RUnlock()
 		return
 	}
 	c.regionStats.Collect()
@@ -1317,7 +1318,6 @@ func (c *RaftCluster) collectClusterMetrics() {
 
 func (c *RaftCluster) resetClusterMetrics() {
 	c.RLock()
-
 	if c.regionStats == nil {
 		c.RUnlock()
 		return
