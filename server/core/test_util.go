@@ -83,6 +83,24 @@ func NewTestRegionInfo(start, end []byte) *RegionInfo {
 	}}
 }
 
+// NewStoreInfoWithAvailable is create with available and capacity
+func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *StoreInfo {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = capacity
+	stats.Available = available
+	usedSize := capacity - available
+	regionSize := (float64(usedSize) * amp) / mb
+	store := NewStoreInfo(
+		&metapb.Store{
+			Id: id,
+		},
+		SetStoreStats(stats),
+		SetRegionCount(int(regionSize/96)),
+		SetRegionSize(int64(regionSize)),
+	)
+	return store
+}
+
 // NewStoreInfoWithLabel is create a store with specified labels.
 func NewStoreInfoWithLabel(id uint64, regionCount int, labels map[string]string) *StoreInfo {
 	storeLabels := make([]*metapb.StoreLabel, 0, len(labels))
