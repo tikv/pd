@@ -80,21 +80,9 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	return shouldBalance, sourceScore, targetScore
 }
 
-<<<<<<< HEAD
 func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
-=======
-func adjustTolerantRatio(cluster opt.Cluster, kind core.ScheduleKind) float64 {
-	var tolerantSizeRatio float64
-	switch c := cluster.(type) {
-	case *schedule.RangeCluster:
-		// range cluster use a separate configuration
-		tolerantSizeRatio = c.GetTolerantSizeRatio()
-	default:
-		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
-	}
->>>>>>> e9b4f7949 (scheduler: allow empty region to be scheduled and use a sperate tolerance config in scatter range scheduler (#4106))
+	tolerantSizeRatio := adjustTolerantRatio(cluster)
 	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
-		tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
 			tolerantSizeRatio = leaderTolerantSizeRatio
 		}
@@ -106,12 +94,19 @@ func adjustTolerantRatio(cluster opt.Cluster, kind core.ScheduleKind) float64 {
 	if regionSize < cluster.GetAverageRegionSize() {
 		regionSize = cluster.GetAverageRegionSize()
 	}
-	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
+	regionSize = int64(float64(regionSize) * tolerantSizeRatio)
 	return regionSize
 }
 
 func adjustTolerantRatio(cluster opt.Cluster) float64 {
-	tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
+	var tolerantSizeRatio float64
+	switch c := cluster.(type) {
+	case *schedule.RangeCluster:
+		// range cluster use a separate configuration
+		tolerantSizeRatio = c.GetTolerantSizeRatio()
+	default:
+		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
+	}
 	if tolerantSizeRatio == 0 {
 		var maxRegionCount float64
 		stores := cluster.GetStores()
