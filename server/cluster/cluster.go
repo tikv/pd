@@ -359,8 +359,8 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.running = false
-	close(c.quit)
 	c.coordinator.stop()
+	close(c.quit)
 	c.Unlock()
 	c.wg.Wait()
 	log.Info("raftcluster is stopped")
