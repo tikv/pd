@@ -1101,7 +1101,7 @@ func isLevelLegal(level string) bool {
 
 // GetReplicationModeConfig returns the replication mode config.
 func (s *Server) GetReplicationModeConfig() *config.ReplicationModeConfig {
-	return s.persistOptions.GetReplicationModeConfig()
+	return s.persistOptions.GetReplicationModeConfig().Clone()
 }
 
 // SetReplicationModeConfig sets the replication mode.
@@ -1334,26 +1334,41 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, member := range resp.Members {
-		clientUrls := member.GetClientUrls()
-		if len(clientUrls) == 0 {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
-			return errs.ErrClientURLEmpty.FastGenByArgs()
+		if err := s.replicateFileToMember(ctx, member, name, data); err != nil {
+			errs = append(errs, err)
 		}
-		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
-		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
-		req.Header.Set("PD-Allow-follower-handle", "true")
-		res, err := s.httpClient.Do(req)
-		if err != nil {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
-			return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
-		}
-		// Since we don't read the body, we can close it immediately.
-		res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
-			return errs.ErrSendRequest.FastGenByArgs()
-		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	// join all error messages
+	for _, e := range errs[1:] {
+		errs[0] = errors.Wrap(errs[0], e.Error())
+	}
+	return errs[0]
+}
+
+func (s *Server) replicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error {
+	clientUrls := member.GetClientUrls()
+	if len(clientUrls) == 0 {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()))
+		return errs.ErrClientURLEmpty.FastGenByArgs()
+	}
+	url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
+	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+	req.Header.Set("PD-Allow-follower-handle", "true")
+	res, err := s.httpClient.Do(req)
+	if err != nil {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
+		return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
+	}
+	// Since we don't read the body, we can close it immediately.
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
+		return errs.ErrSendRequest.FastGenByArgs()
 	}
 	return nil
 }
