@@ -153,7 +153,11 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.
 }
 
 func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
-	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster, region, cluster.GetStore(oldPeer.GetStoreId()))
+	store := cluster.GetStore(oldPeer.GetStoreId())
+	if store == nil {
+		return nil
+	}
+	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster, region, store)
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds())
 
 	target := filter.NewCandidates(cluster.GetStores()).
