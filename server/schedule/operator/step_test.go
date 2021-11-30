@@ -14,8 +14,6 @@
 package operator
 
 import (
-	"context"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -37,7 +35,7 @@ type testCase struct {
 }
 
 func (s *testStepSuite) SetUpTest(c *C) {
-	s.cluster = mockcluster.NewCluster(context.Background(), config.NewTestOptions())
+	s.cluster = mockcluster.NewCluster(config.NewTestOptions())
 	for i := 1; i <= 10; i++ {
 		s.cluster.PutStoreWithLabels(uint64(i))
 	}
