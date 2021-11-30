@@ -1269,6 +1269,7 @@ func (c *RaftCluster) resetMetrics() {
 func (c *RaftCluster) collectClusterMetrics() {
 	c.RLock()
 	if c.regionStats == nil {
+		c.RUnlock()
 		return
 	}
 	c.regionStats.Collect()
@@ -1281,7 +1282,6 @@ func (c *RaftCluster) collectClusterMetrics() {
 
 func (c *RaftCluster) resetClusterMetrics() {
 	c.RLock()
-
 	if c.regionStats == nil {
 		c.RUnlock()
 		return
