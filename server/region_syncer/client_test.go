@@ -16,6 +16,7 @@ package syncer
 
 import (
 	"context"
+	"io/ioutil"
 	"os"
 	"time"
 
@@ -34,7 +35,7 @@ type testClientSuite struct{}
 
 // For issue https://github.com/tikv/pd/issues/3936
 func (t *testClientSuite) TestLoadRegion(c *C) {
-	tempDir, err := os.MkdirTemp(os.TempDir(), "region_syncer_load_region")
+	tempDir, err := ioutil.TempDir(os.TempDir(), "region_syncer_load_region")
 	c.Assert(err, IsNil)
 	defer os.RemoveAll(tempDir)
 	rs, err := core.NewRegionStorage(context.Background(), tempDir, nil)
