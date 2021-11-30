@@ -179,15 +179,10 @@ test-with-cover: install-go-tools dashboard-ui
 	@$(FAILPOINT_DISABLE)
 
 test-with-cover-parallel: install-go-tools dashboard-ui split
-
 	@$(FAILPOINT_ENABLE)
-
 	set -euo pipefail;\
-
 	CGO_ENABLED=1 GO111MODULE=on gotestsum --junitfile test-report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
-
 	gocov convert coverage | gocov-xml >> pd-coverage.xml;
-
 	@$(FAILPOINT_DISABLE)
 
 test-tso-function: install-go-tools dashboard-ui
