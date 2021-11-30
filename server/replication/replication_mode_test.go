@@ -22,6 +22,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -142,13 +143,33 @@ func (s *testReplicationMode) TestStatus(c *C) {
 }
 
 type mockFileReplicator struct {
-	lastData string
-	err      error
+	memberIDs []uint64
+	lastData  map[uint64]string
+	errors    map[uint64]error
 }
 
-func (rep *mockFileReplicator) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
-	rep.lastData = string(data)
-	return rep.err
+func (rep *mockFileReplicator) GetMembers() ([]*pdpb.Member, error) {
+	var members []*pdpb.Member
+	for _, id := range rep.memberIDs {
+		members = append(members, &pdpb.Member{MemberId: id})
+	}
+	return members, nil
+}
+
+func (rep *mockFileReplicator) ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error {
+	if err := rep.errors[member.GetMemberId()]; err != nil {
+		return err
+	}
+	rep.lastData[member.GetMemberId()] = string(data)
+	return nil
+}
+
+func newMockReplicator(ids []uint64) *mockFileReplicator {
+	return &mockFileReplicator{
+		memberIDs: ids,
+		lastData:  make(map[uint64]string),
+		errors:    make(map[uint64]error),
+	}
 }
 
 func (s *testReplicationMode) TestStateSwitch(c *C) {
@@ -163,8 +184,8 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
-	var replicator mockFileReplicator
-	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
+	replicator := newMockReplicator([]uint64{1})
+	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	c.Assert(err, IsNil)
 
 	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
@@ -175,7 +196,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	c.Assert(rep.drGetState(), Equals, drStateSync)
 	stateID := rep.drAutoSync.StateID
 	c.Assert(stateID, Not(Equals), uint64(0))
-	c.Assert(replicator.lastData, Equals, fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID))
+	c.Assert(replicator.lastData[1], Equals, fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID))
 	assertStateIDUpdate := func() {
 		c.Assert(rep.drAutoSync.StateID, Not(Equals), stateID)
 		stateID = rep.drAutoSync.StateID
@@ -185,7 +206,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateAsync)
 	assertStateIDUpdate()
-	c.Assert(replicator.lastData, Equals, fmt.Sprintf(`{"state":"async","state_id":%d}`, stateID))
+	c.Assert(replicator.lastData[1], Equals, fmt.Sprintf(`{"state":"async","state_id":%d}`, stateID))
 
 	// add new store in dr zone.
 	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone2"})
@@ -213,7 +234,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	c.Assert(rep.drGetState(), Equals, drStateAsync)
 	assertStateIDUpdate()
 	rep.drSwitchToSync()
-	replicator.err = errors.New("fail to replicate")
+	replicator.errors[1] = errors.New("fail to replicate")
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateAsync)
 	assertStateIDUpdate()
@@ -267,6 +288,46 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSync)
 	assertStateIDUpdate()
+}
+
+func (s *testReplicationMode) TestReplicateState(c *C) {
+	store := core.NewStorage(kv.NewMemoryKV())
+	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
+		LabelKey:         "zone",
+		Primary:          "zone1",
+		DR:               "zone2",
+		PrimaryReplicas:  2,
+		DRReplicas:       1,
+		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+	}}
+	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
+	replicator := newMockReplicator([]uint64{1})
+	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
+	c.Assert(err, IsNil)
+
+	stateID := rep.drAutoSync.StateID
+	// replicate after initialized
+	c.Assert(replicator.lastData[1], Equals, fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID))
+
+	// repliate state to new member
+	replicator.memberIDs = append(replicator.memberIDs, 2, 3)
+	rep.checkReplicateFile()
+	c.Assert(replicator.lastData[2], Equals, fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID))
+	c.Assert(replicator.lastData[3], Equals, fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID))
+
+	// inject error
+	replicator.errors[2] = errors.New("failed to persist")
+	rep.tickDR() // switch async since there is only one zone
+	newStateID := rep.drAutoSync.StateID
+	c.Assert(replicator.lastData[1], Equals, fmt.Sprintf(`{"state":"async","state_id":%d}`, newStateID))
+	c.Assert(replicator.lastData[2], Equals, fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID))
+	c.Assert(replicator.lastData[3], Equals, fmt.Sprintf(`{"state":"async","state_id":%d}`, newStateID))
+
+	// clear error, replicate to node 2 next time
+	delete(replicator.errors, 2)
+	rep.checkReplicateFile()
+	c.Assert(replicator.lastData[2], Equals, fmt.Sprintf(`{"state":"async","state_id":%d}`, newStateID))
 }
 
 func (s *testReplicationMode) TestAsynctimeout(c *C) {
