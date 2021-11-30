@@ -496,6 +496,9 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	// Put region into cluster, otherwise, AddOperator will fail because of
 	// missing region
 	cluster.PutRegion(region)
+	cluster.AddLeaderStore(1, 1)
+	cluster.AddLeaderStore(2, 1)
+	cluster.AddLeaderStore(3, 1)
 
 	// The next allocated peer should have peerid 3, so we add this peer
 	// to store 3
