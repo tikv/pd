@@ -113,7 +113,7 @@ func (s *StoresStats) GetStoresLoads() map[uint64][]float64 {
 
 func (s *StoresStats) storeIsUnhealthy(cluster core.StoreSetInformer, storeID uint64) bool {
 	store := cluster.GetStore(storeID)
-	return store.IsTombstone() || store.IsUnhealthy() || store.IsPhysicallyDestroyed()
+	return store == nil || store.IsTombstone() || store.IsUnhealthy() || store.IsPhysicallyDestroyed()
 }
 
 // FilterUnhealthyStore filter unhealthy store
