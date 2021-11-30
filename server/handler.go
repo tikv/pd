@@ -707,11 +707,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if !opt.IsRegionHealthy(c, region) || !opt.IsRegionReplicated(c, region) {
+	if !opt.IsRegionHealthy(region) || !opt.IsRegionReplicated(c, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if !opt.IsRegionHealthy(c, target) || !opt.IsRegionReplicated(c, target) {
+	if !opt.IsRegionHealthy(target) || !opt.IsRegionReplicated(c, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 

@@ -145,6 +145,8 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		// region check learner-peer command
 		{[]string{"region", "check", "learner-peer"}, []*core.RegionInfo{r3}},
 		// region keys --format=raw <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=raw", "b"}, []*core.RegionInfo{r2, r3, r4}},
+		// region keys --format=raw <start_key> <end_key> <limit> command
 		{[]string{"region", "keys", "--format=raw", "b", "", "2"}, []*core.RegionInfo{r2, r3}},
 		// region keys --format=hex <start_key> <end_key> <limit> command
 		{[]string{"region", "keys", "--format=hex", "63", "", "2"}, []*core.RegionInfo{r3, r4}},

@@ -586,7 +586,7 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	if !respIsList {
 		res = "[\n" + res + "]\n"
 	}
-	err = os.WriteFile(file, []byte(res), 0644)
+	err = os.WriteFile(file, []byte(res), 0644) // #nosec
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -713,7 +713,7 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	err = os.WriteFile(file, []byte(res), 0644)
+	err = os.WriteFile(file, []byte(res), 0644) // #nosec
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -788,7 +788,7 @@ func loadRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	err = os.WriteFile(file, []byte(res), 0644)
+	err = os.WriteFile(file, []byte(res), 0644) // #nosec
 	if err != nil {
 		cmd.Println(err)
 		return
