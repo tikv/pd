@@ -39,6 +39,7 @@ var _ = Suite(&testStoreSuite{})
 
 type testStoreSuite struct {
 	svr       *server.Server
+	grpcSvr   *server.GrpcServer
 	cleanup   cleanUpFunc
 	urlPrefix string
 	stores    []*metapb.Store
@@ -91,6 +92,7 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
+	s.grpcSvr = &server.GrpcServer{Server: s.svr}
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
@@ -144,7 +146,7 @@ func (s *testStoreSuite) TestStoresList(c *C) {
 
 func (s *testStoreSuite) TestStoreGet(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
-	s.svr.StoreHeartbeat(
+	s.grpcSvr.StoreHeartbeat(
 		context.Background(), &pdpb.StoreHeartbeatRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Stats: &pdpb.StoreStats{
@@ -169,7 +171,7 @@ func (s *testStoreSuite) TestStoreGet(c *C) {
 func (s *testStoreSuite) TestStoreInfoGet(c *C) {
 	timeStamp := time.Now().Unix()
 	url := fmt.Sprintf("%s/store/1112", s.urlPrefix)
-	_, errPut := s.svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+	_, errPut := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 		Store: &metapb.Store{
 			Id:             1112,
