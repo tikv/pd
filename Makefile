@@ -178,7 +178,7 @@ test-with-cover: install-go-tools dashboard-ui
 	done
 	@$(FAILPOINT_DISABLE)
 
-test-with-cover-parallel: install-go-tools dashboard-ui  tools/split
+test-with-cover-parallel: install-go-tools dashboard-ui split
 
 	@$(FAILPOINT_ENABLE)
 
@@ -285,7 +285,7 @@ failpoint-disable: install-go-tools
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
 
-tools/split:
+split:
 	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
 
 	split packages.list -n r/${TASK_COUNT} packages_unit_ -a 1 --numeric-suffixes=1;\
