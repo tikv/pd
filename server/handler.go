@@ -980,6 +980,7 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 				if peer.StoreId == hotPeerStat.StoreID {
 					peerID = peer.Id
 					isLearner = peer.Role == metapb.PeerRole_Learner
+					break
 				}
 			}
 			stat := core.HistoryHotRegion{
@@ -988,7 +989,7 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
 				PeerID:         peerID,
-				IsLeader:       meta.Id == region.GetLeader().Id,
+				IsLeader:       peerID == region.GetLeader().Id,
 				IsLearner:      isLearner,
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
