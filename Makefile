@@ -283,7 +283,8 @@ failpoint-disable: install-go-tools
 split:
 	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
 	split packages.list -n r/${TASK_COUNT} packages_unit_ -a 1 --numeric-suffixes=1;\
-	cat packages_unit_${TASK_ID} |tr "\n" " " >package.list;
+	cat packages_unit_${TASK_ID} |tr "\n" " " >package.list;\
+	rm packages*;
 
 clean: failpoint-disable deadlock-disable clean-test clean-build
 
