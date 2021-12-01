@@ -89,6 +89,9 @@ func (s *RegionStorage) backgroundFlush() {
 		case <-ticker.C:
 			s.mu.RLock()
 			isFlush = s.flushTime.Before(time.Now())
+			failpoint.Inject("regionStorageFastFlush", func() {
+				isFlush = true
+			})
 			s.mu.RUnlock()
 			if !isFlush {
 				continue

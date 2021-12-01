@@ -25,7 +25,6 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
 )
@@ -43,7 +42,7 @@ func (s *testCreateOperatorSuite) SetUpTest(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.cluster = mockcluster.NewCluster(s.ctx, opts)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
+		config.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
 	s.cluster.SetLocationLabels([]string{"zone", "host"})
 	s.cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})

@@ -57,7 +57,7 @@ func main() {
 			fmt.Println(err)
 			return
 		}
-		input = strings.Split(strings.TrimSpace(string(b[:])), " ")
+		input = strings.Split(strings.TrimSpace(string(b)), " ")
 	}
 
 	pdctl.MainStart(append(os.Args[1:], input...))

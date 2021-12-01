@@ -206,12 +206,12 @@ const (
 )
 
 type drAutoSyncStatus struct {
-	State            string    `json:"state,omitempty"`
-	StateID          uint64    `json:"state_id,omitempty"`
-	RecoverStartTime time.Time `json:"recover_start,omitempty"`
-	TotalRegions     int       `json:"total_regions,omitempty"`
-	SyncedRegions    int       `json:"synced_regions,omitempty"`
-	RecoverProgress  float32   `json:"recover_progress,omitempty"`
+	State            string     `json:"state,omitempty"`
+	StateID          uint64     `json:"state_id,omitempty"`
+	RecoverStartTime *time.Time `json:"recover_start,omitempty"`
+	TotalRegions     int        `json:"total_regions,omitempty"`
+	SyncedRegions    int        `json:"synced_regions,omitempty"`
+	RecoverProgress  float32    `json:"recover_progress,omitempty"`
 }
 
 func (m *ModeManager) loadDRAutoSync() error {
@@ -280,7 +280,8 @@ func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
 	}
-	dr := drAutoSyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: time.Now()}
+	now := time.Now()
+	dr := drAutoSyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: &now}
 	if err := m.drPersistStatus(dr); err != nil {
 		return err
 	}
@@ -346,17 +347,17 @@ const (
 )
 
 // Run starts the background job.
-func (m *ModeManager) Run(quit chan struct{}) {
+func (m *ModeManager) Run(ctx context.Context) {
 	// Wait for a while when just start, in case tikv do not connect in time.
 	select {
 	case <-time.After(idleTimeout):
-	case <-quit:
+	case <-ctx.Done():
 		return
 	}
 	for {
 		select {
 		case <-time.After(tickInterval):
-		case <-quit:
+		case <-ctx.Done():
 			return
 		}
 		m.tickDR()
@@ -386,6 +387,16 @@ func (m *ModeManager) tickDR() {
 		upPeers += totalDrPeers - downDrStores
 	}
 	hasMajority := upPeers*2 > totalPrimaryPeers+totalDrPeers
+
+	log.Debug("replication store status",
+		zap.Int("up-primary", upPrimayStores),
+		zap.Int("up-dr", upDrStores),
+		zap.Int("down-primary", downPrimaryStores),
+		zap.Int("down-dr", downDrStores),
+		zap.Bool("can-sync", canSync),
+		zap.Int("up-peers", upPeers),
+		zap.Bool("has-majority", hasMajority),
+	)
 
 	// If hasMajority is false, the cluster is always unavailable. Switch to async won't help.
 	if !canSync && hasMajority && m.drGetState() != drStateAsync && m.drCheckAsyncTimeout() {
@@ -421,7 +432,6 @@ func (m *ModeManager) checkStoreStatus() (primaryDownCount, drDownCount, primary
 			} else {
 				primaryUpCount++
 			}
-
 		}
 		if labelValue == m.config.DRAutoSync.DR {
 			if down {

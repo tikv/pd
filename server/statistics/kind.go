@@ -14,36 +14,6 @@
 
 package statistics
 
-// FlowKind is a identify Flow types.
-type FlowKind uint32
-
-// Flags for flow.
-const (
-	WriteFlow FlowKind = iota
-	ReadFlow
-)
-
-func (k FlowKind) String() string {
-	switch k {
-	case WriteFlow:
-		return "write"
-	case ReadFlow:
-		return "read"
-	}
-	return "unimplemented"
-}
-
-// RegionStats returns hot items according to kind
-func (k FlowKind) RegionStats() []RegionStatKind {
-	switch k {
-	case WriteFlow:
-		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
-	case ReadFlow:
-		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
-	}
-	return nil
-}
-
 // RegionStatKind represents the statistics type of region.
 type RegionStatKind int
 
@@ -146,4 +116,34 @@ func (k SourceKind) String() string {
 		return "adopt"
 	}
 	return "unknown"
+}
+
+// FlowKind is a identify Flow types.
+type FlowKind uint32
+
+// Flags for flow.
+const (
+	WriteFlow FlowKind = iota
+	ReadFlow
+)
+
+func (k FlowKind) String() string {
+	switch k {
+	case WriteFlow:
+		return "write"
+	case ReadFlow:
+		return "read"
+	}
+	return "unimplemented"
+}
+
+// RegionStats returns hot items according to kind
+func (k FlowKind) RegionStats() []RegionStatKind {
+	switch k {
+	case WriteFlow:
+		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
+	case ReadFlow:
+		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
+	}
+	return nil
 }

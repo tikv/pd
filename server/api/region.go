@@ -308,10 +308,10 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags region
-// @Summary List regions start from a key.
-// @Param key query string true "Region start key"
-// @Param endkey query string true "Range end key"
-// @Param limit query integer false "Limit count" default(16)
+// @Summary List regions in a given range [startKey, endKey).
+// @Param key query string true "Region range start key"
+// @Param endkey query string true "Region range end key"
+// @Param limit query integer false "Limit count" default(16) without endKey, default(-1) with endKey
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
@@ -709,7 +709,7 @@ func (h *regionsHandler) GetTopSize(w http.ResponseWriter, r *http.Request) {
 // @Param body body object true "json params"
 // @Param limit query integer false "Limit count" default(256)
 // @Produce json
-// @Success 200 {string} string "Accelerate regions scheduling in a given range[startKey,endKey)"
+// @Success 200 {string} string "Accelerate regions scheduling in a given range [startKey, endKey)"
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/accelerate-schedule [post]
 func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter, r *http.Request) {

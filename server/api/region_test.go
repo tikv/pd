@@ -427,7 +427,7 @@ func (s *testGetRegionSuite) TestRegionKey(c *C) {
 	c.Assert(r.GetID(), Equals, RegionInfo.ID)
 }
 
-func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
+func (s *testGetRegionSuite) TestScanRegionByKeys(c *C) {
 	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
 	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("e"))
