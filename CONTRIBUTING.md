@@ -58,7 +58,7 @@ The format can be described more formally as follows:
 <BLANK LINE>
 <why this change was made>
 <BLANK LINE>
-<close/fix/ref/resolve> <issue number>
+<close/fix/ref/resolve> #<issue number>
 <BLANK LINE>
 <footer>
 ```
