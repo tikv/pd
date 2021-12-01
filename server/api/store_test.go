@@ -418,24 +418,71 @@ func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
 	c.Assert(err, NotNil)
 }
 
-func (s *testStoreSuite) TestDownState(c *C) {
+func (s *testStoreSuite) TestState(c *C) {
 	store := core.NewStoreInfo(
 		&metapb.Store{
 			State: metapb.StoreState_Up,
 		},
 		core.SetStoreStats(&pdpb.StoreStats{}),
-		core.SetLastHeartbeatTS(time.Now()),
 	)
-	storeInfo := newStoreInfo(s.svr.GetScheduleConfig(), store)
-	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
 
-	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute * 2)))
-	storeInfo = newStoreInfo(s.svr.GetScheduleConfig(), newStore)
-	c.Assert(storeInfo.Store.StateName, Equals, disconnectedName)
+	testCases := []struct {
+		name            string
+		option          core.StoreCreateOption
+		expectHBStatus  string
+		expectStateName string
+	}{
+		{
+			name:            "alive store",
+			option:          core.SetLastHeartbeatTS(time.Now()),
+			expectHBStatus:  alive,
+			expectStateName: metapb.StoreState_Up.String(),
+		},
+		{
+			name:            "disconnected store",
+			option:          core.SetLastHeartbeatTS(time.Now().Add(-time.Minute * 2)),
+			expectHBStatus:  disconnected,
+			expectStateName: metapb.StoreState_Up.String(),
+		},
+		{
+			name:            "down store",
+			option:          core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 2)),
+			expectHBStatus:  down,
+			expectStateName: metapb.StoreState_Up.String(),
+		},
+		{
+			name:            "offline down store",
+			option:          core.OfflineStore(false),
+			expectHBStatus:  down,
+			expectStateName: metapb.StoreState_Offline.String(),
+		},
+		{
+			name:            "offline disconnected store",
+			option:          core.SetLastHeartbeatTS(time.Now().Add(-time.Minute * 2)),
+			expectHBStatus:  disconnected,
+			expectStateName: metapb.StoreState_Offline.String(),
+		},
+		{
+			name:            "offline alive store",
+			option:          core.SetLastHeartbeatTS(time.Now()),
+			expectHBStatus:  alive,
+			expectStateName: metapb.StoreState_Offline.String(),
+		},
+		{
+			name:            "tombstone store",
+			option:          core.TombstoneStore(),
+			expectHBStatus:  dead,
+			expectStateName: metapb.StoreState_Tombstone.String(),
+		},
+	}
 
-	newStore = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 2)))
-	storeInfo = newStoreInfo(s.svr.GetScheduleConfig(), newStore)
-	c.Assert(storeInfo.Store.StateName, Equals, downStateName)
+	for _, testCase := range testCases {
+		c.Log(testCase.name)
+		store = store.Clone(testCase.option)
+		storeInfo := newStoreInfo(s.svr.GetScheduleConfig(), store)
+		c.Assert(storeInfo.Store.HeartbeatStatus, Equals, testCase.expectHBStatus)
+		c.Assert(storeInfo.Store.StateName, Equals, testCase.expectStateName)
+	}
 }
 
 func (s *testStoreSuite) TestGetAllLimit(c *C) {

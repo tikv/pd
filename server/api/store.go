@@ -50,6 +50,7 @@ type MetaStore struct {
 	LastHeartbeat       int64                `json:"last_heartbeat,omitempty"`
 	PhysicallyDestroyed bool                 `json:"physically_destroyed,omitempty"`
 	StateName           string               `json:"state_name"`
+	HeartbeatStatus     string               `json:"heartbeat_status"`
 }
 
 // NewMetaStore convert metapb.Store to MetaStore without State
@@ -117,8 +118,10 @@ type StoreInfo struct {
 }
 
 const (
-	disconnectedName = "Disconnected"
-	downStateName    = "Down"
+	alive        = "Alive"
+	disconnected = "Disconnected"
+	down         = "Down"
+	dead         = "Dead"
 )
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
@@ -155,12 +158,14 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 		s.Status.Uptime = &duration
 	}
 
-	if store.GetState() == metapb.StoreState_Up {
-		if store.DownTime() > opt.MaxStoreDownTime.Duration {
-			s.Store.StateName = downStateName
-		} else if store.IsDisconnected() {
-			s.Store.StateName = disconnectedName
-		}
+	if store.IsTombstone() {
+		s.Store.HeartbeatStatus = dead
+	} else if store.DownTime() > opt.MaxStoreDownTime.Duration {
+		s.Store.HeartbeatStatus = down
+	} else if store.IsDisconnected() {
+		s.Store.HeartbeatStatus = disconnected
+	} else {
+		s.Store.HeartbeatStatus = alive
 	}
 	return s
 }
