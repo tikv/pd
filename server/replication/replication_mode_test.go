@@ -54,7 +54,7 @@ func (s *testReplicationMode) TestInitial(c *C) {
 	store := core.NewStorage(kv.NewMemoryKV())
 	conf := config.ReplicationModeConfig{ReplicationMode: modeMajority}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
-	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
+	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{Mode: pb.ReplicationMode_MAJORITY})
 
@@ -67,7 +67,7 @@ func (s *testReplicationMode) TestInitial(c *C) {
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
-	rep, err = NewReplicationModeManager(conf, store, cluster, nil)
+	rep, err = NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{
 		Mode: pb.ReplicationMode_DR_AUTO_SYNC,
@@ -87,7 +87,7 @@ func (s *testReplicationMode) TestStatus(c *C) {
 		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
-	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
+	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{
 		Mode: pb.ReplicationMode_DR_AUTO_SYNC,
@@ -125,7 +125,7 @@ func (s *testReplicationMode) TestStatus(c *C) {
 	})
 
 	// test reload
-	rep, err = NewReplicationModeManager(conf, store, cluster, nil)
+	rep, err = NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	c.Assert(err, IsNil)
 	c.Assert(rep.drAutoSync.State, Equals, drStateSyncRecover)
 
@@ -395,7 +395,7 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
-	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
+	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	c.Assert(err, IsNil)
 
 	prepare := func(n int, asyncRegions []int) {
@@ -455,7 +455,7 @@ func (s *testReplicationMode) TestRecoverProgressWithSplitAndMerge(c *C) {
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
-	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
+	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	c.Assert(err, IsNil)
 
 	prepare := func(n int, asyncRegions []int) {
