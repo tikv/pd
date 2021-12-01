@@ -367,7 +367,6 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 			c.Assert(isClear, IsTrue)
 		}
 	}
-
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {
