@@ -97,6 +97,7 @@ type grantHotRegionSchedulerConfig struct {
 
 func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) bool {
 	conf.mu.Lock()
+	defer conf.mu.Unlock()
 	ret := slice.AnyOf(peers, func(i int) bool {
 		return leaderID == peers[i]
 	})
@@ -104,7 +105,6 @@ func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uin
 		conf.StoreLeadID = leaderID
 		conf.StoreIDs = peers
 	}
-	conf.mu.Unlock()
 	return ret
 }
 
