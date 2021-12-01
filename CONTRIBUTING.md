@@ -4,7 +4,7 @@ Thanks for your interest in contributing to PD! If you need any help or mentorin
 
 ## Finding something to work on
 
-For beginners, we have prepared many suitable tasks for you. Checkout our [Help Wanted issues](https://github.com/tikv/pd/issues?q=is%3Aopen+is%3Aissue+label%3Astatus%2Fhelp-wanted) list, in which we have also marked the difficulty level.
+For beginners, we have prepared many suitable tasks for you. Checkout our [Help Wanted issues](https://github.com/tikv/pd/issues?q=is%3Aopen+is%3Aissue+label%3A%22help+wanted%22) list, in which we have also marked the difficulty level.
 
 If you are planning something big, for example, relates to multiple components or changes current behaviors, make sure to open an issue to discuss with us before going on.
 
@@ -18,6 +18,7 @@ If you are planning something big, for example, relates to multiple components o
 
 This is a rough outline of what a contributor's workflow looks like:
 
+- Create an issue about the problem that you are going to solve if there isn't existed.
 - Create a topic branch from where you want to base your work. This is usually master.
 - Make commits of logical units and add test case if the change fixes a bug or adds new functionality.
 - Run tests and make sure all the tests are passed.
@@ -56,6 +57,8 @@ The format can be described more formally as follows:
 <subsystem>: <what changed>
 <BLANK LINE>
 <why this change was made>
+<BLANK LINE>
+<close/fix/ref/resolve> <issue number>
 <BLANK LINE>
 <footer>
 ```
