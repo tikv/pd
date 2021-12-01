@@ -343,13 +343,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	b.toPromote = newPeersMap()
 	b.toDemote = newPeersMap()
 
-	voterCount := 0
-	for _, peer := range b.targetPeers {
-		if !core.IsLearner(peer) {
-			voterCount++
-		}
-	}
-	if voterCount == 0 {
+	if b.targetPeers.NumVoters() == 0 {
 		return "", errors.New("cannot create operator: target peers have no voter")
 	}
 
@@ -427,6 +421,12 @@ func (b *Builder) prepareBuild() (string, error) {
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toDemote) <= 1 {
 		// If only one peer changed, joint consensus is not used.
 		b.useJointConsensus = false
+
+		// Removing a voter directly in a 2 replicas raft group would make the region unavailable,
+		// demoting the voter to learner before remove it would fix this problem.
+		if len(b.toRemove) == 1 && b.allowDemote && b.originPeers.NumVoters() == 2 {
+			b.toDemote = b.toRemove.Copy()
+		}
 	}
 
 	b.peerAddStep = make(map[uint64]int)
@@ -1077,4 +1077,14 @@ func (pm peersMap) Copy() peersMap {
 		pm2.Set(p)
 	}
 	return pm2
+}
+
+func (pm peersMap) NumVoters() int {
+	voters := 0
+	for _, peer := range pm {
+		if !core.IsLearner(peer) {
+			voters += 1
+		}
+	}
+	return voters
 }

@@ -374,6 +374,16 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 2},
 			},
 		},
+		{ // remove voter in a 2 replica raft group
+			true, false,
+			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}},
+			OpRegion,
+			[]OpStep{
+				DemoteFollower{ToStore: 2, PeerID: 2},
+				RemovePeer{FromStore: 2},
+			},
+		},
 		// use joint consensus
 		{ // transfer leader before entering joint state
 			true, true,
