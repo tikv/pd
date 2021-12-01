@@ -198,6 +198,21 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case schedulers.GrantHotRegionName:
+		leaderID, ok := input["store-leader-id"].(string)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "missing leader id")
+			return
+		}
+		peerIDs, ok := input["store-id"].(string)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "missing store id")
+			return
+		}
+		if err := h.AddGrantHotRegionScheduler(leaderID, peerIDs); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	default:
 		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
 		return
