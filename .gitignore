@@ -19,3 +19,9 @@ docs/swagger/*
 *.before
 covprofile
 coverage.tmp
+packages.list
+package.list
+packages_unit_*
+report.xml
+coverage.xml
+coverage
