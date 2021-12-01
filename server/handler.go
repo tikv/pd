@@ -329,6 +329,11 @@ func (h *Handler) AddRandomMergeScheduler() error {
 	return h.AddScheduler(schedulers.RandomMergeType)
 }
 
+// AddGrantHotRegionScheduler adds a grant-hot-region-scheduler
+func (h *Handler) AddGrantHotRegionScheduler(leaderID, peers string) error {
+	return h.AddScheduler(schedulers.GrantHotRegionType, leaderID, peers)
+}
+
 // GetOperator returns the region operator.
 func (h *Handler) GetOperator(regionID uint64) (*operator.Operator, error) {
 	c, err := h.GetOperatorController()
