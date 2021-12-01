@@ -13,7 +13,7 @@ PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
-TASK_COUNT=4
+TASK_COUNT=1
 TASK_ID=1
 
 BUILD_BIN_PATH := $(shell pwd)/bin
@@ -178,11 +178,13 @@ test-with-cover: install-go-tools dashboard-ui
 	done
 	@$(FAILPOINT_DISABLE)
 
+# the command should be used in daily ci，it will split some task to run parallel.
+# it should retain report.xml、coverage、coverage.xml、package.list to analyze.
 test-with-cover-parallel: install-go-tools dashboard-ui split
 	@$(FAILPOINT_ENABLE)
 	set -euo pipefail;\
 	CGO_ENABLED=1 GO111MODULE=on gotestsum --junitfile report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
-	gocov convert coverage | gocov-xml >> coverage.xml;
+	gocov convert coverage | gocov-xml >> coverage.xml;\
 	@$(FAILPOINT_DISABLE)
 
 test-tso-function: install-go-tools dashboard-ui
@@ -281,6 +283,7 @@ failpoint-disable: install-go-tools
 	@$(FAILPOINT_DISABLE)
 
 split:
+# todo: it will remove server/api、/tests and tso package after daily ci integrate all verify ci.
 	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
 	split packages.list -n r/${TASK_COUNT} packages_unit_ -a 1 --numeric-suffixes=1;\
 	cat packages_unit_${TASK_ID} |tr "\n" " " >package.list;\
