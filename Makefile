@@ -178,8 +178,8 @@ test-with-cover: install-go-tools dashboard-ui
 	done
 	@$(FAILPOINT_DISABLE)
 
-# the command should be used in daily ci，it will split some task to run parallel.
-# it should retain report.xml、coverage、coverage.xml、package.list to analyze.
+# The command should be used in daily CI，it will split some tasks to run parallel.
+# It should retain report.xml,coverage,coverage.xml and package.list to analyze.
 test-with-cover-parallel: install-go-tools dashboard-ui split
 	@$(FAILPOINT_ENABLE)
 	set -euo pipefail;\
@@ -283,7 +283,7 @@ failpoint-disable: install-go-tools
 	@$(FAILPOINT_DISABLE)
 
 split:
-# todo: it will remove server/api、/tests and tso package after daily ci integrate all verify ci.
+# todo: it will remove server/api,/tests and tso packages after daily CI integrate all verify CI.
 	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
 	split packages.list -n r/${TASK_COUNT} packages_unit_ -a 1 --numeric-suffixes=1;\
 	cat packages_unit_${TASK_ID} |tr "\n" " " >package.list;\
