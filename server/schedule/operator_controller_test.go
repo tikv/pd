@@ -164,6 +164,25 @@ func (t *testOperatorControllerSuite) TestFastFailOperator(c *C) {
 	c.Assert(oc.GetOperator(region.GetID()), IsNil)
 }
 
+// Issue 3353
+func (t *testOperatorControllerSuite) TestFastFailWithUnhealthyStore(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(t.ctx, tc, stream)
+	tc.AddLeaderStore(1, 2)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1, 1, 2)
+	region := tc.GetRegion(1)
+	steps := []operator.OpStep{operator.TransferLeader{ToStore: 2}}
+	op := operator.NewOperator("test", "test", 1, region.GetRegionEpoch(), operator.OpLeader, steps...)
+	oc.SetOperator(op)
+	c.Assert(oc.checkStaleOperator(op, steps[0], region), IsFalse)
+	tc.SetStoreDown(2)
+	c.Assert(oc.checkStaleOperator(op, steps[0], region), IsTrue)
+}
+
 func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/unexpectedOperator"), IsNil)
 	opt := config.NewTestOptions()
@@ -477,6 +496,9 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	// Put region into cluster, otherwise, AddOperator will fail because of
 	// missing region
 	cluster.PutRegion(region)
+	cluster.AddLeaderStore(1, 1)
+	cluster.AddLeaderStore(2, 1)
+	cluster.AddLeaderStore(3, 1)
 
 	// The next allocated peer should have peerid 3, so we add this peer
 	// to store 3
