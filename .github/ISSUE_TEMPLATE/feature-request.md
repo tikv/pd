@@ -1,6 +1,6 @@
 ---
 name: "🚀 Feature Request"
-about: I have a suggestion
+about: I have a suggestion.
 labels: type/feature-request
 ---
 
