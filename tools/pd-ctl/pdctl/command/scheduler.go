@@ -54,7 +54,7 @@ func NewSchedulerCommand() *cobra.Command {
 // NewPauseSchedulerCommand returns a command to pause a scheduler.
 func NewPauseSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "pause <scheduler> <delay>",
+		Use:   "pause <scheduler> <delay_second>",
 		Short: "pause a scheduler",
 		Run:   pauseSchedulerCommandFunc,
 	}
