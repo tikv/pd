@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package middleware
 
 import (
 	"context"
 	"net/http"
 	"sync"
+
+	PDServer "github.com/tikv/pd/server"
 
 	"google.golang.org/grpc/metadata"
 
@@ -36,13 +38,13 @@ var (
 
 // SelfProtectionHandler a
 type SelfProtectionHandler struct {
-	s *Server
+	s *PDServer.Server
 	// apiServiceNames is used to find the service name of api
 	apiServiceNames map[string]string
 	// grpcServiceNames is used to find the service name of grpc method
 	grpcServiceNames map[string]string
 	// ServiceHandlers a
-	ServiceHandlers map[string]ServiceHandler
+	ServiceHandlers map[string]ServiceSelfProtectionHandler
 }
 
 func (h *SelfProtectionHandler) GetHttpApiServiceName(url string) (string, bool) {
@@ -84,7 +86,7 @@ func (h *SelfProtectionHandler) SelfProtectionHandle(componentName string, servi
 	return limitAllow
 }
 
-type ServiceHandler struct {
+type ServiceSelfProtectionHandler struct {
 	apiRateLimiter ApiRateLimiter
 	auditLog       AuditLog
 }
@@ -168,28 +170,34 @@ type AuditLog struct {
 }
 
 // UserSignatureGRPCClientInterceptorBuilder add component user signature in gRPC
-type UserSignatureGRPCClientInterceptorBuilder struct{}
+type UserSignatureGRPCClientInterceptorBuilder struct {
+	component string
+}
 
-func (builder *UserSignatureGRPCClientInterceptorBuilder) UnaryClientInterceptor(component string) grpc.UnaryClientInterceptor {
+func (builder *UserSignatureGRPCClientInterceptorBuilder) setComponentName(component string) {
+	builder.component = component
+}
+
+func (builder *UserSignatureGRPCClientInterceptorBuilder) UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		headerData := metadata.Pairs(componentSignatureKey, component)
+		headerData := metadata.Pairs(componentSignatureKey, builder.component)
 		ctxH := metadata.NewOutgoingContext(ctx, headerData)
 		err := invoker(ctxH, method, req, reply, cc, opts...)
 		return err
 	}
 }
 
-func (builder *UserSignatureGRPCClientInterceptorBuilder) StreamClientInterceptor(component string) grpc.StreamClientInterceptor {
+func (builder *UserSignatureGRPCClientInterceptorBuilder) StreamClientInterceptor() grpc.StreamClientInterceptor {
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-		headerData := metadata.Pairs(componentSignatureKey, component)
+		headerData := metadata.Pairs(componentSignatureKey, builder.component)
 		ctxH := metadata.NewOutgoingContext(ctx, headerData)
 		return streamer(ctxH, desc, cc, method, opts...)
 	}
 }
 
-func (builder *UserSignatureGRPCClientInterceptorBuilder) UserSignatureDialOptions(component string) []grpc.DialOption {
-	streamInterceptors := []grpc.StreamClientInterceptor{builder.StreamClientInterceptor(component)}
-	unaryInterceptors := []grpc.UnaryClientInterceptor{builder.UnaryClientInterceptor(component)}
+func (builder *UserSignatureGRPCClientInterceptorBuilder) UserSignatureDialOptions() []grpc.DialOption {
+	streamInterceptors := []grpc.StreamClientInterceptor{builder.StreamClientInterceptor()}
+	unaryInterceptors := []grpc.UnaryClientInterceptor{builder.UnaryClientInterceptor()}
 	opts := []grpc.DialOption{grpc.WithChainStreamInterceptor(streamInterceptors...), grpc.WithChainUnaryInterceptor(unaryInterceptors...)}
 	return opts
 }
