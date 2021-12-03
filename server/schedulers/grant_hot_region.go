@@ -97,6 +97,7 @@ type grantHotRegionSchedulerConfig struct {
 
 func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) bool {
 	conf.mu.Lock()
+	defer conf.mu.Unlock()
 	ret := slice.AnyOf(peers, func(i int) bool {
 		return leaderID == peers[i]
 	})
@@ -104,9 +105,21 @@ func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uin
 		conf.StoreLeadID = leaderID
 		conf.StoreIDs = peers
 	}
-	conf.mu.Unlock()
 	return ret
 }
+
+func (conf *grantHotRegionSchedulerConfig) GetStoreLeadID() uint64 {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	return conf.StoreLeadID
+}
+
+func (conf *grantHotRegionSchedulerConfig) SetStoreLeadID(id uint64) {
+	conf.mu.Lock()
+	defer conf.mu.Unlock()
+	conf.StoreLeadID = id
+}
+
 func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
@@ -231,7 +244,7 @@ func (handler *grantHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	}
 
 	if err = handler.config.Persist(); err != nil {
-		handler.config.StoreLeadID = 0
+		handler.config.SetStoreLeadID(0)
 		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -303,7 +316,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, infos []*s
 				continue
 			}
 		} else {
-			if !s.conf.has(srcStoreID) || srcStoreID == s.conf.StoreLeadID {
+			if !s.conf.has(srcStoreID) || srcStoreID == s.conf.GetStoreLeadID() {
 				continue
 			}
 		}
@@ -343,7 +356,7 @@ func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64,
 	var candidate []uint64
 	if isLeader {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true})
-		candidate = []uint64{s.conf.StoreLeadID}
+		candidate = []uint64{s.conf.GetStoreLeadID()}
 	} else {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()))
