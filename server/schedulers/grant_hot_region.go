@@ -274,21 +274,21 @@ func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operator
 }
 
 func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
-	storeInfos := statistics.SummaryStoreInfos(cluster)
+	storeInfos := statistics.SummaryStoreInfos(cluster.GetStores())
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
 	var stLoadInfos map[uint64]*statistics.StoreLoadDetail
 	switch typ {
 	case statistics.Read:
-		stLoadInfos = summaryStoresLoad(
+		stLoadInfos = statistics.SummaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionReadStats(),
 			isTraceRegionFlow,
 			statistics.Read, core.RegionKind)
 	case statistics.Write:
-		stLoadInfos = summaryStoresLoad(
+		stLoadInfos = statistics.SummaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionWriteStats(),
