@@ -124,7 +124,7 @@ func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect i
 	return res
 }
 
-func checkAndUpdateSync(c *C, cache *hotPeerCache, region *core.RegionInfo) (res []*HotPeerStat) {
+func checkAndUpdateSync(cache *hotPeerCache, region *core.RegionInfo) (res []*HotPeerStat) {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	res = append(res, cache.CollectExpiredItems(region)...)
@@ -373,7 +373,7 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 			var isClear bool
 			region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
 			for i := 1; i <= 200; i++ {
-				checkAndUpdateSync(c, cache, region)
+				checkAndUpdateSync(cache, region)
 				if len(cache.storesOfRegion[region.GetID()]) == 0 {
 					isClear = true
 					break
