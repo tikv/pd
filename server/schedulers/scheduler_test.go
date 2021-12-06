@@ -221,7 +221,7 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionScheduleLimit(0)
-	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	tc.AddRegionStore(1, 3)
@@ -401,7 +401,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	cd := schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
 	bs, err := schedule.CreateScheduler(BalanceRegionType, oc, storage, cd)
 	c.Assert(err, IsNil)
-	hs, err := schedule.CreateScheduler(HotWriteRegionType, oc, storage, cd)
+	hs, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage, cd)
 	c.Assert(err, IsNil)
 
 	opt := config.NewTestOptions()
