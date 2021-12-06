@@ -97,31 +97,31 @@ func (k StoreStatKind) String() string {
 	return "unknown StoreStatKind"
 }
 
-// FlowKind is a identify Flow types.
-type FlowKind uint32
+// RWType is a identify hot region types.
+type RWType uint32
 
-// Flags for flow.
+// Flags for r/w type.
 const (
-	WriteFlow FlowKind = iota
-	ReadFlow
+	Write RWType = iota
+	Read
 )
 
-func (k FlowKind) String() string {
+func (k RWType) String() string {
 	switch k {
-	case WriteFlow:
+	case Write:
 		return "write"
-	case ReadFlow:
+	case Read:
 		return "read"
 	}
 	return "unimplemented"
 }
 
 // RegionStats returns hot items according to kind
-func (k FlowKind) RegionStats() []RegionStatKind {
+func (k RWType) RegionStats() []RegionStatKind {
 	switch k {
-	case WriteFlow:
+	case Write:
 		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
-	case ReadFlow:
+	case Read:
 		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
 	}
 	return nil

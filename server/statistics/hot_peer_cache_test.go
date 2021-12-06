@@ -30,7 +30,7 @@ var _ = Suite(&testHotPeerCache{})
 type testHotPeerCache struct{}
 
 func (t *testHotPeerCache) TestStoreTimeUnsync(c *C) {
-	cache := NewHotPeerCache(WriteFlow)
+	cache := NewHotPeerCache(Write)
 	peers := newPeers(3,
 		func(i int) uint64 { return uint64(10000 + i) },
 		func(i int) uint64 { return uint64(i) })
@@ -68,7 +68,7 @@ const (
 )
 
 type testCacheCase struct {
-	kind       FlowKind
+	kind       RWType
 	operator   operator
 	expect     int
 	needDelete bool
@@ -76,12 +76,12 @@ type testCacheCase struct {
 
 func (t *testHotPeerCache) TestCache(c *C) {
 	tests := []*testCacheCase{
-		{ReadFlow, transferLeader, 3, false},
-		{ReadFlow, movePeer, 4, true},
-		{ReadFlow, addReplica, 4, false},
-		{WriteFlow, transferLeader, 3, true},
-		{WriteFlow, movePeer, 4, true},
-		{WriteFlow, addReplica, 4, true},
+		{Read, transferLeader, 3, false},
+		{Read, movePeer, 4, true},
+		{Read, addReplica, 4, false},
+		{Write, transferLeader, 3, true},
+		{Write, movePeer, 4, true},
+		{Write, addReplica, 4, true},
 	}
 	for _, t := range tests {
 		testCache(c, t)
@@ -89,9 +89,9 @@ func (t *testHotPeerCache) TestCache(c *C) {
 }
 
 func testCache(c *C, t *testCacheCase) {
-	defaultSize := map[FlowKind]int{
-		ReadFlow:  3, // all peers
-		WriteFlow: 3, // all peers
+	defaultSize := map[RWType]int{
+		Read:  3, // all peers
+		Write: 3, // all peers
 	}
 	cache := NewHotPeerCache(t.kind)
 	region := buildRegion(nil, nil, t.kind)
@@ -124,9 +124,9 @@ func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect i
 	return res
 }
 
-func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind FlowKind, isHit bool) {
+func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind RWType, isHit bool) {
 	var peers []*metapb.Peer
-	if kind == ReadFlow {
+	if kind == Read {
 		peers = []*metapb.Peer{region.GetLeader()}
 	} else {
 		peers = region.GetPeers()
@@ -147,7 +147,7 @@ func checkNeedDelete(c *C, ret []*HotPeerStat, storeID uint64, needDelete bool) 
 	}
 }
 
-func schedule(operator operator, region *core.RegionInfo, kind FlowKind) (srcStore uint64, _ *core.RegionInfo) {
+func schedule(operator operator, region *core.RegionInfo, kind RWType) (srcStore uint64, _ *core.RegionInfo) {
 	switch operator {
 	case transferLeader:
 		_, newLeader := pickFollower(region)
@@ -183,7 +183,7 @@ func pickFollower(region *core.RegionInfo) (index int, peer *metapb.Peer) {
 	return dst, meta.Peers[dst]
 }
 
-func buildRegion(meta *metapb.Region, leader *metapb.Peer, kind FlowKind) *core.RegionInfo {
+func buildRegion(meta *metapb.Region, leader *metapb.Peer, kind RWType) *core.RegionInfo {
 	const interval = uint64(60)
 	if meta == nil {
 		peer1 := &metapb.Peer{Id: 1, StoreId: 1}
@@ -201,10 +201,10 @@ func buildRegion(meta *metapb.Region, leader *metapb.Peer, kind FlowKind) *core.
 	}
 
 	switch kind {
-	case ReadFlow:
+	case Read:
 		return core.NewRegionInfo(meta, leader, core.SetReportInterval(interval),
 			core.SetReadBytes(interval*100*1024))
-	case WriteFlow:
+	case Write:
 		return core.NewRegionInfo(meta, leader, core.SetReportInterval(interval),
 			core.SetWrittenBytes(interval*100*1024))
 	default:
@@ -227,22 +227,22 @@ func newPeers(n int, pid genID, sid genID) []*metapb.Peer {
 }
 
 func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
-	cache := NewHotPeerCache(ReadFlow)
+	cache := NewHotPeerCache(Read)
 	// we statistic read peer info from store heartbeat rather than region heartbeat
 	m := RegionHeartBeatReportInterval / StoreHeartBeatReportInterval
 
 	// skip interval=0
-	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: ReadFlow}
+	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
 	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0, 0.0}, 0)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is larger than report interval, but no hot
-	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0, 1.0}, Kind: ReadFlow}
+	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0, 1.0}, Kind: Read}
 	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0, 0.0}, 10*time.Second)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is less than report interval
-	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: ReadFlow}
+	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
 	newItem = cache.updateHotPeerStat(newItem, nil, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem, NotNil)
 	c.Check(newItem.HotDegree, Equals, 0)
@@ -294,7 +294,7 @@ func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
 }
 
 func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold float64) {
-	cache := NewHotPeerCache(ReadFlow)
+	cache := NewHotPeerCache(Read)
 	storeID := uint64(1)
 	c.Assert(byteRate, GreaterEqual, minHotThresholds[RegionReadBytes])
 	for i := uint64(1); i < TopNN+10; i++ {
@@ -328,7 +328,7 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {
-	cache := NewHotPeerCache(ReadFlow)
+	cache := NewHotPeerCache(Read)
 	region := core.NewRegionInfo(&metapb.Region{
 		Id: 1,
 		Peers: []*metapb.Peer{

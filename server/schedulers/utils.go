@@ -230,18 +230,18 @@ type storeLoad struct {
 	Count float64
 }
 
-func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
+func (load storeLoad) ToLoadPred(rwTy statistics.RWType, infl *Influence) *storeLoadPred {
 	future := storeLoad{
 		Loads: append(load.Loads[:0:0], load.Loads...),
 		Count: load.Count,
 	}
 	if infl != nil {
 		switch rwTy {
-		case read:
+		case statistics.Read:
 			future.Loads[statistics.ByteDim] += infl.Loads[statistics.RegionReadBytes]
 			future.Loads[statistics.KeyDim] += infl.Loads[statistics.RegionReadKeys]
 			future.Loads[statistics.QueryDim] += infl.Loads[statistics.RegionReadQuery]
-		case write:
+		case statistics.Write:
 			future.Loads[statistics.ByteDim] += infl.Loads[statistics.RegionWriteBytes]
 			future.Loads[statistics.KeyDim] += infl.Loads[statistics.RegionWriteKeys]
 			future.Loads[statistics.QueryDim] += infl.Loads[statistics.RegionWriteQuery]
@@ -449,9 +449,9 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 			Stats:          make([]statistics.HotPeerStatShow, 0),
 		}
 	}
-	kind := write
-	if li.HotPeers[0].Kind == statistics.ReadFlow {
-		kind = read
+	kind := statistics.Write
+	if li.HotPeers[0].Kind == statistics.Read {
+		kind = statistics.Read
 	}
 
 	peers := make([]statistics.HotPeerStatShow, 0, len(li.HotPeers))
@@ -482,7 +482,7 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	}
 }
 
-func toHotPeerStatShow(p *statistics.HotPeerStat, kind rwType) statistics.HotPeerStatShow {
+func toHotPeerStatShow(p *statistics.HotPeerStat, kind statistics.RWType) statistics.HotPeerStatShow {
 	b, k, q := getRegionStatKind(kind, statistics.ByteDim), getRegionStatKind(kind, statistics.KeyDim), getRegionStatKind(kind, statistics.QueryDim)
 	byteRate := p.Loads[b]
 	keyRate := p.Loads[k]
@@ -506,7 +506,7 @@ type storeCollector interface {
 	// Filter determines whether the Store needs to be handled by itself.
 	Filter(info *storeSummaryInfo, kind core.ResourceKind) bool
 	// GetLoads obtains available loads from storeLoads and peerLoadSum according to rwTy and kind.
-	GetLoads(storeLoads, peerLoadSum []float64, rwTy rwType, kind core.ResourceKind) (loads []float64)
+	GetLoads(storeLoads, peerLoadSum []float64, rwTy statistics.RWType, kind core.ResourceKind) (loads []float64)
 }
 
 type tikvCollector struct{}
@@ -532,14 +532,14 @@ func (c tikvCollector) Filter(info *storeSummaryInfo, kind core.ResourceKind) bo
 	return false
 }
 
-func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy rwType, kind core.ResourceKind) (loads []float64) {
+func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy statistics.RWType, kind core.ResourceKind) (loads []float64) {
 	loads = make([]float64, statistics.DimLen)
 	switch rwTy {
-	case read:
+	case statistics.Read:
 		loads[statistics.ByteDim] = storeLoads[statistics.StoreReadBytes]
 		loads[statistics.KeyDim] = storeLoads[statistics.StoreReadKeys]
 		loads[statistics.QueryDim] = storeLoads[statistics.StoreReadQuery]
-	case write:
+	case statistics.Write:
 		switch kind {
 		case core.LeaderKind:
 			// Use sum of hot peers to estimate leader-only byte rate.
@@ -580,12 +580,12 @@ func (c tiflashCollector) Filter(info *storeSummaryInfo, kind core.ResourceKind)
 	return false
 }
 
-func (c tiflashCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy rwType, kind core.ResourceKind) (loads []float64) {
+func (c tiflashCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy statistics.RWType, kind core.ResourceKind) (loads []float64) {
 	loads = make([]float64, statistics.DimLen)
 	switch rwTy {
-	case read:
+	case statistics.Read:
 		// TODO: Need TiFlash StoreHeartbeat support
-	case write:
+	case statistics.Write:
 		switch kind {
 		case core.LeaderKind:
 			// There is no Leader on TiFlash
@@ -612,7 +612,7 @@ func summaryStoresLoad(
 	storesLoads map[uint64][]float64,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
 	isTraceRegionFlow bool,
-	rwTy rwType,
+	rwTy statistics.RWType,
 	kind core.ResourceKind,
 ) map[uint64]*storeLoadDetail {
 	// loadDetail stores the storeID -> hotPeers stat and its current and future stat(rate,count)
@@ -643,7 +643,7 @@ func summaryStoresLoadByEngine(
 	storeInfos map[uint64]*storeSummaryInfo,
 	storesLoads map[uint64][]float64,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
-	rwTy rwType,
+	rwTy statistics.RWType,
 	kind core.ResourceKind,
 	collector storeCollector,
 ) []*storeLoadDetail {
