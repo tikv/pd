@@ -59,9 +59,9 @@ func (sq *SafeQueue) Clone() *SafeQueue {
 	defer sq.mu.Unlock()
 	q := queue.New().Init()
 	for i := 0; i < sq.que.Len(); i++ {
-		node := sq.que.PopFront()
-		sq.que.PushBack(node)
-		q.PushBack(node)
+		v := sq.que.PopFront()
+		sq.que.PushBack(v)
+		q.PushBack(v)
 	}
 	return &SafeQueue{
 		que: q,
