@@ -102,6 +102,7 @@ func (aot *AvgOverTime) IsFull() bool {
 	return aot.intervalSum >= aot.avgInterval
 }
 
+// Clone returns a copy of AvgOverTime
 func (aot *AvgOverTime) Clone() *AvgOverTime {
 	que := aot.que.Clone()
 	margin := deltaWithInterval{

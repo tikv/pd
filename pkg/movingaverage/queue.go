@@ -54,6 +54,7 @@ func (sq *SafeQueue) PopFront() interface{} {
 	return sq.que.PopFront()
 }
 
+// Clone returns a copy of SafeQueue
 func (sq *SafeQueue) Clone() *SafeQueue {
 	sq.mu.Lock()
 	defer sq.mu.Unlock()

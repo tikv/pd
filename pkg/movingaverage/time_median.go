@@ -67,6 +67,7 @@ func (t *TimeMedian) GetInstantaneous() float64 {
 	return t.instantaneous
 }
 
+// Clone returns a copy of TimeMedian
 func (t *TimeMedian) Clone() *TimeMedian {
 	return &TimeMedian{
 		aot:           t.aot.Clone(),
