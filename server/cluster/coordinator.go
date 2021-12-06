@@ -468,20 +468,16 @@ func (c *coordinator) stop() {
 }
 
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
-	c.RLock()
-	defer c.RUnlock()
 	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
-	storeLoads := c.cluster.GetStoresLoads()
+	storeLoads := c.cluster.GetStoresLoadsLocked()
 	stores := c.cluster.GetStores()
 	regionStats := c.cluster.RegionWriteStats()
 	return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
 }
 
 func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
-	c.RLock()
-	defer c.RUnlock()
 	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
-	storeLoads := c.cluster.GetStoresLoads()
+	storeLoads := c.cluster.GetStoresLoadsLocked()
 	stores := c.cluster.GetStores()
 	regionStats := c.cluster.RegionReadStats()
 	return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
@@ -528,32 +524,32 @@ func (c *coordinator) resetSchedulerMetrics() {
 func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
 	stores := c.cluster.GetStores()
-	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
-	storeLoads := c.cluster.GetStoresLoads()
-	regionWriteStats := c.cluster.RegionWriteStats()
-	regionReadStats := c.cluster.RegionReadStats()
 	c.RUnlock()
 	// Collects hot write region metrics.
-	collectHotMetrics(stores, storeLoads, regionWriteStats, statistics.Write, isTraceFlow)
+	collectHotMetrics(c.cluster, stores, statistics.Write)
 	// Collects hot read region metrics.
-	collectHotMetrics(stores, storeLoads, regionReadStats, statistics.Read, isTraceFlow)
+	collectHotMetrics(c.cluster, stores, statistics.Read)
 	// Collects pending influence.
 	collectPendingInfluence(stores)
 }
 
-func collectHotMetrics(stores []*core.StoreInfo, storesLoads map[uint64][]float64, regionStats map[uint64][]*statistics.HotPeerStat, typ string, isTraceRegionFlow bool) {
-	status := statistics.GetHotStatus(stores, storesLoads, regionStats, typ, isTraceRegionFlow)
+func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ statistics.RWType) {
 	var (
 		kind                      string
 		byteTyp, keyTyp, queryTyp statistics.RegionStatKind
+		regionStats               map[uint64][]*statistics.HotPeerStat
 	)
 
 	switch typ {
 	case statistics.Read:
+		regionStats = cluster.RegionReadStats()
 		kind, byteTyp, keyTyp, queryTyp = statistics.Read.String(), statistics.RegionReadBytes, statistics.RegionReadKeys, statistics.RegionReadQuery
 	case statistics.Write:
+		regionStats = cluster.RegionWriteStats()
 		kind, byteTyp, keyTyp, queryTyp = statistics.Write.String(), statistics.RegionWriteBytes, statistics.RegionWriteKeys, statistics.RegionWriteQuery
 	}
+	status := statistics.GetHotStatus(stores, cluster.GetStoresLoads(), regionStats, typ, cluster.GetOpts().IsTraceRegionFlow())
+
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()

@@ -1499,6 +1499,11 @@ func (c *RaftCluster) GetStoresLoads() map[uint64][]float64 {
 	return c.hotStat.GetStoresLoads()
 }
 
+// GetStoresLoadsLocked returns load stats of all stores.
+func (c *RaftCluster) GetStoresLoadsLocked() map[uint64][]float64 {
+	return c.hotStat.GetStoresLoads()
+}
+
 // RegionReadStats returns hot region's read stats.
 // The result only includes peers that are hot enough.
 // RegionStats is a thread-safe method
@@ -1592,8 +1597,8 @@ func (checker *prepareChecker) collect(region *core.RegionInfo) {
 func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
 	c.RLock()
 	co := c.coordinator
-	c.RUnlock()
 	hotWriteRegions := co.getHotWriteRegions()
+	c.RUnlock()
 	if len(storeIDs) > 0 {
 		hotWriteRegions = getHotRegionsByStoreIDs(hotWriteRegions, storeIDs...)
 	}
@@ -1604,8 +1609,8 @@ func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHo
 func (c *RaftCluster) GetHotReadRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
 	c.RLock()
 	co := c.coordinator
-	c.RUnlock()
 	hotReadRegions := co.getHotReadRegions()
+	c.RUnlock()
 	if len(storeIDs) > 0 {
 		hotReadRegions = getHotRegionsByStoreIDs(hotReadRegions, storeIDs...)
 	}
