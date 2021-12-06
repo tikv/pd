@@ -1250,7 +1250,7 @@ func (s *testHotCacheSuite) TestUpdateCache(c *C) {
 		{1, []uint64{1, 2, 3}, 512 * KB, 0, 0},
 		{2, []uint64{2, 1, 3}, 512 * KB, 0, 0},
 		{3, []uint64{1, 2, 3}, 20 * KB, 0, 0},
-		// lower than hot statistics.Read flow rate, but higher than statistics.Write flow rate
+		// lower than hot read flow rate, but higher than write flow rate
 		{11, []uint64{1, 2, 3}, 7 * KB, 0, 0},
 	})
 	stats := tc.RegionStats(statistics.Read, 0)
@@ -1287,12 +1287,12 @@ func (s *testHotCacheSuite) TestUpdateCache(c *C) {
 	c.Assert(stats[3], HasLen, 1)
 	c.Assert(stats[5], HasLen, 1)
 
-	// For leader statistics.Read flow
+	// For leader read flow
 	addRegionLeaderReadInfo(tc, []testRegionInfo{
 		{21, []uint64{4, 5, 6}, 512 * KB, 0, 0},
 		{22, []uint64{5, 4, 6}, 512 * KB, 0, 0},
 		{23, []uint64{4, 5, 6}, 20 * KB, 0, 0},
-		// lower than hot statistics.Read flow rate, but higher than statistics.Write flow rate
+		// lower than hot read flow rate, but higher than write flow rate
 		{31, []uint64{4, 5, 6}, 7 * KB, 0, 0},
 	})
 	stats = tc.RegionStats(statistics.Read, 0)
@@ -1705,7 +1705,7 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	c.Assert(op, NotNil)
 	hb.(*hotScheduler).summaryPendingInfluence()
 	stInfos = hb.(*hotScheduler).stInfos
-	// assert statistics.Read/statistics.Write influence is the sum of statistics.Write peer and statistics.Write leader
+	// assert read/write influence is the sum of write peer and write leader
 	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteKeys], -1.2*MB), IsTrue)
 	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteBytes], -1.2*MB), IsTrue)
 	c.Assert(nearlyAbout(stInfos[3].PendingSum.Loads[statistics.RegionWriteKeys], 0.7*MB), IsTrue)
@@ -1979,7 +1979,7 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 
 	// Config file is not currently supported
 	hb, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()),
-		schedule.ConfigSliceDecoder("hot-region", []string{"statistics.Read-priorities=byte,query"}))
+		schedule.ConfigSliceDecoder("hot-region", []string{"read-priorities=byte,query"}))
 	c.Assert(err, IsNil)
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.QueryDim, statistics.ByteDim},
