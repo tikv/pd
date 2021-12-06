@@ -335,10 +335,10 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	// Test the TSO follower proxy while enabling the Local TSO.
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
 	// Sleep a while here to prevent from canceling the ongoing TSO request.
-	time.Sleep(time.Millisecond * 500)
+	time.Sleep(time.Millisecond * 50)
 	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, false)
-	time.Sleep(time.Millisecond * 500)
+	time.Sleep(time.Millisecond * 50)
 	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
 }
 
