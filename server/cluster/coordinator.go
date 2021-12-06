@@ -465,7 +465,7 @@ func (c *coordinator) stop() {
 // Hack to retrieve info from scheduler.
 // TODO: remove it.
 type hasHotStatus interface {
-	GetHotStatus(typ string) *statistics.StoreHotPeersInfos
+	GetHotStatus(statistics.RWType) *statistics.StoreHotPeersInfos
 	GetPendingInfluence() map[uint64]*schedulers.Influence
 }
 
@@ -477,7 +477,7 @@ func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
 		return nil
 	}
 	if h, ok := s.Scheduler.(hasHotStatus); ok {
-		return h.GetHotStatus(schedulers.HotWriteRegionType)
+		return h.GetHotStatus(statistics.Write)
 	}
 	return nil
 }
@@ -490,7 +490,7 @@ func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
 		return nil
 	}
 	if h, ok := s.Scheduler.(hasHotStatus); ok {
-		return h.GetHotStatus(schedulers.HotReadRegionType)
+		return h.GetHotStatus(statistics.Read)
 	}
 	return nil
 }
@@ -544,14 +544,14 @@ func (c *coordinator) collectHotSpotMetrics() {
 	c.RUnlock()
 	stores := c.cluster.GetStores()
 	// Collects hot write region metrics.
-	collectHotMetrics(s, stores, schedulers.HotWriteRegionType)
+	collectHotMetrics(s, stores, statistics.Write)
 	// Collects hot read region metrics.
-	collectHotMetrics(s, stores, schedulers.HotReadRegionType)
+	collectHotMetrics(s, stores, statistics.Read)
 	// Collects pending influence.
 	collectPendingInfluence(s, stores)
 }
 
-func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ string) {
+func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ statistics.RWType) {
 	status := s.Scheduler.(hasHotStatus).GetHotStatus(typ)
 	var (
 		kind                      string
@@ -559,10 +559,10 @@ func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ stri
 	)
 
 	switch typ {
-	case schedulers.HotReadRegionType:
-		kind, byteTyp, keyTyp, queryTyp = "read", statistics.RegionReadBytes, statistics.RegionReadKeys, statistics.RegionReadQuery
-	case schedulers.HotWriteRegionType:
-		kind, byteTyp, keyTyp, queryTyp = "write", statistics.RegionWriteBytes, statistics.RegionWriteKeys, statistics.RegionWriteQuery
+	case statistics.Read:
+		kind, byteTyp, keyTyp, queryTyp = statistics.Read.String(), statistics.RegionReadBytes, statistics.RegionReadKeys, statistics.RegionReadQuery
+	case statistics.Write:
+		kind, byteTyp, keyTyp, queryTyp = statistics.Write.String(), statistics.RegionWriteBytes, statistics.RegionWriteKeys, statistics.RegionWriteQuery
 	}
 	for _, s := range stores {
 		storeAddress := s.GetAddress()

@@ -54,7 +54,7 @@ var minHotThresholds = [RegionStatCount]float64{
 
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
-	kind               FlowKind
+	kind               RWType
 	peersOfStore       map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion     map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore     map[uint64]map[uint64]struct{} // storeID -> regionIDs
@@ -64,7 +64,7 @@ type hotPeerCache struct {
 }
 
 // NewHotPeerCache creates a hotPeerCache
-func NewHotPeerCache(kind FlowKind) *hotPeerCache {
+func NewHotPeerCache(kind RWType) *hotPeerCache {
 	c := &hotPeerCache{
 		kind:           kind,
 		peersOfStore:   make(map[uint64]*TopN),
@@ -72,7 +72,7 @@ func NewHotPeerCache(kind FlowKind) *hotPeerCache {
 		regionsOfStore: make(map[uint64]map[uint64]struct{}),
 		inheritItem:    make(map[uint64]*HotPeerStat),
 	}
-	if kind == WriteFlow {
+	if kind == Write {
 		c.reportIntervalSecs = WriteReportInterval
 	} else {
 		c.reportIntervalSecs = ReadReportInterval
@@ -397,7 +397,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, source s
 		// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.
 		// For write stat, as the stat is send by region heartbeat, the first heartbeat will be skipped.
 		// For read stat, as the stat is send by store heartbeat, the first heartbeat won't be skipped.
-		if newItem.Kind == WriteFlow {
+		if newItem.Kind == Write {
 			inheritItemDegree(newItem, oldItem)
 			return newItem
 		}
@@ -525,7 +525,7 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 func hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree + 1
 	newItem.AntiCount = hotRegionAntiCount
-	if newItem.Kind == ReadFlow {
+	if newItem.Kind == Read {
 		newItem.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
 }
@@ -533,7 +533,7 @@ func hotItem(newItem, oldItem *HotPeerStat) {
 func initItemDegree(item *HotPeerStat) {
 	item.HotDegree = 1
 	item.AntiCount = hotRegionAntiCount
-	if item.Kind == ReadFlow {
+	if item.Kind == Read {
 		item.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
 }

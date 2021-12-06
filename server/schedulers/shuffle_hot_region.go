@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -80,7 +81,7 @@ type shuffleHotRegionScheduler struct {
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
 	r           *rand.Rand
 	conf        *shuffleHotRegionSchedulerConfig
-	types       []rwType
+	types       []statistics.RWType
 }
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
@@ -89,7 +90,7 @@ func newShuffleHotRegionScheduler(opController *schedule.OperatorController, con
 	ret := &shuffleHotRegionScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		types:         []rwType{read, write},
+		types:         []statistics.RWType{statistics.Read, statistics.Write},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
@@ -132,27 +133,27 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 	return s.dispatch(s.types[i], cluster)
 }
 
-func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
 	storeInfos := summaryStoreInfos(cluster)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
 	switch typ {
-	case read:
+	case statistics.Read:
 		s.stLoadInfos[readLeader] = summaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionReadStats(),
 			isTraceRegionFlow,
-			read, core.LeaderKind)
+			statistics.Read, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos[readLeader])
-	case write:
+	case statistics.Write:
 		s.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionWriteStats(),
 			isTraceRegionFlow,
-			write, core.LeaderKind)
+			statistics.Write, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos[writeLeader])
 	}
 	return nil
