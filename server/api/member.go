@@ -61,7 +61,8 @@ func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 
 func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
-	members, err := svr.GetMembers(context.Background(), req)
+	grpcServer := &server.GrpcServer{Server: svr}
+	members, err := grpcServer.GetMembers(context.Background(), req)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -244,8 +245,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 		return
 	}
 	for k, v := range input {
-		switch k {
-		case "leader-priority":
+		if k == "leader-priority" {
 			priority, ok := v.(float64)
 			if !ok {
 				h.rd.JSON(w, http.StatusBadRequest, "bad format leader priority")

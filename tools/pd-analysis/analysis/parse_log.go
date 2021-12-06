@@ -89,7 +89,11 @@ func forEachLine(filename string, solve func(string) error) error {
 	if err != nil {
 		return err
 	}
-	defer fi.Close()
+	defer func() {
+		if err := fi.Close(); err != nil {
+			log.Printf("Error closing file: %s\n", err)
+		}
+	}()
 	br := bufio.NewReader(fi)
 	// For each
 	for {

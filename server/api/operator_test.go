@@ -377,7 +377,8 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 }
 
 func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {
-	_, err := svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+	s := &server.GrpcServer{Server: svr}
+	_, err := s.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
 		Store: &metapb.Store{
 			Id:      id,
@@ -388,7 +389,7 @@ func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, 
 		},
 	})
 	c.Assert(err, IsNil)
-	_, err = svr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+	_, err = s.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
 		Stats:  &pdpb.StoreStats{StoreId: id},
 	})

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -85,8 +86,10 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 }
 
 func (kv *etcdKVBase) Save(key, value string) error {
+	failpoint.Inject("etcdSaveFailed", func() {
+		failpoint.Return(errors.New("save failed"))
+	})
 	key = path.Join(kv.rootPath, key)
-
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
@@ -135,19 +138,15 @@ func NewSlowLogTxn(client *clientv3.Client) clientv3.Txn {
 // the operations passed into Then() will be executed. Or the operations
 // passed into Else() will be executed.
 func (t *SlowLogTxn) If(cs ...clientv3.Cmp) clientv3.Txn {
-	return &SlowLogTxn{
-		Txn:    t.Txn.If(cs...),
-		cancel: t.cancel,
-	}
+	t.Txn = t.Txn.If(cs...)
+	return t
 }
 
 // Then takes a list of operations. The Ops list will be executed, if the
 // comparisons passed in If() succeed.
 func (t *SlowLogTxn) Then(ops ...clientv3.Op) clientv3.Txn {
-	return &SlowLogTxn{
-		Txn:    t.Txn.Then(ops...),
-		cancel: t.cancel,
-	}
+	t.Txn = t.Txn.Then(ops...)
+	return t
 }
 
 // Commit implements Txn Commit interface.
