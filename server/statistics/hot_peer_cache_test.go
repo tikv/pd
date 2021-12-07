@@ -123,9 +123,6 @@ func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect i
 	return res
 }
 
-<<<<<<< HEAD
-func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind FlowKind, isHit bool) {
-=======
 func checkAndUpdateSync(cache *hotPeerCache, region *core.RegionInfo) (res []*HotPeerStat) {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
@@ -141,8 +138,7 @@ func checkAndUpdateSync(cache *hotPeerCache, region *core.RegionInfo) (res []*Ho
 	return res
 }
 
-func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind RWType, isHit bool) {
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
+func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind FlowKind, isHit bool) {
 	var peers []*metapb.Peer
 	if kind == ReadFlow {
 		peers = []*metapb.Peer{region.GetLeader()}
@@ -250,33 +246,18 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 	m := RegionHeartBeatReportInterval / StoreHeartBeatReportInterval
 
 	// skip interval=0
-<<<<<<< HEAD
 	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: ReadFlow}
-	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0, 0.0}, 0)
-	c.Check(newItem, IsNil)
-
-	// new peer, interval is larger than report interval, but no hot
-	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0, 1.0}, Kind: ReadFlow}
-	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0, 0.0}, 10*time.Second)
-	c.Check(newItem, IsNil)
-
-	// new peer, interval is less than report interval
-	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: ReadFlow}
-	newItem = cache.updateHotPeerStat(newItem, nil, []float64{60.0, 60.0, 60.0}, 4*time.Second)
-=======
-	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
 	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{0.0, 0.0, 0.0}, 0)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is larger than report interval, but no hot
-	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0, 1.0}, Kind: Read}
+	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0, 1.0}, Kind: ReadFlow}
 	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{0.0, 0.0, 0.0}, 10*time.Second)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is less than report interval
-	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
+	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: ReadFlow}
 	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
 	c.Check(newItem, NotNil)
 	c.Check(newItem.HotDegree, Equals, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
@@ -365,7 +346,7 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 	intervals := []uint64{120, 60, 10}
 	for _, peerCount := range peerCounts {
 		for _, interval := range intervals {
-			cache := NewHotPeerCache(Write)
+			cache := NewHotPeerCache(WriteFlow)
 			peers := newPeers(peerCount,
 				func(i int) uint64 { return uint64(10000 + i) },
 				func(i int) uint64 { return uint64(i) })
