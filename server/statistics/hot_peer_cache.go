@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/core"
-	"go.uber.org/zap"
 )
 
 const (
@@ -148,7 +147,6 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 	for _, peer := range region.GetPeers() {
 		peers = append(peers, peer.StoreId)
 	}
-<<<<<<< HEAD
 
 	var tmpItem *HotPeerStat
 	storeIDs := f.getAllStoreIDs(region)
@@ -182,64 +180,31 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 			thresholds:         thresholds,
 		}
 
+		source := direct
 		if oldItem == nil {
 			if tmpItem != nil { // use the tmpItem cached from the store where this region was in before
+				source = inherit
 				oldItem = tmpItem
+				tmpItem = nil
 			} else { // new item is new peer after adding replica
 				for _, storeID := range storeIDs {
 					oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
 					if oldItem != nil {
+						println("adopt")
+						source = adopt
 						break
 					}
-=======
-	newItem := &HotPeerStat{
-		StoreID:            storeID,
-		RegionID:           region.GetID(),
-		Kind:               f.kind,
-		Loads:              loads,
-		LastUpdateTime:     time.Now(),
-		needDelete:         false,
-		isLeader:           region.GetLeader().GetStoreId() == storeID,
-		justTransferLeader: justTransferLeader,
-		interval:           interval,
-		peers:              peers,
-		thresholds:         thresholds,
-	}
-
-	source := direct
-	if oldItem == nil {
-		inheritItem := f.takeInheritItem(region.GetID())
-		if inheritItem != nil {
-			oldItem = inheritItem
-			source = inherit
-		} else {
-			for _, storeID := range f.getAllStoreIDs(region) {
-				oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
-				if oldItem != nil {
-					source = adopt
-					break
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
 				}
 			}
 		}
 
-		newItem = f.updateHotPeerStat(newItem, oldItem, bytes, keys, time.Duration(interval)*time.Second)
+		newItem = f.updateHotPeerStat(newItem, oldItem, source, bytes, keys, time.Duration(interval)*time.Second)
 		if newItem != nil {
 			ret = append(ret, newItem)
 		}
 	}
-<<<<<<< HEAD
 
-	log.Debug("region heartbeat info",
-		zap.String("type", f.kind.String()),
-		zap.Uint64("region", region.GetID()),
-		zap.Uint64("leader", region.GetLeader().GetStoreId()),
-		zap.Uint64s("peers", peers),
-	)
 	return ret
-=======
-	return f.updateHotPeerStat(newItem, oldItem, source, deltaLoads, time.Duration(interval)*time.Second)
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
 }
 
 func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
@@ -249,42 +214,7 @@ func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool 
 	case ReadFlow:
 		return f.isRegionHotWithPeer(region, region.GetLeader(), hotDegree)
 	}
-<<<<<<< HEAD
 	return false
-=======
-	for regionID := range previousHotStat {
-		if _, ok := reportRegions[regionID]; !ok {
-			oldItem := f.getOldHotPeerStat(regionID, storeID)
-			if oldItem == nil {
-				continue
-			}
-			newItem := &HotPeerStat{
-				StoreID:  storeID,
-				RegionID: regionID,
-				Kind:     f.kind,
-				// use oldItem.thresholds to make the newItem won't affect the threshold
-				Loads:              oldItem.thresholds,
-				LastUpdateTime:     time.Now(),
-				needDelete:         false,
-				isLeader:           oldItem.isLeader,
-				justTransferLeader: oldItem.justTransferLeader,
-				interval:           interval,
-				peers:              oldItem.peers,
-				thresholds:         oldItem.thresholds,
-				inCold:             true,
-			}
-			deltaLoads := make([]float64, RegionStatCount)
-			for i, loads := range oldItem.thresholds {
-				deltaLoads[i] = loads * float64(interval)
-			}
-			stat := f.updateHotPeerStat(newItem, oldItem, direct, deltaLoads, time.Duration(interval)*time.Second)
-			if stat != nil {
-				ret = append(ret, stat)
-			}
-		}
-	}
-	return
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
 }
 
 func (f *hotPeerCache) CollectMetrics(typ string) {
@@ -446,16 +376,11 @@ func (f *hotPeerCache) getDefaultTimeMedian() *movingaverage.TimeMedian {
 	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, RegionHeartBeatReportInterval*time.Second)
 }
 
-<<<<<<< HEAD
-func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, keys float64, interval time.Duration) *HotPeerStat {
+func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, source sourceKind, bytes, keys float64, interval time.Duration) *HotPeerStat {
 	if newItem.needDelete {
 		return newItem
 	}
 
-=======
-func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, source sourceKind, deltaLoads []float64, interval time.Duration) *HotPeerStat {
-	regionStats := f.kind.RegionStats()
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
 	if oldItem == nil {
 		if interval == 0 {
 			return nil
@@ -479,18 +404,13 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, source s
 		return newItem
 	}
 
-<<<<<<< HEAD
-	newItem.rollingByteRate = oldItem.rollingByteRate
-	newItem.rollingKeyRate = oldItem.rollingKeyRate
-=======
 	if source == adopt {
-		for _, dim := range oldItem.rollingLoads {
-			newItem.rollingLoads = append(newItem.rollingLoads, dim.Clone())
-		}
+		newItem.rollingByteRate = oldItem.rollingByteRate.Clone()
+		newItem.rollingKeyRate = oldItem.rollingKeyRate.Clone()
 	} else {
-		newItem.rollingLoads = oldItem.rollingLoads
+		newItem.rollingByteRate = oldItem.rollingByteRate
+		newItem.rollingKeyRate = oldItem.rollingKeyRate
 	}
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
 
 	if newItem.justTransferLeader {
 		// skip the first heartbeat flow statistic after transfer leader, because its statistics are calculated by the last leader in this store and are inaccurate
