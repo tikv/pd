@@ -38,7 +38,7 @@ func newTestingWriter() *testingWriter {
 func (w *testingWriter) Write(p []byte) (n int, err error) {
 	n = len(p)
 	p = bytes.TrimRight(p, "\n")
-	m := fmt.Sprintf("%s", p)
+	m := string(p)
 	w.messages = append(w.messages, m)
 	return n, nil
 }
