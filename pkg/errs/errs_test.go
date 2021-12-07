@@ -15,7 +15,6 @@ package errs
 
 import (
 	"bytes"
-	"fmt"
 	"strconv"
 	"strings"
 	"testing"
