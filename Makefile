@@ -13,6 +13,9 @@ PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
+TASK_COUNT=1
+TASK_ID=1
+
 BUILD_BIN_PATH := $(shell pwd)/bin
 GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
@@ -38,7 +41,6 @@ BUILD_FLAGS ?=
 BUILD_TAGS ?=
 BUILD_CGO_ENABLED := 0
 PD_EDITION ?= Community
-
 # Ensure PD_EDITION is set to Community or Enterprise before running build process.
 ifneq "$(PD_EDITION)" "Community"
 ifneq "$(PD_EDITION)" "Enterprise"
@@ -171,9 +173,18 @@ test-with-cover: install-go-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
 	for PKG in $(TEST_PKGS); do\
 		set -euo pipefail;\
-		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG  2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
+		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
 		rm coverage.tmp;\
 	done
+	@$(FAILPOINT_DISABLE)
+
+# The command should be used in daily CI，it will split some tasks to run parallel.
+# It should retain report.xml,coverage,coverage.xml and package.list to analyze.
+test-with-cover-parallel: install-go-tools dashboard-ui split
+	@$(FAILPOINT_ENABLE)
+	set -euo pipefail;\
+	CGO_ENABLED=1 GO111MODULE=on gotestsum --junitfile report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
+	gocov convert coverage | gocov-xml >> coverage.xml;\
 	@$(FAILPOINT_DISABLE)
 
 test-tso-function: install-go-tools dashboard-ui
@@ -270,6 +281,13 @@ failpoint-enable: install-go-tools
 failpoint-disable: install-go-tools
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
+
+split:
+# todo: it will remove server/api,/tests and tso packages after daily CI integrate all verify CI.
+	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
+	split packages.list -n r/${TASK_COUNT} packages_unit_ -a 1 --numeric-suffixes=1;\
+	cat packages_unit_${TASK_ID} |tr "\n" " " >package.list;\
+	rm packages*;
 
 clean: failpoint-disable deadlock-disable clean-test clean-build
 
