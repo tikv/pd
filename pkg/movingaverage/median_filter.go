@@ -61,3 +61,23 @@ func (r *MedianFilter) Set(n float64) {
 	r.records[0] = n
 	r.count = 1
 }
+<<<<<<< HEAD
+=======
+
+// GetInstantaneous returns the value just added.
+func (r *MedianFilter) GetInstantaneous() float64 {
+	return r.instantaneous
+}
+
+// Clone returns a copy of MedianFilter
+func (r *MedianFilter) Clone() *MedianFilter {
+	records := make([]float64, len(r.records))
+	copy(records, r.records)
+	return &MedianFilter{
+		records:       records,
+		size:          r.size,
+		count:         r.count,
+		instantaneous: r.instantaneous,
+	}
+}
+>>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
