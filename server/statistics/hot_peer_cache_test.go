@@ -347,7 +347,7 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 	intervals := []uint64{120, 60, 10}
 	for _, peerCount := range peerCounts {
 		for _, interval := range intervals {
-			cache := NewHotPeerCache(Write)
+			cache := NewHotPeerCache(WriteFlow)
 			peers := newPeers(peerCount,
 				func(i int) uint64 { return uint64(10000 + i) },
 				func(i int) uint64 { return uint64(i) })
