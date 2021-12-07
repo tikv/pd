@@ -76,8 +76,6 @@ func (k StoreStatKind) String() string {
 
 	return "unknown StoreStatKind"
 }
-<<<<<<< HEAD
-=======
 
 // sourceKind represents the statistics item source.
 type sourceKind int
@@ -99,34 +97,3 @@ func (k sourceKind) String() string {
 	}
 	return "unknown"
 }
-
-// RWType is a identify hot region types.
-type RWType uint32
-
-// Flags for r/w type.
-const (
-	Write RWType = iota
-	Read
-)
-
-func (k RWType) String() string {
-	switch k {
-	case Write:
-		return "write"
-	case Read:
-		return "read"
-	}
-	return "unimplemented"
-}
-
-// RegionStats returns hot items according to kind
-func (k RWType) RegionStats() []RegionStatKind {
-	switch k {
-	case Write:
-		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
-	case Read:
-		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
-	}
-	return nil
-}
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))

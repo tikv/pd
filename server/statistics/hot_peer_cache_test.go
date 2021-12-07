@@ -123,9 +123,6 @@ func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect i
 	return res
 }
 
-<<<<<<< HEAD
-func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind FlowKind, isHit bool) {
-=======
 func checkAndUpdateSync(cache *hotPeerCache, region *core.RegionInfo) (res []*HotPeerStat) {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
@@ -141,8 +138,7 @@ func checkAndUpdateSync(cache *hotPeerCache, region *core.RegionInfo) (res []*Ho
 	return res
 }
 
-func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind RWType, isHit bool) {
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
+func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind FlowKind, isHit bool) {
 	var peers []*metapb.Peer
 	if kind == ReadFlow {
 		peers = []*metapb.Peer{region.GetLeader()}
@@ -248,95 +244,51 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 	cache := NewHotStoresStats(ReadFlow)
 
 	// skip interval=0
-<<<<<<< HEAD
 	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0}, Kind: ReadFlow}
-	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0}, 0)
+	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{0.0, 0.0}, 0)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is larger than report interval, but no hot
 	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0}, Kind: ReadFlow}
-	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0}, 10*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{0.0, 0.0}, 10*time.Second)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is less than report interval
 	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0}, Kind: ReadFlow}
-	newItem = cache.updateHotPeerStat(newItem, nil, []float64{60.0, 60.0}, 4*time.Second)
-=======
-	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
-	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{0.0, 0.0, 0.0}, 0)
-	c.Check(newItem, IsNil)
-
-	// new peer, interval is larger than report interval, but no hot
-	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0, 1.0}, Kind: Read}
-	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{0.0, 0.0, 0.0}, 10*time.Second)
-	c.Check(newItem, IsNil)
-
-	// new peer, interval is less than report interval
-	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
-	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
+	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{60.0, 60.0}, 4*time.Second)
 	c.Check(newItem, NotNil)
 	c.Check(newItem.HotDegree, Equals, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
 	// sum of interval is less than report interval
 	oldItem := newItem
-<<<<<<< HEAD
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 4*time.Second)
-=======
-	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
-<<<<<<< HEAD
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 4*time.Second)
-=======
-	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
 	c.Check(newItem.AntiCount, Equals, 2)
 	// sum of interval is less than report interval
 	oldItem = newItem
-<<<<<<< HEAD
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 4*time.Second)
-=======
-	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
 	c.Check(newItem.AntiCount, Equals, 2)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
-<<<<<<< HEAD
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 10*time.Second)
-=======
-	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 10*time.Second)
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 2)
 	c.Check(newItem.AntiCount, Equals, 2)
 	// sum of interval is larger than report interval, and cold
 	oldItem = newItem
-<<<<<<< HEAD
 	newItem.thresholds = []float64{10.0, 10.0}
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 10*time.Second)
-=======
-	newItem.thresholds = []float64{10.0, 10.0, 10.0}
-	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 10*time.Second)
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
 	c.Check(newItem.AntiCount, Equals, 1)
 	// sum of interval is larger than report interval, and cold
-<<<<<<< HEAD
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 10*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 0)
-=======
-	for i := 0; i < 2*m-1; i++ {
-		oldItem = newItem
-		newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 10*time.Second)
-	}
-	c.Check(newItem.HotDegree, Less, 0)
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
 	c.Check(newItem.AntiCount, Equals, 0)
 	c.Check(newItem.needDelete, Equals, true)
 }
@@ -373,11 +325,7 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 			if oldItem != nil && oldItem.rollingLoads[RegionReadBytes].isHot(thresholds[RegionReadBytes]) == true {
 				break
 			}
-<<<<<<< HEAD
-			item := cache.updateHotPeerStat(newItem, oldItem, []float64{byteRate * interval, 0.0}, time.Duration(interval)*time.Second)
-=======
 			item := cache.updateHotPeerStat(newItem, oldItem, direct, []float64{byteRate * interval, 0.0, 0.0}, time.Duration(interval)*time.Second)
->>>>>>> 2246ef626 (statistics: fix the problem that the hot cache cannot be emptied when the interval is less than 60 (#4396))
 			cache.Update(item)
 		}
 		thresholds := cache.calcHotThresholds(storeID)
@@ -394,7 +342,7 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 	intervals := []uint64{120, 60, 10}
 	for _, peerCount := range peerCounts {
 		for _, interval := range intervals {
-			cache := NewHotPeerCache(Write)
+			cache := NewHotStoresStats(WriteFlow)
 			peers := newPeers(peerCount,
 				func(i int) uint64 { return uint64(10000 + i) },
 				func(i int) uint64 { return uint64(i) })
@@ -411,14 +359,13 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 				core.SetReportInterval(interval),
 				core.SetWrittenBytes(10*1024*1024*interval),
 				core.SetWrittenKeys(10*1024*1024*interval),
-				core.SetWrittenQuery(1024*interval),
 			)
 			for i := 1; i <= 200; i++ {
 				checkAndUpdate(c, cache, region, peerCount)
 			}
 			c.Assert(cache.storesOfRegion[region.GetID()], HasLen, peerCount)
 			var isClear bool
-			region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
+			region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0))
 			for i := 1; i <= 200; i++ {
 				checkAndUpdateSync(cache, region)
 				if len(cache.storesOfRegion[region.GetID()]) == 0 {
