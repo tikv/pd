@@ -64,7 +64,7 @@ func readJSON(client *http.Client, url string, data interface{}) error {
 }
 
 func readJSONWithBody(client *http.Client, url string, body []byte, data interface{}) error {
-	req, err := http.NewRequest("GET", url, bytes.NewBuffer(body))
+	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func extractJSON(resp *http.Response, data interface{}) error {
 }
 
 func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]
 }
 
 func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
-	req, err := http.NewRequest("GET", url, bytes.NewBuffer(data))
+	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]b
 }
 
 func patchJSON(client *http.Client, url string, body []byte) error {
-	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(body))
+	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}
@@ -127,17 +127,18 @@ func patchJSON(client *http.Client, url string, body []byte) error {
 	return nil
 }
 
-func doDelete(client *http.Client, url string) (*http.Response, error) {
-	req, err := http.NewRequest("DELETE", url, nil)
+func doDelete(client *http.Client, url string) (int, error) {
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	if err != nil {
-		return nil, err
+		return http.StatusBadRequest, err
 	}
+	// TODO: find a better way to return status code.
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return http.StatusInternalServerError, err
 	}
-	res.Body.Close()
-	return res, nil
+	defer res.Body.Close()
+	return res.StatusCode, nil
 }
 
 func parseKey(name string, input map[string]interface{}) ([]byte, string, error) {

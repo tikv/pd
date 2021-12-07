@@ -202,8 +202,11 @@ func (s *testStoreSuite) TestStoreInfoGet(c *C) {
 	c.Assert(info.Store.DeployPath, Equals, "/home/test")
 	c.Assert(info.Store.LastHeartbeat, Equals, timeStamp)
 
-	resp, _ := testDialClient.Get(url)
-	b, _ := io.ReadAll(resp.Body)
+	resp, err := testDialClient.Get(url)
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
 	str := string(b)
 	c.Assert(strings.Contains(str, "\"state\""), Equals, false)
 	s.cleanup()
