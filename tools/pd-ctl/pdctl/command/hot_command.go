@@ -129,6 +129,7 @@ func NewHotRegionsHistoryCommand() *cobra.Command {
 func showHotRegionsHistoryCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 2 || len(args)%2 != 0 {
 		cmd.Println(cmd.UsageString())
+		return
 	}
 	input, err := parseHotRegionsHistoryArgs(args)
 	if err != nil {
@@ -152,8 +153,12 @@ func showHotRegionsHistoryCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		hotRegions.HistoryHotRegion = append(hotRegions.HistoryHotRegion, tempHotRegions.HistoryHotRegion...)
 	}
-	sort.SliceStable(hotRegions.HistoryHotRegion, func(i, j int) bool {
-		return hotRegions.HistoryHotRegion[i].UpdateTime > hotRegions.HistoryHotRegion[j].UpdateTime
+	historyHotRegions := hotRegions.HistoryHotRegion
+	sort.SliceStable(historyHotRegions, func(i, j int) bool {
+		if historyHotRegions[i].UpdateTime > historyHotRegions[j].UpdateTime {
+			return true
+		}
+		return historyHotRegions[i].RegionID < historyHotRegions[j].RegionID
 	})
 	resp, err := json.Marshal(hotRegions)
 	if err != nil {

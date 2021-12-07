@@ -290,7 +290,7 @@ func (s *hotTestSuite) TestHistoryHotRegions(c *C) {
 	args := []string{"-u", pdAddr, "hot", "history",
 		start, end,
 		"hot_region_type", "write",
-		"region_ids", "1,2,3",
+		"region_ids", "1,2",
 		"store_ids", "1,4",
 	}
 	output, e := pdctl.ExecuteCommand(cmd, args...)
@@ -298,13 +298,10 @@ func (s *hotTestSuite) TestHistoryHotRegions(c *C) {
 	c.Assert(e, IsNil)
 	c.Assert(json.Unmarshal(output, &hotRegions), IsNil)
 	regions := hotRegions.HistoryHotRegion
-	c.Assert(len(regions), Equals, 2)
+	c.Assert(len(regions), Equals, 1)
 	c.Assert(regions[0].RegionID, Equals, uint64(1))
 	c.Assert(regions[0].StoreID, Equals, uint64(1))
 	c.Assert(regions[0].HotRegionType, Equals, "write")
-	c.Assert(regions[1].RegionID, Equals, uint64(3))
-	c.Assert(regions[1].StoreID, Equals, uint64(1))
-	c.Assert(regions[1].HotRegionType, Equals, "write")
 	args = []string{"-u", pdAddr, "hot", "history",
 		start, end,
 		"is_leader", "false",
