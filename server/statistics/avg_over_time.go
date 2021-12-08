@@ -76,6 +76,17 @@ func (aot *AvgOverTime) Set(avg float64) {
 	aot.que.PushBack(deltaWithInterval{delta: aot.deltaSum, interval: aot.intervalSum})
 }
 
+// Clone returns a copy of AvgOverTime
+func (aot *AvgOverTime) Clone() *AvgOverTime {
+	que := aot.que.Clone()
+	return &AvgOverTime{
+		que:         que,
+		deltaSum:    aot.deltaSum,
+		intervalSum: aot.intervalSum,
+		avgInterval: aot.avgInterval,
+	}
+}
+
 // TimeMedian is AvgOverTime + MedianFilter
 // Size of MedianFilter should be larger than double size of AvgOverTime to denoisy.
 // Delay is aotSize * mfSize * StoreHeartBeatReportInterval /4
@@ -115,4 +126,12 @@ func (t *TimeMedian) Add(delta float64, interval time.Duration) {
 // Set sets the given average.
 func (t *TimeMedian) Set(avg float64) {
 	t.mf.Set(avg)
+}
+
+// Clone returns a copy of TimeMedian
+func (t *TimeMedian) Clone() *TimeMedian {
+	return &TimeMedian{
+		aot: t.aot.Clone(),
+		mf:  t.mf.Clone(),
+	}
 }

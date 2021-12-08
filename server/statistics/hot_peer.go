@@ -36,8 +36,8 @@ type HotPeerStat struct {
 	KeyRate  float64  `json:"flow_keys"`
 
 	// rolling statistics, recording some recently added records.
-	rollingByteRate MovingAvg
-	rollingKeyRate  MovingAvg
+	rollingByteRate *MedianFilter
+	rollingKeyRate  *MedianFilter
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`

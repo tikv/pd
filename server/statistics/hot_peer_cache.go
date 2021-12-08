@@ -143,20 +143,24 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 			isLeader:       region.GetLeader().GetStoreId() == storeID,
 		}
 
+		source := direct
 		if oldItem == nil {
 			if tmpItem != nil { // use the tmpItem cached from the store where this region was in before
+				source = inherit
 				oldItem = tmpItem
+				tmpItem = nil
 			} else { // new item is new peer after adding replica
 				for _, storeID := range storeIDs {
 					oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
 					if oldItem != nil {
+						source = adopt
 						break
 					}
 				}
 			}
 		}
 
-		newItem = f.updateHotPeerStat(newItem, oldItem, storesStats)
+		newItem = f.updateHotPeerStat(newItem, oldItem, source, storesStats)
 		if newItem != nil {
 			ret = append(ret, newItem)
 		}
@@ -292,7 +296,7 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 	return false
 }
 
-func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesStats *StoresStats) *HotPeerStat {
+func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, source sourceKind, storesStats *StoresStats) *HotPeerStat {
 	thresholds := f.calcHotThresholds(storesStats, newItem.StoreID)
 	isHot := newItem.ByteRate >= thresholds[byteDim] ||
 		newItem.KeyRate >= thresholds[keyDim]
@@ -302,8 +306,13 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 	}
 
 	if oldItem != nil {
-		newItem.rollingByteRate = oldItem.rollingByteRate
-		newItem.rollingKeyRate = oldItem.rollingKeyRate
+		if source == adopt {
+			newItem.rollingByteRate = oldItem.rollingByteRate.Clone()
+			newItem.rollingKeyRate = oldItem.rollingKeyRate.Clone()
+		} else {
+			newItem.rollingByteRate = oldItem.rollingByteRate
+			newItem.rollingKeyRate = oldItem.rollingKeyRate
+		}
 		if isHot {
 			newItem.HotDegree = oldItem.HotDegree + 1
 			newItem.AntiCount = hotRegionAntiCount

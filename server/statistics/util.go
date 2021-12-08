@@ -82,3 +82,14 @@ func (r *MedianFilter) Set(n float64) {
 	r.records[0] = n
 	r.count = 1
 }
+
+// Clone returns a copy of MedianFilter
+func (r *MedianFilter) Clone() *MedianFilter {
+	records := make([]float64, len(r.records))
+	copy(records, r.records)
+	return &MedianFilter{
+		records: records,
+		size:    r.size,
+		count:   r.count,
+	}
+}
