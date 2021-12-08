@@ -97,31 +97,52 @@ func (k StoreStatKind) String() string {
 	return "unknown StoreStatKind"
 }
 
-// FlowKind is a identify Flow types.
-type FlowKind uint32
+// sourceKind represents the statistics item source.
+type sourceKind int
 
-// Flags for flow.
 const (
-	WriteFlow FlowKind = iota
-	ReadFlow
+	direct  sourceKind = iota // there is a corresponding peer in this store.
+	inherit                   // there is no a corresponding peer in this store and there is a peer just deleted.
+	adopt                     // there is no corresponding peer in this store and there is no peer just deleted, we need to copy from other stores.
 )
 
-func (k FlowKind) String() string {
+func (k sourceKind) String() string {
 	switch k {
-	case WriteFlow:
+	case direct:
+		return "direct"
+	case inherit:
+		return "inherit"
+	case adopt:
+		return "adopt"
+	}
+	return "unknown"
+}
+
+// RWType is a identify hot region types.
+type RWType uint32
+
+// Flags for r/w type.
+const (
+	Write RWType = iota
+	Read
+)
+
+func (k RWType) String() string {
+	switch k {
+	case Write:
 		return "write"
-	case ReadFlow:
+	case Read:
 		return "read"
 	}
 	return "unimplemented"
 }
 
 // RegionStats returns hot items according to kind
-func (k FlowKind) RegionStats() []RegionStatKind {
+func (k RWType) RegionStats() []RegionStatKind {
 	switch k {
-	case WriteFlow:
+	case Write:
 		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
-	case ReadFlow:
+	case Read:
 		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
 	}
 	return nil

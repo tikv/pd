@@ -1512,14 +1512,14 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
 	threshold := c.GetOpts().GetHotRegionCacheHitsThreshold() *
 		(statistics.RegionHeartBeatReportInterval / statistics.StoreHeartBeatReportInterval)
-	return c.hotStat.RegionStats(statistics.ReadFlow, threshold)
+	return c.hotStat.RegionStats(statistics.Read, threshold)
 }
 
 // RegionWriteStats returns hot region's write stats.
 // The result only includes peers that are hot enough.
 func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
-	return c.hotStat.RegionStats(statistics.WriteFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
+	return c.hotStat.RegionStats(statistics.Write, c.GetOpts().GetHotRegionCacheHitsThreshold())
 }
 
 // TODO: remove me.
@@ -1826,7 +1826,7 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
 			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
-			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s", cURL, healthURL), nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s", cURL, healthURL), nil)
 			if err != nil {
 				log.Error("failed to new request", errs.ZapError(errs.ErrNewHTTPRequest, err))
 				cancel()

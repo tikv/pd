@@ -101,9 +101,9 @@ func (s *testComponentSuite) TestComponent(c *C) {
 
 	// unregister address
 	addr3 := fmt.Sprintf("%s/component/c1/127.0.0.1:1", urlPrefix)
-	res, err := doDelete(testDialClient, addr3)
+	statusCode, err := doDelete(testDialClient, addr3)
 	c.Assert(err, IsNil)
-	c.Assert(res.StatusCode, Equals, 200)
+	c.Assert(statusCode, Equals, 200)
 
 	expected3 := map[string][]string{
 		"c1": {"127.0.0.1:2"},
@@ -116,9 +116,9 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	c.Assert(output, DeepEquals, expected3)
 
 	addr4 := fmt.Sprintf("%s/component/c1/127.0.0.1:2", urlPrefix)
-	res, err = doDelete(testDialClient, addr4)
+	statusCode, err = doDelete(testDialClient, addr4)
 	c.Assert(err, IsNil)
-	c.Assert(res.StatusCode, Equals, 200)
+	c.Assert(statusCode, Equals, 200)
 	expected4 := map[string][]string{
 		"c2": {"127.0.0.1:3"},
 		"c3": {"example.com"},
