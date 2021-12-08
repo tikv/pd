@@ -116,14 +116,23 @@ pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
 # dependent
-install-go-tools: export GO111MODULE=on
-install-go-tools:
+install-all-tools: export GO111MODULE=on
+install-all-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
 	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.43.0
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
+install-golangci-lint:
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.43.0
+
+install-go-tools: export GO111MODULE=on
+install-go-tools:
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
+
 swagger-spec: export GO111MODULE=on
-swagger-spec: install-go-tools
+swagger-spec: install-all-tools
 	go mod vendor
 	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap/tidb-dashboard --output docs/swagger
 	go mod tidy
@@ -154,7 +163,7 @@ pd-heartbeat-bench: export GO111MODULE=on
 pd-heartbeat-bench:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
-test: install-go-tools
+test: install-all-tools
 	# testing all pkgs...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
@@ -168,7 +177,7 @@ basic-test:
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-test-with-cover: install-go-tools dashboard-ui
+test-with-cover: install-all-tools dashboard-ui
 	# testing all pkgs (expect TSO consistency test) with converage...
 	@$(FAILPOINT_ENABLE)
 	for PKG in $(TEST_PKGS); do\
@@ -180,30 +189,30 @@ test-with-cover: install-go-tools dashboard-ui
 
 # The command should be used in daily CI，it will split some tasks to run parallel.
 # It should retain report.xml,coverage,coverage.xml and package.list to analyze.
-test-with-cover-parallel: install-go-tools dashboard-ui split
+test-with-cover-parallel: install-all-tools dashboard-ui split
 	@$(FAILPOINT_ENABLE)
 	set -euo pipefail;\
 	CGO_ENABLED=1 GO111MODULE=on gotestsum --junitfile report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
 	gocov convert coverage | gocov-xml >> coverage.xml;\
 	@$(FAILPOINT_DISABLE)
 
-test-tso-function: install-go-tools dashboard-ui
+test-tso-function: install-go-tools
 	# testing TSO function...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test -race -tags tso_function_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 GO111MODULE=on go test -race -tags without_dashboard,tso_function_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
-test-tso-consistency: install-go-tools dashboard-ui
+test-tso-consistency: install-go-tools
 	# testing TSO consistency...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test -race -tags tso_consistency_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 GO111MODULE=on go test -race -tags without_dashboard,tso_consistency_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
-check: install-go-tools check-all check-plugin errdoc check-testing-t docker-build-test
+check: install-all-tools check-all check-plugin errdoc check-testing-t docker-build-test
 
 check-all: static lint tidy
 	@echo "checking"
@@ -213,12 +222,12 @@ check-plugin:
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
 static: export GO111MODULE=on
-static: install-go-tools
+static: install-all-tools
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l -d $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	golangci-lint run $$($(PACKAGE_DIRECTORIES))
 
-lint: install-go-tools
+lint: install-all-tools
 	@echo "linting"
 	revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
@@ -227,7 +236,7 @@ tidy:
 	GO111MODULE=on go mod tidy
 	git diff --quiet go.mod go.sum
 
-errdoc: install-go-tools
+errdoc: install-all-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
 
@@ -266,19 +275,19 @@ clean-build:
 	rm -rf $(BUILD_BIN_PATH)
 	rm -rf $(GO_TOOLS_BIN_PATH)
 
-deadlock-enable: install-go-tools
+deadlock-enable: install-all-tools
 	# Enabling deadlock...
 	@$(DEADLOCK_ENABLE)
 
-deadlock-disable: install-go-tools
+deadlock-disable: install-all-tools
 	# Disabling deadlock...
 	@$(DEADLOCK_DISABLE)
 
-failpoint-enable: install-go-tools
+failpoint-enable: install-all-tools
 	# Converting failpoints...
 	@$(FAILPOINT_ENABLE)
 
-failpoint-disable: install-go-tools
+failpoint-disable: install-all-tools
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
 
