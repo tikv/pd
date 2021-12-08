@@ -132,7 +132,7 @@ install-go-tools:
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 swagger-spec: export GO111MODULE=on
-swagger-spec: install-all-tools
+swagger-spec: install-go-tools
 	go mod vendor
 	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap/tidb-dashboard --output docs/swagger
 	go mod tidy
@@ -163,7 +163,7 @@ pd-heartbeat-bench: export GO111MODULE=on
 pd-heartbeat-bench:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
-test: install-all-tools
+test: install-go-tools
 	# testing all pkgs...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
@@ -177,7 +177,7 @@ basic-test:
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-test-with-cover: install-all-tools dashboard-ui
+test-with-cover: install-go-tools dashboard-ui
 	# testing all pkgs (expect TSO consistency test) with converage...
 	@$(FAILPOINT_ENABLE)
 	for PKG in $(TEST_PKGS); do\
@@ -189,7 +189,7 @@ test-with-cover: install-all-tools dashboard-ui
 
 # The command should be used in daily CI，it will split some tasks to run parallel.
 # It should retain report.xml,coverage,coverage.xml and package.list to analyze.
-test-with-cover-parallel: install-all-tools dashboard-ui split
+test-with-cover-parallel: install-go-tools dashboard-ui split
 	@$(FAILPOINT_ENABLE)
 	set -euo pipefail;\
 	CGO_ENABLED=1 GO111MODULE=on gotestsum --junitfile report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
@@ -222,12 +222,12 @@ check-plugin:
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
 static: export GO111MODULE=on
-static: install-all-tools
+static: install-golangci-lint
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l -d $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	golangci-lint run $$($(PACKAGE_DIRECTORIES))
 
-lint: install-all-tools
+lint: install-go-tools
 	@echo "linting"
 	revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
@@ -236,7 +236,7 @@ tidy:
 	GO111MODULE=on go mod tidy
 	git diff --quiet go.mod go.sum
 
-errdoc: install-all-tools
+errdoc: install-go-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
 
@@ -275,19 +275,19 @@ clean-build:
 	rm -rf $(BUILD_BIN_PATH)
 	rm -rf $(GO_TOOLS_BIN_PATH)
 
-deadlock-enable: install-all-tools
+deadlock-enable: install-go-tools
 	# Enabling deadlock...
 	@$(DEADLOCK_ENABLE)
 
-deadlock-disable: install-all-tools
+deadlock-disable: install-go-tools
 	# Disabling deadlock...
 	@$(DEADLOCK_DISABLE)
 
-failpoint-enable: install-all-tools
+failpoint-enable: install-go-tools
 	# Converting failpoints...
 	@$(FAILPOINT_ENABLE)
 
-failpoint-disable: install-all-tools
+failpoint-disable: install-go-tools
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
 
