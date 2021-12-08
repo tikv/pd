@@ -170,9 +170,9 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var (
-		globalTSOResp          pdpb.Timestamp  = pdpb.Timestamp{}
-		estimatedMaxTSO        *pdpb.Timestamp = &pdpb.Timestamp{}
-		suffixBits             int             = gta.allocatorManager.GetSuffixBits()
+		globalTSOResp          = pdpb.Timestamp{}
+		estimatedMaxTSO        = &pdpb.Timestamp{}
+		suffixBits             = gta.allocatorManager.GetSuffixBits()
 		shouldRetry, skipCheck bool
 		err                    error
 	)
