@@ -132,10 +132,9 @@ func doDelete(client *http.Client, url string) (int, error) {
 	if err != nil {
 		return http.StatusBadRequest, err
 	}
-	// TODO: find a better way to return status code.
 	res, err := client.Do(req)
 	if err != nil {
-		return http.StatusInternalServerError, err
+		return 0, err
 	}
 	defer res.Body.Close()
 	return res.StatusCode, nil
