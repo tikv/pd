@@ -190,7 +190,6 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 				for _, storeID := range storeIDs {
 					oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
 					if oldItem != nil {
-						println("adopt")
 						source = adopt
 						break
 					}
