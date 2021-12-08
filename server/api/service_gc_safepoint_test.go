@@ -81,14 +81,15 @@ func (s *testServiceGCSafepointSuite) TestRegionStats(c *C) {
 
 	res, err := testDialClient.Get(sspURL)
 	c.Assert(err, IsNil)
+	defer res.Body.Close()
 	listResp := &listServiceGCSafepoint{}
 	err = apiutil.ReadJSON(res.Body, listResp)
 	c.Assert(err, IsNil)
 	c.Assert(listResp, DeepEquals, list)
 
-	res, err = doDelete(testDialClient, sspURL+"/a")
+	statusCode, err := doDelete(testDialClient, sspURL+"/a")
 	c.Assert(err, IsNil)
-	c.Assert(res.StatusCode, Equals, http.StatusOK)
+	c.Assert(statusCode, Equals, http.StatusOK)
 
 	left, err := storage.GetAllServiceGCSafePoints()
 	c.Assert(err, IsNil)

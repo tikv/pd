@@ -70,6 +70,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 		if name != leader {
 			res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 			c.Assert(e, IsNil)
+			res.Body.Close()
 			c.Assert(res.StatusCode, Equals, http.StatusOK)
 		}
 	}
@@ -86,6 +87,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 			testutil.WaitUntil(c, func(c *C) bool {
 				res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(e, IsNil)
+				defer res.Body.Close()
 				return res.StatusCode == http.StatusOK
 			})
 		}
@@ -101,6 +103,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 			testutil.WaitUntil(c, func(c *C) bool {
 				res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(err, IsNil)
+				defer res.Body.Close()
 				return res.StatusCode == http.StatusServiceUnavailable
 			})
 		}
@@ -159,7 +162,7 @@ func (s *testRedirectorSuite) TestAllowFollowerHandle(c *C) {
 	}
 
 	addr := follower.GetAddr() + "/pd/api/v1/version"
-	request, err := http.NewRequest("GET", addr, nil)
+	request, err := http.NewRequest(http.MethodGet, addr, nil)
 	c.Assert(err, IsNil)
 	request.Header.Add(serverapi.AllowFollowerHandle, "true")
 	resp, err := dialClient.Do(request)
@@ -184,7 +187,7 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 
 	addr := follower.GetAddr() + "/pd/api/v1/version"
 	// Request to follower without redirectorHeader is OK.
-	request, err := http.NewRequest("GET", addr, nil)
+	request, err := http.NewRequest(http.MethodGet, addr, nil)
 	c.Assert(err, IsNil)
 	resp, err := dialClient.Do(request)
 	c.Assert(err, IsNil)
