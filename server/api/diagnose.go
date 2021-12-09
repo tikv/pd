@@ -15,13 +15,11 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -110,14 +108,13 @@ func diagnosePD(key diagnoseType, descAdd, instAdd string) *Recommendation {
 func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 	var lostMemberIDs, runningMemberIDs []uint64
 	var newLeaderID uint64
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: d.svr.ClusterID()}}
-	members, err := d.svr.GetMembers(context.Background(), req)
+	members, err := d.svr.GetMembers()
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	lenMembers := len(members.Members)
+	lenMembers := len(members)
 	if lenMembers > 0 {
-		for _, m := range members.Members {
+		for _, m := range members {
 			pm, err := getEtcdPeerStats(d.svr.GetHTTPClient(), m.ClientUrls[0])
 			if err != nil {
 				// get peer etcd failed

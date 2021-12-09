@@ -125,7 +125,7 @@ type RaftCluster struct {
 	replicationMode *replication.ModeManager
 	traceRegionFlow bool
 
-	// It's used to manage components.
+	// Deprecated: we do not use it anymore. See https://github.com/tikv/tikv/issues/11472.
 	componentManager *component.Manager
 
 	unsafeRecoveryController *unsafeRecoveryController
@@ -1308,6 +1308,7 @@ func (c *RaftCluster) resetMetrics() {
 func (c *RaftCluster) collectClusterMetrics() {
 	c.RLock()
 	if c.regionStats == nil {
+		c.RUnlock()
 		return
 	}
 	c.regionStats.Collect()
@@ -1320,7 +1321,6 @@ func (c *RaftCluster) collectClusterMetrics() {
 
 func (c *RaftCluster) resetClusterMetrics() {
 	c.RLock()
-
 	if c.regionStats == nil {
 		c.RUnlock()
 		return
@@ -1515,14 +1515,14 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
 	threshold := c.GetOpts().GetHotRegionCacheHitsThreshold() *
 		(statistics.RegionHeartBeatReportInterval / statistics.StoreHeartBeatReportInterval)
-	return c.hotStat.RegionStats(statistics.ReadFlow, threshold)
+	return c.hotStat.RegionStats(statistics.Read, threshold)
 }
 
 // RegionWriteStats returns hot region's write stats.
 // The result only includes peers that are hot enough.
 func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
-	return c.hotStat.RegionStats(statistics.WriteFlow, c.GetOpts().GetHotRegionCacheHitsThreshold())
+	return c.hotStat.RegionStats(statistics.Write, c.GetOpts().GetHotRegionCacheHitsThreshold())
 }
 
 // TODO: remove me.
@@ -1829,7 +1829,7 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
 			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
-			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s", cURL, healthURL), nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s", cURL, healthURL), nil)
 			if err != nil {
 				log.Error("failed to new request", errs.ZapError(errs.ErrNewHTTPRequest, err))
 				cancel()
@@ -1885,4 +1885,23 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 		}
 	}
 	return false
+}
+
+// cacheCluster include cache info to improve the performance.
+type cacheCluster struct {
+	*RaftCluster
+	stores []*core.StoreInfo
+}
+
+// GetStores returns store infos from cache
+func (c *cacheCluster) GetStores() []*core.StoreInfo {
+	return c.stores
+}
+
+// newCacheCluster constructor for cache
+func newCacheCluster(c *RaftCluster) *cacheCluster {
+	return &cacheCluster{
+		RaftCluster: c,
+		stores:      c.GetStores(),
+	}
 }

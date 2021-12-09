@@ -22,6 +22,7 @@ import (
 
 	"github.com/juju/ratelimit"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -152,6 +153,18 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	}
 }
 
+// GetAllDownstreamNames tries to get the all bind stream's name.
+// Only for test
+func (s *RegionSyncer) GetAllDownstreamNames() []string {
+	s.mu.RLock()
+	names := make([]string, 0, len(s.mu.streams))
+	for name := range s.mu.streams {
+		names = append(names, name)
+	}
+	s.mu.RUnlock()
+	return names
+}
+
 // Sync firstly tries to sync the history records to client.
 // then to sync the latest records.
 func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServer) error {
@@ -207,10 +220,13 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 				select {
 				case <-ctx.Done():
 					log.Info("discontinue sending sync region response")
+					failpoint.Inject("noFastExitSync", func() {
+						failpoint.Goto("doSync")
+					})
 					return nil
 				default:
 				}
-
+				failpoint.Label("doSync")
 				metas = append(metas, r.GetMeta())
 				stats = append(stats, r.GetStat())
 				leader := &metapb.Peer{}

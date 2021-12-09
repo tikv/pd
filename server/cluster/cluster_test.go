@@ -137,7 +137,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
 	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
 	time.Sleep(20 * time.Millisecond)
-	storeStats := cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	storeStats := cluster.hotStat.RegionStats(statistics.Read, 3)
 	c.Assert(storeStats[1], HasLen, 1)
 	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
 	interval := float64(hotHeartBeat.Interval.EndTimestamp - hotHeartBeat.Interval.StartTimestamp)
@@ -148,12 +148,12 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	// After cold heartbeat, we won't find region 1 peer in regionStats
 	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
 	c.Assert(storeStats[1], HasLen, 0)
 	// After hot heartbeat, we can find region 1 peer again
 	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	storeStats = cluster.hotStat.RegionStats(statistics.Read, 3)
 	c.Assert(storeStats[1], HasLen, 1)
 	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
 	//  after several cold heartbeats, and one hot heartbeat, we also can't find region 1 peer
@@ -161,20 +161,20 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
 	c.Assert(cluster.HandleStoreHeartbeat(coldHeartBeat), IsNil)
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 0)
+	storeStats = cluster.hotStat.RegionStats(statistics.Read, 0)
 	c.Assert(storeStats[1], HasLen, 0)
 	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 1)
+	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
 	c.Assert(storeStats[1], HasLen, 1)
 	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
-	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	storeStats = cluster.hotStat.RegionStats(statistics.Read, 3)
 	c.Assert(storeStats[1], HasLen, 0)
 	// after 2 hot heartbeats, wo can find region 1 peer again
 	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
 	c.Assert(cluster.HandleStoreHeartbeat(hotHeartBeat), IsNil)
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(statistics.ReadFlow, 3)
+	storeStats = cluster.hotStat.RegionStats(statistics.Read, 3)
 	c.Assert(storeStats[1], HasLen, 1)
 	c.Assert(storeStats[1][0].RegionID, Equals, uint64(1))
 }
@@ -406,7 +406,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
 	c.Assert(err, IsNil)
 	// wait HotStat to update items
 	time.Sleep(1 * time.Second)
-	stats := cluster.hotStat.RegionStats(statistics.WriteFlow, 0)
+	stats := cluster.hotStat.RegionStats(statistics.Write, 0)
 	c.Assert(stats[1], HasLen, 1)
 	c.Assert(stats[2], HasLen, 1)
 	c.Assert(stats[3], HasLen, 1)
@@ -419,7 +419,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
 	c.Assert(err, IsNil)
 	// wait HotStat to update items
 	time.Sleep(1 * time.Second)
-	stats = cluster.hotStat.RegionStats(statistics.WriteFlow, 0)
+	stats = cluster.hotStat.RegionStats(statistics.Write, 0)
 	c.Assert(stats[1], HasLen, 1)
 	c.Assert(stats[2], HasLen, 0)
 	c.Assert(stats[3], HasLen, 1)
@@ -1036,10 +1036,10 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc))
+		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
 		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
 
-		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc))
+		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
 		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -1055,14 +1055,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc))
+			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		c.Assert(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc)), IsNil)
+		c.Assert(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(tc)), IsNil)
+		c.Assert(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy), IsNil)
 	}
 }
 

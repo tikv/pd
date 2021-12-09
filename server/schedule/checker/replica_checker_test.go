@@ -27,7 +27,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -119,7 +118,7 @@ func (s *testReplicaCheckerSuite) TestReplacePendingPeer(c *C) {
 
 func (s *testReplicaCheckerSuite) TestReplaceOfflinePeer(c *C) {
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
+		config.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
 	peers := []*metapb.Peer{
 		{
