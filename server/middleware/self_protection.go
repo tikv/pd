@@ -16,8 +16,8 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net/http"
-	"sync"
 
 	PDServer "github.com/tikv/pd/server"
 
@@ -27,8 +27,12 @@ import (
 	"google.golang.org/grpc/status"
 
 	"google.golang.org/grpc"
+)
 
-	"golang.org/x/time/rate"
+const (
+	LoggerLabel_Log       string = "log"
+	LoggerLabel_Monitored string = "Monitored"
+	LoggerLabel_Counter   string = "Counter"
 )
 
 var (
@@ -39,8 +43,8 @@ var (
 // SelfProtectionHandler a
 type SelfProtectionHandler struct {
 	s *PDServer.Server
-	// apiServiceNames is used to find the service name of api
-	apiServiceNames map[string]string
+	// httpApiServiceNames is used to find the service name of api
+	httpApiServiceNames map[string]string
 	// grpcServiceNames is used to find the service name of grpc method
 	grpcServiceNames map[string]string
 	// ServiceHandlers a
@@ -48,7 +52,7 @@ type SelfProtectionHandler struct {
 }
 
 func (h *SelfProtectionHandler) GetHttpApiServiceName(url string) (string, bool) {
-	serviceName, ok := h.apiServiceNames[url]
+	serviceName, ok := h.httpApiServiceNames[url]
 	return serviceName, ok
 }
 
@@ -81,47 +85,99 @@ func (h *SelfProtectionHandler) SelfProtectionHandle(componentName string, servi
 	if !ok {
 		return true
 	}
-	limitAllow := serviceHandler.apiRateLimiter.Allow(componentName)
+	limitAllow := serviceHandler.Allow(componentName)
 
+	return limitAllow
+}
+
+func (h *SelfProtectionHandler) SelfProtectionHandleHTTP(req *http.Request) bool {
+	serviceName, foundName := h.GetHttpApiServiceName(req.URL.Path)
+	if !foundName {
+		return true
+	}
+	componentSignature := h.GetComponentNameOnHTTP(req)
+	serviceHandler, ok := h.ServiceHandlers[serviceName]
+	if !ok {
+		return true
+	}
+	limitAllow := serviceHandler.Allow(componentSignature)
+	if serviceHandler.EnableAudit() {
+		logInfo := &LogInfo{
+			RateLimitAllow: limitAllow,
+			Method:         fmt.Sprintf("http:%s", req.URL.Path),
+		}
+		serviceHandler.GetLogInfoFromHTTP(req, logInfo)
+		serviceHandler.Audit(logInfo)
+	}
+	return limitAllow
+}
+
+func (h *SelfProtectionHandler) SelfProtectionHandleGRPC(fullMethod string, ctx context.Context) bool {
+	serviceName, foundName := h.GetGRPCServiceName(fullMethod)
+	if !foundName {
+		return true
+	}
+	componentSignature := h.GetComponentNameOnGRPC(ctx)
+
+	serviceHandler, ok := h.ServiceHandlers[serviceName]
+	if !ok {
+		return true
+	}
+	limitAllow := serviceHandler.Allow(componentSignature)
+	if serviceHandler.EnableAudit() {
+		logInfo := &LogInfo{
+			RateLimitAllow: limitAllow,
+			Method:         fmt.Sprintf("gRPC:%s", fullMethod),
+		}
+		serviceHandler.GetLogInfoFromGRPC(ctx, logInfo)
+		serviceHandler.Audit(logInfo)
+	}
 	return limitAllow
 }
 
 type ServiceSelfProtectionHandler struct {
 	apiRateLimiter ApiRateLimiter
-	auditLog       AuditLog
+	auditLog       AuditLogger
+}
+
+func (s *ServiceSelfProtectionHandler) Allow(componentName string) bool {
+	return true
+}
+
+func (s *ServiceSelfProtectionHandler) EnableAudit() bool {
+	return true
+}
+
+func (s *ServiceSelfProtectionHandler) GetLogInfoFromHTTP(req *http.Request, logInfo *LogInfo) {
+
+}
+
+func (s *ServiceSelfProtectionHandler) GetLogInfoFromGRPC(ctx context.Context, logInfo *LogInfo) {
+
+}
+
+func (s *ServiceSelfProtectionHandler) Audit(logInfo *LogInfo) {
+
 }
 
 type ApiRateLimiter struct {
-	mu sync.RWMutex
-
-	enableQpsLimit bool
-
-	totalQpsRateLimiter *rate.Limiter
-
-	enableComponentQpsLimit bool
-	userQpsRateLimiter      map[string]*rate.Limiter
-}
-
-func (rl *ApiRateLimiter) QpsAllow(componentName string) bool {
-	if !rl.enableQpsLimit {
-		return true
-	}
-	isComponentQpsLimit, isTotalQpsLimit := true, true
-	if rl.enableComponentQpsLimit {
-		componentRateLimiter, ok := rl.userQpsRateLimiter[componentName]
-		if !ok {
-			componentRateLimiter = rl.userQpsRateLimiter[componentAnonymousValue]
-		}
-		isComponentQpsLimit = componentRateLimiter.Allow()
-	}
-	isTotalQpsLimit = rl.totalQpsRateLimiter.Allow()
-	return isComponentQpsLimit && isTotalQpsLimit
 }
 
 func (rl *ApiRateLimiter) Allow(componentName string) bool {
-	rl.mu.RLock()
-	defer rl.mu.RUnlock()
-	return rl.QpsAllow(componentName)
+	return true
+}
+
+type LogInfo struct {
+	ServiceName    string
+	Method         string
+	Component      string
+	IP             string
+	TimeStamp      string
+	Param          string
+	RateLimitAllow bool
+}
+
+type AuditLogger struct {
 }
 
 func (h *SelfProtectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
@@ -140,12 +196,7 @@ func (h *SelfProtectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 func (h *SelfProtectionHandler) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return grpc.UnaryServerInterceptor(func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-		serviceName, foundName := h.GetGRPCServiceName(info.FullMethod)
-		if !foundName {
-			return handler(ctx, req)
-		}
-		componentSignature := h.GetComponentNameOnGRPC(ctx)
-		if h.SelfProtectionHandle(componentSignature, serviceName) {
+		if h.SelfProtectionHandleGRPC(info.FullMethod, ctx) {
 			return nil, status.Errorf(codes.ResourceExhausted, "%s is rejected by grpc_ratelimit middleware, please retry later.", info.FullMethod)
 		}
 		return handler(ctx, req)
@@ -154,19 +205,11 @@ func (h *SelfProtectionHandler) UnaryServerInterceptor() grpc.UnaryServerInterce
 
 func (h *SelfProtectionHandler) StreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		serviceName, foundName := h.GetGRPCServiceName(info.FullMethod)
-		if !foundName {
-			return handler(srv, stream)
-		}
-		componentSignature := h.GetComponentNameOnGRPC(stream.Context())
-		if h.SelfProtectionHandle(componentSignature, serviceName) {
+		if h.SelfProtectionHandleGRPC(info.FullMethod, stream.Context()) {
 			return status.Errorf(codes.ResourceExhausted, "%s is rejected by grpc_ratelimit middleware, please retry later.", info.FullMethod)
 		}
 		return handler(srv, stream)
 	}
-}
-
-type AuditLog struct {
 }
 
 // UserSignatureGRPCClientInterceptorBuilder add component user signature in gRPC
@@ -207,8 +250,8 @@ type UserSignatureRoundTripper struct {
 	Proxied http.RoundTripper
 }
 
-func (rt *UserSignatureRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	req.Header.Set(componentSignatureKey, "pd-ctl")
+func (rt *UserSignatureRoundTripper) RoundTrip(req *http.Request, component string) (resp *http.Response, err error) {
+	req.Header.Set(componentSignatureKey, component)
 	// Send the request, get the response and the error
 	resp, err = rt.Proxied.RoundTrip(req)
 	return

@@ -15,9 +15,11 @@
 package apiutil
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 
@@ -25,6 +27,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/unrolled/render"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 )
 
 // DeferClose captures the error returned from closing (if an error occurs).
@@ -126,4 +130,37 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	} else {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
+}
+
+func GetIpAddrFromGRPCContext(ctx context.Context) string {
+	ip, ok := GetRealIPAddrFromGRPCContext(ctx)
+	if ok {
+		return ip
+	}
+	ip = GetPeerAddrFromGRPCContext(ctx)
+	return ip
+}
+
+func GetRealIPAddrFromGRPCContext(ctx context.Context) (string, bool) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return "", ok
+	}
+	realIPs := md.Get("x-real-ip")
+	if len(realIPs) == 0 {
+		return "", false
+	}
+	return realIPs[0], true
+}
+
+func GetPeerAddrFromGRPCContext(ctx context.Context) string {
+	var addr string
+	if pr, ok := peer.FromContext(ctx); ok {
+		if tcpAddr, ok := pr.Addr.(*net.TCPAddr); ok {
+			addr = tcpAddr.IP.String()
+		} else {
+			addr = pr.Addr.String()
+		}
+	}
+	return addr
 }
