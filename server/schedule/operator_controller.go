@@ -660,7 +660,9 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 	case operator.PromoteLearner:
 		cmd = addNode(st.PeerID, st.ToStore)
 	case operator.DemoteFollower:
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
+		cmd = &pdpb.RegionHeartbeatResponse{
+			ChangePeerV2: st.GetRequest(),
+		}
 	case operator.RemovePeer:
 		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{

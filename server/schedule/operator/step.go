@@ -409,6 +409,20 @@ func (df DemoteFollower) CheckInProgress(cluster opt.Cluster, region *core.Regio
 // Influence calculates the store difference that current step makes.
 func (df DemoteFollower) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
+// GetRequest get the ChangePeerV2 request
+func (df DemoteFollower) GetRequest() *pdpb.ChangePeerV2 {
+	return &pdpb.ChangePeerV2{
+		Changes: []*pdpb.ChangePeer{{
+			ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+			Peer: &metapb.Peer{
+				Id:      df.PeerID,
+				StoreId: df.ToStore,
+				Role:    metapb.PeerRole_Learner,
+			},
+		}},
+	}
+}
+
 // DemoteVoter is very similar to DemoteFollower. But it allows Demote Leader.
 // Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
 type DemoteVoter struct {
