@@ -248,50 +248,50 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 
 	// skip interval=0
 	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
-	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{0.0, 0.0, 0.0}, 0)
+	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0, 0.0}, 0)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is larger than report interval, but no hot
 	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0, 1.0}, Kind: Read}
-	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{0.0, 0.0, 0.0}, 10*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0, 0.0}, 10*time.Second)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is less than report interval
 	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
-	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, nil, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem, NotNil)
 	c.Check(newItem.HotDegree, Equals, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
 	// sum of interval is less than report interval
 	oldItem := newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
 	c.Check(newItem.AntiCount, Equals, 2*m)
 	// sum of interval is less than report interval
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
 	c.Check(newItem.AntiCount, Equals, 2*m)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 10*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 2)
 	c.Check(newItem.AntiCount, Equals, 2*m)
 	// sum of interval is larger than report interval, and cold
 	oldItem = newItem
 	newItem.thresholds = []float64{10.0, 10.0, 10.0}
-	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 10*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
 	c.Check(newItem.AntiCount, Equals, 2*m-1)
 	// sum of interval is larger than report interval, and cold
 	for i := 0; i < 2*m-1; i++ {
 		oldItem = newItem
-		newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 10*time.Second)
+		newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
 	}
 	c.Check(newItem.HotDegree, Less, 0)
 	c.Check(newItem.AntiCount, Equals, 0)

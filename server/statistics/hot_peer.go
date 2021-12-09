@@ -109,6 +109,10 @@ type HotPeerStat struct {
 	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
 	// we will handle it as cold peer and mark the inCold flag
 	inCold bool
+	source sourceKind
+	// it is uncertain whether it is hot and it is adopt from other store
+	// it will be changed to false until it is confirmed to be hot
+	justFromAdopt bool
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -127,15 +131,18 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Uint64("interval", stat.interval),
 		zap.Uint64("region-id", stat.RegionID),
 		zap.Uint64("store", stat.StoreID),
+		zap.Bool("is-leader", stat.isLeader),
+		zap.String("type", stat.Kind.String()),
 		zap.Float64s("loads", stat.GetLoads()),
 		zap.Float64s("loads-instant", stat.Loads),
 		zap.Float64s("thresholds", stat.thresholds),
 		zap.Int("hot-degree", stat.HotDegree),
 		zap.Int("hot-anti-count", stat.AntiCount),
-		zap.Bool("just-transfer-leader", stat.justTransferLeader),
-		zap.Bool("is-leader", stat.isLeader),
+		zap.Duration("sum-interval", stat.GetIntervalSum()),
 		zap.Bool("need-delete", stat.IsNeedDelete()),
-		zap.String("type", stat.Kind.String()),
+		zap.String("source", stat.source.String()),
+		zap.Bool("just-from-adopt", stat.justFromAdopt),
+		zap.Bool("just-transfer-leader", stat.justTransferLeader),
 		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
 }
 
@@ -210,4 +217,12 @@ func (stat *HotPeerStat) hotStatReportInterval() int {
 		return ReadReportInterval
 	}
 	return WriteReportInterval
+}
+
+// GetByteRate returns denoised BytesRate if possible.
+func (stat *HotPeerStat) GetIntervalSum() time.Duration {
+	if len(stat.rollingLoads) == 0 || stat.rollingLoads[0] == nil {
+		return 0
+	}
+	return stat.rollingLoads[0].LastAverage.GetIntervalSum()
 }
