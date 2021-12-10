@@ -521,9 +521,9 @@ func (s *testRuleSuite) TestDelete(c *C) {
 		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.groupID, testcase.id)
 		// clear suspect keyRanges to prevent test case from others
 		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
-		resp, err := doDelete(testDialClient, url)
+		statusCode, err := doDelete(testDialClient, url)
 		c.Assert(err, IsNil)
-		c.Assert(resp.StatusCode, Equals, http.StatusOK)
+		c.Assert(statusCode, Equals, http.StatusOK)
 		if len(testcase.popKeyRange) > 0 {
 			popKeyRangeMap := map[string]struct{}{}
 			for i := 0; i < len(testcase.popKeyRange)/2; i++ {

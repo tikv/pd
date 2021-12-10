@@ -3,9 +3,11 @@ module github.com/tikv/pd
 go 1.16
 
 require (
+	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v0.3.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/aws/aws-sdk-go v1.35.3
+	github.com/axw/gocov v1.0.0
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
@@ -31,7 +33,7 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
 	github.com/pingcap/kvproto v0.0.0-20211109071446-a8b4d34474bc
 	github.com/pingcap/log v0.0.0-20210625125904-98ed8e2eb1c7
-	github.com/pingcap/sysutil v0.0.0-20210730114356-fcd8a63f68c5
+	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
 	github.com/pingcap/tidb-dashboard v0.0.0-20211206031355-bcc43a01d537
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/common v0.6.0
@@ -52,4 +54,5 @@ require (
 	golang.org/x/tools v0.1.5
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
+	gotest.tools/gotestsum v1.7.0
 )

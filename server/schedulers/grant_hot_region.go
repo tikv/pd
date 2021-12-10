@@ -158,7 +158,7 @@ type grantHotRegionScheduler struct {
 	r           *rand.Rand
 	conf        *grantHotRegionSchedulerConfig
 	handler     http.Handler
-	types       []rwType
+	types       []statistics.RWType
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
 }
 
@@ -171,7 +171,7 @@ func newGrantHotRegionScheduler(opController *schedule.OperatorController, conf 
 		conf:          conf,
 		handler:       handler,
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
-		types:         []rwType{read, write},
+		types:         []statistics.RWType{statistics.Read, statistics.Write},
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.stLoadInfos[ty] = map[uint64]*storeLoadDetail{}
@@ -273,27 +273,27 @@ func (s *grantHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 	return s.dispatch(s.types[i], cluster)
 }
 
-func (s *grantHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
+func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
 	storeInfos := summaryStoreInfos(cluster)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
 	var stLoadInfos map[uint64]*storeLoadDetail
 	switch typ {
-	case read:
+	case statistics.Read:
 		stLoadInfos = summaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionReadStats(),
 			isTraceRegionFlow,
-			read, core.RegionKind)
-	case write:
+			statistics.Read, core.RegionKind)
+	case statistics.Write:
 		stLoadInfos = summaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionWriteStats(),
 			isTraceRegionFlow,
-			write, core.RegionKind)
+			statistics.Write, core.RegionKind)
 	}
 	infos := make([]*storeLoadDetail, len(stLoadInfos))
 	index := 0
