@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
@@ -132,6 +133,7 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	}
 }
 
+// GetIpAddrFromGRPCContext returns gRPC client IP from context
 func GetIpAddrFromGRPCContext(ctx context.Context) string {
 	ip, ok := GetRealIPAddrFromGRPCContext(ctx)
 	if ok {
@@ -163,4 +165,23 @@ func GetPeerAddrFromGRPCContext(ctx context.Context) string {
 		}
 	}
 	return addr
+}
+
+// GetIpAddrFromHttpRequest returns http client IP from context
+func GetIpAddrFromHttpRequest(r *http.Request) string {
+	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	if ips[0] != "" {
+		return ips[0]
+	}
+
+	ip := r.Header.Get("X-Real-Ip")
+	if ip != "" {
+		return ip
+	}
+
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return ""
+	}
+	return ip
 }

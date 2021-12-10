@@ -15,15 +15,20 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"sync"
+	"time"
 
+	"github.com/tikv/pd/pkg/apiutil"
 	PDServer "github.com/tikv/pd/server"
-
-	"google.golang.org/grpc/metadata"
-
+	"golang.org/x/time/rate"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -101,8 +106,11 @@ func (h *SelfProtectionHandler) SelfProtectionHandleHTTP(req *http.Request) bool
 	limitAllow := serviceHandler.Allow(componentSignature)
 	if serviceHandler.EnableAudit() {
 		logInfo := &LogInfo{
-			RateLimitAllow: limitAllow,
+			ServiceName:    serviceName,
 			Method:         fmt.Sprintf("http:%s", req.URL.Path),
+			Component:      componentSignature,
+			TimeStamp:      time.Now().Local().String(),
+			RateLimitAllow: limitAllow,
 		}
 		serviceHandler.GetLogInfoFromHTTP(req, logInfo)
 		serviceHandler.Audit(logInfo)
@@ -116,7 +124,6 @@ func (h *SelfProtectionHandler) SelfProtectionHandleGRPC(fullMethod string, ctx 
 		return true
 	}
 	componentSignature := h.GetComponentNameOnGRPC(ctx)
-
 	serviceHandler, ok := h.ServiceHandlers[serviceName]
 	if !ok {
 		return true
@@ -124,8 +131,11 @@ func (h *SelfProtectionHandler) SelfProtectionHandleGRPC(fullMethod string, ctx 
 	limitAllow := serviceHandler.Allow(componentSignature)
 	if serviceHandler.EnableAudit() {
 		logInfo := &LogInfo{
-			RateLimitAllow: limitAllow,
+			ServiceName:    serviceName,
 			Method:         fmt.Sprintf("gRPC:%s", fullMethod),
+			Component:      componentSignature,
+			TimeStamp:      time.Now().Local().String(),
+			RateLimitAllow: limitAllow,
 		}
 		serviceHandler.GetLogInfoFromGRPC(ctx, logInfo)
 		serviceHandler.Audit(logInfo)
@@ -134,35 +144,76 @@ func (h *SelfProtectionHandler) SelfProtectionHandleGRPC(fullMethod string, ctx 
 }
 
 type ServiceSelfProtectionHandler struct {
-	apiRateLimiter ApiRateLimiter
-	auditLog       AuditLogger
+	apiRateLimiter *ApiRateLimiter
+	auditLogger    *AuditLogger
 }
 
 func (s *ServiceSelfProtectionHandler) Allow(componentName string) bool {
-	return true
+	if s.apiRateLimiter == nil {
+		return true
+	}
+	return s.apiRateLimiter.Allow(componentName)
 }
 
 func (s *ServiceSelfProtectionHandler) EnableAudit() bool {
-	return true
+	if s.auditLogger == nil {
+		return true
+	}
+	return s.EnableAudit()
 }
 
 func (s *ServiceSelfProtectionHandler) GetLogInfoFromHTTP(req *http.Request, logInfo *LogInfo) {
-
+	//Get IP
+	logInfo.IP = apiutil.GetIpAddrFromHttpRequest(req)
+	//Get Param
+	buf, err := io.ReadAll(req.Body)
+	if err != nil {
+		logInfo.Param = string(buf)
+	}
+	req.Body = io.NopCloser(bytes.NewBuffer(buf))
 }
 
 func (s *ServiceSelfProtectionHandler) GetLogInfoFromGRPC(ctx context.Context, logInfo *LogInfo) {
-
+	//Get IP
+	logInfo.IP = apiutil.GetIpAddrFromGRPCContext(ctx)
+	//gRPC can't get Param in middware
 }
 
 func (s *ServiceSelfProtectionHandler) Audit(logInfo *LogInfo) {
-
+	s.auditLogger.Audit(logInfo)
 }
 
 type ApiRateLimiter struct {
+	mu sync.RWMutex
+
+	enableQpsLimit bool
+
+	totalQpsRateLimiter *rate.Limiter
+
+	enableComponentQpsLimit bool
+	userQpsRateLimiter      map[string]*rate.Limiter
+}
+
+func (rl *ApiRateLimiter) QpsAllow(componentName string) bool {
+	if !rl.enableQpsLimit {
+		return true
+	}
+	isComponentQpsLimit, isTotalQpsLimit := true, true
+	if rl.enableComponentQpsLimit {
+		componentRateLimiter, ok := rl.userQpsRateLimiter[componentName]
+		if !ok {
+			componentRateLimiter = rl.userQpsRateLimiter[componentAnonymousValue]
+		}
+		isComponentQpsLimit = componentRateLimiter.Allow()
+	}
+	isTotalQpsLimit = rl.totalQpsRateLimiter.Allow()
+	return isComponentQpsLimit && isTotalQpsLimit
 }
 
 func (rl *ApiRateLimiter) Allow(componentName string) bool {
-	return true
+	rl.mu.RLock()
+	defer rl.mu.RUnlock()
+	return rl.QpsAllow(componentName)
 }
 
 type LogInfo struct {
@@ -176,6 +227,28 @@ type LogInfo struct {
 }
 
 type AuditLogger struct {
+	mu          sync.RWMutex
+	enableAudit bool
+	labels      map[string]bool
+}
+
+func (logger *AuditLogger) EnableAudit() bool {
+	logger.mu.RLock()
+	defer logger.mu.RUnlock()
+	return logger.enableAudit
+}
+
+func (logger *AuditLogger) Audit(info *LogInfo) {
+	if isLog, ok := logger.labels[LoggerLabel_Log]; ok {
+		if isLog {
+
+		}
+	}
+	if isMonitor, ok := logger.labels[LoggerLabel_Monitored]; ok {
+		if isMonitor {
+
+		}
+	}
 }
 
 func (h *SelfProtectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
