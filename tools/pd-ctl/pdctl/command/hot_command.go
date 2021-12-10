@@ -134,6 +134,7 @@ func showHotRegionsHistoryCommandFunc(cmd *cobra.Command, args []string) {
 	input, err := parseHotRegionsHistoryArgs(args)
 	if err != nil {
 		cmd.Printf("Failed to get history hotspot: %s\n", err)
+		return
 	}
 	data, _ := json.Marshal(input)
 	endpoints := getEndpoints(cmd)
@@ -215,22 +216,22 @@ func parseHotRegionsHistoryArgs(args []string) (map[string]interface{}, error) {
 		switch args[index] {
 		case "hot_region_type":
 			input["hot_region_type"] = []string{args[index+1]}
-		case "region_ids":
+		case "region_id":
 			results, err := stringToIntSlice(args[index+1])
 			if err != nil {
-				return nil, errors.Errorf("region_ids should be a number slice,but got %s", args[index+1])
+				return nil, errors.Errorf("region_id should be a number slice,but got %s", args[index+1])
 			}
 			input["region_ids"] = results
-		case "store_ids":
+		case "store_id":
 			results, err := stringToIntSlice(args[index+1])
 			if err != nil {
-				return nil, errors.Errorf("store_ids should be a number slice,but got %s", args[index+1])
+				return nil, errors.Errorf("store_id should be a number slice,but got %s", args[index+1])
 			}
 			input["store_ids"] = results
-		case "peer_ids":
+		case "peer_id":
 			results, err := stringToIntSlice(args[index+1])
 			if err != nil {
-				return nil, errors.Errorf("peer_ids should be a number slice,but got %s", args[index+1])
+				return nil, errors.Errorf("peer_id should be a number slice,but got %s", args[index+1])
 			}
 			input["peer_ids"] = results
 		case "is_leader":
@@ -242,11 +243,11 @@ func parseHotRegionsHistoryArgs(args []string) (map[string]interface{}, error) {
 		case "is_learner":
 			isLearner, err := strconv.ParseBool(args[index+1])
 			if err != nil {
-				return nil, errors.Errorf("is_learners should be a bool,but got %s", args[index+1])
+				return nil, errors.Errorf("is_learner should be a bool,but got %s", args[index+1])
 			}
 			input["is_learners"] = []bool{isLearner}
 		default:
-			return nil, errors.Errorf("key should be one of hot_region_type,region_ids,store_ids,peer_ids,is_leaders,is_learners")
+			return nil, errors.Errorf("key should be one of hot_region_type,region_id,store_id,peer_id,is_leader,is_learner")
 		}
 	}
 	if _, ok := input["is_leaders"]; !ok {

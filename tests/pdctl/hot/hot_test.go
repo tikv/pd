@@ -290,8 +290,9 @@ func (s *hotTestSuite) TestHistoryHotRegions(c *C) {
 	args := []string{"-u", pdAddr, "hot", "history",
 		start, end,
 		"hot_region_type", "write",
-		"region_ids", "1,2",
-		"store_ids", "1,4",
+		"region_id", "1,2",
+		"store_id", "1,4",
+		"is_learner", "false",
 	}
 	output, e := pdctl.ExecuteCommand(cmd, args...)
 	hotRegions := core.HistoryHotRegions{}
@@ -304,10 +305,43 @@ func (s *hotTestSuite) TestHistoryHotRegions(c *C) {
 	c.Assert(regions[0].HotRegionType, Equals, "write")
 	args = []string{"-u", pdAddr, "hot", "history",
 		start, end,
+		"hot_region_type", "write",
+		"region_id", "1,2",
+		"store_id", "1,2",
+	}
+	output, e = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegions), IsNil)
+	regions = hotRegions.HistoryHotRegion
+	c.Assert(len(regions), Equals, 2)
+	isSort := regions[0].UpdateTime > regions[1].UpdateTime || regions[0].RegionID < regions[1].RegionID
+	c.Assert(isSort, Equals, true)
+	args = []string{"-u", pdAddr, "hot", "history",
+		start, end,
+		"hot_region_type", "read",
 		"is_leader", "false",
+		"peer_id", "12",
 	}
 	output, e = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(e, IsNil)
 	c.Assert(json.Unmarshal(output, &hotRegions), IsNil)
 	c.Assert(len(hotRegions.HistoryHotRegion), Equals, 0)
+	args = []string{"-u", pdAddr, "hot", "history"}
+	output, e = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegions), NotNil)
+	args = []string{"-u", pdAddr, "hot", "history",
+		start, end,
+		"region_id", "dada",
+	}
+	output, e = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegions), NotNil)
+	args = []string{"-u", pdAddr, "hot", "history",
+		start, end,
+		"region_ids", "12323",
+	}
+	output, e = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegions), NotNil)
 }

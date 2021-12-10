@@ -129,7 +129,7 @@ type DoFunc func(endpoint string) error
 func tryURLs(cmd *cobra.Command, endpoints []string, f DoFunc) error {
 	var err error
 	for _, endpoint := range endpoints {
-		endpoint, err := checkURL(endpoint)
+		endpoint, err = checkURL(endpoint)
 		if err != nil {
 			cmd.Println(err.Error())
 			os.Exit(1)
