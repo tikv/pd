@@ -1390,7 +1390,7 @@ func (s *Server) replicateFileToMember(ctx context.Context, member *pdpb.Member,
 		return errs.ErrClientURLEmpty.FastGenByArgs()
 	}
 	url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
-	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
 	req.Header.Set("PD-Allow-follower-handle", "true")
 	res, err := s.httpClient.Do(req)
 	if err != nil {

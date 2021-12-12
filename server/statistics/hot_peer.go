@@ -70,6 +70,14 @@ func (d *dimStat) Get() float64 {
 	return d.Rolling.Get()
 }
 
+func (d *dimStat) Clone() *dimStat {
+	return &dimStat{
+		typ:         d.typ,
+		Rolling:     d.Rolling.Clone(),
+		LastAverage: d.LastAverage.Clone(),
+	}
+}
+
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
 	StoreID  uint64 `json:"store_id"`
@@ -80,7 +88,7 @@ type HotPeerStat struct {
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int `json:"anti_count"`
 
-	Kind  FlowKind  `json:"-"`
+	Kind  RWType    `json:"-"`
 	Loads []float64 `json:"loads"`
 
 	// rolling statistics, recording some recently added records.
@@ -179,7 +187,7 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
 	ret.Loads = make([]float64, RegionStatCount)
 	for i := RegionStatKind(0); i < RegionStatCount; i++ {
-		ret.Loads[i] = stat.GetLoad(i) // replace with denoised loads
+		ret.Loads[i] = stat.GetLoad(i) // replace with denoising loads
 	}
 	ret.rollingLoads = nil
 	return &ret
@@ -198,7 +206,7 @@ func (stat *HotPeerStat) clearLastAverage() {
 }
 
 func (stat *HotPeerStat) hotStatReportInterval() int {
-	if stat.Kind == ReadFlow {
+	if stat.Kind == Read {
 		return ReadReportInterval
 	}
 	return WriteReportInterval

@@ -137,6 +137,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewRandomMergeSchedulerCommand())
 	c.AddCommand(NewLabelSchedulerCommand())
 	c.AddCommand(NewEvictSlowStoreSchedulerCommand())
+	c.AddCommand(NewGrantHotRegionSchedulerCommand())
 	return c
 }
 
@@ -318,12 +319,33 @@ func NewLabelSchedulerCommand() *cobra.Command {
 	return c
 }
 
+// NewGrantHotRegionSchedulerCommand returns a command to add a grant-hot-region-scheduler.
+func NewGrantHotRegionSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "grant-hot-region-scheduler <store_lead_id> <store_id_1,store_id_2>",
+		Short: "add a scheduler to grant hot region to fixed store",
+		Run:   addSchedulerForGrantHotRegionCommandFunc,
+	}
+	return c
+}
+
+func addSchedulerForGrantHotRegionCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["store-leader-id"] = args[0]
+	input["store-id"] = args[1]
+	postJSON(cmd, schedulersPrefix, input)
+}
+
 func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-
 	input := make(map[string]interface{})
 	input["name"] = cmd.Name()
 	postJSON(cmd, schedulersPrefix, input)
@@ -413,6 +435,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigGrantLeaderCommand(),
 		newConfigHotRegionCommand(),
 		newConfigShuffleRegionCommand(),
+		newConfigGrantHotRegionCommand(),
 	)
 	return c
 }
@@ -532,6 +555,46 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
+}
+
+func newConfigGrantHotRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "grant-hot-region-scheduler",
+		Short: "grant-hot-region-scheduler config",
+		Run:   showGrantHotRegionCommandFunc,
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "set [leader] [peer,]",
+		Short: "set store leader and peers",
+		Run:   func(cmd *cobra.Command, args []string) { setGrantHotRegionCommandFunc(cmd, c.Name(), args) }},
+	)
+	return c
+}
+
+func showGrantHotRegionCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) > 0 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	p := cmd.Name()
+	path := path.Join(schedulerConfigPrefix, p, "list")
+	r, err := doRequest(cmd, path, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func setGrantHotRegionCommandFunc(cmd *cobra.Command, schedulerName string, args []string) {
+	if len(args) != 2 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	input := make(map[string]interface{})
+	input["store-leader-id"] = args[0]
+	input["store-id"] = args[1]
+	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 
 func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, args []string) {
