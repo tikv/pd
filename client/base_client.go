@@ -33,21 +33,27 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	globalDCLocation     = "global"
+	memberUpdateInterval = time.Minute
+)
+
 // baseClient is a basic client for all other complex client.
 type baseClient struct {
-	urls      []string
+	urls      atomic.Value // Store as []string
 	clusterID uint64
 	// PD leader URL
 	leader atomic.Value // Store as string
 	// PD follower URLs
 	followers atomic.Value // Store as []string
-	// dc-location -> TSO allocator leader gRPC connection
+	// addr -> TSO gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 	// dc-location -> TSO allocator leader URL
 	allocators sync.Map // Store as map[string]string
 
-	checkLeaderCh        chan struct{}
-	checkTSODispatcherCh chan struct{}
+	checkLeaderCh          chan struct{}
+	checkTSODispatcherCh   chan struct{}
+	updateConnectionCtxsCh chan struct{}
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -55,10 +61,8 @@ type baseClient struct {
 
 	security SecurityOption
 
-	// BaseClient options.
-	gRPCDialOptions []grpc.DialOption
-	timeout         time.Duration
-	maxRetryTimes   int
+	// Client option.
+	option *option
 }
 
 // SecurityOption records options about tls
@@ -75,16 +79,17 @@ type SecurityOption struct {
 // newBaseClient returns a new baseClient.
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption) *baseClient {
 	clientCtx, clientCancel := context.WithCancel(ctx)
-	return &baseClient{
-		urls:                 urls,
-		checkLeaderCh:        make(chan struct{}, 1),
-		checkTSODispatcherCh: make(chan struct{}, 1),
-		ctx:                  clientCtx,
-		cancel:               clientCancel,
-		security:             security,
-		timeout:              defaultPDTimeout,
-		maxRetryTimes:        maxInitClusterRetries,
+	bc := &baseClient{
+		checkLeaderCh:          make(chan struct{}, 1),
+		checkTSODispatcherCh:   make(chan struct{}, 1),
+		updateConnectionCtxsCh: make(chan struct{}, 1),
+		ctx:                    clientCtx,
+		cancel:                 clientCancel,
+		security:               security,
+		option:                 newOption(),
 	}
+	bc.urls.Store(urls)
+	return bc
 }
 
 func (c *baseClient) init() error {
@@ -105,7 +110,7 @@ func (c *baseClient) init() error {
 
 func (c *baseClient) initRetry(f func() error) error {
 	var err error
-	for i := 0; i < c.maxRetryTimes; i++ {
+	for i := 0; i < c.option.maxRetryTimes; i++ {
 		if err = f(); err == nil {
 			return nil
 		}
@@ -127,7 +132,7 @@ func (c *baseClient) memberLoop() {
 	for {
 		select {
 		case <-c.checkLeaderCh:
-		case <-time.After(time.Minute):
+		case <-time.After(memberUpdateInterval):
 		case <-ctx.Done():
 			return
 		}
@@ -155,6 +160,13 @@ func (c *baseClient) scheduleCheckTSODispatcher() {
 	}
 }
 
+func (c *baseClient) scheduleUpdateConnectionCtxs() {
+	select {
+	case c.updateConnectionCtxsCh <- struct{}{}:
+	default:
+	}
+}
+
 // GetClusterID returns the ClusterID.
 func (c *baseClient) GetClusterID(context.Context) uint64 {
 	return c.clusterID
@@ -169,8 +181,8 @@ func (c *baseClient) GetLeaderAddr() string {
 	return leaderAddr.(string)
 }
 
-// GetLeaderAddr returns the follower address.
-func (c *baseClient) GetFollowerAddr() []string {
+// GetFollowerAddrs returns the follower address.
+func (c *baseClient) GetFollowerAddrs() []string {
 	followerAddrs := c.followers.Load()
 	if followerAddrs == nil {
 		return []string{}
@@ -181,7 +193,7 @@ func (c *baseClient) GetFollowerAddr() []string {
 // GetURLs returns the URLs.
 // For testing use. It should only be called when the client is closed.
 func (c *baseClient) GetURLs() []string {
-	return c.urls
+	return c.urls.Load().([]string)
 }
 
 func (c *baseClient) GetAllocatorLeaderURLs() map[string]string {
@@ -213,8 +225,6 @@ func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grp
 	return cc.(*grpc.ClientConn), url.(string)
 }
 
-const globalDCLocation = "global"
-
 func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
 	// Clean up the old TSO allocators
 	c.allocators.Range(func(dcLocationKey, _ interface{}) bool {
@@ -234,8 +244,8 @@ func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Memb
 func (c *baseClient) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
-	for _, u := range c.urls {
-		members, err := c.getMembers(ctx, u, c.timeout)
+	for _, u := range c.GetURLs() {
+		members, err := c.getMembers(ctx, u, c.option.timeout)
 		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", u), errs.ZapError(err))
 			continue
@@ -247,7 +257,7 @@ func (c *baseClient) initClusterID() error {
 }
 
 func (c *baseClient) updateMember() error {
-	for _, u := range c.urls {
+	for _, u := range c.GetURLs() {
 		members, err := c.getMembers(c.ctx, u, updateMemberTimeout)
 
 		var errTSO error
@@ -283,7 +293,7 @@ func (c *baseClient) updateMember() error {
 		// the error of `switchTSOAllocatorLeader` will be returned.
 		return errTSO
 	}
-	return errs.ErrClientGetLeader.FastGenByArgs(c.urls)
+	return errs.ErrClientGetLeader.FastGenByArgs(c.GetURLs())
 }
 
 func (c *baseClient) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
@@ -308,13 +318,17 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 	}
 
 	sort.Strings(urls)
+	oldURLs := c.GetURLs()
 	// the url list is same.
-	if reflect.DeepEqual(c.urls, urls) {
+	if reflect.DeepEqual(oldURLs, urls) {
 		return
 	}
-
-	log.Info("[pd] update member urls", zap.Strings("old-urls", c.urls), zap.Strings("new-urls", urls))
-	c.urls = urls
+	c.urls.Store(urls)
+	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
+	if c.option.getEnableTSOFollowerProxy() {
+		c.scheduleUpdateConnectionCtxs()
+	}
+	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
 
 func (c *baseClient) switchLeader(addrs []string) error {
@@ -399,7 +413,7 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 	}
 	dCtx, cancel := context.WithTimeout(c.ctx, dialTimeout)
 	defer cancel()
-	cc, err := grpcutil.GetClientConn(dCtx, addr, tlsCfg, c.gRPCDialOptions...)
+	cc, err := grpcutil.GetClientConn(dCtx, addr, tlsCfg, c.option.gRPCDialOptions...)
 	if err != nil {
 		return nil, err
 	}

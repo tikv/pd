@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
@@ -84,7 +83,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	defer cancel()
 	opts := config.NewTestOptions()
 	opts.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
+		config.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
 	tc := mockcluster.NewCluster(ctx, opts)
 
@@ -189,11 +188,11 @@ func (s *testShuffleHotRegionSchedulerSuite) checkBalance(c *C, tc *mockcluster.
 	tc.UpdateStorageWrittenBytes(6, 0)
 
 	// Region 1, 2 and 3 are hot regions.
-	//| region_id | leader_store | follower_store | follower_store | written_bytes |
-	//|-----------|--------------|----------------|----------------|---------------|
-	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       1      |        3       |       4        |      512KB    |
-	//|     3     |       1      |        2       |       4        |      512KB    |
+	// | region_id | leader_store | follower_store | follower_store | written_bytes |
+	// |-----------|--------------|----------------|----------------|---------------|
+	// |     1     |       1      |        2       |       3        |      512KB    |
+	// |     2     |       1      |        3       |       4        |      512KB    |
+	// |     3     |       1      |        2       |       4        |      512KB    |
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
 	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{3, 4})
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 4})
@@ -222,7 +221,7 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionScheduleLimit(0)
-	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	tc.AddRegionStore(1, 3)
@@ -402,7 +401,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	cd := schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
 	bs, err := schedule.CreateScheduler(BalanceRegionType, oc, storage, cd)
 	c.Assert(err, IsNil)
-	hs, err := schedule.CreateScheduler(HotWriteRegionType, oc, storage, cd)
+	hs, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage, cd)
 	c.Assert(err, IsNil)
 
 	opt := config.NewTestOptions()
@@ -641,6 +640,7 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	// Add evict leader scheduler to store 1
 	op := es.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	c.Assert(op[0].Desc(), Equals, EvictSlowStoreType)
 	// Cannot balance leaders to store 1
 	op = bs.Schedule(tc)
 	c.Check(op, IsNil)

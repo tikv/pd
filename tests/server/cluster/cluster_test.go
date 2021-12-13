@@ -23,7 +23,6 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -70,14 +69,6 @@ func (s *clusterTestSuite) SetUpSuite(c *C) {
 
 func (s *clusterTestSuite) TearDownSuite(c *C) {
 	s.cancel()
-}
-
-type testErrorKV struct {
-	kv.Base
-}
-
-func (kv *testErrorKV) Save(key, value string) error {
-	return errors.New("save failed")
 }
 
 func (s *clusterTestSuite) TestBootstrap(c *C) {
@@ -493,7 +484,8 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 				Available: 1000 * (1 << 20),
 			},
 		}
-		_, err := leaderServer.GetServer().StoreHeartbeat(context.TODO(), req)
+		grpcServer := &server.GrpcServer{Server: leaderServer.GetServer()}
+		_, err := grpcServer.StoreHeartbeat(context.TODO(), req)
 		c.Assert(err, IsNil)
 		stream, err := grpcPDClient.RegionHeartbeat(ctx)
 		c.Assert(err, IsNil)
@@ -615,8 +607,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ], HasLen, 0)
 
 	// PUT GET failed
-	oldStorage := svr.GetStorage()
-	svr.SetStorage(core.NewStorage(&testErrorKV{}))
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/etcdSaveFailed", `return(true)`), IsNil)
 	replicationCfg.MaxReplicas = 7
 	scheduleCfg.MaxSnapshotCount = 20
 	pdServerCfg.UseRegionStorage = false
@@ -632,15 +623,15 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ], HasLen, 0)
 
 	// DELETE failed
-	svr.SetStorage(oldStorage)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/etcdSaveFailed"), IsNil)
 	c.Assert(svr.SetReplicationConfig(*replicationCfg), IsNil)
 
-	svr.SetStorage(core.NewStorage(&testErrorKV{}))
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/etcdSaveFailed", `return(true)`), IsNil)
 	c.Assert(svr.DeleteLabelProperty(typ, labelKey, labelValue), NotNil)
 
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
-	svr.SetStorage(oldStorage)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/etcdSaveFailed"), IsNil)
 }
 
 func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
@@ -1070,7 +1061,7 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 			StartKey: []byte{byte(2)},
 			EndKey:   []byte{byte(3)},
 			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
+				ConfVer: 2,
 				Version: 1,
 			},
 		},
@@ -1105,4 +1096,11 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	region = core.RegionFromHeartbeat(regionReq)
 	err = rc.HandleRegionHeartbeat(region)
 	c.Assert(err, NotNil)
+
+	// Allow regions that are created by unsafe recover to send a heartbeat, even though they
+	// are considered "stale" because their conf ver and version are both equal to 1.
+	regionReq.Region.RegionEpoch.ConfVer = 1
+	region = core.RegionFromHeartbeat(regionReq)
+	err = rc.HandleRegionHeartbeat(region)
+	c.Assert(err, IsNil)
 }

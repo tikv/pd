@@ -238,6 +238,26 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler"}, &roles)
 	c.Assert(roles, DeepEquals, []string{"learner"})
 
+	// test grant hot region scheduler config
+	checkSchedulerCommand([]string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"shuffle-region-scheduler":     true,
+		"grant-hot-region-scheduler":   true,
+	})
+	var conf3 map[string]interface{}
+	expected3 := map[string]interface{}{
+		"store-id":        []interface{}{float64(1), float64(2), float64(3)},
+		"store-leader-id": float64(1),
+	}
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
+	c.Assert(expected3, DeepEquals, conf3)
+
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler", "set", "2", "1,2,3"}, nil)
+	expected3["store-leader-id"] = float64(2)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
+	c.Assert(expected3, DeepEquals, conf3)
+
 	// test balance region config
 	echo := mustExec([]string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
@@ -255,8 +275,6 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	// test hot region config
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "[404] scheduler not found"), IsTrue)
-	var conf map[string]interface{}
-	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
 	expected1 := map[string]interface{}{
 		"min-hot-byte-rate":          float64(100),
 		"min-hot-key-rate":           float64(10),
@@ -277,6 +295,10 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"strict-picking-store":       "true",
 		"enable-for-tiflash":         "true",
 	}
+	var conf map[string]interface{}
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
+	c.Assert(conf, DeepEquals, expected1)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "show"}, &conf)
 	c.Assert(conf, DeepEquals, expected1)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.02"}, nil)
 	expected1["src-tolerance-ratio"] = 1.02

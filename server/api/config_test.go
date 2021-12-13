@@ -299,7 +299,7 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	c.Assert(sc.MetricStorage, Equals, "")
 	c.Assert(sc.DashboardAddress, Equals, "auto")
 	c.Assert(sc.FlowRoundByDigit, Equals, int(3))
-	c.Assert(sc.MaxResetTSGap.Duration, Equals, time.Duration(24*time.Hour))
+	c.Assert(sc.MaxResetTSGap.Duration, Equals, 24*time.Hour)
 }
 
 var ttlConfig = map[string]interface{}{

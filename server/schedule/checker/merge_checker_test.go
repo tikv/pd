@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/goleak"
@@ -66,7 +65,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "reject", Value: "leader"}},
+		config.RejectLeader: {{Key: "reject", Value: "leader"}},
 	})
 	s.cluster.DisableFeature(versioninfo.JointConsensus)
 	stores := map[uint64][]string{
@@ -161,6 +160,58 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	// Check merge with previous region.
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+
+	// Test the peer store check.
+	store := s.cluster.GetStore(1)
+	c.Assert(store, NotNil)
+	// Test the peer store is deleted.
+	s.cluster.DeleteStore(store)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	// Test the store is normal.
+	s.cluster.PutStore(store)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+	// Test the store is offline.
+	s.cluster.SetStoreOffline(store.GetID())
+	ops = s.mc.Check(s.regions[2])
+	// Only target region have a peer on the offline store,
+	// so it's not ok to merge.
+	c.Assert(ops, IsNil)
+	// Test the store is up.
+	s.cluster.SetStoreUp(store.GetID())
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+	store = s.cluster.GetStore(5)
+	c.Assert(store, NotNil)
+	// Test the peer store is deleted.
+	s.cluster.DeleteStore(store)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	// Test the store is normal.
+	s.cluster.PutStore(store)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+	// Test the store is offline.
+	s.cluster.SetStoreOffline(store.GetID())
+	ops = s.mc.Check(s.regions[2])
+	// Both regions have peers on the offline store,
+	// so it's ok to merge.
+	c.Assert(ops, NotNil)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+	// Test the store is up.
+	s.cluster.SetStoreUp(store.GetID())
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
 

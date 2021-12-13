@@ -144,10 +144,20 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		{[]string{"region", "check", "down-peer"}, []*core.RegionInfo{r3}},
 		// region check learner-peer command
 		{[]string{"region", "check", "learner-peer"}, []*core.RegionInfo{r3}},
-		// region startkey --format=raw <key> command
-		{[]string{"region", "startkey", "--format=raw", "b", "2"}, []*core.RegionInfo{r2, r3}},
-		// region startkey --format=hex <key> command
-		{[]string{"region", "startkey", "--format=hex", "63", "2"}, []*core.RegionInfo{r3, r4}},
+		// region keys --format=raw <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=raw", "b"}, []*core.RegionInfo{r2, r3, r4}},
+		// region keys --format=raw <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=raw", "b", "", "2"}, []*core.RegionInfo{r2, r3}},
+		// region keys --format=hex <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=hex", "63", "", "2"}, []*core.RegionInfo{r3, r4}},
+		// region keys --format=hex <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=hex", "", "63", "2"}, []*core.RegionInfo{r1, r2}},
+		// region keys --format=raw <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=raw", "b", "d"}, []*core.RegionInfo{r2, r3}},
+		// region keys --format=hex <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=hex", "63", "65"}, []*core.RegionInfo{r3, r4}},
+		// region keys --format=hex <start_key> <end_key> <limit> command
+		{[]string{"region", "keys", "--format=hex", "63", "65", "1"}, []*core.RegionInfo{r3}},
 	}
 
 	for _, testCase := range testRegionsCases {
