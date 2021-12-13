@@ -281,7 +281,7 @@ func (conf *hotRegionSchedulerConfig) IsStrictPickingStoreEnabled() bool {
 	return conf.StrictPickingStore
 }
 
-func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw rwType) bool {
+func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw statistics.RWType) bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	return rw.String() == conf.ForbidRWType
