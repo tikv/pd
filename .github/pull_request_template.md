@@ -44,7 +44,7 @@ Side effects
 Related changes
 
 - PR to update [`pingcap/docs`](https://github.com/pingcap/docs)/[`pingcap/docs-cn`](https://github.com/pingcap/docs-cn):
-- PR to update [`pingcap/tidb-ansible`](https://github.com/pingcap/tidb-ansible):
+- PR to update [`pingcap/tiup`](https://github.com/pingcap/tiup):
 - Need to cherry-pick to the release branch
 
 ### Release note
