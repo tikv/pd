@@ -55,7 +55,6 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: left, Right: right})
 	c.Assert(err, IsNil)
 	c.Assert(cluster.GetRegion(1), NotNil)
-
 }
 
 func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
