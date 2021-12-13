@@ -75,7 +75,7 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 
 	// After drop region from cache, lower version is accepted.
 	url := fmt.Sprintf("%s/admin/cache/region/%d", s.urlPrefix, region.GetID())
-	req, err := http.NewRequest("DELETE", url, nil)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	c.Assert(err, IsNil)
 	res, err := testDialClient.Do(req)
 	c.Assert(err, IsNil)
