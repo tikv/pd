@@ -101,8 +101,10 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 // Update updates the items in statistics.
 func (f *hotPeerCache) Update(item *HotPeerStat) {
 	if item.IsNeedDelete() {
-		f.putInheritItem(item)
 		f.removeItem(item)
+		if item.AntiCount > 0 {
+			f.putInheritItem(item)
+		}
 		item.Log("region heartbeat delete from cache", log.Debug)
 	} else {
 		f.putItem(item)
