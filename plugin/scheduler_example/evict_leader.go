@@ -217,7 +217,7 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id, ranges := range s.conf.StoreIDWitRanges {
-		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
+		region := cluster.RandLeaderRegion(id, ranges, opt.IsRegionHealthy)
 		if region == nil {
 			continue
 		}

@@ -13,6 +13,9 @@ PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
+TASK_COUNT=1
+TASK_ID=1
+
 BUILD_BIN_PATH := $(shell pwd)/bin
 GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
@@ -38,7 +41,6 @@ BUILD_FLAGS ?=
 BUILD_TAGS ?=
 BUILD_CGO_ENABLED := 0
 PD_EDITION ?= Community
-
 # Ensure PD_EDITION is set to Community or Enterprise before running build process.
 ifneq "$(PD_EDITION)" "Community"
 ifneq "$(PD_EDITION)" "Enterprise"
@@ -114,10 +116,19 @@ pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
 # dependent
+install-all-tools: export GO111MODULE=on
+install-all-tools:
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.43.0
+	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
+
+install-golangci-lint:
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.43.0
+
 install-go-tools: export GO111MODULE=on
 install-go-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.38.0
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 swagger-spec: export GO111MODULE=on
@@ -171,28 +182,37 @@ test-with-cover: install-go-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
 	for PKG in $(TEST_PKGS); do\
 		set -euo pipefail;\
-		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG  2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
+		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
 		rm coverage.tmp;\
 	done
 	@$(FAILPOINT_DISABLE)
 
-test-tso-function: install-go-tools dashboard-ui
+# The command should be used in daily CI，it will split some tasks to run parallel.
+# It should retain report.xml,coverage,coverage.xml and package.list to analyze.
+test-with-cover-parallel: install-go-tools dashboard-ui split
+	@$(FAILPOINT_ENABLE)
+	set -euo pipefail;\
+	CGO_ENABLED=1 GO111MODULE=on gotestsum --junitfile report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
+	gocov convert coverage | gocov-xml >> coverage.xml;\
+	@$(FAILPOINT_DISABLE)
+
+test-tso-function: install-go-tools
 	# testing TSO function...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test -race -tags tso_function_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 GO111MODULE=on go test -race -tags without_dashboard,tso_function_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
-test-tso-consistency: install-go-tools dashboard-ui
+test-tso-consistency: install-go-tools
 	# testing TSO consistency...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test -race -tags tso_consistency_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 GO111MODULE=on go test -race -tags without_dashboard,tso_consistency_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
-check: install-go-tools check-all check-plugin errdoc check-testing-t docker-build-test
+check: install-all-tools check-all check-plugin errdoc check-testing-t docker-build-test
 
 check-all: static lint tidy
 	@echo "checking"
@@ -202,7 +222,7 @@ check-plugin:
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
 static: export GO111MODULE=on
-static: install-go-tools
+static: install-golangci-lint
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l -d $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	golangci-lint run $$($(PACKAGE_DIRECTORIES))
@@ -270,6 +290,13 @@ failpoint-enable: install-go-tools
 failpoint-disable: install-go-tools
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
+
+split:
+# todo: it will remove server/api,/tests and tso packages after daily CI integrate all verify CI.
+	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
+	split packages.list -n r/${TASK_COUNT} packages_unit_ -a 1 --numeric-suffixes=1;\
+	cat packages_unit_${TASK_ID} |tr "\n" " " >package.list;\
+	rm packages*;
 
 clean: failpoint-disable deadlock-disable clean-test clean-build
 

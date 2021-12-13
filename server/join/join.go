@@ -217,7 +217,11 @@ func isDataExist(d string) bool {
 		log.Info("failed to open directory, maybe start for the first time", errs.ZapError(err))
 		return false
 	}
-	defer dir.Close()
+	defer func() {
+		if err := dir.Close(); err != nil {
+			log.Error("failed to close file", errs.ZapError(err))
+		}
+	}()
 
 	names, err := dir.Readdirnames(-1)
 	if err != nil {

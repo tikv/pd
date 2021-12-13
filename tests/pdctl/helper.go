@@ -51,7 +51,8 @@ func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) 
 		}
 	}
 	for _, s := range stores {
-		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
+		metapbStore := s.Store.ConvertToMetapbStore()
+		obtained := proto.Clone(metapbStore).(*metapb.Store)
 		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
@@ -87,7 +88,8 @@ func MustPutStore(c *check.C, svr *server.Server, store *metapb.Store) {
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
-	_, err := svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+	grpcServer := &server.GrpcServer{Server: svr}
+	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
 		Store:  store,
 	})

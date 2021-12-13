@@ -149,13 +149,13 @@ func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
 func (conf *hotRegionSchedulerConfig) GetStoreStatZombieDuration() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
-	return time.Duration(conf.MaxZombieRounds) * statistics.StoreHeartBeatReportInterval * time.Second
+	return time.Duration(conf.MaxZombieRounds*statistics.StoreHeartBeatReportInterval) * time.Second
 }
 
 func (conf *hotRegionSchedulerConfig) GetRegionsStatZombieDuration() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
-	return time.Duration(conf.MaxZombieRounds) * statistics.RegionHeartBeatReportInterval * time.Second
+	return time.Duration(conf.MaxZombieRounds*statistics.RegionHeartBeatReportInterval) * time.Second
 }
 
 func (conf *hotRegionSchedulerConfig) GetMaxPeerNumber() int {

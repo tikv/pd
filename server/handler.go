@@ -217,6 +217,8 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 	} else if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", errs.ZapError(err))
+	} else {
+		log.Info("add scheduler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
 	}
 	return err
 }
@@ -229,6 +231,8 @@ func (h *Handler) RemoveScheduler(name string) error {
 	}
 	if err = c.RemoveScheduler(name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
+	} else {
+		log.Info("remove scheduler successfully", zap.String("scheduler-name", name))
 	}
 	return err
 }
@@ -246,6 +250,12 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 			log.Error("can not resume scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {
 			log.Error("can not pause scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
+		}
+	} else {
+		if t == 0 {
+			log.Info("resume scheduler successfully", zap.String("scheduler-name", name))
+		} else {
+			log.Info("pause scheduler successfully", zap.String("scheduler-name", name), zap.Int64("pause-seconds", t))
 		}
 	}
 	return err
@@ -327,6 +337,11 @@ func (h *Handler) AddEvictSlowStoreScheduler() error {
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
 	return h.AddScheduler(schedulers.RandomMergeType)
+}
+
+// AddGrantHotRegionScheduler adds a grant-hot-region-scheduler
+func (h *Handler) AddGrantHotRegionScheduler(leaderID, peers string) error {
+	return h.AddScheduler(schedulers.GrantHotRegionType, leaderID, peers)
 }
 
 // GetOperator returns the region operator.
@@ -702,11 +717,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if !opt.IsRegionHealthy(c, region) || !opt.IsRegionReplicated(c, region) {
+	if !opt.IsRegionHealthy(region) || !opt.IsRegionReplicated(c, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if !opt.IsRegionHealthy(c, target) || !opt.IsRegionReplicated(c, target) {
+	if !opt.IsRegionHealthy(target) || !opt.IsRegionReplicated(c, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 
@@ -938,34 +953,23 @@ func (h *Handler) IsLeader() bool {
 }
 
 // PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
-func (h *Handler) PackHistoryHotReadRegions() (historyHotRegions []core.HistoryHotRegion, err error) {
+func (h *Handler) PackHistoryHotReadRegions() ([]core.HistoryHotRegion, error) {
 	hotReadRegions := h.GetHotReadRegions()
 	if hotReadRegions == nil {
-		return
+		return nil, nil
 	}
 	hotReadPeerRegions := hotReadRegions.AsPeer
-	historyPeerHotRegions, err := h.packHotRegions(hotReadPeerRegions, core.ReadType.String())
-	if err != nil {
-		return
-	}
-	historyHotRegions = append(historyHotRegions, historyPeerHotRegions...)
-	return
+	return h.packHotRegions(hotReadPeerRegions, core.ReadType.String())
 }
 
 // PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
-func (h *Handler) PackHistoryHotWriteRegions() (historyHotRegions []core.HistoryHotRegion, err error) {
+func (h *Handler) PackHistoryHotWriteRegions() ([]core.HistoryHotRegion, error) {
 	hotWriteRegions := h.GetHotWriteRegions()
 	if hotWriteRegions == nil {
-		return
+		return nil, nil
 	}
 	hotWritePeerRegions := hotWriteRegions.AsPeer
-	historyPeerHotRegions, err := h.packHotRegions(hotWritePeerRegions, core.WriteType.String())
-	if err != nil {
-		return
-	}
-
-	historyHotRegions = append(historyHotRegions, historyPeerHotRegions...)
-	return
+	return h.packHotRegions(hotWritePeerRegions, core.WriteType.String())
 }
 
 func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []core.HistoryHotRegion, err error) {
@@ -1018,8 +1022,8 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 
 // GetHistoryHotRegionIter return a iter which iter all qualified item .
 func (h *Handler) GetHistoryHotRegionIter(hotRegionTypes []string,
-	StartTime, EndTime int64) core.HotRegionStorageIterator {
-	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, StartTime, EndTime)
+	startTime, endTime int64) core.HotRegionStorageIterator {
+	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, startTime, endTime)
 	return iter
 }
 

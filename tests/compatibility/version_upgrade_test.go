@@ -66,7 +66,7 @@ func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
 		},
 	}
 
-	svr := leaderServer.GetServer()
+	svr := &server.GrpcServer{Server: leaderServer.GetServer()}
 	_, err = svr.PutStore(context.Background(), putStoreRequest)
 	c.Assert(err, IsNil)
 	// FIX ME: read v0.0.0 in sometime
@@ -142,7 +142,7 @@ func (s *compatibilityTestSuite) TestRollingUpgrade(c *C) {
 		},
 	}
 
-	svr := leaderServer.GetServer()
+	svr := &server.GrpcServer{Server: leaderServer.GetServer()}
 	for _, store := range stores {
 		_, err = svr.PutStore(context.Background(), store)
 		c.Assert(err, IsNil)

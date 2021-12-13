@@ -108,7 +108,7 @@ type normalClient struct {
 func doURL(ep string, args map[string]string) *url.URL {
 	path := ep
 	for k, v := range args {
-		path = strings.Replace(path, ":"+k, v, -1)
+		path = strings.ReplaceAll(path, ":"+k, v)
 	}
 	u := &url.URL{
 		Host: "test:9090",

@@ -60,13 +60,14 @@ func (s *testClientSuite) TestUpdateURLs(c *C) {
 		}
 		return
 	}
-	cli := &baseClient{}
+	cli := &baseClient{option: newOption()}
+	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
-	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
+	c.Assert(cli.GetURLs(), DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
 	cli.updateURLs(members[1:])
-	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
+	c.Assert(cli.GetURLs(), DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
 	cli.updateURLs(members)
-	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
+	c.Assert(cli.GetURLs(), DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
 }
 
 const testClientURL = "tmp://test.url:5255"
@@ -99,17 +100,16 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
-	// nolint
 	cli := &baseClient{
-		urls:                 []string{testClientURL},
 		checkLeaderCh:        make(chan struct{}, 1),
 		checkTSODispatcherCh: make(chan struct{}, 1),
 		ctx:                  ctx,
 		cancel:               cancel,
 		security:             SecurityOption{},
-		gRPCDialOptions:      []grpc.DialOption{grpc.WithBlock()},
+		option:               newOption(),
 	}
-
+	cli.urls.Store([]string{testClientURL})
+	cli.option.gRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
 	err := cli.updateMember()
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Greater, 500*time.Millisecond)

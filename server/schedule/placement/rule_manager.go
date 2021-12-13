@@ -318,7 +318,7 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *Reg
 			return fit
 		}
 	}
-	fit := FitRegion(regionStores, region, rules)
+	fit := fitRegion(regionStores, region, rules)
 	fit.regionStores = regionStores
 	fit.rules = rules
 	return fit
@@ -437,8 +437,7 @@ func (r RuleOp) String() string {
 // Batch executes a series of actions at once.
 func (m *RuleManager) Batch(todo []RuleOp) error {
 	for _, t := range todo {
-		switch t.Action {
-		case RuleOpAdd:
+		if t.Action == RuleOpAdd {
 			err := m.adjustRule(t.Rule, "")
 			if err != nil {
 				return err
