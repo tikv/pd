@@ -110,9 +110,9 @@ type HotPeerStat struct {
 	// we will handle it as cold peer and mark the inCold flag
 	inCold bool
 	source sourceKind
-	// it is uncertain whether it is hot and it is adopt from other store
-	// it will be changed to false until it is confirmed to be hot
-	justFromAdopt bool
+	// If the item in storeA is just adopted from storeB,
+	// then other store, such as storeC, will be forbiden to adopt from storeA until the item in storeA is hot.
+	allowAdopt bool
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -141,7 +141,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Duration("sum-interval", stat.getIntervalSum()),
 		zap.Bool("need-delete", stat.IsNeedDelete()),
 		zap.String("source", stat.source.String()),
-		zap.Bool("just-from-adopt", stat.justFromAdopt),
+		zap.Bool("allow-adopt", stat.allowAdopt),
 		zap.Bool("just-transfer-leader", stat.justTransferLeader),
 		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
 }

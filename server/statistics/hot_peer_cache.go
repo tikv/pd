@@ -101,10 +101,10 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 // Update updates the items in statistics.
 func (f *hotPeerCache) Update(item *HotPeerStat) {
 	if item.IsNeedDelete() {
-		f.removeItem(item)
 		if item.AntiCount > 0 {
 			f.putInheritItem(item)
 		}
+		f.removeItem(item)
 		item.Log("region heartbeat delete from cache", log.Debug)
 	} else {
 		f.putItem(item)
@@ -198,7 +198,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		} else {
 			for _, storeID := range f.getAllStoreIDs(region) {
 				oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
-				if oldItem != nil && !oldItem.justFromAdopt {
+				if oldItem != nil && oldItem.allowAdopt {
 					newItem.source = adopt
 					break
 				}
@@ -389,10 +389,10 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, deltaLoa
 		for _, dim := range oldItem.rollingLoads {
 			newItem.rollingLoads = append(newItem.rollingLoads, dim.Clone())
 		}
-		newItem.justFromAdopt = true
+		newItem.allowAdopt = false
 	} else {
 		newItem.rollingLoads = oldItem.rollingLoads
-		newItem.justFromAdopt = oldItem.justFromAdopt
+		newItem.allowAdopt = oldItem.allowAdopt
 	}
 
 	if newItem.justTransferLeader {
@@ -529,7 +529,7 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 func hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree + 1
 	newItem.AntiCount = hotRegionAntiCount
-	newItem.justFromAdopt = false
+	newItem.allowAdopt = true
 	if newItem.Kind == Read {
 		newItem.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
@@ -538,7 +538,7 @@ func hotItem(newItem, oldItem *HotPeerStat) {
 func initItemDegree(item *HotPeerStat) {
 	item.HotDegree = 1
 	item.AntiCount = hotRegionAntiCount
-	item.justFromAdopt = false
+	item.allowAdopt = true
 	if item.Kind == Read {
 		item.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
