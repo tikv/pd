@@ -34,7 +34,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20211109071446-a8b4d34474bc
 	github.com/pingcap/log v0.0.0-20210625125904-98ed8e2eb1c7
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
-	github.com/pingcap/tidb-dashboard v0.0.0-20211107164327-80363dfbe884
+	github.com/pingcap/tidb-dashboard v0.0.0-20211206031355-bcc43a01d537
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/common v0.6.0
 	github.com/sasha-s/go-deadlock v0.2.0
