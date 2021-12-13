@@ -1251,7 +1251,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 
 	for _, store := range c.GetStores() {
 		if store.IsTombstone() {
-			if store.GetRegionCount() > 0 {
+			if c.core.GetStoreRegionCount(store.GetID()) > 0 {
 				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
 				continue
 			}
