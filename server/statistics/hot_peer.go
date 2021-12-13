@@ -111,7 +111,7 @@ type HotPeerStat struct {
 	inCold bool
 	source sourceKind
 	// If the item in storeA is just adopted from storeB,
-	// then other store, such as storeC, will be forbiden to adopt from storeA until the item in storeA is hot.
+	// then other store, such as storeC, will be forbidden to adopt from storeA until the item in storeA is hot.
 	allowAdopt bool
 }
 
