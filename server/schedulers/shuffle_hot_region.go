@@ -78,7 +78,7 @@ type shuffleHotRegionSchedulerConfig struct {
 // the hot peer.
 type shuffleHotRegionScheduler struct {
 	*BaseScheduler
-	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
+	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
 	r           *rand.Rand
 	conf        *shuffleHotRegionSchedulerConfig
 	types       []statistics.RWType
@@ -94,7 +94,7 @@ func newShuffleHotRegionScheduler(opController *schedule.OperatorController, con
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
-		ret.stLoadInfos[ty] = map[uint64]*storeLoadDetail{}
+		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
 	}
 	return ret
 }
@@ -134,7 +134,7 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 }
 
 func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
-	storeInfos := summaryStoreInfos(cluster)
+	storeInfos := statistics.SummaryStoreInfos(cluster)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
@@ -159,7 +159,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
 	for _, detail := range loadDetail {
 		if len(detail.HotPeers) < 1 {
 			continue
