@@ -56,3 +56,5 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gotest.tools/gotestsum v1.7.0
 )
+
+replace github.com/pingcap/kvproto => github.com/lemonhx/kvproto v0.0.0-20211208055242-fb75b0c74b7e
