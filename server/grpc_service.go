@@ -1711,10 +1711,13 @@ func (s *GrpcServer) StoreGlobalConfig(ctx context.Context, request *pdpb.StoreG
 		value := item.GetValue()
 		ops[i] = clientv3.OpPut(name, value)
 	}
-	_, err :=
+	res, err :=
 		kv.NewSlowLogTxn(s.client).Then(ops...).Commit()
 	if err != nil {
 		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}, err
+	}
+	if !res.Succeeded {
+		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "failed to execute StoreGlobalConfig transaction"}}, errors.Errorf("failed to execute StoreGlobalConfig transaction")
 	}
 	return &pdpb.StoreGlobalConfigResponse{}, err
 }
@@ -1773,7 +1776,6 @@ func (s *GrpcServer) WatchGlobalConfig(request *pdpb.WatchGlobalConfigRequest, s
 func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_WatchGlobalConfigServer) error {
 	configList, err := s.client.Get(ctx, globalConfigPath, clientv3.WithPrefix())
 	if err != nil {
-		log.Error("get global config from etcd failed", zap.Error(err))
 		return err
 	}
 	ls := make([]*pdpb.GlobalConfigItem, configList.Count)

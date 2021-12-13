@@ -1801,23 +1801,23 @@ func (c *client) StoreGlobalConfig(ctx context.Context, items []GlobalConfigItem
 }
 
 func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem, error) {
-	receiver := make(chan []GlobalConfigItem, 16)
+	globalConfigWatcherCh := make(chan []GlobalConfigItem, 16)
 	res, err := c.getClient().WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{})
 	if err != nil {
-		close(receiver)
+		close(globalConfigWatcherCh)
 		return nil, err
 	}
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Error("[pd] panic in client `WatchGlobalConfig` cause by", zap.Any("error:", r))
+				log.Error("[pd] panic in client `WatchGlobalConfig`", zap.Any("error", r))
 				return
 			}
 		}()
 		for {
 			select {
 			case <-ctx.Done():
-				close(receiver)
+				close(globalConfigWatcherCh)
 				return
 			default:
 				m, err := res.Recv()
@@ -1828,9 +1828,9 @@ func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem
 				for j, i := range m.Changes {
 					arr[j] = GlobalConfigItem{i.GetName(), i.GetValue(), nil}
 				}
-				receiver <- arr
+				globalConfigWatcherCh <- arr
 			}
 		}
 	}()
-	return receiver, err
+	return globalConfigWatcherCh, err
 }
