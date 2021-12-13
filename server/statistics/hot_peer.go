@@ -138,7 +138,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Float64s("thresholds", stat.thresholds),
 		zap.Int("hot-degree", stat.HotDegree),
 		zap.Int("hot-anti-count", stat.AntiCount),
-		zap.Duration("sum-interval", stat.GetIntervalSum()),
+		zap.Duration("sum-interval", stat.getIntervalSum()),
 		zap.Bool("need-delete", stat.IsNeedDelete()),
 		zap.String("source", stat.source.String()),
 		zap.Bool("just-from-adopt", stat.justFromAdopt),
@@ -219,8 +219,7 @@ func (stat *HotPeerStat) hotStatReportInterval() int {
 	return WriteReportInterval
 }
 
-// GetByteRate returns denoised BytesRate if possible.
-func (stat *HotPeerStat) GetIntervalSum() time.Duration {
+func (stat *HotPeerStat) getIntervalSum() time.Duration {
 	if len(stat.rollingLoads) == 0 || stat.rollingLoads[0] == nil {
 		return 0
 	}

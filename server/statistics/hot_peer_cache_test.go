@@ -99,7 +99,7 @@ func testCache(c *C, t *testCacheCase) {
 	checkAndUpdate(c, cache, region, defaultSize[t.kind])
 	checkHit(c, cache, region, t.kind, false) // all peers are new
 
-	srcStore, region := schedule(c, t.operator, region, t.kind, 10)
+	srcStore, region := schedule(c, t.operator, region, 10)
 	res := checkAndUpdate(c, cache, region, t.expect)
 	checkHit(c, cache, region, t.kind, true) // hit cache
 	if t.expect != defaultSize[t.kind] {
@@ -150,7 +150,7 @@ func checkNeedDelete(c *C, ret []*HotPeerStat, storeID uint64, needDelete bool) 
 	}
 }
 
-func schedule(c *C, operator operator, region *core.RegionInfo, kind RWType, targets ...uint64) (srcStore uint64, _ *core.RegionInfo) {
+func schedule(c *C, operator operator, region *core.RegionInfo, targets ...uint64) (srcStore uint64, _ *core.RegionInfo) {
 	switch operator {
 	case transferLeader:
 		_, newLeader := pickFollower(region)
@@ -368,8 +368,8 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 			target := uint64(10)
 			movePeer := func() {
 				tmp := uint64(0)
-				tmp, region = schedule(c, removeReplica, region, Write)
-				_, region = schedule(c, addReplica, region, Write, target)
+				tmp, region = schedule(c, removeReplica, region)
+				_, region = schedule(c, addReplica, region, target)
 				target = tmp
 			}
 
