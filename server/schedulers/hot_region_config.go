@@ -139,7 +139,7 @@ type hotRegionSchedulerConfig struct {
 
 	// Separately control whether to start hotspot scheduling for TiFlash
 	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
-	// disable read or write scheduler, only for test
+	// forbid read or write scheduler, only for test
 	ForbidRWType string `json:"forbid-rw-type,omitempty"`
 }
 
