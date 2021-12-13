@@ -105,11 +105,9 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 		allowed := opController.OperatorCount(operator.OpMerge) < c.opts.GetMergeScheduleLimit()
 		if !allowed {
 			operator.OperatorLimitCounter.WithLabelValues(c.mergeChecker.GetType(), operator.OpMerge.String()).Inc()
-		} else {
-			if ops := c.mergeChecker.Check(region); ops != nil {
-				// It makes sure that two operators can be added successfully altogether.
-				return ops
-			}
+		} else if ops := c.mergeChecker.Check(region); ops != nil {
+			// It makes sure that two operators can be added successfully altogether.
+			return ops
 		}
 	}
 	return nil

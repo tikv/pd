@@ -1368,7 +1368,7 @@
             "rgba(237, 129, 40, 0.89)",
             "#d44a3a"
           ],
-          "datasource": "tidb-cluster",
+          "datasource": "${DS_TEST-CLUSTER}",
           "fieldConfig": {
             "defaults": {
               "custom": {}
@@ -7554,7 +7554,7 @@
             "x": 0,
             "y": 20
           },
-          "id": 1433,
+          "id": 1439,
           "legend": {
             "alignAsTable": true,
             "avg": true,

@@ -110,6 +110,7 @@ func (s *testTopNSuite) TestPut(c *C) {
 	}
 }
 
+//nolint
 func putPerm(c *C, tn *TopN, dimNum, total int, f func(x int) float64, isUpdate bool) {
 	{ // insert
 		dims := make([][]int, dimNum)

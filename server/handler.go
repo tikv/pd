@@ -702,11 +702,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if !opt.IsRegionHealthy(c, region) || !opt.IsRegionReplicated(c, region) {
+	if !opt.IsRegionHealthy(region) || !opt.IsRegionReplicated(c, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if !opt.IsRegionHealthy(c, target) || !opt.IsRegionReplicated(c, target) {
+	if !opt.IsRegionHealthy(target) || !opt.IsRegionReplicated(c, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 
@@ -945,7 +945,6 @@ func (h *Handler) PackHistoryHotReadRegions() ([]core.HistoryHotRegion, error) {
 	}
 	hotReadPeerRegions := hotReadRegions.AsPeer
 	return h.packHotRegions(hotReadPeerRegions, core.ReadType.String())
-
 }
 
 // PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
@@ -1008,8 +1007,8 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 
 // GetHistoryHotRegionIter return a iter which iter all qualified item .
 func (h *Handler) GetHistoryHotRegionIter(hotRegionTypes []string,
-	StartTime, EndTime int64) core.HotRegionStorageIterator {
-	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, StartTime, EndTime)
+	startTime, endTime int64) core.HotRegionStorageIterator {
+	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, startTime, endTime)
 	return iter
 }
 

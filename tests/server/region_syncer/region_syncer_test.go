@@ -20,6 +20,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
@@ -38,7 +39,7 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-var _ = Suite(&regionSyncerTestSuite{})
+var _ = SerialSuites(&regionSyncerTestSuite{})
 
 type regionSyncerTestSuite struct {
 	ctx    context.Context
@@ -64,6 +65,10 @@ func (i *idAllocator) alloc() uint64 {
 }
 
 func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/core/regionStorageFastFlush", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/core/noFastExitSync", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/server/core/regionStorageFastFlush")
+	defer failpoint.Disable("github.com/tikv/pd/server/core/noFastExitSync")
 	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -127,13 +132,13 @@ func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
 	// region storage flush rate limit (3s).
 	time.Sleep(4 * time.Second)
 
-	//test All regions have been synchronized to the cache of followerServer
+	// test All regions have been synchronized to the cache of followerServer
 	followerServer := cluster.GetServer(cluster.GetFollower())
 	c.Assert(followerServer, NotNil)
 	cacheRegions := followerServer.GetServer().GetBasicCluster().GetRegions()
 	c.Assert(cacheRegions, HasLen, regionLen)
 	for _, region := range cacheRegions {
-		r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
+		r := leaderServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
 		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
 		c.Assert(r.GetStat(), DeepEquals, region.GetStat())
 		c.Assert(r.GetLeader(), DeepEquals, region.GetLeader())
