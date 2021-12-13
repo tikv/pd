@@ -23,8 +23,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	PDServer "github.com/tikv/pd/server"
+	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -35,7 +37,6 @@ import (
 const (
 	LoggerLabel_Log       string = "log"
 	LoggerLabel_Monitored string = "Monitored"
-	LoggerLabel_Counter   string = "Counter"
 )
 
 var (
@@ -241,12 +242,17 @@ func (logger *AuditLogger) EnableAudit() bool {
 func (logger *AuditLogger) Audit(info *LogInfo) {
 	if isLog, ok := logger.labels[LoggerLabel_Log]; ok {
 		if isLog {
-
+			log.Info("service_audit_detailed",
+				zap.String("Service", info.ServiceName),
+				zap.String("Method", info.Method),
+				zap.String("Component", info.Component),
+				zap.String("Param", info.Param),
+				zap.String("TimeStamp", info.TimeStamp))
 		}
 	}
 	if isMonitor, ok := logger.labels[LoggerLabel_Monitored]; ok {
 		if isMonitor {
-
+			serviceAuditDetailed.WithLabelValues(info.ServiceName, info.Method, info.Component, info.IP, info.Param).SetToCurrentTime()
 		}
 	}
 }
