@@ -1813,17 +1813,17 @@ func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem
 				log.Error("[pd] panic in client `WatchGlobalConfig` cause by", zap.Any("error:", r))
 				return
 			}
-			close(receiver)
 		}()
 		for {
-			m, err := res.Recv()
-			if err != nil {
-				return
-			}
 			select {
 			case <-ctx.Done():
+				close(receiver)
 				return
 			default:
+				m, err := res.Recv()
+				if err != nil {
+					return
+				}
 				arr := make([]GlobalConfigItem, len(m.Changes))
 				for j, i := range m.Changes {
 					arr[j] = GlobalConfigItem{i.GetName(), i.GetValue(), nil}

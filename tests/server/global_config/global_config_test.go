@@ -16,11 +16,9 @@ package global_config_test
 
 import (
 	"context"
-	"reflect"
 	"strconv"
 	"testing"
 	"time"
-	"unsafe"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -201,20 +199,9 @@ func (s *GlobalConfigTestSuite) TestClientWatchCloseReceiverExternally(c *C) {
 }
 
 func (s *GlobalConfigTestSuite) TestClientWatchTimeout(c *C) {
-	ctx, _ := context.WithTimeout(s.server.Context(), time.Second)
+	ctx, cancel := context.WithCancel(s.server.Context())
 	wc, _ := s.client.WatchGlobalConfig(ctx)
-	time.Sleep(2 * time.Second)
-	closed := func(ch interface{}) bool {
-		if reflect.TypeOf(ch).Kind() != reflect.Chan {
-			panic("only channels!")
-		}
-		cptr := *(*uintptr)(unsafe.Pointer(
-			unsafe.Pointer(uintptr(unsafe.Pointer(&ch)) + unsafe.Sizeof(uint(0))),
-		))
-		cptr += unsafe.Sizeof(uint(0)) * 2
-		cptr += unsafe.Sizeof(unsafe.Pointer(uintptr(0)))
-		cptr += unsafe.Sizeof(uint16(0))
-		return *(*uint32)(unsafe.Pointer(cptr)) > 0
-	}(wc)
-	c.Assert(closed, Equals, true)
+	cancel()
+	_, opened := <-wc
+	c.Assert(opened, Equals, false)
 }
