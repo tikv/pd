@@ -133,7 +133,7 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, step), nil
+	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step), nil
 }
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
@@ -169,8 +169,8 @@ func CreateMergeRegionOperator(desc string, cluster opt.Cluster, source *core.Re
 	})
 
 	brief := fmt.Sprintf("merge: region %v to %v", source.GetID(), target.GetID())
-	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind|OpMerge, steps...)
-	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, MergeRegion{
+	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind|OpMerge, source.GetApproximateSize(), steps...)
+	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, target.GetApproximateSize(), MergeRegion{
 		FromRegion: source.GetMeta(),
 		ToRegion:   target.GetMeta(),
 		IsPassive:  true,
@@ -274,5 +274,5 @@ func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *cor
 	}
 
 	b.execChangePeerV2(false, true)
-	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.steps...), nil
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), b.steps...), nil
 }

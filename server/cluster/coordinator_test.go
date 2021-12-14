@@ -42,7 +42,7 @@ import (
 )
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
-	return operator.NewOperator("test", "test", regionID, regionEpoch, kind, steps...)
+	return operator.NewTestOperator("test", "test", regionID, regionEpoch, kind, steps...)
 }
 
 func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {

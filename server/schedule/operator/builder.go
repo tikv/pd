@@ -38,12 +38,13 @@ import (
 // according to various constraints.
 type Builder struct {
 	// basic info
-	desc          string
-	cluster       opt.Cluster
-	regionID      uint64
-	regionEpoch   *metapb.RegionEpoch
-	rules         []*placement.Rule
-	expectedRoles map[uint64]placement.PeerRoleType
+	desc            string
+	cluster         opt.Cluster
+	regionID        uint64
+	regionEpoch     *metapb.RegionEpoch
+	rules           []*placement.Rule
+	expectedRoles   map[uint64]placement.PeerRoleType
+	approximateSize int64
 
 	// operation record
 	originPeers         peersMap
@@ -84,10 +85,11 @@ func SkipOriginJointStateCheck(b *Builder) {
 // NewBuilder creates a Builder.
 func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
-		desc:        desc,
-		cluster:     cluster,
-		regionID:    region.GetID(),
-		regionEpoch: region.GetRegionEpoch(),
+		desc:            desc,
+		cluster:         cluster,
+		regionID:        region.GetID(),
+		regionEpoch:     region.GetRegionEpoch(),
+		approximateSize: region.GetApproximateSize(),
 	}
 
 	// options
@@ -332,7 +334,7 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 		return nil, b.err
 	}
 
-	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.steps...), nil
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...), nil
 }
 
 // Initialize intermediate states.

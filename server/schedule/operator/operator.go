@@ -54,10 +54,11 @@ type Operator struct {
 	Counters         []prometheus.Counter
 	FinishedCounters []prometheus.Counter
 	AdditionalInfos  map[string]string
+	ApproximateSize  int64
 }
 
 // NewOperator creates a new operator.
-func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, steps ...OpStep) *Operator {
+func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, approximateSize int64, steps ...OpStep) *Operator {
 	level := core.NormalPriority
 	if kind&OpAdmin != 0 {
 		level = core.HighPriority
@@ -73,6 +74,7 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		status:          NewOpStatusTracker(),
 		level:           level,
 		AdditionalInfos: make(map[string]string),
+		ApproximateSize: approximateSize,
 	}
 }
 
@@ -81,7 +83,9 @@ func (o *Operator) String() string {
 	for i := range o.steps {
 		stepStrs[i] = o.steps[i].String()
 	}
-	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, steps:[%s])", o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(), o.GetStartTime(), atomic.LoadInt32(&o.currentStep), strings.Join(stepStrs, ", "))
+	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, size:%v，steps:[%s])",
+		o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(),
+		o.GetStartTime(), atomic.LoadInt32(&o.currentStep), o.ApproximateSize, strings.Join(stepStrs, ", "))
 	if o.CheckSuccess() {
 		s += " finished"
 	}
@@ -362,4 +366,12 @@ func (o *Operator) GetAdditionalInfo() string {
 		}
 	}
 	return ""
+}
+
+// mock region default region size is 96Mb.
+const mockRegionSize = 96 * (1 << 20)
+
+// NewTestOperator creates a test operator.
+func NewTestOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, steps ...OpStep) *Operator {
+	return NewOperator(desc, brief, regionID, regionEpoch, kind, mockRegionSize, steps...)
 }
