@@ -177,7 +177,7 @@ func (t *testOperatorControllerSuite) TestFastFailWithUnhealthyStore(c *C) {
 	tc.AddLeaderRegion(1, 1, 2)
 	region := tc.GetRegion(1)
 	steps := []operator.OpStep{operator.TransferLeader{ToStore: 2}}
-	op := operator.NewOperator("test", "test", 1, region.GetRegionEpoch(), operator.OpLeader, steps...)
+	op := operator.NewTestOperator("test", "test", 1, region.GetRegionEpoch(), operator.OpLeader, steps...)
 	oc.SetOperator(op)
 	c.Assert(oc.checkStaleOperator(op, steps[0], region), IsFalse)
 	tc.SetStoreDown(2)

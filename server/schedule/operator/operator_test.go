@@ -97,7 +97,7 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 
 //nolint
 func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
-	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, kind, mockRegionSize, steps...)
+	return NewTestOperator("test", "test", regionID, &metapb.RegionEpoch{}, kind, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OpStep) {
