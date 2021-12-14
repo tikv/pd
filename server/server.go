@@ -1425,3 +1425,8 @@ func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) e
 	}
 	return nil
 }
+
+// SplitAndScatterRegions TODO
+func (s *Server) SplitAndScatterRegions(context context.Context, r *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
+	return nil, errors.New("no implemented")
+}
