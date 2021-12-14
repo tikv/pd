@@ -1552,7 +1552,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		c.Check(len(items), Greater, 0)
 		for _, item := range items {
 			if item.StoreID == 3 {
-				c.Check(item.IsNeedDelete(), IsTrue)
+				c.Check(item.GetOperationType(), Equals, statistics.Remove)
 				continue
 			}
 			c.Check(item.HotDegree, Equals, testcase.DegreeAfterTransferLeader+2)
@@ -1586,9 +1586,9 @@ func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
 	items = tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{3, 4}, 1)
 	for _, item := range items {
 		if item.StoreID < 4 {
-			c.Check(item.IsNeedDelete(), IsTrue)
+			c.Check(item.GetOperationType(), Equals, statistics.Remove)
 		} else {
-			c.Check(item.IsNeedDelete(), IsFalse)
+			c.Check(item.GetOperationType(), Equals, statistics.Update)
 		}
 	}
 }

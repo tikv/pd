@@ -130,7 +130,7 @@ func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 
 // HotRegionsFromStore picks hot regions in specify store.
 func (mc *Cluster) HotRegionsFromStore(store uint64, kind statistics.RWType) []*core.RegionInfo {
-	stats := mc.HotCache.HotRegionsFromStore(store, kind, mc.GetHotRegionCacheHitsThreshold())
+	stats := hotRegionsFromStore(mc.HotCache, store, kind, mc.GetHotRegionCacheHitsThreshold())
 	regions := make([]*core.RegionInfo, 0, len(stats))
 	for _, stat := range stats {
 		region := mc.GetRegion(stat.RegionID)
@@ -139,6 +139,14 @@ func (mc *Cluster) HotRegionsFromStore(store uint64, kind statistics.RWType) []*
 		}
 	}
 	return regions
+}
+
+// hotRegionsFromStore picks hot region in specify store.
+func hotRegionsFromStore(w *statistics.HotCache, storeID uint64, kind statistics.RWType, minHotDegree int) []*statistics.HotPeerStat {
+	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
+		return stats
+	}
+	return nil
 }
 
 // AllocPeer allocs a new peer on a store.

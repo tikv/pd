@@ -147,3 +147,25 @@ func (k RWType) RegionStats() []RegionStatKind {
 	}
 	return nil
 }
+
+// OperationType indicates the operation type for the stat item.
+type OperationType int
+
+// Flags for operation type.
+const (
+	Add OperationType = iota
+	Remove
+	Update
+)
+
+func (t OperationType) String() string {
+	switch t {
+	case Add:
+		return "add"
+	case Remove:
+		return "remove"
+	case Update:
+		return "update"
+	}
+	return "unimplemented"
+}
