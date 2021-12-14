@@ -133,8 +133,8 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	}
 }
 
-// GetIpAddrFromGRPCContext returns gRPC client IP from context
-func GetIpAddrFromGRPCContext(ctx context.Context) string {
+// GetIPAddrFromGRPCContext returns gRPC client IP from context
+func GetIPAddrFromGRPCContext(ctx context.Context) string {
 	ip, ok := GetRealIPAddrFromGRPCContext(ctx)
 	if ok {
 		return ip
@@ -167,8 +167,8 @@ func GetPeerAddrFromGRPCContext(ctx context.Context) string {
 	return addr
 }
 
-// GetIpAddrFromHttpRequest returns http client IP from context
-func GetIpAddrFromHttpRequest(r *http.Request) string {
+// GetIPAddrFromHTTPRequest returns http client IP from context
+func GetIPAddrFromHTTPRequest(r *http.Request) string {
 	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
 	if ips[0] != "" {
 		return ips[0]

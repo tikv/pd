@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	PDServer "github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
@@ -35,8 +36,8 @@ import (
 )
 
 const (
-	LoggerLabel_Log       string = "log"
-	LoggerLabel_Monitored string = "Monitored"
+	LoggerLabelLog       string = "log"
+	LoggerLabelMonitored string = "Monitored"
 )
 
 var (
@@ -48,15 +49,63 @@ var (
 type SelfProtectionHandler struct {
 	s *PDServer.Server
 	// httpApiServiceNames is used to find the service name of api
-	httpApiServiceNames map[string]string
+	httpAPIServiceNames map[string]string
 	// grpcServiceNames is used to find the service name of grpc method
 	grpcServiceNames map[string]string
 	// ServiceHandlers a
-	ServiceHandlers map[string]ServiceSelfProtectionHandler
+	ServiceHandlers map[string]*ServiceSelfProtectionHandler
 }
 
-func (h *SelfProtectionHandler) GetHttpApiServiceName(url string) (string, bool) {
-	serviceName, ok := h.httpApiServiceNames[url]
+func NewSelfProtectionHandler(server *PDServer.Server) *SelfProtectionHandler {
+	handler := &SelfProtectionHandler{s: server,
+		httpAPIServiceNames: config.HTTPAPIServiceNames,
+		grpcServiceNames:    config.GRPCMethodServiceNames,
+		ServiceHandlers:     make(map[string]*ServiceSelfProtectionHandler),
+	}
+	handler.UpdateServiceHandlers()
+	return handler
+}
+
+func (h *SelfProtectionHandler) UpdateServiceHandlers() {
+	if h.s == nil {
+		return
+	}
+	enableUseDefault := h.s.GetConfig().SelfProtectionConfig.EnableUseDefault
+	h.ServiceHandlers = make(map[string]*ServiceSelfProtectionHandler)
+	// if enableUseDefault is 0, only use config defined by users
+	if enableUseDefault == 0 {
+		for i := range h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig {
+			serviceName := h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig[i].ServiceName
+			serviceSelfProtectionHandler := NewServiceSelfProtectionHandler(&h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig[i])
+			h.ServiceHandlers[serviceName] = serviceSelfProtectionHandler
+		}
+		// if enableUseDefault is 1, config defined by users has higher priority than dafault
+	} else if enableUseDefault == 1 {
+		mergeSelfProtectionConfig(h.ServiceHandlers, h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig, config.DefaultServiceSelfProtectionConfig)
+		// if enableUseDefault is 1, dafault config has higher priority than config defined by users
+	} else {
+		mergeSelfProtectionConfig(h.ServiceHandlers, config.DefaultServiceSelfProtectionConfig, h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig)
+	}
+}
+
+func mergeSelfProtectionConfig(handlers map[string]*ServiceSelfProtectionHandler, highPriorityConfigs []config.ServiceSelfprotectionConfig, lowPriorityConfigs []config.ServiceSelfprotectionConfig) {
+	for i := range highPriorityConfigs {
+		serviceName := highPriorityConfigs[i].ServiceName
+		serviceSelfProtectionHandler := NewServiceSelfProtectionHandler(&highPriorityConfigs[i])
+		handlers[serviceName] = serviceSelfProtectionHandler
+	}
+	for i := range lowPriorityConfigs {
+		serviceName := lowPriorityConfigs[i].ServiceName
+		if _, find := handlers[serviceName]; find {
+			continue
+		}
+		serviceSelfProtectionHandler := NewServiceSelfProtectionHandler(&lowPriorityConfigs[i])
+		handlers[serviceName] = serviceSelfProtectionHandler
+	}
+}
+
+func (h *SelfProtectionHandler) GetHTTPAPIServiceName(url string) (string, bool) {
+	serviceName, ok := h.httpAPIServiceNames[url]
 	return serviceName, ok
 }
 
@@ -95,7 +144,7 @@ func (h *SelfProtectionHandler) SelfProtectionHandle(componentName string, servi
 }
 
 func (h *SelfProtectionHandler) SelfProtectionHandleHTTP(req *http.Request) bool {
-	serviceName, foundName := h.GetHttpApiServiceName(req.URL.Path)
+	serviceName, foundName := h.GetHTTPAPIServiceName(req.URL.Path)
 	if !foundName {
 		return true
 	}
@@ -145,8 +194,27 @@ func (h *SelfProtectionHandler) SelfProtectionHandleGRPC(fullMethod string, ctx 
 }
 
 type ServiceSelfProtectionHandler struct {
-	apiRateLimiter *ApiRateLimiter
+	apiRateLimiter *APIRateLimiter
 	auditLogger    *AuditLogger
+}
+
+func NewServiceSelfProtectionHandler(config *config.ServiceSelfprotectionConfig) *ServiceSelfProtectionHandler {
+	handler := &ServiceSelfProtectionHandler{}
+	handler.Update(config)
+	return handler
+}
+
+func (h *ServiceSelfProtectionHandler) Update(config *config.ServiceSelfprotectionConfig) {
+	if h.apiRateLimiter == nil {
+		h.apiRateLimiter = NewAPIRateLimiter(config)
+	} else {
+		h.apiRateLimiter.Update(config)
+	}
+	if h.auditLogger == nil {
+		h.auditLogger = NewAuditLogger(config)
+	} else {
+		h.auditLogger.Update(config)
+	}
 }
 
 func (s *ServiceSelfProtectionHandler) Allow(componentName string) bool {
@@ -164,9 +232,9 @@ func (s *ServiceSelfProtectionHandler) EnableAudit() bool {
 }
 
 func (s *ServiceSelfProtectionHandler) GetLogInfoFromHTTP(req *http.Request, logInfo *LogInfo) {
-	//Get IP
-	logInfo.IP = apiutil.GetIpAddrFromHttpRequest(req)
-	//Get Param
+	// Get IP
+	logInfo.IP = apiutil.GetIPAddrFromHTTPRequest(req)
+	// Get Param
 	buf, err := io.ReadAll(req.Body)
 	if err != nil {
 		logInfo.Param = string(buf)
@@ -175,46 +243,72 @@ func (s *ServiceSelfProtectionHandler) GetLogInfoFromHTTP(req *http.Request, log
 }
 
 func (s *ServiceSelfProtectionHandler) GetLogInfoFromGRPC(ctx context.Context, logInfo *LogInfo) {
-	//Get IP
-	logInfo.IP = apiutil.GetIpAddrFromGRPCContext(ctx)
-	//gRPC can't get Param in middware
+	// Get IP
+	logInfo.IP = apiutil.GetIPAddrFromGRPCContext(ctx)
+	// gRPC can't get Param in middware
 }
 
 func (s *ServiceSelfProtectionHandler) Audit(logInfo *LogInfo) {
 	s.auditLogger.Audit(logInfo)
 }
 
-type ApiRateLimiter struct {
+type APIRateLimiter struct {
 	mu sync.RWMutex
 
-	enableQpsLimit bool
+	enableQPSLimit bool
 
-	totalQpsRateLimiter *rate.Limiter
+	totalQPSRateLimiter *rate.Limiter
 
-	enableComponentQpsLimit bool
-	userQpsRateLimiter      map[string]*rate.Limiter
+	enableComponentQPSLimit bool
+	componentQPSRateLimiter map[string]*rate.Limiter
 }
 
-func (rl *ApiRateLimiter) QpsAllow(componentName string) bool {
-	if !rl.enableQpsLimit {
+func NewAPIRateLimiter(config *config.ServiceSelfprotectionConfig) *APIRateLimiter {
+	limiter := &APIRateLimiter{}
+	limiter.Update(config)
+	return limiter
+}
+
+func (l *APIRateLimiter) Update(config *config.ServiceSelfprotectionConfig) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if config.TotalRateLimit > -1 {
+		l.enableQPSLimit = true
+		l.totalQPSRateLimiter = rate.NewLimiter(rate.Limit(config.TotalRateLimit), config.TotalRateLimit)
+		if config.EnableComponentsLimit {
+			l.enableComponentQPSLimit = config.EnableComponentsLimit
+			l.componentQPSRateLimiter = make(map[string]*rate.Limiter)
+			for _, item := range config.ComponentsRateLimits {
+				component := item.Components
+				limit := item.Limit
+				l.componentQPSRateLimiter[component] = rate.NewLimiter(rate.Limit(limit), limit)
+			}
+		}
+	} else {
+		l.enableQPSLimit = false
+	}
+}
+
+func (rl *APIRateLimiter) QPSAllow(componentName string) bool {
+	if !rl.enableQPSLimit {
 		return true
 	}
 	isComponentQpsLimit, isTotalQpsLimit := true, true
-	if rl.enableComponentQpsLimit {
-		componentRateLimiter, ok := rl.userQpsRateLimiter[componentName]
+	if rl.enableComponentQPSLimit {
+		componentRateLimiter, ok := rl.componentQPSRateLimiter[componentName]
 		if !ok {
-			componentRateLimiter = rl.userQpsRateLimiter[componentAnonymousValue]
+			componentRateLimiter = rl.componentQPSRateLimiter[componentAnonymousValue]
 		}
 		isComponentQpsLimit = componentRateLimiter.Allow()
 	}
-	isTotalQpsLimit = rl.totalQpsRateLimiter.Allow()
+	isTotalQpsLimit = rl.totalQPSRateLimiter.Allow()
 	return isComponentQpsLimit && isTotalQpsLimit
 }
 
-func (rl *ApiRateLimiter) Allow(componentName string) bool {
+func (rl *APIRateLimiter) Allow(componentName string) bool {
 	rl.mu.RLock()
 	defer rl.mu.RUnlock()
-	return rl.QpsAllow(componentName)
+	return rl.QPSAllow(componentName)
 }
 
 type LogInfo struct {
@@ -233,6 +327,22 @@ type AuditLogger struct {
 	labels      map[string]bool
 }
 
+func NewAuditLogger(config *config.ServiceSelfprotectionConfig) *AuditLogger {
+	logger := &AuditLogger{}
+	logger.Update(config)
+	return logger
+}
+
+func (l *AuditLogger) Update(config *config.ServiceSelfprotectionConfig) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(config.AuditLabel) == 0 {
+		l.enableAudit = false
+	} else {
+		l.enableAudit = true
+	}
+}
+
 func (logger *AuditLogger) EnableAudit() bool {
 	logger.mu.RLock()
 	defer logger.mu.RUnlock()
@@ -240,7 +350,7 @@ func (logger *AuditLogger) EnableAudit() bool {
 }
 
 func (logger *AuditLogger) Audit(info *LogInfo) {
-	if isLog, ok := logger.labels[LoggerLabel_Log]; ok {
+	if isLog, ok := logger.labels[LoggerLabelLog]; ok {
 		if isLog {
 			log.Info("service_audit_detailed",
 				zap.String("Service", info.ServiceName),
@@ -250,7 +360,7 @@ func (logger *AuditLogger) Audit(info *LogInfo) {
 				zap.String("TimeStamp", info.TimeStamp))
 		}
 	}
-	if isMonitor, ok := logger.labels[LoggerLabel_Monitored]; ok {
+	if isMonitor, ok := logger.labels[LoggerLabelMonitored]; ok {
 		if isMonitor {
 			serviceAuditDetailed.WithLabelValues(info.ServiceName, info.Method, info.Component, info.IP, info.Param).SetToCurrentTime()
 		}
@@ -258,7 +368,7 @@ func (logger *AuditLogger) Audit(info *LogInfo) {
 }
 
 func (h *SelfProtectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	serviceName, foundName := h.GetHttpApiServiceName(r.URL.Path)
+	serviceName, foundName := h.GetHTTPAPIServiceName(r.URL.Path)
 	if !foundName {
 		next(w, r)
 		return
@@ -294,7 +404,7 @@ type UserSignatureGRPCClientInterceptorBuilder struct {
 	component string
 }
 
-func (builder *UserSignatureGRPCClientInterceptorBuilder) setComponentName(component string) {
+func (builder *UserSignatureGRPCClientInterceptorBuilder) SetComponentName(component string) {
 	builder.component = component
 }
 
