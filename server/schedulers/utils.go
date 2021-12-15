@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
@@ -80,25 +81,34 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 }
 
 func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
+	tolerantSizeRatio := adjustTolerantRatio(cluster, kind)
 	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
-		tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
-		if tolerantSizeRatio == 0 {
-			tolerantSizeRatio = leaderTolerantSizeRatio
-		}
-		leaderCount := int64(1.0 * tolerantSizeRatio)
-		return leaderCount
+		return int64(tolerantSizeRatio)
 	}
 
 	regionSize := region.GetApproximateSize()
 	if regionSize < cluster.GetAverageRegionSize() {
 		regionSize = cluster.GetAverageRegionSize()
 	}
-	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
+	regionSize = int64(float64(regionSize) * tolerantSizeRatio)
 	return regionSize
 }
 
-func adjustTolerantRatio(cluster opt.Cluster) float64 {
-	tolerantSizeRatio := cluster.GetOpts().GetTolerantSizeRatio()
+func adjustTolerantRatio(cluster opt.Cluster, kind core.ScheduleKind) float64 {
+	var tolerantSizeRatio float64
+	switch c := cluster.(type) {
+	case *schedule.RangeCluster:
+		// range cluster use a separate configuration
+		tolerantSizeRatio = c.GetTolerantSizeRatio()
+	default:
+		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
+	}
+	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
+		if tolerantSizeRatio == 0 {
+			return leaderTolerantSizeRatio
+		}
+		return tolerantSizeRatio
+	}
 	if tolerantSizeRatio == 0 {
 		var maxRegionCount float64
 		stores := cluster.GetStores()
