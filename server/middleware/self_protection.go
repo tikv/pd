@@ -40,7 +40,7 @@ var (
 
 // SelfProtectionHandler a
 type SelfProtectionHandler struct {
-	//s *PDServer.Server
+	// s *PDServer.Server
 	// grpcServiceNames is used to find the service name of grpc method
 	grpcServiceNames map[string]string
 	// ServiceHandlers a
@@ -90,8 +90,8 @@ func (h *SelfProtectionHandler) SelfProtectionHandleGRPC(fullMethod string, ctx 
 }
 
 type ServiceSelfProtectionHandler struct {
-	//apiRateLimiter *APIRateLimiter
-	//auditLogger    *AuditLogger
+	// apiRateLimiter *APIRateLimiter
+	// auditLogger    *AuditLogger
 }
 
 func (h *ServiceSelfProtectionHandler) RateLimitAllow(componentName string) bool {
