@@ -47,6 +47,7 @@ const (
 	patrolStep                  = 1 * time.Second
 	defaultAllocatorLeaderLease = 3
 	leaderTickInterval          = 50 * time.Millisecond
+	localTSOAllocatorEtcdPrefix = "local-tso-allocator"
 	localTSOSuffixEtcdPrefix    = "local-tso-suffix"
 )
 
@@ -328,7 +329,13 @@ func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
 	if dcLocation == GlobalDCLocation {
 		return am.rootPath
 	}
-	return path.Join(am.rootPath, dcLocation)
+	return path.Join(am.getLocalTSOAllocatorPath(), dcLocation)
+}
+
+// Add a prefix to the root path to prevent being conflicted
+// with other system key paths such as leader, member, alloc_id, raft, etc.
+func (am *AllocatorManager) getLocalTSOAllocatorPath() string {
+	return path.Join(am.rootPath, localTSOAllocatorEtcdPrefix)
 }
 
 // similar logic with leaderLoop in server/server.go
@@ -1145,7 +1152,7 @@ func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID u
 }
 
 func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
-	return path.Join(am.rootPath, dcLocation, "next-leader")
+	return path.Join(am.getAllocatorPath(dcLocation), "next-leader")
 }
 
 // EnableLocalTSO returns the value of AllocatorManager.enableLocalTSO.
