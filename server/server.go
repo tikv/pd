@@ -52,6 +52,7 @@ import (
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
+	"github.com/tikv/pd/server/middleware"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
@@ -149,6 +150,8 @@ type Server struct {
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
+
+	SelfProtectionHandler *middleware.SelfProtectionHandler
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -238,6 +241,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	}
 
 	s.handler = newHandler(s)
+	s.SelfProtectionHandler = NewSelfProtectionHandler(s)
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -343,6 +347,53 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	})
 	s.member = member.NewMember(etcd, client, etcdServerID)
 	return nil
+}
+
+func NewSelfProtectionHandler(server *Server) *middleware.SelfProtectionHandler {
+	handler := &middleware.SelfProtectionHandler{
+		GrpcServiceNames: config.GRPCMethodServiceNames,
+		ServiceHandlers:  make(map[string]*middleware.ServiceSelfProtectionHandler),
+	}
+	UpdateServiceHandlers(handler, server)
+	return handler
+}
+
+func UpdateServiceHandlers(h *middleware.SelfProtectionHandler, server *Server) {
+	if server == nil {
+		return
+	}
+	enableUseDefault := server.GetConfig().SelfProtectionConfig.EnableUseDefault
+	h.ServiceHandlers = make(map[string]*middleware.ServiceSelfProtectionHandler)
+	// if enableUseDefault is 2, only use config defined by users
+	if enableUseDefault == 2 {
+		for i := range server.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig {
+			serviceName := server.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig[i].ServiceName
+			serviceSelfProtectionHandler := middleware.NewServiceSelfProtectionHandler(&server.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig[i])
+			h.ServiceHandlers[serviceName] = serviceSelfProtectionHandler
+		}
+		// if enableUseDefault is 1, config defined by users has higher priority than dafault
+	} else if enableUseDefault == 1 {
+		mergeSelfProtectionConfig(h.ServiceHandlers, server.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig, config.DefaultServiceSelfProtectionConfig)
+		// if enableUseDefault is 0, dafault config has higher priority than config defined by users
+	} else {
+		mergeSelfProtectionConfig(h.ServiceHandlers, config.DefaultServiceSelfProtectionConfig, server.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig)
+	}
+}
+
+func mergeSelfProtectionConfig(handlers map[string]*middleware.ServiceSelfProtectionHandler, highPriorityConfigs []config.ServiceSelfprotectionConfig, lowPriorityConfigs []config.ServiceSelfprotectionConfig) {
+	for i := range highPriorityConfigs {
+		serviceName := highPriorityConfigs[i].ServiceName
+		serviceSelfProtectionHandler := middleware.NewServiceSelfProtectionHandler(&highPriorityConfigs[i])
+		handlers[serviceName] = serviceSelfProtectionHandler
+	}
+	for i := range lowPriorityConfigs {
+		serviceName := lowPriorityConfigs[i].ServiceName
+		if _, find := handlers[serviceName]; find {
+			continue
+		}
+		serviceSelfProtectionHandler := middleware.NewServiceSelfProtectionHandler(&lowPriorityConfigs[i])
+		handlers[serviceName] = serviceSelfProtectionHandler
+	}
 }
 
 // AddStartCallback adds a callback in the startServer phase.

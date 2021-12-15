@@ -26,7 +26,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
-	PDServer "github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
@@ -48,58 +47,10 @@ var (
 
 // SelfProtectionHandler a
 type SelfProtectionHandler struct {
-	s *PDServer.Server
 	// grpcServiceNames is used to find the service name of grpc method
-	grpcServiceNames map[string]string
+	GrpcServiceNames map[string]string
 	// ServiceHandlers a
 	ServiceHandlers map[string]*ServiceSelfProtectionHandler
-}
-
-func NewSelfProtectionHandler(server *PDServer.Server) *SelfProtectionHandler {
-	handler := &SelfProtectionHandler{s: server,
-		grpcServiceNames: config.GRPCMethodServiceNames,
-		ServiceHandlers:  make(map[string]*ServiceSelfProtectionHandler),
-	}
-	handler.UpdateServiceHandlers()
-	return handler
-}
-
-func (h *SelfProtectionHandler) UpdateServiceHandlers() {
-	if h.s == nil {
-		return
-	}
-	enableUseDefault := h.s.GetConfig().SelfProtectionConfig.EnableUseDefault
-	h.ServiceHandlers = make(map[string]*ServiceSelfProtectionHandler)
-	// if enableUseDefault is 2, only use config defined by users
-	if enableUseDefault == 2 {
-		for i := range h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig {
-			serviceName := h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig[i].ServiceName
-			serviceSelfProtectionHandler := NewServiceSelfProtectionHandler(&h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig[i])
-			h.ServiceHandlers[serviceName] = serviceSelfProtectionHandler
-		}
-		// if enableUseDefault is 1, config defined by users has higher priority than dafault
-	} else if enableUseDefault == 1 {
-		mergeSelfProtectionConfig(h.ServiceHandlers, h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig, config.DefaultServiceSelfProtectionConfig)
-		// if enableUseDefault is 0, dafault config has higher priority than config defined by users
-	} else {
-		mergeSelfProtectionConfig(h.ServiceHandlers, config.DefaultServiceSelfProtectionConfig, h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig)
-	}
-}
-
-func mergeSelfProtectionConfig(handlers map[string]*ServiceSelfProtectionHandler, highPriorityConfigs []config.ServiceSelfprotectionConfig, lowPriorityConfigs []config.ServiceSelfprotectionConfig) {
-	for i := range highPriorityConfigs {
-		serviceName := highPriorityConfigs[i].ServiceName
-		serviceSelfProtectionHandler := NewServiceSelfProtectionHandler(&highPriorityConfigs[i])
-		handlers[serviceName] = serviceSelfProtectionHandler
-	}
-	for i := range lowPriorityConfigs {
-		serviceName := lowPriorityConfigs[i].ServiceName
-		if _, find := handlers[serviceName]; find {
-			continue
-		}
-		serviceSelfProtectionHandler := NewServiceSelfProtectionHandler(&lowPriorityConfigs[i])
-		handlers[serviceName] = serviceSelfProtectionHandler
-	}
 }
 
 func (h *SelfProtectionHandler) GetHTTPAPIServiceName(req *http.Request) (string, bool) {
@@ -113,7 +64,7 @@ func (h *SelfProtectionHandler) GetHTTPAPIServiceName(req *http.Request) (string
 }
 
 func (h *SelfProtectionHandler) GetGRPCServiceName(method string) (string, bool) {
-	serviceName, ok := h.grpcServiceNames[method]
+	serviceName, ok := h.GrpcServiceNames[method]
 	return serviceName, ok
 }
 
@@ -421,11 +372,12 @@ func (builder *UserSignatureGRPCClientInterceptorBuilder) UserSignatureDialOptio
 
 // UserSignatureRoundTripper add component user signature in http
 type UserSignatureRoundTripper struct {
-	Proxied http.RoundTripper
+	Proxied   http.RoundTripper
+	Component string
 }
 
-func (rt *UserSignatureRoundTripper) RoundTrip(req *http.Request, component string) (resp *http.Response, err error) {
-	req.Header.Set(componentSignatureKey, component)
+func (rt *UserSignatureRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	req.Header.Set(componentSignatureKey, rt.Component)
 	// Send the request, get the response and the error
 	resp, err = rt.Proxied.RoundTrip(req)
 	return

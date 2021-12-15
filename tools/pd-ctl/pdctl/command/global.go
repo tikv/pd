@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server/middleware"
 	"go.etcd.io/etcd/pkg/transport"
 )
 
@@ -46,8 +47,10 @@ func InitHTTPSClient(caPath, certPath, keyPath string) error {
 	}
 
 	dialClient = &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
+		Transport: &middleware.UserSignatureRoundTripper{
+			Component: "pdctl",
+			Proxied: &http.Transport{
+				TLSClientConfig: tlsConfig},
 		},
 	}
 
