@@ -88,7 +88,8 @@ func MustPutStore(c *check.C, svr *server.Server, store *metapb.Store) {
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
-	_, err := svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+	grpcServer := &server.GrpcServer{Server: svr}
+	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
 		Store:  store,
 	})

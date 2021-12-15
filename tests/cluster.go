@@ -61,8 +61,9 @@ var (
 // TestServer is only for test.
 type TestServer struct {
 	sync.RWMutex
-	server *server.Server
-	state  int32
+	server     *server.Server
+	grpcServer *server.GrpcServer
+	state      int32
 }
 
 var zapLogOnce sync.Once
@@ -87,8 +88,9 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 		return nil, err
 	}
 	return &TestServer{
-		server: svr,
-		state:  Initial,
+		server:     svr,
+		grpcServer: &server.GrpcServer{Server: svr},
+		state:      Initial,
 	}, nil
 }
 
@@ -257,7 +259,7 @@ func (s *TestServer) GetEtcdLeader() (string, error) {
 	s.RLock()
 	defer s.RUnlock()
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
-	members, err := s.server.GetMembers(context.TODO(), req)
+	members, err := s.grpcServer.GetMembers(context.TODO(), req)
 	if err != nil {
 		return "", errors.WithStack(err)
 	}
@@ -269,7 +271,7 @@ func (s *TestServer) GetEtcdLeaderID() (uint64, error) {
 	s.RLock()
 	defer s.RUnlock()
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
-	members, err := s.server.GetMembers(context.TODO(), req)
+	members, err := s.grpcServer.GetMembers(context.TODO(), req)
 	if err != nil {
 		return 0, errors.WithStack(err)
 	}
@@ -362,7 +364,7 @@ func (s *TestServer) BootstrapCluster() error {
 		Store:  &metapb.Store{Id: 1, Address: "mock://1", LastHeartbeat: time.Now().UnixNano()},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
-	_, err := s.server.Bootstrap(context.Background(), bootstrapReq)
+	_, err := s.grpcServer.Bootstrap(context.Background(), bootstrapReq)
 	if err != nil {
 		return err
 	}
@@ -532,6 +534,31 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 		time.Sleep(option.waitInterval)
 	}
 	return ""
+}
+
+// WaitRegionSyncerClientsReady is used to wait the region syncer clients establish the connection.
+// n means wait n clients.
+func (c *TestCluster) WaitRegionSyncerClientsReady(n int) bool {
+	option := &WaitOp{
+		retryTimes:   40,
+		waitInterval: WaitLeaderCheckInterval,
+	}
+	for i := 0; i < option.retryTimes; i++ {
+		name := c.GetLeader()
+		if len(name) == 0 {
+			time.Sleep(option.waitInterval)
+			continue
+		}
+		leaderServer := c.GetServer(name)
+		clus := leaderServer.GetServer().GetRaftCluster()
+		if clus != nil {
+			if len(clus.GetRegionSyncer().GetAllDownstreamNames()) == n {
+				return true
+			}
+		}
+		time.Sleep(option.waitInterval)
+	}
+	return false
 }
 
 // ResignLeader resigns the leader of the cluster.
