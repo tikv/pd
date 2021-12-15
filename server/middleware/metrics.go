@@ -13,20 +13,3 @@
 // limitations under the License.
 
 package middleware
-
-import "github.com/prometheus/client_golang/prometheus"
-
-var (
-	serviceAuditDetailed = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "service_audit_detailed",
-			Help:      "Service Request Detailed Info",
-		}, []string{"Service", "Method", "Component", "IP", "Param"},
-	)
-)
-
-func init() {
-	prometheus.MustRegister(serviceAuditDetailed)
-}
