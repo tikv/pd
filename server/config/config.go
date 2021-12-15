@@ -163,8 +163,6 @@ type Config struct {
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
-
-	SelfProtectionConfig SelfProtectionConfig `toml:"SelfProtectionConfig"`
 }
 
 // NewConfig creates a new config.
@@ -267,11 +265,6 @@ var (
 	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
 	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
 	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
-
-	DefaultServiceSelfProtectionConfig = []ServiceSelfprotectionConfig{}
-
-	HTTPAPIServiceNames    = map[string]string{}
-	GRPCMethodServiceNames = map[string]string{}
 )
 
 func init() {
@@ -1410,20 +1403,4 @@ type SecurityConfig struct {
 	// RedactInfoLog indicates that whether enabling redact log
 	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
 	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
-}
-
-type ComponenetRateLimits struct {
-	Components string `toml:"components"`
-	Limit      int    `toml:"limit"`
-}
-type ServiceSelfprotectionConfig struct {
-	ServiceName           string                 `toml:"service-name"`
-	TotalRateLimit        int                    `toml:"total-rate-limit"`
-	EnableComponentsLimit bool                   `toml:"enable-components-limit"`
-	ComponentsRateLimits  []ComponenetRateLimits `toml:"components-rate-limits"`
-	AuditLabel            []string               `toml:"audit-label"`
-}
-type SelfProtectionConfig struct {
-	EnableUseDefault            int                           `toml:"enable-use-default"`
-	ServiceSelfprotectionConfig []ServiceSelfprotectionConfig `toml:"service-selfprotection-config"`
 }

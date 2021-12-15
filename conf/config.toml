@@ -200,12 +200,3 @@
 
 ## When enabled, usage data will be sent to PingCAP for improving user experience.
 # enable-telemetry = true
-
-[self-protection]
-## Configurations below are for PD self protection including rate limiter and audit logger.
-# enable-use-default = 0
-# service-selfprotection-config=[
-	{service-name="GetRegion",total-rate-limit=100, enable-componenet-limit=true ,componenet-rate-limits= [
-	{componenet="tidb", limit=100},
-	{componenet="tikv", limit=100}],audit-label=["Monitored"]}]
-

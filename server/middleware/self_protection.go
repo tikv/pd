@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	PDServer "github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
@@ -53,53 +52,6 @@ type SelfProtectionHandler struct {
 	grpcServiceNames map[string]string
 	// ServiceHandlers a
 	ServiceHandlers map[string]*ServiceSelfProtectionHandler
-}
-
-func NewSelfProtectionHandler(server *PDServer.Server) *SelfProtectionHandler {
-	handler := &SelfProtectionHandler{s: server,
-		grpcServiceNames: config.GRPCMethodServiceNames,
-		ServiceHandlers:  make(map[string]*ServiceSelfProtectionHandler),
-	}
-	handler.UpdateServiceHandlers()
-	return handler
-}
-
-func (h *SelfProtectionHandler) UpdateServiceHandlers() {
-	if h.s == nil {
-		return
-	}
-	enableUseDefault := h.s.GetConfig().SelfProtectionConfig.EnableUseDefault
-	h.ServiceHandlers = make(map[string]*ServiceSelfProtectionHandler)
-	// if enableUseDefault is 2, only use config defined by users
-	if enableUseDefault == 2 {
-		for i := range h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig {
-			serviceName := h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig[i].ServiceName
-			serviceSelfProtectionHandler := NewServiceSelfProtectionHandler(&h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig[i])
-			h.ServiceHandlers[serviceName] = serviceSelfProtectionHandler
-		}
-		// if enableUseDefault is 1, config defined by users has higher priority than dafault
-	} else if enableUseDefault == 1 {
-		mergeSelfProtectionConfig(h.ServiceHandlers, h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig, config.DefaultServiceSelfProtectionConfig)
-		// if enableUseDefault is 0, dafault config has higher priority than config defined by users
-	} else {
-		mergeSelfProtectionConfig(h.ServiceHandlers, config.DefaultServiceSelfProtectionConfig, h.s.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig)
-	}
-}
-
-func mergeSelfProtectionConfig(handlers map[string]*ServiceSelfProtectionHandler, highPriorityConfigs []config.ServiceSelfprotectionConfig, lowPriorityConfigs []config.ServiceSelfprotectionConfig) {
-	for i := range highPriorityConfigs {
-		serviceName := highPriorityConfigs[i].ServiceName
-		serviceSelfProtectionHandler := NewServiceSelfProtectionHandler(&highPriorityConfigs[i])
-		handlers[serviceName] = serviceSelfProtectionHandler
-	}
-	for i := range lowPriorityConfigs {
-		serviceName := lowPriorityConfigs[i].ServiceName
-		if _, find := handlers[serviceName]; find {
-			continue
-		}
-		serviceSelfProtectionHandler := NewServiceSelfProtectionHandler(&lowPriorityConfigs[i])
-		handlers[serviceName] = serviceSelfProtectionHandler
-	}
 }
 
 func (h *SelfProtectionHandler) GetHTTPAPIServiceName(req *http.Request) (string, bool) {
@@ -191,25 +143,6 @@ type ServiceSelfProtectionHandler struct {
 	auditLogger    *AuditLogger
 }
 
-func NewServiceSelfProtectionHandler(config *config.ServiceSelfprotectionConfig) *ServiceSelfProtectionHandler {
-	handler := &ServiceSelfProtectionHandler{}
-	handler.Update(config)
-	return handler
-}
-
-func (h *ServiceSelfProtectionHandler) Update(config *config.ServiceSelfprotectionConfig) {
-	if h.apiRateLimiter == nil {
-		h.apiRateLimiter = NewAPIRateLimiter(config)
-	} else {
-		h.apiRateLimiter.Update(config)
-	}
-	if h.auditLogger == nil {
-		h.auditLogger = NewAuditLogger(config)
-	} else {
-		h.auditLogger.Update(config)
-	}
-}
-
 func (h *ServiceSelfProtectionHandler) RateLimitAllow(componentName string) bool {
 	if h.apiRateLimiter == nil {
 		return true
@@ -256,32 +189,6 @@ type APIRateLimiter struct {
 	componentQPSRateLimiter map[string]*rate.Limiter
 }
 
-func NewAPIRateLimiter(config *config.ServiceSelfprotectionConfig) *APIRateLimiter {
-	limiter := &APIRateLimiter{}
-	limiter.Update(config)
-	return limiter
-}
-
-func (rl *APIRateLimiter) Update(config *config.ServiceSelfprotectionConfig) {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	if config.TotalRateLimit > -1 {
-		rl.enableQPSLimit = true
-		rl.totalQPSRateLimiter = rate.NewLimiter(rate.Limit(config.TotalRateLimit), config.TotalRateLimit)
-		if config.EnableComponentsLimit {
-			rl.enableComponentQPSLimit = config.EnableComponentsLimit
-			rl.componentQPSRateLimiter = make(map[string]*rate.Limiter)
-			for _, item := range config.ComponentsRateLimits {
-				component := item.Components
-				limit := item.Limit
-				rl.componentQPSRateLimiter[component] = rate.NewLimiter(rate.Limit(limit), limit)
-			}
-		}
-	} else {
-		rl.enableQPSLimit = false
-	}
-}
-
 func (rl *APIRateLimiter) QPSAllow(componentName string) bool {
 	if !rl.enableQPSLimit {
 		return true
@@ -318,22 +225,6 @@ type AuditLogger struct {
 	mu          sync.RWMutex
 	enableAudit bool
 	labels      map[string]bool
-}
-
-func NewAuditLogger(config *config.ServiceSelfprotectionConfig) *AuditLogger {
-	logger := &AuditLogger{}
-	logger.Update(config)
-	return logger
-}
-
-func (logger *AuditLogger) Update(config *config.ServiceSelfprotectionConfig) {
-	logger.mu.Lock()
-	defer logger.mu.Unlock()
-	if len(config.AuditLabel) == 0 {
-		logger.enableAudit = false
-	} else {
-		logger.enableAudit = true
-	}
 }
 
 func (logger *AuditLogger) Enable() bool {
