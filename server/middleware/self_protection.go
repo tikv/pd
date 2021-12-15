@@ -49,8 +49,6 @@ var (
 // SelfProtectionHandler a
 type SelfProtectionHandler struct {
 	s *PDServer.Server
-	// httpApiServiceNames is used to find the service name of api
-	httpAPIServiceNames map[string]string
 	// grpcServiceNames is used to find the service name of grpc method
 	grpcServiceNames map[string]string
 	// ServiceHandlers a
@@ -59,9 +57,8 @@ type SelfProtectionHandler struct {
 
 func NewSelfProtectionHandler(server *PDServer.Server) *SelfProtectionHandler {
 	handler := &SelfProtectionHandler{s: server,
-		httpAPIServiceNames: config.HTTPAPIServiceNames,
-		grpcServiceNames:    config.GRPCMethodServiceNames,
-		ServiceHandlers:     make(map[string]*ServiceSelfProtectionHandler),
+		grpcServiceNames: config.GRPCMethodServiceNames,
+		ServiceHandlers:  make(map[string]*ServiceSelfProtectionHandler),
 	}
 	handler.UpdateServiceHandlers()
 	return handler
