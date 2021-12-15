@@ -158,8 +158,8 @@ type grantHotRegionScheduler struct {
 	r           *rand.Rand
 	conf        *grantHotRegionSchedulerConfig
 	handler     http.Handler
-	types       []rwType
-	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
+	types       []statistics.RWType
+	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
 }
 
 // newGrantHotRegionScheduler creates an admin scheduler that transfers hot region peer to fixed store and hot region leader to one store.
@@ -171,10 +171,10 @@ func newGrantHotRegionScheduler(opController *schedule.OperatorController, conf 
 		conf:          conf,
 		handler:       handler,
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
-		types:         []rwType{read, write},
+		types:         []statistics.RWType{statistics.Read, statistics.Write},
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
-		ret.stLoadInfos[ty] = map[uint64]*storeLoadDetail{}
+		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
 	}
 	return ret
 }
@@ -273,29 +273,29 @@ func (s *grantHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 	return s.dispatch(s.types[i], cluster)
 }
 
-func (s *grantHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
-	storeInfos := summaryStoreInfos(cluster)
+func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
+	storeInfos := statistics.SummaryStoreInfos(cluster)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
-	var stLoadInfos map[uint64]*storeLoadDetail
+	var stLoadInfos map[uint64]*statistics.StoreLoadDetail
 	switch typ {
-	case read:
+	case statistics.Read:
 		stLoadInfos = summaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionReadStats(),
 			isTraceRegionFlow,
-			read, core.RegionKind)
-	case write:
+			statistics.Read, core.RegionKind)
+	case statistics.Write:
 		stLoadInfos = summaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionWriteStats(),
 			isTraceRegionFlow,
-			write, core.RegionKind)
+			statistics.Write, core.RegionKind)
 	}
-	infos := make([]*storeLoadDetail, len(stLoadInfos))
+	infos := make([]*statistics.StoreLoadDetail, len(stLoadInfos))
 	index := 0
 	for _, info := range stLoadInfos {
 		infos[index] = info
@@ -307,7 +307,7 @@ func (s *grantHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 	return s.randomSchedule(cluster, infos)
 }
 
-func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, infos []*storeLoadDetail) (ops []*operator.Operator) {
+func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, infos []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
 	isleader := s.r.Int()%2 == 1
 	for _, detail := range infos {
 		srcStoreID := detail.Info.Store.GetID()

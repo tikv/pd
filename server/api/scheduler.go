@@ -301,12 +301,12 @@ func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, 
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
 	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
-	resp, err := doDelete(h.svr.GetHTTPClient(), url)
+	statusCode, err := doDelete(h.svr.GetHTTPClient(), url)
 	if err != nil {
-		h.r.JSON(w, resp.StatusCode, err.Error())
+		h.r.JSON(w, statusCode, err.Error())
 		return
 	}
-	h.r.JSON(w, resp.StatusCode, nil)
+	h.r.JSON(w, statusCode, nil)
 }
 
 // FIXME: details of input json body params

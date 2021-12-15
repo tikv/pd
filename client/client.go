@@ -46,6 +46,13 @@ type Region struct {
 	PendingPeers []*metapb.Peer
 }
 
+// GlobalConfigItem standard format of KV pair in GlobalConfig client
+type GlobalConfigItem struct {
+	Name  string
+	Value string
+	Error error
+}
+
 // Client is a PD (Placement Driver) client.
 // It should not be used after calling Close().
 type Client interface {
@@ -109,6 +116,13 @@ type Client interface {
 	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
+
+	// LoadGlobalConfig gets the global config from etcd
+	LoadGlobalConfig(ctx context.Context, names []string) ([]GlobalConfigItem, error)
+	// StoreGlobalConfig set the config from etcd
+	StoreGlobalConfig(ctx context.Context, items []GlobalConfigItem) error
+	// WatchGlobalConfig returns an stream with all global config and updates
+	WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem, error)
 	// UpdateOption updates the client option.
 	UpdateOption(option DynamicOption, value interface{}) error
 	// Close closes the client.
@@ -264,6 +278,19 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
+func (tbc *tsoBatchController) revokeTSORequest(err error) {
+	for i := 0; i < tbc.collectedRequestCount; i++ {
+		tbc.collectedRequests[i].done <- err
+	}
+}
+
+func (tbc *tsoBatchController) revokePendingTSORequest(err error) {
+	for i := 0; i < len(tbc.tsoRequestCh); i++ {
+		req := <-tbc.tsoRequestCh
+		req.done <- err
+	}
+}
+
 type tsoDispatcher struct {
 	dispatcherCtx      context.Context
 	dispatcherCancel   context.CancelFunc
@@ -294,6 +321,8 @@ var (
 	errClosing = errors.New("[pd] closing")
 	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
 	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
+	// errGlobalConfigNotFound is returned when etcd does not contain the globalConfig item
+	errGlobalConfigNotFound = errors.New("[pd] global config not found")
 )
 
 // ClientOption configures client.
@@ -607,7 +636,7 @@ func (c *client) checkAllocator(
 			stream, err := c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 			if err == nil && stream != nil {
 				log.Info("[pd] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
-				updateAndClear(url, &connectionContext{url, stream, cancel})
+				updateAndClear(url, &connectionContext{url, stream, cctx, cancel})
 				return
 			}
 		}
@@ -657,6 +686,7 @@ func (c *client) handleDispatcher(
 		err                error
 		streamAddr         string
 		stream             pdpb.PD_TsoClient
+		streamCtx          context.Context
 		cancel             context.CancelFunc
 		// addr -> connectionContext
 		connectionCtxs sync.Map
@@ -714,38 +744,13 @@ func (c *client) handleDispatcher(
 	}
 
 	// Loop through each batch of TSO requests and send them for processing.
+tsoBatchLoop:
 	for {
 		select {
 		case <-dispatcherCtx.Done():
 			return
 		default:
 		}
-		// Choose a stream to send the TSO gRPC request.
-		connectionCtx := c.chooseStream(&connectionCtxs)
-		if connectionCtx != nil {
-			streamAddr, stream, cancel = connectionCtx.streamAddr, connectionCtx.stream, connectionCtx.cancel
-		}
-		// Check stream and retry if necessary.
-		if stream == nil {
-			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-			c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-			if retryTimeConsuming >= c.option.timeout {
-				err = errs.ErrClientCreateTSOStream.FastGenByArgs()
-				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-				c.ScheduleCheckLeader()
-				c.revokeTSORequest(errors.WithStack(err), tbc.tsoRequestCh)
-				retryTimeConsuming = 0
-				continue
-			}
-			select {
-			case <-dispatcherCtx.Done():
-				return
-			case <-time.After(time.Second):
-				retryTimeConsuming += time.Second
-				continue
-			}
-		}
-		retryTimeConsuming = 0
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
 		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
@@ -754,6 +759,46 @@ func (c *client) handleDispatcher(
 		}
 		if maxBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
+		}
+		// Choose a stream to send the TSO gRPC request.
+	streamChoosingLoop:
+		for {
+			connectionCtx := c.chooseStream(&connectionCtxs)
+			if connectionCtx != nil {
+				streamAddr, stream, streamCtx, cancel = connectionCtx.streamAddr, connectionCtx.stream, connectionCtx.ctx, connectionCtx.cancel
+			}
+			// Check stream and retry if necessary.
+			if stream == nil {
+				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
+				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
+				if retryTimeConsuming >= c.option.timeout {
+					err = errs.ErrClientCreateTSOStream.FastGenByArgs()
+					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
+					c.ScheduleCheckLeader()
+					tbc.revokeTSORequest(errors.WithStack(err))
+					retryTimeConsuming = 0
+					continue tsoBatchLoop
+				}
+				select {
+				case <-dispatcherCtx.Done():
+					return
+				case <-time.After(time.Second):
+					retryTimeConsuming += time.Second
+					continue
+				}
+			}
+			retryTimeConsuming = 0
+			select {
+			case <-streamCtx.Done():
+				log.Info("[pd] tso stream is canceled", zap.String("dc", dc), zap.String("stream-addr", streamAddr))
+				// Set `stream` to nil and remove this stream from the `connectionCtxs` due to being canceled.
+				connectionCtxs.Delete(streamAddr)
+				cancel()
+				stream = nil
+				continue
+			default:
+				break streamChoosingLoop
+			}
 		}
 		done := make(chan struct{})
 		dl := deadline{
@@ -783,11 +828,11 @@ func (c *client) handleDispatcher(
 			default:
 			}
 			c.ScheduleCheckLeader()
-			log.Error("[pd] getTS error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
-			cancel()
-			// Set `stream` to nil and remove this stream from the `connectionCtxs`.
-			stream = nil
+			log.Error("[pd] getTS error", zap.String("dc-location", dc), zap.String("stream-addr", streamAddr), errs.ZapError(errs.ErrClientGetTSO, err))
+			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
+			cancel()
+			stream = nil
 			// Because ScheduleCheckLeader is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
 				if err := c.updateMember(); err != nil {
@@ -832,6 +877,7 @@ type connectionContext struct {
 	streamAddr string
 	// Current stream to send gRPC requests, maybe a leader or a follower.
 	stream pdpb.PD_TsoClient
+	ctx    context.Context
 	cancel context.CancelFunc
 }
 
@@ -884,7 +930,7 @@ func (c *client) tryConnect(
 			err = status.New(codes.Unavailable, "unavailable").Err()
 		})
 		if stream != nil && err == nil {
-			updateAndClear(url, &connectionContext{url, stream, cancel})
+			updateAndClear(url, &connectionContext{url, stream, cctx, cancel})
 			return nil
 		}
 
@@ -927,7 +973,7 @@ func (c *client) tryConnect(
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkAllocator(dispatcherCtx, cancel, dc, forwardedHostTrim, addrTrim, url, updateAndClear)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
-				updateAndClear(addr, &connectionContext{addr, stream, cancel})
+				updateAndClear(addr, &connectionContext{addr, stream, cctx, cancel})
 				return nil
 			}
 			cancel()
@@ -976,7 +1022,7 @@ func (c *client) tryConnectWithProxy(
 				addrTrim := trimHTTPPrefix(addr)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
-			connectionCtxs.Store(addr, &connectionContext{addr, stream, cancel})
+			connectionCtxs.Store(addr, &connectionContext{addr, stream, cctx, cancel})
 			continue
 		}
 		log.Error("[pd] create the tso stream failed", zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
@@ -1083,21 +1129,17 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 	}
 }
 
-func (c *client) revokeTSORequest(err error, tsoDispatcher <-chan *tsoRequest) {
-	for i := 0; i < len(tsoDispatcher); i++ {
-		req := <-tsoDispatcher
-		req.done <- err
-	}
-}
-
 func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.tsoDispatcher.Range(func(_, dispatcher interface{}) bool {
-		if dispatcher != nil {
-			c.revokeTSORequest(errors.WithStack(errClosing), dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh)
-			dispatcher.(*tsoDispatcher).dispatcherCancel()
+	c.tsoDispatcher.Range(func(_, dispatcherInterface interface{}) bool {
+		if dispatcherInterface != nil {
+			dispatcher := dispatcherInterface.(*tsoDispatcher)
+			tsoErr := errors.WithStack(errClosing)
+			dispatcher.tsoBatchController.revokeTSORequest(tsoErr)
+			dispatcher.tsoBatchController.revokePendingTSORequest(tsoErr)
+			dispatcher.dispatcherCancel()
 		}
 		return true
 	})
@@ -1718,4 +1760,77 @@ func trimHTTPPrefix(str string) string {
 	str = strings.TrimPrefix(str, "http://")
 	str = strings.TrimPrefix(str, "https://")
 	return str
+}
+
+func (c *client) LoadGlobalConfig(ctx context.Context, names []string) ([]GlobalConfigItem, error) {
+	resp, err := c.getClient().LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names})
+	if err != nil {
+		return nil, err
+	}
+	res := make([]GlobalConfigItem, len(resp.GetItems()))
+	for i, item := range resp.GetItems() {
+		cfg := GlobalConfigItem{Name: item.GetName()}
+		if item.Error != nil {
+			if item.Error.Type == pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND {
+				cfg.Error = errGlobalConfigNotFound
+			} else {
+				cfg.Error = errors.New("[pd]" + item.Error.Message)
+			}
+		} else {
+			cfg.Value = item.GetValue()
+		}
+		res[i] = cfg
+	}
+	return res, nil
+}
+
+func (c *client) StoreGlobalConfig(ctx context.Context, items []GlobalConfigItem) error {
+	resArr := make([]*pdpb.GlobalConfigItem, len(items))
+	for i, it := range items {
+		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value}
+	}
+	res, err := c.getClient().StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr})
+	if err != nil {
+		return err
+	}
+	resErr := res.GetError()
+	if resErr != nil {
+		return errors.Errorf("[pd]" + resErr.Message)
+	}
+	return err
+}
+
+func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem, error) {
+	globalConfigWatcherCh := make(chan []GlobalConfigItem, 16)
+	res, err := c.getClient().WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{})
+	if err != nil {
+		close(globalConfigWatcherCh)
+		return nil, err
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[pd] panic in client `WatchGlobalConfig`", zap.Any("error", r))
+				return
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				close(globalConfigWatcherCh)
+				return
+			default:
+				m, err := res.Recv()
+				if err != nil {
+					return
+				}
+				arr := make([]GlobalConfigItem, len(m.Changes))
+				for j, i := range m.Changes {
+					arr[j] = GlobalConfigItem{i.GetName(), i.GetValue(), nil}
+				}
+				globalConfigWatcherCh <- arr
+			}
+		}
+	}()
+	return globalConfigWatcherCh, err
 }

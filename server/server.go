@@ -1369,7 +1369,7 @@ func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member,
 		return errs.ErrClientURLEmpty.FastGenByArgs()
 	}
 	url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
-	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
 	req.Header.Set("PD-Allow-follower-handle", "true")
 	res, err := s.httpClient.Do(req)
 	if err != nil {
@@ -1403,4 +1403,9 @@ func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) e
 		}
 	}
 	return nil
+}
+
+// SplitAndScatterRegions TODO
+func (s *Server) SplitAndScatterRegions(context context.Context, r *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
+	return nil, errors.New("no implemented")
 }
