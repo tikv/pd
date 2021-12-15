@@ -146,7 +146,7 @@ func (h *SelfProtectionHandler) SelfProtectionHandleHTTP(req *http.Request) bool
 	if !ok {
 		return true
 	}
-	limitAllow := serviceHandler.Allow(componentSignature)
+	limitAllow := serviceHandler.RateLimitAllow(componentSignature)
 	if serviceHandler.EnableAudit() {
 		logInfo := &LogInfo{
 			ServiceName:    serviceName,
@@ -155,8 +155,8 @@ func (h *SelfProtectionHandler) SelfProtectionHandleHTTP(req *http.Request) bool
 			TimeStamp:      time.Now().Local().String(),
 			RateLimitAllow: limitAllow,
 		}
-		serviceHandler.GetLogInfoFromHTTP(req, logInfo)
-		serviceHandler.Audit(logInfo)
+		GetLogInfoFromHTTP(req, logInfo)
+		serviceHandler.AuditLog(logInfo)
 	}
 	return limitAllow
 }
@@ -171,7 +171,7 @@ func (h *SelfProtectionHandler) SelfProtectionHandleGRPC(fullMethod string, ctx 
 	if !ok {
 		return true
 	}
-	limitAllow := serviceHandler.Allow(componentSignature)
+	limitAllow := serviceHandler.RateLimitAllow(componentSignature)
 	if serviceHandler.EnableAudit() {
 		logInfo := &LogInfo{
 			ServiceName:    serviceName,
@@ -180,8 +180,8 @@ func (h *SelfProtectionHandler) SelfProtectionHandleGRPC(fullMethod string, ctx 
 			TimeStamp:      time.Now().Local().String(),
 			RateLimitAllow: limitAllow,
 		}
-		serviceHandler.GetLogInfoFromGRPC(ctx, logInfo)
-		serviceHandler.Audit(logInfo)
+		GetLogInfoFromGRPC(ctx, logInfo)
+		serviceHandler.AuditLog(logInfo)
 	}
 	return limitAllow
 }
@@ -210,21 +210,21 @@ func (h *ServiceSelfProtectionHandler) Update(config *config.ServiceSelfprotecti
 	}
 }
 
-func (s *ServiceSelfProtectionHandler) Allow(componentName string) bool {
-	if s.apiRateLimiter == nil {
+func (h *ServiceSelfProtectionHandler) RateLimitAllow(componentName string) bool {
+	if h.apiRateLimiter == nil {
 		return true
 	}
-	return s.apiRateLimiter.Allow(componentName)
+	return h.apiRateLimiter.Allow(componentName)
 }
 
-func (s *ServiceSelfProtectionHandler) EnableAudit() bool {
-	if s.auditLogger == nil {
+func (h *ServiceSelfProtectionHandler) EnableAudit() bool {
+	if h.auditLogger == nil {
 		return true
 	}
-	return s.EnableAudit()
+	return h.auditLogger.Enable()
 }
 
-func (s *ServiceSelfProtectionHandler) GetLogInfoFromHTTP(req *http.Request, logInfo *LogInfo) {
+func GetLogInfoFromHTTP(req *http.Request, logInfo *LogInfo) {
 	// Get IP
 	logInfo.IP = apiutil.GetIPAddrFromHTTPRequest(req)
 	// Get Param
@@ -235,14 +235,14 @@ func (s *ServiceSelfProtectionHandler) GetLogInfoFromHTTP(req *http.Request, log
 	req.Body = io.NopCloser(bytes.NewBuffer(buf))
 }
 
-func (s *ServiceSelfProtectionHandler) GetLogInfoFromGRPC(ctx context.Context, logInfo *LogInfo) {
+func GetLogInfoFromGRPC(ctx context.Context, logInfo *LogInfo) {
 	// Get IP
 	logInfo.IP = apiutil.GetIPAddrFromGRPCContext(ctx)
 	// gRPC can't get Param in middware
 }
 
-func (s *ServiceSelfProtectionHandler) Audit(logInfo *LogInfo) {
-	s.auditLogger.Audit(logInfo)
+func (h *ServiceSelfProtectionHandler) AuditLog(logInfo *LogInfo) {
+	h.auditLogger.Log(logInfo)
 }
 
 type APIRateLimiter struct {
@@ -262,23 +262,23 @@ func NewAPIRateLimiter(config *config.ServiceSelfprotectionConfig) *APIRateLimit
 	return limiter
 }
 
-func (l *APIRateLimiter) Update(config *config.ServiceSelfprotectionConfig) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+func (rl *APIRateLimiter) Update(config *config.ServiceSelfprotectionConfig) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
 	if config.TotalRateLimit > -1 {
-		l.enableQPSLimit = true
-		l.totalQPSRateLimiter = rate.NewLimiter(rate.Limit(config.TotalRateLimit), config.TotalRateLimit)
+		rl.enableQPSLimit = true
+		rl.totalQPSRateLimiter = rate.NewLimiter(rate.Limit(config.TotalRateLimit), config.TotalRateLimit)
 		if config.EnableComponentsLimit {
-			l.enableComponentQPSLimit = config.EnableComponentsLimit
-			l.componentQPSRateLimiter = make(map[string]*rate.Limiter)
+			rl.enableComponentQPSLimit = config.EnableComponentsLimit
+			rl.componentQPSRateLimiter = make(map[string]*rate.Limiter)
 			for _, item := range config.ComponentsRateLimits {
 				component := item.Components
 				limit := item.Limit
-				l.componentQPSRateLimiter[component] = rate.NewLimiter(rate.Limit(limit), limit)
+				rl.componentQPSRateLimiter[component] = rate.NewLimiter(rate.Limit(limit), limit)
 			}
 		}
 	} else {
-		l.enableQPSLimit = false
+		rl.enableQPSLimit = false
 	}
 }
 
@@ -286,16 +286,16 @@ func (rl *APIRateLimiter) QPSAllow(componentName string) bool {
 	if !rl.enableQPSLimit {
 		return true
 	}
-	isComponentQpsLimit, isTotalQpsLimit := true, true
+	isComponentQPSLimit := true
 	if rl.enableComponentQPSLimit {
 		componentRateLimiter, ok := rl.componentQPSRateLimiter[componentName]
 		if !ok {
 			componentRateLimiter = rl.componentQPSRateLimiter[componentAnonymousValue]
 		}
-		isComponentQpsLimit = componentRateLimiter.Allow()
+		isComponentQPSLimit = componentRateLimiter.Allow()
 	}
-	isTotalQpsLimit = rl.totalQPSRateLimiter.Allow()
-	return isComponentQpsLimit && isTotalQpsLimit
+	isTotalQPSLimit := rl.totalQPSRateLimiter.Allow()
+	return isComponentQPSLimit && isTotalQPSLimit
 }
 
 func (rl *APIRateLimiter) Allow(componentName string) bool {
@@ -326,23 +326,23 @@ func NewAuditLogger(config *config.ServiceSelfprotectionConfig) *AuditLogger {
 	return logger
 }
 
-func (l *AuditLogger) Update(config *config.ServiceSelfprotectionConfig) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+func (logger *AuditLogger) Update(config *config.ServiceSelfprotectionConfig) {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
 	if len(config.AuditLabel) == 0 {
-		l.enableAudit = false
+		logger.enableAudit = false
 	} else {
-		l.enableAudit = true
+		logger.enableAudit = true
 	}
 }
 
-func (logger *AuditLogger) EnableAudit() bool {
+func (logger *AuditLogger) Enable() bool {
 	logger.mu.RLock()
 	defer logger.mu.RUnlock()
 	return logger.enableAudit
 }
 
-func (logger *AuditLogger) Audit(info *LogInfo) {
+func (logger *AuditLogger) Log(info *LogInfo) {
 	if isLog, ok := logger.labels[LoggerLabelLog]; ok {
 		if isLog {
 			log.Info("service_audit_detailed",
