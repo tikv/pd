@@ -109,6 +109,7 @@ type HotPeerStat struct {
 	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
 	// we will handle it as cold peer and mark the inCold flag
 	inCold bool
+	// source represents the statistics item source, such as directly, inherit, adopt.
 	source sourceKind
 	// If the item in storeA is just adopted from storeB,
 	// then other store, such as storeC, will be forbidden to adopt from storeA until the item in storeA is hot.

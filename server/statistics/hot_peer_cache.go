@@ -101,7 +101,7 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 // Update updates the items in statistics.
 func (f *hotPeerCache) Update(item *HotPeerStat) {
 	if item.IsNeedDelete() {
-		if item.AntiCount > 0 {
+		if item.AntiCount > 0 { // means it's deleted because expired rather than cold
 			f.putInheritItem(item)
 		}
 		f.removeItem(item)

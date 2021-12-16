@@ -107,24 +107,57 @@ func testCache(c *C, t *testCacheCase) {
 	}
 }
 
-func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
+func orderingPeers(cache *hotPeerCache, region *core.RegionInfo) []*metapb.Peer {
+	var peers []*metapb.Peer
+	for _, peer := range region.GetPeers() {
+		if cache.getOldHotPeerStat(region.GetID(), peer.StoreId) != nil {
+			peers = append([]*metapb.Peer{peer}, peers...)
+		} else {
+			peers = append(peers, peer)
+		}
+	}
+	return peers
+}
+
+func checkFlow(cache *hotPeerCache, region *core.RegionInfo, peers []*metapb.Peer) (res []*HotPeerStat) {
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	res = append(res, cache.CollectExpiredItems(region)...)
-	for _, peer := range region.GetPeers() {
+	for _, peer := range peers {
 		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
 		item := cache.CheckPeerFlow(peerInfo, region)
 		if item != nil {
 			res = append(res, item)
 		}
 	}
-	if len(expect) > 0 {
-		c.Assert(res, HasLen, expect[0])
-	}
+	return res
+}
+
+func updateFlow(cache *hotPeerCache, res []*HotPeerStat) []*HotPeerStat {
 	for _, p := range res {
 		cache.Update(p)
 	}
 	return res
+}
+
+type check func(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat)
+
+func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
+	res = checkFlow(cache, region, region.GetPeers())
+	if len(expect) != 0 {
+		c.Assert(res, HasLen, expect[0])
+	}
+	return updateFlow(cache, res)
+}
+
+// Check and update peers in the specified order that old item that he items that have not expired come first, and the items that have expired come second.
+// This order is also similar to the previous version. By the way the order in now version is random.
+func checkAndUpdateWithOrdering(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
+	res = checkFlow(cache, region, orderingPeers(cache, region))
+	if len(expect) != 0 {
+		c.Assert(res, HasLen, expect[0])
+	}
+	return updateFlow(cache, res)
 }
 
 func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind RWType, isHit bool) {
@@ -342,58 +375,63 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 
 func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 	peerCounts := []int{3, 5}
-	intervals := []uint64{120, 60, 10}
+	intervals := []uint64{120, 60, 10, 5}
+	checkers := []check{checkAndUpdate, checkAndUpdateWithOrdering}
 	for _, peerCount := range peerCounts {
 		for _, interval := range intervals {
-			cache := NewHotPeerCache(Write)
-			peers := newPeers(peerCount,
-				func(i int) uint64 { return uint64(10000 + i) },
-				func(i int) uint64 { return uint64(i) })
-			meta := &metapb.Region{
-				Id:          1000,
-				Peers:       peers,
-				StartKey:    []byte(""),
-				EndKey:      []byte(""),
-				RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
-			}
-			region := core.NewRegionInfo(
-				meta,
-				peers[0],
-				core.SetReportInterval(interval),
-				core.SetWrittenBytes(10*1024*1024*interval),
-				core.SetWrittenKeys(10*1024*1024*interval),
-				core.SetWrittenQuery(1024*interval),
-			)
-
-			target := uint64(10)
-			movePeer := func() {
-				tmp := uint64(0)
-				tmp, region = schedule(c, removeReplica, region)
-				_, region = schedule(c, addReplica, region, target)
-				target = tmp
-			}
-
-			for i := 1; i <= 2000; i++ {
-				if i%5 == 0 { // random move peer
-					movePeer()
+			for _, checker := range checkers {
+				cache := NewHotPeerCache(Write)
+				peers := newPeers(peerCount,
+					func(i int) uint64 { return uint64(10000 + i) },
+					func(i int) uint64 { return uint64(i) })
+				meta := &metapb.Region{
+					Id:          1000,
+					Peers:       peers,
+					StartKey:    []byte(""),
+					EndKey:      []byte(""),
+					RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
 				}
-				checkAndUpdate(c, cache, region)
-			}
-			c.Assert(cache.storesOfRegion[region.GetID()], HasLen, peerCount)
+				region := core.NewRegionInfo(
+					meta,
+					peers[0],
+					core.SetReportInterval(interval),
+					core.SetWrittenBytes(10*1024*1024*interval),
+					core.SetWrittenKeys(10*1024*1024*interval),
+					core.SetWrittenQuery(1024*interval),
+				)
 
-			var isClear bool
-			region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
-			for i := 1; i <= 2000; i++ {
-				if i%5 == 0 { // random move peer
-					movePeer()
+				target := uint64(10)
+				movePeer := func() {
+					tmp := uint64(0)
+					tmp, region = schedule(c, removeReplica, region)
+					_, region = schedule(c, addReplica, region, target)
+					target = tmp
 				}
-				checkAndUpdate(c, cache, region)
-				if len(cache.storesOfRegion[region.GetID()]) == 0 {
-					isClear = true
-					break
+
+				for i := 1; i <= 200; i++ {
+					// random move peer to make the interval sum of peers are different
+					if i%5 == 0 {
+						movePeer()
+					}
+					checker(c, cache, region)
 				}
+				c.Assert(cache.storesOfRegion[region.GetID()], HasLen, peerCount)
+
+				var isClear bool
+				region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
+				for i := 1; i <= 200; i++ {
+					// random move peer to make the interval sum of peers are different
+					if i%5 == 0 {
+						movePeer()
+					}
+					checker(c, cache, region)
+					if len(cache.storesOfRegion[region.GetID()]) == 0 {
+						isClear = true
+						break
+					}
+				}
+				c.Assert(isClear, IsTrue)
 			}
-			c.Assert(isClear, IsTrue)
 		}
 	}
 }
