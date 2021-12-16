@@ -24,9 +24,9 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
 )
 
@@ -88,7 +88,7 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 }
 
 // CreateSchedulerFunc is for creating scheduler.
-type CreateSchedulerFunc func(opController *OperatorController, storage core.ConfigStorage, dec ConfigDecoder) (Scheduler, error)
+type CreateSchedulerFunc func(opController *OperatorController, storage storage.ConfigStorage, dec ConfigDecoder) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
 var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
@@ -113,7 +113,7 @@ func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) 
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(typ string, opController *OperatorController, storage core.ConfigStorage, dec ConfigDecoder) (Scheduler, error) {
+func CreateScheduler(typ string, opController *OperatorController, storage storage.ConfigStorage, dec ConfigDecoder) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
 		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)

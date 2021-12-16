@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package storage
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"path"
 	"strconv"
@@ -30,15 +31,35 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 )
 
-// StorageV2 is the interface for the backend storage of the PD.
-// V2 is just a temp name, we will rename it to Storage eventually.
+const (
+	clusterPath                = "raft"
+	configPath                 = "config"
+	schedulePath               = "schedule"
+	gcPath                     = "gc"
+	rulesPath                  = "rules"
+	ruleGroupPath              = "rule_group"
+	regionLabelPath            = "region_label"
+	replicationPath            = "replication_mode"
+	componentPath              = "component"
+	customScheduleConfigPath   = "scheduler_config"
+	encryptionKeysPath         = "encryption_keys"
+	gcWorkerServiceSafePointID = "gc_worker"
+)
+
+const (
+	maxKVRangeLimit = 10000
+	minKVRangeLimit = 100
+)
+
+// Storage is the interface for the backend storage of the PD.
 // TODO: replace the core.Storage with this interface later.
-type StorageV2 interface {
+type Storage interface {
 	ConfigStorage
 	MetaStorage
 	RuleStorage
@@ -115,10 +136,10 @@ type MetaStorage interface {
 	LoadStore(storeID uint64, store *metapb.Store) (bool, error)
 	SaveStore(store *metapb.Store) error
 	SaveStoreWeight(storeID uint64, leader, region float64) error
-	LoadStores(f func(store *StoreInfo)) error
+	LoadStores(f func(store *core.StoreInfo)) error
 	DeleteStore(store *metapb.Store) error
 	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
-	LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error
+	LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error
 	SaveRegion(region *metapb.Region) error
 	DeleteRegion(region *metapb.Region) error
 }
@@ -179,7 +200,7 @@ func (s *defaultStorage) SaveStoreWeight(storeID uint64, leader, region float64)
 }
 
 // LoadStores loads all stores from storage to StoresInfo.
-func (s *defaultStorage) LoadStores(f func(store *StoreInfo)) error {
+func (s *defaultStorage) LoadStores(f func(store *core.StoreInfo)) error {
 	nextID := uint64(0)
 	endKey := storePath(math.MaxUint64)
 	for {
@@ -201,7 +222,7 @@ func (s *defaultStorage) LoadStores(f func(store *StoreInfo)) error {
 			if err != nil {
 				return err
 			}
-			newStoreInfo := NewStoreInfo(store, SetLeaderWeight(leaderWeight), SetRegionWeight(regionWeight))
+			newStoreInfo := core.NewStoreInfo(store, core.SetLeaderWeight(leaderWeight), core.SetRegionWeight(regionWeight))
 
 			nextID = store.GetId() + 1
 			f(newStoreInfo)
@@ -250,7 +271,7 @@ func (s *defaultStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok 
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (s *defaultStorage) LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
+func (s *defaultStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	nextID := uint64(0)
 	endKey := regionPath(math.MaxUint64)
 
@@ -287,7 +308,7 @@ func (s *defaultStorage) LoadRegions(ctx context.Context, f func(region *RegionI
 			}
 
 			nextID = region.GetId() + 1
-			overlaps := f(NewRegionInfo(region, nil))
+			overlaps := f(core.NewRegionInfo(region, nil))
 			for _, item := range overlaps {
 				if err := s.DeleteRegion(item.GetMeta()); err != nil {
 					return err
@@ -470,9 +491,9 @@ func (s *defaultStorage) SaveReplicationStatus(mode string, status interface{}) 
 type GCSafePointStorage interface {
 	LoadGCSafePoint() (uint64, error)
 	SaveGCSafePoint(safePoint uint64) error
-	LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error)
-	LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error)
-	SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
+	LoadMinServiceGCSafePoint(now time.Time) (*core.ServiceSafePoint, error)
+	LoadAllServiceGCSafePoints() ([]*core.ServiceSafePoint, error)
+	SaveServiceGCSafePoint(ssp *core.ServiceSafePoint) error
 	RemoveServiceGCSafePoint(serviceID string) error
 }
 
@@ -501,7 +522,7 @@ func (s *defaultStorage) SaveGCSafePoint(safePoint uint64) error {
 }
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
-func (s *defaultStorage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
+func (s *defaultStorage) LoadMinServiceGCSafePoint(now time.Time) (*core.ServiceSafePoint, error) {
 	prefix := path.Join(gcPath, "safe_point", "service") + "/"
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
@@ -516,9 +537,9 @@ func (s *defaultStorage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafeP
 	}
 
 	hasGCWorker := false
-	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
+	min := &core.ServiceSafePoint{SafePoint: math.MaxUint64}
 	for i, key := range keys {
-		ssp := &ServiceSafePoint{}
+		ssp := &core.ServiceSafePoint{}
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
 		}
@@ -558,8 +579,8 @@ func (s *defaultStorage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafeP
 	return min, nil
 }
 
-func (s *defaultStorage) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
-	ssp := &ServiceSafePoint{
+func (s *defaultStorage) initServiceGCSafePointForGCWorker(initialValue uint64) (*core.ServiceSafePoint, error) {
+	ssp := &core.ServiceSafePoint{
 		ServiceID: gcWorkerServiceSafePointID,
 		SafePoint: initialValue,
 		ExpiredAt: math.MaxInt64,
@@ -571,7 +592,7 @@ func (s *defaultStorage) initServiceGCSafePointForGCWorker(initialValue uint64) 
 }
 
 // LoadAllServiceGCSafePoints returns all services GC safepoints
-func (s *defaultStorage) LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
+func (s *defaultStorage) LoadAllServiceGCSafePoints() ([]*core.ServiceSafePoint, error) {
 	prefix := path.Join(gcPath, "safe_point", "service") + "/"
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
@@ -579,12 +600,12 @@ func (s *defaultStorage) LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, erro
 		return nil, err
 	}
 	if len(keys) == 0 {
-		return []*ServiceSafePoint{}, nil
+		return []*core.ServiceSafePoint{}, nil
 	}
 
-	ssps := make([]*ServiceSafePoint, 0, len(keys))
+	ssps := make([]*core.ServiceSafePoint, 0, len(keys))
 	for i := range keys {
-		ssp := &ServiceSafePoint{}
+		ssp := &core.ServiceSafePoint{}
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
 		}
@@ -595,7 +616,7 @@ func (s *defaultStorage) LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, erro
 }
 
 // SaveServiceGCSafePoint saves a GC safepoint for the service
-func (s *defaultStorage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
+func (s *defaultStorage) SaveServiceGCSafePoint(ssp *core.ServiceSafePoint) error {
 	if ssp.ServiceID == "" {
 		return errors.New("service id of service safepoint cannot be empty")
 	}
@@ -620,4 +641,8 @@ func (s *defaultStorage) RemoveServiceGCSafePoint(serviceID string) error {
 	}
 	key := path.Join(gcPath, "safe_point", "service", serviceID)
 	return s.Remove(key)
+}
+
+func regionPath(regionID uint64) string {
+	return path.Join(clusterPath, "r", fmt.Sprintf("%020d", regionID))
 }

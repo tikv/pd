@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/server/storage"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -578,7 +579,7 @@ func (o *PersistOptions) DeleteLabelProperty(typ, labelKey, labelValue string) {
 }
 
 // Persist saves the configuration to the storage.
-func (o *PersistOptions) Persist(storage core.ConfigStorage) error {
+func (o *PersistOptions) Persist(storage storage.ConfigStorage) error {
 	cfg := &Config{
 		Schedule:        *o.GetScheduleConfig(),
 		Replication:     *o.GetReplicationConfig(),
@@ -595,7 +596,7 @@ func (o *PersistOptions) Persist(storage core.ConfigStorage) error {
 }
 
 // Reload reloads the configuration from the storage.
-func (o *PersistOptions) Reload(storage core.ConfigStorage) error {
+func (o *PersistOptions) Reload(storage storage.ConfigStorage) error {
 	cfg := &Config{}
 	// pass nil to initialize cfg to default values (all items undefined)
 	cfg.Adjust(nil, true)

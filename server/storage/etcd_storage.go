@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package storage
 
 import (
 	"fmt"
@@ -44,7 +44,7 @@ func storeRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
 }
 
-var _ StorageV2 = (*EtcdStorage)(nil)
+var _ Storage = (*EtcdStorage)(nil)
 
 // EtcdStorage is a storage that stores data in etcd,
 // which is used by the PD server.

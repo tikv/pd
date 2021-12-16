@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -1160,11 +1161,11 @@ func newTestRaftCluster(
 	ctx context.Context,
 	id id.Allocator,
 	opt *config.PersistOptions,
-	storage *core.Storage,
+	oldStorage *core.Storage,
 	basicCluster *core.BasicCluster,
 ) *RaftCluster {
 	rc := &RaftCluster{serverCtx: ctx}
-	rc.InitCluster(id, opt, storage, core.NewMemoryStorage(), basicCluster)
+	rc.InitCluster(id, opt, oldStorage, storage.NewMemoryStorage(), basicCluster)
 	return rc
 }
 
@@ -1231,7 +1232,7 @@ func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
 	}
 }
 
-func checkRegionsKV(c *C, s core.MetaStorage, regions []*core.RegionInfo) {
+func checkRegionsKV(c *C, s storage.MetaStorage, regions []*core.RegionInfo) {
 	if s != nil {
 		for _, region := range regions {
 			var meta metapb.Region

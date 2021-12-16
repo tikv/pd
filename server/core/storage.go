@@ -58,7 +58,7 @@ const (
 )
 
 // Storage wraps all kv operations, keep it stateless.
-// NOTICE: this struct will be replaced by StorageV2 later.
+// NOTICE: this struct will be replaced by Storage later.
 type Storage struct {
 	kv.Base
 	regionStorage        *RegionStorage

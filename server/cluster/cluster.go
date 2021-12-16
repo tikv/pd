@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -70,7 +71,7 @@ type Server interface {
 	GetConfig() *config.Config
 	GetPersistOptions() *config.PersistOptions
 	GetStorage() *core.Storage /* NOTICE: this method will be removed later. */
-	GetEtcdStorage() *core.EtcdStorage
+	GetEtcdStorage() *storage.EtcdStorage
 	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
@@ -103,7 +104,7 @@ type RaftCluster struct {
 	meta      *metapb.Cluster
 	opt       *config.PersistOptions
 	storage   *core.Storage /* NOTICE: this field will be removed later. */
-	storageV2 core.StorageV2
+	storageV2 storage.Storage
 	id        id.Allocator
 	limiter   *StoreLimiter
 
@@ -212,7 +213,7 @@ func (c *RaftCluster) InitCluster(
 	id id.Allocator,
 	opt *config.PersistOptions,
 	storage *core.Storage,
-	storageV2 core.StorageV2,
+	storageV2 storage.Storage,
 	basicCluster *core.BasicCluster) {
 	c.core, c.opt, c.storage, c.storageV2, c.id = basicCluster, opt, storage, storageV2, id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
@@ -498,7 +499,7 @@ func (c *RaftCluster) SetStorage(s *core.Storage) {
 }
 
 // GetStorageV2 returns the storage v2.
-func (c *RaftCluster) GetStorageV2() core.StorageV2 {
+func (c *RaftCluster) GetStorageV2() storage.Storage {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storageV2

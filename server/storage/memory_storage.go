@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package storage
 
 import (
 	"github.com/tikv/pd/server/kv"
 )
 
-var _ StorageV2 = (*MemoryStorage)(nil)
+var _ Storage = (*MemoryStorage)(nil)
 
 // MemoryStorage is a storage that stores data in a memory B-Tree without any locks,
 // which should only be used in tests.

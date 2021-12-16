@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/storage"
 )
 
 func TestStatistics(t *testing.T) {
@@ -33,7 +34,7 @@ func TestStatistics(t *testing.T) {
 var _ = Suite(&testRegionStatisticsSuite{})
 
 type testRegionStatisticsSuite struct {
-	store   core.RuleStorage
+	store   storage.RuleStorage
 	manager *placement.RuleManager
 }
 
