@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/storage/base"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -1232,7 +1233,7 @@ func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
 	}
 }
 
-func checkRegionsKV(c *C, s storage.MetaStorage, regions []*core.RegionInfo) {
+func checkRegionsKV(c *C, s base.MetaStorage, regions []*core.RegionInfo) {
 	if s != nil {
 		for _, region := range regions {
 			var meta metapb.Region

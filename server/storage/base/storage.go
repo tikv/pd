@@ -12,23 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package storage
+package base
 
 import (
+	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
-	"github.com/tikv/pd/server/storage/base"
-	"go.etcd.io/etcd/clientv3"
 )
 
-var _ Storage = (*EtcdStorage)(nil)
+const (
+	maxKVRangeLimit = 10000
+	minKVRangeLimit = 100
+)
 
-// EtcdStorage is a storage that stores data in etcd,
-// which is used by the PD server.
-type EtcdStorage struct {
-	*base.Storage
+// Storage is the underlying storage base for all other specific storages.
+// It should define some common storage interfaces and operations.
+type Storage struct {
+	kv.Base
+	encryptionKeyManager *encryptionkm.KeyManager
 }
 
-// NewEtcdStorage is used to create a new etcd storage.
-func NewEtcdStorage(client *clientv3.Client, rootPatch string) *EtcdStorage {
-	return &EtcdStorage{base.NewStorage(kv.NewEtcdKVBase(client, rootPatch), nil)}
+// NewStorage creates a new base Storage with the given KV and encryption key manager.
+func NewStorage(
+	kvBase kv.Base,
+	encryptionKeyManager *encryptionkm.KeyManager,
+) *Storage {
+	return &Storage{
+		kvBase,
+		encryptionKeyManager,
+	}
 }

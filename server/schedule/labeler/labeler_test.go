@@ -23,7 +23,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
-	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/storage/base"
 )
 
 func TestT(t *testing.T) {
@@ -33,7 +33,7 @@ func TestT(t *testing.T) {
 var _ = Suite(&testLabelerSuite{})
 
 type testLabelerSuite struct {
-	store   storage.RuleStorage
+	store   base.RuleStorage
 	labeler *RegionLabeler
 }
 

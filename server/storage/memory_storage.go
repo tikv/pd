@@ -16,6 +16,7 @@ package storage
 
 import (
 	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage/base"
 )
 
 var _ Storage = (*MemoryStorage)(nil)
@@ -23,10 +24,10 @@ var _ Storage = (*MemoryStorage)(nil)
 // MemoryStorage is a storage that stores data in a memory B-Tree without any locks,
 // which should only be used in tests.
 type MemoryStorage struct {
-	defaultStorage
+	*base.Storage
 }
 
 // NewMemoryStorage is used to create a new memory storage.
 func NewMemoryStorage() *MemoryStorage {
-	return &MemoryStorage{defaultStorage{kv.NewMemoryKV(), nil}}
+	return &MemoryStorage{base.NewStorage(kv.NewMemoryKV(), nil)}
 }
