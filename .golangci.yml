@@ -9,6 +9,8 @@ linters:
     - unconvert
     - whitespace
     - makezero
+    - gosec
+    - bodyclose
   disable:
     - errcheck
 linters-settings:
@@ -24,3 +26,9 @@ linters-settings:
       - appendAssign
       - exitAfterDefer
       - ifElseChain
+  gosec:
+    # To specify a set of rules to explicitly exclude.
+    # Available rules: https://github.com/securego/gosec#available-rules
+    excludes:
+      - G402
+      - G404

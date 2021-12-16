@@ -131,7 +131,7 @@ func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster opt.Cluster) []*o
 	storeMap := map[uint64][]core.KeyRange{
 		s.conf.EvictedStores[0]: {core.NewKeyRange("", "")},
 	}
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, storeMap, EvictLeaderBatchSize)
+	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, storeMap, EvictLeaderBatchSize)
 }
 
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {

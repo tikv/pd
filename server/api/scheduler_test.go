@@ -91,20 +91,20 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	c.Assert(resp1["store-id-ranges"], HasLen, 1)
 	deleteURL = fmt.Sprintf("%s/%s", s.urlPrefix, "evict-leader-scheduler-2")
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/config/persistFail", "return(true)"), IsNil)
-	res, err := doDelete(testDialClient, deleteURL)
+	statusCode, err := doDelete(testDialClient, deleteURL)
 	c.Assert(err, IsNil)
-	c.Assert(res.StatusCode, Equals, 500)
+	c.Assert(statusCode, Equals, 500)
 	c.Assert(rc.GetSchedulers(), HasLen, 1)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/config/persistFail"), IsNil)
-	res, err = doDelete(testDialClient, deleteURL)
+	statusCode, err = doDelete(testDialClient, deleteURL)
 	c.Assert(err, IsNil)
-	c.Assert(res.StatusCode, Equals, 200)
+	c.Assert(statusCode, Equals, 200)
 	c.Assert(rc.GetSchedulers(), HasLen, 0)
 	resp2 := make(map[string]interface{})
 	c.Assert(readJSON(testDialClient, listURL, &resp2), NotNil)
 
-	r, _ := doDelete(testDialClient, deleteURL)
-	c.Assert(r.StatusCode, Equals, 404)
+	statusCode, _ = doDelete(testDialClient, deleteURL)
+	c.Assert(statusCode, Equals, 404)
 }
 
 func (s *testScheduleSuite) TestAPI(c *C) {
@@ -196,9 +196,9 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 				delete(exceptMap, "2")
 				c.Assert(resp["store-id-ranges"], DeepEquals, exceptMap)
-				res, err := doDelete(testDialClient, deleteURL)
+				statusCode, err := doDelete(testDialClient, deleteURL)
 				c.Assert(err, IsNil)
-				c.Assert(res.StatusCode, Equals, 404)
+				c.Assert(statusCode, Equals, 404)
 			},
 		},
 		{
@@ -260,9 +260,9 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 				delete(exceptMap, "2")
 				c.Assert(resp["store-id-ranges"], DeepEquals, exceptMap)
-				res, err := doDelete(testDialClient, deleteURL)
+				statusCode, err := doDelete(testDialClient, deleteURL)
 				c.Assert(err, IsNil)
-				c.Assert(res.StatusCode, Equals, 404)
+				c.Assert(statusCode, Equals, 404)
 			},
 		},
 	}

@@ -16,6 +16,7 @@ package client_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -238,7 +239,11 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Printf("Error closing file: %s\n", err)
+		}
+	}()
 
 	w, err := os.Create(dst)
 	if err != nil {

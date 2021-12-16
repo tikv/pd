@@ -17,6 +17,7 @@ package schedulers
 import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -103,7 +104,7 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
 	for _, s := range stores {
-		if cluster.GetOpts().CheckLabelProperty(opt.RejectLeader, s.GetLabels()) {
+		if cluster.GetOpts().CheckLabelProperty(config.RejectLeader, s.GetLabels()) {
 			rejectLeaderStores[s.GetID()] = struct{}{}
 		}
 	}

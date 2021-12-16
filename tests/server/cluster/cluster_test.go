@@ -484,7 +484,8 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 				Available: 1000 * (1 << 20),
 			},
 		}
-		_, err := leaderServer.GetServer().StoreHeartbeat(context.TODO(), req)
+		grpcServer := &server.GrpcServer{Server: leaderServer.GetServer()}
+		_, err := grpcServer.StoreHeartbeat(context.TODO(), req)
 		c.Assert(err, IsNil)
 		stream, err := grpcPDClient.RegionHeartbeat(ctx)
 		c.Assert(err, IsNil)

@@ -158,8 +158,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	hotStatusHandler := newHotStatusHandler(handler, rd)
 	apiRouter.HandleFunc("/hotspot/regions/write", hotStatusHandler.GetHotWriteRegions).Methods("GET")
 	apiRouter.HandleFunc("/hotspot/regions/read", hotStatusHandler.GetHotReadRegions).Methods("GET")
-	apiRouter.HandleFunc("/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
 	apiRouter.HandleFunc("/hotspot/regions/history", hotStatusHandler.GetHistoryHotRegions).Methods("GET")
+	apiRouter.HandleFunc("/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
 
 	regionHandler := newRegionHandler(svr, rd)
 	clusterRouter.HandleFunc("/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")
@@ -227,6 +227,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	replicationModeHandler := newReplicationModeHandler(svr, rd)
 	clusterRouter.HandleFunc("/replication_mode/status", replicationModeHandler.GetStatus)
 
+	// Deprecated: component exists for historical compatibility and should not be used anymore. See https://github.com/tikv/tikv/issues/11472.
 	componentHandler := newComponentHandler(svr, rd)
 	clusterRouter.HandleFunc("/component", componentHandler.Register).Methods("POST")
 	clusterRouter.HandleFunc("/component/{component}/{addr}", componentHandler.UnRegister).Methods("DELETE")
@@ -283,11 +284,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 		})
 	})
 
-	// Deprecated
+	// Deprecated: use /pd/api/v1/health instead.
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
-	// Deprecated
+	// Deprecated: use /pd/api/v1/diagnose instead.
 	rootRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
-	// Deprecated
+	// Deprecated: use /pd/api/v1/ping instead.
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
 	return rootRouter

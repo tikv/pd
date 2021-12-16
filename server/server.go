@@ -84,6 +84,7 @@ var (
 )
 
 // Server is the pd server.
+// nolint
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
@@ -253,7 +254,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		etcdCfg.UserHandlers = userHandlers
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
-		pdpb.RegisterPDServer(gs, s)
+		pdpb.RegisterPDServer(gs, &GrpcServer{Server: s})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg
@@ -780,6 +781,15 @@ func (s *Server) StartTimestamp() int64 {
 	return s.startTimestamp
 }
 
+// GetMembers returns PD server list.
+func (s *Server) GetMembers() ([]*pdpb.Member, error) {
+	if s.IsClosed() {
+		return nil, errors.New("server not started")
+	}
+	members, err := cluster.GetMembers(s.GetClient())
+	return members, err
+}
+
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
@@ -1133,7 +1143,7 @@ func isLevelLegal(level string) bool {
 
 // GetReplicationModeConfig returns the replication mode config.
 func (s *Server) GetReplicationModeConfig() *config.ReplicationModeConfig {
-	return s.persistOptions.GetReplicationModeConfig()
+	return s.persistOptions.GetReplicationModeConfig().Clone()
 }
 
 // SetReplicationModeConfig sets the replication mode.
@@ -1358,41 +1368,35 @@ func (s *Server) reloadConfigFromKV() error {
 	return nil
 }
 
-// ReplicateFileToAllMembers is used to synchronize state among all members.
+// ReplicateFileToMember is used to synchronize state to a member.
 // Each member will write `data` to a local file named `name`.
 // For security reason, data should be in JSON format.
-func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
-	resp, err := s.GetMembers(ctx, nil)
-	if err != nil {
-		return err
+func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error {
+	clientUrls := member.GetClientUrls()
+	if len(clientUrls) == 0 {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()))
+		return errs.ErrClientURLEmpty.FastGenByArgs()
 	}
-	for _, member := range resp.Members {
-		clientUrls := member.GetClientUrls()
-		if len(clientUrls) == 0 {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
-			return errs.ErrClientURLEmpty.FastGenByArgs()
-		}
-		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
-		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
-		req.Header.Set("PD-Allow-follower-handle", "true")
-		res, err := s.httpClient.Do(req)
-		if err != nil {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
-			return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
-		}
-		// Since we don't read the body, we can close it immediately.
-		res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
-			return errs.ErrSendRequest.FastGenByArgs()
-		}
+	url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
+	req.Header.Set("PD-Allow-follower-handle", "true")
+	res, err := s.httpClient.Do(req)
+	if err != nil {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
+		return errs.ErrSendRequest.Wrap(err).GenWithStackByCause()
+	}
+	// Since we don't read the body, we can close it immediately.
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
+		return errs.ErrSendRequest.FastGenByArgs()
 	}
 	return nil
 }
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
-	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
+	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644) // #nosec
 }
 
 // SaveTTLConfig save ttl config
@@ -1408,4 +1412,9 @@ func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) e
 		}
 	}
 	return nil
+}
+
+// SplitAndScatterRegions TODO
+func (s *Server) SplitAndScatterRegions(context context.Context, r *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
+	return nil, errors.New("no implemented")
 }

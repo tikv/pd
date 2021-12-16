@@ -334,13 +334,11 @@ func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 
 	// Test the TSO follower proxy while enabling the Local TSO.
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	// Sleep a while here to prevent from canceling the ongoing TSO request.
+	time.Sleep(time.Millisecond * 50)
 	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, false)
-	// There will be a stream has been chosen before when the TSO Follower Proxy is enabled.
-	// We need to consume it before the client starts the next round of TSO request batch.
-	// TODO: fix this corner case.
-	_, _, err = cli.GetTS(context.TODO())
-	c.Assert(err, ErrorMatches, ".*context canceled.*")
+	time.Sleep(time.Millisecond * 50)
 	requestGlobalAndLocalTSO(c, wg, dcLocationConfig, cli)
 }
 
@@ -562,6 +560,7 @@ type testClientSuite struct {
 	ctx             context.Context
 	clean           context.CancelFunc
 	srv             *server.Server
+	grpcSvr         *server.GrpcServer
 	client          pd.Client
 	grpcPDClient    pdpb.PDClient
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
@@ -580,6 +579,7 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	s.srv, s.cleanup, err = server.NewTestServer(checkerWithNilAssert(c))
 	c.Assert(err, IsNil)
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.srv.GetAddr())
+	s.grpcSvr = &server.GrpcServer{Server: s.srv}
 
 	mustWaitLeader(c, map[string]*server.Server{s.srv.GetAddr(): s.srv})
 	bootstrapServer(c, newHeader(s.srv), s.grpcPDClient)
@@ -594,7 +594,7 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	c.Assert(cluster, NotNil)
 	now := time.Now().UnixNano()
 	for _, store := range stores {
-		s.srv.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: newHeader(s.srv),
 			Store: &metapb.Store{
 				Id:            store.Id,
@@ -943,7 +943,7 @@ func (s *testClientSuite) checkGCSafePoint(c *C, expectedSafePoint uint64) {
 	req := &pdpb.GetGCSafePointRequest{
 		Header: newHeader(s.srv),
 	}
-	resp, err := s.srv.GetGCSafePoint(context.Background(), req)
+	resp, err := s.grpcSvr.GetGCSafePoint(context.Background(), req)
 	c.Assert(err, IsNil)
 	c.Assert(resp.SafePoint, Equals, expectedSafePoint)
 }

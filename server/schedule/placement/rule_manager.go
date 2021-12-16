@@ -318,7 +318,7 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *Reg
 			return fit
 		}
 	}
-	fit := FitRegion(regionStores, region, rules)
+	fit := fitRegion(regionStores, region, rules)
 	fit.regionStores = regionStores
 	fit.rules = rules
 	return fit

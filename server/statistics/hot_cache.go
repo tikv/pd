@@ -41,8 +41,8 @@ func NewHotCache(ctx context.Context) *HotCache {
 		ctx:            ctx,
 		readFlowQueue:  make(chan FlowItemTask, queueCap),
 		writeFlowQueue: make(chan FlowItemTask, queueCap),
-		writeFlow:      NewHotPeerCache(WriteFlow),
-		readFlow:       NewHotPeerCache(ReadFlow),
+		writeFlow:      NewHotPeerCache(Write),
+		readFlow:       NewHotPeerCache(Read),
 	}
 	go w.updateItems(w.readFlowQueue, w.runReadTask)
 	go w.updateItems(w.writeFlowQueue, w.runWriteTask)
@@ -85,24 +85,24 @@ func (w *HotCache) CheckReadAsync(task FlowItemTask) bool {
 // This is used for mockcluster.
 func (w *HotCache) Update(item *HotPeerStat) {
 	switch item.Kind {
-	case WriteFlow:
+	case Write:
 		update(item, w.writeFlow)
-	case ReadFlow:
+	case Read:
 		update(item, w.readFlow)
 	}
 }
 
 // RegionStats returns hot items according to kind
-func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*HotPeerStat {
+func (w *HotCache) RegionStats(kind RWType, minHotDegree int) map[uint64][]*HotPeerStat {
 	switch kind {
-	case WriteFlow:
+	case Write:
 		task := newCollectRegionStatsTask(minHotDegree)
 		succ := w.CheckWriteAsync(task)
 		if !succ {
 			return nil
 		}
 		return task.waitRet(w.ctx)
-	case ReadFlow:
+	case Read:
 		task := newCollectRegionStatsTask(minHotDegree)
 		succ := w.CheckReadAsync(task)
 		if !succ {
@@ -114,7 +114,7 @@ func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*Ho
 }
 
 // HotRegionsFromStore picks hot region in specify store.
-func (w *HotCache) HotRegionsFromStore(storeID uint64, kind FlowKind, minHotDegree int) []*HotPeerStat {
+func (w *HotCache) HotRegionsFromStore(storeID uint64, kind RWType, minHotDegree int) []*HotPeerStat {
 	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
 		return stats
 	}
@@ -158,22 +158,22 @@ func (w *HotCache) ExpiredWriteItems(region *core.RegionInfo) []*HotPeerStat {
 	return w.writeFlow.CollectExpiredItems(region)
 }
 
-func incMetrics(name string, storeID uint64, kind FlowKind) {
+func incMetrics(name string, storeID uint64, kind RWType) {
 	store := storeTag(storeID)
 	switch kind {
-	case WriteFlow:
+	case Write:
 		hotCacheStatusGauge.WithLabelValues(name, store, "write").Inc()
-	case ReadFlow:
+	case Read:
 		hotCacheStatusGauge.WithLabelValues(name, store, "read").Inc()
 	}
 }
 
 // GetFilledPeriod returns filled period.
-func (w *HotCache) GetFilledPeriod(kind FlowKind) int {
+func (w *HotCache) GetFilledPeriod(kind RWType) int {
 	switch kind {
-	case WriteFlow:
+	case Write:
 		return w.writeFlow.getDefaultTimeMedian().GetFilledPeriod()
-	case ReadFlow:
+	case Read:
 		return w.readFlow.getDefaultTimeMedian().GetFilledPeriod()
 	}
 	return 0
@@ -194,7 +194,7 @@ func (w *HotCache) runReadTask(task FlowItemTask) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stucked by a task?
 		task.runTask(w.readFlow)
-		hotCacheFlowQueueStatusGauge.WithLabelValues(ReadFlow.String()).Set(float64(len(w.readFlowQueue)))
+		hotCacheFlowQueueStatusGauge.WithLabelValues(Read.String()).Set(float64(len(w.readFlowQueue)))
 	}
 }
 
@@ -202,7 +202,7 @@ func (w *HotCache) runWriteTask(task FlowItemTask) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stucked by a task?
 		task.runTask(w.writeFlow)
-		hotCacheFlowQueueStatusGauge.WithLabelValues(WriteFlow.String()).Set(float64(len(w.writeFlowQueue)))
+		hotCacheFlowQueueStatusGauge.WithLabelValues(Write.String()).Set(float64(len(w.writeFlowQueue)))
 	}
 }
 
