@@ -142,7 +142,7 @@ func changeLeaderPeerUrls(c *C, leader *pdpb.Member, id uint64, urls []string) {
 	data := map[string][]string{"peerURLs": urls}
 	postData, err := json.Marshal(data)
 	c.Assert(err, IsNil)
-	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/v2/members/%s", leader.GetClientUrls()[0], fmt.Sprintf("%x", id)), bytes.NewBuffer(postData))
+	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/v2/members/%s", leader.GetClientUrls()[0], fmt.Sprintf("%x", id)), bytes.NewBuffer(postData))
 	c.Assert(err, IsNil)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := testDialClient.Do(req)

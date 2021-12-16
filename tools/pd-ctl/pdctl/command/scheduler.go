@@ -103,7 +103,7 @@ func NewShowSchedulerCommand() *cobra.Command {
 		Short: "show schedulers",
 		Run:   showSchedulerCommandFunc,
 	}
-	c.Flags().String("status", "", "the scheduler status, like 'paused' or 'disabled'")
+	c.Flags().String("status", "", "the scheduler status value can be [paused | disabled]")
 	return c
 }
 
