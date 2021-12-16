@@ -66,7 +66,7 @@ func pauseSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
-	delay, err := strconv.Atoi(args[1])
+	delay, err := strconv.ParseInt(args[1], 10, 64)
 	if err != nil || delay <= 0 {
 		cmd.Usage()
 		return
