@@ -47,8 +47,8 @@ const (
 	patrolStep                  = 1 * time.Second
 	defaultAllocatorLeaderLease = 3
 	leaderTickInterval          = 50 * time.Millisecond
-	localTSOAllocatorEtcdPrefix = "local-tso-allocator"
-	localTSOSuffixEtcdPrefix    = "local-tso-suffix"
+	localTSOAllocatorEtcdPrefix = "lta"
+	localTSOSuffixEtcdPrefix    = "lts"
 )
 
 var (
