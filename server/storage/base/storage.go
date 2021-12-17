@@ -19,11 +19,6 @@ import (
 	"github.com/tikv/pd/server/kv"
 )
 
-const (
-	maxKVRangeLimit = 10000
-	minKVRangeLimit = 100
-)
-
 // Storage is the underlying storage base for all other specific storages.
 // It should define some common storage interfaces and operations.
 type Storage struct {

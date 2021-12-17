@@ -28,6 +28,11 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
+const (
+	maxKVRangeLimit = 10000
+	minKVRangeLimit = 100
+)
+
 // MetaStorage defines the storage operations on the PD cluster meta info.
 type MetaStorage interface {
 	LoadMeta(meta *metapb.Cluster) (bool, error)

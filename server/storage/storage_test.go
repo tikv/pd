@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"math"
 	"strings"
+	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -26,6 +27,10 @@ import (
 	"github.com/tikv/pd/server/storage/base"
 	"go.etcd.io/etcd/clientv3"
 )
+
+func TestCore(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testStorageSuite{})
 
