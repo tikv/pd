@@ -56,7 +56,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd2": "dc-1",
 		"pd4": "dc-2",
-		"pd6": "dc-3",
+		"pd6": "leader", /* Test dc-location name is same as the special key */
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum*2, func(conf *config.Config, serverName string) {

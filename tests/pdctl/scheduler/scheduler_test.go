@@ -93,6 +93,12 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		return ""
 	}
 
+	mustUsage := func(args []string) {
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		c.Assert(err, IsNil)
+		c.Assert(strings.Contains(string(output), "Usage"), IsTrue)
+	}
+
 	checkSchedulerCommand := func(args []string, expected map[string]bool) {
 		if args != nil {
 			mustExec(args, nil)
@@ -365,10 +371,13 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		c.Assert(schedulers, DeepEquals, expected)
 	}
 
+	mustUsage([]string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler"})
 	mustExec([]string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
 	checkSchedulerWithStatusCommand(nil, "paused", []string{
 		"balance-leader-scheduler",
 	})
+
+	mustUsage([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler", "60"})
 	mustExec([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
 	checkSchedulerWithStatusCommand(nil, "paused", nil)
 
