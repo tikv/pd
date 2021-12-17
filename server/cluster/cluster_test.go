@@ -38,7 +38,6 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/storage/base"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -446,25 +445,25 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		// region does not exist.
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is the same, not updated.
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 		origin := region
 		// region is updated.
 		region = origin.Clone(core.WithIncVersion())
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is stale (Version).
 		stale := origin.Clone(core.WithIncConfVer())
 		c.Assert(cluster.processRegionHeartbeat(stale), NotNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is updated.
 		region = origin.Clone(
@@ -474,13 +473,13 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is stale (ConfVer).
 		stale = origin.Clone(core.WithIncConfVer())
 		c.Assert(cluster.processRegionHeartbeat(stale), NotNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// Add a down peer.
 		region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
@@ -517,13 +516,13 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 		// Add peers.
 		region = origin
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
@@ -1233,7 +1232,7 @@ func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
 	}
 }
 
-func checkRegionsKV(c *C, s base.MetaStorage, regions []*core.RegionInfo) {
+func checkRegionsKV(c *C, s *core.Storage, regions []*core.RegionInfo) {
 	if s != nil {
 		for _, region := range regions {
 			var meta metapb.Region
