@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -49,11 +50,10 @@ type Config struct {
 func (c *Config) Adjust() error {
 	if len(c.DataEncryptionMethod) == 0 {
 		c.DataEncryptionMethod = defaultDataEncryptionMethod
-	} else {
-		if _, err := c.GetMethod(); err != nil {
-			return err
-		}
+	} else if _, err := c.GetMethod(); err != nil {
+		return err
 	}
+
 	if c.DataKeyRotationPeriod.Duration == 0 {
 		duration, err := time.ParseDuration(defaultDataKeyRotationPeriod)
 		if err != nil {
@@ -69,10 +69,8 @@ func (c *Config) Adjust() error {
 	}
 	if len(c.MasterKey.Type) == 0 {
 		c.MasterKey.Type = masterKeyTypePlaintext
-	} else {
-		if _, err := c.GetMasterKeyMeta(); err != nil {
-			return err
-		}
+	} else if _, err := c.GetMasterKeyMeta(); err != nil {
+		return err
 	}
 	return nil
 }

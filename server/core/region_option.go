@@ -8,12 +8,14 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package core
 
 import (
+	"math"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -32,6 +34,14 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.downPeers = append(downPeers[:0:0], downPeers...)
 		sort.Sort(peerStatsSlice(region.downPeers))
+	}
+}
+
+// WithFlowRoundByDigit set the digit, which use to round to the nearest number
+func WithFlowRoundByDigit(digit int) RegionCreateOption {
+	flowRoundDivisor := uint64(math.Pow10(digit))
+	return func(region *RegionInfo) {
+		region.flowRoundDivisor = flowRoundDivisor
 	}
 }
 
@@ -104,6 +114,11 @@ func WithIncVersion() RegionCreateOption {
 		e := region.meta.GetRegionEpoch()
 		if e != nil {
 			e.Version++
+		} else {
+			region.meta.RegionEpoch = &metapb.RegionEpoch{
+				ConfVer: 0,
+				Version: 1,
+			}
 		}
 	}
 }
@@ -124,6 +139,11 @@ func WithIncConfVer() RegionCreateOption {
 		e := region.meta.GetRegionEpoch()
 		if e != nil {
 			e.ConfVer++
+		} else {
+			region.meta.RegionEpoch = &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 0,
+			}
 		}
 	}
 }
@@ -176,6 +196,25 @@ func SetReadBytes(v uint64) RegionCreateOption {
 func SetReadKeys(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.readKeys = v
+	}
+}
+
+// SetReadQuery sets the read query for the region, only used for unit test.
+func SetReadQuery(v uint64) RegionCreateOption {
+	q := RandomKindReadQuery(v)
+	return SetQueryStats(q)
+}
+
+// SetWrittenQuery sets the write query for the region, only used for unit test.
+func SetWrittenQuery(v uint64) RegionCreateOption {
+	q := RandomKindWriteQuery(v)
+	return SetQueryStats(q)
+}
+
+// SetQueryStats sets the query stats for the region.
+func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.QueryStats = v
 	}
 }
 

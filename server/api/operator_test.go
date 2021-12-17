@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,7 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"strings"
 
 	. "github.com/pingcap/check"
@@ -376,7 +377,8 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 }
 
 func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {
-	_, err := svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+	s := &server.GrpcServer{Server: svr}
+	_, err := s.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
 		Store: &metapb.Store{
 			Id:      id,
@@ -387,7 +389,7 @@ func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, 
 		},
 	})
 	c.Assert(err, IsNil)
-	_, err = svr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+	_, err = s.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
 		Stats:  &pdpb.StoreStats{StoreId: id},
 	})
@@ -404,7 +406,7 @@ func mustReadURL(c *C, url string) string {
 	res, err := testDialClient.Get(url)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()
-	data, err := ioutil.ReadAll(res.Body)
+	data, err := io.ReadAll(res.Body)
 	c.Assert(err, IsNil)
 	return string(data)
 }

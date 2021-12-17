@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -26,6 +27,7 @@ import (
 	clusterpkg "github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -53,7 +55,7 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	i := strings.Index(pdAddr, "//")
 	pdAddr = pdAddr[i+2:]
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 	defer cluster.Destroy()
 
 	// cluster
@@ -63,8 +65,6 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	ci := &metapb.Cluster{}
 	c.Assert(json.Unmarshal(output, ci), IsNil)
 	c.Assert(ci, DeepEquals, cluster.GetCluster())
-	echo := pdctl.GetEcho([]string{"-u", pdAddr, "--cacert=ca.pem", "cluster"})
-	c.Assert(strings.Contains(echo, "no such file or directory"), IsTrue)
 
 	// cluster info
 	args = []string{"-u", pdAddr, "cluster"}
@@ -94,4 +94,9 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(output, NotNil)
+
+	// does not exist
+	args = []string{"-u", pdAddr, "--cacert=ca.pem", "cluster"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, ErrorMatches, ".*no such file or directory.*")
 }

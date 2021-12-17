@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -146,6 +147,22 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 	return succ, last
 }
 
+func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
+	conf.mu.Lock()
+	defer conf.mu.Unlock()
+	conf.cluster.PauseLeaderTransfer(id)
+	conf.StoreIDWithRanges[id] = keyRange
+}
+
+func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	if ranges, exist := conf.StoreIDWithRanges[id]; exist {
+		return ranges
+	}
+	return nil
+}
+
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
 	*BaseScheduler
@@ -215,7 +232,7 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 	defer s.conf.mu.RUnlock()
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
 	for id, ranges := range s.conf.StoreIDWithRanges {
-		region := cluster.RandFollowerRegion(id, ranges, opt.HealthRegion(cluster))
+		region := cluster.RandFollowerRegion(id, ranges, opt.IsRegionHealthy)
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 			continue
@@ -250,12 +267,15 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	idFloat, ok := input["store_id"].(float64)
 	if ok {
 		id = (uint64)(idFloat)
+		handler.config.mu.RLock()
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
 			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
+				handler.config.mu.RUnlock()
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
+		handler.config.mu.RUnlock()
 		args = append(args, strconv.FormatUint(id, 10))
 	}
 
@@ -269,6 +289,7 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.config.BuildWithArgs(args)
 	err := handler.config.Persist()
 	if err != nil {
+		handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -289,10 +310,12 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	}
 
 	var resp interface{}
+	keyRanges := handler.config.getKeyRangesByID(id)
 	succ, last := handler.config.removeStore(id)
 	if succ {
 		err = handler.config.Persist()
 		if err != nil {
+			handler.config.resetStore(id, keyRanges)
 			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -301,6 +324,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {
+					handler.config.resetStore(id, keyRanges)
 					handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				}
 				return

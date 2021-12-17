@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,6 +17,7 @@ package placement
 import (
 	"math"
 	"sort"
+	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
@@ -25,8 +27,28 @@ import (
 // All peers are divided into corresponding rules according to the matching
 // rules, and the remaining Peers are placed in the OrphanPeers list.
 type RegionFit struct {
-	RuleFits    []*RuleFit
-	OrphanPeers []*metapb.Peer
+	mu struct {
+		sync.RWMutex
+		cached bool
+	}
+	RuleFits     []*RuleFit
+	OrphanPeers  []*metapb.Peer
+	regionStores []*core.StoreInfo
+	rules        []*Rule
+}
+
+// SetCached indicates this RegionFit is fetch form cache
+func (f *RegionFit) SetCached(cached bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mu.cached = cached
+}
+
+// IsCached indicates whether this result is fetched from caches
+func (f *RegionFit) IsCached() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.mu.cached
 }
 
 // IsSatisfied returns if the rules are properly satisfied.
@@ -53,6 +75,11 @@ func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 		}
 	}
 	return nil
+}
+
+// GetRegionStores returns region's stores
+func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
+	return f.regionStores
 }
 
 // CompareRegionFit determines the superiority of 2 fits.
@@ -120,38 +147,45 @@ type StoreSet interface {
 	GetStore(id uint64) *core.StoreInfo
 }
 
-// FitRegion tries to fit peers of a region to the rules.
-func FitRegion(stores StoreSet, region *core.RegionInfo, rules []*Rule) *RegionFit {
+// fitRegion tries to fit peers of a region to the rules.
+func fitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *RegionFit {
 	w := newFitWorker(stores, region, rules)
 	w.run()
 	return &w.bestFit
 }
 
 type fitWorker struct {
-	stores  []*core.StoreInfo
-	bestFit RegionFit  // update during execution
-	peers   []*fitPeer // p.selected is updated during execution.
-	rules   []*Rule
+	stores        []*core.StoreInfo
+	bestFit       RegionFit  // update during execution
+	peers         []*fitPeer // p.selected is updated during execution.
+	rules         []*Rule
+	needIsolation bool
+	exit          bool
 }
 
-func newFitWorker(stores StoreSet, region *core.RegionInfo, rules []*Rule) *fitWorker {
+func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
 	regionPeers := region.GetPeers()
 	peers := make([]*fitPeer, 0, len(regionPeers))
 	for _, p := range regionPeers {
 		peers = append(peers, &fitPeer{
 			Peer:     p,
-			store:    stores.GetStore(p.GetStoreId()),
+			store:    getStoreByID(stores, p.GetStoreId()),
 			isLeader: region.GetLeader().GetId() == p.GetId(),
 		})
 	}
 	// Sort peers to keep the match result deterministic.
-	sort.Slice(peers, func(i, j int) bool { return peers[i].GetId() < peers[j].GetId() })
+	sort.Slice(peers, func(i, j int) bool {
+		// Put healthy peers in front to priority to fit healthy peers.
+		si, sj := stateScore(region, peers[i].GetId()), stateScore(region, peers[j].GetId())
+		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
+	})
 
 	return &fitWorker{
-		stores:  stores.GetStores(),
-		bestFit: RegionFit{RuleFits: make([]*RuleFit, len(rules))},
-		peers:   peers,
-		rules:   rules,
+		stores:        stores,
+		bestFit:       RegionFit{RuleFits: make([]*RuleFit, len(rules))},
+		peers:         peers,
+		needIsolation: needIsolation(rules),
+		rules:         rules,
 	}
 }
 
@@ -164,7 +198,15 @@ func (w *fitWorker) run() {
 // Index specifies the position of the rule.
 // returns true if it replaces `bestFit` with a better alternative.
 func (w *fitWorker) fitRule(index int) bool {
+	if w.exit {
+		return false
+	}
 	if index >= len(w.rules) {
+		// If there is no isolation level and we already find one solution, we can early exit searching instead of
+		// searching the whole cases.
+		if !w.needIsolation && w.bestFit.IsSatisfied() {
+			w.exit = true
+		}
 		return false
 	}
 
@@ -176,7 +218,6 @@ func (w *fitWorker) fitRule(index int) bool {
 		// 3. Not selected by other rules.
 		for _, p := range w.peers {
 			if MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) &&
-				p.matchRoleLoose(w.rules[index].Role) &&
 				!p.selected {
 				candidates = append(candidates, p)
 			}
@@ -205,6 +246,9 @@ func (w *fitWorker) enumPeers(candidates, selected []*fitPeer, index int, count 
 		p.selected = true
 		better = w.enumPeers(candidates[i+1:], append(selected, p), index, count) || better
 		p.selected = false
+		if w.exit {
+			break
+		}
 	}
 	return better
 }
@@ -282,13 +326,6 @@ func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 	return false
 }
 
-func (p *fitPeer) matchRoleLoose(role PeerRoleType) bool {
-	// non-learner cannot become learner. All other roles can migrate to
-	// others by scheduling. For example, Leader->Follower, Learner->Leader
-	// are possible, but Voter->Learner is impossible.
-	return role != Learner || core.IsLearner(p.Peer)
-}
-
 func isolationScore(peers []*fitPeer, labels []string) float64 {
 	var score float64
 	if len(labels) == 0 || len(peers) <= 1 {
@@ -309,4 +346,24 @@ func isolationScore(peers []*fitPeer, labels []string) float64 {
 		}
 	}
 	return score
+}
+
+func needIsolation(rules []*Rule) bool {
+	for _, rule := range rules {
+		if len(rule.LocationLabels) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func stateScore(region *core.RegionInfo, peerID uint64) int {
+	switch {
+	case region.GetDownPeer(peerID) != nil:
+		return 0
+	case region.GetPendingPeer(peerID) != nil:
+		return 1
+	default:
+		return 2
+	}
 }

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -18,7 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"sync"
 	"testing"
@@ -26,7 +27,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -41,6 +44,14 @@ func Test(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func checkerWithNilAssert(c *C) *assertutil.Checker {
+	checker := assertutil.NewChecker(c.FailNow)
+	checker.IsNil = func(obtained interface{}) {
+		c.Assert(obtained, IsNil)
+	}
+	return checker
 }
 
 var _ = Suite(&memberTestSuite{})
@@ -102,7 +113,7 @@ func (s *memberTestSuite) TestMemberDelete(c *C) {
 		c.Log(time.Now(), "try to delete:", t.path)
 		testutil.WaitUntil(c, func(c *C) bool {
 			addr := leader.GetConfig().ClientUrls + "/pd/api/v1/members/" + t.path
-			req, err := http.NewRequest("DELETE", addr, nil)
+			req, err := http.NewRequest(http.MethodDelete, addr, nil)
 			c.Assert(err, IsNil)
 			res, err := httpClient.Do(req)
 			c.Assert(err, IsNil)
@@ -130,7 +141,7 @@ func (s *memberTestSuite) TestMemberDelete(c *C) {
 		key := member.GetServer().GetMember().GetDCLocationPath(member.GetServerID())
 		resp, err := etcdutil.EtcdKVGet(leader.GetEtcdClient(), key)
 		c.Assert(err, IsNil)
-		c.Assert(len(resp.Kvs), Equals, 0)
+		c.Assert(resp.Kvs, HasLen, 0)
 	}
 }
 
@@ -140,7 +151,7 @@ func (s *memberTestSuite) checkMemberList(c *C, clientURL string, configs []*con
 	res, err := httpClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()
-	buf, err := ioutil.ReadAll(res.Body)
+	buf, err := io.ReadAll(res.Body)
 	c.Assert(err, IsNil)
 	if res.StatusCode != http.StatusOK {
 		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
@@ -191,9 +202,9 @@ func (s *memberTestSuite) TestLeaderPriority(c *C) {
 
 func (s *memberTestSuite) post(c *C, url string, body string) {
 	testutil.WaitUntil(c, func(c *C) bool {
-		res, err := http.Post(url, "", bytes.NewBufferString(body))
+		res, err := http.Post(url, "", bytes.NewBufferString(body)) // #nosec
 		c.Assert(err, IsNil)
-		b, err := ioutil.ReadAll(res.Body)
+		b, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		c.Assert(err, IsNil)
 		c.Logf("post %s, status: %v res: %s", url, res.StatusCode, string(b))
@@ -238,12 +249,31 @@ func (s *memberTestSuite) TestLeaderResign(c *C) {
 	c.Assert(leader3, Equals, leader1)
 }
 
+func (s *memberTestSuite) TestLeaderResignWithBlock(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	leader1 := cluster.WaitLeader()
+	addr1 := cluster.GetServer(leader1).GetConfig().ClientUrls
+
+	err = failpoint.Enable("github.com/tikv/pd/server/raftclusterIsBusy", `pause`)
+	c.Assert(err, IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/server/raftclusterIsBusy")
+	s.post(c, addr1+"/pd/api/v1/leader/resign", "")
+	leader2 := s.waitLeaderChange(c, cluster, leader1)
+	c.Log("leader2:", leader2)
+	c.Assert(leader2, Not(Equals), leader1)
+}
+
 func (s *memberTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old string) string {
 	var leader string
 	testutil.WaitUntil(c, func(c *C) bool {
 		leader = cluster.GetLeader()
 		if leader == old || leader == "" {
-			time.Sleep(time.Second)
 			return false
 		}
 		return true
@@ -300,7 +330,7 @@ type leaderTestSuite struct {
 
 func (s *leaderTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.cfg = server.NewTestSingleConfig(c)
+	s.cfg = server.NewTestSingleConfig(checkerWithNilAssert(c))
 	s.wg.Add(1)
 	s.done = make(chan bool)
 	svr, err := server.CreateServer(s.ctx, s.cfg)

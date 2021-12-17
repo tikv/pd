@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -24,7 +25,6 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
 )
@@ -42,7 +42,7 @@ func (s *testCreateOperatorSuite) SetUpTest(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.cluster = mockcluster.NewCluster(s.ctx, opts)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
+		config.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
 	s.cluster.SetLocationLabels([]string{"zone", "host"})
 	s.cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
@@ -143,7 +143,7 @@ func (s *testCreateOperatorSuite) TestCreateSplitRegionOperator(c *C) {
 		}
 		c.Assert(err, IsNil)
 		c.Assert(op.Kind(), Equals, OpSplit)
-		c.Assert(len(op.steps), Equals, 1)
+		c.Assert(op.steps, HasLen, 1)
 		for i := 0; i < op.Len(); i++ {
 			switch step := op.Step(i).(type) {
 			case SplitRegion:
@@ -242,7 +242,7 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 			continue
 		}
 		c.Assert(err, IsNil)
-		c.Assert(len(ops), Equals, 2)
+		c.Assert(ops, HasLen, 2)
 		c.Assert(ops[0].kind, Equals, tc.kind)
 		c.Assert(ops[0].Len(), Equals, len(tc.prepareSteps)+1)
 		c.Assert(ops[1].kind, Equals, tc.kind)
@@ -369,7 +369,7 @@ func (s *testCreateOperatorSuite) TestCreateTransferLeaderOperator(c *C) {
 
 		c.Assert(err, IsNil)
 		c.Assert(op.Kind(), Equals, OpLeader)
-		c.Assert(len(op.steps), Equals, 1)
+		c.Assert(op.steps, HasLen, 1)
 		switch step := op.Step(0).(type) {
 		case TransferLeader:
 			c.Assert(step.FromStore, Equals, tc.originPeers[0].StoreId)

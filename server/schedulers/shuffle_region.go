@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -116,7 +117,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return nil
 	}
 
-	op, err := operator.CreateMovePeerOperator(ShuffleRegionType, cluster, region, operator.OpAdmin, oldPeer.GetStoreId(), newPeer)
+	op, err := operator.CreateMovePeerOperator(ShuffleRegionType, cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 		return nil
@@ -134,13 +135,13 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.
 	for _, source := range candidates.Stores {
 		var region *core.RegionInfo
 		if s.conf.IsRoleAllow(roleFollower) {
-			region = cluster.RandFollowerRegion(source.GetID(), s.conf.GetRanges(), opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+			region = cluster.RandFollowerRegion(source.GetID(), s.conf.GetRanges(), opt.IsRegionHealthy, opt.ReplicatedRegion(cluster))
 		}
 		if region == nil && s.conf.IsRoleAllow(roleLeader) {
-			region = cluster.RandLeaderRegion(source.GetID(), s.conf.GetRanges(), opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+			region = cluster.RandLeaderRegion(source.GetID(), s.conf.GetRanges(), opt.IsRegionHealthy, opt.ReplicatedRegion(cluster))
 		}
 		if region == nil && s.conf.IsRoleAllow(roleLearner) {
-			region = cluster.RandLearnerRegion(source.GetID(), s.conf.GetRanges(), opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+			region = cluster.RandLearnerRegion(source.GetID(), s.conf.GetRanges(), opt.IsRegionHealthy, opt.ReplicatedRegion(cluster))
 		}
 		if region != nil {
 			return region, region.GetStorePeer(source.GetID())
@@ -153,7 +154,11 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.
 }
 
 func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
-	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster, region, cluster.GetStore(oldPeer.GetStoreId()))
+	store := cluster.GetStore(oldPeer.GetStoreId())
+	if store == nil {
+		return nil
+	}
+	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster, region, store)
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds())
 
 	target := filter.NewCandidates(cluster.GetStores()).

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -31,18 +32,19 @@ import (
 )
 
 var (
-	regionsPrefix          = "pd/api/v1/regions"
-	regionsStorePrefix     = "pd/api/v1/regions/store"
-	regionsCheckPrefix     = "pd/api/v1/regions/check"
-	regionsWriteFlowPrefix = "pd/api/v1/regions/writeflow"
-	regionsReadFlowPrefix  = "pd/api/v1/regions/readflow"
-	regionsConfVerPrefix   = "pd/api/v1/regions/confver"
-	regionsVersionPrefix   = "pd/api/v1/regions/version"
-	regionsSizePrefix      = "pd/api/v1/regions/size"
-	regionsKeyPrefix       = "pd/api/v1/regions/key"
-	regionsSiblingPrefix   = "pd/api/v1/regions/sibling"
-	regionIDPrefix         = "pd/api/v1/region/id"
-	regionKeyPrefix        = "pd/api/v1/region/key"
+	regionsPrefix           = "pd/api/v1/regions"
+	regionsStorePrefix      = "pd/api/v1/regions/store"
+	regionsCheckPrefix      = "pd/api/v1/regions/check"
+	regionsWriteFlowPrefix  = "pd/api/v1/regions/writeflow"
+	regionsReadFlowPrefix   = "pd/api/v1/regions/readflow"
+	regionsConfVerPrefix    = "pd/api/v1/regions/confver"
+	regionsVersionPrefix    = "pd/api/v1/regions/version"
+	regionsSizePrefix       = "pd/api/v1/regions/size"
+	regionsKeyPrefix        = "pd/api/v1/regions/key"
+	regionsSiblingPrefix    = "pd/api/v1/regions/sibling"
+	regionsRangeHolesPrefix = "pd/api/v1/regions/range-holes"
+	regionIDPrefix          = "pd/api/v1/region/id"
+	regionKeyPrefix         = "pd/api/v1/region/key"
 )
 
 // NewRegionCommand returns a region subcommand of rootCmd
@@ -56,7 +58,8 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionWithCheckCommand())
 	r.AddCommand(NewRegionWithSiblingCommand())
 	r.AddCommand(NewRegionWithStoreCommand())
-	r.AddCommand(NewRegionsWithStartKeyCommand())
+	r.AddCommand(NewRegionsByKeysCommand())
+	r.AddCommand(NewRangesWithRangeHolesCommand())
 
 	topRead := &cobra.Command{
 		Use:   `topread <limit> [--jq="<query string>"]`,
@@ -372,36 +375,45 @@ func decodeKey(text string) (string, error) {
 	return string(buf), nil
 }
 
-// NewRegionsWithStartKeyCommand returns regions from startkey subcommand of regionCmd.
-func NewRegionsWithStartKeyCommand() *cobra.Command {
+// NewRegionsByKeysCommand returns regions in a given range [startkey, endkey) subcommand of regionCmd.
+func NewRegionsByKeysCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "startkey [--format=raw|encode|hex] <key> <limit>",
-		Short: "show regions from start key",
-		Run:   showRegionsFromStartKeyCommandFunc,
+		Use:   "keys [--format=raw|encode|hex] <start_key> <end_key> <limit>",
+		Short: "show regions in a given range [startkey, endkey)",
+		Run:   showRegionsByKeysCommandFunc,
 	}
 
 	r.Flags().String("format", "hex", "the key format")
 	return r
 }
 
-func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) < 1 || len(args) > 2 {
+func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 || len(args) > 3 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	key, err := parseKey(cmd.Flags(), args[0])
+	startKey, err := parseKey(cmd.Flags(), args[0])
 	if err != nil {
 		cmd.Println("Error: ", err)
 		return
 	}
-	key = url.QueryEscape(key)
-	prefix := regionsKeyPrefix + "?key=" + key
-	if len(args) == 2 {
-		if _, err = strconv.Atoi(args[1]); err != nil {
+	startKey = url.QueryEscape(startKey)
+	prefix := regionsKeyPrefix + "?key=" + startKey
+	if len(args) >= 2 {
+		endKey, err := parseKey(cmd.Flags(), args[1])
+		if err != nil {
+			cmd.Println("Error: ", err)
+			return
+		}
+		endKey = url.QueryEscape(endKey)
+		prefix += "&end_key=" + endKey
+	}
+	if len(args) == 3 {
+		if _, err = strconv.Atoi(args[2]); err != nil {
 			cmd.Println("limit should be a number")
 			return
 		}
-		prefix += "&limit=" + args[1]
+		prefix += "&limit=" + args[2]
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
@@ -502,6 +514,25 @@ func showRegionWithStoreCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get regions with the given storeID: %s\n", err)
+		return
+	}
+	cmd.Println(r)
+}
+
+// NewRangesWithRangeHolesCommand returns ranges with range-holes subcommand of regionCmd
+func NewRangesWithRangeHolesCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "range-holes",
+		Short: "show all empty ranges without any region info",
+		Run:   showRangesWithRangeHolesCommandFunc,
+	}
+	return r
+}
+
+func showRangesWithRangeHolesCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, regionsRangeHolesPrefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get range holes: %s\n", err)
 		return
 	}
 	cmd.Println(r)

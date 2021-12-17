@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -26,6 +27,7 @@ import (
 const (
 	ByteDim int = iota
 	KeyDim
+	QueryDim
 	DimLen
 )
 
@@ -68,6 +70,14 @@ func (d *dimStat) Get() float64 {
 	return d.Rolling.Get()
 }
 
+func (d *dimStat) Clone() *dimStat {
+	return &dimStat{
+		typ:         d.typ,
+		Rolling:     d.Rolling.Clone(),
+		LastAverage: d.LastAverage.Clone(),
+	}
+}
+
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
 	StoreID  uint64 `json:"store_id"`
@@ -78,7 +88,7 @@ type HotPeerStat struct {
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int `json:"anti_count"`
 
-	Kind  FlowKind  `json:"-"`
+	Kind  RWType    `json:"-"`
 	Loads []float64 `json:"loads"`
 
 	// rolling statistics, recording some recently added records.
@@ -90,7 +100,7 @@ type HotPeerStat struct {
 	needDelete bool
 	isLeader   bool
 	isNew      bool
-	//TODO: remove it when we send peer stat by store info
+	// TODO: remove it when we send peer stat by store info
 	justTransferLeader     bool
 	interval               uint64
 	thresholds             []float64
@@ -177,7 +187,7 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
 	ret.Loads = make([]float64, RegionStatCount)
 	for i := RegionStatKind(0); i < RegionStatCount; i++ {
-		ret.Loads[i] = stat.GetLoad(i) // replace with denoised loads
+		ret.Loads[i] = stat.GetLoad(i) // replace with denoising loads
 	}
 	ret.rollingLoads = nil
 	return &ret
@@ -196,7 +206,7 @@ func (stat *HotPeerStat) clearLastAverage() {
 }
 
 func (stat *HotPeerStat) hotStatReportInterval() int {
-	if stat.Kind == ReadFlow {
+	if stat.Kind == Read {
 		return ReadReportInterval
 	}
 	return WriteReportInterval

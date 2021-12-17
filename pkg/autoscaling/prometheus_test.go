@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -18,7 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -107,7 +108,7 @@ type normalClient struct {
 func doURL(ep string, args map[string]string) *url.URL {
 	path := ep
 	for k, v := range args {
-		path = strings.Replace(path, ":"+k, v, -1)
+		path = strings.ReplaceAll(path, ":"+k, v)
 	}
 	u := &url.URL{
 		Host: "test:9090",
@@ -162,7 +163,7 @@ func makeJSONResponse(promResp *response) (*http.Response, []byte, error) {
 		Proto:         "HTTP/1.1",
 		ProtoMajor:    1,
 		ProtoMinor:    1,
-		Body:          ioutil.NopCloser(bytes.NewBufferString(string(body))),
+		Body:          io.NopCloser(bytes.NewBufferString(string(body))),
 		ContentLength: int64(len(body)),
 		Header:        make(http.Header),
 	}

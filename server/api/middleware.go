@@ -8,16 +8,19 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 
@@ -40,6 +43,13 @@ func (m clusterMiddleware) Middleware(h http.Handler) http.Handler {
 			m.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 			return
 		}
-		h.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), clusterCtxKey{}, rc)
+		h.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+type clusterCtxKey struct{}
+
+func getCluster(r *http.Request) *cluster.RaftCluster {
+	return r.Context().Value(clusterCtxKey{}).(*cluster.RaftCluster)
 }

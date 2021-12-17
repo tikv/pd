@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,7 +17,7 @@ package dashboard_test
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
+	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 
 	// Register schedulers.
 	_ "github.com/tikv/pd/server/schedulers"
@@ -84,7 +86,7 @@ func (s *dashboardTestSuite) TestDashboardProxy(c *C) {
 func (s *dashboardTestSuite) checkRespCode(c *C, url string, code int) {
 	resp, err := s.httpClient.Get(url) //nolint:gosec
 	c.Assert(err, IsNil)
-	_, err = ioutil.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, code)
@@ -135,7 +137,7 @@ func (s *dashboardTestSuite) testDashboard(c *C, internalProxy bool) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
-	cmd := pdctl.InitCommand()
+	cmd := pdctlCmd.GetRootCmd()
 
 	cluster.WaitLeader()
 	servers := cluster.GetServers()

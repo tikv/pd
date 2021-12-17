@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -29,6 +30,7 @@ var (
 	storesPrefix      = "pd/api/v1/stores"
 	storesLimitPrefix = "pd/api/v1/stores/limit"
 	storePrefix       = "pd/api/v1/store/%v"
+	maxStoreLimit     = float64(200)
 )
 
 // NewStoreCommand return a stores subcommand of rootCmd
@@ -44,6 +46,7 @@ func NewStoreCommand() *cobra.Command {
 	s.AddCommand(NewStoreLimitCommand())
 	s.AddCommand(NewRemoveTombStoneCommand())
 	s.AddCommand(NewStoreLimitSceneCommand())
+	s.AddCommand(NewStoreCheckCommand())
 	s.Flags().String("jq", "", "jq query")
 	s.Flags().StringSlice("state", nil, "state filter")
 	return s
@@ -93,12 +96,22 @@ func NewSetStoreWeightCommand() *cobra.Command {
 // NewStoreLimitCommand returns a limit subcommand of storeCmd.
 func NewStoreLimitCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "limit [<type>]|[<store_id>|<all> [<key> <value>]... <limit> <type>]",
+		Use:   "limit [<store_id>|<all> [<key> <value>]... <limit> <type>]",
 		Short: "show or set a store's rate limit",
 		Long:  "show or set a store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Run:   storeLimitCommandFunc,
 	}
 	return c
+}
+
+// NewStoreCheckCommand return a check subcommand of storeCmd
+func NewStoreCheckCommand() *cobra.Command {
+	d := &cobra.Command{
+		Use:   "check [up|offline|tombstone]",
+		Short: "Check all the stores with specified status",
+		Run:   storeCheckCommandFunc,
+	}
+	return d
 }
 
 // NewStoresCommand returns a store subcommand of rootCmd
@@ -410,6 +423,10 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		var prefix string
 		if args[0] == "all" {
 			prefix = storesLimitPrefix
+			if rate > maxStoreLimit {
+				cmd.Printf("rate should less than %f for all\n", maxStoreLimit)
+				return
+			}
 		} else {
 			prefix = fmt.Sprintf(path.Join(storePrefix, "limit"), args[0])
 		}
@@ -436,6 +453,10 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 				cmd.Println("rate should be a number that > 0.")
 				return
 			}
+			if rate > maxStoreLimit {
+				cmd.Printf("rate should less than %f for all\n", maxStoreLimit)
+				return
+			}
 			postInput["rate"] = rate
 			labels := make(map[string]interface{})
 			for i := 1; i < ratePos; i += 2 {
@@ -445,6 +466,28 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			postJSON(cmd, prefix, postInput)
 		}
 	}
+}
+
+func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
+		return
+	}
+
+	state := strings.Title(strings.ToLower(args[0]))
+	stateValue, ok := metapb.StoreState_value[state]
+	if !ok {
+		cmd.Println("Unknown state: " + state)
+		return
+	}
+
+	prefix := fmt.Sprintf("%s?state=%d", storesPrefix, stateValue)
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get store: %s\n", err)
+		return
+	}
+	cmd.Println(r)
 }
 
 func showStoresCommandFunc(cmd *cobra.Command, args []string) {

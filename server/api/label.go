@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -42,7 +43,7 @@ func newLabelsHandler(svr *server.Server, rd *render.Render) *labelsHandler {
 // @Success 200 {array} metapb.StoreLabel
 // @Router /labels [get]
 func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	var labels []*metapb.StoreLabel
 	m := make(map[string]struct{})
 	stores := rc.GetStores()
@@ -67,7 +68,7 @@ func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /labels/stores [get]
 func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	name := r.URL.Query().Get("name")
 	value := r.URL.Query().Get("value")
 	filter, err := newStoresLabelFilter(name, value)
@@ -131,7 +132,6 @@ func (filter *storesLabelFilter) filter(stores []*metapb.Store) []*metapb.Store 
 				break
 			}
 		}
-
 	}
 	return ret
 }

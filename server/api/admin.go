@@ -8,13 +8,15 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package api
 
 import (
-	"io/ioutil"
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -44,7 +46,7 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 // @Failure 400 {string} string "The input is invalid."
 // @Router /admin/cache/region/{id} [delete]
 func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Request) {
-	rc := h.svr.GetRaftCluster()
+	rc := getCluster(r)
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
@@ -95,14 +97,18 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 }
 
 // Intentionally no swagger mark as it is supposed to be only used in
-// server-to-server.
+// server-to-server. For security reason, it only accepts JSON formatted data.
 func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
-	data, err := ioutil.ReadAll(r.Body)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, "")
 		return
 	}
 	defer r.Body.Close()
+	if !json.Valid(data) {
+		h.rd.Text(w, http.StatusBadRequest, "body should be json format")
+		return
+	}
 	err = h.svr.PersistFile(mux.Vars(r)["file_name"], data)
 	if err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, err.Error())
@@ -114,7 +120,6 @@ func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
 // Intentionally no swagger mark as it is supposed to be only used in
 // server-to-server.
 func (h *adminHandler) UpdateWaitAsyncTime(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -129,15 +134,7 @@ func (h *adminHandler) UpdateWaitAsyncTime(w http.ResponseWriter, r *http.Reques
 		h.rd.JSON(w, http.StatusBadRequest, "invalid member id")
 		return
 	}
-	cluster, err := handler.GetRaftCluster()
-	if err != nil {
-		if err == server.ErrServerNotStarted {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		} else {
-			h.rd.JSON(w, http.StatusForbidden, err.Error())
-		}
-		return
-	}
+	cluster := getCluster(r)
 	cluster.GetReplicationMode().UpdateMemberWaitAsyncTime(memberID)
 	h.rd.JSON(w, http.StatusOK, nil)
 }

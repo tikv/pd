@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -26,7 +27,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -118,7 +118,7 @@ func (s *testReplicaCheckerSuite) TestReplacePendingPeer(c *C) {
 
 func (s *testReplicaCheckerSuite) TestReplaceOfflinePeer(c *C) {
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
+		config.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
 	peers := []*metapb.Peer{
 		{
@@ -201,7 +201,7 @@ func (s *testReplicaCheckerSuite) downPeerAndCheck(c *C, aliveRole metapb.PeerRo
 		DownSeconds: 24 * 60 * 60,
 	}
 	r = r.Clone(core.WithDownPeers(append(r.GetDownPeers(), downPeer)))
-	c.Assert(len(r.GetDownPeers()), Equals, 1)
+	c.Assert(r.GetDownPeers(), HasLen, 1)
 	return s.rc.Check(r)
 }
 
@@ -339,13 +339,13 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	// Transfer peer to store 4.
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 4)
 
-	// Store 5 has a same label score with store 4,but the region score smaller than store 4, we will choose store 5.
+	// Store 5 has a same label score with store 4, but the region score smaller than store 4, we will choose store 5.
 	tc.AddLabelsStore(5, 3, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 5)
 	// Store 5 has too many snapshots, choose store 4
-	tc.UpdateSnapshotCount(5, 10)
+	tc.UpdateSnapshotCount(5, 100)
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 4)
-	tc.UpdatePendingPeerCount(4, 30)
+	tc.UpdatePendingPeerCount(4, 100)
 	c.Assert(rc.Check(region), IsNil)
 }
 
@@ -521,5 +521,64 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	tc.SetEnableRemoveDownReplica(false)
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 2, 4)
 	tc.SetEnableReplaceOfflineReplica(false)
+	c.Assert(rc.Check(region), IsNil)
+}
+
+// See issue: https://github.com/tikv/pd/issues/3705
+func (s *testReplicaCheckerSuite) TestFixDownPeer(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetLocationLabels([]string{"zone"})
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
+	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	region := tc.GetRegion(1)
+	c.Assert(rc.Check(region), IsNil)
+
+	tc.SetStoreDown(4)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{Peer: region.GetStorePeer(4), DownSeconds: 6000},
+	}))
+	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 5)
+
+	tc.SetStoreDown(5)
+	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 2)
+
+	tc.SetIsolationLevel("zone")
+	c.Assert(rc.Check(region), IsNil)
+}
+
+// See issue: https://github.com/tikv/pd/issues/3705
+func (s *testReplicaCheckerSuite) TestFixOfflinePeer(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetLocationLabels([]string{"zone"})
+	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
+	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	region := tc.GetRegion(1)
+	c.Assert(rc.Check(region), IsNil)
+
+	tc.SetStoreOffline(4)
+	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 5)
+
+	tc.SetStoreOffline(5)
+	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 2)
+
+	tc.SetIsolationLevel("zone")
 	c.Assert(rc.Check(region), IsNil)
 }

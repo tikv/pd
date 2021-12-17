@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -129,6 +130,13 @@ func (bc *BasicCluster) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Re
 	return bc.Regions.GetAdjacentRegions(region)
 }
 
+// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
+func (bc *BasicCluster) GetRangeHoles() [][]string {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetRangeHoles()
+}
+
 // PauseLeaderTransfer prevents the store from been selected as source or
 // target store of TransferLeader.
 func (bc *BasicCluster) PauseLeaderTransfer(storeID uint64) error {
@@ -145,11 +153,26 @@ func (bc *BasicCluster) ResumeLeaderTransfer(storeID uint64) {
 	bc.Stores.ResumeLeaderTransfer(storeID)
 }
 
-// AttachAvailableFunc attaches an available function to a specific store.
-func (bc *BasicCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
+// leader to the store
+func (bc *BasicCluster) SlowStoreEvicted(storeID uint64) error {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.AttachAvailableFunc(storeID, limitType, f)
+	return bc.Stores.SlowStoreEvicted(storeID)
+}
+
+// SlowStoreRecovered cleans the evicted state of a store.
+func (bc *BasicCluster) SlowStoreRecovered(storeID uint64) {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Stores.SlowStoreRecovered(storeID)
+}
+
+// ResetStoreLimit resets the limit for a specific store.
+func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Type, ratePerSec ...float64) {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Stores.ResetStoreLimit(storeID, limitType, ratePerSec...)
 }
 
 // UpdateStoreStatus updates the information of the store.
@@ -258,7 +281,7 @@ func (bc *BasicCluster) GetStoreLeaderRegionSize(storeID uint64) int64 {
 func (bc *BasicCluster) GetStoreRegionSize(storeID uint64) int64 {
 	bc.RLock()
 	defer bc.RUnlock()
-	return bc.Regions.GetStoreLeaderRegionSize(storeID) + bc.Regions.GetStoreFollowerRegionSize(storeID) + bc.Regions.GetStoreLearnerRegionSize(storeID)
+	return bc.Regions.GetStoreRegionSize(storeID)
 }
 
 // GetAverageRegionSize returns the average region approximate size.
@@ -266,6 +289,35 @@ func (bc *BasicCluster) GetAverageRegionSize() int64 {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Regions.GetAverageRegionSize()
+}
+
+func (bc *BasicCluster) getWriteRate(
+	f func(storeID uint64) (bytesRate, keysRate float64),
+) (storeIDs []uint64, bytesRates, keysRates []float64) {
+	bc.RLock()
+	defer bc.RUnlock()
+	count := len(bc.Stores.stores)
+	storeIDs = make([]uint64, 0, count)
+	bytesRates = make([]float64, 0, count)
+	keysRates = make([]float64, 0, count)
+	for _, store := range bc.Stores.stores {
+		id := store.GetID()
+		bytesRate, keysRate := f(id)
+		storeIDs = append(storeIDs, id)
+		bytesRates = append(bytesRates, bytesRate)
+		keysRates = append(keysRates, keysRate)
+	}
+	return
+}
+
+// GetStoresLeaderWriteRate get total write rate of each store's leaders.
+func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
+	return bc.getWriteRate(bc.Regions.GetStoreLeaderWriteRate)
+}
+
+// GetStoresWriteRate get total write rate of each store's regions.
+func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
+	return bc.getWriteRate(bc.Regions.GetStoreWriteRate)
 }
 
 // PutStore put a store.
@@ -282,30 +334,45 @@ func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 	bc.Stores.DeleteStore(store)
 }
 
+func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
+	bc.RLock()
+	defer bc.RUnlock()
+	origin = bc.Regions.GetRegion(region.GetID())
+	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
+		overlaps = bc.Regions.GetOverlaps(region)
+	}
+	return
+}
+
+func isRegionRecreated(region *RegionInfo) bool {
+	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
+	// prevent stale bootstrap region (first region in a cluster which covers the entire key
+	// range) from reporting stale info, we execlude regions that covers the entire key range
+	// here. Technically, it is possible for unsafe recover to recreate such region, but that
+	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
+	// better than recreating the cluster.
+	return region.GetRegionEpoch().GetVersion() == 1 && region.GetRegionEpoch().GetConfVer() == 1 && (len(region.GetStartKey()) != 0 || len(region.GetEndKey()) != 0)
+}
+
 // PreCheckPutRegion checks if the region is valid to put.
 func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
-	bc.RLock()
-	origin := bc.Regions.GetRegion(region.GetID())
-	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		for _, item := range bc.Regions.GetOverlaps(region) {
-			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
-				bc.RUnlock()
-				return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
-			}
+	origin, overlaps := bc.getRelevantRegions(region)
+	for _, item := range overlaps {
+		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
+		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !isRegionRecreated(region) {
+			return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
 		}
 	}
-	bc.RUnlock()
 	if origin == nil {
 		return nil, nil
 	}
+
 	r := region.GetRegionEpoch()
 	o := origin.GetRegionEpoch()
-
 	// TiKV reports term after v3.0
 	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
-
 	// Region meta is stale, return an error.
-	if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() || isTermBehind {
+	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !isRegionRecreated(region) {
 		return origin, errRegionIsStale(region.GetMeta(), origin.GetMeta())
 	}
 
@@ -319,7 +386,7 @@ func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	return bc.Regions.SetRegion(region)
 }
 
-// CheckAndPutRegion checks if the region is valid to put,if valid then put.
+// CheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	origin, err := bc.PreCheckPutRegion(region)
 	if err != nil {
@@ -396,7 +463,8 @@ type StoreSetController interface {
 	PauseLeaderTransfer(id uint64) error
 	ResumeLeaderTransfer(id uint64)
 
-	AttachAvailableFunc(id uint64, limitType storelimit.Type, f func() bool)
+	SlowStoreEvicted(id uint64) error
+	SlowStoreRecovered(id uint64)
 }
 
 // KeyRange is a key range.

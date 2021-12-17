@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -54,7 +55,7 @@ func addOperators(wop WaitingOperator) {
 func (s *testWaitingOperatorSuite) TestListOperator(c *C) {
 	rb := NewRandBuckets()
 	addOperators(rb)
-	c.Assert(len(rb.ListOperator()), Equals, 3)
+	c.Assert(rb.ListOperator(), HasLen, 3)
 }
 
 func (s *testWaitingOperatorSuite) TestRandomBucketsWithMergeRegion(c *C) {

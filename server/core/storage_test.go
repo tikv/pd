@@ -4,16 +4,18 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -22,7 +24,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
@@ -143,7 +145,7 @@ func (s *testKVSuite) TestLoadRegions(c *C) {
 
 	n := 10
 	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegions(cache.SetRegion), IsNil)
+	c.Assert(storage.LoadRegions(context.Background(), cache.SetRegion), IsNil)
 
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
@@ -157,7 +159,7 @@ func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
 
 	n := 10
 	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegionsOnce(cache.SetRegion), IsNil)
+	c.Assert(storage.LoadRegionsOnce(context.Background(), cache.SetRegion), IsNil)
 
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
@@ -166,21 +168,23 @@ func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
 
 	n = 20
 	mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegionsOnce(cache.SetRegion), IsNil)
+	c.Assert(storage.LoadRegionsOnce(context.Background(), cache.SetRegion), IsNil)
 	c.Assert(cache.GetRegionCount(), Equals, n)
 }
 
 func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
-	storage := NewStorage(&KVWithMaxRangeLimit{Base: kv.NewMemoryKV(), rangeLimit: 500})
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/withRangeLimit", "return(500)"), IsNil)
+	storage := NewStorage(kv.NewMemoryKV())
 	cache := NewRegionsInfo()
 
 	n := 1000
 	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegions(cache.SetRegion), IsNil)
+	c.Assert(storage.LoadRegions(context.Background(), cache.SetRegion), IsNil)
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/withRangeLimit"), IsNil)
 }
 
 func (s *testKVSuite) TestLoadGCSafePoint(c *C) {
@@ -217,8 +221,8 @@ func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := mem.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	c.Assert(err, IsNil)
-	c.Assert(len(keys), Equals, 3)
-	c.Assert(len(values), Equals, 3)
+	c.Assert(keys, HasLen, 3)
+	c.Assert(values, HasLen, 3)
 
 	ssp := &ServiceSafePoint{}
 	for i, key := range keys {
@@ -263,18 +267,6 @@ func (s *testKVSuite) TestLoadMinServiceGCSafePoint(c *C) {
 	c.Assert(ssp.ServiceID, Equals, "2")
 	c.Assert(ssp.ExpiredAt, Equals, expireAt)
 	c.Assert(ssp.SafePoint, Equals, uint64(2))
-}
-
-type KVWithMaxRangeLimit struct {
-	kv.Base
-	rangeLimit int
-}
-
-func (kv *KVWithMaxRangeLimit) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
-	if limit > kv.rangeLimit {
-		return nil, nil, errors.Errorf("limit %v exceed max rangeLimit %v", limit, kv.rangeLimit)
-	}
-	return kv.Base.LoadRange(key, endKey, limit)
 }
 
 func newTestRegionMeta(regionID uint64) *metapb.Region {

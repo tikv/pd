@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -29,7 +30,7 @@ var _ = Suite(&testHotPeerCache{})
 type testHotPeerCache struct{}
 
 func (t *testHotPeerCache) TestStoreTimeUnsync(c *C) {
-	cache := NewHotStoresStats(WriteFlow)
+	cache := NewHotPeerCache(Write)
 	peers := newPeers(3,
 		func(i int) uint64 { return uint64(10000 + i) },
 		func(i int) uint64 { return uint64(i) })
@@ -67,7 +68,7 @@ const (
 )
 
 type testCacheCase struct {
-	kind       FlowKind
+	kind       RWType
 	operator   operator
 	expect     int
 	needDelete bool
@@ -75,12 +76,12 @@ type testCacheCase struct {
 
 func (t *testHotPeerCache) TestCache(c *C) {
 	tests := []*testCacheCase{
-		{ReadFlow, transferLeader, 3, false},
-		{ReadFlow, movePeer, 4, true},
-		{ReadFlow, addReplica, 4, false},
-		{WriteFlow, transferLeader, 3, true},
-		{WriteFlow, movePeer, 4, true},
-		{WriteFlow, addReplica, 4, true},
+		{Read, transferLeader, 3, false},
+		{Read, movePeer, 4, true},
+		{Read, addReplica, 4, false},
+		{Write, transferLeader, 3, true},
+		{Write, movePeer, 4, true},
+		{Write, addReplica, 4, true},
 	}
 	for _, t := range tests {
 		testCache(c, t)
@@ -88,11 +89,11 @@ func (t *testHotPeerCache) TestCache(c *C) {
 }
 
 func testCache(c *C, t *testCacheCase) {
-	defaultSize := map[FlowKind]int{
-		ReadFlow:  3, // all peers
-		WriteFlow: 3, // all peers
+	defaultSize := map[RWType]int{
+		Read:  3, // all peers
+		Write: 3, // all peers
 	}
-	cache := NewHotStoresStats(t.kind)
+	cache := NewHotPeerCache(t.kind)
 	region := buildRegion(nil, nil, t.kind)
 	checkAndUpdate(c, cache, region, defaultSize[t.kind])
 	checkHit(c, cache, region, t.kind, false) // all peers are new
@@ -110,12 +111,7 @@ func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect i
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	res = append(res, cache.CollectExpiredItems(region)...)
 	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer,
-			region.GetBytesWritten(),
-			region.GetKeysWritten(),
-			region.GetBytesRead(),
-			region.GetKeysRead(),
-			interval)
+		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
 		item := cache.CheckPeerFlow(peerInfo, region)
 		if item != nil {
 			res = append(res, item)
@@ -128,9 +124,24 @@ func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect i
 	return res
 }
 
-func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind FlowKind, isHit bool) {
+func checkAndUpdateSync(cache *hotPeerCache, region *core.RegionInfo) (res []*HotPeerStat) {
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	res = append(res, cache.CollectExpiredItems(region)...)
+	for _, peer := range region.GetPeers() {
+		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
+		item := cache.CheckPeerFlow(peerInfo, region)
+		if item != nil {
+			res = append(res, item)
+			cache.Update(item)
+		}
+	}
+	return res
+}
+
+func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind RWType, isHit bool) {
 	var peers []*metapb.Peer
-	if kind == ReadFlow {
+	if kind == Read {
 		peers = []*metapb.Peer{region.GetLeader()}
 	} else {
 		peers = region.GetPeers()
@@ -151,7 +162,7 @@ func checkNeedDelete(c *C, ret []*HotPeerStat, storeID uint64, needDelete bool) 
 	}
 }
 
-func schedule(operator operator, region *core.RegionInfo, kind FlowKind) (srcStore uint64, _ *core.RegionInfo) {
+func schedule(operator operator, region *core.RegionInfo, kind RWType) (srcStore uint64, _ *core.RegionInfo) {
 	switch operator {
 	case transferLeader:
 		_, newLeader := pickFollower(region)
@@ -187,7 +198,7 @@ func pickFollower(region *core.RegionInfo) (index int, peer *metapb.Peer) {
 	return dst, meta.Peers[dst]
 }
 
-func buildRegion(meta *metapb.Region, leader *metapb.Peer, kind FlowKind) *core.RegionInfo {
+func buildRegion(meta *metapb.Region, leader *metapb.Peer, kind RWType) *core.RegionInfo {
 	const interval = uint64(60)
 	if meta == nil {
 		peer1 := &metapb.Peer{Id: 1, StoreId: 1}
@@ -205,10 +216,10 @@ func buildRegion(meta *metapb.Region, leader *metapb.Peer, kind FlowKind) *core.
 	}
 
 	switch kind {
-	case ReadFlow:
+	case Read:
 		return core.NewRegionInfo(meta, leader, core.SetReportInterval(interval),
 			core.SetReadBytes(interval*100*1024))
-	case WriteFlow:
+	case Write:
 		return core.NewRegionInfo(meta, leader, core.SetReportInterval(interval),
 			core.SetWrittenBytes(interval*100*1024))
 	default:
@@ -231,56 +242,60 @@ func newPeers(n int, pid genID, sid genID) []*metapb.Peer {
 }
 
 func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
-	cache := NewHotStoresStats(ReadFlow)
+	cache := NewHotPeerCache(Read)
+	// we statistic read peer info from store heartbeat rather than region heartbeat
+	m := RegionHeartBeatReportInterval / StoreHeartBeatReportInterval
 
 	// skip interval=0
-	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0}, Kind: ReadFlow}
-	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0}, 0)
+	newItem := &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
+	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{0.0, 0.0, 0.0}, 0)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is larger than report interval, but no hot
-	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0}, Kind: ReadFlow}
-	newItem = cache.updateHotPeerStat(newItem, nil, []float64{0.0, 0.0}, 10*time.Second)
+	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{1.0, 1.0, 1.0}, Kind: Read}
+	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{0.0, 0.0, 0.0}, 10*time.Second)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is less than report interval
-	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0}, Kind: ReadFlow}
-	newItem = cache.updateHotPeerStat(newItem, nil, []float64{60.0, 60.0}, 4*time.Second)
+	newItem = &HotPeerStat{needDelete: false, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
+	newItem = cache.updateHotPeerStat(newItem, nil, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem, NotNil)
 	c.Check(newItem.HotDegree, Equals, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
 	// sum of interval is less than report interval
 	oldItem := newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 4*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 4*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
-	c.Check(newItem.AntiCount, Equals, 2)
+	c.Check(newItem.AntiCount, Equals, 2*m)
 	// sum of interval is less than report interval
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 4*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
-	c.Check(newItem.AntiCount, Equals, 2)
+	c.Check(newItem.AntiCount, Equals, 2*m)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 10*time.Second)
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 2)
-	c.Check(newItem.AntiCount, Equals, 2)
+	c.Check(newItem.AntiCount, Equals, 2*m)
 	// sum of interval is larger than report interval, and cold
 	oldItem = newItem
-	newItem.thresholds = []float64{10.0, 10.0}
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 10*time.Second)
+	newItem.thresholds = []float64{10.0, 10.0, 10.0}
+	newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 10*time.Second)
 	c.Check(newItem.HotDegree, Equals, 1)
-	c.Check(newItem.AntiCount, Equals, 1)
+	c.Check(newItem.AntiCount, Equals, 2*m-1)
 	// sum of interval is larger than report interval, and cold
-	oldItem = newItem
-	newItem = cache.updateHotPeerStat(newItem, oldItem, []float64{60.0, 60.0}, 10*time.Second)
-	c.Check(newItem.HotDegree, Equals, 0)
+	for i := 0; i < 2*m-1; i++ {
+		oldItem = newItem
+		newItem = cache.updateHotPeerStat(newItem, oldItem, direct, []float64{60.0, 60.0, 60.0}, 10*time.Second)
+	}
+	c.Check(newItem.HotDegree, Less, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
-	c.Check(newItem.needDelete, Equals, true)
+	c.Check(newItem.needDelete, IsTrue)
 }
 
 func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
@@ -294,7 +309,7 @@ func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
 }
 
 func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold float64) {
-	cache := NewHotStoresStats(ReadFlow)
+	cache := NewHotPeerCache(Read)
 	storeID := uint64(1)
 	c.Assert(byteRate, GreaterEqual, minHotThresholds[RegionReadBytes])
 	for i := uint64(1); i < TopNN+10; i++ {
@@ -315,7 +330,7 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 			if oldItem != nil && oldItem.rollingLoads[RegionReadBytes].isHot(thresholds[RegionReadBytes]) == true {
 				break
 			}
-			item := cache.updateHotPeerStat(newItem, oldItem, []float64{byteRate * interval, 0.0}, time.Duration(interval)*time.Second)
+			item := cache.updateHotPeerStat(newItem, oldItem, direct, []float64{byteRate * interval, 0.0, 0.0}, time.Duration(interval)*time.Second)
 			cache.Update(item)
 		}
 		thresholds := cache.calcHotThresholds(storeID)
@@ -327,8 +342,50 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 	}
 }
 
+func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
+	peerCounts := []int{3, 5}
+	intervals := []uint64{120, 60, 10}
+	for _, peerCount := range peerCounts {
+		for _, interval := range intervals {
+			cache := NewHotPeerCache(Write)
+			peers := newPeers(peerCount,
+				func(i int) uint64 { return uint64(10000 + i) },
+				func(i int) uint64 { return uint64(i) })
+			meta := &metapb.Region{
+				Id:          1000,
+				Peers:       peers,
+				StartKey:    []byte(""),
+				EndKey:      []byte(""),
+				RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
+			}
+			region := core.NewRegionInfo(
+				meta,
+				peers[0],
+				core.SetReportInterval(interval),
+				core.SetWrittenBytes(10*1024*1024*interval),
+				core.SetWrittenKeys(10*1024*1024*interval),
+				core.SetWrittenQuery(1024*interval),
+			)
+			for i := 1; i <= 200; i++ {
+				checkAndUpdate(c, cache, region, peerCount)
+			}
+			c.Assert(cache.storesOfRegion[region.GetID()], HasLen, peerCount)
+			var isClear bool
+			region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
+			for i := 1; i <= 200; i++ {
+				checkAndUpdateSync(cache, region)
+				if len(cache.storesOfRegion[region.GetID()]) == 0 {
+					isClear = true
+					break
+				}
+			}
+			c.Assert(isClear, IsTrue)
+		}
+	}
+}
+
 func BenchmarkCheckRegionFlow(b *testing.B) {
-	cache := NewHotStoresStats(ReadFlow)
+	cache := NewHotPeerCache(Read)
 	region := core.NewRegionInfo(&metapb.Region{
 		Id: 1,
 		Peers: []*metapb.Peer{
@@ -345,12 +402,7 @@ func BenchmarkCheckRegionFlow(b *testing.B) {
 		core.SetReadKeys(300000*10))
 	peerInfos := make([]*core.PeerInfo, 0)
 	for _, peer := range newRegion.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer,
-			region.GetBytesWritten(),
-			region.GetKeysWritten(),
-			region.GetBytesRead(),
-			region.GetKeysRead(),
-			10)
+		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), 10)
 		peerInfos = append(peerInfos, peerInfo)
 	}
 	b.ResetTimer()

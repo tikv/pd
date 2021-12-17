@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -64,7 +65,11 @@ func main() {
 	rootPath = path.Join(pdRootPath, strconv.FormatUint(*clusterID, 10))
 	f, err := os.Create(*filePath)
 	checkErr(err)
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Printf("error closing file: %s\n", err)
+		}
+	}()
 
 	urls := strings.Split(*endpoints, ",")
 

@@ -4,16 +4,18 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -42,6 +44,7 @@ const (
 	gcPath                     = "gc"
 	rulesPath                  = "rules"
 	ruleGroupPath              = "rule_group"
+	regionLabelPath            = "region_label"
 	replicationPath            = "replication_mode"
 	componentPath              = "component"
 	customScheduleConfigPath   = "scheduler_config"
@@ -153,12 +156,6 @@ func (s *Storage) RemoveScheduleConfig(scheduleName string) error {
 	return s.Remove(configPath)
 }
 
-// LoadScheduleConfig loads the config of scheduler.
-func (s *Storage) LoadScheduleConfig(scheduleName string) (string, error) {
-	configPath := path.Join(customScheduleConfigPath, scheduleName)
-	return s.Load(configPath)
-}
-
 // LoadMeta loads cluster meta from storage.
 func (s *Storage) LoadMeta(meta *metapb.Cluster) (bool, error) {
 	return loadProto(s.Base, clusterPath, meta)
@@ -193,22 +190,22 @@ func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, e
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (s *Storage) LoadRegions(f func(region *RegionInfo) []*RegionInfo) error {
+func (s *Storage) LoadRegions(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
-		return loadRegions(s.regionStorage, s.encryptionKeyManager, f)
+		return loadRegions(ctx, s.regionStorage, s.encryptionKeyManager, f)
 	}
-	return loadRegions(s.Base, s.encryptionKeyManager, f)
+	return loadRegions(ctx, s.Base, s.encryptionKeyManager, f)
 }
 
 // LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
-func (s *Storage) LoadRegionsOnce(f func(region *RegionInfo) []*RegionInfo) error {
+func (s *Storage) LoadRegionsOnce(ctx context.Context, f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) == 0 {
-		return loadRegions(s.Base, s.encryptionKeyManager, f)
+		return loadRegions(ctx, s.Base, s.encryptionKeyManager, f)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.regionLoaded == 0 {
-		if err := loadRegions(s.regionStorage, s.encryptionKeyManager, f); err != nil {
+		if err := loadRegions(ctx, s.regionStorage, s.encryptionKeyManager, f); err != nil {
 			return err
 		}
 		s.regionLoaded = 1
@@ -259,7 +256,7 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 
 // SaveRule stores a rule cfg to the rulesPath.
 func (s *Storage) SaveRule(ruleKey string, rule interface{}) error {
-	return s.SaveJSON(rulesPath, ruleKey, rule)
+	return s.saveJSON(rulesPath, ruleKey, rule)
 }
 
 // DeleteRule removes a rule from storage.
@@ -269,12 +266,27 @@ func (s *Storage) DeleteRule(ruleKey string) error {
 
 // LoadRules loads placement rules from storage.
 func (s *Storage) LoadRules(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(rulesPath+"/", f)
+	return s.loadRangeByPrefix(rulesPath+"/", f)
+}
+
+// SaveRegionRule saves a region rule to the storage.
+func (s *Storage) SaveRegionRule(ruleKey string, rule interface{}) error {
+	return s.saveJSON(regionLabelPath, ruleKey, rule)
+}
+
+// DeleteRegionRule removes a region rule from storage.
+func (s *Storage) DeleteRegionRule(ruleKey string) error {
+	return s.Remove(path.Join(regionLabelPath, ruleKey))
+}
+
+// LoadRegionRules loads region rules from storage.
+func (s *Storage) LoadRegionRules(f func(k, v string)) error {
+	return s.loadRangeByPrefix(regionLabelPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.
 func (s *Storage) SaveRuleGroup(groupID string, group interface{}) error {
-	return s.SaveJSON(ruleGroupPath, groupID, group)
+	return s.saveJSON(ruleGroupPath, groupID, group)
 }
 
 // DeleteRuleGroup removes a rule group from storage.
@@ -284,11 +296,11 @@ func (s *Storage) DeleteRuleGroup(groupID string) error {
 
 // LoadRuleGroups loads all rule groups from storage.
 func (s *Storage) LoadRuleGroups(f func(k, v string)) error {
-	return s.LoadRangeByPrefix(ruleGroupPath+"/", f)
+	return s.loadRangeByPrefix(ruleGroupPath+"/", f)
 }
 
-// SaveJSON saves json format data to storage.
-func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
+// saveJSON saves json format data to storage.
+func (s *Storage) saveJSON(prefix, key string, data interface{}) error {
 	value, err := json.Marshal(data)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
@@ -296,8 +308,8 @@ func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
 	return s.Save(path.Join(prefix, key), string(value))
 }
 
-// LoadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
-func (s *Storage) LoadRangeByPrefix(prefix string, f func(k, v string)) error {
+// loadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
+func (s *Storage) loadRangeByPrefix(prefix string, f func(k, v string)) error {
 	nextKey := prefix
 	endKey := clientv3.GetPrefixRangeEnd(prefix)
 	for {

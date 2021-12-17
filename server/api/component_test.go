@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -50,13 +51,13 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	output := make(map[string][]string)
 	err := readJSON(testDialClient, addr, &output)
 	c.Assert(err, IsNil)
-	c.Assert(len(output), Equals, 0)
+	c.Assert(output, HasLen, 0)
 
 	addr1 := fmt.Sprintf("%s/component/c1", urlPrefix)
 	var output1 []string
 	err = readJSON(testDialClient, addr1, &output)
 	c.Assert(strings.Contains(err.Error(), "404"), IsTrue)
-	c.Assert(len(output1), Equals, 0)
+	c.Assert(output1, HasLen, 0)
 
 	// register 2 c1, 1 c2, and 1 c3
 	reqs := []map[string]string{
@@ -100,9 +101,9 @@ func (s *testComponentSuite) TestComponent(c *C) {
 
 	// unregister address
 	addr3 := fmt.Sprintf("%s/component/c1/127.0.0.1:1", urlPrefix)
-	res, err := doDelete(testDialClient, addr3)
+	statusCode, err := doDelete(testDialClient, addr3)
 	c.Assert(err, IsNil)
-	c.Assert(res.StatusCode, Equals, 200)
+	c.Assert(statusCode, Equals, 200)
 
 	expected3 := map[string][]string{
 		"c1": {"127.0.0.1:2"},
@@ -115,9 +116,9 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	c.Assert(output, DeepEquals, expected3)
 
 	addr4 := fmt.Sprintf("%s/component/c1/127.0.0.1:2", urlPrefix)
-	res, err = doDelete(testDialClient, addr4)
+	statusCode, err = doDelete(testDialClient, addr4)
 	c.Assert(err, IsNil)
-	c.Assert(res.StatusCode, Equals, 200)
+	c.Assert(statusCode, Equals, 200)
 	expected4 := map[string][]string{
 		"c2": {"127.0.0.1:3"},
 		"c3": {"example.com"},

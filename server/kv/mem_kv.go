@@ -4,10 +4,11 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,6 +18,8 @@ import (
 	"sync"
 
 	"github.com/google/btree"
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 )
 
 type memoryKV struct {
@@ -50,6 +53,12 @@ func (kv *memoryKV) Load(key string) (string, error) {
 }
 
 func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
+	failpoint.Inject("withRangeLimit", func(val failpoint.Value) {
+		rangeLimit, ok := val.(int)
+		if ok && limit > rangeLimit {
+			failpoint.Return(nil, nil, errors.Errorf("limit %d exceed max rangeLimit %d", limit, rangeLimit))
+		}
+	})
 	kv.RLock()
 	defer kv.RUnlock()
 	keys := make([]string, 0, limit)

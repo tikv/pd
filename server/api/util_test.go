@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -15,7 +16,7 @@ package api
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net/http/httptest"
 
 	. "github.com/pingcap/check"
@@ -32,7 +33,7 @@ func (s *testUtilSuite) TestJsonRespondErrorOk(c *C) {
 		IndentJSON: true,
 	})
 	response := httptest.NewRecorder()
-	body := ioutil.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
+	body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
 	var input map[string]string
 	output := map[string]string{"zone": "cn", "host": "local"}
 	err := apiutil.ReadJSONRespondError(rd, response, body, &input)
@@ -48,7 +49,7 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 		IndentJSON: true,
 	})
 	response := httptest.NewRecorder()
-	body := ioutil.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
+	body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
 	var input []string
 	err := apiutil.ReadJSONRespondError(rd, response, body, &input)
 	c.Assert(err, NotNil)
@@ -57,7 +58,7 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 	c.Assert(result.StatusCode, Equals, 400)
 
 	{
-		body := ioutil.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\","))
+		body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\","))
 		var input []string
 		err := apiutil.ReadJSONRespondError(rd, response, body, &input)
 		c.Assert(err, NotNil)

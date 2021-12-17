@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -23,6 +24,7 @@ import (
 
 // LearnerChecker ensures region has a learner will be promoted.
 type LearnerChecker struct {
+	PauseController
 	cluster opt.Cluster
 }
 
@@ -35,6 +37,10 @@ func NewLearnerChecker(cluster opt.Cluster) *LearnerChecker {
 
 // Check verifies a region's role, creating an Operator if need.
 func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
+	if l.IsPaused() {
+		checkerCounter.WithLabelValues("learner_checker", "paused").Inc()
+		return nil
+	}
 	for _, p := range region.GetLearners() {
 		op, err := operator.CreatePromoteLearnerOperator("promote-learner", l.cluster, region, p)
 		if err != nil {

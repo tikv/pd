@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -25,6 +26,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server/schedulers"
 )
 
 var (
@@ -52,29 +54,45 @@ func NewSchedulerCommand() *cobra.Command {
 // NewPauseSchedulerCommand returns a command to pause a scheduler.
 func NewPauseSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "pause <scheduler> <delay>",
+		Use:   "pause <scheduler> <delay_seconds>",
 		Short: "pause a scheduler",
-		Run:   pauseOrResumeSchedulerCommandFunc,
+		Run:   pauseSchedulerCommandFunc,
 	}
 	return c
 }
 
-func pauseOrResumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 && len(args) != 1 {
+func pauseSchedulerCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		cmd.Usage()
+		return
+	}
+	delay, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil || delay <= 0 {
 		cmd.Usage()
 		return
 	}
 	path := schedulersPrefix + "/" + args[0]
-	input := make(map[string]interface{})
-	input["delay"] = 0
-	if len(args) == 2 {
-		delay, err := strconv.Atoi(args[1])
-		if err != nil {
-			cmd.Usage()
-			return
-		}
-		input["delay"] = delay
+	input := map[string]interface{}{"delay": delay}
+	postJSON(cmd, path, input)
+}
+
+// NewResumeSchedulerCommand returns a command to resume a scheduler.
+func NewResumeSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "resume <scheduler>",
+		Short: "resume a scheduler",
+		Run:   resumeSchedulerCommandFunc,
 	}
+	return c
+}
+
+func resumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
+		return
+	}
+	path := schedulersPrefix + "/" + args[0]
+	input := map[string]interface{}{"delay": 0}
 	postJSON(cmd, path, input)
 }
 
@@ -85,17 +103,7 @@ func NewShowSchedulerCommand() *cobra.Command {
 		Short: "show schedulers",
 		Run:   showSchedulerCommandFunc,
 	}
-	c.Flags().String("status", "", "the scheduler status")
-	return c
-}
-
-// NewResumeSchedulerCommand returns a command to resume a scheduler.
-func NewResumeSchedulerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "resume <scheduler>",
-		Short: "resume a scheduler",
-		Run:   pauseOrResumeSchedulerCommandFunc,
-	}
+	c.Flags().String("status", "", "the scheduler status value can be [paused | disabled]")
 	return c
 }
 
@@ -134,6 +142,8 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewBalanceHotRegionSchedulerCommand())
 	c.AddCommand(NewRandomMergeSchedulerCommand())
 	c.AddCommand(NewLabelSchedulerCommand())
+	c.AddCommand(NewEvictSlowStoreSchedulerCommand())
+	c.AddCommand(NewGrantHotRegionSchedulerCommand())
 	return c
 }
 
@@ -203,7 +213,6 @@ func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 		input["store_id"] = storeID
 		postJSON(cmd, schedulersPrefix, input)
 	}
-
 }
 
 // NewShuffleLeaderSchedulerCommand returns a command to add a shuffle-leader-scheduler.
@@ -266,6 +275,16 @@ func NewBalanceLeaderSchedulerCommand() *cobra.Command {
 	return c
 }
 
+// NewEvictSlowStoreSchedulerCommand returns a command to add a evict-slow-store-scheduler.
+func NewEvictSlowStoreSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-slow-store-scheduler",
+		Short: "add a scheduler to detect and evict slow stores",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
 // NewBalanceRegionSchedulerCommand returns a command to add a balance-region-scheduler.
 func NewBalanceRegionSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
@@ -306,12 +325,33 @@ func NewLabelSchedulerCommand() *cobra.Command {
 	return c
 }
 
+// NewGrantHotRegionSchedulerCommand returns a command to add a grant-hot-region-scheduler.
+func NewGrantHotRegionSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "grant-hot-region-scheduler <store_lead_id> <store_id_1,store_id_2>",
+		Short: "add a scheduler to grant hot region to fixed store",
+		Run:   addSchedulerForGrantHotRegionCommandFunc,
+	}
+	return c
+}
+
+func addSchedulerForGrantHotRegionCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["store-leader-id"] = args[0]
+	input["store-id"] = args[1]
+	postJSON(cmd, schedulersPrefix, input)
+}
+
 func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-
 	input := make(map[string]interface{})
 	input["name"] = cmd.Name()
 	postJSON(cmd, schedulersPrefix, input)
@@ -388,7 +428,6 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		cmd.Println("Success!")
 	}
-
 }
 
 // NewConfigSchedulerCommand returns commands to config scheduler.
@@ -402,6 +441,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigGrantLeaderCommand(),
 		newConfigHotRegionCommand(),
 		newConfigShuffleRegionCommand(),
+		newConfigGrantHotRegionCommand(),
 	)
 	return c
 }
@@ -412,14 +452,22 @@ func newConfigHotRegionCommand() *cobra.Command {
 		Short: "balance-hot-region-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
+
+	// Deprecated: list command will be deprecated in future version, use show command instead.
 	c.AddCommand(&cobra.Command{
 		Use:   "list",
+		Short: "list the config item (will be deprecated in feature version, use show command instead)",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "show",
 		Short: "list the config item",
-		Run:   listSchedulerConfigCommandFunc})
-	c.AddCommand(&cobra.Command{
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
 		Use:   "set <key> <value>",
 		Short: "set the config item",
-		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) }})
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+
 	return c
 }
 
@@ -500,7 +548,7 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	p := cmd.Name()
-	if p == "list" {
+	if p == "list" || p == "show" {
 		p = cmd.Parent().Name()
 	}
 	path := path.Join(schedulerConfigPrefix, p, "list")
@@ -515,6 +563,46 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
+func newConfigGrantHotRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "grant-hot-region-scheduler",
+		Short: "grant-hot-region-scheduler config",
+		Run:   showGrantHotRegionCommandFunc,
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "set [leader] [peer,]",
+		Short: "set store leader and peers",
+		Run:   func(cmd *cobra.Command, args []string) { setGrantHotRegionCommandFunc(cmd, c.Name(), args) }},
+	)
+	return c
+}
+
+func showGrantHotRegionCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) > 0 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	p := cmd.Name()
+	path := path.Join(schedulerConfigPrefix, p, "list")
+	r, err := doRequest(cmd, path, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func setGrantHotRegionCommandFunc(cmd *cobra.Command, schedulerName string, args []string) {
+	if len(args) != 2 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	input := make(map[string]interface{})
+	input["store-leader-id"] = args[0]
+	input["store-id"] = args[1]
+	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
+}
+
 func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, args []string) {
 	if len(args) != 2 {
 		cmd.Println(cmd.UsageString())
@@ -527,7 +615,36 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	if err != nil {
 		val = value
 	}
-	input[key] = val
+	if schedulerName == "balance-hot-region-scheduler" && (key == "read-priorities" || key == "write-leader-priorities" || key == "write-peer-priorities") {
+		priorities := make([]string, 0)
+		prioritiesMap := make(map[string]struct{})
+		for _, priority := range strings.Split(value, ",") {
+			if priority != schedulers.BytePriority && priority != schedulers.KeyPriority && priority != schedulers.QueryPriority {
+				cmd.Println(fmt.Sprintf("priority should be one of [%s, %s, %s]",
+					schedulers.BytePriority,
+					schedulers.QueryPriority,
+					schedulers.KeyPriority))
+				return
+			}
+			if priority == schedulers.QueryPriority && key == "write-peer-priorities" {
+				cmd.Println("qps is not allowed to be set in priorities for write-peer-priorities")
+				return
+			}
+			priorities = append(priorities, priority)
+			prioritiesMap[priority] = struct{}{}
+		}
+		if len(priorities) < 2 {
+			cmd.Println("priorities should have at least 2 dimensions")
+			return
+		}
+		input[key] = priorities
+		if len(priorities) != len(prioritiesMap) {
+			cmd.Println("priorities shouldn't be repeated")
+			return
+		}
+	} else {
+		input[key] = val
+	}
 	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 

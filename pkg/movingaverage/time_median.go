@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -64,4 +65,15 @@ func (t *TimeMedian) GetFilledPeriod() int { // it is unrelated with mfSize
 // GetInstantaneous returns instantaneous speed
 func (t *TimeMedian) GetInstantaneous() float64 {
 	return t.instantaneous
+}
+
+// Clone returns a copy of TimeMedian
+func (t *TimeMedian) Clone() *TimeMedian {
+	return &TimeMedian{
+		aot:           t.aot.Clone(),
+		mf:            t.mf.Clone(),
+		aotSize:       t.aotSize,
+		mfSize:        t.mfSize,
+		instantaneous: t.instantaneous,
+	}
 }

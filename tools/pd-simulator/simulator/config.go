@@ -1,8 +1,22 @@
+// Copyright 2021 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package simulator
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -20,7 +34,7 @@ const (
 	defaultStoreIOMBPerSecond = 40
 	defaultStoreVersion       = "2.1.0"
 	// server
-	defaultLeaderLease                 = 1
+	defaultLeaderLease                 = 3
 	defaultTSOSaveInterval             = 200 * time.Millisecond
 	defaultTickInterval                = 100 * time.Millisecond
 	defaultElectionInterval            = 3 * time.Second
@@ -51,7 +65,7 @@ func NewSimConfig(serverLogLevel string) *SimConfig {
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls
 	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
+	cfg.DataDir, _ = os.MkdirTemp("/tmp", "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.Log.Level = serverLogLevel
 	return &SimConfig{ServerConfig: cfg}

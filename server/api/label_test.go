@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -139,7 +140,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 	}{
 		{
 			name: "Zone",
-			want: s.stores[:],
+			want: s.stores,
 		},
 		{
 			name: "other",
@@ -179,12 +180,12 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 
 type testStrictlyLabelsStoreSuite struct {
 	svr       *server.Server
+	grpcSvr   *server.GrpcServer
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
 func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
-	// TODO: enable placementrules
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.LocationLabels = []string{"zone", "disk"}
 		cfg.Replication.StrictlyMatchLabel = true
@@ -192,6 +193,7 @@ func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
 	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
+	s.grpcSvr = &server.GrpcServer{Server: s.svr}
 	addr := s.svr.GetAddr()
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
@@ -261,7 +263,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 	}
 
 	for _, t := range cases {
-		_, err := s.svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		_, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      t.store.Id,
@@ -281,7 +283,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 	// enable placement rules. Report no error any more.
 	c.Assert(postJSON(testDialClient, fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`)), IsNil)
 	for _, t := range cases {
-		_, err := s.svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		_, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      t.store.Id,
@@ -291,7 +293,11 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 				Version: t.store.Version,
 			},
 		})
-		c.Assert(err, IsNil)
+		if t.valid {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(strings.Contains(err.Error(), t.expectError), IsTrue)
+		}
 	}
 }
 

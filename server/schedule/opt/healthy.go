@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -21,38 +22,20 @@ import (
 var balanceEmptyRegionThreshold = 50
 
 // IsRegionHealthy checks if a region is healthy for scheduling. It requires the
-// region does not have any down or pending peers. And when placement rules
-// feature is disabled, it requires the region does not have any learner peer.
-func IsRegionHealthy(cluster Cluster, region *core.RegionInfo) bool {
-	return IsHealthyAllowPending(cluster, region) && len(region.GetPendingPeers()) == 0
+// region does not have any down or pending peers.
+func IsRegionHealthy(region *core.RegionInfo) bool {
+	return IsRegionHealthyAllowPending(region) && len(region.GetPendingPeers()) == 0
 }
 
-// IsHealthyAllowPending checks if a region is healthy for scheduling.
+// IsRegionHealthyAllowPending checks if a region is healthy for scheduling.
 // Differs from IsRegionHealthy, it allows the region to have pending peers.
-func IsHealthyAllowPending(cluster Cluster, region *core.RegionInfo) bool {
-	if !cluster.GetOpts().IsPlacementRulesEnabled() && len(region.GetLearners()) > 0 {
-		return false
-	}
+func IsRegionHealthyAllowPending(region *core.RegionInfo) bool {
 	return len(region.GetDownPeers()) == 0
 }
 
 // IsEmptyRegionAllowBalance checks if a region is an empty region and can be balanced.
 func IsEmptyRegionAllowBalance(cluster Cluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < balanceEmptyRegionThreshold
-}
-
-// HealthRegion returns a function that checks if a region is healthy for
-// scheduling. It requires the region does not have any down or pending peers,
-// and does not have any learner peers when placement rules is disabled.
-func HealthRegion(cluster Cluster) func(*core.RegionInfo) bool {
-	return func(region *core.RegionInfo) bool { return IsRegionHealthy(cluster, region) }
-}
-
-// HealthAllowPending returns a function that checks if a region is
-// healthy for scheduling. Differs from HealthRegion, it allows the region
-// to have pending peers.
-func HealthAllowPending(cluster Cluster) func(*core.RegionInfo) bool {
-	return func(region *core.RegionInfo) bool { return IsHealthyAllowPending(cluster, region) }
 }
 
 // AllowBalanceEmptyRegion returns a function that checks if a region is an empty region and can be balanced.
@@ -65,7 +48,7 @@ func AllowBalanceEmptyRegion(cluster Cluster) func(*core.RegionInfo) bool {
 // rules is disabled, it should have enough replicas and no any learner peer.
 func IsRegionReplicated(cluster Cluster, region *core.RegionInfo) bool {
 	if cluster.GetOpts().IsPlacementRulesEnabled() {
-		return cluster.FitRegion(region).IsSatisfied()
+		return cluster.GetRuleManager().FitRegion(cluster, region).IsSatisfied()
 	}
 	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetOpts().GetMaxReplicas()
 }

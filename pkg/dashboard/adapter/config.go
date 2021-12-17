@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -34,6 +35,7 @@ func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 	dashboardCfg.PublicPathPrefix = cfg.Dashboard.PublicPathPrefix
 	dashboardCfg.EnableTelemetry = cfg.Dashboard.EnableTelemetry
 	dashboardCfg.EnableExperimental = cfg.Dashboard.EnableExperimental
+	dashboardCfg.EnableNonRootLogin = true
 	if dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToTLSConfig(); err != nil {
 		return nil, err
 	}

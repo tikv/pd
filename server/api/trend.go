@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -129,8 +130,8 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	for _, store := range stores {
 		info := newStoreInfo(h.svr.GetScheduleConfig(), store)
 		s := trendStore{
-			ID:              info.Store.GetId(),
-			Address:         info.Store.GetAddress(),
+			ID:              info.Store.StoreID,
+			Address:         info.Store.Address,
 			StateName:       info.Store.StateName,
 			Capacity:        uint64(info.Status.Capacity),
 			Available:       uint64(info.Status.Available),
@@ -140,21 +141,21 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 			LastHeartbeatTS: info.Status.LastHeartbeatTS,
 			Uptime:          info.Status.Uptime,
 		}
-		s.HotReadFlow, s.HotReadRegionFlows = h.getStoreFlow(readStats, statistics.RegionReadBytes, store.GetID())
-		s.HotWriteFlow, s.HotWriteRegionFlows = h.getStoreFlow(writeStats, statistics.RegionWriteBytes, store.GetID())
+		s.HotReadFlow, s.HotReadRegionFlows = h.getStoreFlow(readStats, store.GetID())
+		s.HotWriteFlow, s.HotWriteRegionFlows = h.getStoreFlow(writeStats, store.GetID())
 		trendStores = append(trendStores, s)
 	}
 	return trendStores, nil
 }
 
-func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, regionStatKind statistics.RegionStatKind, storeID uint64) (storeFlow float64, regionFlows []float64) {
+func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, storeID uint64) (storeByteFlow float64, regionByteFlows []float64) {
 	if stats == nil {
 		return
 	}
 	if stat, ok := stats[storeID]; ok {
-		storeFlow = stat.TotalLoads[regionStatKind]
+		storeByteFlow = stat.TotalBytesRate
 		for _, flow := range stat.Stats {
-			regionFlows = append(regionFlows, flow.GetLoad(regionStatKind))
+			regionByteFlows = append(regionByteFlows, flow.ByteRate)
 		}
 	}
 	return

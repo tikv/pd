@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -80,14 +81,15 @@ func (s *testServiceGCSafepointSuite) TestRegionStats(c *C) {
 
 	res, err := testDialClient.Get(sspURL)
 	c.Assert(err, IsNil)
+	defer res.Body.Close()
 	listResp := &listServiceGCSafepoint{}
 	err = apiutil.ReadJSON(res.Body, listResp)
 	c.Assert(err, IsNil)
 	c.Assert(listResp, DeepEquals, list)
 
-	res, err = doDelete(testDialClient, sspURL+"/a")
+	statusCode, err := doDelete(testDialClient, sspURL+"/a")
 	c.Assert(err, IsNil)
-	c.Assert(res.StatusCode, Equals, http.StatusOK)
+	c.Assert(statusCode, Equals, http.StatusOK)
 
 	left, err := storage.GetAllServiceGCSafePoints()
 	c.Assert(err, IsNil)

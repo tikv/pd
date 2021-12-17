@@ -8,8 +8,12 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+//go:build tso_full_test || tso_function_test
+// +build tso_full_test tso_function_test
 
 package tso_test
 
@@ -52,7 +56,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd2": "dc-1",
 		"pd4": "dc-2",
-		"pd6": "dc-3",
+		"pd6": "leader", /* Test dc-location name is same as the special key */
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum*2, func(conf *config.Config, serverName string) {
@@ -94,7 +98,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	}
 	// At the end, we should have three initialized Local TSO Allocator,
 	// i.e., the Local TSO Allocator leaders for all dc-locations in testDCLocations
-	c.Assert(len(allAllocatorLeaders), Equals, dcLocationNum)
+	c.Assert(allAllocatorLeaders, HasLen, dcLocationNum)
 	allocatorLeaderMemberIDs := make([]uint64, 0, dcLocationNum)
 	for _, allocator := range allAllocatorLeaders {
 		allocatorLeader, _ := allocator.(*tso.LocalTSOAllocator)
@@ -104,10 +108,10 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 		// Filter out Global TSO Allocator
 		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(tso.GlobalDCLocation))
 		if _, ok := dcLocationConfig[server.GetServer().Name()]; !ok {
-			c.Assert(len(allocators), Equals, 0)
+			c.Assert(allocators, HasLen, 0)
 			continue
 		}
-		c.Assert(len(allocators), Equals, dcLocationNum)
+		c.Assert(allocators, HasLen, dcLocationNum)
 		for _, allocator := range allocators {
 			allocatorFollower, _ := allocator.(*tso.LocalTSOAllocator)
 			allocatorFollowerMemberID := allocatorFollower.GetAllocatorLeader().GetMemberId()
@@ -219,7 +223,7 @@ func (s *testAllocatorSuite) testTSOSuffix(c *C, cluster *tests.TestCluster, am 
 			cluster.GetEtcdClient(),
 			am.GetLocalTSOSuffixPath(dcLocation))
 		c.Assert(err, IsNil)
-		c.Assert(len(suffixResp.Kvs), Equals, 1)
+		c.Assert(suffixResp.Kvs, HasLen, 1)
 		suffix, err = strconv.ParseInt(string(suffixResp.Kvs[0].Value), 10, 64)
 		c.Assert(err, IsNil)
 		c.Assert(suffixBits, GreaterEqual, tso.CalSuffixBits(int32(suffix)))

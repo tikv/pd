@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -26,7 +27,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/schedule/opt"
 )
 
 func Test(t *testing.T) {
@@ -48,7 +48,7 @@ func (s *testOperatorSuite) SetUpTest(c *C) {
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "reject", Value: "leader"}},
+		config.RejectLeader: {{Key: "reject", Value: "leader"}},
 	})
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
@@ -64,6 +64,7 @@ func (s *testOperatorSuite) TearDownTest(c *C) {
 	s.cancel()
 }
 
+//nolint
 func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {
 	var (
 		region metapb.Region
@@ -94,8 +95,9 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 	c.Assert(RemovePeer{FromStore: 3}.IsFinish(region), IsTrue)
 }
 
+//nolint
 func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
-	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, OpAdmin|kind, steps...)
+	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, kind, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OpStep) {
@@ -113,7 +115,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 		TransferLeader{FromStore: 3, ToStore: 1},
 		RemovePeer{FromStore: 3},
 	}
-	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+	op := s.newTestOperator(1, OpAdmin|OpLeader|OpRegion, steps...)
 	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	s.checkSteps(c, op, steps)
 	op.Start()
@@ -233,7 +235,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 }
 
 func (s *testOperatorSuite) TestOperatorKind(c *C) {
-	c.Assert((OpLeader | OpReplica).String(), Equals, "leader,replica")
+	c.Assert((OpLeader | OpReplica).String(), Equals, "replica,leader")
 	c.Assert(OpKind(0).String(), Equals, "unknown")
 	k, err := ParseOperatorKind("region,leader")
 	c.Assert(err, IsNil)
@@ -380,5 +382,41 @@ func (s *testOperatorSuite) TestCheck(c *C) {
 		region = s.newTestRegion(1, 1, [2]uint64{1, 1})
 		c.Assert(op.Check(region), IsNil)
 		c.Assert(op.Status(), Equals, SUCCESS)
+	}
+}
+
+func (s *testOperatorSuite) TestSchedulerKind(c *C) {
+	testdata := []struct {
+		op     *Operator
+		expect OpKind
+	}{
+		{
+			op:     s.newTestOperator(1, OpAdmin|OpMerge|OpRegion),
+			expect: OpAdmin,
+		}, {
+			op:     s.newTestOperator(1, OpMerge|OpLeader|OpRegion),
+			expect: OpMerge,
+		}, {
+			op:     s.newTestOperator(1, OpReplica|OpRegion),
+			expect: OpReplica,
+		}, {
+			op:     s.newTestOperator(1, OpSplit|OpRegion),
+			expect: OpSplit,
+		}, {
+			op:     s.newTestOperator(1, OpRange|OpRegion),
+			expect: OpRange,
+		}, {
+			op:     s.newTestOperator(1, OpHotRegion|OpLeader|OpRegion),
+			expect: OpHotRegion,
+		}, {
+			op:     s.newTestOperator(1, OpRegion|OpLeader),
+			expect: OpRegion,
+		}, {
+			op:     s.newTestOperator(1, OpLeader),
+			expect: OpLeader,
+		},
+	}
+	for _, v := range testdata {
+		c.Assert(v.op.SchedulerKind(), Equals, v.expect)
 	}
 }

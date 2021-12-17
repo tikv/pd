@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -23,91 +24,29 @@ import (
 // only turned off by the simulator and the test.
 var Denoising = true
 
-const queueCap = 1000
+const queueCap = 20000
 
 // HotCache is a cache hold hot regions.
 type HotCache struct {
-	readFlowQueue  chan *FlowItem
-	writeFlowQueue chan *FlowItem
+	ctx            context.Context
+	readFlowQueue  chan FlowItemTask
+	writeFlowQueue chan FlowItemTask
 	writeFlow      *hotPeerCache
 	readFlow       *hotPeerCache
-}
-
-// FlowItem indicates the item in the flow, it is a wrapper for peerInfo, expiredItems or coldItem.
-type FlowItem struct {
-	peerInfo             *core.PeerInfo
-	regionInfo           *core.RegionInfo
-	expiredStat          *HotPeerStat
-	unReportStatsCollect *unReportStatsCollect
-}
-
-type unReportStatsCollect struct {
-	storeID   uint64
-	regionIDs map[uint64]struct{}
-	interval  uint64
-}
-
-// NewUnReportStatsCollect creates information for unreported stats
-func NewUnReportStatsCollect(storeID uint64, regionIDs map[uint64]struct{}, interval uint64) *FlowItem {
-	return &FlowItem{
-		peerInfo:    nil,
-		regionInfo:  nil,
-		expiredStat: nil,
-		unReportStatsCollect: &unReportStatsCollect{
-			storeID:   storeID,
-			regionIDs: regionIDs,
-			interval:  interval,
-		},
-	}
-}
-
-// NewPeerInfoItem creates FlowItem for PeerInfo
-func NewPeerInfoItem(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) *FlowItem {
-	return &FlowItem{
-		peerInfo:             peerInfo,
-		regionInfo:           regionInfo,
-		expiredStat:          nil,
-		unReportStatsCollect: nil,
-	}
-}
-
-// NewExpiredStatItem creates Expired stat
-func NewExpiredStatItem(expiredStat *HotPeerStat) *FlowItem {
-	return &FlowItem{
-		peerInfo:             nil,
-		regionInfo:           nil,
-		expiredStat:          expiredStat,
-		unReportStatsCollect: nil,
-	}
 }
 
 // NewHotCache creates a new hot spot cache.
 func NewHotCache(ctx context.Context) *HotCache {
 	w := &HotCache{
-		readFlowQueue:  make(chan *FlowItem, queueCap),
-		writeFlowQueue: make(chan *FlowItem, queueCap),
-		writeFlow:      NewHotStoresStats(WriteFlow),
-		readFlow:       NewHotStoresStats(ReadFlow),
+		ctx:            ctx,
+		readFlowQueue:  make(chan FlowItemTask, queueCap),
+		writeFlowQueue: make(chan FlowItemTask, queueCap),
+		writeFlow:      NewHotPeerCache(Write),
+		readFlow:       NewHotPeerCache(Read),
 	}
-	go w.updateItems(ctx)
+	go w.updateItems(w.readFlowQueue, w.runReadTask)
+	go w.updateItems(w.writeFlowQueue, w.runWriteTask)
 	return w
-}
-
-// ExpiredItems returns the items which are already expired.
-func (w *HotCache) ExpiredItems(region *core.RegionInfo) (expiredItems []*HotPeerStat) {
-	expiredItems = append(expiredItems, w.ExpiredReadItems(region)...)
-	expiredItems = append(expiredItems, w.ExpiredWriteItems(region)...)
-	return
-}
-
-// ExpiredReadItems returns the read items which are already expired.
-func (w *HotCache) ExpiredReadItems(region *core.RegionInfo) []*HotPeerStat {
-	return w.readFlow.CollectExpiredItems(region)
-}
-
-// ExpiredWriteItems returns the write items which are already expired.
-func (w *HotCache) ExpiredWriteItems(region *core.RegionInfo) []*HotPeerStat {
-	return w.writeFlow.CollectExpiredItems(region)
 }
 
 // CheckWritePeerSync checks the write status, returns update items.
@@ -123,46 +62,59 @@ func (w *HotCache) CheckReadPeerSync(peer *core.PeerInfo, region *core.RegionInf
 }
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
-func (w *HotCache) CheckWriteAsync(item *FlowItem) {
-	w.writeFlowQueue <- item
+func (w *HotCache) CheckWriteAsync(task FlowItemTask) bool {
+	select {
+	case w.writeFlowQueue <- task:
+		return true
+	default:
+		return false
+	}
 }
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
-func (w *HotCache) CheckReadAsync(item *FlowItem) {
-	w.readFlowQueue <- item
+func (w *HotCache) CheckReadAsync(task FlowItemTask) bool {
+	select {
+	case w.readFlowQueue <- task:
+		return true
+	default:
+		return false
+	}
 }
 
 // Update updates the cache.
+// This is used for mockcluster.
 func (w *HotCache) Update(item *HotPeerStat) {
 	switch item.Kind {
-	case WriteFlow:
-		w.writeFlow.Update(item)
-	case ReadFlow:
-		w.readFlow.Update(item)
-	}
-
-	if item.IsNeedDelete() {
-		w.incMetrics("remove_item", item.StoreID, item.Kind)
-	} else if item.IsNew() {
-		w.incMetrics("add_item", item.StoreID, item.Kind)
-	} else {
-		w.incMetrics("update_item", item.StoreID, item.Kind)
+	case Write:
+		update(item, w.writeFlow)
+	case Read:
+		update(item, w.readFlow)
 	}
 }
 
 // RegionStats returns hot items according to kind
-func (w *HotCache) RegionStats(kind FlowKind, minHotDegree int) map[uint64][]*HotPeerStat {
+func (w *HotCache) RegionStats(kind RWType, minHotDegree int) map[uint64][]*HotPeerStat {
 	switch kind {
-	case WriteFlow:
-		return w.writeFlow.RegionStats(minHotDegree)
-	case ReadFlow:
-		return w.readFlow.RegionStats(minHotDegree)
+	case Write:
+		task := newCollectRegionStatsTask(minHotDegree)
+		succ := w.CheckWriteAsync(task)
+		if !succ {
+			return nil
+		}
+		return task.waitRet(w.ctx)
+	case Read:
+		task := newCollectRegionStatsTask(minHotDegree)
+		succ := w.CheckReadAsync(task)
+		if !succ {
+			return nil
+		}
+		return task.waitRet(w.ctx)
 	}
 	return nil
 }
 
 // HotRegionsFromStore picks hot region in specify store.
-func (w *HotCache) HotRegionsFromStore(storeID uint64, kind FlowKind, minHotDegree int) []*HotPeerStat {
+func (w *HotCache) HotRegionsFromStore(storeID uint64, kind RWType, minHotDegree int) []*HotPeerStat {
 	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
 		return stats
 	}
@@ -171,14 +123,22 @@ func (w *HotCache) HotRegionsFromStore(storeID uint64, kind FlowKind, minHotDegr
 
 // IsRegionHot checks if the region is hot.
 func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
-	return w.writeFlow.isRegionHotWithAnyPeers(region, minHotDegree) ||
-		w.readFlow.isRegionHotWithPeer(region, region.GetLeader(), minHotDegree)
+	writeIsRegionHotTask := newIsRegionHotTask(region, minHotDegree)
+	readIsRegionHotTask := newIsRegionHotTask(region, minHotDegree)
+	succ1 := w.CheckWriteAsync(writeIsRegionHotTask)
+	succ2 := w.CheckReadAsync(readIsRegionHotTask)
+	if succ1 && succ2 {
+		return writeIsRegionHotTask.waitRet(w.ctx) || readIsRegionHotTask.waitRet(w.ctx)
+	}
+	return false
 }
 
 // CollectMetrics collects the hot cache metrics.
 func (w *HotCache) CollectMetrics() {
-	w.writeFlow.CollectMetrics("write")
-	w.readFlow.CollectMetrics("read")
+	writeMetricsTask := newCollectMetricsTask("write")
+	readMetricsTask := newCollectMetricsTask("read")
+	w.CheckWriteAsync(writeMetricsTask)
+	w.CheckReadAsync(readMetricsTask)
 }
 
 // ResetMetrics resets the hot cache metrics.
@@ -186,57 +146,73 @@ func (w *HotCache) ResetMetrics() {
 	hotCacheStatusGauge.Reset()
 }
 
-func (w *HotCache) incMetrics(name string, storeID uint64, kind FlowKind) {
+// ExpiredReadItems returns the read items which are already expired.
+// This is used for mockcluster.
+func (w *HotCache) ExpiredReadItems(region *core.RegionInfo) []*HotPeerStat {
+	return w.readFlow.CollectExpiredItems(region)
+}
+
+// ExpiredWriteItems returns the write items which are already expired.
+// This is used for mockcluster.
+func (w *HotCache) ExpiredWriteItems(region *core.RegionInfo) []*HotPeerStat {
+	return w.writeFlow.CollectExpiredItems(region)
+}
+
+func incMetrics(name string, storeID uint64, kind RWType) {
 	store := storeTag(storeID)
 	switch kind {
-	case WriteFlow:
+	case Write:
 		hotCacheStatusGauge.WithLabelValues(name, store, "write").Inc()
-	case ReadFlow:
+	case Read:
 		hotCacheStatusGauge.WithLabelValues(name, store, "read").Inc()
 	}
 }
 
 // GetFilledPeriod returns filled period.
-func (w *HotCache) GetFilledPeriod(kind FlowKind) int {
+func (w *HotCache) GetFilledPeriod(kind RWType) int {
 	switch kind {
-	case WriteFlow:
+	case Write:
 		return w.writeFlow.getDefaultTimeMedian().GetFilledPeriod()
-	case ReadFlow:
+	case Read:
 		return w.readFlow.getDefaultTimeMedian().GetFilledPeriod()
 	}
 	return 0
 }
 
-func (w *HotCache) updateItems(ctx context.Context) {
+func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task FlowItemTask)) {
 	for {
 		select {
-		case <-ctx.Done():
+		case <-w.ctx.Done():
 			return
-		case item, ok := <-w.writeFlowQueue:
-			if ok && item != nil {
-				w.updateItem(item, w.writeFlow)
-			}
-		case item, ok := <-w.readFlowQueue:
-			if ok && item != nil {
-				w.updateItem(item, w.readFlow)
-			}
+		case task := <-queue:
+			runTask(task)
 		}
 	}
 }
 
-func (w *HotCache) updateItem(item *FlowItem, flow *hotPeerCache) {
-	if item.peerInfo != nil && item.regionInfo != nil {
-		stat := flow.CheckPeerFlow(item.peerInfo, item.regionInfo)
-		if stat != nil {
-			w.Update(stat)
-		}
-	} else if item.expiredStat != nil {
-		w.Update(item.expiredStat)
-	} else if item.unReportStatsCollect != nil {
-		handle := item.unReportStatsCollect
-		stats := flow.CheckColdPeer(handle.storeID, handle.regionIDs, handle.interval)
-		for _, stat := range stats {
-			w.Update(stat)
-		}
+func (w *HotCache) runReadTask(task FlowItemTask) {
+	if task != nil {
+		// TODO: do we need a run-task timeout to protect the queue won't be stucked by a task?
+		task.runTask(w.readFlow)
+		hotCacheFlowQueueStatusGauge.WithLabelValues(Read.String()).Set(float64(len(w.readFlowQueue)))
+	}
+}
+
+func (w *HotCache) runWriteTask(task FlowItemTask) {
+	if task != nil {
+		// TODO: do we need a run-task timeout to protect the queue won't be stucked by a task?
+		task.runTask(w.writeFlow)
+		hotCacheFlowQueueStatusGauge.WithLabelValues(Write.String()).Set(float64(len(w.writeFlowQueue)))
+	}
+}
+
+func update(item *HotPeerStat, flow *hotPeerCache) {
+	flow.Update(item)
+	if item.IsNeedDelete() {
+		incMetrics("remove_item", item.StoreID, item.Kind)
+	} else if item.IsNew() {
+		incMetrics("add_item", item.StoreID, item.Kind)
+	} else {
+		incMetrics("update_item", item.StoreID, item.Kind)
 	}
 }

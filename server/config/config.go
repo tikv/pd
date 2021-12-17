@@ -8,17 +8,18 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package config
 
 import (
-	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -225,10 +226,12 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage = true
-	defaultTraceRegionFlow  = true
-	defaultMaxResetTSGap    = 24 * time.Hour
-	defaultKeyType          = "table"
+	defaultUseRegionStorage  = true
+	defaultTraceRegionFlow   = true
+	defaultFlowRoundByDigit  = 3 // KB
+	maxTraceFlowRoundByDigit = 5 // 0.1 MB
+	defaultMaxResetTSGap     = 24 * time.Hour
+	defaultKeyType           = "table"
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
@@ -322,6 +325,12 @@ func adjustUint64(v *uint64, defValue uint64) {
 }
 
 func adjustInt64(v *int64, defValue int64) {
+	if *v == 0 {
+		*v = defValue
+	}
+}
+
+func adjustInt(v *int, defValue int) {
 	if *v == 0 {
 		*v = defValue
 	}
@@ -727,6 +736,12 @@ type ScheduleConfig struct {
 	// is overwritten, the value is fixed until it is deleted.
 	// Default: manual
 	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
+
+	// Controls the time interval between write hot regions info into leveldb.
+	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
+
+	// The day of hot regions data to be reserved. 0 means close.
+	HotRegionsReservedDays int64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -748,12 +763,12 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 
 const (
 	defaultMaxReplicas               = 3
-	defaultMaxSnapshotCount          = 3
-	defaultMaxPendingPeerCount       = 16
+	defaultMaxSnapshotCount          = 64
+	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
 	defaultMaxMergeRegionKeys        = 200000
 	defaultSplitMergeInterval        = 1 * time.Hour
-	defaultPatrolRegionInterval      = 100 * time.Millisecond
+	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
 	defaultRegionScheduleLimit       = 2048
@@ -772,6 +787,8 @@ const (
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
 	defaultEnableCrossTableMerge       = true
+	defaultHotRegionsWriteInterval     = 10 * time.Minute
+	defaultHotRegionsResevervedDays    = 0
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -851,6 +868,14 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 
 	if c.StoreLimit == nil {
 		c.StoreLimit = make(map[uint64]StoreLimitConfig)
+	}
+
+	if !meta.IsDefined("hot-regions-write-interval") {
+		adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
+	}
+
+	if !meta.IsDefined("hot-regions-reserved-days") {
+		adjustInt64(&c.HotRegionsReservedDays, defaultHotRegionsResevervedDays)
 	}
 
 	return c.Validate()
@@ -972,7 +997,6 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
-	{Type: "label"},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enable by default.
@@ -1000,6 +1024,9 @@ type ReplicationConfig struct {
 
 	// When PlacementRules feature is enabled. MaxReplicas, LocationLabels and IsolationLabels are not used any more.
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
+
+	// EnablePlacementRuleCache controls whether use cache during rule checker
+	EnablePlacementRulesCache bool `toml:"enable-placement-rules-cache" json:"enable-placement-rules-cache,string"`
 
 	// IsolationLevel is used to isolate replicas explicitly and forcibly if it's not empty.
 	// Its value must be empty or one of LocationLabels.
@@ -1069,8 +1096,11 @@ type PDServerConfig struct {
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
-	// TraceRegionFlow the option to update flow information of regions
-	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
+	// TraceRegionFlow the option to update flow information of regions.
+	// WARN: TraceRegionFlow is deprecated.
+	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
+	// FlowRoundByDigit used to discretization processing flow information.
+	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1090,7 +1120,36 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("trace-region-flow") {
 		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
+	if !meta.IsDefined("flow-round-by-digit") {
+		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
+	}
+	c.migrateConfigurationFromFile(meta)
 	return c.Validate()
+}
+
+func (c *PDServerConfig) migrateConfigurationFromFile(meta *configMetaData) error {
+	oldName, newName := "trace-region-flow", "flow-round-by-digit"
+	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
+	switch {
+	case defineOld && defineNew:
+		if c.TraceRegionFlow && (c.FlowRoundByDigit == defaultFlowRoundByDigit) {
+			return errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
+		}
+	case defineOld && !defineNew:
+		if !c.TraceRegionFlow {
+			c.FlowRoundByDigit = math.MaxInt8
+		}
+	}
+	return nil
+}
+
+// MigrateDeprecatedFlags updates new flags according to deprecated flags.
+func (c *PDServerConfig) MigrateDeprecatedFlags() {
+	if !c.TraceRegionFlow {
+		c.FlowRoundByDigit = math.MaxInt8
+	}
+	// json omity the false. next time will not persist to the kv.
+	c.TraceRegionFlow = false
 }
 
 // Clone returns a cloned PD server config.
@@ -1111,6 +1170,9 @@ func (c *PDServerConfig) Validate() error {
 			return err
 		}
 	}
+	if c.FlowRoundByDigit < 0 {
+		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
+	}
 
 	return nil
 }
@@ -1120,6 +1182,10 @@ type StoreLabel struct {
 	Key   string `toml:"key" json:"key"`
 	Value string `toml:"value" json:"value"`
 }
+
+// RejectLeader is the label property type that suggests a store should not
+// have any region leaders.
+const RejectLeader = "reject-leader"
 
 // LabelPropertyConfig is the config section to set properties to store labels.
 type LabelPropertyConfig map[string][]StoreLabel
@@ -1177,33 +1243,6 @@ func (c *Config) GetZapLogProperties() *log.ZapProperties {
 // GetConfigFile gets the config file.
 func (c *Config) GetConfigFile() string {
 	return c.configFile
-}
-
-// RewriteFile rewrites the config file after updating the config.
-func (c *Config) RewriteFile(new *Config) error {
-	filePath := c.GetConfigFile()
-	if filePath == "" {
-		return nil
-	}
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(*new); err != nil {
-		return err
-	}
-	dir := filepath.Dir(filePath)
-	tmpfile := filepath.Join(dir, "tmp_pd.toml")
-
-	f, err := os.Create(tmpfile)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.Write(buf.Bytes()); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	return os.Rename(tmpfile, filePath)
 }
 
 // GenEmbedEtcdConfig generates a configuration for embedded etcd.

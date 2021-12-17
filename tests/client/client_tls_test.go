@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -15,8 +16,8 @@ package client_test
 
 import (
 	"context"
+	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,16 +73,16 @@ func (s *clientTLSTestSuite) TearDownSuite(c *C) {
 // when all certs are atomically replaced by directory renaming.
 // And expects server to reject client requests, and vice versa.
 func (s *clientTLSTestSuite) TestTLSReloadAtomicReplace(c *C) {
-	tmpDir, err := ioutil.TempDir(os.TempDir(), "cert-tmp")
+	tmpDir, err := os.MkdirTemp(os.TempDir(), "cert-tmp")
 	c.Assert(err, IsNil)
 	os.RemoveAll(tmpDir)
 	defer os.RemoveAll(tmpDir)
 
-	certsDir, err := ioutil.TempDir(os.TempDir(), "cert-to-load")
+	certsDir, err := os.MkdirTemp(os.TempDir(), "cert-to-load")
 	c.Assert(err, IsNil)
 	defer os.RemoveAll(certsDir)
 
-	certsDirExp, err := ioutil.TempDir(os.TempDir(), "cert-expired")
+	certsDirExp, err := os.MkdirTemp(os.TempDir(), "cert-expired")
 	c.Assert(err, IsNil)
 	defer os.RemoveAll(certsDirExp)
 
@@ -91,7 +92,6 @@ func (s *clientTLSTestSuite) TestTLSReloadAtomicReplace(c *C) {
 		_, err = copyTLSFiles(testTLSInfoExpired, certsDirExp)
 		c.Assert(err, IsNil)
 		return tlsInfo
-
 	}
 	replaceFunc := func() {
 		err = os.Rename(certsDir, tmpDir)
@@ -102,7 +102,6 @@ func (s *clientTLSTestSuite) TestTLSReloadAtomicReplace(c *C) {
 		// 'certsDir' contains expired certs
 		// 'tmpDir' contains valid certs
 		// 'certsDirExp' does not exist
-
 	}
 	revertFunc := func() {
 		err = os.Rename(tmpDir, certsDirExp)
@@ -113,10 +112,8 @@ func (s *clientTLSTestSuite) TestTLSReloadAtomicReplace(c *C) {
 
 		err = os.Rename(certsDirExp, certsDir)
 		c.Assert(err, IsNil)
-
 	}
 	s.testTLSReload(c, cloneFunc, replaceFunc, revertFunc)
-
 }
 
 func (s *clientTLSTestSuite) testTLSReload(
@@ -193,6 +190,29 @@ func (s *clientTLSTestSuite) testTLSReload(
 	c.Assert(err, IsNil)
 	dcancel()
 	cli.Close()
+
+	// 7. test use raw bytes to init tls config
+	caData, certData, keyData := loadTLSContent(c,
+		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
+	ctx1, cancel1 := context.WithTimeout(s.ctx, 2*time.Second)
+	_, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
+		SSLCABytes:   caData,
+		SSLCertBytes: certData,
+		SSLKEYBytes:  keyData,
+	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	c.Assert(err, IsNil)
+	cancel1()
+}
+
+func loadTLSContent(c *C, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
+	var err error
+	caData, err = os.ReadFile(caPath)
+	c.Assert(err, IsNil)
+	certData, err = os.ReadFile(certPath)
+	c.Assert(err, IsNil)
+	keyData, err = os.ReadFile(keyPath)
+	c.Assert(err, IsNil)
+	return
 }
 
 // copyTLSFiles clones certs files to dst directory.
@@ -205,38 +225,34 @@ func copyTLSFiles(ti transport.TLSInfo, dst string) (transport.TLSInfo, error) {
 	}
 	if err := copyFile(ti.KeyFile, ci.KeyFile); err != nil {
 		return transport.TLSInfo{}, err
-
 	}
 	if err := copyFile(ti.CertFile, ci.CertFile); err != nil {
 		return transport.TLSInfo{}, err
-
 	}
 	if err := copyFile(ti.TrustedCAFile, ci.TrustedCAFile); err != nil {
 		return transport.TLSInfo{}, err
-
 	}
 	return ci, nil
-
 }
 func copyFile(src, dst string) error {
 	f, err := os.Open(src)
 	if err != nil {
 		return err
-
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Printf("Error closing file: %s\n", err)
+		}
+	}()
 
 	w, err := os.Create(dst)
 	if err != nil {
 		return err
-
 	}
 	defer w.Close()
 
 	if _, err = io.Copy(w, f); err != nil {
 		return err
-
 	}
 	return w.Sync()
-
 }

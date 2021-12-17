@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -59,4 +60,12 @@ func (r *MaxFilter) Reset() {
 func (r *MaxFilter) Set(n float64) {
 	r.records[0] = n
 	r.count = 1
+}
+
+// GetInstantaneous returns the value just added.
+func (r *MaxFilter) GetInstantaneous() float64 {
+	if r.count == 0 {
+		return 0
+	}
+	return r.records[(r.count-1)%r.size]
 }

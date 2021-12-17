@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -22,7 +23,6 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/opt"
 )
 
 var _ = Suite(&testBuilderSuite{})
@@ -38,7 +38,7 @@ func (s *testBuilderSuite) SetUpTest(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.cluster = mockcluster.NewCluster(s.ctx, opts)
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
+		config.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
 	s.cluster.SetLocationLabels([]string{"zone", "host"})
 	s.cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
@@ -62,11 +62,11 @@ func (s *testBuilderSuite) TestNewBuilder(c *C) {
 	region := core.NewRegionInfo(&metapb.Region{Id: 42, Peers: peers}, peers[0])
 	builder := NewBuilder("test", s.cluster, region)
 	c.Assert(builder.err, IsNil)
-	c.Assert(len(builder.originPeers), Equals, 2)
+	c.Assert(builder.originPeers, HasLen, 2)
 	c.Assert(builder.originPeers[1], DeepEquals, peers[0])
 	c.Assert(builder.originPeers[2], DeepEquals, peers[1])
 	c.Assert(builder.originLeaderStoreID, Equals, uint64(1))
-	c.Assert(len(builder.targetPeers), Equals, 2)
+	c.Assert(builder.targetPeers, HasLen, 2)
 	c.Assert(builder.targetPeers[1], DeepEquals, peers[0])
 	c.Assert(builder.targetPeers[2], DeepEquals, peers[1])
 
@@ -105,7 +105,7 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 		4: {StoreId: 4},
 	}
 	builder := s.newBuilder().SetPeers(m).EnableLightWeight()
-	c.Assert(len(builder.targetPeers), Equals, 3)
+	c.Assert(builder.targetPeers, HasLen, 3)
 	c.Assert(builder.targetPeers[2], DeepEquals, m[2])
 	c.Assert(builder.targetPeers[3], DeepEquals, m[3])
 	c.Assert(builder.targetPeers[4], DeepEquals, m[4])
@@ -127,16 +127,16 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	})
 	_, err = builder.prepareBuild()
 	c.Assert(err, IsNil)
-	c.Assert(len(builder.toAdd), Equals, 2)
+	c.Assert(builder.toAdd, HasLen, 2)
 	c.Assert(builder.toAdd[4].GetRole(), Not(Equals), metapb.PeerRole_Learner)
 	c.Assert(builder.toAdd[4].GetId(), Equals, uint64(14))
 	c.Assert(builder.toAdd[5].GetRole(), Equals, metapb.PeerRole_Learner)
 	c.Assert(builder.toAdd[5].GetId(), Not(Equals), uint64(0))
-	c.Assert(len(builder.toRemove), Equals, 1)
+	c.Assert(builder.toRemove, HasLen, 1)
 	c.Assert(builder.toRemove[2], NotNil)
-	c.Assert(len(builder.toPromote), Equals, 1)
+	c.Assert(builder.toPromote, HasLen, 1)
 	c.Assert(builder.toPromote[3], NotNil)
-	c.Assert(len(builder.toDemote), Equals, 1)
+	c.Assert(builder.toDemote, HasLen, 1)
 	c.Assert(builder.toDemote[1], NotNil)
 	c.Assert(builder.currentLeaderStoreID, Equals, uint64(1))
 
@@ -152,16 +152,16 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	builder.useJointConsensus = false
 	_, err = builder.prepareBuild()
 	c.Assert(err, IsNil)
-	c.Assert(len(builder.toAdd), Equals, 3)
+	c.Assert(builder.toAdd, HasLen, 3)
 	c.Assert(builder.toAdd[1].GetRole(), Equals, metapb.PeerRole_Learner)
 	c.Assert(builder.toAdd[1].GetId(), Not(Equals), uint64(0))
 	c.Assert(builder.toAdd[4].GetRole(), Not(Equals), metapb.PeerRole_Learner)
 	c.Assert(builder.toAdd[4].GetId(), Equals, uint64(14))
 	c.Assert(builder.toAdd[5].GetRole(), Equals, metapb.PeerRole_Learner)
 	c.Assert(builder.toAdd[5].GetId(), Not(Equals), uint64(0))
-	c.Assert(len(builder.toRemove), Equals, 1)
+	c.Assert(builder.toRemove, HasLen, 1)
 	c.Assert(builder.toRemove[1], NotNil)
-	c.Assert(len(builder.toPromote), Equals, 1)
+	c.Assert(builder.toPromote, HasLen, 1)
 	c.Assert(builder.toPromote[3], NotNil)
 	c.Assert(builder.currentLeaderStoreID, Equals, uint64(1))
 }
@@ -438,14 +438,10 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				c.Assert(step.ToStore, Equals, tc.steps[i].(TransferLeader).ToStore)
 			case AddPeer:
 				c.Assert(step.ToStore, Equals, tc.steps[i].(AddPeer).ToStore)
-			case AddLightPeer:
-				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLightPeer).ToStore)
 			case RemovePeer:
 				c.Assert(step.FromStore, Equals, tc.steps[i].(RemovePeer).FromStore)
 			case AddLearner:
 				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLearner).ToStore)
-			case AddLightLearner:
-				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLightLearner).ToStore)
 			case PromoteLearner:
 				c.Assert(step.ToStore, Equals, tc.steps[i].(PromoteLearner).ToStore)
 			case DemoteFollower:

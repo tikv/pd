@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -22,12 +23,6 @@ import (
 	"github.com/tikv/pd/server/versioninfo"
 )
 
-const (
-	// RejectLeader is the label property type that suggests a store should not
-	// have any region leaders.
-	RejectLeader = "reject-leader"
-)
-
 // Cluster provides an overview of a cluster's regions distribution.
 // TODO: This interface should be moved to a better place.
 type Cluster interface {
@@ -40,10 +35,11 @@ type Cluster interface {
 
 	GetOpts() *config.PersistOptions
 	AllocID() (uint64, error)
-	FitRegion(*core.RegionInfo) *placement.RegionFit
+	GetRuleManager() *placement.RuleManager
 	RemoveScheduler(name string) error
 	IsFeatureSupported(f versioninfo.Feature) bool
 	AddSuspectRegions(ids ...uint64)
+	GetBasicCluster() *core.BasicCluster
 }
 
 // HeartbeatStream is an interface.

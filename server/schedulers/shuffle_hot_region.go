@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -26,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -76,10 +78,10 @@ type shuffleHotRegionSchedulerConfig struct {
 // the hot peer.
 type shuffleHotRegionScheduler struct {
 	*BaseScheduler
-	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
+	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
 	r           *rand.Rand
 	conf        *shuffleHotRegionSchedulerConfig
-	types       []rwType
+	types       []statistics.RWType
 }
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
@@ -88,11 +90,11 @@ func newShuffleHotRegionScheduler(opController *schedule.OperatorController, con
 	ret := &shuffleHotRegionScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		types:         []rwType{read, write},
+		types:         []statistics.RWType{statistics.Read, statistics.Write},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
-		ret.stLoadInfos[ty] = map[uint64]*storeLoadDetail{}
+		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
 	}
 	return ret
 }
@@ -131,28 +133,33 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 	return s.dispatch(s.types[i], cluster)
 }
 
-func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
+	storeInfos := statistics.SummaryStoreInfos(cluster)
 	storesLoads := cluster.GetStoresLoads()
+	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
+
 	switch typ {
-	case read:
+	case statistics.Read:
 		s.stLoadInfos[readLeader] = summaryStoresLoad(
+			storeInfos,
 			storesLoads,
-			map[uint64]*Influence{},
 			cluster.RegionReadStats(),
-			read, core.LeaderKind)
+			isTraceRegionFlow,
+			statistics.Read, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos[readLeader])
-	case write:
+	case statistics.Write:
 		s.stLoadInfos[writeLeader] = summaryStoresLoad(
+			storeInfos,
 			storesLoads,
-			map[uint64]*Influence{},
 			cluster.RegionWriteStats(),
-			write, core.LeaderKind)
+			isTraceRegionFlow,
+			statistics.Write, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos[writeLeader])
 	}
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
 	for _, detail := range loadDetail {
 		if len(detail.HotPeers) < 1 {
 			continue

@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -144,7 +145,7 @@ func (s *testFitSuite) TestFitRegion(c *C) {
 		for _, r := range cc.rules {
 			rules = append(rules, s.makeRule(r))
 		}
-		rf := FitRegion(stores, region, rules)
+		rf := fitRegion(stores.GetStores(), region, rules)
 		expects := strings.Split(cc.fitPeers, "/")
 		for i, f := range rf.RuleFits {
 			c.Assert(s.checkPeerMatch(f.Peers, expects[i]), IsTrue)

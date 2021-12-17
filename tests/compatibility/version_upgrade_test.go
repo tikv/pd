@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -65,7 +66,7 @@ func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
 		},
 	}
 
-	svr := leaderServer.GetServer()
+	svr := &server.GrpcServer{Server: leaderServer.GetServer()}
 	_, err = svr.PutStore(context.Background(), putStoreRequest)
 	c.Assert(err, IsNil)
 	// FIX ME: read v0.0.0 in sometime
@@ -141,7 +142,7 @@ func (s *compatibilityTestSuite) TestRollingUpgrade(c *C) {
 		},
 	}
 
-	svr := leaderServer.GetServer()
+	svr := &server.GrpcServer{Server: leaderServer.GetServer()}
 	for _, store := range stores {
 		_, err = svr.PutStore(context.Background(), store)
 		c.Assert(err, IsNil)

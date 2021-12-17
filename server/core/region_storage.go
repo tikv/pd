@@ -4,10 +4,11 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/encryption"
@@ -71,35 +73,36 @@ func NewRegionStorage(
 		regionStorageCtx:     regionStorageCtx,
 		regionStorageCancel:  regionStorageCancel,
 	}
-	s.backgroundFlush()
+	go s.backgroundFlush()
 	return s, nil
 }
 
 func (s *RegionStorage) backgroundFlush() {
-	ticker := time.NewTicker(dirtyFlushTick)
 	var (
 		isFlush bool
 		err     error
 	)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				s.mu.RLock()
-				isFlush = s.flushTime.Before(time.Now())
-				s.mu.RUnlock()
-				if !isFlush {
-					continue
-				}
-				if err = s.FlushRegion(); err != nil {
-					log.Error("flush regions meet error", errs.ZapError(err))
-				}
-			case <-s.regionStorageCtx.Done():
-				return
+	ticker := time.NewTicker(dirtyFlushTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.mu.RLock()
+			isFlush = s.flushTime.Before(time.Now())
+			failpoint.Inject("regionStorageFastFlush", func() {
+				isFlush = true
+			})
+			s.mu.RUnlock()
+			if !isFlush {
+				continue
 			}
+			if err = s.FlushRegion(); err != nil {
+				log.Error("flush regions meet error", errs.ZapError(err))
+			}
+		case <-s.regionStorageCtx.Done():
+			return
 		}
-	}()
+	}
 }
 
 // SaveRegion saves one region to storage.
@@ -131,6 +134,7 @@ func deleteRegion(kv kv.Base, region *metapb.Region) error {
 }
 
 func loadRegions(
+	ctx context.Context,
 	kv kv.Base,
 	encryptionKeyManager *encryptionkm.KeyManager,
 	f func(region *RegionInfo) []*RegionInfo,
@@ -143,6 +147,10 @@ func loadRegions(
 	// a variable rangeLimit to work around.
 	rangeLimit := maxKVRangeLimit
 	for {
+		failpoint.Inject("slowLoadRegion", func() {
+			rangeLimit = 1
+			time.Sleep(time.Second)
+		})
 		startKey := regionPath(nextID)
 		_, res, err := kv.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {
@@ -150,6 +158,11 @@ func loadRegions(
 				continue
 			}
 			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
 
 		for _, s := range res {

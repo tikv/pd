@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -120,6 +121,22 @@ var (
 			Help:      "The distribution of region write keys",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 18),
 		})
+	readQueryHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "read_query_hist",
+			Help:      "The distribution of region read query",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+		})
+	writeQueryHist = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "write_query_hist",
+			Help:      "The distribution of region write query",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+		})
 	regionHeartbeatIntervalHist = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -144,6 +161,14 @@ var (
 			Name:      "abnormal_peer_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
 			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
+		}, []string{"type"})
+
+	hotCacheFlowQueueStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "hotcache",
+			Name:      "flow_queue_status",
+			Help:      "Status of the hotspot flow queue.",
 		}, []string{"type"})
 )
 
@@ -170,4 +195,5 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatIntervalHist)
 	prometheus.MustRegister(storeHeartbeatIntervalHist)
 	prometheus.MustRegister(regionAbnormalPeerDuration)
+	prometheus.MustRegister(hotCacheFlowQueueStatusGauge)
 }
