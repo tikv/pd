@@ -32,13 +32,13 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
 )
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
@@ -645,12 +645,12 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(tc.addLeaderRegion(3, 3, 1, 2), IsNil)
 
 	oc := co.opController
-	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
+	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewMemoryStorage(), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	gls, err = schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls, err = schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewMemoryStorage(), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), IsNil)
 
@@ -681,17 +681,16 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 
 	c.Assert(co.schedulers, HasLen, 3)
 	oc := co.opController
-	storage := tc.RaftCluster.storage
 	storageV2 := tc.RaftCluster.storageV2
 
-	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storageV2, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
-	evict, err := schedule.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
+	evict, err := schedule.CreateScheduler(schedulers.EvictLeaderType, oc, storageV2, schedule.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(evict, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
-	sches, _, err := storage.LoadAllScheduleConfig()
+	sches, _, err := storageV2.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(sches, HasLen, 5)
 	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
@@ -705,7 +704,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	_, err = schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
+	_, err = schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storageV2, schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	// suppose we add a new default enable scheduler
 	config.DefaultSchedulers = append(config.DefaultSchedulers, config.SchedulerConfig{Type: "shuffle-region"})
@@ -715,7 +714,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(newOpt.GetSchedulers(), HasLen, 3)
 	c.Assert(newOpt.Reload(storageV2), IsNil)
 	// only remains 3 items with independent config.
-	sches, _, err = storage.LoadAllScheduleConfig()
+	sches, _, err = storageV2.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(sches, HasLen, 3)
 
@@ -736,12 +735,11 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	tc.RaftCluster.opt = newOpt
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
-	storage = tc.RaftCluster.storage
 	c.Assert(co.schedulers, HasLen, 3)
-	bls, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	bls, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storageV2, schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls), IsNil)
-	brs, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
+	brs, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, storageV2, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
@@ -781,7 +779,7 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 
 	c.Assert(co.schedulers, HasLen, 3)
 	oc := co.opController
-	storage := tc.RaftCluster.storage
+	storage := tc.RaftCluster.storageV2
 
 	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
@@ -954,7 +952,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
+	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storageV2, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	opt := tc.GetOpts()
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
@@ -1005,7 +1003,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
+	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storageV2, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
@@ -1107,7 +1105,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 2), IsNil)
-	scheduler, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	scheduler, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage.NewMemoryStorage(), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
@@ -1191,7 +1189,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	_, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 
-	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, storage.NewMemoryStorage(), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
 

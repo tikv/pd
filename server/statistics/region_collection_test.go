@@ -22,8 +22,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/base"
 )
 
@@ -39,7 +39,7 @@ type testRegionStatisticsSuite struct {
 }
 
 func (t *testRegionStatisticsSuite) SetUpTest(c *C) {
-	t.store = core.NewStorage(kv.NewMemoryKV())
+	t.store = storage.NewMemoryStorage()
 	var err error
 	t.manager = placement.NewRuleManager(t.store, nil, nil)
 	err = t.manager.Initialize(3, []string{"zone", "rack", "host"})

@@ -660,7 +660,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	// Save meta, stores and regions.
 	n := 10
 	meta := &metapb.Cluster{Id: 123}
-	c.Assert(storage.SaveMeta(meta), IsNil)
+	c.Assert(storageV2.SaveMeta(meta), IsNil)
 	stores := make([]*metapb.Store, 0, n)
 	for i := 0; i < n; i++ {
 		store := &metapb.Store{Id: uint64(i)}
@@ -668,7 +668,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	}
 
 	for _, store := range stores {
-		c.Assert(storage.SaveStore(store), IsNil)
+		c.Assert(storageV2.SaveStore(store), IsNil)
 	}
 
 	regions := make([]*metapb.Region, 0, n)

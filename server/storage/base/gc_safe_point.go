@@ -17,35 +17,34 @@ package base
 import (
 	"encoding/json"
 	"math"
-	"path"
 	"strconv"
 	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/server/core"
 	"go.etcd.io/etcd/clientv3"
 )
 
-const (
-	gcPath                     = "gc"
-	gcWorkerServiceSafePointID = "gc_worker"
-)
+// ServiceSafePoint is the safepoint for a specific service
+type ServiceSafePoint struct {
+	ServiceID string `json:"service_id"`
+	ExpiredAt int64  `json:"expired_at"`
+	SafePoint uint64 `json:"safe_point"`
+}
 
 // GCSafePointStorage defines the storage operations on the GC safe point.
 type GCSafePointStorage interface {
 	LoadGCSafePoint() (uint64, error)
 	SaveGCSafePoint(safePoint uint64) error
-	LoadMinServiceGCSafePoint(now time.Time) (*core.ServiceSafePoint, error)
-	LoadAllServiceGCSafePoints() ([]*core.ServiceSafePoint, error)
-	SaveServiceGCSafePoint(ssp *core.ServiceSafePoint) error
+	LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error)
+	LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error)
+	SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
 	RemoveServiceGCSafePoint(serviceID string) error
 }
 
 // LoadGCSafePoint loads current GC safe point from storage.
 func (s *Storage) LoadGCSafePoint() (uint64, error) {
-	key := path.Join(gcPath, "safe_point")
-	value, err := s.Load(key)
+	value, err := s.Load(gcSafePointPath())
 	if err != nil {
 		return 0, err
 	}
@@ -61,14 +60,13 @@ func (s *Storage) LoadGCSafePoint() (uint64, error) {
 
 // SaveGCSafePoint saves new GC safe point to storage.
 func (s *Storage) SaveGCSafePoint(safePoint uint64) error {
-	key := path.Join(gcPath, "safe_point")
 	value := strconv.FormatUint(safePoint, 16)
-	return s.Save(key, value)
+	return s.Save(gcSafePointPath(), value)
 }
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
-func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*core.ServiceSafePoint, error) {
-	prefix := path.Join(gcPath, "safe_point", "service") + "/"
+func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
+	prefix := GCSafePointServicePrefixPath()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
@@ -82,9 +80,9 @@ func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*core.ServiceSafePoi
 	}
 
 	hasGCWorker := false
-	min := &core.ServiceSafePoint{SafePoint: math.MaxUint64}
+	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
 	for i, key := range keys {
-		ssp := &core.ServiceSafePoint{}
+		ssp := &ServiceSafePoint{}
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
 		}
@@ -124,8 +122,8 @@ func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*core.ServiceSafePoi
 	return min, nil
 }
 
-func (s *Storage) initServiceGCSafePointForGCWorker(initialValue uint64) (*core.ServiceSafePoint, error) {
-	ssp := &core.ServiceSafePoint{
+func (s *Storage) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
+	ssp := &ServiceSafePoint{
 		ServiceID: gcWorkerServiceSafePointID,
 		SafePoint: initialValue,
 		ExpiredAt: math.MaxInt64,
@@ -137,20 +135,20 @@ func (s *Storage) initServiceGCSafePointForGCWorker(initialValue uint64) (*core.
 }
 
 // LoadAllServiceGCSafePoints returns all services GC safepoints
-func (s *Storage) LoadAllServiceGCSafePoints() ([]*core.ServiceSafePoint, error) {
-	prefix := path.Join(gcPath, "safe_point", "service") + "/"
+func (s *Storage) LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
+	prefix := GCSafePointServicePrefixPath()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return nil, err
 	}
 	if len(keys) == 0 {
-		return []*core.ServiceSafePoint{}, nil
+		return []*ServiceSafePoint{}, nil
 	}
 
-	ssps := make([]*core.ServiceSafePoint, 0, len(keys))
+	ssps := make([]*ServiceSafePoint, 0, len(keys))
 	for i := range keys {
-		ssp := &core.ServiceSafePoint{}
+		ssp := &ServiceSafePoint{}
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
 		}
@@ -161,7 +159,7 @@ func (s *Storage) LoadAllServiceGCSafePoints() ([]*core.ServiceSafePoint, error)
 }
 
 // SaveServiceGCSafePoint saves a GC safepoint for the service
-func (s *Storage) SaveServiceGCSafePoint(ssp *core.ServiceSafePoint) error {
+func (s *Storage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 	if ssp.ServiceID == "" {
 		return errors.New("service id of service safepoint cannot be empty")
 	}
@@ -170,7 +168,7 @@ func (s *Storage) SaveServiceGCSafePoint(ssp *core.ServiceSafePoint) error {
 		return errors.New("TTL of gc_worker's service safe point must be infinity")
 	}
 
-	key := path.Join(gcPath, "safe_point", "service", ssp.ServiceID)
+	key := gcSafePointServicePath(ssp.ServiceID)
 	value, err := json.Marshal(ssp)
 	if err != nil {
 		return err
@@ -184,6 +182,6 @@ func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
 	if serviceID == gcWorkerServiceSafePointID {
 		return errors.New("cannot remove service safe point of gc_worker")
 	}
-	key := path.Join(gcPath, "safe_point", "service", serviceID)
+	key := gcSafePointServicePath(serviceID)
 	return s.Remove(key)
 }

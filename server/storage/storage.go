@@ -14,11 +14,15 @@
 
 package storage
 
-import "github.com/tikv/pd/server/storage/base"
+import (
+	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage/base"
+)
 
 // Storage is the interface for the backend storage of the PD.
 // TODO: replace the core.Storage with this interface later.
 type Storage interface {
+	kv.Base
 	base.ConfigStorage
 	base.MetaStorage
 	base.RuleStorage

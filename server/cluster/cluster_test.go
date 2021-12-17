@@ -103,7 +103,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 
 	for i, store := range stores {
 		tmp := &metapb.Store{}
-		ok, err := cluster.storage.LoadStore(store.GetID(), tmp)
+		ok, err := cluster.storageV2.LoadStore(store.GetID(), tmp)
 		c.Assert(ok, IsTrue)
 		c.Assert(err, IsNil)
 		c.Assert(tmp, DeepEquals, storeMetasAfterHeartbeat[i])
@@ -446,25 +446,25 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		// region does not exist.
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storage, regions[:i+1])
+		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
 
 		// region is the same, not updated.
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storage, regions[:i+1])
+		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
 		origin := region
 		// region is updated.
 		region = origin.Clone(core.WithIncVersion())
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storage, regions[:i+1])
+		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
 
 		// region is stale (Version).
 		stale := origin.Clone(core.WithIncConfVer())
 		c.Assert(cluster.processRegionHeartbeat(stale), NotNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storage, regions[:i+1])
+		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
 
 		// region is updated.
 		region = origin.Clone(
@@ -474,13 +474,13 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storage, regions[:i+1])
+		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
 
 		// region is stale (ConfVer).
 		stale = origin.Clone(core.WithIncConfVer())
 		c.Assert(cluster.processRegionHeartbeat(stale), NotNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storage, regions[:i+1])
+		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
 
 		// Add a down peer.
 		region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
@@ -517,13 +517,13 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storage, regions[:i+1])
+		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
 		// Add peers.
 		region = origin
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.storage, regions[:i+1])
+		checkRegionsKV(c, cluster.storageV2, regions[:i+1])
 
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
@@ -849,7 +849,7 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := storage.NewMemoryStorage()
 	cluster.ruleManager = placement.NewRuleManager(storage, cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
@@ -1144,8 +1144,8 @@ func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, er
 }
 
 func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluster {
-	storage := core.NewStorage(kv.NewMemoryKV())
-	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage, core.NewBasicCluster())
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	storage := storage.NewMemoryStorage()
 	rc.ruleManager = placement.NewRuleManager(storage, rc, rc.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())

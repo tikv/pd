@@ -800,11 +800,10 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
-	storage := s.GetStorage()
-	if storage == nil {
+	if s.etcdStorage == nil {
 		return cfg
 	}
-	sches, configs, err := storage.LoadAllScheduleConfig()
+	sches, configs, err := s.etcdStorage.LoadAllScheduleConfig()
 	if err != nil {
 		return cfg
 	}

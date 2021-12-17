@@ -21,8 +21,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-const componentPath = "component"
-
 // ComponentStorage defines the storage operations on the component.
 type ComponentStorage interface {
 	LoadComponent(component interface{}) (bool, error)

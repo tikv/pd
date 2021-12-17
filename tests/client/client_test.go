@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/storage/base"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
@@ -1003,7 +1004,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(min, Equals, uint64(3))
 
 	// Update only the TTL of the minimum safepoint
-	oldMinSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	oldMinSsp, err := s.srv.GetEtcdStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(oldMinSsp.ServiceID, Equals, "c")
 	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
@@ -1011,7 +1012,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		"c", 2000, 3)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(3))
-	minSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp, err := s.srv.GetEtcdStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
@@ -1022,7 +1023,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		"c", 1, 3)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(3))
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp, err = s.srv.GetEtcdStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(minSsp.ExpiredAt, Less, oldMinSsp.ExpiredAt)
@@ -1032,7 +1033,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		"c", math.MaxInt64, 3)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(3))
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp, err = s.srv.GetEtcdStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
@@ -1077,27 +1078,27 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	// Force set invalid ttl to gc_worker
 	gcWorkerKey := path.Join("gc", "safe_point", "service", "gc_worker")
 	{
-		gcWorkerSsp := &core.ServiceSafePoint{
+		gcWorkerSsp := &base.ServiceSafePoint{
 			ServiceID: "gc_worker",
 			ExpiredAt: -12345,
 			SafePoint: 10,
 		}
 		value, err := json.Marshal(gcWorkerSsp)
 		c.Assert(err, IsNil)
-		err = s.srv.GetStorage().Save(gcWorkerKey, string(value))
+		err = s.srv.GetEtcdStorage().Save(gcWorkerKey, string(value))
 		c.Assert(err, IsNil)
 	}
 
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp, err = s.srv.GetEtcdStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "gc_worker")
 	c.Assert(minSsp.SafePoint, Equals, uint64(10))
 	c.Assert(minSsp.ExpiredAt, Equals, int64(math.MaxInt64))
 
 	// Force delete gc_worker, then the min service safepoint is 11 of "a".
-	err = s.srv.GetStorage().Remove(gcWorkerKey)
+	err = s.srv.GetEtcdStorage().Remove(gcWorkerKey)
 	c.Assert(err, IsNil)
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp, err = s.srv.GetEtcdStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.SafePoint, Equals, uint64(11))
 	// After calling LoadMinServiceGCS when "gc_worker"'s service safepoint is missing, "gc_worker"'s service safepoint
@@ -1107,7 +1108,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		"a", 1000, 14)
 	c.Assert(err, IsNil)
 
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp, err = s.srv.GetEtcdStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "gc_worker")
 	c.Assert(minSsp.SafePoint, Equals, uint64(11))

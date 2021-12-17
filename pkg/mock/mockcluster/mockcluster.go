@@ -29,10 +29,10 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -68,7 +68,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
 	}
-	clus.RegionLabeler, _ = labeler.NewRegionLabeler(core.NewStorage(kv.NewMemoryKV()))
+	clus.RegionLabeler, _ = labeler.NewRegionLabeler(storage.NewMemoryStorage())
 	return clus
 }
 
@@ -157,7 +157,7 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
-		mc.RuleManager = placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()), mc, mc.GetOpts())
+		mc.RuleManager = placement.NewRuleManager(storage.NewMemoryStorage(), mc, mc.GetOpts())
 		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels)
 	}
 }

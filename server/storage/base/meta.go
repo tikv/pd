@@ -16,9 +16,7 @@ package base
 
 import (
 	"context"
-	"fmt"
 	"math"
-	"path"
 	"strconv"
 	"time"
 
@@ -28,11 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
-)
-
-const (
-	clusterPath  = "raft"
-	schedulePath = "schedule"
 )
 
 // MetaStorage defines the storage operations on the PD cluster meta info.
@@ -57,47 +50,20 @@ func (s *Storage) LoadMeta(meta *metapb.Cluster) (bool, error) {
 	return s.loadProto(clusterPath, meta)
 }
 
-func (s *Storage) loadProto(key string, msg proto.Message) (bool, error) {
-	value, err := s.Load(key)
-	if err != nil {
-		return false, err
-	}
-	if value == "" {
-		return false, nil
-	}
-	err = proto.Unmarshal([]byte(value), msg)
-	if err != nil {
-		return false, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
-	}
-	return true, nil
-}
-
 // SaveMeta save cluster meta to the storage. This method will only
 // be used by the PD server, so we should only implement it for the etcd storage.
 func (s *Storage) SaveMeta(meta *metapb.Cluster) error {
 	return s.saveProto(clusterPath, meta)
 }
 
-func (s *Storage) saveProto(key string, msg proto.Message) error {
-	value, err := proto.Marshal(msg)
-	if err != nil {
-		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
-	}
-	return s.Save(key, string(value))
-}
-
 // LoadStore loads one store from storage.
 func (s *Storage) LoadStore(storeID uint64, store *metapb.Store) (bool, error) {
-	return s.loadProto(storePath(storeID), store)
-}
-
-func storePath(storeID uint64) string {
-	return path.Join(clusterPath, "s", fmt.Sprintf("%020d", storeID))
+	return s.loadProto(StorePath(storeID), store)
 }
 
 // SaveStore saves one store to storage.
 func (s *Storage) SaveStore(store *metapb.Store) error {
-	return s.saveProto(storePath(store.GetId()), store)
+	return s.saveProto(StorePath(store.GetId()), store)
 }
 
 // SaveStoreWeight saves a store's leader and region weight to storage.
@@ -110,20 +76,12 @@ func (s *Storage) SaveStoreWeight(storeID uint64, leader, region float64) error 
 	return s.Save(storeRegionWeightPath(storeID), regionValue)
 }
 
-func storeLeaderWeightPath(storeID uint64) string {
-	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
-}
-
-func storeRegionWeightPath(storeID uint64) string {
-	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
-}
-
 // LoadStores loads all stores from storage to StoresInfo.
 func (s *Storage) LoadStores(f func(store *core.StoreInfo)) error {
 	nextID := uint64(0)
-	endKey := storePath(math.MaxUint64)
+	endKey := StorePath(math.MaxUint64)
 	for {
-		key := storePath(nextID)
+		key := StorePath(nextID)
 		_, res, err := s.LoadRange(key, endKey, minKVRangeLimit)
 		if err != nil {
 			return err
@@ -169,12 +127,12 @@ func (s *Storage) loadFloatWithDefaultValue(path string, def float64) (float64, 
 
 // DeleteStore deletes one store from storage.
 func (s *Storage) DeleteStore(store *metapb.Store) error {
-	return s.Remove(storePath(store.GetId()))
+	return s.Remove(StorePath(store.GetId()))
 }
 
 // LoadRegion loads one region from the backend storage.
 func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
-	value, err := s.Load(regionPath(regionID))
+	value, err := s.Load(RegionPath(regionID))
 	if err != nil {
 		return false, err
 	}
@@ -189,14 +147,10 @@ func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, e
 	return true, err
 }
 
-func regionPath(regionID uint64) string {
-	return path.Join(clusterPath, "r", fmt.Sprintf("%020d", regionID))
-}
-
 // LoadRegions loads all regions from storage to RegionsInfo.
 func (s *Storage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	nextID := uint64(0)
-	endKey := regionPath(math.MaxUint64)
+	endKey := RegionPath(math.MaxUint64)
 
 	// Since the region key may be very long, using a larger rangeLimit will cause
 	// the message packet to exceed the grpc message size limit (4MB). Here we use
@@ -207,7 +161,7 @@ func (s *Storage) LoadRegions(ctx context.Context, f func(region *core.RegionInf
 			rangeLimit = 1
 			time.Sleep(time.Second)
 		})
-		startKey := regionPath(nextID)
+		startKey := RegionPath(nextID)
 		_, res, err := s.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {
 			if rangeLimit /= 2; rangeLimit >= minKVRangeLimit {
@@ -255,10 +209,10 @@ func (s *Storage) SaveRegion(region *metapb.Region) error {
 	if err != nil {
 		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByArgs()
 	}
-	return s.Save(regionPath(region.GetId()), string(value))
+	return s.Save(RegionPath(region.GetId()), string(value))
 }
 
 // DeleteRegion deletes one region from storage.
 func (s *Storage) DeleteRegion(region *metapb.Region) error {
-	return s.Remove(regionPath(region.GetId()))
+	return s.Remove(RegionPath(region.GetId()))
 }

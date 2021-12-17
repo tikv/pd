@@ -16,16 +16,10 @@ package base
 
 import (
 	"encoding/json"
-	"path"
 	"strings"
 
 	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/clientv3"
-)
-
-const (
-	configPath               = "config"
-	customScheduleConfigPath = "scheduler_config"
 )
 
 // ConfigStorage defines the storage operations on the config.
@@ -74,12 +68,10 @@ func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
 
 // SaveScheduleConfig saves the config of scheduler.
 func (s *Storage) SaveScheduleConfig(scheduleName string, data []byte) error {
-	configPath := path.Join(customScheduleConfigPath, scheduleName)
-	return s.Save(configPath, string(data))
+	return s.Save(scheduleConfigPath(scheduleName), string(data))
 }
 
 // RemoveScheduleConfig removes the config of scheduler.
 func (s *Storage) RemoveScheduleConfig(scheduleName string) error {
-	configPath := path.Join(customScheduleConfigPath, scheduleName)
-	return s.Remove(configPath)
+	return s.Remove(scheduleConfigPath(scheduleName))
 }

@@ -16,12 +16,9 @@ package base
 
 import (
 	"encoding/json"
-	"path"
 
 	"github.com/tikv/pd/pkg/errs"
 )
-
-const replicationPath = "replication_mode"
 
 // ReplicationStatusStorage defines the storage operations on the replication status.
 type ReplicationStatusStorage interface {
@@ -31,7 +28,7 @@ type ReplicationStatusStorage interface {
 
 // LoadReplicationStatus loads replication status by mode.
 func (s *Storage) LoadReplicationStatus(mode string, status interface{}) (bool, error) {
-	v, err := s.Load(path.Join(replicationPath, mode))
+	v, err := s.Load(replicationModePath(mode))
 	if err != nil {
 		return false, err
 	}
@@ -51,5 +48,5 @@ func (s *Storage) SaveReplicationStatus(mode string, status interface{}) error {
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
 	}
-	return s.Save(path.Join(replicationPath, mode), string(value))
+	return s.Save(replicationModePath(mode), string(value))
 }

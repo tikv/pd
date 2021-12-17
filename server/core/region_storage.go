@@ -50,6 +50,8 @@ const (
 	defaultFlushRegionRate = 3 * time.Second
 	// DefaultBatchSize is the batch size to save the regions to region storage.
 	defaultBatchSize = 100
+	maxKVRangeLimit  = 10000
+	minKVRangeLimit  = 100
 )
 
 // NewRegionStorage returns a region storage that is used to save regions.

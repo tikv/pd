@@ -30,12 +30,12 @@ import (
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
 )
 
@@ -312,7 +312,7 @@ func (c *coordinator) run() {
 		err           error
 	)
 	for i := 0; i < maxLoadConfigRetries; i++ {
-		scheduleNames, configs, err = c.cluster.storage.LoadAllScheduleConfig()
+		scheduleNames, configs, err = c.cluster.storageV2.LoadAllScheduleConfig()
 		select {
 		case <-c.ctx.Done():
 			log.Info("coordinator stops running")
@@ -348,7 +348,7 @@ func (c *coordinator) run() {
 			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
 			continue
 		}
-		s, err := schedule.CreateScheduler(cfg.Type, c.opController, c.cluster.storage, schedule.ConfigJSONDecoder([]byte(data)))
+		s, err := schedule.CreateScheduler(cfg.Type, c.opController, c.cluster.storageV2, schedule.ConfigJSONDecoder([]byte(data)))
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
@@ -369,7 +369,7 @@ func (c *coordinator) run() {
 			continue
 		}
 
-		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args))
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storageV2, schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args))
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			continue
@@ -418,7 +418,7 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	}
 	schedulerArgs := SchedulerArgs.(func() []string)
 	// create and add user scheduler
-	s, err := schedule.CreateScheduler(schedulerType(), c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerType(), schedulerArgs()))
+	s, err := schedule.CreateScheduler(schedulerType(), c.opController, c.cluster.storageV2, schedule.ConfigSliceDecoder(schedulerType(), schedulerArgs()))
 	if err != nil {
 		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), errs.ZapError(err))
 		return
@@ -661,7 +661,7 @@ func (c *coordinator) removeScheduler(name string) error {
 		return err
 	}
 
-	if err := c.cluster.storage.RemoveScheduleConfig(name); err != nil {
+	if err := c.cluster.storageV2.RemoveScheduleConfig(name); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
 	}
@@ -678,7 +678,7 @@ func (c *coordinator) removeOptScheduler(o *config.PersistOptions, name string) 
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
 		decoder := schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
-		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(c.ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), decoder)
+		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(c.ctx, nil, nil), storage.NewMemoryStorage(), decoder)
 		if err != nil {
 			return err
 		}

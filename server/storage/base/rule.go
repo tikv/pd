@@ -15,18 +15,9 @@
 package base
 
 import (
-	"encoding/json"
-	"path"
 	"strings"
 
-	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/clientv3"
-)
-
-const (
-	rulesPath       = "rules"
-	ruleGroupPath   = "rule_group"
-	regionLabelPath = "region_label"
 )
 
 // RuleStorage defines the storage operations on the rule.
@@ -49,15 +40,7 @@ func (s *Storage) SaveRule(ruleKey string, rule interface{}) error {
 
 // DeleteRule removes a rule from storage.
 func (s *Storage) DeleteRule(ruleKey string) error {
-	return s.Remove(path.Join(rulesPath, ruleKey))
-}
-
-func (s *Storage) saveJSON(prefix, key string, data interface{}) error {
-	value, err := json.Marshal(data)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
-	}
-	return s.Save(path.Join(prefix, key), string(value))
+	return s.Remove(ruleKeyPath(ruleKey))
 }
 
 // LoadRuleGroups loads all rule groups from storage.
@@ -72,7 +55,7 @@ func (s *Storage) SaveRuleGroup(groupID string, group interface{}) error {
 
 // DeleteRuleGroup removes a rule group from storage.
 func (s *Storage) DeleteRuleGroup(groupID string) error {
-	return s.Remove(path.Join(ruleGroupPath, groupID))
+	return s.Remove(ruleGroupIDPath(groupID))
 }
 
 // LoadRegionRules loads region rules from storage.
@@ -87,7 +70,7 @@ func (s *Storage) SaveRegionRule(ruleKey string, rule interface{}) error {
 
 // DeleteRegionRule removes a region rule from storage.
 func (s *Storage) DeleteRegionRule(ruleKey string) error {
-	return s.Remove(path.Join(regionLabelPath, ruleKey))
+	return s.Remove(regionLabelKeyPath(ruleKey))
 }
 
 // LoadRules loads placement rules from storage.

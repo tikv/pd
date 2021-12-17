@@ -1345,7 +1345,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	}
 
 	if request.TTL > 0 && request.SafePoint >= min.SafePoint {
-		ssp := &core.ServiceSafePoint{
+		ssp := &base.ServiceSafePoint{
 			ServiceID: string(request.ServiceId),
 			ExpiredAt: now.Unix() + request.TTL,
 			SafePoint: request.SafePoint,

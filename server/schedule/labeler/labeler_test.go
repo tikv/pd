@@ -22,7 +22,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/base"
 )
 
@@ -38,7 +38,7 @@ type testLabelerSuite struct {
 }
 
 func (s *testLabelerSuite) SetUpTest(c *C) {
-	s.store = core.NewStorage(kv.NewMemoryKV())
+	s.store = storage.NewMemoryStorage()
 	var err error
 	s.labeler, err = NewRegionLabeler(s.store)
 	c.Assert(err, IsNil)

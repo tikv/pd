@@ -198,7 +198,7 @@ func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
 // yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(c.storage.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.storageV2.Load(c.storage.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return t, err
 	}
@@ -246,7 +246,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
+	c.ruleManager = placement.NewRuleManager(c.storageV2, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
 		if err != nil {
@@ -254,18 +254,18 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.regionLabeler, err = labeler.NewRegionLabeler(c.storage)
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.storageV2)
 	if err != nil {
 		return err
 	}
 
-	c.componentManager = component.NewManager(c.storage)
-	_, err = c.storage.LoadComponent(&c.componentManager)
+	c.componentManager = component.NewManager(c.storageV2)
+	_, err = c.storageV2.LoadComponent(&c.componentManager)
 	if err != nil {
 		return err
 	}
 
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster, s)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storageV2, cluster, s)
 	if err != nil {
 		return err
 	}
@@ -292,7 +292,7 @@ func (c *RaftCluster) Start(s Server) error {
 // LoadClusterInfo loads cluster related info.
 func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	c.meta = &metapb.Cluster{}
-	ok, err := c.storage.LoadMeta(c.meta)
+	ok, err := c.storageV2.LoadMeta(c.meta)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	}
 
 	start := time.Now()
-	if err := c.storage.LoadStores(c.core.PutStore); err != nil {
+	if err := c.storageV2.LoadStores(c.core.PutStore); err != nil {
 		return nil, err
 	}
 	log.Info("load stores",
@@ -588,8 +588,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
-	if newStore.NeedPersist() && c.storage != nil {
-		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
+	if newStore.NeedPersist() && c.storageV2 != nil {
+		if err := c.storageV2.SaveStore(newStore.GetMeta()); err != nil {
 			log.Error("failed to persist store", zap.Uint64("store-id", newStore.GetID()), errs.ZapError(err))
 		} else {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
@@ -778,8 +778,8 @@ func (c *RaftCluster) getClusterID() uint64 {
 }
 
 func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
-	if c.storage != nil {
-		if err := c.storage.SaveMeta(meta); err != nil {
+	if c.storageV2 != nil {
+		if err := c.storageV2.SaveMeta(meta); err != nil {
 			return err
 		}
 	}
@@ -1194,7 +1194,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	if err := c.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
+	if err := c.storageV2.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
 		return err
 	}
 
@@ -1207,8 +1207,8 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 }
 
 func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
-	if c.storage != nil {
-		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
+	if c.storageV2 != nil {
+		if err := c.storageV2.SaveStore(store.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -1288,8 +1288,8 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 }
 
 func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
-	if c.storage != nil {
-		if err := c.storage.DeleteStore(store.GetMeta()); err != nil {
+	if c.storageV2 != nil {
+		if err := c.storageV2.DeleteStore(store.GetMeta()); err != nil {
 			return err
 		}
 	}
