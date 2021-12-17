@@ -116,10 +116,19 @@ pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
 # dependent
+install-all-tools: export GO111MODULE=on
+install-all-tools:
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.43.0
+	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
+
+install-golangci-lint:
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.43.0
+
 install-go-tools: export GO111MODULE=on
 install-go-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.43.0
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 swagger-spec: export GO111MODULE=on
@@ -187,23 +196,23 @@ test-with-cover-parallel: install-go-tools dashboard-ui split
 	gocov convert coverage | gocov-xml >> coverage.xml;\
 	@$(FAILPOINT_DISABLE)
 
-test-tso-function: install-go-tools dashboard-ui
+test-tso-function: install-go-tools
 	# testing TSO function...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test -race -tags tso_function_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 GO111MODULE=on go test -race -tags without_dashboard,tso_function_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
-test-tso-consistency: install-go-tools dashboard-ui
+test-tso-consistency: install-go-tools
 	# testing TSO consistency...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test -race -tags tso_consistency_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 GO111MODULE=on go test -race -tags without_dashboard,tso_consistency_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
-check: install-go-tools check-all check-plugin errdoc check-testing-t docker-build-test
+check: install-all-tools check-all check-plugin errdoc check-testing-t docker-build-test
 
 check-all: static lint tidy
 	@echo "checking"
@@ -213,7 +222,7 @@ check-plugin:
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
 static: export GO111MODULE=on
-static: install-go-tools
+static: install-golangci-lint
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l -d $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	golangci-lint run $$($(PACKAGE_DIRECTORIES))
