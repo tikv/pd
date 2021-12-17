@@ -521,9 +521,10 @@ func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 func coldItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
-	newItem.allowAdopt = true
 	if newItem.AntiCount <= 0 {
 		newItem.needDelete = true
+	}else{
+		newItem.allowAdopt = true
 	}
 }
 
