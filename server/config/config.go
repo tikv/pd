@@ -267,7 +267,7 @@ var (
 	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
 	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
 	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
-	// ServiceSelfProtectionConfig is used for self protection mechanism
+	// DefaultServiceSelfProtectionConfig is used for self protection mechanism
 	DefaultServiceSelfProtectionConfig = []ServiceSelfprotectionConfig{}
 	// GRPCMethodServiceNames is used to get logic service name of the gRPC service
 	GRPCMethodServiceNames = map[string]string{}
@@ -1411,10 +1411,13 @@ type SecurityConfig struct {
 	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
 }
 
+// ComponenetRateLimits indicates the config of component granularity for rate limit
 type ComponenetRateLimits struct {
 	Components string `toml:"components"`
 	Limit      int    `toml:"limit"`
 }
+
+// ServiceSelfprotectionConfig is service granularity config
 type ServiceSelfprotectionConfig struct {
 	ServiceName           string                 `toml:"service-name"`
 	TotalRateLimit        int                    `toml:"total-rate-limit"`
@@ -1422,7 +1425,13 @@ type ServiceSelfprotectionConfig struct {
 	ComponentsRateLimits  []ComponenetRateLimits `toml:"components-rate-limits"`
 	AuditLabel            []string               `toml:"audit-label"`
 }
+
+// SelfProtectionConfig is used for self-protection
 type SelfProtectionConfig struct {
+	// EnableUseDefault has three kinds of value
+	// 0 indicates that dafault config has higher priority than config defined by users
+	// 1 indicates that config defined by users has higher priority than dafault
+	// 2 indicates that only use config defined by users
 	EnableUseDefault            int                           `toml:"enable-use-default"`
 	ServiceSelfprotectionConfig []ServiceSelfprotectionConfig `toml:"service-selfprotection-config"`
 }

@@ -83,6 +83,7 @@ type selfProtector struct {
 	s *server.Server
 }
 
+// NewSelfProtector handle self-protection
 func NewSelfProtector(s *server.Server) negroni.Handler {
 	return &selfProtector{s: s}
 }

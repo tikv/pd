@@ -143,7 +143,7 @@ func GetIPAddrFromGRPCContext(ctx context.Context) string {
 	return ip
 }
 
-// GetPeerAddrFromGRPCContext return gRPC client real IP if gateway or proxy put real IP In
+// GetRealIPAddrFromGRPCContext return gRPC client real IP if gateway or proxy put real IP In
 func GetRealIPAddrFromGRPCContext(ctx context.Context) (string, bool) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {

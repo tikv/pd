@@ -1,4 +1,4 @@
-// Copyright 2016 TiKV Project Authors.
+// Copyright 2021 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,9 @@ import (
 )
 
 const (
-	LoggerLabelLog       string = "log"
+	//LoggerLabelLog means AuditLogger will restore info in local file system
+	LoggerLabelLog string = "log"
+	// LoggerLabelMonitored means AuditLogger will report info to promethus
 	LoggerLabelMonitored string = "Monitored"
 )
 
@@ -136,7 +138,7 @@ func (h *SelfProtectionHandler) SelfProtectionHandleHTTP(req *http.Request) bool
 }
 
 // SelfProtectionHandleGRPC is used to handle gRPC self protection
-func (h *SelfProtectionHandler) SelfProtectionHandleGRPC(fullMethod string, ctx context.Context) bool {
+func (h *SelfProtectionHandler) SelfProtectionHandleGRPC(ctx context.Context, fullMethod string) bool {
 	serviceName, foundName := h.GetGRPCServiceName(fullMethod)
 	if !foundName {
 		return true
@@ -216,7 +218,7 @@ func GetLogInfoFromHTTP(req *http.Request, logInfo *LogInfo) {
 	req.Body = io.NopCloser(bytes.NewBuffer(buf))
 }
 
-// GetLogInfoFromHTTP return LogInfo from Context
+// GetLogInfoFromGRPC return LogInfo from Context
 func GetLogInfoFromGRPC(ctx context.Context, logInfo *LogInfo) {
 	// Get IP
 	logInfo.IP = apiutil.GetIPAddrFromGRPCContext(ctx)
@@ -364,7 +366,7 @@ func (logger *AuditLogger) Log(info *LogInfo) {
 // UnaryServerInterceptor returns a gRPC stream server interceptor to handle self protection in gRPC unary service
 func (h *SelfProtectionHandler) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return grpc.UnaryServerInterceptor(func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-		if h.SelfProtectionHandleGRPC(info.FullMethod, ctx) {
+		if h.SelfProtectionHandleGRPC(ctx, info.FullMethod) {
 			return nil, status.Errorf(codes.ResourceExhausted, "%s is rejected by grpc_ratelimit middleware, please retry later.", info.FullMethod)
 		}
 		return handler(ctx, req)
@@ -374,7 +376,7 @@ func (h *SelfProtectionHandler) UnaryServerInterceptor() grpc.UnaryServerInterce
 // StreamServerInterceptor returns a gRPC stream server interceptor to handle self protection in gRPC stream service
 func (h *SelfProtectionHandler) StreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if h.SelfProtectionHandleGRPC(info.FullMethod, stream.Context()) {
+		if h.SelfProtectionHandleGRPC(stream.Context(), info.FullMethod) {
 			return status.Errorf(codes.ResourceExhausted, "%s is rejected by grpc_ratelimit middleware, please retry later.", info.FullMethod)
 		}
 		return handler(srv, stream)
