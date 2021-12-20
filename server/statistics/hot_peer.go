@@ -104,6 +104,11 @@ type HotPeerStat struct {
 	thresholds             [dimLen]float64
 	peers                  []uint64
 	lastTransferLeaderTime time.Time
+	// source represents the statistics item source, such as directly, inherit, adopt.
+	source sourceKind
+	// If the item in storeA is just adopted from storeB,
+	// then other store, such as storeC, will be forbidden to adopt from storeA until the item in storeA is hot.
+	allowAdopt bool
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -136,12 +141,15 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Float64("key-rate", stat.GetKeyRate()),
 		zap.Float64("key-rate-instant", stat.KeyRate),
 		zap.Float64("key-rate-threshold", stat.thresholds[keyDim]),
+		zap.Bool("is-leader", stat.isLeader),
+		zap.String("type", stat.Kind.String()),
 		zap.Int("hot-degree", stat.HotDegree),
 		zap.Int("hot-anti-count", stat.AntiCount),
-		zap.Bool("just-transfer-leader", stat.justTransferLeader),
-		zap.Bool("is-leader", stat.isLeader),
+		zap.Duration("sum-interval", stat.getIntervalSum()),
 		zap.Bool("need-delete", stat.IsNeedDelete()),
-		zap.String("type", stat.Kind.String()),
+		zap.String("source", stat.source.String()),
+		zap.Bool("allow-adopt", stat.allowAdopt),
+		zap.Bool("just-transfer-leader", stat.justTransferLeader),
 		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
 }
 
@@ -204,4 +212,11 @@ func (stat *HotPeerStat) isFullAndHot() bool {
 func (stat *HotPeerStat) clearLastAverage() {
 	stat.rollingByteRate.clearLastAverage()
 	stat.rollingKeyRate.clearLastAverage()
+}
+
+func (stat *HotPeerStat) getIntervalSum() time.Duration {
+	if stat == nil || stat.rollingByteRate == nil {
+		return 0
+	}
+	return stat.rollingByteRate.LastAverage.GetIntervalSum()
 }

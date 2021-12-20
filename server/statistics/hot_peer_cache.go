@@ -178,26 +178,26 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 			interval:           interval,
 			peers:              peers,
 			thresholds:         thresholds,
+			source:             direct,
 		}
-
-		source := direct
+		// todo diff with branch
 		if oldItem == nil {
 			if tmpItem != nil { // use the tmpItem cached from the store where this region was in before
-				source = inherit
+				newItem.source = inherit
 				oldItem = tmpItem
 				tmpItem = nil
 			} else { // new item is new peer after adding replica
 				for _, storeID := range storeIDs {
 					oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
-					if oldItem != nil {
-						source = adopt
+					if oldItem != nil && oldItem.allowAdopt {
+						newItem.source = adopt
 						break
 					}
 				}
 			}
 		}
 
-		newItem = f.updateHotPeerStat(newItem, oldItem, source, bytes, keys, time.Duration(interval)*time.Second)
+		newItem = f.updateHotPeerStat(newItem, oldItem, bytes, keys, time.Duration(interval)*time.Second)
 		if newItem != nil {
 			ret = append(ret, newItem)
 		}
@@ -375,7 +375,7 @@ func (f *hotPeerCache) getDefaultTimeMedian() *movingaverage.TimeMedian {
 	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, RegionHeartBeatReportInterval*time.Second)
 }
 
-func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, source sourceKind, bytes, keys float64, interval time.Duration) *HotPeerStat {
+func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, keys float64, interval time.Duration) *HotPeerStat {
 	if newItem.needDelete {
 		return newItem
 	}
@@ -403,12 +403,14 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, source s
 		return newItem
 	}
 
-	if source == adopt {
+	if newItem.source == adopt {
 		newItem.rollingByteRate = oldItem.rollingByteRate.Clone()
 		newItem.rollingKeyRate = oldItem.rollingKeyRate.Clone()
+		newItem.allowAdopt = false
 	} else {
 		newItem.rollingByteRate = oldItem.rollingByteRate
 		newItem.rollingKeyRate = oldItem.rollingKeyRate
+		newItem.allowAdopt = oldItem.allowAdopt
 	}
 
 	if newItem.justTransferLeader {
