@@ -164,7 +164,7 @@ type Config struct {
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
 
-	SelfProtectionConfig SelfProtectionConfig `toml:"SelfProtectionConfig"`
+	SelfProtectionConfig SelfProtectionConfig `toml:"self-protection-config"`
 }
 
 // NewConfig creates a new config.
@@ -267,10 +267,9 @@ var (
 	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
 	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
 	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
-
+	// ServiceSelfProtectionConfig is used for self protection mechanism
 	DefaultServiceSelfProtectionConfig = []ServiceSelfprotectionConfig{}
-
-	HTTPAPIServiceNames    = map[string]string{}
+	// GRPCMethodServiceNames is used to get logic service name of the gRPC service
 	GRPCMethodServiceNames = map[string]string{}
 )
 

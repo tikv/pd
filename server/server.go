@@ -349,16 +349,19 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	return nil
 }
 
+// NewSelfProtectionHandler returns a new SelfProtectionHandler with config
 func NewSelfProtectionHandler(server *Server) *middleware.SelfProtectionHandler {
 	handler := &middleware.SelfProtectionHandler{
 		GrpcServiceNames: config.GRPCMethodServiceNames,
 		ServiceHandlers:  make(map[string]*middleware.ServiceSelfProtectionHandler),
 	}
-	UpdateServiceHandlers(handler, server)
+	updateServiceHandlers(handler, server)
 	return handler
 }
 
-func UpdateServiceHandlers(h *middleware.SelfProtectionHandler, server *Server) {
+// updateServiceHandlers update ServiceHandlers
+// it will make a new map and merge user-defined handlers and dafault handlers with different priority according to enableUseDefault
+func updateServiceHandlers(h *middleware.SelfProtectionHandler, server *Server) {
 	if server == nil {
 		return
 	}
@@ -373,26 +376,10 @@ func UpdateServiceHandlers(h *middleware.SelfProtectionHandler, server *Server) 
 		}
 		// if enableUseDefault is 1, config defined by users has higher priority than dafault
 	} else if enableUseDefault == 1 {
-		mergeSelfProtectionConfig(h.ServiceHandlers, server.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig, config.DefaultServiceSelfProtectionConfig)
+		middleware.MergeSelfProtectionConfig(h.ServiceHandlers, server.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig, config.DefaultServiceSelfProtectionConfig)
 		// if enableUseDefault is 0, dafault config has higher priority than config defined by users
 	} else {
-		mergeSelfProtectionConfig(h.ServiceHandlers, config.DefaultServiceSelfProtectionConfig, server.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig)
-	}
-}
-
-func mergeSelfProtectionConfig(handlers map[string]*middleware.ServiceSelfProtectionHandler, highPriorityConfigs []config.ServiceSelfprotectionConfig, lowPriorityConfigs []config.ServiceSelfprotectionConfig) {
-	for i := range highPriorityConfigs {
-		serviceName := highPriorityConfigs[i].ServiceName
-		serviceSelfProtectionHandler := middleware.NewServiceSelfProtectionHandler(&highPriorityConfigs[i])
-		handlers[serviceName] = serviceSelfProtectionHandler
-	}
-	for i := range lowPriorityConfigs {
-		serviceName := lowPriorityConfigs[i].ServiceName
-		if _, find := handlers[serviceName]; find {
-			continue
-		}
-		serviceSelfProtectionHandler := middleware.NewServiceSelfProtectionHandler(&lowPriorityConfigs[i])
-		handlers[serviceName] = serviceSelfProtectionHandler
+		middleware.MergeSelfProtectionConfig(h.ServiceHandlers, config.DefaultServiceSelfProtectionConfig, server.GetConfig().SelfProtectionConfig.ServiceSelfprotectionConfig)
 	}
 }
 

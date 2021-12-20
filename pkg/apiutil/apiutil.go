@@ -143,6 +143,7 @@ func GetIPAddrFromGRPCContext(ctx context.Context) string {
 	return ip
 }
 
+// GetPeerAddrFromGRPCContext return gRPC client real IP if gateway or proxy put real IP In
 func GetRealIPAddrFromGRPCContext(ctx context.Context) (string, bool) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -155,6 +156,7 @@ func GetRealIPAddrFromGRPCContext(ctx context.Context) (string, bool) {
 	return realIPs[0], true
 }
 
+// GetPeerAddrFromGRPCContext return gRPC client IP which may be a proxy IP from peer info
 func GetPeerAddrFromGRPCContext(ctx context.Context) string {
 	var addr string
 	if pr, ok := peer.FromContext(ctx); ok {
