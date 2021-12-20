@@ -36,7 +36,7 @@ import (
 )
 
 const (
-	//LoggerLabelLog means AuditLogger will restore info in local file system
+	// LoggerLabelLog means AuditLogger will restore info in local file system
 	LoggerLabelLog string = "log"
 	// LoggerLabelMonitored means AuditLogger will report info to promethus
 	LoggerLabelMonitored string = "Monitored"
