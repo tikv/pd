@@ -396,10 +396,10 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 	for _, checker := range checkers {
 		cache := NewHotPeerCache(Write)
 		region := buildRegion(Write, 3, 5)
-		for i := 1; i <= 200; i++ { //prepare
+		// prepare
+		for i := 1; i <= 200; i++ {
 			checker(c, cache, region)
 		}
-
 		// make the interval sum of peers are different
 		checkAndUpdateSkipOne(c, cache, region)
 		var intervalSums []int
@@ -410,7 +410,7 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 		c.Assert(intervalSums, HasLen, 3)
 		c.Assert(intervalSums[0], Not(Equals), intervalSums[1])
 		c.Assert(intervalSums[0], Not(Equals), intervalSums[2])
-
+		// check whether cold cache is cleared
 		var isClear bool
 		region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
 		for i := 1; i <= 200; i++ {
@@ -441,20 +441,18 @@ func (t *testHotPeerCache) TestRemoveFromCacheRandom(c *C) {
 					_, region = schedule(c, addReplica, region, target)
 					target = tmp
 				}
-
+				// prepare with random move peer to make the interval sum of peers are different
 				for i := 1; i <= 200; i++ {
-					// random move peer to make the interval sum of peers are different
 					if i%5 == 0 {
 						movePeer()
 					}
 					checker(c, cache, region)
 				}
 				c.Assert(cache.storesOfRegion[region.GetID()], HasLen, peerCount)
-
+				// check whether cold cache is cleared
 				var isClear bool
 				region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
 				for i := 1; i <= 200; i++ {
-					// random move peer to make the interval sum of peers are different
 					if i%5 == 0 {
 						movePeer()
 					}
