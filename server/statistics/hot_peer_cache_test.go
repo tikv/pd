@@ -15,6 +15,7 @@ package statistics
 
 import (
 	"math/rand"
+	"sort"
 	"testing"
 	"time"
 
@@ -117,8 +118,12 @@ func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect .
 }
 
 func checkAndUpdateSkipOne(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) []*HotPeerStat {
-	peer:=region.GetPeers()
-	res := cache.CheckRegionFlow(region.Clone(core.SetPeers(peer[1:])))
+	peers := region.GetPeers()
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(peers), func(i, j int) {
+		peers[i], peers[j] = peers[j], peers[i]
+	})
+	res := cache.CheckRegionFlow(region.Clone(core.SetPeers(peers[1:])))
 	if len(expect) != 0 {
 		c.Assert(res, HasLen, expect[0])
 	}
@@ -140,6 +145,17 @@ func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind FlowKind,
 		c.Assert(item, NotNil)
 		c.Assert(item.isNew, Equals, !isHit)
 	}
+}
+
+func checkIntervalSum(c *C, cache *hotPeerCache, region *core.RegionInfo, peerCount int) {
+	var intervalSums []int
+	for _, peer := range region.GetPeers() {
+		oldItem := cache.getOldHotPeerStat(region.GetID(), peer.StoreId)
+		intervalSums = append(intervalSums, int(oldItem.getIntervalSum()))
+	}
+	c.Assert(intervalSums, HasLen, peerCount)
+	sort.Ints(intervalSums)
+	c.Assert(intervalSums[0] != intervalSums[peerCount-1], IsTrue)
 }
 
 func checkNeedDelete(c *C, ret []*HotPeerStat, storeID uint64) {
@@ -344,23 +360,16 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 }
 
 func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
-
+	peerCount := 3
 	cache := NewHotStoresStats(WriteFlow)
-	region := buildRegion(WriteFlow, 3, 5)
+	region := buildRegion(WriteFlow, peerCount, 5)
 	// prepare
 	for i := 1; i <= 200; i++ {
 		checkAndUpdate(c, cache, region)
 	}
 	// make the interval sum of peers are different
 	checkAndUpdateSkipOne(c, cache, region)
-	var intervalSums []int
-	for _, peer := range region.GetPeers() {
-		oldItem := cache.getOldHotPeerStat(region.GetID(), peer.StoreId)
-		intervalSums = append(intervalSums, int(oldItem.getIntervalSum()))
-	}
-	c.Assert(intervalSums, HasLen, 3)
-	c.Assert(intervalSums[0], Not(Equals), intervalSums[1])
-	c.Assert(intervalSums[0], Not(Equals), intervalSums[2])
+	checkIntervalSum(c, cache, region, peerCount)
 	// check whether cold cache is cleared
 	var isClear bool
 	region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0))
@@ -396,6 +405,9 @@ func (t *testHotPeerCache) TestRemoveFromCacheRandom(c *C) {
 					movePeer()
 				}
 				checkAndUpdate(c, cache, region)
+			}
+			if interval < RegionHeartBeatReportInterval {
+				checkIntervalSum(c, cache, region, peerCount)
 			}
 			c.Assert(cache.storesOfRegion[region.GetID()], HasLen, peerCount)
 			// check whether cold cache is cleared

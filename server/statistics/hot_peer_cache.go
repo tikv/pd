@@ -182,7 +182,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 		}
 		// todo diff with branch
 		if oldItem == nil {
-			if tmpItem != nil { // use the tmpItem cached from the store where this region was in before
+			if tmpItem != nil && tmpItem.AntiCount > 0 { // use the tmpItem cached from the store where this region was in before
 				newItem.source = inherit
 				oldItem = tmpItem
 				tmpItem = nil
@@ -391,6 +391,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		if interval.Seconds() >= RegionHeartBeatReportInterval {
 			newItem.HotDegree = 1
 			newItem.AntiCount = hotRegionAntiCount
+			newItem.allowAdopt = true
 		}
 		newItem.isNew = true
 		newItem.rollingByteRate = newDimStat(byteDim)
@@ -434,6 +435,7 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		if f.isOldColdPeer(oldItem, newItem.StoreID) {
 			if newItem.isFullAndHot() {
 				newItem.HotDegree = 1
+				newItem.allowAdopt = true
 				newItem.AntiCount = hotRegionAntiCount
 			} else {
 				newItem.needDelete = true
@@ -442,11 +444,14 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 			if newItem.isFullAndHot() {
 				newItem.HotDegree = oldItem.HotDegree + 1
 				newItem.AntiCount = hotRegionAntiCount
+				newItem.allowAdopt = true
 			} else {
 				newItem.HotDegree = oldItem.HotDegree - 1
 				newItem.AntiCount = oldItem.AntiCount - 1
 				if newItem.AntiCount <= 0 {
 					newItem.needDelete = true
+				} else {
+					newItem.allowAdopt = true
 				}
 			}
 		}
