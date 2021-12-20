@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/core"
+	"go.uber.org/zap"
 )
 
 const (
@@ -203,6 +204,12 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 		}
 	}
 
+	log.Debug("region heartbeat info",
+		zap.String("type", f.kind.String()),
+		zap.Uint64("region", region.GetID()),
+		zap.Uint64("leader", region.GetLeader().GetStoreId()),
+		zap.Uint64s("peers", peers),
+	)
 	return ret
 }
 
