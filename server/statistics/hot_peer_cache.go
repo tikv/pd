@@ -523,7 +523,7 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 	newItem.AntiCount = oldItem.AntiCount - 1
 	if newItem.AntiCount <= 0 {
 		newItem.needDelete = true
-	}else{
+	} else {
 		newItem.allowAdopt = true
 	}
 }

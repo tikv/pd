@@ -95,7 +95,7 @@ func testCache(c *C, t *testCacheCase) {
 		Write: 3, // all peers
 	}
 	cache := NewHotPeerCache(t.kind)
-	region := buildRegion(t.kind)
+	region := buildRegion(t.kind, 3, 60)
 	checkAndUpdate(c, cache, region, defaultSize[t.kind])
 	checkHit(c, cache, region, t.kind, false) // all peers are new
 
@@ -154,6 +154,14 @@ func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect .
 // This order is also similar to the previous version. By the way the order in now version is random.
 func checkAndUpdateWithOrdering(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
 	res = checkFlow(cache, region, orderingPeers(cache, region))
+	if len(expect) != 0 {
+		c.Assert(res, HasLen, expect[0])
+	}
+	return updateFlow(cache, res)
+}
+
+func checkAndUpdateSkipOne(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
+	res = checkFlow(cache, region, region.GetPeers()[1:])
 	if len(expect) != 0 {
 		c.Assert(res, HasLen, expect[0])
 	}
@@ -230,29 +238,39 @@ func pickFollower(region *core.RegionInfo) (index int, peer *metapb.Peer) {
 	return dst, meta.Peers[dst]
 }
 
-func buildRegion(kind RWType) *core.RegionInfo {
-	const interval = uint64(60)
-
-	peer1 := &metapb.Peer{Id: 1, StoreId: 1}
-	peer2 := &metapb.Peer{Id: 2, StoreId: 2}
-	peer3 := &metapb.Peer{Id: 3, StoreId: 3}
-
+func buildRegion(kind RWType, peerCount int, interval uint64) *core.RegionInfo {
+	peers := newPeers(peerCount,
+		func(i int) uint64 { return uint64(10000 + i) },
+		func(i int) uint64 { return uint64(i) })
 	meta := &metapb.Region{
 		Id:          1000,
-		Peers:       []*metapb.Peer{peer1, peer2, peer3},
+		Peers:       peers,
 		StartKey:    []byte(""),
 		EndKey:      []byte(""),
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
 	}
+
 	leader := meta.Peers[rand.Intn(3)]
 
 	switch kind {
 	case Read:
-		return core.NewRegionInfo(meta, leader, core.SetReportInterval(interval),
-			core.SetReadBytes(interval*100*1024))
+		return core.NewRegionInfo(
+			meta,
+			leader,
+			core.SetReportInterval(interval),
+			core.SetReadBytes(10*1024*1024*interval),
+			core.SetReadKeys(10*1024*1024*interval),
+			core.SetReadQuery(1024*interval),
+		)
 	case Write:
-		return core.NewRegionInfo(meta, leader, core.SetReportInterval(interval),
-			core.SetWrittenBytes(interval*100*1024))
+		return core.NewRegionInfo(
+			meta,
+			leader,
+			core.SetReportInterval(interval),
+			core.SetWrittenBytes(10*1024*1024*interval),
+			core.SetWrittenKeys(10*1024*1024*interval),
+			core.SetWrittenQuery(1024*interval),
+		)
 	default:
 		return nil
 	}
@@ -374,6 +392,39 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 }
 
 func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
+	checkers := []check{checkAndUpdate, checkAndUpdateWithOrdering}
+	for _, checker := range checkers {
+		cache := NewHotPeerCache(Write)
+		region := buildRegion(Write, 3, 5)
+		for i := 1; i <= 200; i++ { //prepare
+			checker(c, cache, region)
+		}
+
+		// make the interval sum of peers are different
+		checkAndUpdateSkipOne(c, cache, region)
+		var intervalSums []int
+		for _, peer := range region.GetPeers() {
+			oldItem := cache.getOldHotPeerStat(region.GetID(), peer.StoreId)
+			intervalSums = append(intervalSums, int(oldItem.getIntervalSum()))
+		}
+		c.Assert(intervalSums, HasLen, 3)
+		c.Assert(intervalSums[0], Not(Equals), intervalSums[1])
+		c.Assert(intervalSums[0], Not(Equals), intervalSums[2])
+
+		var isClear bool
+		region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
+		for i := 1; i <= 200; i++ {
+			checker(c, cache, region)
+			if len(cache.storesOfRegion[region.GetID()]) == 0 {
+				isClear = true
+				break
+			}
+		}
+		c.Assert(isClear, IsTrue)
+	}
+}
+
+func (t *testHotPeerCache) TestRemoveFromCacheRandom(c *C) {
 	peerCounts := []int{3, 5}
 	intervals := []uint64{120, 60, 10, 5}
 	checkers := []check{checkAndUpdate, checkAndUpdateWithOrdering}
@@ -381,24 +432,7 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 		for _, interval := range intervals {
 			for _, checker := range checkers {
 				cache := NewHotPeerCache(Write)
-				peers := newPeers(peerCount,
-					func(i int) uint64 { return uint64(10000 + i) },
-					func(i int) uint64 { return uint64(i) })
-				meta := &metapb.Region{
-					Id:          1000,
-					Peers:       peers,
-					StartKey:    []byte(""),
-					EndKey:      []byte(""),
-					RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
-				}
-				region := core.NewRegionInfo(
-					meta,
-					peers[0],
-					core.SetReportInterval(interval),
-					core.SetWrittenBytes(10*1024*1024*interval),
-					core.SetWrittenKeys(10*1024*1024*interval),
-					core.SetWrittenQuery(1024*interval),
-				)
+				region := buildRegion(Write, peerCount, interval)
 
 				target := uint64(10)
 				movePeer := func() {
