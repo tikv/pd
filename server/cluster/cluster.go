@@ -632,7 +632,6 @@ var regionGuide = core.GenerateRegionGuideFunc(true)
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
-	storage := c.storage
 	coreCluster := c.core
 	hotStat := c.hotStat
 	c.RUnlock()
@@ -664,13 +663,62 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		time.Sleep(500 * time.Millisecond)
 	})
 
+	return c.saveRegionLock(isNew, saveKV, saveCache, needSync, region, origin)
+}
+
+// processRegionHeartbeatResponse updates the region information thought region split.
+// It will update peer that not exist in the cache, and add new peers that join in.
+func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err error) {
+	if err = checkSplitRegions(regions); err != nil {
+		return err
+	}
+	c.RLock()
+	coreCluster := c.core
+	c.RUnlock()
+	for i, v := range regions {
+		if v.Peers == nil {
+			err = errors.Wrap(err, "region peer is nil")
+			continue
+		}
+		region := core.NewRegionInfo(v, v.Peers[0])
+		origin, perr := coreCluster.PreCheckPutRegion(region)
+		if perr != nil {
+			err = errors.Wrap(err, perr.Error())
+			continue
+		}
+		update, isNew, needSync := false, false, true
+		// The region that is not the rightmost element should be latest, it should update if origin is nil.
+		if origin == nil {
+			update = true
+		} else if i == len(regions)-1 {
+			isNew = false
+			r, o := region.GetRegionEpoch(), origin.GetRegionEpoch()
+			if r.GetVersion() > o.GetVersion() || r.GetConfVer() > o.GetConfVer() {
+				update = true
+				needSync = false
+			}
+		}
+		if update {
+			if e := c.saveRegionLock(isNew, true, true, needSync, region, origin); e != nil {
+				err = errors.Wrap(err, e.Error())
+			}
+		}
+	}
+	return err
+}
+
+func (c *RaftCluster) saveRegionLock(isNew, saveKV, saveCache, needSync bool, region *core.RegionInfo, origin *core.RegionInfo) error {
+	c.RLock()
+	changedRegions := c.changedRegions
+	c.RUnlock()
 	var overlaps []*core.RegionInfo
 	c.Lock()
+	// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
+	// check its validation again here.
+	//
+	// However it can't solve the race condition of concurrent heartbeats from the same region.
+
 	if saveCache {
-		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
-		// check its validation again here.
-		//
-		// However it can't solve the race condition of concurrent heartbeats from the same region.
 		if _, err := c.core.PreCheckPutRegion(region); err != nil {
 			c.Unlock()
 			return err
@@ -698,7 +746,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
-
 	if isNew {
 		c.prepareChecker.collect(region)
 	}
@@ -706,18 +753,14 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
-
-	changedRegions := c.changedRegions
-
 	c.Unlock()
-
-	if storage != nil {
+	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.
 		// Not successfully saved to storage is not fatal, it only leads to longer warm-up
 		// after restart. Here we only log the error then go on updating cache.
 		for _, item := range overlaps {
-			if err := storage.DeleteRegion(item.GetMeta()); err != nil {
+			if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
 				log.Error("failed to delete region from storage",
 					zap.Uint64("region-id", item.GetID()),
 					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
@@ -725,7 +768,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			}
 		}
 		if saveKV {
-			if err := storage.SaveRegion(region.GetMeta()); err != nil {
+			if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
 				log.Error("failed to save region to storage",
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
@@ -741,7 +784,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		default:
 		}
 	}
-
 	return nil
 }
 

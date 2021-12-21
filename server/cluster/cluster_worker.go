@@ -17,7 +17,6 @@ package cluster
 import (
 	"bytes"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -160,7 +159,7 @@ func (c *RaftCluster) checkSplitRegion(left *metapb.Region, right *metapb.Region
 	return errors.New("invalid split region")
 }
 
-func (c *RaftCluster) checkSplitRegions(regions []*metapb.Region) error {
+func checkSplitRegions(regions []*metapb.Region) error {
 	if len(regions) <= 1 {
 		return errors.New("invalid split region")
 	}
@@ -182,32 +181,14 @@ func (c *RaftCluster) checkSplitRegions(regions []*metapb.Region) error {
 func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
 	left := request.GetLeft()
 	right := request.GetRight()
-
-	err := c.checkSplitRegion(left, right)
-	if err != nil {
-		log.Warn("report split region is invalid",
-			logutil.ZapRedactStringer("left-region", core.RegionToHexMeta(left)),
-			logutil.ZapRedactStringer("right-region", core.RegionToHexMeta(right)),
+	if err := c.processRegionSpiltReport([]*metapb.Region{left, right}); err != nil {
+		log.Warn("report batch split region is invalid",
+			zap.Stringer("region-meta", core.RegionToHexMeta(right)),
 			errs.ZapError(err))
 		return nil, err
 	}
-
-	// Build origin region by using left and right.
-	originRegion := proto.Clone(right).(*metapb.Region)
-	originRegion.RegionEpoch = nil
-	originRegion.StartKey = left.GetStartKey()
-
-	for _, region := range []*metapb.Region{left, right} {
-		regionInfo := core.NewRegionInfo(region, nil)
-		if err = c.HandleRegionHeartbeat(regionInfo); err != nil {
-			log.Warn("region handler error",
-				zap.Stringer("region-meta", region),
-				errs.ZapError(err))
-		}
-	}
-
 	log.Info("region split, generate new region",
-		zap.Uint64("region-id", originRegion.GetId()),
+		zap.Uint64("region-id", right.GetId()),
 		logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(left)))
 	return &pdpb.ReportSplitResponse{}, nil
 }
@@ -215,28 +196,17 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 // HandleBatchReportSplit handles the batch report split request.
 func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
 	regions := request.GetRegions()
-
-	hrm := core.RegionsToHexMeta(regions)
-	err := c.checkSplitRegions(regions)
-	if err != nil {
+	total := len(regions) - 1
+	last := regions[total]
+	if err := c.processRegionSpiltReport(regions); err != nil {
 		log.Warn("report batch split region is invalid",
-			zap.Stringer("region-meta", hrm),
+			zap.Stringer("region-meta", core.RegionToHexMeta(last)),
 			errs.ZapError(err))
 		return nil, err
 	}
-	last := len(regions) - 1
-	originRegion := proto.Clone(regions[last]).(*metapb.Region)
 	log.Info("region batch split, generate new regions",
-		zap.Uint64("region-id", originRegion.GetId()),
-		zap.Stringer("origin", hrm),
-		zap.Int("total", last))
-	for _, region := range hrm {
-		regionInfo := core.NewRegionInfo(region, nil)
-		if err = c.HandleRegionHeartbeat(regionInfo); err != nil {
-			log.Warn("region handler error",
-				zap.Stringer("region-meta", region),
-				errs.ZapError(err))
-		}
-	}
+		zap.Uint64("region-id", last.Id),
+		zap.Stringer("origin-meta", core.RegionToHexMeta(last)),
+		zap.Int("total", total))
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
