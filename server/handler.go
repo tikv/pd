@@ -994,7 +994,8 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 			for _, peer := range meta.Peers {
 				if peer.StoreId == hotPeerStat.StoreID {
 					peerID = peer.Id
-					isLearner = peer.Role == metapb.PeerRole_Learner
+					isLearner = core.IsLearner(peer)
+					break
 				}
 			}
 			stat := core.HistoryHotRegion{
@@ -1003,15 +1004,15 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
 				PeerID:         peerID,
-				IsLeader:       meta.Id == region.GetLeader().Id,
+				IsLeader:       peerID == region.GetLeader().Id,
 				IsLearner:      isLearner,
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
 				KeyRate:        hotPeerStat.KeyRate,
 				QueryRate:      hotPeerStat.QueryRate,
-				StartKey:       meta.StartKey,
-				EndKey:         meta.EndKey,
-				EncryptionMeta: meta.EncryptionMeta,
+				StartKey:       string(region.GetStartKey()),
+				EndKey:         string(region.GetEndKey()),
+				EncryptionMeta: meta.GetEncryptionMeta(),
 				HotRegionType:  hotRegionType,
 			}
 			historyHotRegions = append(historyHotRegions, stat)
