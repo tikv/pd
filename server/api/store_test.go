@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tikv/pd/server/versioninfo"
+
 	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
@@ -32,7 +34,6 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 var _ = Suite(&testStoreSuite{})
@@ -182,7 +183,7 @@ func (s *testStoreSuite) TestStoreInfoGet(c *C) {
 			StatusAddress:  fmt.Sprintf("tikv%d", 1112),
 			GitHash:        "45ce5b9584d618bc777877bea77cb94f61b8410",
 			StartTimestamp: timeStamp,
-			DeployPath:     "/home/test",
+			DeployPath:     "/home/cabinfever/test",
 			LastHeartbeat:  timeStamp,
 		},
 	})
@@ -193,13 +194,13 @@ func (s *testStoreSuite) TestStoreInfoGet(c *C) {
 	err := readJSON(testDialClient, url, info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.StateName, Equals, metapb.StoreState_Offline.String())
-	c.Assert(info.Store.StoreID, Equals, uint64(1112))
+	c.Assert(info.Store.Id, Equals, uint64(1112))
 	c.Assert(info.Store.Address, Equals, "tikv1112")
 	c.Assert(info.Store.Version, Equals, versioninfo.MinSupportedVersion(versioninfo.Version5_0).String())
 	c.Assert(info.Store.StatusAddress, Equals, fmt.Sprintf("tikv%d", 1112))
 	c.Assert(info.Store.GitHash, Equals, "45ce5b9584d618bc777877bea77cb94f61b8410")
 	c.Assert(info.Store.StartTimestamp, Equals, timeStamp)
-	c.Assert(info.Store.DeployPath, Equals, "/home/test")
+	c.Assert(info.Store.DeployPath, Equals, "/home/cabinfever/test")
 	c.Assert(info.Store.LastHeartbeat, Equals, timeStamp)
 
 	resp, err := testDialClient.Get(url)
@@ -209,7 +210,6 @@ func (s *testStoreSuite) TestStoreInfoGet(c *C) {
 	c.Assert(err, IsNil)
 	str := string(b)
 	c.Assert(strings.Contains(str, "\"state\""), Equals, false)
-	s.cleanup()
 	s.SetUpSuite(c)
 }
 

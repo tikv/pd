@@ -130,7 +130,7 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	for _, store := range stores {
 		info := newStoreInfo(h.svr.GetScheduleConfig(), store)
 		s := trendStore{
-			ID:              info.Store.StoreID,
+			ID:              info.Store.Id,
 			Address:         info.Store.Address,
 			StateName:       info.Store.StateName,
 			Capacity:        uint64(info.Status.Capacity),
