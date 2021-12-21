@@ -210,7 +210,6 @@ func (s *testStoreSuite) TestStoreInfoGet(c *C) {
 	c.Assert(err, IsNil)
 	str := string(b)
 	c.Assert(strings.Contains(str, "\"state\""), Equals, false)
-	s.SetUpSuite(c)
 }
 
 func (s *testStoreSuite) TestStoreLabel(c *C) {
