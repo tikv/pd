@@ -205,7 +205,7 @@ func ReadStdin(r io.Reader) (input []string, err error) {
 	if err != nil {
 		return nil, err
 	}
-	if s := strings.TrimSpace(string(b)); s != "" {
+	if s := strings.TrimSpace(string(b)); len(s) > 0 {
 		input = strings.Split(s, " ")
 	}
 	return input, nil

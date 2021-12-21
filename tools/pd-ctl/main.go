@@ -53,6 +53,7 @@ func main() {
 		in, err := pdctl.ReadStdin(os.Stdin)
 		if err != nil {
 			fmt.Println(err)
+			return
 		}
 		inputs = in
 	}
