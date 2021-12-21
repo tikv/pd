@@ -217,6 +217,8 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 	} else if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", errs.ZapError(err))
+	} else {
+		log.Info("add scheduler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
 	}
 	return err
 }
@@ -229,6 +231,8 @@ func (h *Handler) RemoveScheduler(name string) error {
 	}
 	if err = c.RemoveScheduler(name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
+	} else {
+		log.Info("remove scheduler successfully", zap.String("scheduler-name", name))
 	}
 	return err
 }
@@ -246,6 +250,12 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 			log.Error("can not resume scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {
 			log.Error("can not pause scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
+		}
+	} else {
+		if t == 0 {
+			log.Info("resume scheduler successfully", zap.String("scheduler-name", name))
+		} else {
+			log.Info("pause scheduler successfully", zap.String("scheduler-name", name), zap.Int64("pause-seconds", t))
 		}
 	}
 	return err
@@ -984,7 +994,8 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 			for _, peer := range meta.Peers {
 				if peer.StoreId == hotPeerStat.StoreID {
 					peerID = peer.Id
-					isLearner = peer.Role == metapb.PeerRole_Learner
+					isLearner = core.IsLearner(peer)
+					break
 				}
 			}
 			stat := core.HistoryHotRegion{
@@ -993,15 +1004,15 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
 				PeerID:         peerID,
-				IsLeader:       meta.Id == region.GetLeader().Id,
+				IsLeader:       peerID == region.GetLeader().Id,
 				IsLearner:      isLearner,
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
 				KeyRate:        hotPeerStat.KeyRate,
 				QueryRate:      hotPeerStat.QueryRate,
-				StartKey:       meta.StartKey,
-				EndKey:         meta.EndKey,
-				EncryptionMeta: meta.EncryptionMeta,
+				StartKey:       string(region.GetStartKey()),
+				EndKey:         string(region.GetEndKey()),
+				EncryptionMeta: meta.GetEncryptionMeta(),
 				HotRegionType:  hotRegionType,
 			}
 			historyHotRegions = append(historyHotRegions, stat)

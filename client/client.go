@@ -46,6 +46,13 @@ type Region struct {
 	PendingPeers []*metapb.Peer
 }
 
+// GlobalConfigItem standard format of KV pair in GlobalConfig client
+type GlobalConfigItem struct {
+	Name  string
+	Value string
+	Error error
+}
+
 // Client is a PD (Placement Driver) client.
 // It should not be used after calling Close().
 type Client interface {
@@ -109,6 +116,13 @@ type Client interface {
 	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
+
+	// LoadGlobalConfig gets the global config from etcd
+	LoadGlobalConfig(ctx context.Context, names []string) ([]GlobalConfigItem, error)
+	// StoreGlobalConfig set the config from etcd
+	StoreGlobalConfig(ctx context.Context, items []GlobalConfigItem) error
+	// WatchGlobalConfig returns an stream with all global config and updates
+	WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem, error)
 	// UpdateOption updates the client option.
 	UpdateOption(option DynamicOption, value interface{}) error
 	// Close closes the client.
@@ -307,6 +321,8 @@ var (
 	errClosing = errors.New("[pd] closing")
 	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
 	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
+	// errGlobalConfigNotFound is returned when etcd does not contain the globalConfig item
+	errGlobalConfigNotFound = errors.New("[pd] global config not found")
 )
 
 // ClientOption configures client.
@@ -1744,4 +1760,77 @@ func trimHTTPPrefix(str string) string {
 	str = strings.TrimPrefix(str, "http://")
 	str = strings.TrimPrefix(str, "https://")
 	return str
+}
+
+func (c *client) LoadGlobalConfig(ctx context.Context, names []string) ([]GlobalConfigItem, error) {
+	resp, err := c.getClient().LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names})
+	if err != nil {
+		return nil, err
+	}
+	res := make([]GlobalConfigItem, len(resp.GetItems()))
+	for i, item := range resp.GetItems() {
+		cfg := GlobalConfigItem{Name: item.GetName()}
+		if item.Error != nil {
+			if item.Error.Type == pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND {
+				cfg.Error = errGlobalConfigNotFound
+			} else {
+				cfg.Error = errors.New("[pd]" + item.Error.Message)
+			}
+		} else {
+			cfg.Value = item.GetValue()
+		}
+		res[i] = cfg
+	}
+	return res, nil
+}
+
+func (c *client) StoreGlobalConfig(ctx context.Context, items []GlobalConfigItem) error {
+	resArr := make([]*pdpb.GlobalConfigItem, len(items))
+	for i, it := range items {
+		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value}
+	}
+	res, err := c.getClient().StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr})
+	if err != nil {
+		return err
+	}
+	resErr := res.GetError()
+	if resErr != nil {
+		return errors.Errorf("[pd]" + resErr.Message)
+	}
+	return err
+}
+
+func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem, error) {
+	globalConfigWatcherCh := make(chan []GlobalConfigItem, 16)
+	res, err := c.getClient().WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{})
+	if err != nil {
+		close(globalConfigWatcherCh)
+		return nil, err
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[pd] panic in client `WatchGlobalConfig`", zap.Any("error", r))
+				return
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				close(globalConfigWatcherCh)
+				return
+			default:
+				m, err := res.Recv()
+				if err != nil {
+					return
+				}
+				arr := make([]GlobalConfigItem, len(m.Changes))
+				for j, i := range m.Changes {
+					arr[j] = GlobalConfigItem{i.GetName(), i.GetValue(), nil}
+				}
+				globalConfigWatcherCh <- arr
+			}
+		}
+	}()
+	return globalConfigWatcherCh, err
 }

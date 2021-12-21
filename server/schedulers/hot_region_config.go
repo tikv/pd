@@ -80,6 +80,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
 		StrictPickingStore:     true,
 		EnableForTiFlash:       true,
+		ForbidRWType:           "none",
 	}
 	cfg.apply(defaultConfig)
 	return cfg
@@ -138,6 +139,8 @@ type hotRegionSchedulerConfig struct {
 
 	// Separately control whether to start hotspot scheduling for TiFlash
 	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
+	// forbid read or write scheduler, only for test
+	ForbidRWType string `json:"forbid-rw-type,omitempty"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
@@ -276,6 +279,12 @@ func (conf *hotRegionSchedulerConfig) IsStrictPickingStoreEnabled() bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.StrictPickingStore
+}
+
+func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw statistics.RWType) bool {
+	conf.RLock()
+	defer conf.RUnlock()
+	return rw.String() == conf.ForbidRWType
 }
 
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
