@@ -70,7 +70,7 @@ func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
 
 		InitialClusterState: embed.ClusterStateFlagNew,
 
-		LeaderLease:     1,
+		LeaderLease:     10,
 		TSOSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
 	}
 

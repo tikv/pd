@@ -1359,31 +1359,10 @@ func (s *Server) reloadConfigFromKV() error {
 	return nil
 }
 
-// ReplicateFileToAllMembers is used to synchronize state among all members.
+// ReplicateFileToMember is used to synchronize state to a member.
 // Each member will write `data` to a local file named `name`.
 // For security reason, data should be in JSON format.
-func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
-	members, err := s.GetMembers()
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for _, member := range members {
-		if err := s.replicateFileToMember(ctx, member, name, data); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if len(errs) == 0 {
-		return nil
-	}
-	// join all error messages
-	for _, e := range errs[1:] {
-		errs[0] = errors.Wrap(errs[0], e.Error())
-	}
-	return errs[0]
-}
-
-func (s *Server) replicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error {
+func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error {
 	clientUrls := member.GetClientUrls()
 	if len(clientUrls) == 0 {
 		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()))
@@ -1424,4 +1403,9 @@ func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) e
 		}
 	}
 	return nil
+}
+
+// SplitAndScatterRegions TODO
+func (s *Server) SplitAndScatterRegions(context context.Context, r *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
+	return nil, errors.New("no implemented")
 }

@@ -62,19 +62,19 @@ type HistoryHotRegions struct {
 // HistoryHotRegion wraps hot region info
 // it is storage format of hot_region_storage
 type HistoryHotRegion struct {
-	UpdateTime    int64   `json:"update_time,omitempty"`
-	RegionID      uint64  `json:"region_id,omitempty"`
-	PeerID        uint64  `json:"peer_id,omitempty"`
-	StoreID       uint64  `json:"store_id,omitempty"`
-	IsLeader      bool    `json:"is_leader,omitempty"`
-	IsLearner     bool    `json:"is_learner,omitempty"`
-	HotRegionType string  `json:"hot_region_type,omitempty"`
-	HotDegree     int64   `json:"hot_degree,omitempty"`
-	FlowBytes     float64 `json:"flow_bytes,omitempty"`
-	KeyRate       float64 `json:"key_rate,omitempty"`
-	QueryRate     float64 `json:"query_rate,omitempty"`
-	StartKey      []byte  `json:"start_key,omitempty"`
-	EndKey        []byte  `json:"end_key,omitempty"`
+	UpdateTime    int64   `json:"update_time"`
+	RegionID      uint64  `json:"region_id"`
+	PeerID        uint64  `json:"peer_id"`
+	StoreID       uint64  `json:"store_id"`
+	IsLeader      bool    `json:"is_leader"`
+	IsLearner     bool    `json:"is_learner"`
+	HotRegionType string  `json:"hot_region_type"`
+	HotDegree     int64   `json:"hot_degree"`
+	FlowBytes     float64 `json:"flow_bytes"`
+	KeyRate       float64 `json:"key_rate"`
+	QueryRate     float64 `json:"query_rate"`
+	StartKey      string  `json:"start_key"`
+	EndKey        string  `json:"end_key"`
 	// Encryption metadata for start_key and end_key. encryption_meta.iv is IV for start_key.
 	// IV for end_key is calculated from (encryption_meta.iv + len(start_key)).
 	// The field is only used by PD and should be ignored otherwise.
@@ -254,16 +254,16 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 	for i := range historyHotRegions {
 		region := &metapb.Region{
 			Id:             historyHotRegions[i].RegionID,
-			StartKey:       historyHotRegions[i].StartKey,
-			EndKey:         historyHotRegions[i].EndKey,
+			StartKey:       HexRegionKey([]byte(historyHotRegions[i].StartKey)),
+			EndKey:         HexRegionKey([]byte(historyHotRegions[i].EndKey)),
 			EncryptionMeta: historyHotRegions[i].EncryptionMeta,
 		}
 		region, err := encryption.EncryptRegion(region, h.encryptionKeyManager)
 		if err != nil {
 			return err
 		}
-		historyHotRegions[i].StartKey = region.StartKey
-		historyHotRegions[i].EndKey = region.EndKey
+		historyHotRegions[i].StartKey = String(region.StartKey)
+		historyHotRegions[i].EndKey = String(region.EndKey)
 		key := HotRegionStorePath(hotRegionType, historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
 		h.batchHotInfo[key] = &historyHotRegions[i]
 	}
@@ -338,21 +338,20 @@ func (it *HotRegionStorageIterator) Next() (*HistoryHotRegion, error) {
 	}
 	region := &metapb.Region{
 		Id:             message.RegionID,
-		StartKey:       message.StartKey,
-		EndKey:         message.EndKey,
+		StartKey:       []byte(message.StartKey),
+		EndKey:         []byte(message.EndKey),
 		EncryptionMeta: message.EncryptionMeta,
 	}
 	if err := encryption.DecryptRegion(region, it.encryptionKeyManager); err != nil {
 		return nil, err
 	}
-	message.StartKey = region.StartKey
-	message.EndKey = region.EndKey
+	message.StartKey = String(region.StartKey)
+	message.EndKey = String(region.EndKey)
 	message.EncryptionMeta = nil
 	return &message, nil
 }
 
 // HotRegionStorePath generate hot region store key for HotRegionStorage.
-// TODO:find a better place to put this function.
 func HotRegionStorePath(hotRegionType string, updateTime int64, regionID uint64) string {
 	return path.Join(
 		"schedule",
