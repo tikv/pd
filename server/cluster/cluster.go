@@ -675,7 +675,10 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 	c.RLock()
 	coreCluster := c.core
 	c.RUnlock()
-	for i, v := range regions {
+	total := len(regions) - 1
+	for i := range regions {
+		// It should update rightmost because it will override by left .
+		v := regions[total-i]
 		if v.Peers == nil {
 			err = errors.Wrap(err, "region peer is nil")
 			continue
@@ -687,7 +690,8 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 			continue
 		}
 		update, isNew, needSync := false, false, true
-		// The region that is not the rightmost element should be latest, it should update if origin is nil.
+		// The region that is not the rightmost element should update if origin is nil.
+		// The rightmost region should update if epoch greater than origin.
 		if origin == nil {
 			update = true
 		} else if i == len(regions)-1 {
@@ -709,16 +713,15 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 
 func (c *RaftCluster) saveRegionLock(isNew, saveKV, saveCache, needSync bool, region *core.RegionInfo, origin *core.RegionInfo) error {
 	c.RLock()
-	changedRegions := c.changedRegions
+	storage := c.storage
 	c.RUnlock()
 	var overlaps []*core.RegionInfo
 	c.Lock()
-	// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
-	// check its validation again here.
-	//
-	// However it can't solve the race condition of concurrent heartbeats from the same region.
-
 	if saveCache {
+		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
+		// check its validation again here.
+		//
+		// However it can't solve the race condition of concurrent heartbeats from the same region.
 		if _, err := c.core.PreCheckPutRegion(region); err != nil {
 			c.Unlock()
 			return err
@@ -753,14 +756,15 @@ func (c *RaftCluster) saveRegionLock(isNew, saveKV, saveCache, needSync bool, re
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
+	changedRegions := c.changedRegions
 	c.Unlock()
-	if c.storage != nil {
+	if storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.
 		// Not successfully saved to storage is not fatal, it only leads to longer warm-up
 		// after restart. Here we only log the error then go on updating cache.
 		for _, item := range overlaps {
-			if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
+			if err := storage.DeleteRegion(item.GetMeta()); err != nil {
 				log.Error("failed to delete region from storage",
 					zap.Uint64("region-id", item.GetID()),
 					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
@@ -768,7 +772,7 @@ func (c *RaftCluster) saveRegionLock(isNew, saveKV, saveCache, needSync bool, re
 			}
 		}
 		if saveKV {
-			if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
+			if err := storage.SaveRegion(region.GetMeta()); err != nil {
 				log.Error("failed to save region to storage",
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
