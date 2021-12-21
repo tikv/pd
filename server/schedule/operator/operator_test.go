@@ -394,8 +394,14 @@ func (s *testOperatorSuite) TestSchedulerKind(c *C) {
 			op:     s.newTestOperator(1, OpAdmin|OpMerge|OpRegion),
 			expect: OpAdmin,
 		}, {
+			op:     s.newTestOperator(1, OpAdmin|OpPlaceholder|OpRegion),
+			expect: OpAdmin,
+		}, {
 			op:     s.newTestOperator(1, OpMerge|OpLeader|OpRegion),
 			expect: OpMerge,
+		}, {
+			op:     s.newTestOperator(1, OpPlaceholder|OpRegion),
+			expect: OpPlaceholder,
 		}, {
 			op:     s.newTestOperator(1, OpReplica|OpRegion),
 			expect: OpReplica,
@@ -417,6 +423,6 @@ func (s *testOperatorSuite) TestSchedulerKind(c *C) {
 		},
 	}
 	for _, v := range testdata {
-		c.Assert(v.op.SchedulerKind(), Equals, v.expect)
+		c.Assert(v.op.ScheduleKind(), Equals, v.expect)
 	}
 }

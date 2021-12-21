@@ -545,6 +545,12 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 		_ = op.Cancel()
 	}
 
+	// Do nothing for placeholder, it's only used by merge.
+	if op.Kind()&operator.OpPlaceholder == 1 {
+		oc.opRecords.Put(op)
+		return
+	}
+
 	switch st {
 	case operator.SUCCESS:
 		log.Info("operator finish",
@@ -768,7 +774,7 @@ func (oc *OperatorController) updateCounts(operators map[uint64]*operator.Operat
 		delete(oc.counts, k)
 	}
 	for _, op := range operators {
-		oc.counts[op.SchedulerKind()]++
+		oc.counts[op.ScheduleKind()]++
 	}
 }
 

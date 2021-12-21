@@ -192,7 +192,7 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
 			},
 			OpMerge | OpLeader | OpRegion,
-			OpPlaceholder,
+			OpPlaceholder | OpLeader | OpRegion,
 			false,
 			[]OpStep{
 				AddLearner{ToStore: 3},
