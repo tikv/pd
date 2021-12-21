@@ -149,6 +149,8 @@ type Server struct {
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
+	// SelfProtectionHandler is used for PD self-pretection
+	selfProtectionHandler *SelfProtectionHandler
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -238,6 +240,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	}
 
 	s.handler = newHandler(s)
+	s.selfProtectionHandler = NewSelfProtectionHandler(s)
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -666,6 +669,11 @@ func (s *Server) createRaftCluster() error {
 func (s *Server) stopRaftCluster() {
 	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
+}
+
+// GetAddr returns the server urls for clients.
+func (s *Server) GetSelfProtectionHandler() *SelfProtectionHandler {
+	return s.selfProtectionHandler
 }
 
 // GetAddr returns the server urls for clients.
