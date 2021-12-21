@@ -248,7 +248,14 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(ok, IsFalse)
 
 	// store delete <store_id> command
-	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
+	upStateNameList := map[string]bool{
+		metapb.StoreState_Up.String(): true,
+		"Disconnected":                true,
+		"Down":                        true,
+	}
+	// after omitting state, need to compare StateName
+	// down/disconnected/up are 0-State
+	c.Assert(upStateNameList[storeInfo.Store.StateName], Equals, true)
 	args = []string{"-u", pdAddr, "store", "delete", "1"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)

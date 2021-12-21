@@ -70,7 +70,6 @@ func NewMetaStore(store *metapb.Store, stateName string) *MetaStore {
 }
 
 // ConvertToMetapbStore convert to metapb.Store
-// For test only.
 func (m *MetaStore) ConvertToMetapbStore() *metapb.Store {
 	metapbStore := &metapb.Store{
 		Id:             m.StoreID,
