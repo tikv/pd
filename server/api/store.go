@@ -38,6 +38,7 @@ import (
 
 // MetaStore contains meta information about a store which needed to show.
 type MetaStore struct {
+	//nolint
 	StoreID             uint64               `json:"id,omitempty"`
 	Address             string               `json:"address,omitempty"`
 	Labels              []*metapb.StoreLabel `json:"labels,omitempty"`
