@@ -310,7 +310,7 @@ func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedu
 func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, infos []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
 	isleader := s.r.Int()%2 == 1
 	for _, detail := range infos {
-		srcStoreID := detail.Info.Store.GetID()
+		srcStoreID := detail.GetID()
 		if isleader {
 			if s.conf.has(srcStoreID) || len(detail.HotPeers) < 1 {
 				continue
