@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
@@ -77,6 +78,31 @@ func IsServiceAllowed(s *server.Server, group server.ServiceGroup) bool {
 	}
 
 	return false
+}
+
+type selfProtector struct {
+	s *server.Server
+}
+
+// NewSelfProtector handle self-protection
+func NewSelfProtector(s *server.Server) negroni.Handler {
+	return &selfProtector{s: s}
+}
+
+func (protector *selfProtector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	handler := protector.s.GetSelfProtectionHandler()
+
+	failpoint.Inject("addSelfProtectionHTTPHeader", func() {
+		w.Header().Add("self-protection", "ok")
+	})
+
+	if handler == nil || handler.HandleHTTPSelfProtection(r) {
+		next(w, r)
+	} else {
+		// current plan will only deny request when over the speed limit
+		// todo: support more HTTP Status code
+		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+	}
 }
 
 type redirector struct {
