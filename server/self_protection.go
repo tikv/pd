@@ -23,7 +23,7 @@ import (
 // SelfProtectionHandler is a framework to handle self protection mechanism
 // Self-protection granularity is a logical service
 type SelfProtectionHandler struct {
-	// ServiceHandlers is a map to store handler owned by different services
+	// ServiceHandlers a
 	ServiceHandlers map[string]*serviceSelfProtectionHandler
 }
 

@@ -22,7 +22,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/apiutil/serverapi"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -122,7 +121,10 @@ func (s *testSelfProtectorSuite) SetUpSuite(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
 	s.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3)
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
+		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
+	})
 	c.Assert(err, IsNil)
 	c.Assert(cluster.RunInitialServers(), IsNil)
 	c.Assert(cluster.WaitLeader(), Not(HasLen), 0)
@@ -137,9 +139,7 @@ func (s *testSelfProtectorSuite) TearDownSuite(c *C) {
 func (s *testSelfProtectorSuite) TestSelfProtect(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	header := mustRequestSuccess(c, leader.GetServer())
-	c.Assert(failpoint.Enable("github.com/tikv/pd/pkg/apiutil/serverapi/addSelfProtectionHTTPHeader", `return(true)`), IsNil)
 	c.Assert(header.Get("self-protection"), Equals, "ok")
-	c.Assert(failpoint.Disable("github.com/tikv/pd/pkg/apiutil/serverapi/addSelfProtectionHTTPHeader"), IsNil)
 }
 
 var _ = Suite(&testRedirectorSuite{})

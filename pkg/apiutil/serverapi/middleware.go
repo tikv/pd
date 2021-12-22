@@ -20,7 +20,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
@@ -92,15 +91,11 @@ func NewSelfProtector(s *server.Server) negroni.Handler {
 func (protector *selfProtector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	handler := protector.s.GetSelfProtectionHandler()
 	if handler == nil || handler.HandleHTTPSelfProtection(r) {
-
-		failpoint.Inject("addSelfProtectionHTTPHeader", func() {
-			w.Header().Add("self-protection", "ok")
-		})
+		// One line below is used for middleware testing only
+		w.Header().Add("self-protection", "ok")
 
 		next(w, r)
 	} else {
-		// current plan will only deny request when over the speed limit
-		// todo: support more HTTP Status code
 		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
 	}
 }

@@ -671,7 +671,7 @@ func (s *Server) stopRaftCluster() {
 	s.cluster.Stop()
 }
 
-// GetSelfProtectionHandler returns the selfProt ectionHandler
+// GetAddr returns the server urls for clients.
 func (s *Server) GetSelfProtectionHandler() *SelfProtectionHandler {
 	return s.selfProtectionHandler
 }
