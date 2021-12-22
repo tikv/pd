@@ -166,8 +166,9 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	left := request.GetLeft()
 	right := request.GetRight()
 	if err := c.processRegionSpiltReport([]*metapb.Region{left, right}); err != nil {
-		log.Warn("report batch split region is invalid",
-			zap.Stringer("region-meta", core.RegionToHexMeta(right)),
+		log.Warn("report split region is invalid",
+			logutil.ZapRedactStringer("left-region", core.RegionToHexMeta(left)),
+			logutil.ZapRedactStringer("right-region", core.RegionToHexMeta(right)),
 			errs.ZapError(err))
 		return nil, err
 	}
@@ -180,17 +181,19 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 // HandleBatchReportSplit handles the batch report split request.
 func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
 	regions := request.GetRegions()
-	total := len(regions) - 1
-	last := regions[total]
+	hrm := core.RegionsToHexMeta(regions)
 	if err := c.processRegionSpiltReport(regions); err != nil {
 		log.Warn("report batch split region is invalid",
-			zap.Stringer("region-meta", core.RegionToHexMeta(last)),
+			zap.Stringer("region-meta", hrm),
 			errs.ZapError(err))
 		return nil, err
 	}
+	total := len(regions) - 1
+	originRegion := regions[total]
+	hrm = core.RegionsToHexMeta(regions[:total])
 	log.Info("region batch split, generate new regions",
-		zap.Uint64("region-id", last.Id),
-		zap.Stringer("origin-meta", core.RegionToHexMeta(last)),
+		zap.Uint64("region-id", originRegion.GetId()),
+		zap.Stringer("origin", hrm),
 		zap.Int("total", total))
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
