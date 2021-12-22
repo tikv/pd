@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
@@ -127,15 +126,4 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	} else {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
-}
-
-// GetHTTPRouteName return mux route name registered for ServiceName
-func GetHTTPRouteName(req *http.Request) (string, bool) {
-	route := mux.CurrentRoute(req)
-	if route != nil {
-		if route.GetName() != "" {
-			return route.GetName(), true
-		}
-	}
-	return "", false
 }

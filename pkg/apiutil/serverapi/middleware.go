@@ -79,24 +79,6 @@ func IsServiceAllowed(s *server.Server, group server.ServiceGroup) bool {
 	return false
 }
 
-type selfProtector struct {
-	s *server.Server
-}
-
-// NewSelfProtector handle self-protection
-func NewSelfProtector(s *server.Server) negroni.Handler {
-	return &selfProtector{s: s}
-}
-
-func (protector *selfProtector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	handler := protector.s.GetSelfProtectionHandler()
-	if handler == nil || handler.HandleHTTPSelfProtection(r) {
-		next(w, r)
-	} else {
-		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
-	}
-}
-
 type redirector struct {
 	s *server.Server
 }

@@ -21,14 +21,11 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/gorilla/mux"
 	. "github.com/pingcap/check"
-	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/urfave/negroni"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/goleak"
@@ -237,43 +234,4 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	c.Assert(err, IsNil)
 	bodyString := string(bodyBytes)
 	c.Assert(bodyString, Equals, "Hello World\n")
-}
-
-func (s *testServerHandlerSuite) TestMuxRouterName(c *C) {
-	handler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
-		r := mux.NewRouter()
-		r.HandleFunc("/pd/apis/mok/v1/router", func(w http.ResponseWriter, r *http.Request) {
-			RouterName, _ := apiutil.GetHTTPRouteName(r)
-			fmt.Fprintln(w, RouterName)
-		}).Name("Mux Router")
-		info := ServiceGroup{
-			Name:    "mok",
-			Version: "v1",
-		}
-		router := mux.NewRouter()
-		router.PathPrefix("/pd").Handler(negroni.New(
-			negroni.Wrap(r)),
-		)
-		return router, info, nil
-	}
-	cfg := NewTestSingleConfig(checkerWithNilAssert(c))
-	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := CreateServer(ctx, cfg, handler)
-	c.Assert(err, IsNil)
-	defer func() {
-		cancel()
-		svr.Close()
-		testutil.CleanServer(svr.cfg.DataDir)
-	}()
-	err = svr.Run()
-	c.Assert(err, IsNil)
-	resp, err := http.Get(fmt.Sprintf("%s/pd/apis/mok/v1/router", svr.GetAddr()))
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	c.Assert(err, IsNil)
-	bodyBytes, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	c.Assert(err, IsNil)
-	bodyString := string(bodyBytes)
-	c.Assert(bodyString, Equals, "Mux Router\n")
 }
