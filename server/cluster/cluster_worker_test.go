@@ -18,7 +18,6 @@ import (
 	"context"
 
 	"github.com/gogo/protobuf/proto"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -63,24 +62,24 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	storage := core.NewStorage(kv.NewMemoryKV())
 	cluster := newTestRaftCluster(s.ctx, idAllc, opt, storage, core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
-	origin := &metapb.Region{Id: 2, StartKey: []byte("a"), EndKey: []byte("d")}
+	origin := &metapb.Region{Id: 2, StartKey: []byte("a"), EndKey: []byte("d"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}
 	origin.Peers = mockRegionPeer(idAllc, []uint64{1, 2, 3})
 
 	c.Assert(cluster.putRegion(core.NewRegionInfo(origin, nil)), IsNil)
 	old := cluster.GetRegion(2)
 	c.Assert(core.HexRegionKeyStr(old.GetStartKey()), Equals, core.HexRegionKeyStr(origin.GetStartKey()))
 
-	left := &metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("c"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}
-	right := &metapb.Region{Id: 2, StartKey: []byte("c"), EndKey: []byte("d"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}
+	left := &metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("c"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1}}
+	right := &metapb.Region{Id: 2, StartKey: []byte("c"), EndKey: []byte("d"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1}}
 	c.Assert(cluster.GetRegion(1), IsNil)
-	//case1: left endKey should equal to right startKey
+	// case1: left endKey should equal to right startKey
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: proto.Clone(right).(*metapb.Region), Right: proto.Clone(left).(*metapb.Region)})
 	c.Assert(err, NotNil)
 	c.Assert(cluster.GetRegion(1), IsNil)
 	old = cluster.GetRegion(2)
 	c.Assert(old, NotNil)
 	c.Assert(core.HexRegionKeyStr(old.GetStartKey()), Equals, core.HexRegionKeyStr(origin.GetStartKey()))
-	// case1: peer can not be nil
+	// case2: peer can not be nil
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: proto.Clone(left).(*metapb.Region), Right: proto.Clone(right).(*metapb.Region)})
 	c.Assert(err, IsNil)
 	c.Assert(cluster.GetRegion(1), IsNil)

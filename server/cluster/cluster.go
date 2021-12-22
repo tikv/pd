@@ -679,9 +679,10 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 	total := len(regions) - 1
 	for i := range regions {
 		// It should update rightmost because it will override by left.
-		v := regions[total-i]
-		if v.Peers == nil {
-			err = errors.Wrap(err, "region peer is nil")
+		index := total - i
+		v := regions[index]
+		if v.GetPeers() == nil {
+			err = errors.Wrap(err, fmt.Sprintf("region:%d peer is nil", v.GetId()))
 			continue
 		}
 		region := core.NewRegionInfo(v, v.Peers[0])
@@ -695,10 +696,10 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 		// The rightmost region should update if epoch greater than origin.
 		if origin == nil {
 			update = true
-		} else if i == total {
+		} else if index == total {
 			isNew = false
 			r, o := region.GetRegionEpoch(), origin.GetRegionEpoch()
-			if r.GetVersion() > o.GetVersion() || r.GetConfVer() > o.GetConfVer() {
+			if r.GetConfVer() > o.GetConfVer() {
 				update = true
 				needSync = false
 			}
@@ -755,10 +756,8 @@ func (c *RaftCluster) saveRegion(isNew, saveKV, saveCache, needSync bool, region
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
 	changedRegions := c.changedRegions
-	c.Unlock()
-	c.RLock()
 	storage := c.storage
-	c.RUnlock()
+	c.Unlock()
 	if storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.
