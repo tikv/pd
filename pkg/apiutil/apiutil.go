@@ -27,6 +27,14 @@ import (
 	"github.com/unrolled/render"
 )
 
+var (
+	// ComponentSignatureKey is used for http request header key
+	// to identify component signature
+	ComponentSignatureKey = "ti-component"
+	// ComponentAnonymousValue identify anonymous request source
+	ComponentAnonymousValue = "anonymous"
+)
+
 // DeferClose captures the error returned from closing (if an error occurs).
 // This is designed to be used in a defer statement.
 func DeferClose(c io.Closer, err *error) {
@@ -126,4 +134,26 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	} else {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
+}
+
+// GetComponentNameOnHTTP return component name from Request Header
+func GetComponentNameOnHTTP(r *http.Request) string {
+	componentName := r.Header.Get(ComponentSignatureKey)
+	if componentName == "" {
+		componentName = ComponentAnonymousValue
+	}
+	return componentName
+}
+
+type UserSignatureRoundTripper struct {
+	Proxied   http.RoundTripper
+	Component string
+}
+
+// RoundTrip is used to implement RoundTripper
+func (rt *UserSignatureRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	req.Header.Add(ComponentSignatureKey, rt.Component)
+	// Send the request, get the response and the error
+	resp, err = rt.Proxied.RoundTrip(req)
+	return
 }

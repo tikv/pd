@@ -25,7 +25,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
-	"go.etcd.io/etcd/pkg/transport"
+	"github.com/tikv/pd/pkg/apiutil"
 )
 
 var (
@@ -35,19 +35,11 @@ var (
 
 // InitHTTPSClient creates https client with ca file
 func InitHTTPSClient(caPath, certPath, keyPath string) error {
-	tlsInfo := transport.TLSInfo{
-		CertFile:      certPath,
-		KeyFile:       keyPath,
-		TrustedCAFile: caPath,
-	}
-	tlsConfig, err := tlsInfo.ClientConfig()
-	if err != nil {
-		return errors.WithStack(err)
-	}
 
 	dialClient = &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
+		Transport: &apiutil.UserSignatureRoundTripper{
+			Component: "pdctl",
+			Proxied:   http.DefaultTransport,
 		},
 	}
 
