@@ -135,9 +135,9 @@ func (s *testSelfProtectorSuite) TearDownSuite(c *C) {
 }
 
 func (s *testSelfProtectorSuite) TestSelfProtect(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/pkg/apiutil/serverapi/addSelfProtectionHTTPHeader", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	header := mustRequestSuccess(c, leader.GetServer())
+	c.Assert(failpoint.Enable("github.com/tikv/pd/pkg/apiutil/serverapi/addSelfProtectionHTTPHeader", `return(true)`), IsNil)
 	c.Assert(header.Get("self-protection"), Equals, "ok")
 	c.Assert(failpoint.Disable("github.com/tikv/pd/pkg/apiutil/serverapi/addSelfProtectionHTTPHeader"), IsNil)
 }
