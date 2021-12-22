@@ -140,7 +140,6 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.String("source", stat.source.String()),
 		zap.Bool("allow-adopt", stat.allowAdopt),
 		zap.String("operation-type", stat.opType.String()),
-		zap.String("type", stat.Kind.String()),
 		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
 }
 
