@@ -73,7 +73,8 @@ type Server interface {
 	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
-	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
+	GetMembers() ([]*pdpb.Member, error)
+	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 }
 
 // RaftCluster is used for cluster config management.
@@ -663,7 +664,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		time.Sleep(500 * time.Millisecond)
 	})
 
-	return c.saveRegionLock(isNew, saveKV, saveCache, needSync, region, origin)
+	return c.saveRegion(isNew, saveKV, saveCache, needSync, region, origin)
 }
 
 // processRegionHeartbeatResponse updates the region information thought region split.
@@ -703,7 +704,7 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 			}
 		}
 		if update {
-			if e := c.saveRegionLock(isNew, true, true, needSync, region, origin); e != nil {
+			if e := c.saveRegion(isNew, true, true, needSync, region, origin); e != nil {
 				err = errors.Wrap(err, e.Error())
 			}
 		}
@@ -711,10 +712,7 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 	return err
 }
 
-func (c *RaftCluster) saveRegionLock(isNew, saveKV, saveCache, needSync bool, region *core.RegionInfo, origin *core.RegionInfo) error {
-	c.RLock()
-	storage := c.storage
-	c.RUnlock()
+func (c *RaftCluster) saveRegion(isNew, saveKV, saveCache, needSync bool, region *core.RegionInfo, origin *core.RegionInfo) error {
 	var overlaps []*core.RegionInfo
 	c.Lock()
 	if saveCache {
@@ -758,6 +756,9 @@ func (c *RaftCluster) saveRegionLock(isNew, saveKV, saveCache, needSync bool, re
 	}
 	changedRegions := c.changedRegions
 	c.Unlock()
+	c.RLock()
+	storage := c.storage
+	c.RUnlock()
 	if storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.
