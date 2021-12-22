@@ -51,8 +51,7 @@ func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) 
 		}
 	}
 	for _, s := range stores {
-		metapbStore := s.Store.ConvertToMetapbStore()
-		obtained := proto.Clone(metapbStore).(*metapb.Store)
+		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
 		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
