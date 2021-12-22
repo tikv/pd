@@ -91,9 +91,6 @@ func NewSelfProtector(s *server.Server) negroni.Handler {
 func (protector *selfProtector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	handler := protector.s.GetSelfProtectionHandler()
 	if handler == nil || handler.HandleHTTPSelfProtection(r) {
-		// One line below is used for middleware testing only
-		w.Header().Add("self-protection", "ok")
-
 		next(w, r)
 	} else {
 		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)

@@ -110,38 +110,6 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	}
 }
 
-var _ = Suite(&testSelfProtectorSuite{})
-
-type testSelfProtectorSuite struct {
-	cleanup func()
-	cluster *tests.TestCluster
-}
-
-func (s *testSelfProtectorSuite) SetUpSuite(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
-	s.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
-		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
-		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
-	})
-	c.Assert(err, IsNil)
-	c.Assert(cluster.RunInitialServers(), IsNil)
-	c.Assert(cluster.WaitLeader(), Not(HasLen), 0)
-	s.cluster = cluster
-}
-
-func (s *testSelfProtectorSuite) TearDownSuite(c *C) {
-	s.cleanup()
-	s.cluster.Destroy()
-}
-
-func (s *testSelfProtectorSuite) TestSelfProtect(c *C) {
-	leader := s.cluster.GetServer(s.cluster.GetLeader())
-	header := mustRequestSuccess(c, leader.GetServer())
-	c.Assert(header.Get("self-protection"), Equals, "ok")
-}
-
 var _ = Suite(&testRedirectorSuite{})
 
 type testRedirectorSuite struct {
