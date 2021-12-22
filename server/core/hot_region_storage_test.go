@@ -15,6 +15,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -63,8 +64,8 @@ func (m *MockPackHotRegionInfo) GenHistoryHotRegions(num int, updateTime time.Ti
 			FlowBytes:     rand.Float64() * 100,
 			KeyRate:       rand.Float64() * 100,
 			QueryRate:     rand.Float64() * 100,
-			StartKey:      []byte(fmt.Sprintf("%20d", i)),
-			EndKey:        []byte(fmt.Sprintf("%20d", i)),
+			StartKey:      fmt.Sprintf("%20d", i),
+			EndKey:        fmt.Sprintf("%20d", i),
 		}
 		if i%2 == 1 {
 			m.historyHotWrites = append(m.historyHotWrites, historyHotRegion)
@@ -103,19 +104,32 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 			RegionID:      1,
 			StoreID:       1,
 			HotRegionType: ReadType.String(),
+			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
+			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
 		{
 			UpdateTime:    now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      2,
 			StoreID:       1,
 			HotRegionType: ReadType.String(),
+			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
+			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
 		{
 			UpdateTime:    now.Add(20*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      3,
 			StoreID:       1,
 			HotRegionType: ReadType.String(),
+			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x83, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
+			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x83, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
+	}
+	var copyHotRegionStorages []HistoryHotRegion
+	data, _ := json.Marshal(hotRegionStorages)
+	json.Unmarshal(data, &copyHotRegionStorages)
+	for i, region := range hotRegionStorages {
+		copyHotRegionStorages[i].StartKey = region.StartKey
+		copyHotRegionStorages[i].EndKey = region.EndKey
 	}
 	packHotRegionInfo.historyHotReads = hotRegionStorages
 	packHotRegionInfo.historyHotWrites = []HistoryHotRegion{
@@ -133,7 +147,9 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 		now.Add(40*time.Second).UnixNano()/int64(time.Millisecond))
 	index := 0
 	for next, err := iter.Next(); next != nil && err == nil; next, err = iter.Next() {
-		c.Assert(reflect.DeepEqual(&hotRegionStorages[index], next), IsTrue)
+		copyHotRegionStorages[index].StartKey = HexRegionKeyStr([]byte(copyHotRegionStorages[index].StartKey))
+		copyHotRegionStorages[index].EndKey = HexRegionKeyStr([]byte(copyHotRegionStorages[index].EndKey))
+		c.Assert(reflect.DeepEqual(&copyHotRegionStorages[index], next), IsTrue)
 		index++
 	}
 	c.Assert(err, IsNil)

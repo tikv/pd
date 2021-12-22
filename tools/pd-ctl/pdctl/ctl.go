@@ -198,3 +198,15 @@ func genCompleter(cmd *cobra.Command) []readline.PrefixCompleterInterface {
 	}
 	return pc
 }
+
+// ReadStdin convert stdin to string array
+func ReadStdin(r io.Reader) (input []string, err error) {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	if s := strings.TrimSpace(string(b)); len(s) > 0 {
+		input = strings.Split(s, " ")
+	}
+	return input, nil
+}
