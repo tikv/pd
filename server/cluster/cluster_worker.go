@@ -143,22 +143,6 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	return resp, nil
 }
 
-func (c *RaftCluster) checkSplitRegion(left *metapb.Region, right *metapb.Region) error {
-	if left == nil || right == nil {
-		return errors.New("invalid split region")
-	}
-
-	if !bytes.Equal(left.GetEndKey(), right.GetStartKey()) {
-		return errors.New("invalid split region")
-	}
-
-	if len(right.GetEndKey()) == 0 || bytes.Compare(left.GetStartKey(), right.GetEndKey()) < 0 {
-		return nil
-	}
-
-	return errors.New("invalid split region")
-}
-
 func checkSplitRegions(regions []*metapb.Region) error {
 	if len(regions) <= 1 {
 		return errors.New("invalid split region")

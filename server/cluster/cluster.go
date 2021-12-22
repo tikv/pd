@@ -677,7 +677,7 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 	c.RUnlock()
 	total := len(regions) - 1
 	for i := range regions {
-		// It should update rightmost because it will override by left .
+		// It should update rightmost because it will override by left.
 		v := regions[total-i]
 		if v.Peers == nil {
 			err = errors.Wrap(err, "region peer is nil")
@@ -694,7 +694,7 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 		// The rightmost region should update if epoch greater than origin.
 		if origin == nil {
 			update = true
-		} else if i == len(regions)-1 {
+		} else if i == total {
 			isNew = false
 			r, o := region.GetRegionEpoch(), origin.GetRegionEpoch()
 			if r.GetVersion() > o.GetVersion() || r.GetConfVer() > o.GetConfVer() {

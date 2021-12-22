@@ -108,6 +108,7 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	right.RegionEpoch.ConfVer++
 	right.RegionEpoch.Version++
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: proto.Clone(left).(*metapb.Region), Right: proto.Clone(right).(*metapb.Region)})
+	c.Assert(err, IsNil)
 	a = cluster.GetRegion(1)
 	c.Assert(core.HexRegionKeyStr(a.GetStartKey()), Not(Equals), core.HexRegionKeyStr(left.GetStartKey()))
 	old = cluster.GetRegion(2)
