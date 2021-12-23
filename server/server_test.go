@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
@@ -203,7 +204,9 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintln(w, "Hello World")
+			// test getting ip
+			client_ip := apiutil.GetIPAddrFromHTTPRequest(r)
+			fmt.Fprintln(w, client_ip)
 		})
 		info := ServiceGroup{
 			Name:    "mok",
@@ -233,5 +236,5 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	bodyBytes, err := io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	bodyString := string(bodyBytes)
-	c.Assert(bodyString, Equals, "Hello World\n")
+	c.Assert(bodyString, Equals, "127.0.0.1\n")
 }
