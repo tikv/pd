@@ -20,23 +20,23 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 )
 
-// SelfProtectionHandler is a framework to handle self protection mechanism
+// SelfProtectionManager is a framework to handle self protection mechanism
 // Self-protection granularity is a logical service
-type SelfProtectionHandler struct {
+type SelfProtectionManager struct {
 	// ServiceHandlers is a map to store handler owned by different services
 	ServiceHandlers map[string]*serviceSelfProtectionHandler
 }
 
-// NewSelfProtectionHandler returns a new SelfProtectionHandler with config
-func NewSelfProtectionHandler(server *Server) *SelfProtectionHandler {
-	handler := &SelfProtectionHandler{
+// NewSelfProtectionManager returns a new SelfProtectionManager with config
+func NewSelfProtectionManager(server *Server) *SelfProtectionManager {
+	handler := &SelfProtectionManager{
 		ServiceHandlers: make(map[string]*serviceSelfProtectionHandler),
 	}
 	return handler
 }
 
-// HandleHTTPSelfProtection is used to handle http api self protection
-func (h *SelfProtectionHandler) HandleHTTPSelfProtection(req *http.Request) bool {
+// ProcessHTTPSelfProtection is used to process http api self protection
+func (h *SelfProtectionManager) ProcessHTTPSelfProtection(req *http.Request) bool {
 	serviceName, findName := apiutil.GetHTTPRouteName(req)
 	// if path is not registered in router, go on process
 	if !findName {
@@ -49,26 +49,26 @@ func (h *SelfProtectionHandler) HandleHTTPSelfProtection(req *http.Request) bool
 		return true
 	}
 
-	httpHandler := &HTTPServiceSelfProtectionHandler{
+	httpHandler := &HTTPServiceSelfProtectionManager{
 		req:     req,
 		handler: serviceHandler,
 	}
 	return httpHandler.Handle()
 }
 
-// ServiceSelfProtectionHandler is a interface for define self-protection handler by service granularity
-type ServiceSelfProtectionHandler interface {
+// ServiceSelfProtectionManager is a interface for define self-protection handler by service granularity
+type ServiceSelfProtectionManager interface {
 	Handle() bool
 }
 
-// HTTPServiceSelfProtectionHandler implement ServiceSelfProtectionHandler to handle http
-type HTTPServiceSelfProtectionHandler struct {
+// HTTPServiceSelfProtectionManager implement ServiceSelfProtectionManager to handle http
+type HTTPServiceSelfProtectionManager struct {
 	req     *http.Request
 	handler *serviceSelfProtectionHandler
 }
 
-// Handle implement ServiceSelfProtectionHandler defined function
-func (h *HTTPServiceSelfProtectionHandler) Handle() bool {
+// Handle implement ServiceSelfProtectionManager defined function
+func (h *HTTPServiceSelfProtectionManager) Handle() bool {
 	// to be implemented
 	return true
 }

@@ -244,7 +244,7 @@ func (s *testServerHandlerSuite) TestMuxRouterName(c *C) {
 		r := mux.NewRouter()
 		r.HandleFunc("/pd/apis/mok/v1/router", func(w http.ResponseWriter, r *http.Request) {
 			RouterName, _ := apiutil.GetHTTPRouteName(r)
-			fmt.Fprintln(w, RouterName)
+			c.Assert(RouterName, Equals, "Mux Router")
 		}).Name("Mux Router")
 		info := ServiceGroup{
 			Name:    "mok",
@@ -271,9 +271,5 @@ func (s *testServerHandlerSuite) TestMuxRouterName(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	c.Assert(err, IsNil)
-	bodyBytes, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	c.Assert(err, IsNil)
-	bodyString := string(bodyBytes)
-	c.Assert(bodyString, Equals, "Mux Router\n")
 }

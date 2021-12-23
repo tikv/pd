@@ -90,13 +90,13 @@ func NewSelfProtector(s *server.Server) negroni.Handler {
 }
 
 func (protector *selfProtector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	handler := protector.s.GetSelfProtectionHandler()
+	handler := protector.s.GetSelfProtectionManager()
 
 	failpoint.Inject("addSelfProtectionHTTPHeader", func() {
 		w.Header().Add("self-protection", "ok")
 	})
 
-	if handler == nil || handler.HandleHTTPSelfProtection(r) {
+	if handler == nil || handler.ProcessHTTPSelfProtection(r) {
 		next(w, r)
 	} else {
 		// current plan will only deny request when over the speed limit
