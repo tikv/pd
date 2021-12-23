@@ -30,7 +30,7 @@ import (
 var (
 	// ComponentSignatureKey is used for http request header key
 	// to identify component signature
-	ComponentSignatureKey = "ti-component"
+	ComponentSignatureKey = "component"
 	// ComponentAnonymousValue identify anonymous request source
 	ComponentAnonymousValue = "anonymous"
 )

@@ -30,7 +30,12 @@ import (
 )
 
 var (
-	dialClient = &http.Client{}
+	dialClient = &http.Client{
+		Transport: &apiutil.UserSignatureRoundTripper{
+			Component: "pdctl",
+			Proxied:   http.DefaultTransport,
+		},
+	}
 	pingPrefix = "pd/api/v1/ping"
 )
 
