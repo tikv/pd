@@ -691,17 +691,17 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 			err = errors.Wrap(err, perr.Error())
 			continue
 		}
-		update, isNew, needSync := false, false, true
+		update, isNew, needSync := false, false, false
 		// The region that is not the rightmost element should update if origin is nil.
 		// The rightmost region should update if epoch greater than origin.
 		if origin == nil {
 			update = true
+			isNew = true
+			needSync = true
 		} else if index == total {
-			isNew = false
 			r, o := region.GetRegionEpoch(), origin.GetRegionEpoch()
 			if r.GetConfVer() > o.GetConfVer() {
 				update = true
-				needSync = false
 			}
 		}
 		if update {
