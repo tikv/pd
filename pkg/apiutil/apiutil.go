@@ -145,13 +145,14 @@ func GetComponentNameOnHTTP(r *http.Request) string {
 	return componentName
 }
 
-type UserSignatureRoundTripper struct {
+// ComponentSignatureRoundTripper is used to add component signature in HTTP header
+type ComponentSignatureRoundTripper struct {
 	Proxied   http.RoundTripper
 	Component string
 }
 
 // RoundTrip is used to implement RoundTripper
-func (rt *UserSignatureRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+func (rt *ComponentSignatureRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	req.Header.Add(ComponentSignatureKey, rt.Component)
 	// Send the request, get the response and the error
 	resp, err = rt.Proxied.RoundTrip(req)

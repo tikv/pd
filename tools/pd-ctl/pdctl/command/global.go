@@ -31,7 +31,7 @@ import (
 
 var (
 	dialClient = &http.Client{
-		Transport: &apiutil.UserSignatureRoundTripper{
+		Transport: &apiutil.ComponentSignatureRoundTripper{
 			Component: "pdctl",
 			Proxied:   http.DefaultTransport,
 		},
@@ -52,7 +52,7 @@ func InitHTTPSClient(caPath, certPath, keyPath string) error {
 	}
 
 	dialClient = &http.Client{
-		Transport: &apiutil.UserSignatureRoundTripper{
+		Transport: &apiutil.ComponentSignatureRoundTripper{
 			Component: "pdctl",
 			Proxied: &http.Transport{
 				TLSClientConfig: tlsConfig},
