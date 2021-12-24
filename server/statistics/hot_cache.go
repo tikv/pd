@@ -191,7 +191,7 @@ func (w *HotCache) runWriteTask(task flowItemTask) {
 
 func updateStat(cache *hotPeerCache, item *HotPeerStat) {
 	cache.update(item)
-	switch item.opType {
+	switch item.actionType {
 	case Add:
 		incMetrics("add_item", item.StoreID, item.Kind)
 	case Remove:

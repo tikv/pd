@@ -69,10 +69,10 @@ const (
 )
 
 type testCacheCase struct {
-	kind     RWType
-	operator operator
-	expect   int
-	opType   OperationType
+	kind       RWType
+	operator   operator
+	expect     int
+	actionType ActionType
 }
 
 func (t *testHotPeerCache) TestCache(c *C) {
@@ -103,7 +103,7 @@ func testCache(c *C, t *testCacheCase) {
 	res := checkAndUpdate(c, cache, region, t.expect)
 	checkHit(c, cache, region, t.kind, Update) // hit cache
 	if t.expect != defaultSize[t.kind] {
-		checkOp(c, res, srcStore, t.opType)
+		checkOp(c, res, srcStore, t.actionType)
 	}
 }
 
@@ -168,7 +168,7 @@ func checkAndUpdateSkipOne(c *C, cache *hotPeerCache, region *core.RegionInfo, e
 	return updateFlow(cache, res)
 }
 
-func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind RWType, opType OperationType) {
+func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind RWType, actionType ActionType) {
 	var peers []*metapb.Peer
 	if kind == Read {
 		peers = []*metapb.Peer{region.GetLeader()}
@@ -178,14 +178,14 @@ func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind RWType, o
 	for _, peer := range peers {
 		item := cache.getOldHotPeerStat(region.GetID(), peer.StoreId)
 		c.Assert(item, NotNil)
-		c.Assert(item.opType, Equals, opType)
+		c.Assert(item.actionType, Equals, actionType)
 	}
 }
 
-func checkOp(c *C, ret []*HotPeerStat, storeID uint64, opType OperationType) {
+func checkOp(c *C, ret []*HotPeerStat, storeID uint64, actionType ActionType) {
 	for _, item := range ret {
 		if item.StoreID == storeID {
-			c.Assert(item.opType, Equals, opType)
+			c.Assert(item.actionType, Equals, actionType)
 			return
 		}
 	}
@@ -296,17 +296,17 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 	m := RegionHeartBeatReportInterval / StoreHeartBeatReportInterval
 
 	// skip interval=0
-	newItem := &HotPeerStat{opType: Update, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
+	newItem := &HotPeerStat{actionType: Update, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
 	newItem = cache.updateHotPeerStat(nil, newItem, nil, []float64{0.0, 0.0, 0.0}, 0)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is larger than report interval, but no hot
-	newItem = &HotPeerStat{opType: Update, thresholds: []float64{1.0, 1.0, 1.0}, Kind: Read}
+	newItem = &HotPeerStat{actionType: Update, thresholds: []float64{1.0, 1.0, 1.0}, Kind: Read}
 	newItem = cache.updateHotPeerStat(nil, newItem, nil, []float64{0.0, 0.0, 0.0}, 10*time.Second)
 	c.Check(newItem, IsNil)
 
 	// new peer, interval is less than report interval
-	newItem = &HotPeerStat{opType: Update, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
+	newItem = &HotPeerStat{actionType: Update, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
 	newItem = cache.updateHotPeerStat(nil, newItem, nil, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	c.Check(newItem, NotNil)
 	c.Check(newItem.HotDegree, Equals, 0)
@@ -344,7 +344,7 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 	}
 	c.Check(newItem.HotDegree, Less, 0)
 	c.Check(newItem.AntiCount, Equals, 0)
-	c.Check(newItem.opType, Equals, Remove)
+	c.Check(newItem.actionType, Equals, Remove)
 }
 
 func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
@@ -369,7 +369,7 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 				Kind:       cache.kind,
 				StoreID:    storeID,
 				RegionID:   i,
-				opType:     Update,
+				actionType: Update,
 				thresholds: thresholds,
 				Loads:      make([]float64, DimLen),
 			}

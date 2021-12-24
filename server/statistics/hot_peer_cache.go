@@ -102,7 +102,7 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 
 // update updates the items in statistics.
 func (f *hotPeerCache) update(item *HotPeerStat) {
-	if item.opType == Remove {
+	if item.actionType == Remove {
 		if item.AntiCount > 0 { // means it's deleted because expired rather than cold
 			f.putInheritItem(item)
 		}
@@ -146,7 +146,7 @@ func (f *hotPeerCache) collectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 		if region.GetStorePeer(storeID) == nil {
 			item := f.getOldHotPeerStat(regionID, storeID)
 			if item != nil {
-				item.opType = Remove
+				item.actionType = Remove
 				items = append(items, item)
 			}
 		}
@@ -185,7 +185,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		isLeader:       region.GetLeader().GetStoreId() == storeID,
 		interval:       interval,
 		peers:          peers,
-		opType:         Update,
+		actionType:     Update,
 		thresholds:     thresholds,
 		source:         direct,
 	}
@@ -233,7 +233,7 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				isLeader:       oldItem.isLeader,
 				interval:       interval,
 				peers:          oldItem.peers,
-				opType:         Update,
+				actionType:     Update,
 				thresholds:     oldItem.thresholds,
 				inCold:         true,
 			}
@@ -429,7 +429,7 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 				if newItem.isHot() {
 					initItem(newItem)
 				} else {
-					newItem.opType = Remove
+					newItem.actionType = Remove
 				}
 			} else {
 				if newItem.isHot() {
@@ -457,7 +457,7 @@ func (f *hotPeerCache) updateNewHotPeerStat(regionStats []RegionStatKind, newIte
 	if interval.Seconds() >= float64(f.reportIntervalSecs) {
 		initItem(newItem)
 	}
-	newItem.opType = Add
+	newItem.actionType = Add
 	newItem.rollingLoads = make([]*dimStat, len(regionStats))
 	for i, k := range regionStats {
 		ds := newDimStat(k, time.Duration(newItem.hotStatReportInterval())*time.Second)
@@ -523,7 +523,7 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
 	if newItem.AntiCount <= 0 {
-		newItem.opType = Remove
+		newItem.actionType = Remove
 	} else {
 		newItem.allowAdopt = true
 	}

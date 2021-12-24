@@ -97,7 +97,7 @@ type HotPeerStat struct {
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
 
-	opType                 OperationType
+	actionType             ActionType
 	isLeader               bool
 	interval               uint64
 	thresholds             []float64
@@ -139,7 +139,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Duration("sum-interval", stat.getIntervalSum()),
 		zap.String("source", stat.source.String()),
 		zap.Bool("allow-adopt", stat.allowAdopt),
-		zap.String("operation-type", stat.opType.String()),
+		zap.String("action-type", stat.actionType.String()),
 		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
 }
 
@@ -153,9 +153,9 @@ func (stat *HotPeerStat) IsLeader() bool {
 	return stat.isLeader
 }
 
-// GetOperationType returns the item operation type.
-func (stat *HotPeerStat) GetOperationType() OperationType {
-	return stat.opType
+// GetActionType returns the item action type.
+func (stat *HotPeerStat) GetActionType() ActionType {
+	return stat.actionType
 }
 
 // GetLoad returns denoising load if possible.
