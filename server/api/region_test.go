@@ -536,6 +536,7 @@ func (s *testGetRegionRangeHolesSuite) TestRegionRangeHoles(c *C) {
 		{"", core.HexRegionKeyStr(r1.GetStartKey())},
 		{core.HexRegionKeyStr(r1.GetEndKey()), core.HexRegionKeyStr(r3.GetStartKey())},
 		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r6.GetStartKey())},
+		{core.HexRegionKeyStr(r6.GetEndKey()), ""},
 	})
 }
 

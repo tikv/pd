@@ -519,12 +519,33 @@ func showRegionWithStoreCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
+const (
+	rangeHolesLongDesc = `There are some cases that the region range is not continuous, for example, the region doest't send the heartbeat to PD after a spliting.
+This command will output all empty ranges without any region info.`
+	rangeHolesExample = `
+  If PD now holds the region ranges info like ["", "a"], ["b", "x"], ["x", "z"]. The the output will be like:
+
+  [
+    [
+      "a",
+      "b"
+    ],
+    [
+      "z",
+      ""
+    ],
+  ]
+`
+)
+
 // NewRangesWithRangeHolesCommand returns ranges with range-holes subcommand of regionCmd
 func NewRangesWithRangeHolesCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "range-holes",
-		Short: "show all empty ranges without any region info",
-		Run:   showRangesWithRangeHolesCommandFunc,
+		Use:     "range-holes",
+		Short:   "show all empty ranges without any region info.",
+		Long:    rangeHolesLongDesc,
+		Example: rangeHolesExample,
+		Run:     showRangesWithRangeHolesCommandFunc,
 	}
 	return r
 }
