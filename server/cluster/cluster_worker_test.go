@@ -88,11 +88,11 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	c.Assert(core.HexRegionKeyStr(old.GetStartKey()), Equals, core.HexRegionKeyStr(origin.GetStartKey()))
 
 	// case3: peer can handler well
-	// |--id--|--start_key--|--end_key--|
-	// | 1   |  "a"          |  "c"     |
-	// | 2   |  "c"          |  "d"     |
-	left.Peers = mockRegionPeer(idAllc, []uint64{1, 2, 3})
-	right.Peers = mockRegionPeer(idAllc, []uint64{1, 2, 3})
+	// |--id--|--start_key--|--end_key--| --leader_id--|
+	// | 1   |  "a"          |  "c"     |   1          |
+	// | 2   |  "c"          |  "d"     |   1          |
+	left.Peers = mockRegionPeer(idAllc, []uint64{3, 2, 1})
+	right.Peers = mockRegionPeer(idAllc, []uint64{3, 2, 1})
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: proto.Clone(left).(*metapb.Region), Right: proto.Clone(right).(*metapb.Region)})
 	c.Assert(err, IsNil)
 	a := cluster.GetRegion(1)
@@ -101,6 +101,7 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	old = cluster.GetRegion(2)
 	c.Assert(old, NotNil)
 	c.Assert(core.HexRegionKeyStr(old.GetStartKey()), Equals, core.HexRegionKeyStr(right.GetStartKey()))
+	c.Assert(a.GetLeader().GetStoreId(), Equals, old.GetLeader().GetStoreId())
 
 	// case4: left peer will ignore if region exist cache, but right peer will check epoch
 	left.StartKey = []byte("b")
@@ -113,6 +114,7 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	old = cluster.GetRegion(2)
 	c.Assert(old.GetRegionEpoch().GetVersion(), Equals, right.GetRegionEpoch().GetVersion())
 	c.Assert(old.GetRegionEpoch().GetConfVer(), Equals, right.GetRegionEpoch().GetConfVer())
+	c.Assert(a.GetLeader().GetStoreId(), Equals, old.GetLeader().GetStoreId())
 }
 
 func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {

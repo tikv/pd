@@ -673,19 +673,33 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 	if err = checkSplitRegions(regions); err != nil {
 		return err
 	}
+	total := len(regions) - 1
 	c.RLock()
 	coreCluster := c.core
 	c.RUnlock()
-	total := len(regions) - 1
+	leaderStoreID := uint64(0)
+	if r := coreCluster.GetRegion(regions[0].GetId()); r != nil {
+		leaderStoreID = r.GetLeader().GetStoreId()
+	}
 	for i := range regions {
-		// It should update rightmost because it will override by left.
+		// It should update rightmost because it can override by left.
 		index := total - i
 		v := regions[index]
 		if v.GetPeers() == nil {
 			err = errors.Wrap(err, fmt.Sprintf("region:%d peer is nil", v.GetId()))
 			continue
 		}
-		region := core.NewRegionInfo(v, v.Peers[0])
+		// region split initiator store will be leader with a high probability
+		leader := v.Peers[0]
+		if leaderStoreID > 0 {
+			for _, peer := range v.GetPeers() {
+				if peer.GetStoreId() == leaderStoreID {
+					leader = peer
+					break
+				}
+			}
+		}
+		region := core.NewRegionInfo(v, leader)
 		origin, perr := coreCluster.PreCheckPutRegion(region)
 		if perr != nil {
 			err = errors.Wrap(err, perr.Error())
