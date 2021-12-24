@@ -28,6 +28,6 @@ type MemoryStorage struct {
 }
 
 // NewMemoryStorage is used to create a new memory storage.
-func NewMemoryStorage() *MemoryStorage {
+func newMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{base.NewStorage(kv.NewMemoryKV(), nil)}
 }

@@ -68,7 +68,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
 	}
-	clus.RegionLabeler, _ = labeler.NewRegionLabeler(storage.NewMemoryStorage())
+	clus.RegionLabeler, _ = labeler.NewRegionLabeler(storage.NewBuilder().WithMemoryBackend().Build())
 	return clus
 }
 
@@ -157,7 +157,7 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
-		mc.RuleManager = placement.NewRuleManager(storage.NewMemoryStorage(), mc, mc.GetOpts())
+		mc.RuleManager = placement.NewRuleManager(storage.NewBuilder().WithMemoryBackend().Build(), mc, mc.GetOpts())
 		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels)
 	}
 }

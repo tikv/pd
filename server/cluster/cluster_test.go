@@ -848,7 +848,7 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 
-	storage := storage.NewMemoryStorage()
+	storage := storage.NewBuilder().WithMemoryBackend().Build()
 	cluster.ruleManager = placement.NewRuleManager(storage, cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
@@ -1144,7 +1144,7 @@ func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, er
 
 func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluster {
 	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
-	storage := storage.NewMemoryStorage()
+	storage := storage.NewBuilder().WithMemoryBackend().Build()
 	rc.ruleManager = placement.NewRuleManager(storage, rc, rc.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
@@ -1165,7 +1165,7 @@ func newTestRaftCluster(
 	basicCluster *core.BasicCluster,
 ) *RaftCluster {
 	rc := &RaftCluster{serverCtx: ctx}
-	rc.InitCluster(id, opt, oldStorage, storage.NewMemoryStorage(), basicCluster)
+	rc.InitCluster(id, opt, oldStorage, storage.NewBuilder().WithMemoryBackend().Build(), basicCluster)
 	return rc
 }
 

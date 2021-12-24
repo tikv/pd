@@ -28,7 +28,7 @@ type EtcdStorage struct {
 	*base.Storage
 }
 
-// NewEtcdStorage is used to create a new etcd storage.
-func NewEtcdStorage(client *clientv3.Client, rootPatch string) *EtcdStorage {
+// newEtcdStorage is used to create a new etcd storage.
+func newEtcdStorage(client *clientv3.Client, rootPatch string) *EtcdStorage {
 	return &EtcdStorage{base.NewStorage(kv.NewEtcdKVBase(client, rootPatch), nil)}
 }

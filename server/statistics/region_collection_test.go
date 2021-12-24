@@ -39,7 +39,7 @@ type testRegionStatisticsSuite struct {
 }
 
 func (t *testRegionStatisticsSuite) SetUpTest(c *C) {
-	t.store = storage.NewMemoryStorage()
+	t.store = storage.NewBuilder().WithMemoryBackend().Build()
 	var err error
 	t.manager = placement.NewRuleManager(t.store, nil, nil)
 	err = t.manager.Initialize(3, []string{"zone", "rack", "host"})

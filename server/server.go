@@ -397,7 +397,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		core.WithRegionStorage(regionStorage),
 		core.WithEncryptionKeyManager(encryptionKeyManager),
 	)
-	s.etcdStorage = storage.NewEtcdStorage(s.client, s.rootPath)
+	s.etcdStorage = storage.NewBuilder().WithEtcdBackend(s.client).WithKeyRootPath(s.rootPath).Build().(*storage.EtcdStorage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)

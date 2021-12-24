@@ -38,7 +38,7 @@ type testLabelerSuite struct {
 }
 
 func (s *testLabelerSuite) SetUpTest(c *C) {
-	s.store = storage.NewMemoryStorage()
+	s.store = storage.NewBuilder().WithMemoryBackend().Build()
 	var err error
 	s.labeler, err = NewRegionLabeler(s.store)
 	c.Assert(err, IsNil)

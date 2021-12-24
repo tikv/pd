@@ -38,7 +38,7 @@ type testStorageSuite struct {
 }
 
 func (s *testStorageSuite) TestBasic(c *C) {
-	storage := NewMemoryStorage()
+	storage := newMemoryStorage()
 
 	c.Assert(base.StorePath(123), Equals, "raft/s/00000000000000000123")
 	c.Assert(base.RegionPath(123), Equals, "raft/r/00000000000000000123")
@@ -97,7 +97,7 @@ func mustSaveStores(c *C, s Storage, n int) []*metapb.Store {
 }
 
 func (s *testStorageSuite) TestLoadStores(c *C) {
-	storage := NewMemoryStorage()
+	storage := newMemoryStorage()
 	cache := core.NewStoresInfo()
 
 	n := 10
@@ -111,7 +111,7 @@ func (s *testStorageSuite) TestLoadStores(c *C) {
 }
 
 func (s *testStorageSuite) TestStoreWeight(c *C) {
-	storage := NewMemoryStorage()
+	storage := newMemoryStorage()
 	cache := core.NewStoresInfo()
 	const n = 3
 
@@ -128,7 +128,7 @@ func (s *testStorageSuite) TestStoreWeight(c *C) {
 }
 
 func (s *testStorageSuite) TestLoadGCSafePoint(c *C) {
-	storage := NewMemoryStorage()
+	storage := newMemoryStorage()
 	testData := []uint64{0, 1, 2, 233, 2333, 23333333333, math.MaxUint64}
 
 	r, e := storage.LoadGCSafePoint()
@@ -144,7 +144,7 @@ func (s *testStorageSuite) TestLoadGCSafePoint(c *C) {
 }
 
 func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
-	storage := NewMemoryStorage()
+	storage := newMemoryStorage()
 	expireAt := time.Now().Add(100 * time.Second).Unix()
 	serviceSafePoints := []*base.ServiceSafePoint{
 		{ServiceID: "1", ExpiredAt: expireAt, SafePoint: 1},
@@ -175,7 +175,7 @@ func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
 }
 
 func (s *testStorageSuite) TestLoadMinServiceGCSafePoint(c *C) {
-	storage := NewMemoryStorage()
+	storage := newMemoryStorage()
 	expireAt := time.Now().Add(1000 * time.Second).Unix()
 	serviceSafePoints := []*base.ServiceSafePoint{
 		{ServiceID: "1", ExpiredAt: 0, SafePoint: 1},

@@ -51,7 +51,7 @@ func (s *testReplicationMode) TearDownTest(c *C) {
 }
 
 func (s *testReplicationMode) TestInitial(c *C) {
-	store := storage.NewMemoryStorage()
+	store := storage.NewBuilder().WithMemoryBackend().Build()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeMajority}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
@@ -81,7 +81,7 @@ func (s *testReplicationMode) TestInitial(c *C) {
 }
 
 func (s *testReplicationMode) TestStatus(c *C) {
-	store := storage.NewMemoryStorage()
+	store := storage.NewBuilder().WithMemoryBackend().Build()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:        "dr-label",
 		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
@@ -173,7 +173,7 @@ func newMockReplicator(ids []uint64) *mockFileReplicator {
 }
 
 func (s *testReplicationMode) TestStateSwitch(c *C) {
-	store := storage.NewMemoryStorage()
+	store := storage.NewBuilder().WithMemoryBackend().Build()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
@@ -291,7 +291,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 }
 
 func (s *testReplicationMode) TestReplicateState(c *C) {
-	store := storage.NewMemoryStorage()
+	store := storage.NewBuilder().WithMemoryBackend().Build()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
@@ -331,7 +331,7 @@ func (s *testReplicationMode) TestReplicateState(c *C) {
 }
 
 func (s *testReplicationMode) TestAsynctimeout(c *C) {
-	store := storage.NewMemoryStorage()
+	store := storage.NewBuilder().WithMemoryBackend().Build()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
@@ -383,7 +383,7 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 	regionScanBatchSize = 10
 	regionMinSampleSize = 5
 
-	store := storage.NewMemoryStorage()
+	store := storage.NewBuilder().WithMemoryBackend().Build()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
@@ -443,7 +443,7 @@ func (s *testReplicationMode) TestRecoverProgressWithSplitAndMerge(c *C) {
 	regionScanBatchSize = 10
 	regionMinSampleSize = 5
 
-	store := storage.NewMemoryStorage()
+	store := storage.NewBuilder().WithMemoryBackend().Build()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",

@@ -32,7 +32,7 @@ import (
 const clusterPath = "raft"
 
 // Storage wraps all kv operations, keep it stateless.
-// NOTICE: this struct will be replaced by Storage later.
+// NOTICE: this struct will be replaced by server/storage later.
 type Storage struct {
 	kv.Base
 	regionStorage        *RegionStorage
