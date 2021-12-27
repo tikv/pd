@@ -243,7 +243,7 @@ func (s *testServerHandlerSuite) TestMuxRouterName(c *C) {
 	handler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
 		r := mux.NewRouter()
 		r.HandleFunc("/pd/apis/mok/v1/router", func(w http.ResponseWriter, r *http.Request) {
-			RouterName, _ := apiutil.GetHTTPRouteName(r)
+			RouterName, _ := apiutil.GetRouteName(r)
 			c.Assert(RouterName, Equals, "Mux Router")
 		}).Name("Mux Router")
 		info := ServiceGroup{

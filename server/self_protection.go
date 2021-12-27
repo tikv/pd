@@ -36,7 +36,7 @@ func NewSelfProtectionManager(server *Server) *selfProtectionManager {
 
 // ProcessHTTPSelfProtection is used to process http api self protection
 func (h *selfProtectionManager) ProcessHTTPSelfProtection(req *http.Request) bool {
-	serviceName, foundName := apiutil.GetHTTPRouteName(req)
+	serviceName, foundName := apiutil.GetRouteName(req)
 	// if path is not registered in router, go on processing
 	if !foundName {
 		return true
