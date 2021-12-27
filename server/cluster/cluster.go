@@ -669,9 +669,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 // processRegionHeartbeatResponse updates the region information thought region split.
 // It will update peer that not exist in the cache, and add new peers that join in.
-func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err error) {
-	if err = checkSplitRegions(regions); err != nil {
-		return err
+func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (errs []error) {
+	if err := checkSplitRegions(regions); err != nil {
+		return []error{err}
 	}
 	total := len(regions) - 1
 	c.RLock()
@@ -685,8 +685,8 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 		// It should update rightmost because it can override by left.
 		index := total - i
 		v := regions[index]
-		if v.GetPeers() == nil {
-			err = errors.Wrap(err, fmt.Sprintf("region:%d peer is nil", v.GetId()))
+		if len(v.GetPeers()) == 0 {
+			errs = append(errs, errors.New(fmt.Sprintf("region:%d has no peer", v.GetId())))
 			continue
 		}
 		// region split initiator store will be leader with a high probability
@@ -702,7 +702,7 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 		region := core.NewRegionInfo(v, leader)
 		origin, perr := coreCluster.PreCheckPutRegion(region)
 		if perr != nil {
-			err = errors.Wrap(err, perr.Error())
+			errs = append(errs, perr)
 			continue
 		}
 		update, isNew, needSync := false, false, false
@@ -719,12 +719,12 @@ func (c *RaftCluster) processRegionSpiltReport(regions []*metapb.Region) (err er
 			}
 		}
 		if update {
-			if e := c.saveRegion(isNew, true, true, needSync, region, origin); e != nil {
-				err = errors.Wrap(err, e.Error())
+			if err := c.saveRegion(isNew, true, true, needSync, region, origin); err != nil {
+				errs = append(errs, err)
 			}
 		}
 	}
-	return err
+	return errs
 }
 
 func (c *RaftCluster) saveRegion(isNew, saveKV, saveCache, needSync bool, region *core.RegionInfo, origin *core.RegionInfo) error {
