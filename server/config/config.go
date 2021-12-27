@@ -140,6 +140,8 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
+	MaxRequestBytes uint `toml:"max-request-bytes" json:"max-request-bytes"`
+
 	Security SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
@@ -149,12 +151,9 @@ type Config struct {
 	// For all warnings during parsing.
 	WarningMsgs []string
 
-	// Only test can change them.
-	nextRetryDelay             time.Duration
 	DisableStrictReconfigCheck bool
 
 	HeartbeatStreamBindInterval typeutil.Duration
-
 	LeaderPriorityCheckInterval typeutil.Duration
 
 	logger   *zap.Logger
@@ -201,10 +200,10 @@ func NewConfig() *Config {
 
 const (
 	defaultLeaderLease             = int64(3)
-	defaultNextRetryDelay          = time.Second
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
+	defaultMaxRequestBytes         = uint(1.5 * 1024 * 1024)                   // 1.5MB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -550,14 +549,13 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		c.Labels = make(map[string]string)
 	}
 
-	if c.nextRetryDelay == 0 {
-		c.nextRetryDelay = defaultNextRetryDelay
-	}
-
 	adjustString(&c.AutoCompactionMode, defaultCompactionMode)
 	adjustString(&c.AutoCompactionRetention, defaultAutoCompactionRetention)
 	if !configMetaData.IsDefined("quota-backend-bytes") {
 		c.QuotaBackendBytes = defaultQuotaBackendBytes
+	}
+	if !configMetaData.IsDefined("max-request-bytes") {
+		c.MaxRequestBytes = defaultMaxRequestBytes
 	}
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
@@ -788,7 +786,7 @@ const (
 	defaultEnableJointConsensus        = true
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
-	defaultHotRegionsResevervedDays    = 0
+	defaultHotRegionsReservedDays      = 0
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -875,7 +873,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 
 	if !meta.IsDefined("hot-regions-reserved-days") {
-		adjustInt64(&c.HotRegionsReservedDays, defaultHotRegionsResevervedDays)
+		adjustInt64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
 	}
 
 	return c.Validate()
@@ -928,7 +926,7 @@ func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 // Validate is used to validate if some scheduling configurations are right.
 func (c *ScheduleConfig) Validate() error {
 	if c.TolerantSizeRatio < 0 {
-		return errors.New("tolerant-size-ratio should be nonnegative")
+		return errors.New("tolerant-size-ratio should be non-negative")
 	}
 	if c.LowSpaceRatio < 0 || c.LowSpaceRatio > 1 {
 		return errors.New("low-space-ratio should between 0 and 1")
@@ -1262,6 +1260,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.AutoCompactionMode = c.AutoCompactionMode
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
+	cfg.MaxRequestBytes = c.MaxRequestBytes
 
 	allowedCN, serr := c.Security.GetOneAllowedCN()
 	if serr != nil {
