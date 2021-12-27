@@ -150,7 +150,7 @@ type Server struct {
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 	// SelfProtectionManager is used for PD self-pretection
-	selfProtectionManager *SelfProtectionManager
+	selfProtectionManager *selfProtectionManager
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -672,7 +672,7 @@ func (s *Server) stopRaftCluster() {
 }
 
 // GetSelfProtectionManager returns the selfProt ectionHandler
-func (s *Server) GetSelfProtectionManager() *SelfProtectionManager {
+func (s *Server) GetSelfProtectionManager() *selfProtectionManager {
 	return s.selfProtectionManager
 }
 

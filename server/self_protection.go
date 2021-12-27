@@ -20,55 +20,39 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 )
 
-// SelfProtectionManager is a framework to handle self protection mechanism
+// selfProtectionManager is a framework to handle self protection mechanism
 // Self-protection granularity is a logical service
-type SelfProtectionManager struct {
+type selfProtectionManager struct {
 	// ServiceHandlers is a map to store handler owned by different services
 	ServiceHandlers map[string]*serviceSelfProtectionHandler
 }
 
 // NewSelfProtectionManager returns a new SelfProtectionManager with config
-func NewSelfProtectionManager(server *Server) *SelfProtectionManager {
-	handler := &SelfProtectionManager{
+func NewSelfProtectionManager(server *Server) *selfProtectionManager {
+	return &selfProtectionManager{
 		ServiceHandlers: make(map[string]*serviceSelfProtectionHandler),
 	}
-	return handler
 }
 
 // ProcessHTTPSelfProtection is used to process http api self protection
-func (h *SelfProtectionManager) ProcessHTTPSelfProtection(req *http.Request) bool {
-	serviceName, findName := apiutil.GetHTTPRouteName(req)
-	// if path is not registered in router, go on process
-	if !findName {
+func (h *selfProtectionManager) ProcessHTTPSelfProtection(req *http.Request) bool {
+	serviceName, foundName := apiutil.GetHTTPRouteName(req)
+	// if path is not registered in router, go on processing
+	if !foundName {
 		return true
 	}
 
 	serviceHandler, ok := h.ServiceHandlers[serviceName]
-	// if there is no service handler, go on process
+	// if there is no service handler, go on processing
 	if !ok {
 		return true
 	}
 
-	httpHandler := &HTTPServiceSelfProtectionManager{
-		req:     req,
-		handler: serviceHandler,
-	}
-	return httpHandler.Handle()
+	return HandleServiceHTTPSelfProtection(req, serviceHandler)
 }
 
-// ServiceSelfProtectionManager is a interface for define self-protection handler by service granularity
-type ServiceSelfProtectionManager interface {
-	Handle() bool
-}
-
-// HTTPServiceSelfProtectionManager implement ServiceSelfProtectionManager to handle http
-type HTTPServiceSelfProtectionManager struct {
-	req     *http.Request
-	handler *serviceSelfProtectionHandler
-}
-
-// Handle implement ServiceSelfProtectionManager defined function
-func (h *HTTPServiceSelfProtectionManager) Handle() bool {
+// HandleServiceHTTPSelfProtection is used to implement self-protection HTTP handler by service granularity
+func HandleServiceHTTPSelfProtection(req *http.Request, handler *serviceSelfProtectionHandler) bool {
 	// to be implemented
 	return true
 }
