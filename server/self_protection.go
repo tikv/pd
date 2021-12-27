@@ -20,7 +20,8 @@ import (
 	"golang.org/x/time/rate"
 )
 
-type APIRateLimiter struct {
+// serviceRateLimiter is used to rimit service request rate
+type serviceRateLimiter struct {
 	mu sync.RWMutex
 
 	enableQPSLimit bool
@@ -33,7 +34,7 @@ type APIRateLimiter struct {
 
 // QPSAllow firstly check component token bucket and then check total token bucket
 // if component rate limiter doesn't allow, it won't ask total limiter
-func (rl *APIRateLimiter) QPSAllow(componentName string) bool {
+func (rl *serviceRateLimiter) QPSAllow(componentName string) bool {
 	if !rl.enableQPSLimit {
 		return true
 	}
@@ -53,7 +54,7 @@ func (rl *APIRateLimiter) QPSAllow(componentName string) bool {
 }
 
 // Allow currentlt only supports QPS rate limit
-func (rl *APIRateLimiter) Allow(componentName string) bool {
+func (rl *serviceRateLimiter) Allow(componentName string) bool {
 	rl.mu.RLock()
 	defer rl.mu.RUnlock()
 	return rl.QPSAllow(componentName)

@@ -25,27 +25,27 @@ import (
 var _ = Suite(&testSelfProtectHandler{})
 
 type testSelfProtectHandler struct {
-	rateLimiterOnlyTotal         *APIRateLimiter
-	rateLimiterDisabled          *APIRateLimiter
-	rateLimiterZeroBucket        *APIRateLimiter
-	rateLimiterComopnent         *APIRateLimiter
-	rateLimiterNoComopnentConfig *APIRateLimiter
+	rateLimiterOnlyTotal         *serviceRateLimiter
+	rateLimiterDisabled          *serviceRateLimiter
+	rateLimiterZeroBucket        *serviceRateLimiter
+	rateLimiterComopnent         *serviceRateLimiter
+	rateLimiterNoComopnentConfig *serviceRateLimiter
 }
 
 func (s *testSelfProtectHandler) SetUpSuite(c *C) {
-	s.rateLimiterOnlyTotal = &APIRateLimiter{
+	s.rateLimiterOnlyTotal = &serviceRateLimiter{
 		enableQPSLimit:          true,
 		totalQPSRateLimiter:     rate.NewLimiter(100, 100),
 		enableComponentQPSLimit: false,
 	}
-	s.rateLimiterDisabled = &APIRateLimiter{
+	s.rateLimiterDisabled = &serviceRateLimiter{
 		enableQPSLimit: false,
 	}
-	s.rateLimiterZeroBucket = &APIRateLimiter{
+	s.rateLimiterZeroBucket = &serviceRateLimiter{
 		enableQPSLimit:      true,
 		totalQPSRateLimiter: rate.NewLimiter(0, 0),
 	}
-	s.rateLimiterComopnent = &APIRateLimiter{
+	s.rateLimiterComopnent = &serviceRateLimiter{
 		enableQPSLimit:          true,
 		totalQPSRateLimiter:     rate.NewLimiter(100, 100),
 		enableComponentQPSLimit: true,
@@ -54,7 +54,7 @@ func (s *testSelfProtectHandler) SetUpSuite(c *C) {
 	s.rateLimiterComopnent.componentQPSRateLimiter["pdctl"] = rate.NewLimiter(100, 100)
 	s.rateLimiterComopnent.componentQPSRateLimiter["anonymous"] = rate.NewLimiter(100, 100)
 
-	s.rateLimiterNoComopnentConfig = &APIRateLimiter{
+	s.rateLimiterNoComopnentConfig = &serviceRateLimiter{
 		enableQPSLimit:          true,
 		totalQPSRateLimiter:     rate.NewLimiter(200, 200),
 		enableComponentQPSLimit: true,
@@ -63,7 +63,7 @@ func (s *testSelfProtectHandler) SetUpSuite(c *C) {
 	s.rateLimiterNoComopnentConfig.componentQPSRateLimiter["pdctl"] = rate.NewLimiter(10, 10)
 }
 
-func CountRateLimiterHandleResult(handler *APIRateLimiter, component string, successCount *int,
+func CountRateLimiterHandleResult(handler *serviceRateLimiter, component string, successCount *int,
 	failedCount *int, lock *sync.Mutex, wg *sync.WaitGroup) {
 	result := handler.Allow(component)
 	lock.Lock()
