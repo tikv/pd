@@ -1199,23 +1199,6 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
-// ParseUrls parse a string into multiple urls.
-// Export for api.
-func ParseUrls(s string) ([]url.URL, error) {
-	items := strings.Split(s, ",")
-	urls := make([]url.URL, 0, len(items))
-	for _, item := range items {
-		u, err := url.Parse(item)
-		if err != nil {
-			return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
-		}
-
-		urls = append(urls, *u)
-	}
-
-	return urls, nil
-}
-
 // SetupLogger setup the logger.
 func (c *Config) SetupLogger() error {
 	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
@@ -1283,22 +1266,22 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.Logger = "zap"
 	var err error
 
-	cfg.LPUrls, err = ParseUrls(c.PeerUrls)
+	cfg.LPUrls, err = parseUrls(c.PeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.APUrls, err = ParseUrls(c.AdvertisePeerUrls)
+	cfg.APUrls, err = parseUrls(c.AdvertisePeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.LCUrls, err = ParseUrls(c.ClientUrls)
+	cfg.LCUrls, err = parseUrls(c.ClientUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.ACUrls, err = ParseUrls(c.AdvertiseClientUrls)
+	cfg.ACUrls, err = parseUrls(c.AdvertiseClientUrls)
 	if err != nil {
 		return nil, err
 	}
