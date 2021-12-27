@@ -136,7 +136,7 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	}
 }
 
-// GetComponentNameOnHTTP return component name from Request Header
+// GetComponentNameOnHTTP returns component name from Request Header
 func GetComponentNameOnHTTP(r *http.Request) string {
 	componentName := r.Header.Get(ComponentSignatureKey)
 	if componentName == "" {
