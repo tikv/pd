@@ -31,7 +31,7 @@ var (
 	// ComponentSignatureKey is used for http request header key
 	// to identify component signature
 	ComponentSignatureKey = "component"
-	// ComponentAnonymousValue identify anonymous request source
+	// ComponentAnonymousValue identifies anonymous request source
 	ComponentAnonymousValue = "anonymous"
 )
 
