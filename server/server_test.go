@@ -270,6 +270,5 @@ func (s *testServerHandlerSuite) TestMuxRouterName(c *C) {
 	resp, err := http.Get(fmt.Sprintf("%s/pd/apis/mok/v1/router", svr.GetAddr()))
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	c.Assert(err, IsNil)
 	resp.Body.Close()
 }

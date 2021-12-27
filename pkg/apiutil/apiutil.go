@@ -132,10 +132,8 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 // GetHTTPRouteName return mux route name registered for ServiceName
 func GetHTTPRouteName(req *http.Request) (string, bool) {
 	route := mux.CurrentRoute(req)
-	if route != nil {
-		if route.GetName() != "" {
-			return route.GetName(), true
-		}
+	if route != nil && route.GetName() != "" {
+		return route.GetName(), true
 	}
 	return "", false
 }
