@@ -130,10 +130,13 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	}
 }
 
-// GetIPAddrFromHTTPRequest returns http client IP from context
+// GetIPAddrFromHTTPRequest returns http client IP from context.
+// Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
+// so `X-Forwarded-For` has the higher priority than `X-Real-IP`.
+// And both of them have the higher priority than `RemoteAddr`
 func GetIPAddrFromHTTPRequest(r *http.Request) string {
 	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-	if ips[0] != "" {
+	if len(strings.Trim(ips[0], " ")) > 0 {
 		return ips[0]
 	}
 
