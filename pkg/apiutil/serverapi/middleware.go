@@ -112,7 +112,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 	clientUrls := leader.GetClientUrls()
-	urls := make([]url.URL, len(clientUrls))
+	urls := make([]url.URL, 0, len(clientUrls))
 	for _, item := range clientUrls {
 		u, err := url.Parse(item)
 		if err != nil {
