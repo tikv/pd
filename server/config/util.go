@@ -17,9 +17,11 @@ package config
 import (
 	"net/url"
 	"regexp"
+	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 const (
@@ -86,4 +88,20 @@ func NewTestOptions() *PersistOptions {
 	c := NewConfig()
 	c.Adjust(nil, false)
 	return NewPersistOptions(c)
+}
+
+// parseUrls parse a string into multiple urls.
+func parseUrls(s string) ([]url.URL, error) {
+	items := strings.Split(s, ",")
+	urls := make([]url.URL, 0, len(items))
+	for _, item := range items {
+		u, err := url.Parse(item)
+		if err != nil {
+			return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
+		}
+
+		urls = append(urls, *u)
+	}
+
+	return urls, nil
 }
