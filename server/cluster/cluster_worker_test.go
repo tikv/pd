@@ -81,7 +81,7 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	c.Assert(core.HexRegionKeyStr(old.GetStartKey()), Equals, core.HexRegionKeyStr(origin.GetStartKey()))
 	// case2: peer can not be nil
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: proto.Clone(left).(*metapb.Region), Right: proto.Clone(right).(*metapb.Region)})
-	c.Assert(err, IsNil)
+	c.Assert(err, NotNil)
 	c.Assert(cluster.GetRegion(1), IsNil)
 	old = cluster.GetRegion(2)
 	c.Assert(old, NotNil)
