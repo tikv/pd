@@ -586,7 +586,7 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 		},
 	}
 
-	status := false
+	status := ""
 
 	// invalid url
 	url := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, "_", "t")
@@ -608,7 +608,7 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 
 	err = readJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
-	c.Assert(status, Equals, true)
+	c.Assert(status, Equals, "REPLICATED")
 
 	// test multiple rules
 	r1 = newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
@@ -625,7 +625,7 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 
 	err = readJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
-	c.Assert(status, Equals, true)
+	c.Assert(status, Equals, "REPLICATED")
 
 	// test multiple bundles
 	bundle = append(bundle, placement.GroupBundle{
@@ -644,7 +644,7 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 
 	err = readJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
-	c.Assert(status, Equals, false)
+	c.Assert(status, Equals, "INPROGRESS")
 
 	r1 = newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1}, &metapb.Peer{Id: 6, StoreId: 1}, &metapb.Peer{Id: 7, StoreId: 1})
@@ -652,7 +652,7 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 
 	err = readJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
-	c.Assert(status, Equals, true)
+	c.Assert(status, Equals, "REPLICATED")
 }
 
 // Create n regions (0..n) of n stores (0..n).
