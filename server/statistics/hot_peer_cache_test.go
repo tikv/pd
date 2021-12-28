@@ -493,6 +493,55 @@ func (t *testHotPeerCache) TestRemoveFromCacheRandom(c *C) {
 	}
 }
 
+func checkCoolDown(c *C, cache *hotPeerCache, region *core.RegionInfo, expect bool) {
+	item := cache.getOldHotPeerStat(region.GetID(), region.GetLeader().GetStoreId())
+	c.Assert(item.IsNeedCoolDownTransferLeader(3), Equals, expect)
+}
+
+func (t *testHotPeerCache) TestCoolDownTransferLeader(c *C) {
+	cache := NewHotPeerCache(Read)
+	region := buildRegion(Read, 3, 60)
+
+	moveLeader := func() {
+		_, region = schedule(c, movePeer, region, 10)
+		checkAndUpdate(c, cache, region)
+		checkCoolDown(c, cache, region, false)
+		_, region = schedule(c, transferLeader, region, 10)
+		checkAndUpdate(c, cache, region)
+		checkCoolDown(c, cache, region, true)
+	}
+	transferLeader := func() {
+		_, region = schedule(c, transferLeader, region)
+		checkAndUpdate(c, cache, region)
+		checkCoolDown(c, cache, region, true)
+	}
+	movePeer := func() {
+		_, region = schedule(c, movePeer, region, 10)
+		checkAndUpdate(c, cache, region)
+		checkCoolDown(c, cache, region, false)
+	}
+	addReplica := func() {
+		_, region = schedule(c, addReplica, region, 10)
+		checkAndUpdate(c, cache, region)
+		checkCoolDown(c, cache, region, false)
+	}
+	removeReplica := func() {
+		_, region = schedule(c, removeReplica, region, 10)
+		checkAndUpdate(c, cache, region)
+		checkCoolDown(c, cache, region, false)
+	}
+	schedulerAndChecks := []func(){moveLeader, transferLeader, movePeer, addReplica, removeReplica}
+	for _, schedulerAndCheck := range schedulerAndChecks {
+		cache = NewHotPeerCache(Read)
+		region = buildRegion(Read, 3, 60)
+		for i := 1; i <= 200; i++ {
+			checkAndUpdate(c, cache, region)
+		}
+		checkCoolDown(c, cache, region, false)
+		schedulerAndCheck()
+	}
+}
+
 func BenchmarkCheckRegionFlow(b *testing.B) {
 	cache := NewHotPeerCache(Read)
 	region := buildRegion(Read, 3, 10)
