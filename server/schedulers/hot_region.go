@@ -69,10 +69,6 @@ const (
 	HotRegionName = "balance-hot-region-scheduler"
 	// HotRegionType is balance hot region scheduler type.
 	HotRegionType = "hot-region"
-	// HotReadRegionType is hot read region scheduler type.
-	HotReadRegionType = "hot-read-region"
-	// HotWriteRegionType is hot write region scheduler type.
-	HotWriteRegionType = "hot-write-region"
 
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
@@ -89,7 +85,7 @@ type hotScheduler struct {
 	name string
 	*BaseScheduler
 	sync.RWMutex
-	types []rwType
+	types []statistics.RWType
 	r     *rand.Rand
 
 	// regionPendings stores regionID -> pendingInfluence
@@ -99,10 +95,10 @@ type hotScheduler struct {
 
 	// store information, including pending Influence by resource type
 	// Every time `Schedule()` will recalculate it.
-	stInfos map[uint64]*storeSummaryInfo
+	stInfos map[uint64]*statistics.StoreSummaryInfo
 	// temporary states but exported to API or metrics
 	// Every time `Schedule()` will recalculate it.
-	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
+	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
 
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
@@ -113,13 +109,13 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 	ret := &hotScheduler{
 		name:           HotRegionName,
 		BaseScheduler:  base,
-		types:          []rwType{write, read},
+		types:          []statistics.RWType{statistics.Write, statistics.Read},
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 		regionPendings: make(map[uint64]*pendingInfluence),
 		conf:           conf,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
-		ret.stLoadInfos[ty] = map[uint64]*storeLoadDetail{}
+		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
 	}
 	return ret
 }
@@ -156,16 +152,20 @@ func (h *hotScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }
 
-func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
+func (h *hotScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 
 	h.prepareForBalance(typ, cluster)
+	// it can not move earlier to support to use api and metrics.
+	if h.conf.IsForbidRWType(typ) {
+		return nil
+	}
 
 	switch typ {
-	case read:
+	case statistics.Read:
 		return h.balanceHotReadRegions(cluster)
-	case write:
+	case statistics.Write:
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
@@ -173,14 +173,14 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store
-func (h *hotScheduler) prepareForBalance(typ rwType, cluster opt.Cluster) {
-	h.stInfos = summaryStoreInfos(cluster)
+func (h *hotScheduler) prepareForBalance(typ statistics.RWType, cluster opt.Cluster) {
+	h.stInfos = statistics.SummaryStoreInfos(cluster)
 	h.summaryPendingInfluence()
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
 	switch typ {
-	case read:
+	case statistics.Read:
 		// update read statistics
 		regionRead := cluster.RegionReadStats()
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
@@ -188,14 +188,14 @@ func (h *hotScheduler) prepareForBalance(typ rwType, cluster opt.Cluster) {
 			storesLoads,
 			regionRead,
 			isTraceRegionFlow,
-			read, core.LeaderKind)
+			statistics.Read, core.LeaderKind)
 		h.stLoadInfos[readPeer] = summaryStoresLoad(
 			h.stInfos,
 			storesLoads,
 			regionRead,
 			isTraceRegionFlow,
-			read, core.RegionKind)
-	case write:
+			statistics.Read, core.RegionKind)
+	case statistics.Write:
 		// update write statistics
 		regionWrite := cluster.RegionWriteStats()
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
@@ -203,13 +203,13 @@ func (h *hotScheduler) prepareForBalance(typ rwType, cluster opt.Cluster) {
 			storesLoads,
 			regionWrite,
 			isTraceRegionFlow,
-			write, core.LeaderKind)
+			statistics.Write, core.LeaderKind)
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			h.stInfos,
 			storesLoads,
 			regionWrite,
 			isTraceRegionFlow,
-			write, core.RegionKind)
+			statistics.Write, core.RegionKind)
 	}
 }
 
@@ -235,15 +235,15 @@ func (h *hotScheduler) summaryPendingInfluence() {
 		}
 
 		if from != nil && weight > 0 {
-			from.addInfluence(&p.origin, -weight)
+			from.AddInfluence(&p.origin, -weight)
 		}
 		if to != nil && weight > 0 {
-			to.addInfluence(&p.origin, weight)
+			to.AddInfluence(&p.origin, weight)
 		}
 	}
 }
 
-func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, maxZombieDur time.Duration) bool {
+func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl statistics.Influence, maxZombieDur time.Duration) bool {
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
 	if ok {
@@ -259,9 +259,9 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, d
 }
 
 func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
-	leaderSolver := newBalanceSolver(h, cluster, read, transferLeader)
+	leaderSolver := newBalanceSolver(h, cluster, statistics.Read, transferLeader)
 	leaderOps := leaderSolver.solve()
-	peerSolver := newBalanceSolver(h, cluster, read, movePeer)
+	peerSolver := newBalanceSolver(h, cluster, statistics.Read, movePeer)
 	peerOps := peerSolver.solve()
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
 		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -306,7 +306,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 	s := h.r.Intn(100)
 	switch {
 	case s < int(schedulePeerPr*100):
-		peerSolver := newBalanceSolver(h, cluster, write, movePeer)
+		peerSolver := newBalanceSolver(h, cluster, statistics.Write, movePeer)
 		ops := peerSolver.solve()
 		if len(ops) > 0 && peerSolver.tryAddPendingInfluence() {
 			return ops
@@ -314,7 +314,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 	default:
 	}
 
-	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
+	leaderSolver := newBalanceSolver(h, cluster, statistics.Write, transferLeader)
 	ops := leaderSolver.solve()
 	if len(ops) > 0 && leaderSolver.tryAddPendingInfluence() {
 		return ops
@@ -327,18 +327,18 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 type balanceSolver struct {
 	sche         *hotScheduler
 	cluster      opt.Cluster
-	stLoadDetail map[uint64]*storeLoadDetail
-	rwTy         rwType
+	stLoadDetail map[uint64]*statistics.StoreLoadDetail
+	rwTy         statistics.RWType
 	opTy         opType
 
 	cur  *solution
 	best *solution
 	ops  []*operator.Operator
-	infl Influence
+	infl statistics.Influence
 
-	maxSrc   *storeLoad
-	minDst   *storeLoad
-	rankStep *storeLoad
+	maxSrc   *statistics.StoreLoad
+	minDst   *statistics.StoreLoad
+	rankStep *statistics.StoreLoad
 
 	// firstPriority and secondPriority indicate priority of hot schedule
 	// they may be byte(0), key(1), query(2), and always less than dimLen
@@ -350,10 +350,10 @@ type balanceSolver struct {
 }
 
 type solution struct {
-	srcDetail   *storeLoadDetail
+	srcDetail   *statistics.StoreLoadDetail
 	srcPeerStat *statistics.HotPeerStat
 	region      *core.RegionInfo
-	dstDetail   *storeLoadDetail
+	dstDetail   *statistics.StoreLoadDetail
 
 	// progressiveRank measures the contribution for balance.
 	// The smaller the rank, the better this solution is.
@@ -374,20 +374,20 @@ func (bs *balanceSolver) init() {
 	}
 	// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
 
-	bs.maxSrc = &storeLoad{Loads: make([]float64, statistics.DimLen)}
-	bs.minDst = &storeLoad{
+	bs.maxSrc = &statistics.StoreLoad{Loads: make([]float64, statistics.DimLen)}
+	bs.minDst = &statistics.StoreLoad{
 		Loads: make([]float64, statistics.DimLen),
 		Count: math.MaxFloat64,
 	}
 	for i := range bs.minDst.Loads {
 		bs.minDst.Loads[i] = math.MaxFloat64
 	}
-	maxCur := &storeLoad{Loads: make([]float64, statistics.DimLen)}
+	maxCur := &statistics.StoreLoad{Loads: make([]float64, statistics.DimLen)}
 
 	for _, detail := range bs.stLoadDetail {
-		bs.maxSrc = maxLoad(bs.maxSrc, detail.LoadPred.min())
-		bs.minDst = minLoad(bs.minDst, detail.LoadPred.max())
-		maxCur = maxLoad(maxCur, &detail.LoadPred.Current)
+		bs.maxSrc = statistics.MaxLoad(bs.maxSrc, detail.LoadPred.Min())
+		bs.minDst = statistics.MinLoad(bs.minDst, detail.LoadPred.Max())
+		maxCur = statistics.MaxLoad(maxCur, &detail.LoadPred.Current)
 	}
 
 	rankStepRatios := []float64{
@@ -398,7 +398,7 @@ func (bs *balanceSolver) init() {
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
 	}
-	bs.rankStep = &storeLoad{
+	bs.rankStep = &statistics.StoreLoad{
 		Loads: stepLoads,
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
@@ -415,9 +415,9 @@ func (bs *balanceSolver) getPriorities() []string {
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	switch bs.rwTy {
-	case read:
+	case statistics.Read:
 		return adjustConfig(querySupport, bs.sche.conf.GetReadPriorities(), getReadPriorities)
-	case write:
+	case statistics.Write:
 		switch bs.opTy {
 		case transferLeader:
 			return adjustConfig(querySupport, bs.sche.conf.GetWriteLeaderPriorities(), getWriteLeaderPriorities)
@@ -429,7 +429,7 @@ func (bs *balanceSolver) getPriorities() []string {
 	return []string{}
 }
 
-func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
+func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy statistics.RWType, opTy opType) *balanceSolver {
 	solver := &balanceSolver{
 		sche:    sche,
 		cluster: cluster,
@@ -445,7 +445,7 @@ func (bs *balanceSolver) isValid() bool {
 		return false
 	}
 	switch bs.rwTy {
-	case write, read:
+	case statistics.Write, statistics.Read:
 	default:
 		return false
 	}
@@ -514,21 +514,21 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	default:
 		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
 	}
-	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.srcDetail.getID(), bs.best.dstDetail.getID(), bs.infl, maxZombieDur)
+	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.srcDetail.GetID(), bs.best.dstDetail.GetID(), bs.infl, maxZombieDur)
 }
 
 func (bs *balanceSolver) isForWriteLeader() bool {
-	return bs.rwTy == write && bs.opTy == transferLeader
+	return bs.rwTy == statistics.Write && bs.opTy == transferLeader
 }
 
 func (bs *balanceSolver) isForWritePeer() bool {
-	return bs.rwTy == write && bs.opTy == movePeer
+	return bs.rwTy == statistics.Write && bs.opTy == movePeer
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
 // its expectation * ratio, the store would be selected as hot source store
-func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
-	ret := make(map[uint64]*storeLoadDetail)
+func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetail {
+	ret := make(map[uint64]*statistics.StoreLoadDetail)
 	confSrcToleranceRatio := bs.sche.conf.GetSrcToleranceRatio()
 	confEnableForTiFlash := bs.sche.conf.GetEnableForTiFlash()
 	for id, detail := range bs.stLoadDetail {
@@ -537,7 +537,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			if !confEnableForTiFlash {
 				continue
 			}
-			if bs.rwTy != write || bs.opTy != movePeer {
+			if bs.rwTy != statistics.Write || bs.opTy != movePeer {
 				continue
 			}
 			srcToleranceRatio += tiflashToleranceRatioCorrection
@@ -546,7 +546,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			continue
 		}
 
-		if bs.checkSrcByDimPriorityAndTolerance(detail.LoadPred.min(), &detail.LoadPred.Expect, srcToleranceRatio) {
+		if bs.checkSrcByDimPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 		} else {
@@ -556,7 +556,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	return ret
 }
 
-func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *storeLoad, toleranceRatio float64) bool {
+func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
 	if bs.sche.conf.IsStrictPickingStoreEnabled() {
 		return slice.AllOf(minLoad.Loads, func(i int) bool {
 			if bs.isSelectedDim(i) {
@@ -604,13 +604,13 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum 
 	firstSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(firstSort, ret)
 	sort.Slice(firstSort, func(i, j int) bool {
-		k := getRegionStatKind(bs.rwTy, bs.firstPriority)
+		k := statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority)
 		return firstSort[i].GetLoad(k) > firstSort[j].GetLoad(k)
 	})
 	secondSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(secondSort, ret)
 	sort.Slice(secondSort, func(i, j int) bool {
-		k := getRegionStatKind(bs.rwTy, bs.secondPriority)
+		k := statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority)
 		return secondSort[i].GetLoad(k) > secondSort[j].GetLoad(k)
 	})
 	union := make(map[*statistics.HotPeerStat]struct{}, maxPeerNum)
@@ -675,13 +675,13 @@ func (bs *balanceSolver) getRegion() *core.RegionInfo {
 
 	switch bs.opTy {
 	case movePeer:
-		srcPeer := region.GetStorePeer(bs.cur.srcDetail.getID())
+		srcPeer := region.GetStorePeer(bs.cur.srcDetail.GetID())
 		if srcPeer == nil {
 			log.Debug("region does not have a peer on source store, maybe stat out of date", zap.Uint64("region-id", bs.cur.srcPeerStat.ID()))
 			return nil
 		}
 	case transferLeader:
-		if region.GetLeader().GetStoreId() != bs.cur.srcDetail.getID() {
+		if region.GetLeader().GetStoreId() != bs.cur.srcDetail.GetID() {
 			log.Debug("region leader is not on source store, maybe stat out of date", zap.Uint64("region-id", bs.cur.srcPeerStat.ID()))
 			return nil
 		}
@@ -693,10 +693,10 @@ func (bs *balanceSolver) getRegion() *core.RegionInfo {
 }
 
 // filterDstStores select the candidate store by filters
-func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
+func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetail {
 	var (
 		filters    []filter.Filter
-		candidates []*storeLoadDetail
+		candidates []*statistics.StoreLoadDetail
 	)
 	srcStore := bs.cur.srcDetail.Info.Store
 	switch bs.opTy {
@@ -733,8 +733,8 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	return bs.pickDstStores(filters, candidates)
 }
 
-func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*storeLoadDetail) map[uint64]*storeLoadDetail {
-	ret := make(map[uint64]*storeLoadDetail, len(candidates))
+func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*statistics.StoreLoadDetail) map[uint64]*statistics.StoreLoadDetail {
+	ret := make(map[uint64]*statistics.StoreLoadDetail, len(candidates))
 	confDstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	confEnableForTiFlash := bs.sche.conf.GetEnableForTiFlash()
 	for _, detail := range candidates {
@@ -744,14 +744,14 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 			if !confEnableForTiFlash {
 				continue
 			}
-			if bs.rwTy != write || bs.opTy != movePeer {
+			if bs.rwTy != statistics.Write || bs.opTy != movePeer {
 				continue
 			}
 			dstToleranceRatio += tiflashToleranceRatioCorrection
 		}
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
 			id := store.GetID()
-			if bs.checkDstByPriorityAndTolerance(detail.LoadPred.max(), &detail.LoadPred.Expect, dstToleranceRatio) {
+			if bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				ret[id] = detail
 				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(id, 10)).Inc()
 			} else {
@@ -762,7 +762,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 	return ret
 }
 
-func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLoad, toleranceRatio float64) bool {
+func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statistics.StoreLoad, toleranceRatio float64) bool {
 	if bs.sche.conf.IsStrictPickingStoreEnabled() {
 		return slice.AllOf(maxLoad.Loads, func(i int) bool {
 			if bs.isSelectedDim(i) {
@@ -779,8 +779,8 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *storeLo
 func (bs *balanceSolver) calcProgressiveRank() {
 	src := bs.cur.srcDetail
 	dst := bs.cur.dstDetail
-	srcLd := src.LoadPred.min()
-	dstLd := dst.LoadPred.max()
+	srcLd := src.LoadPred.Min()
+	dstLd := dst.LoadPred.Max()
 	bs.cur.progressiveRank = 0
 	peer := bs.cur.srcPeerStat
 
@@ -790,7 +790,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		}
 		srcRate := srcLd.Loads[bs.firstPriority]
 		dstRate := dstLd.Loads[bs.firstPriority]
-		peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, bs.firstPriority))
+		peerRate := peer.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority))
 		if srcRate-peerRate >= dstRate+peerRate {
 			bs.cur.progressiveRank = -1
 		}
@@ -826,20 +826,20 @@ func (bs *balanceSolver) calcProgressiveRank() {
 
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
 // This will make the hot region scheduling slow even serializely running when each 2 store's pending influence is close.
-func (bs *balanceSolver) isTolerance(src, dst *storeLoadDetail, dim int) bool {
+func (bs *balanceSolver) isTolerance(src, dst *statistics.StoreLoadDetail, dim int) bool {
 	srcRate := src.LoadPred.Current.Loads[dim]
 	dstRate := dst.LoadPred.Current.Loads[dim]
 	if srcRate <= dstRate {
 		return false
 	}
 	pendingAmp := (1 + pendingAmpFactor*srcRate/(srcRate-dstRate))
-	srcPending := src.LoadPred.pending().Loads[dim]
-	dstPending := dst.LoadPred.pending().Loads[dim]
-	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(src.getID(), 10), strconv.FormatUint(dst.getID(), 10)).Set(pendingAmp)
+	srcPending := src.LoadPred.Pending().Loads[dim]
+	dstPending := dst.LoadPred.Pending().Loads[dim]
+	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(src.GetID(), 10), strconv.FormatUint(dst.GetID(), 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
-func (bs *balanceSolver) getHotDecRatioByPriorities(srcLd, dstLd *storeLoad, peer *statistics.HotPeerStat) (bool, float64, bool, float64) {
+func (bs *balanceSolver) getHotDecRatioByPriorities(srcLd, dstLd *statistics.StoreLoad, peer *statistics.HotPeerStat) (bool, float64, bool, float64) {
 	// we use DecRatio(Decline Ratio) to expect that the dst store's rate should still be less
 	// than the src store's rate after scheduling one peer.
 	getSrcDecRate := func(a, b float64) float64 {
@@ -851,7 +851,7 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(srcLd, dstLd *storeLoad, pee
 	checkHot := func(dim int) (bool, float64) {
 		srcRate := srcLd.Loads[dim]
 		dstRate := dstLd.Loads[dim]
-		peerRate := peer.GetLoad(getRegionStatKind(bs.rwTy, dim))
+		peerRate := peer.GetLoad(statistics.GetRegionStatKind(bs.rwTy, dim))
 		decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
 		isHot := peerRate >= bs.getMinRate(dim)
 		return isHot, decRatio
@@ -902,7 +902,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 		// compare region
 
 		if bs.isForWriteLeader() {
-			kind := getRegionStatKind(write, bs.firstPriority)
+			kind := statistics.GetRegionStatKind(statistics.Write, bs.firstPriority)
 			switch {
 			case bs.cur.srcPeerStat.GetLoad(kind) > old.srcPeerStat.GetLoad(kind):
 				return true
@@ -938,7 +938,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 }
 
 func (bs *balanceSolver) getRkCmpPriorities(old *solution) (firstCmp int, secondCmp int) {
-	fk, sk := getRegionStatKind(bs.rwTy, bs.firstPriority), getRegionStatKind(bs.rwTy, bs.secondPriority)
+	fk, sk := statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority), statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority)
 	dimToStep := func(priority int) float64 {
 		switch priority {
 		case statistics.ByteDim:
@@ -956,7 +956,7 @@ func (bs *balanceSolver) getRkCmpPriorities(old *solution) (firstCmp int, second
 }
 
 // smaller is better
-func (bs *balanceSolver) compareSrcStore(detail1, detail2 *storeLoadDetail) int {
+func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadDetail) int {
 	if detail1 != detail2 {
 		// compare source store
 		var lpCmp storeLPCmp
@@ -989,7 +989,7 @@ func (bs *balanceSolver) compareSrcStore(detail1, detail2 *storeLoadDetail) int 
 }
 
 // smaller is better
-func (bs *balanceSolver) compareDstStore(detail1, detail2 *storeLoadDetail) int {
+func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadDetail) int {
 	if detail1 != detail2 {
 		// compare destination store
 		var lpCmp storeLPCmp
@@ -1031,14 +1031,14 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 		bs.cur.srcPeerStat == nil || bs.cur.region == nil {
 		return false
 	}
-	if bs.cur.srcDetail.getID() != bs.cur.srcPeerStat.StoreID ||
+	if bs.cur.srcDetail.GetID() != bs.cur.srcPeerStat.StoreID ||
 		bs.cur.region.GetID() != bs.cur.srcPeerStat.ID() {
 		return false
 	}
 	return true
 }
 
-func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence) {
+func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *statistics.Influence) {
 	if !bs.isReadyToBuild() {
 		return nil, nil
 	}
@@ -1049,8 +1049,8 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 		targetLabel string
 	)
 
-	srcStoreID := bs.cur.srcDetail.getID()
-	dstStoreID := bs.cur.dstDetail.getID()
+	srcStoreID := bs.cur.srcDetail.GetID()
+	dstStoreID := bs.cur.dstDetail.GetID()
 	switch bs.opTy {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(srcStoreID) // checked in getRegionAndSrcPeer
@@ -1058,7 +1058,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 		sourceLabel = strconv.FormatUint(srcStoreID, 10)
 		targetLabel = strconv.FormatUint(dstPeer.GetStoreId(), 10)
 
-		if bs.rwTy == read && bs.cur.region.GetLeader().StoreId == srcStoreID { // move read leader
+		if bs.rwTy == statistics.Read && bs.cur.region.GetLeader().StoreId == srcStoreID { // move read leader
 			op, err = operator.CreateMoveLeaderOperator(
 				"move-hot-read-leader",
 				bs.cluster,
@@ -1119,30 +1119,30 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
 
-	infl = &Influence{
+	infl = &statistics.Influence{
 		Loads: append(bs.cur.srcPeerStat.Loads[:0:0], bs.cur.srcPeerStat.Loads...),
 		Count: 1,
 	}
 	return op, infl
 }
 
-func (h *hotScheduler) GetHotStatus(typ string) *statistics.StoreHotPeersInfos {
+func (h *hotScheduler) GetHotStatus(typ statistics.RWType) *statistics.StoreHotPeersInfos {
 	h.RLock()
 	defer h.RUnlock()
 	var leaderTyp, peerTyp resourceType
 	switch typ {
-	case HotReadRegionType:
+	case statistics.Read:
 		leaderTyp, peerTyp = readLeader, readPeer
-	case HotWriteRegionType:
+	case statistics.Write:
 		leaderTyp, peerTyp = writeLeader, writePeer
 	}
 	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[leaderTyp]))
 	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[peerTyp]))
 	for id, detail := range h.stLoadInfos[leaderTyp] {
-		asLeader[id] = detail.toHotPeersStat()
+		asLeader[id] = detail.ToHotPeersStat()
 	}
 	for id, detail := range h.stLoadInfos[peerTyp] {
-		asPeer[id] = detail.toHotPeersStat()
+		asPeer[id] = detail.ToHotPeersStat()
 	}
 	return &statistics.StoreHotPeersInfos{
 		AsLeader: asLeader,
@@ -1150,10 +1150,10 @@ func (h *hotScheduler) GetHotStatus(typ string) *statistics.StoreHotPeersInfos {
 	}
 }
 
-func (h *hotScheduler) GetPendingInfluence() map[uint64]*Influence {
+func (h *hotScheduler) GetPendingInfluence() map[uint64]*statistics.Influence {
 	h.RLock()
 	defer h.RUnlock()
-	ret := make(map[uint64]*Influence, len(h.stInfos))
+	ret := make(map[uint64]*statistics.Influence, len(h.stInfos))
 	for id, info := range h.stInfos {
 		if info.PendingSum != nil {
 			ret[id] = info.PendingSum
@@ -1190,25 +1190,6 @@ func (h *hotScheduler) clearPendingInfluence() {
 	h.regionPendings = make(map[uint64]*pendingInfluence)
 }
 
-// rwType : the perspective of balance
-type rwType int
-
-const (
-	write rwType = iota
-	read
-)
-
-func (rw rwType) String() string {
-	switch rw {
-	case read:
-		return "read"
-	case write:
-		return "write"
-	default:
-		return ""
-	}
-}
-
 type opType int
 
 const (
@@ -1237,16 +1218,16 @@ const (
 	resourceTypeLen
 )
 
-func toResourceType(rwTy rwType, opTy opType) resourceType {
+func toResourceType(rwTy statistics.RWType, opTy opType) resourceType {
 	switch rwTy {
-	case write:
+	case statistics.Write:
 		switch opTy {
 		case movePeer:
 			return writePeer
 		case transferLeader:
 			return writeLeader
 		}
-	case read:
+	case statistics.Read:
 		switch opTy {
 		case movePeer:
 			return readPeer
@@ -1255,24 +1236,6 @@ func toResourceType(rwTy rwType, opTy opType) resourceType {
 		}
 	}
 	panic(fmt.Sprintf("invalid arguments for toResourceType: rwTy = %v, opTy = %v", rwTy, opTy))
-}
-
-func getRegionStatKind(rwTy rwType, dim int) statistics.RegionStatKind {
-	switch {
-	case rwTy == read && dim == statistics.ByteDim:
-		return statistics.RegionReadBytes
-	case rwTy == read && dim == statistics.KeyDim:
-		return statistics.RegionReadKeys
-	case rwTy == write && dim == statistics.ByteDim:
-		return statistics.RegionWriteBytes
-	case rwTy == write && dim == statistics.KeyDim:
-		return statistics.RegionWriteKeys
-	case rwTy == write && dim == statistics.QueryDim:
-		return statistics.RegionWriteQuery
-	case rwTy == read && dim == statistics.QueryDim:
-		return statistics.RegionReadQuery
-	}
-	return 0
 }
 
 func stringToDim(name string) int {

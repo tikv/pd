@@ -113,7 +113,7 @@ func (s *memberTestSuite) TestMemberDelete(c *C) {
 		c.Log(time.Now(), "try to delete:", t.path)
 		testutil.WaitUntil(c, func(c *C) bool {
 			addr := leader.GetConfig().ClientUrls + "/pd/api/v1/members/" + t.path
-			req, err := http.NewRequest("DELETE", addr, nil)
+			req, err := http.NewRequest(http.MethodDelete, addr, nil)
 			c.Assert(err, IsNil)
 			res, err := httpClient.Do(req)
 			c.Assert(err, IsNil)
