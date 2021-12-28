@@ -32,7 +32,7 @@ import (
 var (
 	pdControllerComponentName = "pdctl"
 	dialClient                = &http.Client{
-		Transport: apiutil.NewComponentSignatureRoundTripper(http.DefaultTransport, &pdControllerComponentName),
+		Transport: apiutil.NewComponentSignatureRoundTripper(http.DefaultTransport, pdControllerComponentName),
 	}
 	pingPrefix = "pd/api/v1/ping"
 )
@@ -51,7 +51,7 @@ func InitHTTPSClient(caPath, certPath, keyPath string) error {
 
 	dialClient = &http.Client{
 		Transport: apiutil.NewComponentSignatureRoundTripper(
-			&http.Transport{TLSClientConfig: tlsConfig}, &pdControllerComponentName),
+			&http.Transport{TLSClientConfig: tlsConfig}, pdControllerComponentName),
 	}
 
 	return nil
