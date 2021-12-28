@@ -201,5 +201,6 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	c.Assert(*rangeHoles, DeepEquals, [][]string{
 		{"", core.HexRegionKeyStr(r1.GetStartKey())},
 		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r5.GetStartKey())},
+		{core.HexRegionKeyStr(r5.GetEndKey()), ""},
 	})
 }
