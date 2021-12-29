@@ -158,12 +158,15 @@ func (s *testConfigSuite) TestValidation(c *C) {
 	c.Assert(cfg.Schedule.Validate(), NotNil)
 	// check quota
 	c.Assert(cfg.QuotaBackendBytes, Equals, defaultQuotaBackendBytes)
+	// check request bytes
+	c.Assert(cfg.MaxRequestBytes, Equals, defaultMaxRequestBytes)
 }
 
 func (s *testConfigSuite) TestAdjust(c *C) {
 	cfgData := `
 name = ""
 lease = 0
+max-request-bytes = 20000000
 
 [pd-server]
 metric-storage = "http://127.0.0.1:9090"
@@ -184,6 +187,7 @@ leader-schedule-limit = 0
 	c.Assert(err, IsNil)
 	c.Assert(cfg.Name, Equals, fmt.Sprintf("%s-%s", defaultName, host))
 	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
+	c.Assert(cfg.MaxRequestBytes, Equals, uint(20000000))
 	// When defined, use values from config file.
 	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
 	c.Assert(cfg.Schedule.EnableOneWayMerge, IsTrue)
