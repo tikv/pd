@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedulers"
@@ -62,7 +63,7 @@ type coordinator struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	cluster         *RaftCluster
-	checkers        *schedule.CheckerController
+	checkers        *checker.Controller
 	regionScatterer *schedule.RegionScatterer
 	regionSplitter  *schedule.RegionSplitter
 	schedulers      map[string]*scheduleController
@@ -79,7 +80,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
-		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
+		checkers:        checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:      make(map[string]*scheduleController),
