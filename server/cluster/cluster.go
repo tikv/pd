@@ -177,7 +177,7 @@ func (c *RaftCluster) isInitialized() bool {
 	if c.core.GetRegionCount() > 1 {
 		return true
 	}
-	region := c.core.SearchRegion(nil)
+	region := c.core.GetRegionByKey(nil)
 	return region != nil &&
 		len(region.GetVoters()) >= int(c.GetReplicationConfig().MaxReplicas) &&
 		len(region.GetPendingPeers()) == 0
@@ -774,12 +774,12 @@ func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
 
 // GetRegionByKey gets regionInfo by region key from cluster.
 func (c *RaftCluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.SearchRegion(regionKey)
+	return c.core.GetRegionByKey(regionKey)
 }
 
 // GetPrevRegionByKey gets previous region and leader peer by the region key from cluster.
 func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.SearchPrevRegion(regionKey)
+	return c.core.GetPrevRegionByKey(regionKey)
 }
 
 // ScanRegions scans region with start key, until the region contains endKey, or
