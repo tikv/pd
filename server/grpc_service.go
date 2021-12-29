@@ -618,6 +618,10 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 
+	if status := request.GetDrAutosyncStatus(); status != nil {
+		rc.GetReplicationMode().UpdateStoreDRStatus(request.GetStats().GetStoreId(), status)
+	}
+
 	resp := &pdpb.StoreHeartbeatResponse{
 		Header:            s.header(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
