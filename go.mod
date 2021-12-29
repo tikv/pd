@@ -57,4 +57,4 @@ require (
 	gotest.tools/gotestsum v1.7.0
 )
 
-replace github.com/pingcap/kvproto => github.com/oh-my-tidb/kvproto v0.0.0-20211229094157-27b6c69757d3
+replace github.com/pingcap/kvproto => github.com/oh-my-tidb/kvproto v0.0.0-20211229105236-4999e238abdf
