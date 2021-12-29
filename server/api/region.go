@@ -237,7 +237,7 @@ func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags region
-// @Summary Check if regions in the given key ranges are replicated. Returns 'REPLICATED', 'INPROGRESS', or 'WAITING'.
+// @Summary Check if regions in the given key ranges are replicated. Returns 'REPLICATED', 'INPROGRESS', or 'PENDING'. 'PENDING' means that there is at least one region pending for scheduling. Similarly, 'INPROGRESS' means there is at least one region in scheduling.
 // @Param startKey query string true "Regions start key, hex encoded"
 // @Param endKey query string true "Regions end key, hex encoded"
 // @Produce plain
@@ -268,7 +268,7 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 			state = "INPROGRESS"
 			for _, item := range rc.GetCoordinator().GetWaitingRegions() {
 				if item.Key == region.GetID() {
-					state = "WAITING"
+					state = "PENDING"
 					break
 				}
 			}
