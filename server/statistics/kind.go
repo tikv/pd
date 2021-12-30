@@ -147,3 +147,25 @@ func (k RWType) RegionStats() []RegionStatKind {
 	}
 	return nil
 }
+
+// ActionType indicates the action type for the stat item.
+type ActionType int
+
+// Flags for action type.
+const (
+	Add ActionType = iota
+	Remove
+	Update
+)
+
+func (t ActionType) String() string {
+	switch t {
+	case Add:
+		return "add"
+	case Remove:
+		return "remove"
+	case Update:
+		return "update"
+	}
+	return "unimplemented"
+}

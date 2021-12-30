@@ -594,11 +594,11 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
-	regionIDs := make(map[uint64]struct{}, len(stats.GetPeerStats()))
+	regions := make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
 	for _, peerStat := range stats.GetPeerStats() {
 		regionID := peerStat.GetRegionId()
-		regionIDs[regionID] = struct{}{}
 		region := c.GetRegion(regionID)
+		regions[regionID] = region
 		if region == nil {
 			log.Warn("discard hot peer stat for unknown region",
 				zap.Uint64("region-id", regionID),
@@ -624,7 +624,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
-	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regionIDs, interval))
+	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	return nil
 }
 
