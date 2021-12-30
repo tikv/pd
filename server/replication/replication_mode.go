@@ -538,7 +538,7 @@ func (m *ModeManager) checkStoreStatus() [][]uint64 {
 	return stores
 }
 
-// UpdateStoreStatus saves the dr-autosync status of a store.
+// UpdateStoreDRStatus saves the dr-autosync status of a store.
 func (m *ModeManager) UpdateStoreDRStatus(id uint64, status *pb.StoreDRAutoSyncStatus) {
 	m.drStoreStatus.Store(id, status)
 }
