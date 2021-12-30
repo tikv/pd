@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -34,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -61,7 +61,7 @@ var (
 type OperatorController struct {
 	sync.RWMutex
 	ctx             context.Context
-	cluster         opt.Cluster
+	cluster         Cluster
 	operators       map[uint64]*operator.Operator
 	hbStreams       *hbstream.HeartbeatStreams
 	fastOperators   *cache.TTLUint64
@@ -74,7 +74,7 @@ type OperatorController struct {
 }
 
 // NewOperatorController creates a OperatorController.
-func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams *hbstream.HeartbeatStreams) *OperatorController {
+func NewOperatorController(ctx context.Context, cluster Cluster, hbStreams *hbstream.HeartbeatStreams) *OperatorController {
 	return &OperatorController{
 		ctx:             ctx,
 		cluster:         cluster,
@@ -97,7 +97,7 @@ func (oc *OperatorController) Ctx() context.Context {
 }
 
 // GetCluster exports cluster to evict-scheduler for check store status.
-func (oc *OperatorController) GetCluster() opt.Cluster {
+func (oc *OperatorController) GetCluster() Cluster {
 	oc.RLock()
 	defer oc.RUnlock()
 	return oc.cluster
@@ -160,7 +160,18 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 }
 
 func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step operator.OpStep, region *core.RegionInfo) bool {
-	err := step.CheckInProgress(oc.cluster, region)
+	checkFn := func(id uint64) error {
+		store := oc.cluster.GetStore(id)
+		if store == nil {
+			return errors.New("target store does not exist")
+		}
+		if store.DownTime() > oc.cluster.GetOpts().GetMaxStoreDownTime() {
+			return errors.New("target store is down")
+		}
+		return nil
+	}
+
+	err := step.CheckInProgress(checkFn, region)
 	if err != nil {
 		if oc.RemoveOperator(op, zap.String("reason", err.Error())) {
 			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
@@ -786,7 +797,7 @@ func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
 }
 
 // GetOpInfluence gets OpInfluence.
-func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInfluence {
+func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluence {
 	influence := operator.OpInfluence{
 		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
 	}
@@ -804,7 +815,7 @@ func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInf
 }
 
 // GetFastOpInfluence get fast finish operator influence
-func (oc *OperatorController) GetFastOpInfluence(cluster opt.Cluster, influence operator.OpInfluence) {
+func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence operator.OpInfluence) {
 	for _, id := range oc.fastOperators.GetAllID() {
 		value, ok := oc.fastOperators.Get(id)
 		if !ok {
@@ -823,7 +834,7 @@ func (oc *OperatorController) GetFastOpInfluence(cluster opt.Cluster, influence 
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
-func NewTotalOpInfluence(operators []*operator.Operator, cluster opt.Cluster) operator.OpInfluence {
+func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operator.OpInfluence {
 	influence := operator.OpInfluence{
 		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
 	}

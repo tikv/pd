@@ -25,7 +25,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -41,8 +40,8 @@ const (
 )
 
 type balancePlan struct {
+	schedule.Cluster
 	kind              core.ScheduleKind
-	cluster           opt.Cluster
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
 
@@ -54,10 +53,10 @@ type balancePlan struct {
 	targetScore float64
 }
 
-func newBalancePlan(kind core.ScheduleKind, cluster opt.Cluster, opInfluence operator.OpInfluence) *balancePlan {
+func newBalancePlan(kind core.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *balancePlan {
 	return &balancePlan{
+		Cluster:           cluster,
 		kind:              kind,
-		cluster:           cluster,
 		opInfluence:       opInfluence,
 		tolerantSizeRatio: adjustTolerantRatio(cluster, kind),
 	}
@@ -105,7 +104,7 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 	if targetInfluence < 0 {
 		targetInfluence = -targetInfluence
 	}
-	opts := p.cluster.GetOpts()
+	opts := p.GetOpts()
 	switch p.kind.Resource {
 	case core.LeaderKind:
 		sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
@@ -131,7 +130,7 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 			zap.Int64("source-influence", sourceInfluence),
 			zap.Int64("target-size", p.target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
 			zap.Int64("target-influence", targetInfluence),
-			zap.Int64("average-region-size", p.cluster.GetAverageRegionSize()),
+			zap.Int64("average-region-size", p.GetAverageRegionSize()),
 			zap.Int64("tolerant-resource", tolerantResource))
 	}
 	return shouldBalance
@@ -142,13 +141,13 @@ func (p *balancePlan) getTolerantResource() int64 {
 		return int64(p.tolerantSizeRatio)
 	}
 	regionSize := p.region.GetApproximateSize()
-	if regionSize < p.cluster.GetAverageRegionSize() {
-		regionSize = p.cluster.GetAverageRegionSize()
+	if regionSize < p.GetAverageRegionSize() {
+		regionSize = p.GetAverageRegionSize()
 	}
 	return int64(float64(regionSize) * p.tolerantSizeRatio)
 }
 
-func adjustTolerantRatio(cluster opt.Cluster, kind core.ScheduleKind) float64 {
+func adjustTolerantRatio(cluster schedule.Cluster, kind core.ScheduleKind) float64 {
 	var tolerantSizeRatio float64
 	switch c := cluster.(type) {
 	case *schedule.RangeCluster:
