@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -540,7 +539,7 @@ func (m *ModeManager) checkStoreStatus() [][]uint64 {
 }
 
 // UpdateStoreStatus saves the dr-autosync status of a store.
-func (m *ModeManager) UpdateStoreDRStatus(id uint64, status *replication_modepb.StoreDRAutoSyncStatus) {
+func (m *ModeManager) UpdateStoreDRStatus(id uint64, status *pb.StoreDRAutoSyncStatus) {
 	m.drStoreStatus.Store(id, status)
 }
 
@@ -557,7 +556,7 @@ func (m *ModeManager) drCheckStoreStateUpdated(stores []uint64) bool {
 		if !ok {
 			return false
 		}
-		drStatus := status.(*replication_modepb.StoreDRAutoSyncStatus)
+		drStatus := status.(*pb.StoreDRAutoSyncStatus)
 		if drStatus.GetState() != state.GetState() || drStatus.GetStateId() != state.GetStateId() {
 			return false
 		}
