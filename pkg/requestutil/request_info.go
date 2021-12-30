@@ -14,11 +14,15 @@
 
 package requestutil
 
-import "net/http"
+import (
+	"net/http"
+	"sync"
+)
 
 var (
 	// registeredSericeLabel is used to find service which request wants to access
 	registeredSericeLabel map[requestSchema]string
+	lock                  sync.RWMutex
 )
 
 func init() {
@@ -43,6 +47,8 @@ func NewRequestSchema(path string, method string) requestSchema {
 
 // GetServiceLabel returns service label which is defined when register router handle
 func GetServiceLabel(r *http.Request) string {
+	lock.RLock()
+	defer lock.RUnlock()
 	schema := NewRequestSchema(r.URL.Path, r.Method)
 	return registeredSericeLabel[schema]
 }
@@ -50,6 +56,8 @@ func GetServiceLabel(r *http.Request) string {
 // AddServiceLabel is used to add service label
 // when request schema has been added, it returns false
 func AddServiceLabel(path string, method string, serviceLabel string) bool {
+	lock.Lock()
+	defer lock.Unlock()
 	result, ok := registeredSericeLabel[NewRequestSchema(path, method)]
 	if ok && result != serviceLabel {
 		return false
