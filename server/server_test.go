@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 
@@ -203,9 +204,10 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintln(w, "Hello World")
 			// test getting ip
-			client_ip := apiutil.GetIPAddrFromHTTPRequest(r)
-			c.Assert(client_ip, Equals, "127.0.0.1")
+			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
+			c.Assert(clientIP, Equals, "127.0.0.1")
 		})
 		info := ServiceGroup{
 			Name:    "mok",
@@ -231,4 +233,8 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+	bodyString := string(bodyBytes)
+	c.Assert(bodyString, Equals, "Hello World\n")
 }
