@@ -198,7 +198,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/regions/range-holes", regionsHandler.GetRangeHoles).Methods("GET")
 	clusterRouter.HandleFunc("/regions/replicated", regionsHandler.CheckRegionsReplicated).Methods("GET").Queries("startKey", "{startKey}", "endKey", "{endKey}")
 
-	if ok := svr.GetConfig().AddServiceLabel(requestutil.NewRequestSchema(prefix+apiPrefix+"/version", "GET"), "GetPDVersion"); ok {
+	if ok := requestutil.AddServiceLabel(prefix+apiPrefix+"/version", "GET", "GetPDVersion"); ok {
 		apiRouter.Handle("/version", newVersionHandler(rd)).Methods("GET")
 	} else {
 		log.Error("Service Label Repetition", zap.String("URL PATH", prefix+apiPrefix+"/version"), zap.String("METHOD", "GET"))

@@ -28,18 +28,21 @@ import (
 )
 
 // requestInfoMiddleware is used to gather info from requsetInfo
-type sericeInfoMiddleware struct {
+type serviceInfoMiddleware struct {
 	s *server.Server
 }
 
-func newSericeInfoMiddleware(s *server.Server) negroni.Handler {
-	return &sericeInfoMiddleware{s: s}
+func newServiceInfoMiddleware(s *server.Server) negroni.Handler {
+	return &serviceInfoMiddleware{s: s}
 }
 
 // ServeHTTP is used to implememt negroni.Handler for sericeInfoMiddleware
-func (s *sericeInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	requestSchema := requestutil.GetRequestSchema(r)
-	serviceLabel := s.s.GetConfig().GetServiceLabel(requestSchema)
+func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if s.s.GetConfig().DisableServiceMiddleware {
+		next(w, r)
+	}
+
+	serviceLabel := requestutil.GetServiceLabel(r)
 	r = r.WithContext(requestutil.WithServiceLabel(r.Context(), serviceLabel))
 
 	failpoint.Inject("addSericeInfoMiddleware", func() {

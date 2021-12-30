@@ -16,23 +16,44 @@ package requestutil
 
 import "net/http"
 
+var (
+	// registeredSericeLabel is used to find service which request wants to access
+	registeredSericeLabel map[requestSchema]string
+)
+
+func init() {
+	registeredSericeLabel = make(map[requestSchema]string)
+}
+
 // SourceInfo holds source information from http.Request
 type SourceInfo struct {
 	// todo component and realIP
 }
 
 // RequestSchema identifies http.Reuqest schema info
-type RequestSchema struct {
-	Path   string
-	Method string
-}
-
-// GetRequestSchema returns RequestSchema from http.Request
-func GetRequestSchema(r *http.Request) *RequestSchema {
-	return &RequestSchema{Path: r.URL.Path, Method: r.Method}
+type requestSchema struct {
+	path   string
+	method string
 }
 
 // NewRequestSchema returns a new RequestSchema
-func NewRequestSchema(path string, method string) *RequestSchema {
-	return &RequestSchema{Path: path, Method: method}
+func NewRequestSchema(path string, method string) requestSchema {
+	return requestSchema{path: path, method: method}
+}
+
+// GetServiceLabel returns service label which is defined when register router handle
+func GetServiceLabel(r *http.Request) string {
+	schema := NewRequestSchema(r.URL.Path, r.Method)
+	return registeredSericeLabel[schema]
+}
+
+// AddServiceLabel is used to add service label
+// when request schema has been added, it returns false
+func AddServiceLabel(path string, method string, serviceLabel string) bool {
+	result, ok := registeredSericeLabel[NewRequestSchema(path, method)]
+	if ok && result != serviceLabel {
+		return false
+	}
+	registeredSericeLabel[NewRequestSchema(path, method)] = serviceLabel
+	return true
 }

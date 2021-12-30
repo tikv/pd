@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/metricutil"
-	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/versioninfo"
@@ -165,8 +164,7 @@ type Config struct {
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
 
-	// apiServiceMatcher is used to find service which request wants to access
-	apiServiceMatcher map[requestutil.RequestSchema]string
+	DisableServiceMiddleware bool
 }
 
 // NewConfig creates a new config.
@@ -199,8 +197,6 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "force to create a new one-member cluster")
-
-	cfg.apiServiceMatcher = make(map[requestutil.RequestSchema]string)
 
 	return cfg
 }
@@ -368,22 +364,6 @@ func adjustPath(p *string) {
 	if err == nil {
 		*p = absPath
 	}
-}
-
-// GetServiceLabel returns service label which is defined when register router handle
-func (c *Config) GetServiceLabel(schema *requestutil.RequestSchema) string {
-	return c.apiServiceMatcher[*schema]
-}
-
-// AddServiceLabel is used to add service label
-// when request schema has been added, it returns false
-func (c *Config) AddServiceLabel(schema *requestutil.RequestSchema, serviceLabel string) bool {
-	_, ok := c.apiServiceMatcher[*schema]
-	if ok {
-		return false
-	}
-	c.apiServiceMatcher[*schema] = serviceLabel
-	return true
 }
 
 // Parse parses flag definitions from the argument list.
