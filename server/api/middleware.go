@@ -18,11 +18,38 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
+	"github.com/urfave/negroni"
 )
+
+// requestInfoMiddleware is used to gather info from requsetInfo
+type sericeInfoMiddleware struct {
+	s *server.Server
+}
+
+func newSericeInfoMiddleware(s *server.Server) negroni.Handler {
+	return &sericeInfoMiddleware{s: s}
+}
+
+// ServeHTTP is used to implememt negroni.Handler for sericeInfoMiddleware
+func (s *sericeInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	requestSchema := requestutil.GetRequestSchema(r)
+	serviceLabel := s.s.GetConfig().GetServiceLabel(requestSchema)
+	r = r.WithContext(requestutil.WithServiceLabel(r.Context(), serviceLabel))
+
+	failpoint.Inject("addSericeInfoMiddleware", func() {
+		w.Header().Add("service-label", serviceLabel)
+	})
+
+	// todo: implement getting source info and storing into request.Context
+	// such as real ip and component name
+	next(w, r)
+}
 
 type clusterMiddleware struct {
 	s  *server.Server

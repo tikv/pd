@@ -21,8 +21,11 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 func createStreamingRender() *render.Render {
@@ -195,7 +198,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/regions/range-holes", regionsHandler.GetRangeHoles).Methods("GET")
 	clusterRouter.HandleFunc("/regions/replicated", regionsHandler.CheckRegionsReplicated).Methods("GET").Queries("startKey", "{startKey}", "endKey", "{endKey}")
 
-	apiRouter.Handle("/version", newVersionHandler(rd)).Methods("GET")
+	if ok := svr.GetConfig().AddServiceLabel(requestutil.NewRequestSchema(prefix+apiPrefix+"/version", "GET"), "GetPDVersion"); ok {
+		apiRouter.Handle("/version", newVersionHandler(rd)).Methods("GET")
+	} else {
+		log.Error("Service Label Repetition", zap.String("URL PATH", prefix+apiPrefix+"/version"), zap.String("METHOD", "GET"))
+	}
 	apiRouter.Handle("/status", newStatusHandler(svr, rd)).Methods("GET")
 
 	memberHandler := newMemberHandler(svr, rd)
