@@ -140,6 +140,8 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
+	MaxRequestBytes uint `toml:"max-request-bytes" json:"max-request-bytes"`
+
 	Security SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
@@ -149,12 +151,9 @@ type Config struct {
 	// For all warnings during parsing.
 	WarningMsgs []string
 
-	// Only test can change them.
-	nextRetryDelay             time.Duration
 	DisableStrictReconfigCheck bool
 
 	HeartbeatStreamBindInterval typeutil.Duration
-
 	LeaderPriorityCheckInterval typeutil.Duration
 
 	logger   *zap.Logger
@@ -190,7 +189,7 @@ func NewConfig() *Config {
 
 	fs.StringVar(&cfg.Metric.PushAddress, "metrics-addr", "", "prometheus pushgateway address, leaves it empty will disable prometheus push")
 
-	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
+	fs.StringVar(&cfg.Log.Level, "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 
 	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "path of file that contains list of trusted TLS CAs")
@@ -203,10 +202,10 @@ func NewConfig() *Config {
 
 const (
 	defaultLeaderLease             = int64(3)
-	defaultNextRetryDelay          = time.Second
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
+	defaultMaxRequestBytes         = uint(1.5 * 1024 * 1024)                   // 1.5MB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -552,14 +551,13 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		c.Labels = make(map[string]string)
 	}
 
-	if c.nextRetryDelay == 0 {
-		c.nextRetryDelay = defaultNextRetryDelay
-	}
-
 	adjustString(&c.AutoCompactionMode, defaultCompactionMode)
 	adjustString(&c.AutoCompactionRetention, defaultAutoCompactionRetention)
 	if !configMetaData.IsDefined("quota-backend-bytes") {
 		c.QuotaBackendBytes = defaultQuotaBackendBytes
+	}
+	if !configMetaData.IsDefined("max-request-bytes") {
+		c.MaxRequestBytes = defaultMaxRequestBytes
 	}
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
@@ -790,7 +788,7 @@ const (
 	defaultEnableJointConsensus        = true
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
-	defaultHotRegionsResevervedDays    = 0
+	defaultHotRegionsReservedDays      = 7
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -877,7 +875,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 
 	if !meta.IsDefined("hot-regions-reserved-days") {
-		adjustInt64(&c.HotRegionsReservedDays, defaultHotRegionsResevervedDays)
+		adjustInt64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
 	}
 
 	return c.Validate()
@@ -930,7 +928,7 @@ func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 // Validate is used to validate if some scheduling configurations are right.
 func (c *ScheduleConfig) Validate() error {
 	if c.TolerantSizeRatio < 0 {
-		return errors.New("tolerant-size-ratio should be nonnegative")
+		return errors.New("tolerant-size-ratio should be non-negative")
 	}
 	if c.LowSpaceRatio < 0 || c.LowSpaceRatio > 1 {
 		return errors.New("low-space-ratio should between 0 and 1")
@@ -1203,23 +1201,6 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
-// ParseUrls parse a string into multiple urls.
-// Export for api.
-func ParseUrls(s string) ([]url.URL, error) {
-	items := strings.Split(s, ",")
-	urls := make([]url.URL, 0, len(items))
-	for _, item := range items {
-		u, err := url.Parse(item)
-		if err != nil {
-			return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
-		}
-
-		urls = append(urls, *u)
-	}
-
-	return urls, nil
-}
-
 // SetupLogger setup the logger.
 func (c *Config) SetupLogger() error {
 	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
@@ -1264,6 +1245,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.AutoCompactionMode = c.AutoCompactionMode
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
+	cfg.MaxRequestBytes = c.MaxRequestBytes
 
 	allowedCN, serr := c.Security.GetOneAllowedCN()
 	if serr != nil {
@@ -1286,22 +1268,22 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.Logger = "zap"
 	var err error
 
-	cfg.LPUrls, err = ParseUrls(c.PeerUrls)
+	cfg.LPUrls, err = parseUrls(c.PeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.APUrls, err = ParseUrls(c.AdvertisePeerUrls)
+	cfg.APUrls, err = parseUrls(c.AdvertisePeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.LCUrls, err = ParseUrls(c.ClientUrls)
+	cfg.LCUrls, err = parseUrls(c.ClientUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.ACUrls, err = ParseUrls(c.AdvertiseClientUrls)
+	cfg.ACUrls, err = parseUrls(c.AdvertiseClientUrls)
 	if err != nil {
 		return nil, err
 	}

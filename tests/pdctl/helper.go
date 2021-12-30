@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/core"
@@ -112,4 +113,12 @@ func MustPutRegion(c *check.C, cluster *tests.TestCluster, regionID, storeID uin
 	err := cluster.HandleRegionHeartbeat(r)
 	c.Assert(err, check.IsNil)
 	return r
+}
+
+func checkerWithNilAssert(c *check.C) *assertutil.Checker {
+	checker := assertutil.NewChecker(c.FailNow)
+	checker.IsNil = func(obtained interface{}) {
+		c.Assert(obtained, check.IsNil)
+	}
+	return checker
 }

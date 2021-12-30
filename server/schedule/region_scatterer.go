@@ -250,7 +250,7 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 // Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
 // in a group level instead of cluster level.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*operator.Operator, error) {
-	if !opt.IsRegionReplicated(r.cluster, region) {
+	if !IsRegionReplicated(r.cluster, region) {
 		r.cluster.AddSuspectRegions(region.GetID())
 		scatterCounter.WithLabelValues("skip", "not-replicated").Inc()
 		log.Warn("region not replicated during scatter", zap.Uint64("region-id", region.GetID()))

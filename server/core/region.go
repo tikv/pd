@@ -1143,6 +1143,10 @@ func (r *RegionsInfo) GetRangeHoles() [][]string {
 		lastEndKey = region.GetEndKey()
 		return true
 	})
+	// If the last end key is not empty, it means there is a range hole at the end.
+	if len(lastEndKey) > 0 {
+		rangeHoles = append(rangeHoles, []string{HexRegionKeyStr(lastEndKey), ""})
+	}
 	return rangeHoles
 }
 
