@@ -28,7 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
-	log "github.com/sirupsen/logrus"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"

@@ -11,7 +11,6 @@ require (
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
-	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f
 	github.com/docker/go-units v0.4.0
 	github.com/go-echarts/go-echarts v1.0.0
 	github.com/gogo/protobuf v1.3.1
@@ -38,7 +37,6 @@ require (
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/common v0.6.0
 	github.com/sasha-s/go-deadlock v0.2.0
-	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
@@ -52,6 +50,5 @@ require (
 	go.uber.org/zap v1.19.0
 	golang.org/x/tools v0.1.5
 	google.golang.org/grpc v1.26.0
-	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gotest.tools/gotestsum v1.7.0
 )
