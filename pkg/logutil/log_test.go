@@ -25,10 +25,6 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// const (
-// 	logPattern = `\d\d\d\d/\d\d/\d\d \d\d:\d\d:\d\d\.\d\d\d ([\w_%!$@.,+~-]+|\\.)+:\d+: \[(fatal|error|warning|info|debug)\] .*?\n`
-// )
-
 func Test(t *testing.T) {
 	TestingT(t)
 }
@@ -77,32 +73,6 @@ func (s *testLogSuite) TestStringToLogFormatter(c *C) {
 		TimestampFormat:  defaultLogTimeFormat,
 	})
 	c.Assert(StringToLogFormatter("", true), DeepEquals, &textFormatter{})
-}
-
-// TestLogging assure log format and log redirection works.
-func (s *testLogSuite) TestLogging(c *C) {
-	conf := &zaplog.Config{Level: "warn", File: zaplog.FileLogConfig{}}
-	c.Assert(InitLogger(conf), IsNil)
-
-	log.SetOutput(s.buf)
-	// Skip capnslog temporarily
-	// tlog := capnslog.NewPackageLogger("github.com/tikv/pd/pkg/logutil", "test")
-
-	// tlog.Infof("[this message should not be sent to buf]")
-	// c.Assert(s.buf.Len(), Equals, 0)
-
-	// tlog.Warningf("[this message should be sent to buf]")
-	// entry, err := s.buf.ReadString('\n')
-	// c.Assert(err, IsNil)
-	// c.Assert(entry, Matches, logPattern)
-	// All capnslog log will be trigered in logutil/log.go
-	// c.Assert(strings.Contains(entry, "log.go"), IsTrue)
-
-	// log.Warnf("this message comes from logrus")
-	// entry, err := s.buf.ReadString('\n')
-	// c.Assert(err, IsNil)
-	// c.Assert(entry, Matches, logPattern)
-	// c.Assert(strings.Contains(entry, "log_test.go"), IsTrue)
 }
 
 func (s *testLogSuite) TestFileLog(c *C) {
