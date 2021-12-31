@@ -68,9 +68,10 @@ func newAuditMiddleware(s *server.Server) negroni.Handler {
 func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	serviceLabel := "test"
 	v := requestutil.RequsetEvent{}
+	types := s.s.GetServiceAuditConfig(serviceLabel).Label
 
 	for _, backend := range s.s.GetAuditBackend() {
-		if backend.Match(serviceLabel) {
+		if backend.MatchType(types) {
 			backend.ProcessRequest(v)
 		}
 	}

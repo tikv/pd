@@ -21,9 +21,24 @@ import (
 type AuditConfig struct {
 	Label []string
 }
+type TypeMatcher interface {
+	MatchType([]string) bool
+}
+
+type SinkTypeMatcher struct {
+	Type string
+}
+
+func (m *SinkTypeMatcher) MatchType(types []string) bool {
+	for _, item := range types {
+		if m.Type == item {
+			return true
+		}
+	}
+	return false
+}
 
 type Sink interface {
 	ProcessRequest(event requestutil.RequsetEvent) bool
-
-	Match(label string) bool
+	TypeMatcher
 }
