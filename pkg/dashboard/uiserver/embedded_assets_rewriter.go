@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/tidb-dashboard/pkg/config"
 	"github.com/pingcap/tidb-dashboard/pkg/uiserver"
+	"github.com/tikv/pd/pkg/dashboard/distroutil"
 )
 
 var once sync.Once
@@ -29,7 +30,8 @@ var once sync.Once
 // Assets returns the Assets FileSystem of the dashboard UI
 func Assets(cfg *config.Config) http.FileSystem {
 	once.Do(func() {
-		uiserver.RewriteAssets(assets, cfg, func(fs http.FileSystem, f http.File, path, newContent string, bs []byte) {
+		resPath := distroutil.MustGetResPath()
+		uiserver.RewriteAssets(assets, cfg, resPath, func(fs http.FileSystem, f http.File, path, newContent string, bs []byte) {
 			m := fs.(vfsgen۰FS)
 			fi := f.(os.FileInfo)
 			m[path] = &vfsgen۰CompressedFileInfo{

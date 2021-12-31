@@ -1,6 +1,6 @@
 $DIR = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $BASE_DIR = (get-item $DIR).parent.FullName
-$CACHE_DIR = Join-Path($BASE_DIR) "\.dashboard_asset_cache"
+$CACHE_DIR = Join-Path($BASE_DIR) "\.dashboard_download_cache"
 
 echo '+ Create asset cache directory'
 

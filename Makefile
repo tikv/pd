@@ -271,7 +271,7 @@ clean-test:
 
 clean-build:
 	# Cleaning building files...
-	rm -rf .dashboard_asset_cache/
+	rm -rf .dashboard_download_cache/
 	rm -rf $(BUILD_BIN_PATH)
 	rm -rf $(GO_TOOLS_BIN_PATH)
 
