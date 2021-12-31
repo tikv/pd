@@ -275,6 +275,12 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 			break
 		}
 	}
+	failpoint.Inject("mockPending", func(val failpoint.Value) {
+		aok, ok := val.(bool)
+		if ok && aok {
+			state = "PENDING"
+		}
+	})
 	h.rd.JSON(w, http.StatusOK, state)
 }
 

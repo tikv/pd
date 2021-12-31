@@ -610,6 +610,12 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(status, Equals, "REPLICATED")
 
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/mockPending", "return(true)"), IsNil)
+	err = readJSON(testDialClient, url, &status)
+	c.Assert(err, IsNil)
+	c.Assert(status, Equals, "PENDING")
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/mockPending"), IsNil)
+
 	// test multiple rules
 	r1 = newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1})
