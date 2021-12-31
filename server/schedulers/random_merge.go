@@ -109,7 +109,7 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
 		return nil
 	}
-	region := cluster.RandLeaderRegion(store.GetID(), s.conf.Ranges, opt.IsRegionHealthy)
+	region := cluster.RandLeaderRegion(store.GetID(), s.conf.Ranges, schedule.IsRegionHealthy)
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 		return nil
@@ -139,10 +139,10 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 }
 
 func (s *randomMergeScheduler) allowMerge(cluster opt.Cluster, region, target *core.RegionInfo) bool {
-	if !opt.IsRegionHealthy(region) || !opt.IsRegionHealthy(target) {
+	if !schedule.IsRegionHealthy(region) || !schedule.IsRegionHealthy(target) {
 		return false
 	}
-	if !opt.IsRegionReplicated(cluster, region) || !opt.IsRegionReplicated(cluster, target) {
+	if !schedule.IsRegionReplicated(cluster, region) || !schedule.IsRegionReplicated(cluster, target) {
 		return false
 	}
 	if cluster.IsRegionHot(region) || cluster.IsRegionHot(target) {
