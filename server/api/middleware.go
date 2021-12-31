@@ -19,9 +19,11 @@ import (
 	"net/http"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
+	"github.com/urfave/negroni"
 )
 
 type clusterMiddleware struct {
@@ -52,4 +54,26 @@ type clusterCtxKey struct{}
 
 func getCluster(r *http.Request) *cluster.RaftCluster {
 	return r.Context().Value(clusterCtxKey{}).(*cluster.RaftCluster)
+}
+
+type auditMiddleware struct {
+	s *server.Server
+}
+
+func newAuditMiddleware(s *server.Server) negroni.Handler {
+	return &auditMiddleware{s: s}
+}
+
+// ServeHTTP is used to implememt negroni.Handler for auditMiddleware
+func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	serviceLabel := "test"
+	v := requestutil.RequsetEvent{}
+
+	for _, backend := range s.s.GetAuditBackend() {
+		if backend.Match(serviceLabel) {
+			backend.ProcessRequest(v)
+		}
+	}
+
+	next(w, r)
 }

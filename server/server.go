@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
@@ -149,6 +150,10 @@ type Server struct {
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
+
+	serviceAuditConfig map[string]*audit.AuditConfig
+
+	auditBackend []audit.Sink
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -1103,6 +1108,17 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 		return cluster.GetRegions()
 	}
 	return nil
+}
+
+func (s *Server) GetAuditBackend() []audit.Sink {
+	return s.auditBackend
+}
+
+func (s *Server) GetServiceAuditConfig(serviceLabel string) *audit.AuditConfig {
+	if s.serviceAuditConfig == nil {
+		return nil
+	}
+	return s.serviceAuditConfig[serviceLabel]
 }
 
 // GetClusterStatus gets cluster status.
