@@ -250,15 +250,11 @@ func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
 		return b
 	}
 	for _, storeID := range storeIDs {
-		if peer, ok := b.targetPeers[storeID]; !ok {
+		peer := b.targetPeers[storeID]
+		if peer == nil || core.IsLearner(peer) || b.unhealthyPeers[storeID] != nil {
 			continue
-		} else if core.IsLearner(peer) {
-			continue
-		} else if _, ok := b.unhealthyPeers[storeID]; ok {
-			continue
-		} else {
-			b.targetLeaderStoreIDs = append(b.targetLeaderStoreIDs, storeID)
 		}
+		b.targetLeaderStoreIDs = append(b.targetLeaderStoreIDs, storeID)
 	}
 	// Don't need to check if there's valid target, because `targetLeaderStoreIDs`
 	// can be empty if this is not a multi-target evict leader operation. Besides,
