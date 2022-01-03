@@ -33,8 +33,8 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
@@ -250,11 +250,26 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	for storeID := uint64(0); storeID <= 4; storeID++ {
 		store := cluster.GetStore(storeID)
 		if store == nil || store.IsUp() {
-			c.Assert(cluster.buryStore(storeID), NotNil)
+			c.Assert(cluster.BuryStore(storeID, false), NotNil)
 		} else {
-			c.Assert(cluster.buryStore(storeID), IsNil)
+			c.Assert(cluster.BuryStore(storeID, false), IsNil)
 		}
 	}
+}
+
+func (s *testClusterInfoSuite) TestForceBuryStore(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	// Put 2 stores.
+	stores := newTestStores(2, "5.3.0")
+	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
+	for _, store := range stores {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	c.Assert(cluster.BuryStore(uint64(1), true), IsNil)
+	c.Assert(cluster.BuryStore(uint64(2), true), NotNil)
+	c.Assert(errors.ErrorEqual(cluster.BuryStore(uint64(3), true), errs.ErrStoreNotFound.FastGenByArgs(uint64(3))), IsTrue)
 }
 
 func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
@@ -272,7 +287,7 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 	c.Assert(cluster.RemoveStore(3, true), IsNil)
 	// store 4: tombstone
 	c.Assert(cluster.RemoveStore(4, true), IsNil)
-	c.Assert(cluster.buryStore(4), IsNil)
+	c.Assert(cluster.BuryStore(4, false), IsNil)
 
 	for id := uint64(1); id <= 4; id++ {
 		storeInfo := cluster.GetStore(id)
@@ -1021,10 +1036,10 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
+		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
 		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
 
-		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
+		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
 		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -1040,14 +1055,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
+			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		c.Assert(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy), IsNil)
+		c.Assert(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy), IsNil)
+		c.Assert(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy), IsNil)
 	}
 }
 

@@ -73,7 +73,8 @@ type Server interface {
 	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
-	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
+	GetMembers() ([]*pdpb.Member, error)
+	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 }
 
 // RaftCluster is used for cluster config management.
@@ -593,11 +594,11 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
-	regionIDs := make(map[uint64]struct{}, len(stats.GetPeerStats()))
+	regions := make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
 	for _, peerStat := range stats.GetPeerStats() {
 		regionID := peerStat.GetRegionId()
-		regionIDs[regionID] = struct{}{}
 		region := c.GetRegion(regionID)
+		regions[regionID] = region
 		if region == nil {
 			log.Warn("discard hot peer stat for unknown region",
 				zap.Uint64("region-id", regionID),
@@ -623,7 +624,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
-	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regionIDs, interval))
+	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	return nil
 }
 
@@ -1077,10 +1078,9 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	return err
 }
 
-// buryStore marks a store as tombstone in cluster.
-// The store should be empty before calling this func
-// State transition: Offline -> Tombstone.
-func (c *RaftCluster) buryStore(storeID uint64) error {
+// BuryStore marks a store as tombstone in cluster.
+// If forceBury is false, the store should be offlined and emptied before calling this func.
+func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -1095,7 +1095,11 @@ func (c *RaftCluster) buryStore(storeID uint64) error {
 	}
 
 	if store.IsUp() {
-		return errs.ErrStoreIsUp.FastGenByArgs()
+		if !forceBury {
+			return errs.ErrStoreIsUp.FastGenByArgs()
+		} else if !store.IsDisconnected() {
+			return errors.Errorf("The store %v is not offline nor disconnected", storeID)
+		}
 	}
 
 	newStore := store.Clone(core.TombstoneStore())
@@ -1219,7 +1223,7 @@ func (c *RaftCluster) checkStores() {
 		// If the store is empty, it can be buried.
 		regionCount := c.core.GetStoreRegionCount(offlineStore.GetId())
 		if regionCount == 0 {
-			if err := c.buryStore(offlineStore.GetId()); err != nil {
+			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
 					errs.ZapError(err))
@@ -1248,7 +1252,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 
 	for _, store := range c.GetStores() {
 		if store.IsTombstone() {
-			if store.GetRegionCount() > 0 {
+			if c.core.GetStoreRegionCount(store.GetID()) > 0 {
 				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
 				continue
 			}
@@ -1826,7 +1830,7 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
 			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
-			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s", cURL, healthURL), nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s", cURL, healthURL), nil)
 			if err != nil {
 				log.Error("failed to new request", errs.ZapError(errs.ErrNewHTTPRequest, err))
 				cancel()

@@ -248,7 +248,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(ok, IsFalse)
 
 	// store delete <store_id> command
-	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
 	args = []string{"-u", pdAddr, "store", "delete", "1"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
@@ -256,7 +256,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
-	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Offline.String())
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
 
 	// store check status
 	args = []string{"-u", pdAddr, "store", "check", "Offline"}
@@ -285,7 +285,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
-	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Offline.String())
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
 
 	// store remove-tombstone
 	args = []string{"-u", pdAddr, "store", "remove-tombstone"}

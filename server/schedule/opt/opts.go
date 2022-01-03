@@ -15,7 +15,6 @@
 package opt
 
 import (
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -40,9 +39,4 @@ type Cluster interface {
 	IsFeatureSupported(f versioninfo.Feature) bool
 	AddSuspectRegions(ids ...uint64)
 	GetBasicCluster() *core.BasicCluster
-}
-
-// HeartbeatStream is an interface.
-type HeartbeatStream interface {
-	Send(*pdpb.RegionHeartbeatResponse) error
 }

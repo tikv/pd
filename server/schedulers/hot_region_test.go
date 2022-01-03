@@ -100,7 +100,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		op.Start()
 		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-5*statistics.StoreHeartBeatReportInterval*time.Second))
 		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add((-5*statistics.StoreHeartBeatReportInterval+1)*time.Second))
-		return newPendingInfluence(op, 2, 4, Influence{}, hb.conf.GetStoreStatZombieDuration())
+		return newPendingInfluence(op, 2, 4, statistics.Influence{}, hb.conf.GetStoreStatZombieDuration())
 	}
 	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		infl := notDoneOpInfluence(region, ty)
@@ -1552,7 +1552,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		c.Check(len(items), Greater, 0)
 		for _, item := range items {
 			if item.StoreID == 3 {
-				c.Check(item.IsNeedDelete(), IsTrue)
+				c.Check(item.GetActionType(), Equals, statistics.Remove)
 				continue
 			}
 			c.Check(item.HotDegree, Equals, testcase.DegreeAfterTransferLeader+2)
@@ -1586,9 +1586,9 @@ func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
 	items = tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{3, 4}, 1)
 	for _, item := range items {
 		if item.StoreID < 4 {
-			c.Check(item.IsNeedDelete(), IsTrue)
+			c.Check(item.GetActionType(), Equals, statistics.Remove)
 		} else {
-			c.Check(item.IsNeedDelete(), IsFalse)
+			c.Check(item.GetActionType(), Equals, statistics.Update)
 		}
 	}
 }

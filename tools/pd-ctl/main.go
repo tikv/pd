@@ -16,10 +16,8 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -49,16 +47,15 @@ func main() {
 		}
 	}()
 
-	var input []string
+	var inputs []string
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
-		b, err := io.ReadAll(os.Stdin)
+		in, err := pdctl.ReadStdin(os.Stdin)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		input = strings.Split(strings.TrimSpace(string(b)), " ")
+		inputs = in
 	}
-
-	pdctl.MainStart(append(os.Args[1:], input...))
+	pdctl.MainStart(append(os.Args[1:], inputs...))
 }

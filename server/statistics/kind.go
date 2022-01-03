@@ -97,8 +97,29 @@ func (k StoreStatKind) String() string {
 	return "unknown StoreStatKind"
 }
 
+// sourceKind represents the statistics item source.
+type sourceKind int
+
+const (
+	direct  sourceKind = iota // there is a corresponding peer in this store.
+	inherit                   // there is no a corresponding peer in this store and there is a peer just deleted.
+	adopt                     // there is no corresponding peer in this store and there is no peer just deleted, we need to copy from other stores.
+)
+
+func (k sourceKind) String() string {
+	switch k {
+	case direct:
+		return "direct"
+	case inherit:
+		return "inherit"
+	case adopt:
+		return "adopt"
+	}
+	return "unknown"
+}
+
 // RWType is a identify hot region types.
-type RWType uint32
+type RWType int
 
 // Flags for r/w type.
 const (
@@ -125,4 +146,26 @@ func (k RWType) RegionStats() []RegionStatKind {
 		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
 	}
 	return nil
+}
+
+// ActionType indicates the action type for the stat item.
+type ActionType int
+
+// Flags for action type.
+const (
+	Add ActionType = iota
+	Remove
+	Update
+)
+
+func (t ActionType) String() string {
+	switch t {
+	case Add:
+		return "add"
+	case Remove:
+		return "remove"
+	case Update:
+		return "update"
+	}
+	return "unimplemented"
 }

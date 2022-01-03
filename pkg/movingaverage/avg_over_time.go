@@ -101,3 +101,24 @@ func (aot *AvgOverTime) Set(avg float64) {
 func (aot *AvgOverTime) IsFull() bool {
 	return aot.intervalSum >= aot.avgInterval
 }
+
+// Clone returns a copy of AvgOverTime
+func (aot *AvgOverTime) Clone() *AvgOverTime {
+	que := aot.que.Clone()
+	margin := deltaWithInterval{
+		delta:    aot.margin.delta,
+		interval: aot.margin.interval,
+	}
+	return &AvgOverTime{
+		que:         que,
+		margin:      margin,
+		deltaSum:    aot.deltaSum,
+		intervalSum: aot.intervalSum,
+		avgInterval: aot.avgInterval,
+	}
+}
+
+// GetIntervalSum returns the sum of interval
+func (aot *AvgOverTime) GetIntervalSum() time.Duration {
+	return aot.intervalSum
+}

@@ -239,7 +239,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	waitNoResponse(c, stream)
 }
 
-func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream opt.HeartbeatStream) error {
+func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream.HeartbeatStream) error {
 	co.hbStreams.BindStream(region.GetLeader().GetStoreId(), stream)
 	if err := co.cluster.putRegion(region.Clone()); err != nil {
 		return err
