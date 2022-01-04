@@ -774,7 +774,7 @@ func (mc *Cluster) ResetSuspectRegions() {
 
 // GetRegionByKey get region by key
 func (mc *Cluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
-	return mc.SearchRegion(regionKey)
+	return mc.BasicCluster.GetRegionByKey(regionKey)
 }
 
 // SetStoreLastHeartbeatInterval set the last heartbeat to the target store
