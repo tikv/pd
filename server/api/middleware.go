@@ -85,18 +85,17 @@ func getCluster(r *http.Request) *cluster.RaftCluster {
 }
 
 type auditMiddleware struct {
-	s *server.Server
+	srv *server.Server
 }
 
 func newAuditMiddleware(s *server.Server) negroni.Handler {
-	return &auditMiddleware{s: s}
+	return &auditMiddleware{srv: s}
 }
 
 // ServeHTTP is used to implememt negroni.Handler for auditMiddleware
 func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	serviceLabel := "test"
-	v := requestutil.
-	types := s.s.GetServiceAuditConfig(serviceLabel).Label
+	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
+	types := s.srv.
 
 	for _, backend := range s.s.GetAuditBackend() {
 		if backend.MatchType(types) {
