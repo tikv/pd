@@ -19,12 +19,14 @@ import (
 	"net/http"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
+	"go.uber.org/zap"
 )
 
 // requestInfoMiddleware is used to gather info from requsetInfo
@@ -94,20 +96,20 @@ func newAuditMiddleware(s *server.Server) negroni.Handler {
 
 // ServeHTTP is used to implememt negroni.Handler for auditMiddleware
 func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-<<<<<<< Updated upstream
-	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
-	types := s.srv.
-=======
-	if s.s.GetConfig().DisableServiceMiddleware {
+	if s.srv.GetConfig().DisableServiceMiddleware {
 		next(w, r)
 	}
-	serviceLabel := "test"
-	v := requestutil.RequestInfo{}
->>>>>>> Stashed changes
 
-	for _, backend := range s.s.GetAuditBackend() {
-		if backend.MatchType(types) {
-			backend.ProcessRequest(v)
+	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
+	if !ok {
+		log.Warn("Audit failed", zap.Bool("request-info", ok))
+		next(w, r)
+	}
+	config := s.srv.GetServiceAuditConfig(requestInfo.ServiceLabel)
+
+	for _, backend := range s.srv.GetAuditBackend() {
+		if backend.MatchType(config.Label) {
+			backend.ProcessRequest(requestInfo)
 		}
 	}
 
