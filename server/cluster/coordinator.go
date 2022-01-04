@@ -467,20 +467,20 @@ func (c *coordinator) stop() {
 	c.cancel()
 }
 
-func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
+func (c *coordinator) getHotRegionsByType(typ statistics.RWType) *statistics.StoreHotPeersInfos {
 	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
-	storeLoads := c.cluster.GetStoresLoadsLocked()
+	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
-	regionStats := c.cluster.RegionWriteStats()
-	return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
-}
-
-func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
-	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
-	storeLoads := c.cluster.GetStoresLoadsLocked()
-	stores := c.cluster.GetStores()
-	regionStats := c.cluster.RegionReadStats()
-	return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
+	switch typ {
+	case statistics.Write:
+		regionStats := c.cluster.RegionWriteStats()
+		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
+	case statistics.Read:
+		regionStats := c.cluster.RegionReadStats()
+		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
+	default:
+	}
+	return nil
 }
 
 func (c *coordinator) getSchedulers() []string {
@@ -522,9 +522,7 @@ func (c *coordinator) resetSchedulerMetrics() {
 }
 
 func (c *coordinator) collectHotSpotMetrics() {
-	c.RLock()
 	stores := c.cluster.GetStores()
-	c.RUnlock()
 	// Collects hot write region metrics.
 	collectHotMetrics(c.cluster, stores, statistics.Write)
 	// Collects hot read region metrics.
