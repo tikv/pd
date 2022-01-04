@@ -378,7 +378,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 1},
 			},
 		},
-		{ // add voter + demote voter + remove learner.
+		{
 			"(disable JointConcensus) add voter + demote voter + remove learner",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
@@ -393,8 +393,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 2},
 			},
 		},
-		// use joint consensus
-		{ // transfer leader before entering joint state
+		{
 			"(enable JointConcensus) transfer leader before entering joint state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
@@ -413,7 +412,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 1},
 			},
 		},
-		{ // transfer leader after leaving joint state
+		{
 			"(enable JointConcensus) transfer leader after leaving joint state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
@@ -432,7 +431,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 2},
 			},
 		},
-		{ // add 1 peer(learner) should always build steps without joint consensus state
+		{
 			"(enable JointConcensus) add 1 peer(learner) should always build steps without joint consensus state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
@@ -442,7 +441,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				AddLearner{ToStore: 3},
 			},
 		},
-		{ // remove 1 peer(learner) should always build steps without joint consensus state
+		{
 			"(enable JointConcensus) remove 1 peer(learner) should always build steps without joint consensus state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3}},
@@ -452,7 +451,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 2},
 			},
 		},
-		{ // add 1+ learners should not enter joint consensus state
+		{
 			"(enable JointConcensus) add 1+ learners should not enter joint consensus state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
@@ -463,7 +462,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				AddLearner{ToStore: 3},
 			},
 		},
-		{ // remove 1+ learners should not enter joint consensus state
+		{
 			"(enable JointConcensus) remove 1+ learners should not enter joint consensus state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
@@ -474,7 +473,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 3},
 			},
 		},
-		{ // demote 1 follower now
+		{
 			"(enable JointConcensus) demote 1 voter should enter JointConcensus, and TiKV will handle the leave step",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}},
@@ -487,7 +486,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				},
 			},
 		},
-		{ // add 1 learner should goto to buildStepsWithoutJointConsensus
+		{
 			"(enable JointConcensus) add 1 learner should goto to buildStepsWithoutJointConsensus",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
@@ -500,6 +499,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 	}
 
 	for _, tc := range cases {
+		c.Log(tc.name)
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.originPeers}, tc.originPeers[0])
 		builder := NewBuilder("test", s.cluster, region)
 		builder.useJointConsensus = tc.useJointConsensus
@@ -513,7 +513,6 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			c.Assert(err, NotNil)
 			continue
 		}
-
 		c.Assert(err, IsNil)
 		c.Assert(op.Kind(), Equals, tc.kind)
 		c.Assert(op.Len(), Equals, len(tc.steps))
@@ -530,8 +529,6 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLearner).ToStore)
 			case PromoteLearner:
 				c.Assert(step.ToStore, Equals, tc.steps[i].(PromoteLearner).ToStore)
-			case DemoteFollower:
-				c.Assert(step.ToStore, Equals, tc.steps[i].(DemoteFollower).ToStore)
 			case ChangePeerV2Enter:
 				c.Assert(len(step.PromoteLearners), Equals, len(tc.steps[i].(ChangePeerV2Enter).PromoteLearners))
 				c.Assert(len(step.DemoteVoters), Equals, len(tc.steps[i].(ChangePeerV2Enter).DemoteVoters))
