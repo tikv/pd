@@ -698,9 +698,8 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 			b.execTransferLeader(b.targetLeaderStoreID)
 		}
 
-		// TiKV will leave joint consensus automatically if there is only 1 peer changes in PromoteLearners and DemoteVoters
-		if len(step.PromoteLearners)+len(step.DemoteVoters) > 1 {
-			// Leave
+		// TiKV will handle leave step if only single peer change in promote and demote when enter step is bypassed
+		if !(needEnter && len(step.PromoteLearners)+len(step.DemoteVoters) == 1) {
 			b.steps = append(b.steps, ChangePeerV2Leave(step))
 		}
 	}
