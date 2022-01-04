@@ -12,18 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package audit
+package requestutil
 
 import (
-	"github.com/tikv/pd/pkg/requestutil"
+	"context"
+	"testing"
+
+	. "github.com/pingcap/check"
 )
 
-type AuditConfig struct {
-	Label []string
+func Test(t *testing.T) {
+	TestingT(t)
 }
 
-type Sink interface {
-	ProcessRequest(event requestutil.RequestInfo) bool
+var _ = Suite(&testRequestContextSuite{})
 
-	Match(label string) bool
+type testRequestContextSuite struct {
+}
+
+func (s *testRequestContextSuite) TestRequestInfo(c *C) {
+	ctx := context.Background()
+	_, ok := RequestInfoFrom(ctx)
+	c.Assert(ok, Equals, false)
+
+	ctx = WithRequestInfo(ctx, RequestInfo{})
+
+	result, ok := RequestInfoFrom(ctx)
+	c.Assert(result, NotNil)
+	c.Assert(ok, Equals, true)
 }

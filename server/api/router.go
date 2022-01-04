@@ -195,6 +195,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/regions/range-holes", regionsHandler.GetRangeHoles).Methods("GET")
 	clusterRouter.HandleFunc("/regions/replicated", regionsHandler.CheckRegionsReplicated).Methods("GET").Queries("startKey", "{startKey}", "endKey", "{endKey}")
 
+	// /pd/api/v1/version has added into service label map
 	apiRouter.Handle("/version", newVersionHandler(rd)).Methods("GET")
 	apiRouter.Handle("/status", newStatusHandler(svr, rd)).Methods("GET")
 

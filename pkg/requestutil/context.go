@@ -12,18 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package audit
+package requestutil
 
 import (
-	"github.com/tikv/pd/pkg/requestutil"
+	"context"
 )
 
-type AuditConfig struct {
-	Label []string
+type key int
+
+const (
+	// requestInfoKey is the context key for the request compoenent.
+	requestInfoKey key = iota
+)
+
+// WithRequestInfo returns a copy of parent in which the user value is set
+func WithRequestInfo(parent context.Context, requestInfo RequestInfo) context.Context {
+	return context.WithValue(parent, requestInfoKey, requestInfo)
 }
 
-type Sink interface {
-	ProcessRequest(event requestutil.RequestInfo) bool
-
-	Match(label string) bool
+// RequestInfoFrom returns the value of the request info key on the ctx
+func RequestInfoFrom(ctx context.Context) (RequestInfo, bool) {
+	requestInfo, ok := ctx.Value(requestInfoKey).(RequestInfo)
+	return requestInfo, ok
 }
