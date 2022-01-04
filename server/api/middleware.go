@@ -29,7 +29,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// requestInfoMiddleware is used to gather info from requsetInfo
+// serviceInfoMiddleware is used to gather info from requsetInfo
 type serviceInfoMiddleware struct {
 	s *server.Server
 }

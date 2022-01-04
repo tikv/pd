@@ -37,10 +37,12 @@ type RequestInfo struct {
 	BodyParm     string
 }
 
+// RequestSchemaList is used to store requestSchemas which have been registered
 type RequestSchemaList struct {
 	requestSchemas []*RequestSchema
 }
 
+// NewRequestSchemaList returns a new RequestSchemaList with given length
 func NewRequestSchemaList(len int) *RequestSchemaList {
 	return &RequestSchemaList{requestSchemas: make([]*RequestSchema, 0, len)}
 }
@@ -54,6 +56,7 @@ func (l *RequestSchemaList) match(path string, method string) string {
 	return ""
 }
 
+// AddServiceLabel is used to register requestSchema
 func (l *RequestSchemaList) AddServiceLabel(paths []string, method, serviceLabel string) {
 	l.requestSchemas = append(l.requestSchemas,
 		&RequestSchema{paths: paths, method: method, serviceLabel: serviceLabel})

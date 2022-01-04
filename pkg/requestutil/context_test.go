@@ -34,10 +34,24 @@ func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 	ctx := context.Background()
 	_, ok := RequestInfoFrom(ctx)
 	c.Assert(ok, Equals, false)
-
-	ctx = WithRequestInfo(ctx, RequestInfo{})
-
+	ctx = WithRequestInfo(ctx,
+		RequestInfo{
+			ServiceLabel: "test label",
+			Method:       "POST",
+			Component:    "pdctl",
+			IP:           "localhost",
+			URLParam:     "{\"id\"=1}",
+			BodyParm:     "{\"state\"=\"Up\"}",
+			TimeStamp:    "2022",
+		})
 	result, ok := RequestInfoFrom(ctx)
 	c.Assert(result, NotNil)
 	c.Assert(ok, Equals, true)
+	c.Assert(result.ServiceLabel, Equals, "test label")
+	c.Assert(result.Method, Equals, "POST")
+	c.Assert(result.Component, Equals, "pdctl")
+	c.Assert(result.IP, Equals, "localhost")
+	c.Assert(result.URLParam, Equals, "{\"id\"=1}")
+	c.Assert(result.BodyParm, Equals, "{\"state\"=\"Up\"}")
+	c.Assert(result.TimeStamp, Equals, "2022")
 }

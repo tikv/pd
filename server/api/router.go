@@ -32,7 +32,7 @@ var (
 )
 
 func init() {
-	registeredSericeLabel = requestutil.NewRequestSchemaList(3)
+	registeredSericeLabel = requestutil.NewRequestSchemaList(5)
 
 	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "version"}, "GET", "GetPDVersion")
 	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "store", ""}, "GET", "ShowStore")

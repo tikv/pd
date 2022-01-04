@@ -22,7 +22,7 @@ type key int
 
 const (
 	// requestInfoKey is the context key for the request compoenent.
-	requestInfoKey key = iota
+	requestInfoKey = 1
 )
 
 // WithRequestInfo returns a copy of parent in which the user value is set
