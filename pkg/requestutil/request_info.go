@@ -24,6 +24,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/apiutil"
 	"go.uber.org/zap"
 )
 
@@ -81,10 +82,11 @@ func addServiceLabel(path string, method string, serviceLabel string) bool {
 
 // GetRequestInfo returns request info needed from http.Request
 func GetRequestInfo(r *http.Request) RequestInfo {
-	// todo component and ip
 	return RequestInfo{
 		ServiceLabel: getServiceLabel(r),
 		Method:       fmt.Sprintf("HTTP/%s:%s", r.Method, r.URL.Path),
+		Component:    apiutil.GetComponentNameOnHTTP(r),
+		IP:           apiutil.GetIPAddrFromHTTPRequest(r),
 		TimeStamp:    time.Now().Local().String(),
 		URLParam:     getURLParam(r),
 		BodyParm:     getBodyParam(r),
