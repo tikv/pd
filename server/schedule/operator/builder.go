@@ -368,10 +368,12 @@ func (b *Builder) prepareBuild() (string, error) {
 			}
 		}
 
-		if core.IsLearner(o) && !core.IsLearner(n) {
+		isOriginPeerLearner := core.IsLearner(o)
+		isTargetPeerLearner := core.IsLearner(n)
+		if isOriginPeerLearner && !isTargetPeerLearner {
 			// learner -> voter
 			b.toPromote.Set(n)
-		} else if !core.IsLearner(o) && core.IsLearner(n) {
+		} else if !isOriginPeerLearner && isTargetPeerLearner {
 			// voter -> learner
 			if b.useJointConsensus {
 				b.toDemote.Set(n)
@@ -599,9 +601,6 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			b.execTransferLeader(plan.leaderBeforeRemove)
 			kind |= OpLeader
 		}
-		if plan.demote != nil {
-			b.execDemoteFollower(plan.demote)
-		}
 		if plan.remove != nil {
 			b.execRemovePeer(plan.remove)
 			kind |= OpRegion
@@ -633,12 +632,6 @@ func (b *Builder) execPromoteLearner(peer *metapb.Peer) {
 	b.steps = append(b.steps, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
 	b.currentPeers.Set(peer)
 	delete(b.toPromote, peer.GetStoreId())
-}
-
-func (b *Builder) execDemoteFollower(peer *metapb.Peer) {
-	b.steps = append(b.steps, DemoteFollower{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
-	b.currentPeers.Set(peer)
-	delete(b.toDemote, peer.GetStoreId())
 }
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
