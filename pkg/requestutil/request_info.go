@@ -79,6 +79,7 @@ func addServiceLabel(path string, method string, serviceLabel string) bool {
 	return true
 }
 
+// GetRequestInfo returns request info needed from http.Request
 func GetRequestInfo(r *http.Request) RequestInfo {
 	// todo component and ip
 	return RequestInfo{
