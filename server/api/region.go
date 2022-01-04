@@ -237,11 +237,11 @@ func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags region
-// @Summary Check if regions in the given key ranges are replicated.
+// @Summary Check if regions in the given key ranges are replicated. Returns 'REPLICATED', 'INPROGRESS', or 'PENDING'. 'PENDING' means that there is at least one region pending for scheduling. Similarly, 'INPROGRESS' means there is at least one region in scheduling.
 // @Param startKey query string true "Regions start key, hex encoded"
 // @Param endKey query string true "Regions end key, hex encoded"
 // @Produce plain
-// @Success 200 {string} string "true"
+// @Success 200 {string} string "INPROGRESS"
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/replicated [get]
 func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.Request) {
@@ -262,14 +262,26 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	}
 
 	regions := rc.ScanRegions(startKey, endKey, -1)
-	replicated := true
+	state := "REPLICATED"
 	for _, region := range regions {
 		if !schedule.IsRegionReplicated(rc, region) {
-			replicated = false
+			state = "INPROGRESS"
+			for _, item := range rc.GetCoordinator().GetWaitingRegions() {
+				if item.Key == region.GetID() {
+					state = "PENDING"
+					break
+				}
+			}
 			break
 		}
 	}
-	h.rd.JSON(w, http.StatusOK, replicated)
+	failpoint.Inject("mockPending", func(val failpoint.Value) {
+		aok, ok := val.(bool)
+		if ok && aok {
+			state = "PENDING"
+		}
+	})
+	h.rd.JSON(w, http.StatusOK, state)
 }
 
 type regionsHandler struct {
