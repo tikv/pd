@@ -94,8 +94,16 @@ func newAuditMiddleware(s *server.Server) negroni.Handler {
 
 // ServeHTTP is used to implememt negroni.Handler for auditMiddleware
 func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+<<<<<<< Updated upstream
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
 	types := s.srv.
+=======
+	if s.s.GetConfig().DisableServiceMiddleware {
+		next(w, r)
+	}
+	serviceLabel := "test"
+	v := requestutil.RequestInfo{}
+>>>>>>> Stashed changes
 
 	for _, backend := range s.s.GetAuditBackend() {
 		if backend.MatchType(types) {
