@@ -98,6 +98,7 @@ func newAuditMiddleware(s *server.Server) negroni.Handler {
 func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	if s.srv.GetConfig().DisableServiceMiddleware {
 		next(w, r)
+		return
 	}
 
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
@@ -105,8 +106,12 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 		log.Warn("Audit failed", zap.Bool("request-info", ok))
 		next(w, r)
 	}
-	config := s.srv.GetServiceAuditConfig(requestInfo.ServiceLabel)
 
+	config := s.srv.GetServiceAuditConfig(requestInfo.ServiceLabel)
+	if config == nil {
+		next(w, r)
+		return
+	}
 	for _, backend := range s.srv.GetAuditBackend() {
 		if backend.MatchType(config.Label) {
 			backend.ProcessRequest(requestInfo)
